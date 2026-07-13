@@ -88,8 +88,8 @@ derive_and_capture() {
     --out "$demo_directory/session.cast"
   "$TERMTRACE_BIN" capture \
     --session "$session" \
-    --width 960 \
-    --height 540 \
+    --width 1920 \
+    --height 1080 \
     --fps 24 >"$demo_directory/capture.json"
   ffprobe \
     -v error \

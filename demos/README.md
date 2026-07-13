@@ -63,3 +63,7 @@ demo-artifacts/<demo>/
 ├── video-probe.json
 └── event-counts.json
 ```
+
+## Resolution
+
+All native captures and showcase MP4s are generated at **1920×1080 and 24 FPS**.
