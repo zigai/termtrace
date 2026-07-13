@@ -32,6 +32,10 @@ Termtrace refuses to reuse an existing session directory. This prevents accident
 
 Detailed references: [installation](docs/installation.md), [agent workflows](docs/agent-workflows.md), [semantic replay](docs/semantic-replay.md), [formats and schemas](docs/formats.md), and [troubleshooting](docs/troubleshooting.md).
 
+## Reproducible demos
+
+Run `demos/run-all.sh` to generate three owner-only showcases covering visual/semantic fidelity, live agent control and signals, tmux interoperability, schema generation, tamper rejection, and torn-tail recovery. Each visual demo includes the canonical session, lossless 24 FPS Ghostty capture, screenshot, agent-readable states, asciicast export, and a broadly playable MP4. See [the demo guide](demos/README.md) for individual commands and artifact layout.
+
 ## Live agent control
 
 Every active recording exposes an owner-only `control.sock` inside its session directory. Requests use bounded, newline-framed, versioned JSON and Linux peer credentials must match the recording owner. The CLI is a thin client:

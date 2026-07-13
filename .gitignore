@@ -1,6 +1,9 @@
 /target/
+/demo-artifacts/
 /.tools/
 /.idea/
 /.vscode/
 *.profraw
 *.termtrace
+__pycache__/
+*.py[cod]
