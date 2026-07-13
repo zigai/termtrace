@@ -5,6 +5,169 @@
       "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
       "type": "string"
     },
+    "CaptureTarget": {
+      "description": "Pixel viewport intended for native visual capture.",
+      "properties": {
+        "height": {
+          "description": "Viewport height in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "description": "Viewport width in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "type": "object"
+    },
+    "GeometryProvenance": {
+      "description": "Provenance for automatic terminal geometry selection.",
+      "properties": {
+        "capture_target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CaptureTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Intended native-capture viewport, when selected during recording."
+        },
+        "ghostty_config_hash": {
+          "description": "Effective Ghostty configuration hash used for a fitted measurement.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/GeometrySource",
+          "description": "How the initial geometry was selected."
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
+    "GeometrySource": {
+      "description": "Origin of the initial terminal geometry.",
+      "oneOf": [
+        {
+          "const": "manual",
+          "description": "Explicit columns, rows, and cell dimensions.",
+          "type": "string"
+        },
+        {
+          "const": "inherited",
+          "description": "Dimensions inherited from the controlling terminal.",
+          "type": "string"
+        },
+        {
+          "const": "ghostty_fit",
+          "description": "Dimensions measured from Ghostty at a target viewport size.",
+          "type": "string"
+        }
+      ]
+    },
+    "GhosttyVisualOverrides": {
+      "description": "Focused Termtrace overrides applied to a Ghostty visual profile.",
+      "properties": {
+        "background": {
+          "description": "Default background color in Ghostty syntax.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font_family": {
+          "description": "Regular terminal font family.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font_size": {
+          "description": "Font size in points, represented exactly as a Ghostty config value.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "foreground": {
+          "description": "Default foreground color in Ghostty syntax.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "padding_x": {
+          "description": "Symmetric horizontal window padding in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "padding_y": {
+          "description": "Symmetric vertical window padding in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "GhosttyVisualProvenance": {
+      "description": "Persisted provenance for a canonical per-recording Ghostty profile.",
+      "properties": {
+        "effective_config": {
+          "description": "Relative canonical effective-configuration artifact.",
+          "type": "string"
+        },
+        "effective_config_hash": {
+          "description": "BLAKE3 of the canonical effective configuration.",
+          "type": "string"
+        },
+        "overrides": {
+          "$ref": "#/$defs/GhosttyVisualOverrides",
+          "description": "Focused overrides applied after resolving the source configuration."
+        },
+        "source_config": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Base64Bytes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Original custom configuration path bytes, when supplied."
+        }
+      },
+      "required": [
+        "overrides",
+        "effective_config",
+        "effective_config_hash"
+      ],
+      "type": "object"
+    },
     "SessionGeometry": {
       "description": "Initial PTY geometry.",
       "properties": {
@@ -87,6 +250,27 @@
     "geometry": {
       "$ref": "#/$defs/SessionGeometry",
       "description": "Initial PTY geometry."
+    },
+    "geometry_provenance": {
+      "$ref": "#/$defs/GeometryProvenance",
+      "default": {
+        "capture_target": null,
+        "ghostty_config_hash": null,
+        "source": "manual"
+      },
+      "description": "Selection source and optional capture target for the initial geometry."
+    },
+    "ghostty_visual": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GhosttyVisualProvenance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Canonical per-recording Ghostty profile, when explicitly resolved."
     },
     "operating_system": {
       "description": "Build target operating system.",

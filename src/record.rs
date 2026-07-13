@@ -3,29 +3,37 @@
 use std::{
     collections::BTreeMap,
     collections::HashMap,
+    env::consts::{ARCH, OS},
     ffi::OsString,
     fs::{DirBuilder, Permissions},
-    io::{BufRead as _, BufReader, Read, Write},
+    io::{self, BufRead as _, BufReader, Error as IoError, ErrorKind, Read, Write},
+    mem::{replace, take},
     os::fd::{AsFd as _, OwnedFd},
     os::unix::ffi::OsStrExt as _,
     os::unix::fs::{DirBuilderExt as _, PermissionsExt as _},
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
+    slice,
     sync::mpsc::{self, RecvTimeoutError},
     thread,
     time::{Duration, Instant},
 };
 
 use nix::{
+    errno::Errno,
     poll::{PollFd, PollFlags, PollTimeout, poll},
     sys::{
         signal::{Signal, killpg},
         socket::{getsockopt, sockopt::PeerCredentials},
     },
-    unistd::{Pid, isatty, pipe, read as fd_read, write as fd_write},
+    unistd::{Pid, Uid, isatty, pipe, read as fd_read, write as fd_write},
 };
 use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
-use signal_hook::{consts::signal::SIGWINCH, iterator::Signals};
+use rustix::termios::{Winsize, tcgetwinsize};
+use signal_hook::{
+    consts::signal::SIGWINCH,
+    iterator::{Handle, Signals},
+};
 use uuid::Uuid;
 
 use crate::{
@@ -41,9 +49,10 @@ use crate::{
     },
     event_log::{EventLogWriter, SessionClock},
     ghostty_vt::GhosttyVt,
+    profile::ResolvedGhosttyProfile,
     session::{
-        SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, SessionCompletion, SessionGeometry,
-        SessionManifest,
+        GeometryProvenance, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, SessionCompletion,
+        SessionGeometry, SessionManifest,
     },
     terminal_mode::RawTerminalGuard,
 };
@@ -70,6 +79,10 @@ pub struct RecordOptions {
     pub cell_width_px: u16,
     /// Cell height reported to the PTY, in pixels.
     pub cell_height_px: u16,
+    /// Provenance for manual, inherited, or Ghostty-fitted geometry.
+    pub geometry_provenance: GeometryProvenance,
+    /// Canonical per-recording Ghostty visual profile, when configured.
+    pub ghostty_profile: Option<ResolvedGhosttyProfile>,
     /// Terminal identity exposed to the child.
     pub term: String,
     /// Default colors exposed by the terminal host and pinned into replay.
@@ -125,23 +138,23 @@ struct TerminalGeometry {
 
 impl From<PtySize> for TerminalGeometry {
     fn from(size: PtySize) -> Self {
-        Self {
+        return Self {
             cols: size.cols,
             rows: size.rows,
             pixel_width: size.pixel_width,
             pixel_height: size.pixel_height,
-        }
+        };
     }
 }
 
 impl From<TerminalGeometry> for PtySize {
     fn from(geometry: TerminalGeometry) -> Self {
-        Self {
+        return Self {
             rows: geometry.rows,
             cols: geometry.cols,
             pixel_width: geometry.pixel_width,
             pixel_height: geometry.pixel_height,
-        }
+        };
     }
 }
 
@@ -151,7 +164,7 @@ struct InputWorker {
 }
 
 struct ResizeWorker {
-    handle: signal_hook::iterator::Handle,
+    handle: Handle,
     thread: thread::JoinHandle<()>,
 }
 
@@ -208,15 +221,23 @@ enum QueryKind {
 /// created, PTY setup or child execution fails, output cannot be mirrored, or
 /// the canonical event log cannot be durably committed.
 pub fn record(options: &RecordOptions) -> Result<RecordOutcome> {
-    let stdout = std::io::stdout();
+    let stdout = io::stdout();
     let mut terminal_mode = RawTerminalGuard::enter(options.forward_stdin)?;
     let result = record_to(options, &mut stdout.lock());
-    finish_with_cleanup(result, terminal_mode.restore())
+    return finish_with_cleanup(result, terminal_mode.restore());
 }
 
 fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordOutcome> {
     let pty_size = validate_options(options)?;
     create_session_directory(&options.output_directory)?;
+    if let Some(profile) = &options.ghostty_profile {
+        write_secure(
+            &options
+                .output_directory
+                .join(&profile.provenance.effective_config),
+            &profile.effective_config,
+        )?;
+    }
     let clock = SessionClock::now()?;
     let session_id = Uuid::now_v7();
     let header = EventLogHeader::new(
@@ -277,12 +298,12 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         },
     )?;
 
-    Ok(RecordOutcome {
+    return Ok(RecordOutcome {
         exit_code,
         signal_name,
         output_bytes: runtime.output_bytes,
         event_log: event_log_path,
-    })
+    });
 }
 
 fn write_session_manifest(
@@ -302,43 +323,50 @@ fn write_session_manifest(
         command: options
             .command
             .iter()
-            .map(|value| ByteString::from(value.as_os_str().as_bytes()))
+            .map(|value| return ByteString::from(value.as_os_str().as_bytes()))
             .collect(),
         working_directory: options
             .working_directory
             .as_deref()
-            .map(|path| ByteString::from(path.as_os_str().as_bytes())),
+            .map(|path| return ByteString::from(path.as_os_str().as_bytes())),
         geometry: SessionGeometry {
             cols: size.cols,
             rows: size.rows,
             pixel_width: size.pixel_width,
             pixel_height: size.pixel_height,
         },
+        geometry_provenance: options.geometry_provenance.clone(),
+        ghostty_visual: options
+            .ghostty_profile
+            .as_ref()
+            .map(|profile| return profile.provenance.clone()),
         child_environment,
         termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
-        operating_system: std::env::consts::OS.to_owned(),
-        architecture: std::env::consts::ARCH.to_owned(),
+        operating_system: OS.to_owned(),
+        architecture: ARCH.to_owned(),
         event_log: "events.jsonl".to_owned(),
         control_socket: CONTROL_SOCKET_NAME.to_owned(),
         contains_sensitive_terminal_data: true,
     };
-    write_json_secure(&options.output_directory.join("session.json"), &manifest)
+    return write_json_secure(&options.output_directory.join("session.json"), &manifest);
 }
 
 fn write_session_completion(options: &RecordOptions, completion: &SessionCompletion) -> Result<()> {
-    write_json_secure(
+    return write_json_secure(
         &options.output_directory.join("completion.json"),
         &completion,
-    )
+    );
 }
 
 fn write_json_secure(path: &Path, value: &impl serde::Serialize) -> Result<()> {
-    let encoded = serde_json::to_vec_pretty(value).map_err(|source| Error::InvalidJson {
-        path: path.to_path_buf(),
-        json_path: "$".to_owned(),
-        source,
+    let encoded = serde_json::to_vec_pretty(value).map_err(|source| {
+        return Error::InvalidJson {
+            path: path.to_path_buf(),
+            json_path: "$".to_owned(),
+            source,
+        };
     })?;
-    write_secure(path, &encoded)
+    return write_secure(path, &encoded);
 }
 
 fn validate_options(options: &RecordOptions) -> Result<PtySize> {
@@ -348,11 +376,11 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
     let pixel_width = options
         .cols
         .checked_mul(options.cell_width_px)
-        .ok_or_else(|| invalid_geometry(options))?;
+        .ok_or_else(|| return invalid_geometry(options))?;
     let pixel_height = options
         .rows
         .checked_mul(options.cell_height_px)
-        .ok_or_else(|| invalid_geometry(options))?;
+        .ok_or_else(|| return invalid_geometry(options))?;
     if options.cols == 0
         || options.rows == 0
         || options.cell_width_px == 0
@@ -360,20 +388,23 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
     {
         return Err(invalid_geometry(options));
     }
-    Ok(PtySize {
+    return Ok(PtySize {
         rows: options.rows,
         cols: options.cols,
         pixel_width,
         pixel_height,
-    })
+    });
 }
 
 fn spawn_command(options: &RecordOptions, pty_size: PtySize) -> Result<SpawnedCommand> {
     let pair = native_pty_system()
         .openpty(pty_size)
-        .map_err(|error| terminal_error("open PTY", error.to_string()))?;
-    let mut command = CommandBuilder::new(&options.command[0]);
-    command.args(&options.command[1..]);
+        .map_err(|error| return terminal_error("open PTY", error.to_string()))?;
+    let Some((program, arguments)) = options.command.split_first() else {
+        return Err(terminal_error("validate command", "command is empty"));
+    };
+    let mut command = CommandBuilder::new(program);
+    command.args(arguments);
     command.env("TERM", &options.term);
     command.env("COLORTERM", "truecolor");
     if let Some(directory) = options.working_directory.as_deref() {
@@ -383,24 +414,24 @@ fn spawn_command(options: &RecordOptions, pty_size: PtySize) -> Result<SpawnedCo
     let reader = pair
         .master
         .try_clone_reader()
-        .map_err(|error| terminal_error("clone PTY reader", error.to_string()))?;
+        .map_err(|error| return terminal_error("clone PTY reader", error.to_string()))?;
     let writer = pair
         .master
         .take_writer()
-        .map_err(|error| terminal_error("take PTY writer", error.to_string()))?;
+        .map_err(|error| return terminal_error("take PTY writer", error.to_string()))?;
     let child = pair
         .slave
         .spawn_command(command)
-        .map_err(|error| terminal_error("spawn terminal command", error.to_string()))?;
+        .map_err(|error| return terminal_error("spawn terminal command", error.to_string()))?;
     drop(pair.slave);
     let pid = child.process_id();
-    Ok(SpawnedCommand {
+    return Ok(SpawnedCommand {
         master: pair.master,
         reader,
         writer,
         child,
         pid,
-    })
+    });
 }
 
 fn consume_runtime(
@@ -425,7 +456,7 @@ fn consume_runtime(
         query_tracker: QueryTracker::default(),
     };
     let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
-    let reader = std::mem::replace(&mut spawned.reader, Box::new(std::io::empty()));
+    let reader = replace(&mut spawned.reader, Box::new(io::empty()));
     let workers = RuntimeWorkers::start(
         reader,
         &sender,
@@ -469,12 +500,12 @@ fn consume_runtime(
                 exit_status = spawned
                     .child
                     .try_wait()
-                    .map_err(|error| terminal_error("poll child", error.to_string()))?;
+                    .map_err(|error| return terminal_error("poll child", error.to_string()))?;
                 if exit_status.is_some() && !progress.output_closed {
                     drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
                 }
             }
-            if drain_deadline.is_some_and(|deadline| Instant::now() >= deadline)
+            if drain_deadline.is_some_and(|deadline| return Instant::now() >= deadline)
                 && !progress.output_closed
             {
                 if process_group_killed {
@@ -488,7 +519,8 @@ fn consume_runtime(
                 drain_deadline = Some(Instant::now() + DESCENDANT_DRAIN_TIMEOUT);
             }
         }
-        exit_status.ok_or_else(|| terminal_error("wait for child", "missing exit status"))
+        return exit_status
+            .ok_or_else(|| return terminal_error("wait for child", "missing exit status"));
     })();
 
     if result.is_err() {
@@ -497,10 +529,10 @@ fn consume_runtime(
     }
     let status = workers.finish(result)?;
 
-    Ok(RuntimeOutcome {
+    return Ok(RuntimeOutcome {
         status,
         output_bytes: progress.output_bytes,
-    })
+    });
 }
 
 fn process_runtime_message(
@@ -522,10 +554,12 @@ fn process_runtime_message(
             })?;
             output
                 .write_all(&data)
-                .and_then(|()| output.flush())
-                .map_err(|source| Error::Filesystem {
-                    path: PathBuf::from("<stdout>"),
-                    source,
+                .and_then(|()| return output.flush())
+                .map_err(|source| {
+                    return Error::Filesystem {
+                        path: PathBuf::from("<stdout>"),
+                        source,
+                    };
                 })?;
             process_semantic_output(
                 &mut live.semantic,
@@ -578,7 +612,7 @@ fn process_runtime_message(
             return Err(terminal_error("serve control socket", reason));
         }
     }
-    Ok(())
+    return Ok(());
 }
 
 fn spawn_reader(
@@ -596,16 +630,14 @@ fn spawn_reader(
                         return;
                     }
                     Ok(length) => {
-                        if sender
-                            .send(RuntimeMessage::Output(buffer[..length].to_vec()))
-                            .is_err()
-                        {
+                        let mut output = buffer.to_vec();
+                        output.truncate(length);
+                        if sender.send(RuntimeMessage::Output(output)).is_err() {
                             return;
                         }
                     }
                     Err(error) => {
-                        let message = if error.raw_os_error() == Some(nix::errno::Errno::EIO as i32)
-                        {
+                        let message = if error.raw_os_error() == Some(Errno::EIO as i32) {
                             RuntimeMessage::OutputClosed
                         } else {
                             RuntimeMessage::ReadFailed(error.to_string())
@@ -616,40 +648,41 @@ fn spawn_reader(
                 }
             }
         })
-        .map_err(|error| terminal_error("spawn PTY reader", error.to_string()))?;
-    Ok(thread)
+        .map_err(|error| return terminal_error("spawn PTY reader", error.to_string()))?;
+    return Ok(thread);
 }
 
 fn spawn_input(sender: mpsc::SyncSender<RuntimeMessage>) -> Result<InputWorker> {
-    let (cancel_read, cancel) = pipe()
-        .map_err(|error| terminal_error("create input cancellation pipe", error.to_string()))?;
+    let (cancel_read, cancel) = pipe().map_err(|error| {
+        return terminal_error("create input cancellation pipe", error.to_string());
+    })?;
     let thread = thread::Builder::new()
         .name("termtrace-stdin-reader".to_owned())
         .spawn(move || input_loop(&cancel_read, &sender))
-        .map_err(|error| terminal_error("spawn standard-input reader", error.to_string()))?;
-    Ok(InputWorker { cancel, thread })
+        .map_err(|error| return terminal_error("spawn standard-input reader", error.to_string()))?;
+    return Ok(InputWorker { cancel, thread });
 }
 
 fn spawn_resize(
     sender: mpsc::SyncSender<RuntimeMessage>,
     initial: TerminalGeometry,
 ) -> Result<Option<ResizeWorker>> {
-    let stdin = std::io::stdin();
+    let stdin = io::stdin();
     if !isatty(&stdin)
-        .map_err(|error| terminal_error("inspect standard input", error.to_string()))?
+        .map_err(|error| return terminal_error("inspect standard input", error.to_string()))?
     {
         return Ok(None);
     }
     let mut signals = Signals::new([SIGWINCH])
-        .map_err(|error| terminal_error("listen for terminal resize", error.to_string()))?;
+        .map_err(|error| return terminal_error("listen for terminal resize", error.to_string()))?;
     let handle = signals.handle();
     let thread = thread::Builder::new()
         .name("termtrace-resize-listener".to_owned())
         .spawn(move || {
-            let stdin = std::io::stdin();
+            let stdin = io::stdin();
             let mut previous = initial;
             for _ in signals.forever() {
-                match rustix::termios::tcgetwinsize(&stdin) {
+                match tcgetwinsize(&stdin) {
                     Ok(size) => {
                         let Some(geometry) = geometry_from_winsize(size, initial) else {
                             continue;
@@ -668,8 +701,10 @@ fn spawn_resize(
                 }
             }
         })
-        .map_err(|error| terminal_error("spawn terminal-resize listener", error.to_string()))?;
-    Ok(Some(ResizeWorker { handle, thread }))
+        .map_err(|error| {
+            return terminal_error("spawn terminal-resize listener", error.to_string());
+        })?;
+    return Ok(Some(ResizeWorker { handle, thread }));
 }
 
 fn spawn_control_server(
@@ -677,33 +712,35 @@ fn spawn_control_server(
     sender: mpsc::SyncSender<RuntimeMessage>,
 ) -> Result<ControlWorker> {
     let socket_path = session_directory.join(CONTROL_SOCKET_NAME);
-    let listener = UnixListener::bind(&socket_path).map_err(|source| Error::Filesystem {
-        path: socket_path.clone(),
-        source,
+    let listener = UnixListener::bind(&socket_path).map_err(|source| {
+        return Error::Filesystem {
+            path: socket_path.clone(),
+            source,
+        };
     })?;
     fs_err::set_permissions(&socket_path, Permissions::from_mode(0o600)).map_err(|source| {
-        cleanup_failed_control_socket(
+        return cleanup_failed_control_socket(
             &socket_path,
             Error::Filesystem {
                 path: socket_path.clone(),
                 source,
             },
-        )
+        );
     })?;
     listener.set_nonblocking(true).map_err(|source| {
-        cleanup_failed_control_socket(
+        return cleanup_failed_control_socket(
             &socket_path,
             Error::Filesystem {
                 path: socket_path.clone(),
                 source,
             },
-        )
+        );
     })?;
     let (cancel_read, cancel) = pipe().map_err(|error| {
-        cleanup_failed_control_socket(
+        return cleanup_failed_control_socket(
             &socket_path,
             terminal_error("create control cancellation pipe", error.to_string()),
-        )
+        );
     })?;
     let thread_socket_path = socket_path.clone();
     let thread = thread::Builder::new()
@@ -714,30 +751,32 @@ fn spawn_control_server(
             }
         })
         .map_err(|error| {
-            cleanup_failed_control_socket(
+            return cleanup_failed_control_socket(
                 &socket_path,
                 terminal_error("spawn control server", error.to_string()),
-            )
+            );
         })?;
     tracing::debug!(socket = %thread_socket_path.display(), "control socket ready");
-    Ok(ControlWorker {
+    return Ok(ControlWorker {
         cancel,
         socket_path,
         thread,
-    })
+    });
 }
 
 fn cleanup_failed_control_socket(socket_path: &Path, primary: Error) -> Error {
     match fs_err::remove_file(socket_path) {
-        Ok(()) => primary,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => primary,
-        Err(source) => Error::CleanupFailed {
-            primary: Box::new(primary),
-            cleanup: Box::new(Error::Filesystem {
-                path: socket_path.to_path_buf(),
-                source,
-            }),
-        },
+        Ok(()) => return primary,
+        Err(error) if error.kind() == ErrorKind::NotFound => return primary,
+        Err(source) => {
+            return Error::CleanupFailed {
+                primary: Box::new(primary),
+                cleanup: Box::new(Error::Filesystem {
+                    path: socket_path.to_path_buf(),
+                    source,
+                }),
+            };
+        }
     }
 }
 
@@ -754,7 +793,7 @@ fn control_server_loop(
             ];
             match poll(&mut descriptors, PollTimeout::NONE) {
                 Ok(_) => (poll_ready(&descriptors[0]), poll_ready(&descriptors[1])),
-                Err(nix::errno::Errno::EINTR) => continue,
+                Err(Errno::EINTR) => continue,
                 Err(error) => return Err(terminal_error("poll control socket", error.to_string())),
             }
         };
@@ -769,7 +808,7 @@ fn control_server_loop(
                 Ok((stream, _)) => {
                     let _ = handle_control_connection(stream, sender, cancel);
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(error) if error.kind() == ErrorKind::WouldBlock => break,
                 Err(error) => {
                     return Err(terminal_error(
                         "accept control connection",
@@ -787,8 +826,8 @@ fn handle_control_connection(
     cancel: &OwnedFd,
 ) -> Result<()> {
     let credentials = getsockopt(&stream, PeerCredentials)
-        .map_err(|error| terminal_error("authenticate control peer", error.to_string()))?;
-    if credentials.uid() != nix::unistd::Uid::effective().as_raw() {
+        .map_err(|error| return terminal_error("authenticate control peer", error.to_string()))?;
+    if credentials.uid() != Uid::effective().as_raw() {
         return Err(Error::ControlRejected {
             code: "unauthorized_peer".to_owned(),
             message: "control peer uid does not own this session".to_owned(),
@@ -797,24 +836,25 @@ fn handle_control_connection(
     let timeout = Some(Duration::from_secs(10));
     stream
         .set_read_timeout(timeout)
-        .and_then(|()| stream.set_write_timeout(timeout))
-        .map_err(|error| terminal_error("configure control connection", error.to_string()))?;
+        .and_then(|()| return stream.set_write_timeout(timeout))
+        .map_err(|error| {
+            return terminal_error("configure control connection", error.to_string());
+        })?;
     let mut encoded = Vec::new();
-    BufReader::new(
-        stream
-            .try_clone()
-            .map_err(|error| terminal_error("clone control connection", error.to_string()))?,
-    )
+    BufReader::new(stream.try_clone().map_err(|error| {
+        return terminal_error("clone control connection", error.to_string());
+    })?)
     .take(MAX_CONTROL_MESSAGE_BYTES + 1)
     .read_until(b'\n', &mut encoded)
-    .map_err(|error| terminal_error("read control request", error.to_string()))?;
+    .map_err(|error| return terminal_error("read control request", error.to_string()))?;
     validate_frame(&encoded)?;
-    let request: ControlRequest =
-        serde_json::from_slice(&encoded).map_err(|source| Error::InvalidJson {
+    let request: ControlRequest = serde_json::from_slice(&encoded).map_err(|source| {
+        return Error::InvalidJson {
             path: PathBuf::from("<control-socket>"),
             json_path: "$".to_owned(),
             source,
-        })?;
+        };
+    })?;
     if request.version != CONTROL_PROTOCOL_VERSION {
         return write_control_response(
             &mut stream,
@@ -880,43 +920,44 @@ fn handle_control_connection(
             }
         }
     };
-    write_control_response(&mut stream, &response)
+    return write_control_response(&mut stream, &response);
 }
 
 fn cancellation_requested(cancel: &OwnedFd) -> Result<bool> {
     let mut descriptors = [PollFd::new(cancel.as_fd(), PollFlags::POLLIN)];
     match poll(&mut descriptors, PollTimeout::ZERO) {
-        Ok(_) => Ok(poll_ready(&descriptors[0])),
-        Err(nix::errno::Errno::EINTR) => Ok(false),
-        Err(error) => Err(terminal_error(
-            "poll control cancellation",
-            error.to_string(),
-        )),
+        Ok(_) => return Ok(poll_ready(&descriptors[0])),
+        Err(Errno::EINTR) => return Ok(false),
+        Err(error) => {
+            return Err(terminal_error(
+                "poll control cancellation",
+                error.to_string(),
+            ));
+        }
     }
 }
 
 fn write_control_response(stream: &mut UnixStream, response: &ControlResponse) -> Result<()> {
-    serde_json::to_writer(&mut *stream, &response).map_err(|source| Error::InvalidJson {
-        path: PathBuf::from("<control-socket>"),
-        json_path: "$".to_owned(),
-        source,
+    serde_json::to_writer(&mut *stream, &response).map_err(|source| {
+        return Error::InvalidJson {
+            path: PathBuf::from("<control-socket>"),
+            json_path: "$".to_owned(),
+            source,
+        };
     })?;
-    stream
+    return stream
         .write_all(b"\n")
-        .and_then(|()| stream.flush())
-        .map_err(|error| terminal_error("write control response", error.to_string()))
+        .and_then(|()| return stream.flush())
+        .map_err(|error| return terminal_error("write control response", error.to_string()));
 }
 
-fn geometry_from_winsize(
-    size: rustix::termios::Winsize,
-    fallback: TerminalGeometry,
-) -> Option<TerminalGeometry> {
+fn geometry_from_winsize(size: Winsize, fallback: TerminalGeometry) -> Option<TerminalGeometry> {
     if size.ws_col == 0 || size.ws_row == 0 {
         return None;
     }
     let cell_width = fallback.pixel_width.checked_div(fallback.cols)?.max(1);
     let cell_height = fallback.pixel_height.checked_div(fallback.rows)?.max(1);
-    Some(TerminalGeometry {
+    return Some(TerminalGeometry {
         cols: size.ws_col,
         rows: size.ws_row,
         pixel_width: if size.ws_xpixel == 0 {
@@ -929,11 +970,11 @@ fn geometry_from_winsize(
         } else {
             size.ws_ypixel
         },
-    })
+    });
 }
 
 fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
-    let stdin = std::io::stdin();
+    let stdin = io::stdin();
     let mut buffer = [0_u8; READ_BUFFER_BYTES];
     loop {
         let mut descriptors = [
@@ -942,7 +983,7 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
         ];
         match poll(&mut descriptors, PollTimeout::NONE) {
             Ok(_) => {}
-            Err(nix::errno::Errno::EINTR) => continue,
+            Err(Errno::EINTR) => continue,
             Err(error) => {
                 let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
                 return;
@@ -960,14 +1001,13 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
                 return;
             }
             Ok(length) => {
-                if sender
-                    .send(RuntimeMessage::Input(buffer[..length].to_vec()))
-                    .is_err()
-                {
+                let mut input = buffer.to_vec();
+                input.truncate(length);
+                if sender.send(RuntimeMessage::Input(input)).is_err() {
                     return;
                 }
             }
-            Err(nix::errno::Errno::EINTR) => {}
+            Err(Errno::EINTR) => {}
             Err(error) => {
                 let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
                 return;
@@ -977,12 +1017,12 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
 }
 
 fn poll_ready(descriptor: &PollFd<'_>) -> bool {
-    descriptor
+    return descriptor
         .revents()
         .unwrap_or(PollFlags::empty())
         .intersects(
             PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR | PollFlags::POLLNVAL,
-        )
+        );
 }
 
 fn handle_control_request(
@@ -1033,8 +1073,8 @@ fn handle_control_request(
         tracing::warn!(request_id = %request.request_id, "control response receiver disconnected");
     }
     match outcome {
-        Ok(_) | Err(Error::ControlRejected { .. }) => Ok(()),
-        Err(error) => Err(error),
+        Ok(_) | Err(Error::ControlRejected { .. }) => return Ok(()),
+        Err(error) => return Err(error),
     }
 }
 
@@ -1053,7 +1093,7 @@ fn execute_control_command(
                 command: "ping".to_owned(),
                 response: serde_json::json!({"responsive": true}),
             })?;
-            Ok(ControlData::Acknowledged)
+            return Ok(ControlData::Acknowledged);
         }
         ControlCommand::Status => {
             let observed_seq = event_log.next_seq();
@@ -1066,11 +1106,11 @@ fn execute_control_command(
                     "observed_next_event_seq": observed_seq,
                 }),
             })?;
-            Ok(ControlData::Status {
+            return Ok(ControlData::Status {
                 pid: spawned.pid,
                 output_bytes,
                 next_event_seq: event_log.next_seq(),
-            })
+            });
         }
         ControlCommand::Input { data, intent } => {
             validate_control_input(data.as_bytes(), intent.as_deref())?;
@@ -1083,7 +1123,7 @@ fn execute_control_command(
                 intent.clone(),
                 data.as_bytes(),
             )?;
-            Ok(ControlData::Acknowledged)
+            return Ok(ControlData::Acknowledged);
         }
         ControlCommand::Resize {
             cols,
@@ -1100,11 +1140,11 @@ fn execute_control_command(
             validate_control_geometry(geometry)?;
             apply_resize(spawned.master.as_mut(), event_log, request_id, geometry)?;
             resize_semantic(semantic, geometry)?;
-            Ok(ControlData::Acknowledged)
+            return Ok(ControlData::Acknowledged);
         }
         ControlCommand::Signal { signal } => {
             apply_signal(spawned.pid, event_log, request_id, *signal)?;
-            Ok(ControlData::Acknowledged)
+            return Ok(ControlData::Acknowledged);
         }
         ControlCommand::Mark { label } => {
             let label = label.trim();
@@ -1117,11 +1157,11 @@ fn execute_control_command(
             event_log.append(Event::Marker {
                 label: label.to_owned(),
             })?;
-            Ok(ControlData::Acknowledged)
+            return Ok(ControlData::Acknowledged);
         }
         ControlCommand::Stop => {
             apply_signal(spawned.pid, event_log, request_id, ProcessSignal::Terminate)?;
-            Ok(ControlData::Acknowledged)
+            return Ok(ControlData::Acknowledged);
         }
     }
 }
@@ -1133,13 +1173,13 @@ fn validate_control_input(data: &[u8], intent: Option<&str>) -> Result<()> {
             "input must contain 1 to 65536 bytes",
         ));
     }
-    if intent.is_some_and(|value| value.len() > 1024) {
+    if intent.is_some_and(|value| return value.len() > 1024) {
         return Err(control_rejected(
             "invalid_intent",
             "input intent must not exceed 1024 UTF-8 bytes",
         ));
     }
-    Ok(())
+    return Ok(());
 }
 
 fn validate_control_geometry(geometry: TerminalGeometry) -> Result<()> {
@@ -1153,7 +1193,7 @@ fn validate_control_geometry(geometry: TerminalGeometry) -> Result<()> {
             "columns, rows, pixel width, and pixel height must be non-zero",
         ));
     }
-    Ok(())
+    return Ok(());
 }
 
 fn apply_signal(
@@ -1169,9 +1209,9 @@ fn apply_signal(
         name: name.to_owned(),
     })?;
     let signal_result = pid
-        .and_then(|value| i32::try_from(value).ok())
-        .ok_or(nix::errno::Errno::ESRCH)
-        .and_then(|value| killpg(Pid::from_raw(value), signal));
+        .and_then(|value| return i32::try_from(value).ok())
+        .ok_or(Errno::ESRCH)
+        .and_then(|value| return killpg(Pid::from_raw(value), signal));
     let status = if signal_result.is_ok() {
         OperationStatus::Applied
     } else {
@@ -1190,22 +1230,22 @@ fn apply_signal(
     let Some(error) = signal_result.err() else {
         return result_write;
     };
-    finish_with_cleanup(
+    return finish_with_cleanup(
         Err(terminal_error(
             "signal child process group",
             error.to_string(),
         )),
         result_write,
-    )
+    );
 }
 
 fn nix_signal(signal: ProcessSignal) -> (Signal, &'static str) {
     match signal {
-        ProcessSignal::Interrupt => (Signal::SIGINT, "SIGINT"),
-        ProcessSignal::Terminate => (Signal::SIGTERM, "SIGTERM"),
-        ProcessSignal::Hangup => (Signal::SIGHUP, "SIGHUP"),
-        ProcessSignal::User1 => (Signal::SIGUSR1, "SIGUSR1"),
-        ProcessSignal::User2 => (Signal::SIGUSR2, "SIGUSR2"),
+        ProcessSignal::Interrupt => return (Signal::SIGINT, "SIGINT"),
+        ProcessSignal::Terminate => return (Signal::SIGTERM, "SIGTERM"),
+        ProcessSignal::Hangup => return (Signal::SIGHUP, "SIGHUP"),
+        ProcessSignal::User1 => return (Signal::SIGUSR1, "SIGUSR1"),
+        ProcessSignal::User2 => return (Signal::SIGUSR2, "SIGUSR2"),
     }
 }
 
@@ -1214,31 +1254,31 @@ fn control_error_response(
     code: impl Into<String>,
     message: impl Into<String>,
 ) -> ControlResponse {
-    ControlResponse {
+    return ControlResponse {
         version: CONTROL_PROTOCOL_VERSION,
         request_id,
         result: ControlResult::Error {
             code: code.into(),
             message: message.into(),
         },
-    }
+    };
 }
 
 fn control_error_code(error: &Error) -> &str {
     match error {
-        Error::ControlRejected { code, .. } => code,
-        Error::EventLogPoisoned { .. } | Error::InvalidEventLog { .. } => "event_log_failed",
-        Error::Filesystem { .. } => "io_failed",
-        Error::TerminalOperation { .. } => "terminal_operation_failed",
-        _ => "internal_error",
+        Error::ControlRejected { code, .. } => return code,
+        Error::EventLogPoisoned { .. } | Error::InvalidEventLog { .. } => return "event_log_failed",
+        Error::Filesystem { .. } => return "io_failed",
+        Error::TerminalOperation { .. } => return "terminal_operation_failed",
+        _ => return "internal_error",
     }
 }
 
 fn control_rejected(code: &str, message: &str) -> Error {
-    Error::ControlRejected {
+    return Error::ControlRejected {
         code: code.to_owned(),
         message: message.to_owned(),
-    }
+    };
 }
 
 fn process_semantic_output(
@@ -1250,11 +1290,11 @@ fn process_semantic_output(
 ) -> Result<()> {
     for byte in data {
         let complete = tracker.push(*byte);
-        semantic.write(std::slice::from_ref(byte));
+        semantic.write(slice::from_ref(byte));
         tracker.pending_responses.extend(semantic.take_responses());
         if complete || (!tracker.is_tracking() && !tracker.pending_responses.is_empty()) {
             let query = ByteString::from(tracker.bytes());
-            for response in std::mem::take(&mut tracker.pending_responses) {
+            for response in take(&mut tracker.pending_responses) {
                 event_log.append(Event::QueryResponse {
                     query: query.clone(),
                     response: ByteString::from(response.as_slice()),
@@ -1275,12 +1315,12 @@ fn process_semantic_output(
             tracker.clear();
         }
     }
-    Ok(())
+    return Ok(());
 }
 
 impl QueryTracker {
     fn is_tracking(&self) -> bool {
-        !matches!(self.kind, QueryKind::None)
+        return !matches!(self.kind, QueryKind::None);
     }
 
     fn push(&mut self, byte: u8) -> bool {
@@ -1290,55 +1330,55 @@ impl QueryTracker {
                 0x1b => {
                     self.sequence.push(byte);
                     self.kind = QueryKind::Escape;
-                    false
+                    return false;
                 }
                 0x9b => {
                     self.sequence.push(byte);
                     self.kind = QueryKind::Csi;
-                    false
+                    return false;
                 }
                 0x9d => {
                     self.sequence.push(byte);
                     self.kind = QueryKind::Osc;
-                    false
+                    return false;
                 }
                 0x05 => {
                     self.sequence.push(byte);
                     self.kind = QueryKind::Single;
-                    true
+                    return true;
                 }
-                _ => false,
+                _ => return false,
             },
             QueryKind::Escape => {
                 self.sequence.push(byte);
                 match byte {
                     b'[' => {
                         self.kind = QueryKind::Csi;
-                        false
+                        return false;
                     }
                     b']' => {
                         self.kind = QueryKind::Osc;
-                        false
+                        return false;
                     }
-                    _ => true,
+                    _ => return true,
                 }
             }
             QueryKind::Csi => {
                 self.sequence.push(byte);
-                (0x40..=0x7e).contains(&byte) || self.sequence.len() > MAX_QUERY_BYTES
+                return (0x40..=0x7e).contains(&byte) || self.sequence.len() > MAX_QUERY_BYTES;
             }
             QueryKind::Osc => {
                 self.sequence.push(byte);
-                byte == 0x07
+                return byte == 0x07
                     || self.sequence.ends_with(b"\x1b\\")
-                    || self.sequence.len() > MAX_QUERY_BYTES
+                    || self.sequence.len() > MAX_QUERY_BYTES;
             }
-            QueryKind::Single => true,
+            QueryKind::Single => return true,
         }
     }
 
     fn bytes(&self) -> &[u8] {
-        &self.sequence
+        return &self.sequence;
     }
 
     fn clear(&mut self) {
@@ -1348,16 +1388,16 @@ impl QueryTracker {
 }
 
 fn resize_semantic(semantic: &mut GhosttyVt, geometry: TerminalGeometry) -> Result<()> {
-    semantic.resize(
+    return semantic.resize(
         geometry.cols,
         geometry.rows,
         geometry_cell_size(geometry.pixel_width, geometry.cols),
         geometry_cell_size(geometry.pixel_height, geometry.rows),
-    )
+    );
 }
 
 fn geometry_cell_size(pixels: u16, cells: u16) -> u32 {
-    u32::from(pixels.checked_div(cells).unwrap_or(0).max(1))
+    return u32::from(pixels.checked_div(cells).unwrap_or(0).max(1));
 }
 
 fn apply_input(
@@ -1394,10 +1434,10 @@ fn apply_input(
     let Some(error) = write_error else {
         return result_write;
     };
-    finish_with_cleanup(
+    return finish_with_cleanup(
         Err(terminal_error("write PTY input", error.to_string())),
         result_write,
-    )
+    );
 }
 
 fn apply_resize(
@@ -1426,92 +1466,97 @@ fn apply_resize(
             error_code: resize_result
                 .as_ref()
                 .err()
-                .map(|_| "pty_resize_failed".to_owned()),
+                .map(|_| return "pty_resize_failed".to_owned()),
         })
         .map(|_| ());
     let Some(error) = resize_result.err() else {
         return result_write;
     };
-    finish_with_cleanup(
+    return finish_with_cleanup(
         Err(terminal_error("resize child PTY", error.to_string())),
         result_write,
-    )
+    );
 }
 
-fn write_input(writer: &mut dyn Write, data: &[u8]) -> (u64, Option<std::io::Error>) {
+fn write_input(writer: &mut dyn Write, data: &[u8]) -> (u64, Option<IoError>) {
     let mut offset = 0_usize;
     while offset < data.len() {
-        match writer.write(&data[offset..]) {
+        let Some(remaining) = data.get(offset..) else {
+            return (
+                u64::try_from(offset).unwrap_or(u64::MAX),
+                Some(IoError::other("PTY writer reported an invalid byte count")),
+            );
+        };
+        match writer.write(remaining) {
             Ok(0) => {
                 return (
                     u64::try_from(offset).unwrap_or(u64::MAX),
-                    Some(std::io::Error::new(
-                        std::io::ErrorKind::WriteZero,
+                    Some(IoError::new(
+                        ErrorKind::WriteZero,
                         "PTY accepted zero input bytes",
                     )),
                 );
             }
             Ok(written) => offset = offset.saturating_add(written),
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) if error.kind() == ErrorKind::Interrupted => {}
             Err(error) => return (u64::try_from(offset).unwrap_or(u64::MAX), Some(error)),
         }
     }
-    (u64::try_from(offset).unwrap_or(u64::MAX), None)
+    return (u64::try_from(offset).unwrap_or(u64::MAX), None);
 }
 
-fn io_error_code(error: &std::io::Error) -> String {
-    error.raw_os_error().map_or_else(
-        || format!("io_{:?}", error.kind()).to_ascii_lowercase(),
+fn io_error_code(error: &IoError) -> String {
+    return error.raw_os_error().map_or_else(
+        || return format!("io_{:?}", error.kind()).to_ascii_lowercase(),
         |errno| format!("os_errno_{errno}"),
-    )
+    );
 }
 
 impl InputWorker {
     fn stop(self) -> Result<()> {
         let cancel_result = match fd_write(&self.cancel, b"x") {
-            Ok(_) | Err(nix::errno::Errno::EPIPE) => Ok(()),
+            Ok(_) | Err(Errno::EPIPE) => Ok(()),
             Err(error) => Err(terminal_error(
                 "cancel standard-input reader",
                 error.to_string(),
             )),
         };
-        let join_result = self
-            .thread
-            .join()
-            .map_err(|_| terminal_error("join standard-input reader", "input thread panicked"));
-        finish_with_cleanup(cancel_result, join_result)
+        let join_result = self.thread.join().map_err(|_| {
+            return terminal_error("join standard-input reader", "input thread panicked");
+        });
+        return finish_with_cleanup(cancel_result, join_result);
     }
 }
 
 impl ResizeWorker {
     fn stop(self) -> Result<()> {
         self.handle.close();
-        self.thread
-            .join()
-            .map_err(|_| terminal_error("join terminal-resize listener", "resize thread panicked"))
+        return self.thread.join().map_err(|_| {
+            return terminal_error("join terminal-resize listener", "resize thread panicked");
+        });
     }
 }
 
 impl ControlWorker {
     fn stop(self) -> Result<()> {
         let cancel_result = match fd_write(&self.cancel, b"x") {
-            Ok(_) | Err(nix::errno::Errno::EPIPE) => Ok(()),
+            Ok(_) | Err(Errno::EPIPE) => Ok(()),
             Err(error) => Err(terminal_error("cancel control server", error.to_string())),
         };
         let join_result = self
             .thread
             .join()
-            .map_err(|_| terminal_error("join control server", "control thread panicked"));
+            .map_err(|_| return terminal_error("join control server", "control thread panicked"));
         let remove_result = match fs_err::remove_file(&self.socket_path) {
             Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
             Err(source) => Err(Error::Filesystem {
                 path: self.socket_path,
                 source,
             }),
         };
         let result = finish_with_cleanup(cancel_result, join_result);
-        finish_with_cleanup(result, remove_result)
+        return finish_with_cleanup(result, remove_result);
     }
 }
 
@@ -1529,7 +1574,7 @@ impl RuntimeWorkers {
             Err(error) => return finish_with_cleanup(Err(error), control.stop()),
         };
         let input = match forward_stdin
-            .then(|| spawn_input(sender.clone()))
+            .then(|| return spawn_input(sender.clone()))
             .transpose()
         {
             Ok(worker) => worker,
@@ -1550,12 +1595,12 @@ impl RuntimeWorkers {
                 return finish_with_cleanup(Err(error), cleanup);
             }
         };
-        Ok(Self {
+        return Ok(Self {
             reader,
             input,
             resize,
             control,
-        })
+        });
     }
 
     fn finish<T>(self, primary: Result<T>) -> Result<T> {
@@ -1565,23 +1610,25 @@ impl RuntimeWorkers {
         let reader_join = self
             .reader
             .join()
-            .map_err(|_| terminal_error("join PTY reader", "reader thread panicked"));
+            .map_err(|_| return terminal_error("join PTY reader", "reader thread panicked"));
         let result = finish_with_cleanup(primary, control_stop);
         let result = finish_with_cleanup(result, input_stop);
         let result = finish_with_cleanup(result, resize_stop);
-        finish_with_cleanup(result, reader_join)
+        return finish_with_cleanup(result, reader_join);
     }
 }
 
 fn finish_with_cleanup<T>(primary: Result<T>, cleanup: Result<()>) -> Result<T> {
     match (primary, cleanup) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Ok(_), Err(cleanup)) => Err(cleanup),
-        (Err(primary), Ok(())) => Err(primary),
-        (Err(primary), Err(cleanup)) => Err(Error::CleanupFailed {
-            primary: Box::new(primary),
-            cleanup: Box::new(cleanup),
-        }),
+        (Ok(value), Ok(())) => return Ok(value),
+        (Ok(_), Err(cleanup)) => return Err(cleanup),
+        (Err(primary), Ok(())) => return Err(primary),
+        (Err(primary), Err(cleanup)) => {
+            return Err(Error::CleanupFailed {
+                primary: Box::new(primary),
+                cleanup: Box::new(cleanup),
+            });
+        }
     }
 }
 
@@ -1591,46 +1638,50 @@ fn create_session_directory(path: &Path) -> Result<()> {
     match builder.create(path) {
         Ok(()) => {
             fs_err::set_permissions(path, Permissions::from_mode(SESSION_DIRECTORY_MODE)).map_err(
-                |source| Error::Filesystem {
-                    path: path.to_path_buf(),
-                    source,
+                |source| {
+                    return Error::Filesystem {
+                        path: path.to_path_buf(),
+                        source,
+                    };
                 },
             )?;
-            Ok(())
+            return Ok(());
         }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            Err(Error::SessionExists {
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+            return Err(Error::SessionExists {
                 path: path.to_path_buf(),
-            })
+            });
         }
-        Err(source) => Err(Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        }),
+        Err(source) => {
+            return Err(Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
     }
 }
 
 fn terminate_process_group(pid: Option<u32>) {
-    let Some(pid) = pid.and_then(|value| i32::try_from(value).ok()) else {
+    let Some(pid) = pid.and_then(|value| return i32::try_from(value).ok()) else {
         return;
     };
     let _ = killpg(Pid::from_raw(pid), Signal::SIGKILL);
 }
 
 fn invalid_geometry(options: &RecordOptions) -> Error {
-    Error::InvalidGeometry {
+    return Error::InvalidGeometry {
         cols: options.cols,
         rows: options.rows,
         cell_width_px: options.cell_width_px,
         cell_height_px: options.cell_height_px,
-    }
+    };
 }
 
 fn terminal_error(operation: &'static str, reason: impl Into<String>) -> Error {
-    Error::TerminalOperation {
+    return Error::TerminalOperation {
         operation,
         reason: reason.into(),
-    }
+    };
 }
 
 #[cfg(test)]
@@ -1662,6 +1713,8 @@ mod tests {
             rows: 24,
             cell_width_px: 9,
             cell_height_px: 18,
+            geometry_provenance: GeometryProvenance::default(),
+            ghostty_profile: None,
             term: "xterm-ghostty".to_owned(),
             colors: TerminalColors::default(),
             forward_stdin: false,
@@ -1684,8 +1737,8 @@ mod tests {
             .events
             .iter()
             .filter_map(|record| match &record.event {
-                Event::Output { data } => Some(data.as_bytes()),
-                _ => None,
+                Event::Output { data } => return Some(data.as_bytes()),
+                _ => return None,
             })
             .flatten()
             .copied()
@@ -1693,20 +1746,20 @@ mod tests {
         assert_eq!(output, b"\x1b[31mhello\x1b[0m\xff");
         assert_eq!(mirrored_output, output);
         assert!(matches!(
-            recording.events.last().map(|record| &record.event),
+            recording.events.last().map(|record| return &record.event),
             Some(Event::Exit { code: Some(0), .. })
         ));
         let output_closed_index = recording
             .events
             .iter()
             .position(|record| {
-                matches!(
+                return matches!(
                     record.event,
                     Event::Lifecycle {
                         lifecycle_kind: LifecycleKind::OutputClosed,
                         ..
                     }
-                )
+                );
             })
             .expect("output closed event");
         assert!(output_closed_index < recording.events.len() - 1);
@@ -1739,6 +1792,8 @@ mod tests {
             rows: 24,
             cell_width_px: 9,
             cell_height_px: 18,
+            geometry_provenance: GeometryProvenance::default(),
+            ghostty_profile: None,
             term: "xterm-ghostty".to_owned(),
             colors: TerminalColors::default(),
             forward_stdin: false,
@@ -1763,6 +1818,8 @@ mod tests {
             rows: 24,
             cell_width_px: 9,
             cell_height_px: 18,
+            geometry_provenance: GeometryProvenance::default(),
+            ghostty_profile: None,
             term: "xterm-ghostty".to_owned(),
             colors: TerminalColors::default(),
             forward_stdin: false,
@@ -1797,6 +1854,8 @@ mod tests {
             rows: 24,
             cell_width_px: 9,
             cell_height_px: 18,
+            geometry_provenance: GeometryProvenance::default(),
+            ghostty_profile: None,
             term: "xterm-ghostty".to_owned(),
             colors: TerminalColors::default(),
             forward_stdin: false,
@@ -1806,7 +1865,7 @@ mod tests {
         let outcome = record_to(&options, &mut output).expect("record query command");
         let log = EventLog::read(outcome.event_log).expect("valid query log");
 
-        assert!(output.windows(4).any(|window| window == b"GOT:"));
+        assert!(output.windows(4).any(|window| return window == b"GOT:"));
         assert!(log.events.iter().any(|record| matches!(
             &record.event,
             Event::QueryResponse { query, response, .. }
@@ -1838,6 +1897,8 @@ mod tests {
             rows: 24,
             cell_width_px: 9,
             cell_height_px: 18,
+            geometry_provenance: GeometryProvenance::default(),
+            ghostty_profile: None,
             term: "xterm-ghostty".to_owned(),
             colors: TerminalColors::default(),
             forward_stdin: false,

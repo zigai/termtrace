@@ -1,11 +1,12 @@
 //! Native Ghostty capture on an isolated Xvfb display.
 
 use std::{
+    env::{current_exe, temp_dir},
     fs::{File, OpenOptions, Permissions},
-    io::{BufRead as _, BufReader, Write as _},
+    io::{BufRead as _, BufReader, ErrorKind, Write as _},
     os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
-    process::{Child, Command, ExitStatus, Stdio},
+    process::{self, Child, Command, ExitStatus, Stdio},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -21,8 +22,11 @@ use crate::{
         sync_directory, write_secure,
     },
     event_log::EventLog,
+    geometry::TerminalGeometryReport,
     playback::PlaybackTiming,
+    profile::{ResolvedGhosttyProfile, materialize_profile},
     replay::{DERIVED_DIRECTORY, StateIndexEntry},
+    session::{CaptureTarget, read_manifest},
 };
 
 /// Native visual artifact directory name.
@@ -50,6 +54,13 @@ pub struct CaptureOutcome {
     pub video: PathBuf,
     /// Final native screenshot path.
     pub screenshot: PathBuf,
+}
+
+/// Geometry and configuration measured from Ghostty at a target viewport.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FittedGeometry {
+    /// Live XTWINOPS geometry report.
+    pub report: TerminalGeometryReport,
 }
 
 /// State-to-video mapping entry.
@@ -136,28 +147,109 @@ pub fn capture(options: &CaptureOptions) -> Result<CaptureOutcome> {
         ));
     }
     let commit = commit_directory(&options.session_directory, &staging, &destination)
-        .and_then(|()| sync_directory(&options.session_directory));
+        .and_then(|()| return sync_directory(&options.session_directory));
     if let Err(error) = commit {
-        let cleanup = fs_err::remove_dir_all(&staging).map_err(|source| Error::Filesystem {
-            path: staging,
-            source,
+        let cleanup = fs_err::remove_dir_all(&staging).map_err(|source| {
+            return Error::Filesystem {
+                path: staging,
+                source,
+            };
         });
         return finish_with_cleanup(Err(error), cleanup);
     }
-    Ok(outcome(destination))
+    return Ok(outcome(destination));
+}
+
+/// Measure Ghostty's real grid and cell dimensions at a capture viewport.
+///
+/// # Errors
+///
+/// Returns an error when Ghostty, Xvfb, D-Bus, terminal queries, or temporary
+/// evidence persistence fails.
+pub fn probe_ghostty_geometry(
+    target: CaptureTarget,
+    profile: &ResolvedGhosttyProfile,
+) -> Result<FittedGeometry> {
+    if target.width < 320 || target.height < 200 {
+        return Err(Error::InvalidReplay {
+            reason: "fitted geometry requires a viewport of at least 320x200 pixels".to_owned(),
+        });
+    }
+    let staging = temp_dir().join(format!("termtrace-geometry-{}", Uuid::now_v7()));
+    create_private_directory(&staging)?;
+    let result = probe_ghostty_geometry_staged(target, profile, &staging);
+    match result {
+        Ok(fitted) => {
+            fs_err::remove_dir_all(&staging).map_err(|source| {
+                return Error::Filesystem {
+                    path: staging,
+                    source,
+                };
+            })?;
+            return Ok(fitted);
+        }
+        Err(source) => {
+            return Err(Error::CaptureFailed {
+                evidence: staging,
+                source: Box::new(source),
+            });
+        }
+    }
+}
+
+fn probe_ghostty_geometry_staged(
+    target: CaptureTarget,
+    profile: &ResolvedGhosttyProfile,
+    staging: &Path,
+) -> Result<FittedGeometry> {
+    write_secure(
+        &staging.join("ghostty-config.txt"),
+        &profile.effective_config,
+    )?;
+    let profile_root =
+        materialize_profile(&staging.join("ghostty-profile"), &profile.effective_config)?;
+    let lease = DisplayLease::acquire()?;
+    let display = format!(":{}", lease.number);
+    let mut xvfb = spawn_xvfb(&lease, target.width, target.height, staging)?;
+    wait_for_x_socket(&lease, &mut xvfb, Duration::from_secs(5))?;
+    let report_path = staging.join("geometry.json");
+    let overrides = ghostty_overrides();
+    let mut ghostty =
+        spawn_geometry_probe(staging, &display, &report_path, &overrides, &profile_root)?;
+    let report: TerminalGeometryReport =
+        wait_for_json(&report_path, &mut ghostty, Duration::from_secs(20))?;
+    wait_for_success(&mut ghostty, Duration::from_secs(5), staging)?;
+    xvfb.terminate();
+    let geometry = report.session_geometry()?;
+    if geometry.pixel_width > target.width || geometry.pixel_height > target.height {
+        return Err(Error::InvalidReplay {
+            reason: format!(
+                "Ghostty text area {}x{} exceeds requested viewport {}x{}",
+                geometry.pixel_width, geometry.pixel_height, target.width, target.height
+            ),
+        });
+    }
+    drop(lease);
+    return Ok(FittedGeometry { report });
 }
 
 fn preserve_failed_capture(session: &Path, staging: &Path, error: Error) -> Error {
     let evidence = session.join(format!("visual-failed-{}", Uuid::now_v7()));
-    match commit_directory(session, staging, &evidence).and_then(|()| sync_directory(session)) {
-        Ok(()) => Error::CaptureFailed {
-            evidence,
-            source: Box::new(error),
-        },
-        Err(cleanup) => Error::CleanupFailed {
-            primary: Box::new(error),
-            cleanup: Box::new(cleanup),
-        },
+    match commit_directory(session, staging, &evidence)
+        .and_then(|()| return sync_directory(session))
+    {
+        Ok(()) => {
+            return Error::CaptureFailed {
+                evidence,
+                source: Box::new(error),
+            };
+        }
+        Err(cleanup) => {
+            return Error::CleanupFailed {
+                primary: Box::new(error),
+                cleanup: Box::new(cleanup),
+            };
+        }
     }
 }
 
@@ -167,8 +259,53 @@ fn capture_staged(
     state_index: &[StateIndexEntry],
     staging: &Path,
 ) -> Result<VisualManifest> {
-    let resolved_config = command_output("ghostty", &["+show-config"])?;
+    let session_manifest = read_manifest(&options.session_directory)?;
+    let profile_root = if let Some(profile) = &session_manifest.ghostty_visual {
+        if profile.effective_config != "ghostty-config.txt" {
+            return Err(Error::InvalidReplay {
+                reason: format!(
+                    "unsupported recorded Ghostty profile path `{}`",
+                    profile.effective_config
+                ),
+            });
+        }
+        let config_path = options.session_directory.join(&profile.effective_config);
+        let config = fs_err::read(&config_path).map_err(|source| {
+            return Error::Filesystem {
+                path: config_path,
+                source,
+            };
+        })?;
+        let actual_hash = blake3::hash(&config).to_hex().to_string();
+        if actual_hash != profile.effective_config_hash {
+            return Err(Error::InvalidReplay {
+                reason: "recorded Ghostty profile hash does not match session provenance"
+                    .to_owned(),
+            });
+        }
+        Some(materialize_profile(
+            &staging.join("ghostty-profile"),
+            &config,
+        )?)
+    } else {
+        None
+    };
+    let resolved_config =
+        command_output_in_profile("ghostty", &["+show-config"], profile_root.as_deref())?;
     let config_hash = blake3::hash(&resolved_config).to_hex().to_string();
+    if let Some(expected) = session_manifest
+        .geometry_provenance
+        .ghostty_config_hash
+        .as_deref()
+        && expected != config_hash
+    {
+        return Err(Error::ExternalCommand {
+            program: "ghostty".to_owned(),
+            reason: format!(
+                "effective configuration changed since geometry fitting (recorded {expected}, current {config_hash})"
+            ),
+        });
+    }
     if let Some(expected) = event_log
         .header
         .colors
@@ -195,7 +332,7 @@ fn capture_staged(
 
     let lease = DisplayLease::acquire()?;
     let display = format!(":{}", lease.number);
-    let mut xvfb = spawn_xvfb(&lease, options, staging)?;
+    let mut xvfb = spawn_xvfb(&lease, options.width, options.height, staging)?;
     wait_for_x_socket(&lease, &mut xvfb, Duration::from_secs(5))?;
     let timing_file = staging.join("playback-timing.json");
     let ready_file = staging.join("playback-ready");
@@ -207,6 +344,7 @@ fn capture_staged(
         &timing_file,
         &ready_file,
         &overrides,
+        profile_root.as_deref(),
     )?;
     let timing: PlaybackTiming =
         wait_for_json(&timing_file, &mut ghostty, Duration::from_secs(20))?;
@@ -216,7 +354,7 @@ fn capture_staged(
     let video_path = staging.join("session.mkv");
     let mut ffmpeg = spawn_video_ffmpeg(options, staging, &display, &video_path)?;
     let recording_duration = event_log.events.last().map_or(Duration::ZERO, |event| {
-        Duration::from_nanos(event.monotonic_ns)
+        return Duration::from_nanos(event.monotonic_ns);
     });
     wait_for_file(
         &ready_file,
@@ -243,7 +381,10 @@ fn capture_staged(
     let manifest = VisualManifest {
         version: 1,
         session_id: event_log.header.session_id,
-        source_event_hash: event_log.events.last().map(|event| event.hash.clone()),
+        source_event_hash: event_log
+            .events
+            .last()
+            .map(|event| return event.hash.clone()),
         fps: options.fps,
         width: options.width,
         height: options.height,
@@ -257,17 +398,27 @@ fn capture_staged(
         screenshot_probe,
     };
     let encoded = serde_json::to_vec_pretty(&manifest)
-        .map_err(|source| json_error(staging.join("manifest.json"), source))?;
+        .map_err(|source| return json_error(staging.join("manifest.json"), source))?;
     write_secure(&staging.join("manifest.json"), &encoded)?;
     for transient in [&timing_file, &ready_file] {
-        fs_err::remove_file(transient).map_err(|source| Error::Filesystem {
-            path: transient.clone(),
-            source,
+        fs_err::remove_file(transient).map_err(|source| {
+            return Error::Filesystem {
+                path: transient.clone(),
+                source,
+            };
+        })?;
+    }
+    if let Some(profile_root) = profile_root {
+        fs_err::remove_dir_all(&profile_root).map_err(|source| {
+            return Error::Filesystem {
+                path: profile_root,
+                source,
+            };
         })?;
     }
     sync_directory(staging)?;
     drop(lease);
-    Ok(manifest)
+    return Ok(manifest);
 }
 
 fn validate_options(options: &CaptureOptions) -> Result<()> {
@@ -286,11 +437,11 @@ fn validate_options(options: &CaptureOptions) -> Result<()> {
             reason: "semantic index is missing; run `termtrace index` first".to_owned(),
         });
     }
-    Ok(())
+    return Ok(());
 }
 
 fn ghostty_overrides() -> Vec<String> {
-    vec![
+    return vec![
         "--gtk-single-instance=false".to_owned(),
         "--confirm-close-surface=false".to_owned(),
         "--quit-after-last-window-closed=true".to_owned(),
@@ -299,29 +450,68 @@ fn ghostty_overrides() -> Vec<String> {
         "--window-width=9999".to_owned(),
         "--window-height=9999".to_owned(),
         "--window-save-state=never".to_owned(),
-    ]
+    ];
 }
 
 fn spawn_xvfb(
     lease: &DisplayLease,
-    options: &CaptureOptions,
+    width: u16,
+    height: u16,
     staging: &Path,
 ) -> Result<ManagedChild> {
     let log = secure_file(&staging.join("xvfb.log"))?;
-    let screen = format!("{}x{}x24", options.width, options.height);
+    let screen = format!("{width}x{height}x24");
     let child = Command::new("Xvfb")
         .arg(format!(":{}", lease.number))
         .args(["-screen", "0", &screen, "-nolisten", "tcp", "-noreset"])
         .stdout(Stdio::from(log.try_clone().map_err(|source| {
-            Error::Filesystem {
+            return Error::Filesystem {
                 path: staging.join("xvfb.log"),
                 source,
-            }
+            };
         })?))
         .stderr(Stdio::from(log))
         .spawn()
-        .map_err(|error| external_error("Xvfb", &error))?;
-    Ok(ManagedChild::new("Xvfb", child))
+        .map_err(|error| return external_error("Xvfb", &error))?;
+    return Ok(ManagedChild::new("Xvfb", child));
+}
+
+fn spawn_geometry_probe(
+    staging: &Path,
+    display: &str,
+    report_path: &Path,
+    overrides: &[String],
+    profile_root: &Path,
+) -> Result<ManagedChild> {
+    let stdout = secure_file(&staging.join("ghostty.stdout.log"))?;
+    let stderr = secure_file(&staging.join("ghostty.stderr.log"))?;
+    let executable = current_exe().map_err(|source| {
+        return Error::Filesystem {
+            path: PathBuf::from("<current-executable>"),
+            source,
+        };
+    })?;
+    let mut command = Command::new("dbus-run-session");
+    command
+        .arg("--")
+        .arg("ghostty")
+        .args(overrides)
+        .arg("-e")
+        .arg(executable)
+        .arg("geometry-probe")
+        .arg("--out")
+        .arg(report_path)
+        .env("DISPLAY", display)
+        .env("XDG_CONFIG_HOME", profile_root)
+        .env("GDK_BACKEND", "x11")
+        .env("LIBGL_ALWAYS_SOFTWARE", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
+    let child = command
+        .spawn()
+        .map_err(|error| return external_error("ghostty geometry probe", &error))?;
+    return Ok(ManagedChild::new("ghostty geometry probe", child));
 }
 
 fn spawn_ghostty(
@@ -331,12 +521,15 @@ fn spawn_ghostty(
     timing_file: &Path,
     ready_file: &Path,
     overrides: &[String],
+    profile_root: Option<&Path>,
 ) -> Result<ManagedChild> {
     let stdout = secure_file(&staging.join("ghostty.stdout.log"))?;
     let stderr = secure_file(&staging.join("ghostty.stderr.log"))?;
-    let executable = std::env::current_exe().map_err(|source| Error::Filesystem {
-        path: PathBuf::from("<current-executable>"),
-        source,
+    let executable = current_exe().map_err(|source| {
+        return Error::Filesystem {
+            path: PathBuf::from("<current-executable>"),
+            source,
+        };
     })?;
     let mut command = Command::new("dbus-run-session");
     command.arg("--").arg("ghostty").args(overrides).arg("-e");
@@ -359,10 +552,13 @@ fn spawn_ghostty(
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
+    if let Some(profile_root) = profile_root {
+        command.env("XDG_CONFIG_HOME", profile_root);
+    }
     let child = command
         .spawn()
-        .map_err(|error| external_error("ghostty", &error))?;
-    Ok(ManagedChild::new("ghostty", child))
+        .map_err(|error| return external_error("ghostty", &error))?;
+    return Ok(ManagedChild::new("ghostty", child));
 }
 
 fn spawn_video_ffmpeg(
@@ -404,15 +600,15 @@ fn spawn_video_ffmpeg(
         .arg(video)
         .stdin(Stdio::piped())
         .stdout(Stdio::from(log.try_clone().map_err(|source| {
-            Error::Filesystem {
+            return Error::Filesystem {
                 path: staging.join("ffmpeg-video.log"),
                 source,
-            }
+            };
         })?))
         .stderr(Stdio::from(log))
         .spawn()
-        .map_err(|error| external_error("ffmpeg", &error))?;
-    Ok(ManagedChild::new("ffmpeg", child))
+        .map_err(|error| return external_error("ffmpeg", &error))?;
+    return Ok(ManagedChild::new("ffmpeg", child));
 }
 
 fn capture_screenshot(
@@ -441,12 +637,12 @@ fn capture_screenshot(
         ])
         .arg(screenshot)
         .output()
-        .map_err(|error| external_error("ffmpeg screenshot", &error))?;
+        .map_err(|error| return external_error("ffmpeg screenshot", &error))?;
     if !output.status.success() {
         write_secure(&staging.join("ffmpeg-screenshot.log"), &output.stderr)?;
         return Err(status_error("ffmpeg screenshot", output.status));
     }
-    write_secure(&staging.join("ffmpeg-screenshot.log"), &output.stderr)
+    return write_secure(&staging.join("ffmpeg-screenshot.log"), &output.stderr);
 }
 
 fn probe_video(path: &Path, fps: u16, width: u16, height: u16) -> Result<serde_json::Value> {
@@ -462,31 +658,36 @@ fn probe_video(path: &Path, fps: u16, width: u16, height: u16) -> Result<serde_j
         ])
         .arg(path)
         .output()
-        .map_err(|error| external_error("ffprobe", &error))?;
+        .map_err(|error| return external_error("ffprobe", &error))?;
     if !output.status.success() {
         return Err(status_error("ffprobe", output.status));
     }
     let probe: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|source| json_error(path.to_path_buf(), source))?;
+        .map_err(|source| return json_error(path.to_path_buf(), source))?;
     let expected = format!("{fps}/1");
-    let stream = probe["streams"]
-        .as_array()
-        .and_then(|streams| streams.first())
-        .ok_or_else(|| invalid_probe("video has no stream"))?;
-    let frame_count = stream["nb_read_frames"]
-        .as_str()
-        .and_then(|value| value.parse::<u64>().ok())
+    let stream = probe
+        .get("streams")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|streams| return streams.first())
+        .ok_or_else(|| return invalid_probe("video has no stream"))?;
+    let frame_count = stream
+        .get("nb_read_frames")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| return value.parse::<u64>().ok())
         .unwrap_or(0);
-    if stream["avg_frame_rate"].as_str() != Some(&expected)
-        || stream["width"].as_u64() != Some(u64::from(width))
-        || stream["height"].as_u64() != Some(u64::from(height))
+    if stream
+        .get("avg_frame_rate")
+        .and_then(serde_json::Value::as_str)
+        != Some(&expected)
+        || stream.get("width").and_then(serde_json::Value::as_u64) != Some(u64::from(width))
+        || stream.get("height").and_then(serde_json::Value::as_u64) != Some(u64::from(height))
         || frame_count == 0
     {
         return Err(invalid_probe(
             "video frame-rate or frame-count probe failed",
         ));
     }
-    Ok(probe)
+    return Ok(probe);
 }
 
 fn probe_screenshot(path: &Path, width: u16, height: u16) -> Result<serde_json::Value> {
@@ -494,46 +695,53 @@ fn probe_screenshot(path: &Path, width: u16, height: u16) -> Result<serde_json::
         .args(["-v", "error", "-show_streams", "-of", "json"])
         .arg(path)
         .output()
-        .map_err(|error| external_error("ffprobe screenshot", &error))?;
+        .map_err(|error| return external_error("ffprobe screenshot", &error))?;
     if !output.status.success() {
         return Err(status_error("ffprobe screenshot", output.status));
     }
     let probe: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|source| json_error(path.to_path_buf(), source))?;
-    let stream = probe["streams"]
-        .as_array()
-        .and_then(|streams| streams.first())
-        .ok_or_else(|| invalid_probe("screenshot has no stream"))?;
-    if stream["width"].as_u64() != Some(u64::from(width))
-        || stream["height"].as_u64() != Some(u64::from(height))
-        || stream["codec_name"].as_str() != Some("png")
+        .map_err(|source| return json_error(path.to_path_buf(), source))?;
+    let stream = probe
+        .get("streams")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|streams| return streams.first())
+        .ok_or_else(|| return invalid_probe("screenshot has no stream"))?;
+    if stream.get("width").and_then(serde_json::Value::as_u64) != Some(u64::from(width))
+        || stream.get("height").and_then(serde_json::Value::as_u64) != Some(u64::from(height))
+        || stream.get("codec_name").and_then(serde_json::Value::as_str) != Some("png")
     {
         return Err(invalid_probe("screenshot dimensions or codec do not match"));
     }
-    Ok(probe)
+    return Ok(probe);
 }
 
 fn read_state_index(session: &Path) -> Result<Vec<StateIndexEntry>> {
     let path = session.join(DERIVED_DIRECTORY).join("state-index.jsonl");
-    let reader = BufReader::new(File::open(&path).map_err(|source| Error::Filesystem {
-        path: path.clone(),
-        source,
+    let reader = BufReader::new(File::open(&path).map_err(|source| {
+        return Error::Filesystem {
+            path: path.clone(),
+            source,
+        };
     })?);
-    reader
+    return reader
         .lines()
         .enumerate()
         .map(|(index, line)| {
-            let line = line.map_err(|source| Error::Filesystem {
-                path: path.clone(),
-                source,
+            let line = line.map_err(|source| {
+                return Error::Filesystem {
+                    path: path.clone(),
+                    source,
+                };
             })?;
-            serde_json::from_str(&line).map_err(|source| Error::InvalidJson {
-                path: path.clone(),
-                json_path: format!("line {}", index + 1),
-                source,
-            })
+            return serde_json::from_str(&line).map_err(|source| {
+                return Error::InvalidJson {
+                    path: path.clone(),
+                    json_path: format!("line {}", index + 1),
+                    source,
+                };
+            });
         })
-        .collect()
+        .collect();
 }
 
 fn write_video_map(
@@ -548,8 +756,8 @@ fn write_video_map(
         let presentation = replay_origin.saturating_add(u128::from(state.monotonic_ns));
         let relative = presentation.saturating_sub(capture_origin);
         let frame = state.presented.then(|| {
-            u64::try_from(relative.saturating_mul(u128::from(fps)) / 1_000_000_000)
-                .unwrap_or(u64::MAX)
+            return u64::try_from(relative.saturating_mul(u128::from(fps)) / 1_000_000_000)
+                .unwrap_or(u64::MAX);
         });
         let entry = VideoMapEntry {
             state_id: state.state_id,
@@ -559,15 +767,15 @@ fn write_video_map(
             presented: state.presented,
         };
         serde_json::to_writer(&mut writer, &entry)
-            .map_err(|source| json_error(path.to_path_buf(), source))?;
-        writer
-            .write_all(b"\n")
-            .map_err(|source| Error::Filesystem {
+            .map_err(|source| return json_error(path.to_path_buf(), source))?;
+        writer.write_all(b"\n").map_err(|source| {
+            return Error::Filesystem {
                 path: path.to_path_buf(),
                 source,
-            })?;
+            };
+        })?;
     }
-    finish_writer(writer, path)
+    return finish_writer(writer, path);
 }
 
 impl DisplayLease {
@@ -586,15 +794,15 @@ impl DisplayLease {
                 .open(&lock_path)
             {
                 Ok(mut file) => {
-                    writeln!(file, "{}", std::process::id()).map_err(|source| {
-                        Error::Filesystem {
+                    writeln!(file, "{}", process::id()).map_err(|source| {
+                        return Error::Filesystem {
                             path: lock_path.clone(),
                             source,
-                        }
+                        };
                     })?;
                     return Ok(Self { number, lock_path });
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
                 Err(source) => {
                     return Err(Error::Filesystem {
                         path: lock_path,
@@ -603,10 +811,10 @@ impl DisplayLease {
                 }
             }
         }
-        Err(Error::ExternalCommand {
+        return Err(Error::ExternalCommand {
             program: "Xvfb".to_owned(),
             reason: "no private display number is available".to_owned(),
-        })
+        });
     }
 }
 
@@ -618,18 +826,22 @@ impl Drop for DisplayLease {
 
 impl ManagedChild {
     fn new(name: &'static str, child: Child) -> Self {
-        Self {
+        return Self {
             name,
             child: Some(child),
-        }
+        };
     }
 
     fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
-        self.child
-            .as_mut()
-            .expect("managed child is available")
+        let Some(child) = self.child.as_mut() else {
+            return Err(Error::ExternalCommand {
+                program: self.name.to_owned(),
+                reason: "managed child is unavailable".to_owned(),
+            });
+        };
+        return child
             .try_wait()
-            .map_err(|error| external_error(self.name, &error))
+            .map_err(|error| return external_error(self.name, &error));
     }
 
     fn terminate(&mut self) {
@@ -652,11 +864,11 @@ fn wait_for_x_socket(
     timeout: Duration,
 ) -> Result<()> {
     let socket = PathBuf::from(format!("/tmp/.X11-unix/X{}", lease.number));
-    wait_until(process, timeout, || socket.exists())
+    return wait_until(process, timeout, || return socket.exists());
 }
 
 fn wait_for_file(path: &Path, process: &mut ManagedChild, timeout: Duration) -> Result<()> {
-    wait_until(process, timeout, || path.is_file())
+    return wait_until(process, timeout, || return path.is_file());
 }
 
 fn wait_for_json<T: for<'de> Deserialize<'de>>(
@@ -728,112 +940,134 @@ fn wait_for_success(process: &mut ManagedChild, timeout: Duration, staging: &Pat
 }
 
 fn stop_ffmpeg(process: &mut ManagedChild, timeout: Duration, staging: &Path) -> Result<()> {
-    process
-        .child
-        .as_mut()
-        .expect("managed child is available")
+    let child = process.child.as_mut().ok_or_else(|| {
+        return Error::ExternalCommand {
+            program: process.name.to_owned(),
+            reason: "managed child is unavailable".to_owned(),
+        };
+    })?;
+    child
         .stdin
         .as_mut()
-        .ok_or_else(|| Error::ExternalCommand {
-            program: process.name.to_owned(),
-            reason: "standard-input control pipe is unavailable".to_owned(),
+        .ok_or_else(|| {
+            return Error::ExternalCommand {
+                program: process.name.to_owned(),
+                reason: "standard-input control pipe is unavailable".to_owned(),
+            };
         })?
         .write_all(b"q\n")
-        .map_err(|error| external_error(process.name, &error))?;
-    wait_for_success(process, timeout, staging)
+        .map_err(|error| return external_error(process.name, &error))?;
+    return wait_for_success(process, timeout, staging);
 }
 
 fn secure_permissions(path: &Path) -> Result<()> {
-    fs_err::set_permissions(path, Permissions::from_mode(0o600)).map_err(|source| {
-        Error::Filesystem {
+    return fs_err::set_permissions(path, Permissions::from_mode(0o600)).map_err(|source| {
+        return Error::Filesystem {
             path: path.to_path_buf(),
             source,
-        }
-    })
+        };
+    });
 }
 
 fn command_output(program: &str, arguments: &[&str]) -> Result<Vec<u8>> {
-    let output = Command::new(program)
-        .args(arguments)
+    return command_output_in_profile(program, arguments, None);
+}
+
+fn command_output_in_profile(
+    program: &str,
+    arguments: &[&str],
+    profile_root: Option<&Path>,
+) -> Result<Vec<u8>> {
+    let mut command = Command::new(program);
+    command.args(arguments);
+    if let Some(profile_root) = profile_root {
+        command.env("XDG_CONFIG_HOME", profile_root);
+    }
+    let output = command
         .output()
-        .map_err(|error| external_error(program, &error))?;
+        .map_err(|error| return external_error(program, &error))?;
     if output.status.success() {
-        Ok(output.stdout)
+        return Ok(output.stdout);
     } else {
-        Err(status_error(program, output.status))
+        return Err(status_error(program, output.status));
     }
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
-    let bytes = fs_err::read(path).map_err(|source| Error::Filesystem {
-        path: path.to_path_buf(),
-        source,
+    let bytes = fs_err::read(path).map_err(|source| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        };
     })?;
-    serde_json::from_slice(&bytes).map_err(|source| json_error(path.to_path_buf(), source))
+    return serde_json::from_slice(&bytes)
+        .map_err(|source| return json_error(path.to_path_buf(), source));
 }
 
 fn unix_now_ns() -> Result<u128> {
-    SystemTime::now()
+    return SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .map_err(|_| Error::ClockBeforeEpoch)
+        .map(|duration| return duration.as_nanos())
+        .map_err(|_| return Error::ClockBeforeEpoch);
 }
 
 fn outcome(directory: PathBuf) -> CaptureOutcome {
-    CaptureOutcome {
+    return CaptureOutcome {
         video: directory.join("session.mkv"),
         screenshot: directory.join("final.png"),
         directory,
-    }
+    };
 }
 
 fn status_error(program: &str, status: ExitStatus) -> Error {
-    Error::ExternalCommand {
+    return Error::ExternalCommand {
         program: program.to_owned(),
         reason: format!("exit status {status}"),
-    }
+    };
 }
 
 fn status_error_with_logs(program: &str, status: ExitStatus, staging: &Path) -> Error {
-    Error::ExternalCommand {
+    return Error::ExternalCommand {
         program: program.to_owned(),
         reason: format!(
             "exit status {status}; inspect logs in {}",
             staging.display()
         ),
-    }
+    };
 }
 
 fn external_error(program: &str, error: &impl ToString) -> Error {
-    Error::ExternalCommand {
+    return Error::ExternalCommand {
         program: program.to_owned(),
         reason: error.to_string(),
-    }
+    };
 }
 
 fn invalid_probe(reason: &str) -> Error {
-    Error::ExternalCommand {
+    return Error::ExternalCommand {
         program: "ffprobe".to_owned(),
         reason: reason.to_owned(),
-    }
+    };
 }
 
 fn json_error(path: PathBuf, source: serde_json::Error) -> Error {
-    Error::InvalidJson {
+    return Error::InvalidJson {
         path,
         json_path: "$".to_owned(),
         source,
-    }
+    };
 }
 
 fn finish_with_cleanup<T>(primary: Result<T>, cleanup: Result<()>) -> Result<T> {
     match (primary, cleanup) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Ok(_), Err(cleanup)) => Err(cleanup),
-        (Err(primary), Ok(())) => Err(primary),
-        (Err(primary), Err(cleanup)) => Err(Error::CleanupFailed {
-            primary: Box::new(primary),
-            cleanup: Box::new(cleanup),
-        }),
+        (Ok(value), Ok(())) => return Ok(value),
+        (Ok(_), Err(cleanup)) => return Err(cleanup),
+        (Err(primary), Ok(())) => return Err(primary),
+        (Err(primary), Err(cleanup)) => {
+            return Err(Error::CleanupFailed {
+                primary: Box::new(primary),
+                cleanup: Box::new(cleanup),
+            });
+        }
     }
 }

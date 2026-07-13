@@ -1,8 +1,9 @@
 //! Timed canonical-event playback for the native Ghostty capture process.
 
 use std::{
+    collections::HashMap,
     fs::OpenOptions,
-    io::Write as _,
+    io::{self, Write as _},
     os::unix::fs::OpenOptionsExt as _,
     path::{Path, PathBuf},
     thread,
@@ -16,6 +17,8 @@ use crate::{
     Error, Result,
     event::{Event, OperationStatus},
     event_log::EventLog,
+    geometry::resize_and_query,
+    session::{GeometrySource, read_manifest},
     terminal_mode::{RawTerminalGuard, TerminalInputDrain},
 };
 
@@ -51,13 +54,45 @@ pub struct PlaybackOptions {
 /// handshake persistence failures.
 pub fn playback(options: &PlaybackOptions) -> Result<()> {
     let mut terminal_mode = RawTerminalGuard::enter(true)?;
+    if let Err(error) = prepare_terminal_geometry(options) {
+        return finish_with_cleanup(Err(error), terminal_mode.restore());
+    }
     let mut input_drain = match TerminalInputDrain::start(terminal_mode.is_active()) {
         Ok(input_drain) => input_drain,
         Err(e) => return finish_with_cleanup(Err(e), terminal_mode.restore()),
     };
     let result = playback_with_raw_input(options);
     let result = finish_with_cleanup(result, input_drain.stop());
-    finish_with_cleanup(result, terminal_mode.restore())
+    return finish_with_cleanup(result, terminal_mode.restore());
+}
+
+fn prepare_terminal_geometry(options: &PlaybackOptions) -> Result<()> {
+    let manifest = read_manifest(&options.session_directory)?;
+    let expected = manifest.geometry;
+    let reported = resize_and_query(expected.cols, expected.rows)?;
+    if reported.cols != expected.cols || reported.rows != expected.rows {
+        return Err(Error::InvalidReplay {
+            reason: format!(
+                "Ghostty applied {}x{} cells instead of recorded {}x{}; increase the capture viewport or use fitted geometry",
+                reported.cols, reported.rows, expected.cols, expected.rows
+            ),
+        });
+    }
+    if manifest.geometry_provenance.source == GeometrySource::GhosttyFit
+        && (reported.text_width != expected.pixel_width
+            || reported.text_height != expected.pixel_height)
+    {
+        return Err(Error::InvalidReplay {
+            reason: format!(
+                "Ghostty text area changed from recorded {}x{} pixels to {}x{} pixels",
+                expected.pixel_width,
+                expected.pixel_height,
+                reported.text_width,
+                reported.text_height
+            ),
+        });
+    }
+    return Ok(());
 }
 
 fn playback_with_raw_input(options: &PlaybackOptions) -> Result<()> {
@@ -65,8 +100,10 @@ fn playback_with_raw_input(options: &PlaybackOptions) -> Result<()> {
     let monotonic_origin = Instant::now() + options.start_delay;
     let replay_origin_unix_ns = unix_now_ns()?
         .checked_add(options.start_delay.as_nanos())
-        .ok_or_else(|| Error::InvalidReplay {
-            reason: "playback wall-clock origin overflow".to_owned(),
+        .ok_or_else(|| {
+            return Error::InvalidReplay {
+                reason: "playback wall-clock origin overflow".to_owned(),
+            };
         })?;
     let timing = PlaybackTiming {
         replay_origin_unix_ns,
@@ -75,9 +112,9 @@ fn playback_with_raw_input(options: &PlaybackOptions) -> Result<()> {
     write_create_new_json(&options.timing_file, &timing)?;
     sleep_until(monotonic_origin);
 
-    let stdout = std::io::stdout();
+    let stdout = io::stdout();
     let mut output = stdout.lock();
-    let mut resize_intents = std::collections::HashMap::new();
+    let mut resize_intents = HashMap::new();
     for record in &log.events {
         let target = monotonic_origin + Duration::from_nanos(record.monotonic_ns);
         sleep_until(target);
@@ -85,7 +122,7 @@ fn playback_with_raw_input(options: &PlaybackOptions) -> Result<()> {
             Event::Output { data } => {
                 output
                     .write_all(data.as_bytes())
-                    .and_then(|()| output.flush())
+                    .and_then(|()| return output.flush())
                     .map_err(output_error)?;
             }
             Event::ResizeIntent {
@@ -103,7 +140,7 @@ fn playback_with_raw_input(options: &PlaybackOptions) -> Result<()> {
             } => {
                 if let Some((cols, rows)) = resize_intents.remove(operation_id) {
                     write!(output, "\x1b[8;{rows};{cols}t")
-                        .and_then(|()| output.flush())
+                        .and_then(|()| return output.flush())
                         .map_err(output_error)?;
                 }
             }
@@ -115,18 +152,20 @@ fn playback_with_raw_input(options: &PlaybackOptions) -> Result<()> {
     }
     write_create_new(&options.ready_file, b"ready\n")?;
     thread::sleep(options.final_hold);
-    Ok(())
+    return Ok(());
 }
 
 fn finish_with_cleanup<T>(primary: Result<T>, cleanup: Result<()>) -> Result<T> {
     match (primary, cleanup) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Err(primary), Ok(())) => Err(primary),
-        (Ok(_), Err(cleanup)) => Err(cleanup),
-        (Err(primary), Err(cleanup)) => Err(Error::CleanupFailed {
-            primary: Box::new(primary),
-            cleanup: Box::new(cleanup),
-        }),
+        (Ok(value), Ok(())) => return Ok(value),
+        (Err(primary), Ok(())) => return Err(primary),
+        (Ok(_), Err(cleanup)) => return Err(cleanup),
+        (Err(primary), Err(cleanup)) => {
+            return Err(Error::CleanupFailed {
+                primary: Box::new(primary),
+                cleanup: Box::new(cleanup),
+            });
+        }
     }
 }
 
@@ -137,19 +176,21 @@ fn sleep_until(target: Instant) {
 }
 
 fn unix_now_ns() -> Result<u128> {
-    SystemTime::now()
+    return SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .map_err(|_| Error::ClockBeforeEpoch)
+        .map(|duration| return duration.as_nanos())
+        .map_err(|_| return Error::ClockBeforeEpoch);
 }
 
 fn write_create_new_json(path: &Path, value: &impl Serialize) -> Result<()> {
-    let encoded = serde_json::to_vec(value).map_err(|source| Error::InvalidJson {
-        path: path.to_path_buf(),
-        json_path: "$".to_owned(),
-        source,
+    let encoded = serde_json::to_vec(value).map_err(|source| {
+        return Error::InvalidJson {
+            path: path.to_path_buf(),
+            json_path: "$".to_owned(),
+            source,
+        };
     })?;
-    write_create_new(path, &encoded)
+    return write_create_new(path, &encoded);
 }
 
 fn write_create_new(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -158,21 +199,26 @@ fn write_create_new(path: &Path, bytes: &[u8]) -> Result<()> {
         .create_new(true)
         .mode(0o600)
         .open(path)
-        .map_err(|source| Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            };
         })?;
-    file.write_all(bytes)
-        .and_then(|()| file.sync_data())
-        .map_err(|source| Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        })
+    return file
+        .write_all(bytes)
+        .and_then(|()| return file.sync_data())
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            };
+        });
 }
 
-fn output_error(source: std::io::Error) -> Error {
-    Error::Filesystem {
+fn output_error(source: io::Error) -> Error {
+    return Error::Filesystem {
         path: PathBuf::from("<playback-stdout>"),
         source,
-    }
+    };
 }

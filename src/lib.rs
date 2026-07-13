@@ -6,6 +6,7 @@ pub mod control;
 pub mod error;
 pub mod event;
 pub mod event_log;
+pub mod geometry;
 pub mod ghostty_vt;
 pub mod inspection;
 pub mod interop;
