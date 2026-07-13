@@ -27,6 +27,8 @@ Ghostty on Xvfb <─────┘
 
 The proxy forwards bytes unchanged. It owns the target PTY, logs before acknowledging state-changing control requests, propagates window changes, and distinguishes input originating from a human terminal, an agent, or an automatic host response.
 
+Every input, resize, and signal uses a unique intent/result pair. The intent is durably written before the syscall; the result records complete application or a stable failure code. An intent left without a result after interruption is reported as uncertain and is never retried automatically. Input results also carry the exact number of bytes written so partial writes cannot masquerade as successful delivery.
+
 tmux is supported as a target command but is not required. Asciicast is an interoperability export and is never the canonical recording.
 
 ## Event and state granularity
@@ -51,4 +53,3 @@ The Linux Ghostty GUI currently has no stable headless framebuffer or screenshot
 - Safe connection and process-readiness probes may use bounded retries.
 - Cleanup failures are reported alongside, but never replace, the primary failure.
 - Public failures carry stable diagnostic codes and structured context.
-

@@ -1,6 +1,7 @@
 //! Crash-resistant append-only persistence and strict event-log recovery.
 
 use std::{
+    collections::{HashMap, HashSet},
     fs::{File, OpenOptions},
     io::{BufRead, BufReader, BufWriter, Write},
     os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
@@ -9,10 +10,14 @@ use std::{
 };
 
 use blake3::Hash;
+use uuid::Uuid;
 
 use crate::{
     Error, Result,
-    event::{EVENT_LOG_FORMAT, EVENT_LOG_VERSION, Event, EventBody, EventLogHeader, EventRecord},
+    event::{
+        EVENT_LOG_FORMAT, EVENT_LOG_VERSION, Event, EventBody, EventLogHeader, EventRecord,
+        OperationStatus,
+    },
 };
 
 const OWNER_DIRECTORY_MODE: u32 = 0o700;
@@ -191,6 +196,32 @@ pub struct EventLog {
     pub header: EventLogHeader,
     /// Ordered, integrity-checked events.
     pub events: Vec<EventRecord>,
+    /// Intents without a corresponding result, usually due to interruption.
+    pub pending_operations: Vec<PendingOperation>,
+}
+
+/// Kind of state-changing operation represented by an intent/result pair.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OperationKind {
+    /// Bytes sent to the child PTY.
+    Input,
+    /// Terminal geometry change.
+    Resize,
+    /// Process-group signal.
+    Signal,
+}
+
+/// Durable operation intent whose delivery outcome is uncertain.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingOperation {
+    /// Operation identifier.
+    pub operation_id: Uuid,
+    /// Operation category.
+    pub kind: OperationKind,
+    /// Sequence containing the intent.
+    pub intent_seq: u64,
+    /// Intended byte count for input operations.
+    pub expected_bytes: Option<u64>,
 }
 
 impl EventLog {
@@ -219,6 +250,8 @@ impl EventLog {
         let mut expected_seq = 0_u64;
         let mut line_number = 2_u64;
         let mut events = Vec::new();
+        let mut seen_operations = HashSet::new();
+        let mut pending_operations = HashMap::new();
 
         while let Some(line) = read_line(&mut reader, path, line_number)? {
             let record: EventRecord = parse_json_line(path, line_number, &line)?;
@@ -258,6 +291,13 @@ impl EventLog {
             if record.hash != expected_hash.to_hex().as_str() {
                 return Err(invalid_log(path, line_number, "event hash does not match"));
             }
+            validate_operation_transition(
+                path,
+                line_number,
+                &record,
+                &mut seen_operations,
+                &mut pending_operations,
+            )?;
 
             previous_hash = expected_hash;
             previous_time = record.monotonic_ns;
@@ -268,7 +308,146 @@ impl EventLog {
             line_number = line_number.saturating_add(1);
         }
 
-        Ok(Self { header, events })
+        let mut pending_operations = pending_operations.into_values().collect::<Vec<_>>();
+        pending_operations.sort_by_key(|operation| operation.intent_seq);
+        Ok(Self {
+            header,
+            events,
+            pending_operations,
+        })
+    }
+}
+
+fn validate_operation_transition(
+    path: &Path,
+    line: u64,
+    record: &EventRecord,
+    seen: &mut HashSet<Uuid>,
+    pending: &mut HashMap<Uuid, PendingOperation>,
+) -> Result<()> {
+    if let Some((operation_id, kind, expected_bytes)) = operation_intent(&record.event) {
+        if !seen.insert(operation_id) {
+            return Err(invalid_log(path, line, "operation identifier was reused"));
+        }
+        pending.insert(
+            operation_id,
+            PendingOperation {
+                operation_id,
+                kind,
+                intent_seq: record.seq,
+                expected_bytes,
+            },
+        );
+        return Ok(());
+    }
+
+    let Some(result) = operation_result(&record.event) else {
+        return Ok(());
+    };
+    let intent = pending
+        .remove(&result.operation_id)
+        .ok_or_else(|| invalid_log(path, line, "operation result has no pending intent"))?;
+    if intent.kind != result.kind {
+        return Err(invalid_log(
+            path,
+            line,
+            "operation result kind does not match its intent",
+        ));
+    }
+    match result.status {
+        OperationStatus::Applied if result.error_code.is_some() => {
+            return Err(invalid_log(
+                path,
+                line,
+                "applied operation result contains an error code",
+            ));
+        }
+        OperationStatus::Failed if result.error_code.is_none() => {
+            return Err(invalid_log(
+                path,
+                line,
+                "failed operation result is missing an error code",
+            ));
+        }
+        OperationStatus::Applied | OperationStatus::Failed => {}
+    }
+    if let (Some(expected), Some(written)) = (intent.expected_bytes, result.bytes_written)
+        && (written > expected
+            || (result.status == OperationStatus::Applied && written != expected))
+    {
+        return Err(invalid_log(
+            path,
+            line,
+            "input result byte count is inconsistent with its intent",
+        ));
+    }
+    Ok(())
+}
+
+fn operation_intent(event: &Event) -> Option<(Uuid, OperationKind, Option<u64>)> {
+    match event {
+        Event::InputIntent {
+            operation_id, data, ..
+        } => Some((
+            *operation_id,
+            OperationKind::Input,
+            Some(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX)),
+        )),
+        Event::ResizeIntent { operation_id, .. } => {
+            Some((*operation_id, OperationKind::Resize, None))
+        }
+        Event::SignalIntent { operation_id, .. } => {
+            Some((*operation_id, OperationKind::Signal, None))
+        }
+        _ => None,
+    }
+}
+
+struct OperationResultRef<'a> {
+    operation_id: Uuid,
+    kind: OperationKind,
+    status: OperationStatus,
+    bytes_written: Option<u64>,
+    error_code: &'a Option<String>,
+}
+
+fn operation_result(event: &Event) -> Option<OperationResultRef<'_>> {
+    match event {
+        Event::InputResult {
+            operation_id,
+            status,
+            bytes_written,
+            error_code,
+        } => Some(OperationResultRef {
+            operation_id: *operation_id,
+            kind: OperationKind::Input,
+            status: *status,
+            bytes_written: Some(*bytes_written),
+            error_code,
+        }),
+        Event::ResizeResult {
+            operation_id,
+            status,
+            error_code,
+        } => Some(OperationResultRef {
+            operation_id: *operation_id,
+            kind: OperationKind::Resize,
+            status: *status,
+            bytes_written: None,
+            error_code,
+        }),
+        Event::SignalResult {
+            operation_id,
+            status,
+            error_code,
+        } => Some(OperationResultRef {
+            operation_id: *operation_id,
+            kind: OperationKind::Signal,
+            status: *status,
+            bytes_written: None,
+            error_code,
+        }),
+        _ => None,
     }
 }
 
@@ -409,7 +588,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::event::{ByteString, InputKind, InputSource};
+    use crate::event::{ByteString, InputKind, InputSource, OperationStatus};
 
     fn header(clock: &SessionClock) -> EventLogHeader {
         EventLogHeader::new(
@@ -443,10 +622,12 @@ mod tests {
                 },
             )
             .expect("append output");
+        let input_id = Uuid::now_v7();
         writer
             .append_at(
                 20,
-                Event::Input {
+                Event::InputIntent {
+                    operation_id: input_id,
                     source: InputSource::Agent,
                     input_kind: InputKind::Keys,
                     data: ByteString::from(&b"\x03"[..]),
@@ -454,10 +635,22 @@ mod tests {
                 },
             )
             .expect("append input");
+        writer
+            .append_at(
+                21,
+                Event::InputResult {
+                    operation_id: input_id,
+                    status: OperationStatus::Applied,
+                    bytes_written: 1,
+                    error_code: None,
+                },
+            )
+            .expect("append input result");
         drop(writer);
 
         let recording = EventLog::read(&path).expect("read valid recording");
-        assert_eq!(recording.events.len(), 2);
+        assert_eq!(recording.events.len(), 3);
+        assert!(recording.pending_operations.is_empty());
         assert_eq!(recording.events[0].seq, 0);
         assert_eq!(recording.events[1].seq, 1);
         assert!(matches!(
@@ -477,6 +670,66 @@ mod tests {
             & 0o777;
         assert_eq!(directory_mode, OWNER_DIRECTORY_MODE);
         assert_eq!(file_mode, OWNER_FILE_MODE);
+    }
+
+    #[test]
+    fn reports_intent_without_result_as_uncertain() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let directory = temporary.path().join("session");
+        secure_directory(&directory);
+        let path = directory.join("events.jsonl");
+        let clock = SessionClock::now().expect("valid clock");
+        let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("create log");
+        let operation_id = Uuid::now_v7();
+        writer
+            .append_at(
+                1,
+                Event::InputIntent {
+                    operation_id,
+                    source: InputSource::Agent,
+                    input_kind: InputKind::Text,
+                    data: ByteString::from(&b"hello"[..]),
+                    intent: None,
+                },
+            )
+            .expect("append intent");
+        drop(writer);
+
+        let recording = EventLog::read(&path).expect("read interrupted recording");
+        assert_eq!(
+            recording.pending_operations,
+            vec![PendingOperation {
+                operation_id,
+                kind: OperationKind::Input,
+                intent_seq: 0,
+                expected_bytes: Some(5),
+            }]
+        );
+    }
+
+    #[test]
+    fn rejects_result_without_matching_intent() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let directory = temporary.path().join("session");
+        secure_directory(&directory);
+        let path = directory.join("events.jsonl");
+        let clock = SessionClock::now().expect("valid clock");
+        let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("create log");
+        writer
+            .append_at(
+                1,
+                Event::InputResult {
+                    operation_id: Uuid::now_v7(),
+                    status: OperationStatus::Applied,
+                    bytes_written: 0,
+                    error_code: None,
+                },
+            )
+            .expect("append unmatched result");
+        drop(writer);
+
+        let error = EventLog::read(&path).expect_err("unmatched result must fail");
+        assert!(matches!(error, Error::InvalidEventLog { line: 2, .. }));
     }
 
     #[test]

@@ -155,6 +155,16 @@ pub enum LifecycleKind {
     Stopping,
 }
 
+/// Result of a state-changing operation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationStatus {
+    /// The complete operation was applied once.
+    Applied,
+    /// The operation failed without a complete application.
+    Failed,
+}
+
 /// One ordered session event.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -164,8 +174,10 @@ pub enum Event {
         /// Exact bytes, including control sequences and invalid UTF-8.
         data: ByteString,
     },
-    /// Bytes sent to the child PTY.
-    Input {
+    /// Durable intent to send bytes to the child PTY.
+    InputIntent {
+        /// Identifier paired with the corresponding result.
+        operation_id: Uuid,
         /// Input origin.
         source: InputSource,
         /// High-level input category.
@@ -175,8 +187,21 @@ pub enum Event {
         /// Optional symbolic intent such as `ctrl-c` or `paste`.
         intent: Option<String>,
     },
-    /// Terminal geometry changed.
-    Resize {
+    /// Result of one input intent.
+    InputResult {
+        /// Identifier from the corresponding intent.
+        operation_id: Uuid,
+        /// Whether the entire byte sequence was applied.
+        status: OperationStatus,
+        /// Bytes written before success or failure.
+        bytes_written: u64,
+        /// Stable diagnostic code on failure.
+        error_code: Option<String>,
+    },
+    /// Durable intent to change terminal geometry.
+    ResizeIntent {
+        /// Identifier paired with the corresponding result.
+        operation_id: Uuid,
         /// Columns after the resize.
         cols: u16,
         /// Rows after the resize.
@@ -186,12 +211,32 @@ pub enum Event {
         /// Cell height reported to the child, in pixels.
         cell_height_px: u16,
     },
-    /// A signal was sent to the child process or process group.
-    Signal {
+    /// Result of one resize intent.
+    ResizeResult {
+        /// Identifier from the corresponding intent.
+        operation_id: Uuid,
+        /// Whether the new geometry was applied.
+        status: OperationStatus,
+        /// Stable diagnostic code on failure.
+        error_code: Option<String>,
+    },
+    /// Durable intent to signal the child process group.
+    SignalIntent {
+        /// Identifier paired with the corresponding result.
+        operation_id: Uuid,
         /// Platform signal number.
         number: i32,
         /// Stable display name such as `SIGINT`.
         name: String,
+    },
+    /// Result of one signal intent.
+    SignalResult {
+        /// Identifier from the corresponding intent.
+        operation_id: Uuid,
+        /// Whether the signal syscall succeeded.
+        status: OperationStatus,
+        /// Stable diagnostic code on failure.
+        error_code: Option<String>,
     },
     /// A named point in the session timeline.
     Marker {
