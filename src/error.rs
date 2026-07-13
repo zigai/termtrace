@@ -74,6 +74,43 @@ pub enum Error {
         /// Permission bits.
         mode: u32,
     },
+
+    /// A PTY or child-process operation failed.
+    #[error("terminal operation `{operation}` failed: {reason}")]
+    #[diagnostic(code(termtrace::terminal_operation))]
+    TerminalOperation {
+        /// Stable operation name.
+        operation: &'static str,
+        /// Error returned by the PTY implementation.
+        reason: String,
+    },
+
+    /// The requested session directory already exists.
+    #[error("session directory `{path}` already exists")]
+    #[diagnostic(
+        code(termtrace::session_exists),
+        help("Choose a new directory; Termtrace never overwrites a recording")
+    )]
+    SessionExists {
+        /// Existing path.
+        path: PathBuf,
+    },
+
+    /// Terminal pixel geometry overflowed the PTY representation.
+    #[error(
+        "terminal geometry {cols}x{rows} at {cell_width_px}x{cell_height_px}px per cell is too large"
+    )]
+    #[diagnostic(code(termtrace::invalid_geometry))]
+    InvalidGeometry {
+        /// Terminal columns.
+        cols: u16,
+        /// Terminal rows.
+        rows: u16,
+        /// Cell width in pixels.
+        cell_width_px: u16,
+        /// Cell height in pixels.
+        cell_height_px: u16,
+    },
 }
 
 /// Result type used throughout Termtrace.

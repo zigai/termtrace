@@ -220,6 +220,8 @@ pub enum Event {
         code: Option<i32>,
         /// Signal number when signal termination occurred.
         signal: Option<i32>,
+        /// Platform signal description when available.
+        signal_name: Option<String>,
     },
     /// A host failure retained in the canonical timeline.
     HostError {
