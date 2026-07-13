@@ -40,6 +40,12 @@ pub fn resolved_terminal_colors() -> Result<TerminalColors> {
 pub fn builtin_terminal_colors() -> Result<TerminalColors> {
     let mut terminal = GhosttyVt::new(1, 1, 0)?;
     let state = terminal.snapshot()?;
+    if state.colors.palette.len() != 256 {
+        return Err(profile_error(format!(
+            "pinned libghostty returned {} palette entries instead of 256",
+            state.colors.palette.len()
+        )));
+    }
     Ok(TerminalColors {
         source: "libghostty_builtin".to_owned(),
         foreground: rgb_array(state.colors.foreground),
@@ -68,7 +74,11 @@ fn apply_config(colors: &mut TerminalColors, config: &[u8]) -> Result<()> {
                 let index = index
                     .parse::<u8>()
                     .map_err(|error| profile_error(format!("invalid palette index: {error}")))?;
-                colors.palette[usize::from(index)] = parse_rgb(color, "palette")?;
+                let parsed = parse_rgb(color, "palette")?;
+                let slot = colors.palette.get_mut(usize::from(index)).ok_or_else(|| {
+                    profile_error("terminal profile has an incomplete palette".to_owned())
+                })?;
+                *slot = parsed;
             }
             _ => {}
         }

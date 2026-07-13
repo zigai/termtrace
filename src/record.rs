@@ -191,6 +191,7 @@ struct LiveTerminal {
 struct QueryTracker {
     sequence: Vec<u8>,
     kind: QueryKind,
+    pending_responses: Vec<Vec<u8>>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1254,21 +1255,25 @@ fn process_semantic_output(
     for byte in data {
         let complete = tracker.push(*byte);
         semantic.write(std::slice::from_ref(byte));
-        for response in semantic.take_responses() {
-            event_log.append(Event::QueryResponse {
-                query: ByteString::from(tracker.bytes()),
-                response: ByteString::from(response.as_slice()),
-                responder: "pinned-libghostty-vt".to_owned(),
-            })?;
-            apply_input(
-                writer,
-                event_log,
-                Uuid::now_v7(),
-                InputSource::Host,
-                InputKind::Raw,
-                Some("terminal query response".to_owned()),
-                &response,
-            )?;
+        tracker.pending_responses.extend(semantic.take_responses());
+        if complete || (!tracker.is_tracking() && !tracker.pending_responses.is_empty()) {
+            let query = ByteString::from(tracker.bytes());
+            for response in std::mem::take(&mut tracker.pending_responses) {
+                event_log.append(Event::QueryResponse {
+                    query: query.clone(),
+                    response: ByteString::from(response.as_slice()),
+                    responder: "pinned-libghostty-vt".to_owned(),
+                })?;
+                apply_input(
+                    writer,
+                    event_log,
+                    Uuid::now_v7(),
+                    InputSource::Host,
+                    InputKind::Raw,
+                    Some("terminal query response".to_owned()),
+                    &response,
+                )?;
+            }
         }
         if complete {
             tracker.clear();
@@ -1278,6 +1283,10 @@ fn process_semantic_output(
 }
 
 impl QueryTracker {
+    fn is_tracking(&self) -> bool {
+        !matches!(self.kind, QueryKind::None)
+    }
+
     fn push(&mut self, byte: u8) -> bool {
         const MAX_QUERY_BYTES: usize = 64 * 1024;
         match self.kind {
@@ -1848,6 +1857,40 @@ mod tests {
                 source: InputSource::Host,
                 ..
             }
+        )));
+    }
+
+    #[test]
+    fn preserves_complete_osc_query_when_response_precedes_st() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let options = RecordOptions {
+            output_directory: temporary.path().join("osc-query"),
+            command: vec![
+                OsString::from("/usr/bin/python3"),
+                OsString::from("-c"),
+                OsString::from(
+                    "import os,tty; tty.setraw(0); q=b'\\x1b]11;?\\x1b\\\\'; os.write(1,q); r=b'';\nwhile not r.endswith(b'\\x1b\\\\'): r+=os.read(0,99)\nos.write(1,b'GOT:'+r.hex().encode())",
+                ),
+            ],
+            working_directory: None,
+            cols: 80,
+            rows: 24,
+            cell_width_px: 9,
+            cell_height_px: 18,
+            term: "xterm-ghostty".to_owned(),
+            colors: TerminalColors::default(),
+            forward_stdin: false,
+        };
+        let mut output = Vec::new();
+
+        let outcome = record_to(&options, &mut output).expect("record OSC query command");
+        let log = EventLog::read(outcome.event_log).expect("valid OSC query log");
+
+        assert!(log.events.iter().any(|record| matches!(
+            &record.event,
+            Event::QueryResponse { query, response, .. }
+                if query.as_bytes() == b"\x1b]11;?\x1b\\"
+                    && response.as_bytes() == b"\x1b]11;rgb:0000/0000/0000\x1b\\"
         )));
     }
 
