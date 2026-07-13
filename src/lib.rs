@@ -15,6 +15,7 @@ pub mod record;
 pub mod replay;
 pub mod schema;
 pub mod session;
+mod terminal_mode;
 pub mod visual;
 
 pub use error::{Error, Result};

@@ -21,7 +21,6 @@ use nix::{
     sys::{
         signal::{Signal, killpg},
         socket::{getsockopt, sockopt::PeerCredentials},
-        termios::{SetArg, Termios, cfmakeraw, tcgetattr, tcsetattr},
     },
     unistd::{Pid, isatty, pipe, read as fd_read, write as fd_write},
 };
@@ -46,6 +45,7 @@ use crate::{
         SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, SessionCompletion, SessionGeometry,
         SessionManifest,
     },
+    terminal_mode::RawTerminalGuard,
 };
 
 const SESSION_DIRECTORY_MODE: u32 = 0o700;
@@ -150,10 +150,6 @@ struct InputWorker {
     thread: thread::JoinHandle<()>,
 }
 
-struct TerminalModeGuard {
-    original: Option<Termios>,
-}
-
 struct ResizeWorker {
     handle: signal_hook::iterator::Handle,
     thread: thread::JoinHandle<()>,
@@ -213,7 +209,7 @@ enum QueryKind {
 /// the canonical event log cannot be durably committed.
 pub fn record(options: &RecordOptions) -> Result<RecordOutcome> {
     let stdout = std::io::stdout();
-    let mut terminal_mode = TerminalModeGuard::enter(options.forward_stdin)?;
+    let mut terminal_mode = RawTerminalGuard::enter(options.forward_stdin)?;
     let result = record_to(options, &mut stdout.lock());
     finish_with_cleanup(result, terminal_mode.restore())
 }
@@ -1574,41 +1570,6 @@ impl RuntimeWorkers {
         let result = finish_with_cleanup(result, input_stop);
         let result = finish_with_cleanup(result, resize_stop);
         finish_with_cleanup(result, reader_join)
-    }
-}
-
-impl TerminalModeGuard {
-    fn enter(enabled: bool) -> Result<Self> {
-        let stdin = std::io::stdin();
-        if !enabled
-            || !isatty(&stdin)
-                .map_err(|error| terminal_error("inspect standard input", error.to_string()))?
-        {
-            return Ok(Self { original: None });
-        }
-        let original = tcgetattr(&stdin)
-            .map_err(|error| terminal_error("read terminal mode", error.to_string()))?;
-        let mut raw = original.clone();
-        cfmakeraw(&mut raw);
-        tcsetattr(&stdin, SetArg::TCSANOW, &raw)
-            .map_err(|error| terminal_error("enter raw terminal mode", error.to_string()))?;
-        Ok(Self {
-            original: Some(original),
-        })
-    }
-
-    fn restore(&mut self) -> Result<()> {
-        let Some(original) = self.original.take() else {
-            return Ok(());
-        };
-        tcsetattr(std::io::stdin(), SetArg::TCSANOW, &original)
-            .map_err(|error| terminal_error("restore terminal mode", error.to_string()))
-    }
-}
-
-impl Drop for TerminalModeGuard {
-    fn drop(&mut self) {
-        let _ = self.restore();
     }
 }
 

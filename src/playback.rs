@@ -16,6 +16,7 @@ use crate::{
     Error, Result,
     event::{Event, OperationStatus},
     event_log::EventLog,
+    terminal_mode::{RawTerminalGuard, TerminalInputDrain},
 };
 
 /// Clock handshake written before playback begins.
@@ -49,6 +50,17 @@ pub struct PlaybackOptions {
 /// Returns an error for invalid timing, event-log validation, output, or
 /// handshake persistence failures.
 pub fn playback(options: &PlaybackOptions) -> Result<()> {
+    let mut terminal_mode = RawTerminalGuard::enter(true)?;
+    let mut input_drain = match TerminalInputDrain::start(terminal_mode.is_active()) {
+        Ok(input_drain) => input_drain,
+        Err(e) => return finish_with_cleanup(Err(e), terminal_mode.restore()),
+    };
+    let result = playback_with_raw_input(options);
+    let result = finish_with_cleanup(result, input_drain.stop());
+    finish_with_cleanup(result, terminal_mode.restore())
+}
+
+fn playback_with_raw_input(options: &PlaybackOptions) -> Result<()> {
     let log = EventLog::read(options.session_directory.join("events.jsonl"))?;
     let monotonic_origin = Instant::now() + options.start_delay;
     let replay_origin_unix_ns = unix_now_ns()?
@@ -104,6 +116,18 @@ pub fn playback(options: &PlaybackOptions) -> Result<()> {
     write_create_new(&options.ready_file, b"ready\n")?;
     thread::sleep(options.final_hold);
     Ok(())
+}
+
+fn finish_with_cleanup<T>(primary: Result<T>, cleanup: Result<()>) -> Result<T> {
+    match (primary, cleanup) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(primary), Ok(())) => Err(primary),
+        (Ok(_), Err(cleanup)) => Err(cleanup),
+        (Err(primary), Err(cleanup)) => Err(Error::CleanupFailed {
+            primary: Box::new(primary),
+            cleanup: Box::new(cleanup),
+        }),
+    }
 }
 
 fn sleep_until(target: Instant) {

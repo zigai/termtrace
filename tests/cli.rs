@@ -3,6 +3,8 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::{
+    io::{Read as _, Write as _},
+    os::unix::fs::PermissionsExt as _,
     process::{Command as StdCommand, Stdio},
     thread,
     time::{Duration, Instant},
@@ -418,4 +420,96 @@ fn validate_json_value(schema: &str, instance: &serde_json::Value) {
     if let Err(error) = validator.validate(instance) {
         panic!("{schema} rejected instance: {error}");
     }
+}
+
+#[test]
+fn playback_does_not_echo_terminal_query_responses() {
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    use termtrace::{
+        event::{ByteString, Event, EventLogHeader},
+        event_log::{EventLogWriter, SessionClock},
+    };
+    use uuid::Uuid;
+
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("playback");
+    fs_err::create_dir(&session).expect("session directory");
+    fs_err::set_permissions(&session, std::fs::Permissions::from_mode(0o700))
+        .expect("private session");
+    let clock = SessionClock::now().expect("session clock");
+    let header = EventLogHeader::new(
+        Uuid::now_v7(),
+        clock.started_unix_ns(),
+        80,
+        24,
+        720,
+        432,
+        "xterm-ghostty",
+    );
+    let mut event_log =
+        EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
+    let query = b"\x1b]11;?\x1b\\";
+    event_log
+        .append(Event::Output {
+            data: ByteString::from(query.as_slice()),
+        })
+        .expect("query output");
+    event_log
+        .append(Event::Exit {
+            code: Some(0),
+            signal: None,
+            signal_name: None,
+        })
+        .expect("exit event");
+    drop(event_log);
+
+    let pty = native_pty_system()
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 720,
+            pixel_height: 432,
+        })
+        .expect("playback PTY");
+    let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_termtrace"));
+    let timing_file = temporary.path().join("timing.json");
+    let ready_file = temporary.path().join("ready");
+    command.args([
+        "playback",
+        "--session",
+        session.to_str().expect("UTF-8 session"),
+        "--timing-file",
+        timing_file.to_str().expect("UTF-8 timing"),
+        "--ready-file",
+        ready_file.to_str().expect("UTF-8 ready"),
+        "--start-delay-ms",
+        "200",
+        "--final-hold-ms",
+        "1000",
+    ]);
+    let mut child = pty.slave.spawn_command(command).expect("spawn playback");
+    drop(pty.slave);
+    let mut reader = pty.master.try_clone_reader().expect("clone PTY reader");
+    let reader_thread = thread::spawn(move || {
+        let mut output = Vec::new();
+        let _ = reader.read_to_end(&mut output);
+        output
+    });
+    let mut writer = pty.master.take_writer().expect("take PTY writer");
+    thread::sleep(Duration::from_millis(400));
+    writer
+        .write_all(b"HOST-RESPONSE\n")
+        .expect("write simulated host response");
+    child.wait().expect("wait for playback");
+    drop(writer);
+    drop(pty.master);
+    let output = reader_thread.join().expect("join PTY reader");
+
+    assert!(output.windows(query.len()).any(|window| window == query));
+    assert!(
+        !output
+            .windows(b"HOST-RESPONSE".len())
+            .any(|window| window == b"HOST-RESPONSE"),
+        "playback echoed a capture-host response: {output:?}"
+    );
 }
