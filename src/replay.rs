@@ -2,9 +2,8 @@
 
 use std::{
     collections::HashMap,
-    fs::{DirBuilder, File, OpenOptions, Permissions},
+    fs::File,
     io::{BufWriter, Write as _},
-    os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
 };
 
@@ -13,6 +12,10 @@ use uuid::Uuid;
 
 use crate::{
     Error, Result,
+    artifact::{
+        commit_directory, create_private_directory, finish_writer, secure_writer, sync_directory,
+        write_secure,
+    },
     event::{Event, OperationStatus},
     event_log::EventLog,
     ghostty_vt::{
@@ -361,12 +364,12 @@ pub fn index_session(session_directory: impl AsRef<Path>) -> Result<IndexOutcome
     let log = EventLog::read(&event_path)?;
     let destination = session_directory.join(DERIVED_DIRECTORY);
     if destination.exists() {
-        return Err(Error::DerivedArtifactsExist { path: destination });
+        return Err(Error::ArtifactExists { path: destination });
     }
     let staging = session_directory.join(format!(".derived.{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
     let result = write_index(&staging, &log).and_then(|artifacts| {
-        commit_derived_directory(session_directory, &staging, &destination)?;
+        commit_directory(session_directory, &staging, &destination)?;
         sync_directory(session_directory)?;
         Ok(IndexOutcome {
             directory: destination.clone(),
@@ -477,34 +480,6 @@ fn cell_size(pixels: u16, cells: u16) -> u32 {
     u32::from(pixels.checked_div(cells).unwrap_or(0).max(1))
 }
 
-fn create_private_directory(path: &Path) -> Result<()> {
-    let mut builder = DirBuilder::new();
-    builder.mode(0o700);
-    builder.create(path).map_err(|source| Error::Filesystem {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    fs_err::set_permissions(path, Permissions::from_mode(0o700)).map_err(|source| {
-        Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        }
-    })
-}
-
-fn secure_writer(path: &Path) -> Result<BufWriter<File>> {
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-        .map(BufWriter::new)
-        .map_err(|source| Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        })
-}
-
 fn write_json_line(
     writer: &mut BufWriter<File>,
     value: &impl Serialize,
@@ -515,69 +490,6 @@ fn write_json_line(
     writer.write_all(b"\n").map_err(|source| Error::Filesystem {
         path: path.to_path_buf(),
         source,
-    })
-}
-
-fn finish_writer(mut writer: BufWriter<File>, path: &Path) -> Result<()> {
-    writer
-        .flush()
-        .and_then(|()| writer.get_ref().sync_data())
-        .map_err(|source| Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        })
-}
-
-fn write_secure(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut writer = secure_writer(path)?;
-    writer
-        .write_all(bytes)
-        .and_then(|()| writer.flush())
-        .and_then(|()| writer.get_ref().sync_data())
-        .map_err(|source| Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        })
-}
-
-fn sync_directory(path: &Path) -> Result<()> {
-    File::open(path)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|source| Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        })
-}
-
-fn commit_derived_directory(session: &Path, staging: &Path, destination: &Path) -> Result<()> {
-    let directory = File::open(session).map_err(|source| Error::Filesystem {
-        path: session.to_path_buf(),
-        source,
-    })?;
-    let staging_name = staging
-        .file_name()
-        .ok_or_else(|| invalid_replay("staging directory has no basename"))?;
-    let destination_name = destination
-        .file_name()
-        .ok_or_else(|| invalid_replay("derived directory has no basename"))?;
-    nix::fcntl::renameat2(
-        &directory,
-        staging_name,
-        &directory,
-        destination_name,
-        nix::fcntl::RenameFlags::RENAME_NOREPLACE,
-    )
-    .map_err(|error| {
-        if error == nix::errno::Errno::EEXIST {
-            Error::DerivedArtifactsExist {
-                path: destination.to_path_buf(),
-            }
-        } else {
-            Error::Filesystem {
-                path: destination.to_path_buf(),
-                source: std::io::Error::from_raw_os_error(error as i32),
-            }
-        }
     })
 }
 

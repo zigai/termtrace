@@ -63,6 +63,19 @@ Replay validates the event hash chain, feeds each output byte through the pinned
 
 The derived directory is assembled privately and atomically renamed with no-replace semantics. Existing results are never overwritten implicitly.
 
+## Native Ghostty pixels
+
+```bash
+termtrace capture --session /tmp/example.termtrace \
+  --width 1920 --height 1080 --fps 24
+```
+
+Capture launches the installed Ghostty GTK/OpenGL application on a private Xvfb display. Ghostty reads the normal user configuration; Termtrace saves the fully resolved config and its BLAKE3 hash, so settings such as the pure-black background, font, palette, padding, and shader choices are evidence rather than assumptions. Command-line overrides only isolate the process, disable single-instance behavior, position and expand the window to the capture surface, and prevent persisted window state from changing the result.
+
+`visual/session.mkv` is lossless RGB H.264 at exactly 24 FPS. `visual/final.png` is a direct X11 frame with the mouse hidden. FFprobe output, process logs, config, provenance, and `video-map.jsonl` are retained beside them. Failed captures preserve their owner-only diagnostic directory instead of deleting the evidence.
+
+Run `scripts/native-smoke-test.sh` on a Linux host with Ghostty, Xvfb, FFmpeg/FFprobe, D-Bus, and `jq` to exercise and probe the complete native path.
+
 ## Development
 
 The repository pins Rust, Ghostty, and Zig. Bootstrap a fresh clone and validate a change with:

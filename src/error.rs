@@ -162,13 +162,13 @@ pub enum Error {
         result: i32,
     },
 
-    /// Derived artifacts already exist and are never replaced implicitly.
-    #[error("derived artifact directory `{path}` already exists")]
+    /// Artifact output already exists and is never replaced implicitly.
+    #[error("artifact directory `{path}` already exists")]
     #[diagnostic(
         code(termtrace::derived_artifacts_exist),
         help("Move or remove the existing derived directory before indexing again")
     )]
-    DerivedArtifactsExist {
+    ArtifactExists {
         /// Existing derived artifact directory.
         path: PathBuf,
     },
@@ -179,6 +179,27 @@ pub enum Error {
     InvalidReplay {
         /// Replay invariant that was violated.
         reason: String,
+    },
+
+    /// A required external runtime command failed.
+    #[error("external command `{program}` failed: {reason}")]
+    #[diagnostic(code(termtrace::external_command))]
+    ExternalCommand {
+        /// Executable or component name.
+        program: String,
+        /// Exit status or launch failure.
+        reason: String,
+    },
+
+    /// Native capture failed but retained private diagnostic evidence.
+    #[error("native capture failed; evidence preserved in `{evidence}`: {source}")]
+    #[diagnostic(code(termtrace::capture_failed))]
+    CaptureFailed {
+        /// Owner-only failed-capture directory.
+        evidence: PathBuf,
+        /// Primary capture failure.
+        #[source]
+        source: Box<Error>,
     },
 }
 

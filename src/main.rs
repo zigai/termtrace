@@ -1,14 +1,16 @@
 //! Command-line entry point for Termtrace.
 
-use std::{ffi::OsString, path::PathBuf, process::ExitCode};
+use std::{ffi::OsString, path::PathBuf, process::ExitCode, time::Duration};
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
     control::{ControlCommand, ProcessSignal, request},
     event::ByteString,
+    playback::{PlaybackOptions, playback},
     record::{RecordOptions, record},
     replay::index_session,
+    visual::{CaptureOptions, capture},
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -48,6 +50,46 @@ enum Command {
     Stop(SessionArgs),
     /// Replay canonical events and build semantic state artifacts.
     Index(SessionArgs),
+    /// Capture actual Ghostty pixels on a private headless display.
+    Capture(CaptureArgs),
+    /// Internal timed event playback used as Ghostty's child process.
+    #[command(hide = true)]
+    Playback(PlaybackArgs),
+}
+
+#[derive(Debug, Args)]
+struct CaptureArgs {
+    /// Indexed source session directory.
+    #[arg(long)]
+    session: PathBuf,
+    /// Capture width in pixels.
+    #[arg(long, default_value_t = 1280)]
+    width: u16,
+    /// Capture height in pixels.
+    #[arg(long, default_value_t = 720)]
+    height: u16,
+    /// Video frame rate; native capture currently requires 24.
+    #[arg(long, default_value_t = 24)]
+    fps: u16,
+}
+
+#[derive(Debug, Args)]
+struct PlaybackArgs {
+    /// Source session directory.
+    #[arg(long)]
+    session: PathBuf,
+    /// Playback clock handshake path.
+    #[arg(long)]
+    timing_file: PathBuf,
+    /// Final-frame readiness path.
+    #[arg(long)]
+    ready_file: PathBuf,
+    /// Delay before event time zero.
+    #[arg(long)]
+    start_delay_ms: u64,
+    /// Final-frame hold duration.
+    #[arg(long)]
+    final_hold_ms: u64,
 }
 
 #[derive(Debug, Args)]
@@ -227,6 +269,33 @@ fn main() -> Result<ExitCode> {
                     "final_state_hash": outcome.final_state_hash,
                 })
             );
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Capture(arguments) => {
+            let outcome = capture(&CaptureOptions {
+                session_directory: arguments.session,
+                width: arguments.width,
+                height: arguments.height,
+                fps: arguments.fps,
+            })?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "directory": outcome.directory,
+                    "video": outcome.video,
+                    "screenshot": outcome.screenshot,
+                })
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Playback(arguments) => {
+            playback(&PlaybackOptions {
+                session_directory: arguments.session,
+                timing_file: arguments.timing_file,
+                ready_file: arguments.ready_file,
+                start_delay: Duration::from_millis(arguments.start_delay_ms),
+                final_hold: Duration::from_millis(arguments.final_hold_ms),
+            })?;
             Ok(ExitCode::SUCCESS)
         }
     }
