@@ -1,8 +1,14 @@
 //! Deterministic JSON Schema generation for every public artifact envelope.
 
-use std::path::{Path, PathBuf};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 use schemars::{JsonSchema, schema_for};
+
+#[cfg(test)]
+use jsonschema::meta::is_valid;
 
 use crate::{
     Error, Result,
@@ -31,7 +37,7 @@ pub struct GeneratedSchema {
 ///
 /// Returns an error only if an in-memory schema cannot serialize as JSON.
 pub fn generate() -> Result<Vec<GeneratedSchema>> {
-    Ok(vec![
+    return Ok(vec![
         schema::<EventLogHeader>("event-log-header.schema.json")?,
         schema::<EventRecord>("event-record.schema.json")?,
         schema::<ControlRequest>("control-request.schema.json")?,
@@ -47,7 +53,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<RecoveryReport>("recovery-report.schema.json")?,
         schema::<WaitOutcome>("wait-outcome.schema.json")?,
         schema::<PlaybackTiming>("playback-timing.schema.json")?,
-    ])
+    ]);
 }
 
 /// Write all schemas to a directory, replacing generated files by name.
@@ -57,45 +63,59 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
 /// Returns an error when the directory or any schema file cannot be written.
 pub fn write_all(directory: impl AsRef<Path>) -> Result<Vec<PathBuf>> {
     let directory = directory.as_ref();
-    fs_err::create_dir_all(directory).map_err(|source| Error::Filesystem {
-        path: directory.to_path_buf(),
-        source,
+    fs_err::create_dir_all(directory).map_err(|source| {
+        return Error::Filesystem {
+            path: directory.to_path_buf(),
+            source,
+        };
     })?;
-    generate()?
+    return generate()?
         .into_iter()
         .map(|schema| {
             let path = directory.join(schema.filename);
-            fs_err::write(&path, schema.json).map_err(|source| Error::Filesystem {
-                path: path.clone(),
-                source,
+            fs_err::write(&path, schema.json).map_err(|source| {
+                return Error::Filesystem {
+                    path: path.clone(),
+                    source,
+                };
             })?;
-            Ok(path)
+            return Ok(path);
         })
-        .collect()
+        .collect();
 }
 
 fn schema<T: JsonSchema>(filename: &'static str) -> Result<GeneratedSchema> {
-    let mut value = serde_json::to_value(schema_for!(T)).map_err(|source| Error::InvalidJson {
-        path: PathBuf::from(filename),
-        json_path: "$".to_owned(),
-        source,
+    let mut value = serde_json::to_value(schema_for!(T)).map_err(|source| {
+        return Error::InvalidJson {
+            path: PathBuf::from(filename),
+            json_path: "$".to_owned(),
+            source,
+        };
     })?;
-    value
-        .as_object_mut()
-        .expect("schema root is an object")
-        .insert(
-            "$id".to_owned(),
-            serde_json::Value::String(format!(
-                "https://github.com/zigai/termtrace/schemas/{filename}"
+    let Some(root) = value.as_object_mut() else {
+        return Err(Error::InvalidJson {
+            path: PathBuf::from(filename),
+            json_path: "$".to_owned(),
+            source: serde_json::Error::io(io::Error::other(
+                "generated schema root is not an object",
             )),
-        );
-    let mut json = serde_json::to_vec_pretty(&value).map_err(|source| Error::InvalidJson {
-        path: PathBuf::from(filename),
-        json_path: "$".to_owned(),
-        source,
+        });
+    };
+    root.insert(
+        "$id".to_owned(),
+        serde_json::Value::String(format!(
+            "https://github.com/zigai/termtrace/schemas/{filename}"
+        )),
+    );
+    let mut json = serde_json::to_vec_pretty(&value).map_err(|source| {
+        return Error::InvalidJson {
+            path: PathBuf::from(filename),
+            json_path: "$".to_owned(),
+            source,
+        };
     })?;
     json.push(b'\n');
-    Ok(GeneratedSchema { filename, json })
+    return Ok(GeneratedSchema { filename, json });
 }
 
 #[cfg(test)]
@@ -110,7 +130,7 @@ mod tests {
             let schema: serde_json::Value =
                 serde_json::from_slice(&generated.json).expect("schema JSON");
             assert!(
-                jsonschema::meta::is_valid(&schema),
+                is_valid(&schema),
                 "invalid JSON Schema {}",
                 generated.filename
             );

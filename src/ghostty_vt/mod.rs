@@ -1,9 +1,19 @@
 //! Safe, narrow adapter around the pinned libghostty-vt C API.
 
-#![allow(unsafe_code)]
-#![allow(clippy::struct_excessive_bools)]
+#![allow(
+    unsafe_code,
+    reason = "the module is the audited boundary around Ghostty's C API"
+)]
+#![allow(
+    clippy::struct_excessive_bools,
+    reason = "terminal mode snapshots intentionally preserve independent protocol flags"
+)]
 
-use std::{ffi::c_void, mem::size_of, ptr};
+use std::{
+    ffi::c_void,
+    mem::{size_of, take},
+    ptr, slice,
+};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -274,6 +284,10 @@ impl GhosttyVt {
             unsafe { sys::ghostty_terminal_free(terminal) };
             return Err(error);
         }
+        #[allow(
+            clippy::fn_to_numeric_cast_any,
+            reason = "Ghostty's generic C option setter accepts callback pointers as void pointers"
+        )]
         let callback = (write_pty_callback as *const ()).cast::<c_void>();
         if let Err(error) = check("set terminal write callback", unsafe {
             sys::ghostty_terminal_set(
@@ -292,12 +306,12 @@ impl GhosttyVt {
             unsafe { sys::ghostty_terminal_free(terminal) };
             return Err(error);
         }
-        Ok(Self {
+        return Ok(Self {
             terminal,
             render,
             last_snapshot: None,
             responses,
-        })
+        });
     }
 
     /// Feed exact PTY output bytes through Ghostty's VT parser.
@@ -307,7 +321,7 @@ impl GhosttyVt {
 
     /// Drain terminal query responses emitted synchronously by the VT engine.
     pub fn take_responses(&mut self) -> Vec<Vec<u8>> {
-        std::mem::take(&mut self.responses.pending)
+        return take(&mut self.responses.pending);
     }
 
     /// Apply captured host defaults before processing terminal output.
@@ -356,7 +370,7 @@ impl GhosttyVt {
                 )
             })?;
         }
-        Ok(())
+        return Ok(());
     }
 
     /// Resize the semantic terminal.
@@ -371,9 +385,9 @@ impl GhosttyVt {
         cell_width_px: u32,
         cell_height_px: u32,
     ) -> Result<()> {
-        check("resize terminal", unsafe {
+        return check("resize terminal", unsafe {
             sys::ghostty_terminal_resize(self.terminal, cols, rows, cell_width_px, cell_height_px)
-        })
+        });
     }
 
     /// Copy the complete current render state into stable Rust structures.
@@ -385,9 +399,10 @@ impl GhosttyVt {
         if let Some(state) = self.snapshot_if_changed()? {
             return Ok(state);
         }
-        self.last_snapshot
+        return self
+            .last_snapshot
             .clone()
-            .ok_or_else(|| invalid_snapshot("unchanged terminal has no prior snapshot"))
+            .ok_or_else(|| return invalid_snapshot("unchanged terminal has no prior snapshot"));
     }
 
     /// Return a complete snapshot only when semantic content changed.
@@ -418,12 +433,12 @@ impl GhosttyVt {
         let previous = self.last_snapshot.clone();
         if dirty == DirtyState::Clean
             && previous.as_ref().is_some_and(|state| {
-                state.cols == cols
+                return state.cols == cols
                     && state.rows == rows
                     && state.cursor == cursor
                     && state.modes == modes
                     && state.active_style == active_style
-                    && state.metadata == metadata
+                    && state.metadata == metadata;
             })
         {
             return Ok(None);
@@ -431,7 +446,7 @@ impl GhosttyVt {
         let colors = if dirty == DirtyState::Clean {
             previous
                 .as_ref()
-                .map(|state| state.colors.clone())
+                .map(|state| return state.colors.clone())
                 .unwrap_or(self.color_state()?)
         } else {
             self.color_state()?
@@ -439,7 +454,7 @@ impl GhosttyVt {
         let grid = self.grid(cols, rows, dirty, previous.as_ref())?;
         let dirty_rows = grid
             .iter()
-            .filter_map(|row| row.dirty.then_some(row.row))
+            .filter_map(|row| return row.dirty.then_some(row.row))
             .collect();
         self.reset_render_dirty()?;
         let state = SemanticState {
@@ -456,12 +471,12 @@ impl GhosttyVt {
         };
         if previous
             .as_ref()
-            .is_some_and(|previous| semantic_content_eq(previous, &state))
+            .is_some_and(|previous| return semantic_content_eq(previous, &state))
         {
             return Ok(None);
         }
         self.last_snapshot = Some(state.clone());
-        Ok(Some(state))
+        return Ok(Some(state));
     }
 
     /// Format the active screen using Ghostty's own formatter.
@@ -503,7 +518,7 @@ impl GhosttyVt {
             selection: ptr::null(),
         };
         let formatter = Formatter::new(self.terminal, options)?;
-        formatter.output()
+        return formatter.output();
     }
 
     fn render_get<T: Default>(&self, operation: &'static str, key: u32) -> Result<T> {
@@ -511,7 +526,7 @@ impl GhosttyVt {
         check(operation, unsafe {
             sys::ghostty_render_state_get(self.render, key, (&raw mut value).cast::<c_void>())
         })?;
-        Ok(value)
+        return Ok(value);
     }
 
     fn active_style(&self) -> Result<CellStyle> {
@@ -526,11 +541,11 @@ impl GhosttyVt {
                 (&raw mut style).cast::<c_void>(),
             )
         })?;
-        decode_style(style)
+        return decode_style(style);
     }
 
     fn terminal_metadata(&self) -> Result<TerminalMetadata> {
-        Ok(TerminalMetadata {
+        return Ok(TerminalMetadata {
             title: ByteString::new(self.terminal_string(
                 "get terminal title",
                 sys::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_TITLE,
@@ -539,7 +554,7 @@ impl GhosttyVt {
                 "get terminal working directory",
                 sys::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_PWD,
             )?),
-        })
+        });
     }
 
     fn terminal_string(&self, operation: &'static str, key: u32) -> Result<Vec<u8>> {
@@ -555,7 +570,7 @@ impl GhosttyVt {
                 "terminal string has a non-zero length and null pointer",
             ));
         }
-        Ok(unsafe { std::slice::from_raw_parts(value.ptr, value.len) }.to_vec())
+        return Ok(unsafe { slice::from_raw_parts(value.ptr, value.len) }.to_vec());
     }
 
     fn mode(&self, value: u16, ansi: bool) -> Result<bool> {
@@ -564,7 +579,7 @@ impl GhosttyVt {
         check("get terminal mode", unsafe {
             sys::ghostty_terminal_mode_get(self.terminal, packed, &raw mut enabled)
         })?;
-        Ok(enabled)
+        return Ok(enabled);
     }
 
     fn mode_state(&self) -> Result<ModeState> {
@@ -590,18 +605,18 @@ impl GhosttyVt {
             });
         }
         let dec = |number| {
-            values
+            return values
                 .iter()
-                .find(|mode| !mode.ansi && mode.number == number)
-                .is_some_and(|mode| mode.enabled)
+                .find(|mode| return !mode.ansi && mode.number == number)
+                .is_some_and(|mode| return mode.enabled);
         };
-        Ok(ModeState {
+        return Ok(ModeState {
             synchronized_output: dec(2026),
             alternate_screen: dec(47) || dec(1047) || dec(1049),
             wraparound: dec(7),
             bracketed_paste: dec(2004),
             values,
-        })
+        });
     }
 
     fn dirty_state(&self) -> Result<DirtyState> {
@@ -610,15 +625,21 @@ impl GhosttyVt {
             sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_DIRTY,
         )?;
         match dirty {
-            sys::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FALSE => Ok(DirtyState::Clean),
-            sys::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_PARTIAL => {
-                Ok(DirtyState::Partial)
+            sys::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FALSE => {
+                return Ok(DirtyState::Clean);
             }
-            sys::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FULL => Ok(DirtyState::Full),
-            result => Err(Error::GhosttyVt {
-                operation: "decode dirty state",
-                result: i32::try_from(result).unwrap_or(i32::MAX),
-            }),
+            sys::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_PARTIAL => {
+                return Ok(DirtyState::Partial);
+            }
+            sys::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FULL => {
+                return Ok(DirtyState::Full);
+            }
+            result => {
+                return Err(Error::GhosttyVt {
+                    operation: "decode dirty state",
+                    result: i32::try_from(result).unwrap_or(i32::MAX),
+                });
+            }
         }
     }
 
@@ -658,7 +679,7 @@ impl GhosttyVt {
             sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE,
         )?;
         let style = decode_cursor_style(raw_style)?;
-        Ok(CursorState {
+        return Ok(CursorState {
             visible,
             blinking,
             in_viewport,
@@ -666,7 +687,7 @@ impl GhosttyVt {
             row,
             wide_tail,
             style,
-        })
+        });
     }
 
     fn color_state(&self) -> Result<ColorState> {
@@ -677,12 +698,12 @@ impl GhosttyVt {
         check("get render colors", unsafe {
             sys::ghostty_render_state_colors_get(self.render, &raw mut colors)
         })?;
-        Ok(ColorState {
+        return Ok(ColorState {
             background: colors.background.into(),
             foreground: colors.foreground.into(),
-            cursor: colors.cursor_has_value.then(|| colors.cursor.into()),
+            cursor: colors.cursor_has_value.then(|| return colors.cursor.into()),
             palette: colors.palette.into_iter().map(Into::into).collect(),
-        })
+        });
     }
 
     fn grid(
@@ -692,7 +713,7 @@ impl GhosttyVt {
         dirty: DirtyState,
         previous: Option<&SemanticState>,
     ) -> Result<Vec<RowState>> {
-        let reusable = previous.filter(|state| state.cols == cols && state.rows == rows);
+        let reusable = previous.filter(|state| return state.cols == cols && state.rows == rows);
         if dirty == DirtyState::Clean
             && let Some(previous) = reusable
         {
@@ -740,9 +761,11 @@ impl GhosttyVt {
                 cells
             } else {
                 reusable
-                    .and_then(|state| state.grid.get(usize::from(row)))
-                    .map(|state| state.cells.clone())
-                    .ok_or_else(|| invalid_snapshot("clean row is absent from previous snapshot"))?
+                    .and_then(|state| return state.grid.get(usize::from(row)))
+                    .map(|state| return state.cells.clone())
+                    .ok_or_else(|| {
+                        return invalid_snapshot("clean row is absent from previous snapshot");
+                    })?
             };
             let clean = false;
             check("reset row dirty state", unsafe {
@@ -763,18 +786,18 @@ impl GhosttyVt {
                 "render row count differs from terminal rows",
             ));
         }
-        Ok(grid)
+        return Ok(grid);
     }
 
     fn reset_render_dirty(&self) -> Result<()> {
         let clean = sys::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FALSE;
-        check("reset render dirty state", unsafe {
+        return check("reset render dirty state", unsafe {
             sys::ghostty_render_state_set(
                 self.render,
                 sys::GhosttyRenderStateOption_GHOSTTY_RENDER_STATE_OPTION_DIRTY,
                 (&raw const clean).cast::<c_void>(),
             )
-        })
+        });
     }
 }
 
@@ -805,7 +828,7 @@ impl RenderIterators {
             unsafe { sys::ghostty_render_state_row_iterator_free(row) };
             return Err(error);
         }
-        Ok(Self { row, cells })
+        return Ok(Self { row, cells });
     }
 }
 
@@ -829,7 +852,7 @@ impl Formatter {
         check("create terminal formatter", unsafe {
             sys::ghostty_formatter_terminal_new(ptr::null(), &raw mut formatter, terminal, options)
         })?;
-        Ok(Self(formatter))
+        return Ok(Self(formatter));
     }
 
     fn output(&self) -> Result<Vec<u8>> {
@@ -856,7 +879,7 @@ impl Formatter {
             )
         })?;
         output.truncate(length);
-        Ok(output)
+        return Ok(output);
     }
 }
 
@@ -875,7 +898,7 @@ fn row_get<T: Default>(
     check(operation, unsafe {
         sys::ghostty_render_state_row_get(row, key, (&raw mut value).cast::<c_void>())
     })?;
-    Ok(value)
+    return Ok(value);
 }
 
 fn cell_get<T: Default>(
@@ -887,7 +910,7 @@ fn cell_get<T: Default>(
     check(operation, unsafe {
         sys::ghostty_render_state_row_cells_get(cells, key, (&raw mut value).cast::<c_void>())
     })?;
-    Ok(value)
+    return Ok(value);
 }
 
 fn read_cell(cells: sys::GhosttyRenderStateRowCells, column: u16) -> Result<CellState> {
@@ -902,7 +925,7 @@ fn read_cell(cells: sys::GhosttyRenderStateRowCells, column: u16) -> Result<Cell
             (&raw mut style).cast::<c_void>(),
         )
     })?;
-    Ok(CellState {
+    return Ok(CellState {
         column,
         grapheme: read_grapheme(cells)?,
         style: decode_style(style)?,
@@ -919,7 +942,7 @@ fn read_cell(cells: sys::GhosttyRenderStateRowCells, column: u16) -> Result<Cell
             "get cell selection",
             sys::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED,
         )?,
-    })
+    });
 }
 
 fn read_grapheme(cells: sys::GhosttyRenderStateRowCells) -> Result<String> {
@@ -951,10 +974,12 @@ fn read_grapheme(cells: sys::GhosttyRenderStateRowCells) -> Result<String> {
         )
     })?;
     bytes.truncate(buffer.len);
-    String::from_utf8(bytes).map_err(|_| Error::GhosttyVt {
-        operation: "decode cell grapheme",
-        result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
-    })
+    return String::from_utf8(bytes).map_err(|_| {
+        return Error::GhosttyVt {
+            operation: "decode cell grapheme",
+            result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
+        };
+    });
 }
 
 fn optional_cell_color(cells: sys::GhosttyRenderStateRowCells, key: u32) -> Result<Option<Rgb>> {
@@ -963,17 +988,19 @@ fn optional_cell_color(cells: sys::GhosttyRenderStateRowCells, key: u32) -> Resu
         sys::ghostty_render_state_row_cells_get(cells, key, (&raw mut color).cast::<c_void>())
     };
     match result {
-        sys::GhosttyResult_GHOSTTY_SUCCESS => Ok(Some(color.into())),
-        sys::GhosttyResult_GHOSTTY_INVALID_VALUE => Ok(None),
-        result => Err(Error::GhosttyVt {
-            operation: "get cell color",
-            result,
-        }),
+        sys::GhosttyResult_GHOSTTY_SUCCESS => return Ok(Some(color.into())),
+        sys::GhosttyResult_GHOSTTY_INVALID_VALUE => return Ok(None),
+        result => {
+            return Err(Error::GhosttyVt {
+                operation: "get cell color",
+                result,
+            });
+        }
     }
 }
 
 fn decode_style(style: sys::GhosttyStyle) -> Result<CellStyle> {
-    Ok(CellStyle {
+    return Ok(CellStyle {
         foreground: decode_color(style.fg_color)?,
         background: decode_color(style.bg_color)?,
         underline_color: decode_color(style.underline_color)?,
@@ -986,40 +1013,42 @@ fn decode_style(style: sys::GhosttyStyle) -> Result<CellStyle> {
         strikethrough: style.strikethrough,
         overline: style.overline,
         underline: style.underline,
-    })
+    });
 }
 
 fn decode_color(color: sys::GhosttyStyleColor) -> Result<ColorSpec> {
     match color.tag {
-        sys::GhosttyStyleColorTag_GHOSTTY_STYLE_COLOR_NONE => Ok(ColorSpec::None),
+        sys::GhosttyStyleColorTag_GHOSTTY_STYLE_COLOR_NONE => return Ok(ColorSpec::None),
         sys::GhosttyStyleColorTag_GHOSTTY_STYLE_COLOR_PALETTE => {
-            Ok(ColorSpec::Palette(unsafe { color.value.palette }))
+            return Ok(ColorSpec::Palette(unsafe { color.value.palette }));
         }
         sys::GhosttyStyleColorTag_GHOSTTY_STYLE_COLOR_RGB => {
-            Ok(ColorSpec::Rgb(unsafe { color.value.rgb }.into()))
+            return Ok(ColorSpec::Rgb(unsafe { color.value.rgb }.into()));
         }
-        result => Err(Error::GhosttyVt {
-            operation: "decode style color",
-            result: i32::try_from(result).unwrap_or(i32::MAX),
-        }),
+        result => {
+            return Err(Error::GhosttyVt {
+                operation: "decode style color",
+                result: i32::try_from(result).unwrap_or(i32::MAX),
+            });
+        }
     }
 }
 
 fn decode_cursor_style(style: u32) -> Result<CursorStyle> {
     match style {
         sys::GhosttyRenderStateCursorVisualStyle_GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR => {
-            Ok(CursorStyle::Bar)
+            return Ok(CursorStyle::Bar)
         }
         sys::GhosttyRenderStateCursorVisualStyle_GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK => {
-            Ok(CursorStyle::Block)
+            return Ok(CursorStyle::Block)
         }
         sys::GhosttyRenderStateCursorVisualStyle_GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE => {
-            Ok(CursorStyle::Underline)
+            return Ok(CursorStyle::Underline)
         }
         sys::GhosttyRenderStateCursorVisualStyle_GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW => {
-            Ok(CursorStyle::HollowBlock)
+            return Ok(CursorStyle::HollowBlock)
         }
-        result => Err(Error::GhosttyVt {
+        result => return Err(Error::GhosttyVt {
             operation: "decode cursor style",
             result: i32::try_from(result).unwrap_or(i32::MAX),
         }),
@@ -1028,14 +1057,14 @@ fn decode_cursor_style(style: u32) -> Result<CursorStyle> {
 
 fn check(operation: &'static str, result: sys::GhosttyResult) -> Result<()> {
     if result == sys::GhosttyResult_GHOSTTY_SUCCESS {
-        Ok(())
+        return Ok(());
     } else {
-        Err(Error::GhosttyVt { operation, result })
+        return Err(Error::GhosttyVt { operation, result });
     }
 }
 
 fn ffi_rgb([r, g, b]: [u8; 3]) -> sys::GhosttyColorRgb {
-    sys::GhosttyColorRgb { r, g, b }
+    return sys::GhosttyColorRgb { r, g, b };
 }
 
 fn set_color_option(
@@ -1045,9 +1074,9 @@ fn set_color_option(
     operation: &'static str,
 ) -> Result<()> {
     let color = ffi_rgb(color);
-    check(operation, unsafe {
+    return check(operation, unsafe {
         sys::ghostty_terminal_set(terminal, option, (&raw const color).cast::<c_void>())
-    })
+    });
 }
 
 unsafe extern "C" fn write_pty_callback(
@@ -1062,21 +1091,21 @@ unsafe extern "C" fn write_pty_callback(
     let bytes = if len == 0 {
         Vec::new()
     } else {
-        unsafe { std::slice::from_raw_parts(data, len) }.to_vec()
+        unsafe { slice::from_raw_parts(data, len) }.to_vec()
     };
     let responses = unsafe { &mut *userdata.cast::<ResponseState>() };
     responses.pending.push(bytes);
 }
 
 fn invalid_snapshot(operation: &'static str) -> Error {
-    Error::GhosttyVt {
+    return Error::GhosttyVt {
         operation,
         result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
-    }
+    };
 }
 
 fn semantic_content_eq(left: &SemanticState, right: &SemanticState) -> bool {
-    left.cols == right.cols
+    return left.cols == right.cols
         && left.rows == right.rows
         && left.cursor == right.cursor
         && left.modes == right.modes
@@ -1088,16 +1117,16 @@ fn semantic_content_eq(left: &SemanticState, right: &SemanticState) -> bool {
             .grid
             .iter()
             .zip(&right.grid)
-            .all(|(left, right)| left.row == right.row && left.cells == right.cells)
+            .all(|(left, right)| return left.row == right.row && left.cells == right.cells);
 }
 
 impl From<sys::GhosttyColorRgb> for Rgb {
     fn from(color: sys::GhosttyColorRgb) -> Self {
-        Self {
+        return Self {
             r: color.r,
             g: color.g,
             b: color.b,
-        }
+        };
     }
 }
 
@@ -1121,19 +1150,19 @@ mod tests {
             primary.grid[0]
                 .cells
                 .iter()
-                .any(|cell| cell.grapheme == "界")
+                .any(|cell| return cell.grapheme == "界")
         );
         assert!(
             primary.grid[0]
                 .cells
                 .iter()
-                .any(|cell| cell.grapheme == "e\u{301}")
+                .any(|cell| return cell.grapheme == "e\u{301}")
         );
         assert!(
             primary.grid[0]
                 .cells
                 .iter()
-                .any(|cell| { cell.resolved_foreground == Some(Rgb { r: 1, g: 2, b: 3 }) })
+                .any(|cell| { return cell.resolved_foreground == Some(Rgb { r: 1, g: 2, b: 3 }) })
         );
 
         terminal.write(b"\x1b[?1049hALT");
@@ -1143,8 +1172,8 @@ mod tests {
             alternate
                 .grid
                 .iter()
-                .flat_map(|row| &row.cells)
-                .any(|cell| cell.grapheme == "A")
+                .flat_map(|row| return &row.cells)
+                .any(|cell| return cell.grapheme == "A")
         );
         terminal.write(b"\x1b[?1049l");
         let restored = terminal.snapshot().expect("restored snapshot");

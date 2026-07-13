@@ -92,11 +92,11 @@ pub struct ControlRequest {
 impl ControlRequest {
     /// Construct a request with a fresh time-sortable identifier.
     pub fn new(command: ControlCommand) -> Self {
-        Self {
+        return Self {
             version: CONTROL_PROTOCOL_VERSION,
             request_id: Uuid::now_v7(),
             command,
-        }
+        };
     }
 }
 
@@ -157,7 +157,7 @@ pub fn request(
     session_directory: impl AsRef<Path>,
     command: ControlCommand,
 ) -> Result<ControlData> {
-    send_request(session_directory, &ControlRequest::new(command))
+    return send_request(session_directory, &ControlRequest::new(command));
 }
 
 /// Send a caller-owned request, preserving its identifier for safe retries.
@@ -174,59 +174,70 @@ pub fn send_request(
     request: &ControlRequest,
 ) -> Result<ControlData> {
     let socket = session_directory.as_ref().join(CONTROL_SOCKET_NAME);
-    let mut stream = UnixStream::connect(&socket).map_err(|source| Error::Filesystem {
-        path: socket.clone(),
-        source,
+    let mut stream = UnixStream::connect(&socket).map_err(|source| {
+        return Error::Filesystem {
+            path: socket.clone(),
+            source,
+        };
     })?;
     let timeout = Some(Duration::from_secs(10));
     stream
         .set_read_timeout(timeout)
-        .and_then(|()| stream.set_write_timeout(timeout))
-        .map_err(|source| Error::Filesystem {
-            path: socket.clone(),
-            source,
+        .and_then(|()| return stream.set_write_timeout(timeout))
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: socket.clone(),
+                source,
+            };
         })?;
-    serde_json::to_writer(&mut stream, request).map_err(|source| Error::InvalidJson {
-        path: socket.clone(),
-        json_path: "$".to_owned(),
-        source,
+    serde_json::to_writer(&mut stream, request).map_err(|source| {
+        return Error::InvalidJson {
+            path: socket.clone(),
+            json_path: "$".to_owned(),
+            source,
+        };
     })?;
-    stream
-        .write_all(b"\n")
-        .map_err(|source| Error::Filesystem {
+    stream.write_all(b"\n").map_err(|source| {
+        return Error::Filesystem {
             path: socket.clone(),
             source,
-        })?;
-    stream
-        .shutdown(Shutdown::Write)
-        .map_err(|source| Error::Filesystem {
+        };
+    })?;
+    stream.shutdown(Shutdown::Write).map_err(|source| {
+        return Error::Filesystem {
             path: socket.clone(),
             source,
-        })?;
+        };
+    })?;
 
     let mut encoded = Vec::new();
     BufReader::new(stream)
         .take(MAX_CONTROL_MESSAGE_BYTES + 1)
         .read_until(b'\n', &mut encoded)
-        .map_err(|source| Error::Filesystem {
-            path: socket.clone(),
-            source,
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: socket.clone(),
+                source,
+            };
         })?;
     validate_frame(&encoded)?;
-    let response: ControlResponse =
-        serde_json::from_slice(&encoded).map_err(|source| Error::InvalidJson {
+    let response: ControlResponse = serde_json::from_slice(&encoded).map_err(|source| {
+        return Error::InvalidJson {
             path: socket,
             json_path: "$".to_owned(),
             source,
-        })?;
+        };
+    })?;
     if response.version != CONTROL_PROTOCOL_VERSION || response.request_id != request.request_id {
         return Err(Error::InvalidControlProtocol {
             reason: "response version or request identifier does not match".to_owned(),
         });
     }
     match response.result {
-        ControlResult::Ok { data } => Ok(data),
-        ControlResult::Error { code, message } => Err(Error::ControlRejected { code, message }),
+        ControlResult::Ok { data } => return Ok(data),
+        ControlResult::Error { code, message } => {
+            return Err(Error::ControlRejected { code, message });
+        }
     }
 }
 
@@ -240,7 +251,7 @@ pub(crate) fn validate_frame(encoded: &[u8]) -> Result<()> {
                 .to_owned(),
         });
     }
-    Ok(())
+    return Ok(());
 }
 
 #[cfg(test)]

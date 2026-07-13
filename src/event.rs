@@ -1,6 +1,6 @@
 //! Versioned events that make up the canonical terminal execution record.
 
-use std::{borrow::Cow, fmt};
+use std::{borrow::Cow, fmt, result::Result as StdResult};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -19,74 +19,74 @@ pub struct ByteString(Vec<u8>);
 impl ByteString {
     /// Wrap an owned byte buffer.
     pub fn new(bytes: Vec<u8>) -> Self {
-        Self(bytes)
+        return Self(bytes);
     }
 
     /// Borrow the original bytes.
     pub fn as_bytes(&self) -> &[u8] {
-        &self.0
+        return &self.0;
     }
 
     /// Consume this value and return the original bytes.
     pub fn into_bytes(self) -> Vec<u8> {
-        self.0
+        return self.0;
     }
 }
 
 impl fmt::Debug for ByteString {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        return f
             .debug_struct("ByteString")
             .field("len", &self.0.len())
-            .finish_non_exhaustive()
+            .finish_non_exhaustive();
     }
 }
 
 impl From<Vec<u8>> for ByteString {
     fn from(bytes: Vec<u8>) -> Self {
-        Self::new(bytes)
+        return Self::new(bytes);
     }
 }
 
 impl From<&[u8]> for ByteString {
     fn from(bytes: &[u8]) -> Self {
-        Self::new(bytes.to_vec())
+        return Self::new(bytes.to_vec());
     }
 }
 
 impl Serialize for ByteString {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        serializer.serialize_str(&STANDARD.encode(&self.0))
+        return serializer.serialize_str(&STANDARD.encode(&self.0));
     }
 }
 
 impl<'de> Deserialize<'de> for ByteString {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let encoded = String::deserialize(deserializer)?;
-        STANDARD
+        return STANDARD
             .decode(encoded)
             .map(Self)
-            .map_err(de::Error::custom)
+            .map_err(de::Error::custom);
     }
 }
 
 impl schemars::JsonSchema for ByteString {
     fn schema_name() -> Cow<'static, str> {
-        Cow::Borrowed("Base64Bytes")
+        return Cow::Borrowed("Base64Bytes");
     }
 
     fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({
+        return schemars::json_schema!({
             "type": "string",
             "contentEncoding": "base64",
             "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
-        })
+        });
     }
 }
 
@@ -135,13 +135,13 @@ pub struct TerminalColors {
 
 impl Default for TerminalColors {
     fn default() -> Self {
-        Self {
+        return Self {
             source: "libghostty_builtin".to_owned(),
             foreground: [0xff, 0xff, 0xff],
             background: [0, 0, 0],
             cursor: None,
             palette: Vec::new(),
-        }
+        };
     }
 }
 
@@ -156,7 +156,7 @@ impl EventLogHeader {
         pixel_height: u16,
         term: impl Into<String>,
     ) -> Self {
-        Self {
+        return Self {
             format: EVENT_LOG_FORMAT.to_owned(),
             version: EVENT_LOG_VERSION,
             session_id,
@@ -167,14 +167,14 @@ impl EventLogHeader {
             pixel_height,
             term: term.into(),
             colors: TerminalColors::default(),
-        }
+        };
     }
 
     /// Override the terminal color profile embedded in a new header.
     #[must_use]
     pub fn with_colors(mut self, colors: TerminalColors) -> Self {
         self.colors = colors;
-        self
+        return self;
     }
 }
 
@@ -365,8 +365,8 @@ pub struct EventRecord {
 
 /// Canonical portion of an event covered by its integrity hash.
 #[derive(Serialize)]
-pub(crate) struct EventBody<'a> {
+pub(crate) struct EventBody<'event> {
     pub(crate) seq: u64,
     pub(crate) monotonic_ns: u64,
-    pub(crate) event: &'a Event,
+    pub(crate) event: &'event Event,
 }

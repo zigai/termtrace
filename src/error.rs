@@ -1,6 +1,6 @@
 //! Typed errors shared by the CLI and session runtime.
 
-use std::path::PathBuf;
+use std::{io::Error as IoError, path::PathBuf, result::Result as StdResult};
 
 use miette::Diagnostic;
 use thiserror::Error;
@@ -19,7 +19,7 @@ pub enum Error {
         path: PathBuf,
         /// Underlying operating-system error.
         #[source]
-        source: std::io::Error,
+        source: IoError,
     },
 
     /// A persisted JSON document did not match its schema.
@@ -204,4 +204,4 @@ pub enum Error {
 }
 
 /// Result type used throughout Termtrace.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = StdResult<T, Error>;

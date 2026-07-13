@@ -3,13 +3,14 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::{File, OpenOptions},
-    io::{BufRead, BufReader, BufWriter, Write},
+    io::{BufRead, BufReader, BufWriter, Error as IoError, ErrorKind, Write},
     os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use blake3::Hash;
+use nix::unistd::Uid;
 use uuid::Uuid;
 
 use crate::{
@@ -41,23 +42,23 @@ impl SessionClock {
     pub fn now() -> Result<Self> {
         let started_unix_ns = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| Error::ClockBeforeEpoch)?
+            .map_err(|_| return Error::ClockBeforeEpoch)?
             .as_nanos();
 
-        Ok(Self {
+        return Ok(Self {
             monotonic_origin: Instant::now(),
             started_unix_ns,
-        })
+        });
     }
 
     /// Wall-clock Unix timestamp corresponding to monotonic time zero.
     pub fn started_unix_ns(&self) -> u128 {
-        self.started_unix_ns
+        return self.started_unix_ns;
     }
 
     /// Nanoseconds elapsed from the monotonic origin, saturating at `u64::MAX`.
     pub fn elapsed_ns(&self) -> u64 {
-        u64::try_from(self.monotonic_origin.elapsed().as_nanos()).unwrap_or(u64::MAX)
+        return u64::try_from(self.monotonic_origin.elapsed().as_nanos()).unwrap_or(u64::MAX);
     }
 }
 
@@ -75,12 +76,12 @@ pub struct EventLogWriter {
 impl EventLogWriter {
     /// Sequence number that will be assigned to the next event.
     pub fn next_seq(&self) -> u64 {
-        self.next_seq
+        return self.next_seq;
     }
 
     /// Hex hash of the most recently appended record, or the header before events.
     pub fn current_hash(&self) -> String {
-        self.previous_hash.to_hex().to_string()
+        return self.previous_hash.to_hex().to_string();
     }
 
     /// Create a new owner-only event log and durably write its header.
@@ -110,36 +111,42 @@ impl EventLogWriter {
             .create_new(true)
             .mode(OWNER_FILE_MODE)
             .open(&path)
-            .map_err(|source| Error::Filesystem {
-                path: path.clone(),
-                source,
+            .map_err(|source| {
+                return Error::Filesystem {
+                    path: path.clone(),
+                    source,
+                };
             })?;
 
-        let header_bytes = serde_json::to_vec(header).map_err(|source| Error::InvalidJson {
-            path: path.clone(),
-            json_path: "$".to_owned(),
-            source,
+        let header_bytes = serde_json::to_vec(header).map_err(|source| {
+            return Error::InvalidJson {
+                path: path.clone(),
+                json_path: "$".to_owned(),
+                source,
+            };
         })?;
         let previous_hash = blake3::hash(&header_bytes);
         let mut writer = BufWriter::new(file);
         writer
             .write_all(&header_bytes)
-            .and_then(|()| writer.write_all(b"\n"))
-            .and_then(|()| writer.flush())
-            .and_then(|()| writer.get_ref().sync_data())
-            .map_err(|source| Error::Filesystem {
-                path: path.clone(),
-                source,
+            .and_then(|()| return writer.write_all(b"\n"))
+            .and_then(|()| return writer.flush())
+            .and_then(|()| return writer.get_ref().sync_data())
+            .map_err(|source| {
+                return Error::Filesystem {
+                    path: path.clone(),
+                    source,
+                };
             })?;
 
-        Ok(Self {
+        return Ok(Self {
             path,
             writer,
             clock,
             next_seq: 0,
             previous_hash,
             poisoned: false,
-        })
+        });
     }
 
     /// Append and durably synchronize an event before returning its sequence number.
@@ -149,7 +156,7 @@ impl EventLogWriter {
     /// Returns an error when serialization, writing, flushing, synchronization,
     /// or sequence advancement fails.
     pub fn append(&mut self, event: Event) -> Result<u64> {
-        self.append_at(self.clock.elapsed_ns(), event)
+        return self.append_at(self.clock.elapsed_ns(), event);
     }
 
     /// Append an event without an immediate `fsync`.
@@ -163,11 +170,11 @@ impl EventLogWriter {
     /// Returns an error when serialization or buffered writing fails, or when
     /// an earlier I/O failure poisoned the writer.
     pub fn append_buffered(&mut self, event: Event) -> Result<u64> {
-        self.append_at_policy(self.clock.elapsed_ns(), event, false)
+        return self.append_at_policy(self.clock.elapsed_ns(), event, false);
     }
 
     fn append_at(&mut self, monotonic_ns: u64, event: Event) -> Result<u64> {
-        self.append_at_policy(monotonic_ns, event, true)
+        return self.append_at_policy(monotonic_ns, event, true);
     }
 
     fn append_at_policy(&mut self, monotonic_ns: u64, event: Event, durable: bool) -> Result<u64> {
@@ -177,20 +184,24 @@ impl EventLogWriter {
             });
         }
         let seq = self.next_seq;
-        let next_seq = seq.checked_add(1).ok_or_else(|| Error::InvalidEventLog {
-            path: self.path.clone(),
-            line: seq.saturating_add(2),
-            reason: "event sequence overflow".to_owned(),
+        let next_seq = seq.checked_add(1).ok_or_else(|| {
+            return Error::InvalidEventLog {
+                path: self.path.clone(),
+                line: seq.saturating_add(2),
+                reason: "event sequence overflow".to_owned(),
+            };
         })?;
         let body = EventBody {
             seq,
             monotonic_ns,
             event: &event,
         };
-        let body_bytes = serde_json::to_vec(&body).map_err(|source| Error::InvalidJson {
-            path: self.path.clone(),
-            json_path: "$".to_owned(),
-            source,
+        let body_bytes = serde_json::to_vec(&body).map_err(|source| {
+            return Error::InvalidJson {
+                path: self.path.clone(),
+                json_path: "$".to_owned(),
+                source,
+            };
         })?;
         let hash = chained_hash(self.previous_hash, &body_bytes);
         let record = EventRecord {
@@ -200,20 +211,22 @@ impl EventLogWriter {
             hash: hash.to_hex().to_string(),
             event,
         };
-        let record_bytes = serde_json::to_vec(&record).map_err(|source| Error::InvalidJson {
-            path: self.path.clone(),
-            json_path: "$".to_owned(),
-            source,
+        let record_bytes = serde_json::to_vec(&record).map_err(|source| {
+            return Error::InvalidJson {
+                path: self.path.clone(),
+                json_path: "$".to_owned(),
+                source,
+            };
         })?;
 
         let write_result = self
             .writer
             .write_all(&record_bytes)
-            .and_then(|()| self.writer.write_all(b"\n"));
+            .and_then(|()| return self.writer.write_all(b"\n"));
         let write_result = if durable {
             write_result
-                .and_then(|()| self.writer.flush())
-                .and_then(|()| self.writer.get_ref().sync_data())
+                .and_then(|()| return self.writer.flush())
+                .and_then(|()| return self.writer.get_ref().sync_data())
         } else {
             write_result
         };
@@ -227,7 +240,7 @@ impl EventLogWriter {
 
         self.next_seq = next_seq;
         self.previous_hash = hash;
-        Ok(seq)
+        return Ok(seq);
     }
 }
 
@@ -318,7 +331,7 @@ impl EventLog {
     /// headers, truncation, non-contiguous ordering, time reversal, or a broken
     /// integrity chain.
     pub fn read(path: impl AsRef<Path>) -> Result<Self> {
-        Ok(parse_event_log(path.as_ref(), false)?.log)
+        return Ok(parse_event_log(path.as_ref(), false)?.log);
     }
 
     /// Copy the longest integrity-checked prefix to a new owner-only file.
@@ -344,25 +357,27 @@ impl EventLog {
         let pending_operations = verified
             .pending_operations
             .iter()
-            .map(|operation| PendingOperationReport {
-                operation_id: operation.operation_id,
-                kind: match operation.kind {
-                    OperationKind::Input => "input",
-                    OperationKind::Resize => "resize",
-                    OperationKind::Signal => "signal",
-                }
-                .to_owned(),
-                intent_seq: operation.intent_seq,
-                expected_bytes: operation.expected_bytes,
+            .map(|operation| {
+                return PendingOperationReport {
+                    operation_id: operation.operation_id,
+                    kind: match operation.kind {
+                        OperationKind::Input => "input",
+                        OperationKind::Resize => "resize",
+                        OperationKind::Signal => "signal",
+                    }
+                    .to_owned(),
+                    intent_seq: operation.intent_seq,
+                    expected_bytes: operation.expected_bytes,
+                };
             })
             .collect();
-        Ok(RecoveryReport {
+        return Ok(RecoveryReport {
             source: source.to_path_buf(),
             recovered: recovered.to_path_buf(),
             valid_events: u64::try_from(verified.events.len()).unwrap_or(u64::MAX),
             discarded_tail: parsed.issue,
             pending_operations,
-        })
+        });
     }
 }
 
@@ -402,10 +417,12 @@ impl LogValidation {
             monotonic_ns: record.monotonic_ns,
             event: &record.event,
         };
-        let body_bytes = serde_json::to_vec(&body).map_err(|source| Error::InvalidJson {
-            path: path.to_path_buf(),
-            json_path: "$".to_owned(),
-            source,
+        let body_bytes = serde_json::to_vec(&body).map_err(|source| {
+            return Error::InvalidJson {
+                path: path.to_path_buf(),
+                json_path: "$".to_owned(),
+                source,
+            };
         })?;
         let expected_hash = chained_hash(self.previous_hash, &body_bytes);
         if record.hash != expected_hash.to_hex().as_str() {
@@ -423,19 +440,21 @@ impl LogValidation {
         self.expected_seq = self
             .expected_seq
             .checked_add(1)
-            .ok_or_else(|| invalid_log(path, line, "event sequence overflow"))?;
-        Ok(record)
+            .ok_or_else(|| return invalid_log(path, line, "event sequence overflow"))?;
+        return Ok(record);
     }
 }
 
 fn parse_event_log(path: &Path, recover_tail: bool) -> Result<ParsedEventLog> {
-    let file = File::open(path).map_err(|source| Error::Filesystem {
-        path: path.to_path_buf(),
-        source,
+    let file = File::open(path).map_err(|source| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        };
     })?;
     let mut reader = BufReader::new(file);
-    let header_bytes =
-        read_line(&mut reader, path, 1)?.ok_or_else(|| invalid_log(path, 1, "missing header"))?;
+    let header_bytes = read_line(&mut reader, path, 1)?
+        .ok_or_else(|| return invalid_log(path, 1, "missing header"))?;
     let header: EventLogHeader = parse_json_line(path, 1, &header_bytes)?;
     validate_header(path, &header)?;
     let mut validation = LogValidation {
@@ -465,8 +484,8 @@ fn parse_event_log(path: &Path, recover_tail: bool) -> Result<ParsedEventLog> {
         .pending_operations
         .into_values()
         .collect::<Vec<_>>();
-    pending_operations.sort_by_key(|operation| operation.intent_seq);
-    Ok(ParsedEventLog {
+    pending_operations.sort_by_key(|operation| return operation.intent_seq);
+    return Ok(ParsedEventLog {
         valid_lines: u64::try_from(events.len())
             .unwrap_or(u64::MAX)
             .saturating_add(1),
@@ -476,35 +495,43 @@ fn parse_event_log(path: &Path, recover_tail: bool) -> Result<ParsedEventLog> {
             pending_operations,
         },
         issue,
-    })
+    });
 }
 
 fn recovery_issue(error: &Error, fallback_line: u64) -> RecoveryIssue {
     match error {
-        Error::InvalidEventLog { line, reason, .. } => RecoveryIssue {
-            line: *line,
-            reason: reason.clone(),
-        },
-        _ => RecoveryIssue {
-            line: fallback_line,
-            reason: error.to_string(),
-        },
+        Error::InvalidEventLog { line, reason, .. } => {
+            return RecoveryIssue {
+                line: *line,
+                reason: reason.clone(),
+            };
+        }
+        _ => {
+            return RecoveryIssue {
+                line: fallback_line,
+                reason: error.to_string(),
+            };
+        }
     }
 }
 
 fn copy_lines(source: &Path, recovered: &Path, count: u64) -> Result<()> {
-    let input = File::open(source).map_err(|source_error| Error::Filesystem {
-        path: source.to_path_buf(),
-        source: source_error,
+    let input = File::open(source).map_err(|source_error| {
+        return Error::Filesystem {
+            path: source.to_path_buf(),
+            source: source_error,
+        };
     })?;
     let output = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(OWNER_FILE_MODE)
         .open(recovered)
-        .map_err(|source| Error::Filesystem {
-            path: recovered.to_path_buf(),
-            source,
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: recovered.to_path_buf(),
+                source,
+            };
         })?;
     let mut reader = BufReader::new(input);
     let mut writer = BufWriter::new(output);
@@ -512,27 +539,31 @@ fn copy_lines(source: &Path, recovered: &Path, count: u64) -> Result<()> {
         let mut bytes = Vec::new();
         let read = reader
             .read_until(b'\n', &mut bytes)
-            .map_err(|source_error| Error::Filesystem {
-                path: source.to_path_buf(),
-                source: source_error,
+            .map_err(|source_error| {
+                return Error::Filesystem {
+                    path: source.to_path_buf(),
+                    source: source_error,
+                };
             })?;
         if read == 0 || bytes.last() != Some(&b'\n') {
             return Err(invalid_log(source, line, "valid prefix copy was truncated"));
         }
-        writer
-            .write_all(&bytes)
-            .map_err(|source| Error::Filesystem {
+        writer.write_all(&bytes).map_err(|source| {
+            return Error::Filesystem {
                 path: recovered.to_path_buf(),
                 source,
-            })?;
+            };
+        })?;
     }
-    writer
+    return writer
         .flush()
-        .and_then(|()| writer.get_ref().sync_data())
-        .map_err(|source| Error::Filesystem {
-            path: recovered.to_path_buf(),
-            source,
-        })
+        .and_then(|()| return writer.get_ref().sync_data())
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: recovered.to_path_buf(),
+                source,
+            };
+        });
 }
 
 fn validate_operation_transition(
@@ -563,7 +594,7 @@ fn validate_operation_transition(
     };
     let intent = pending
         .remove(&result.operation_id)
-        .ok_or_else(|| invalid_log(path, line, "operation result has no pending intent"))?;
+        .ok_or_else(|| return invalid_log(path, line, "operation result has no pending intent"))?;
     if intent.kind != result.kind {
         return Err(invalid_log(
             path,
@@ -598,34 +629,36 @@ fn validate_operation_transition(
             "input result byte count is inconsistent with its intent",
         ));
     }
-    Ok(())
+    return Ok(());
 }
 
 fn operation_intent(event: &Event) -> Option<(Uuid, OperationKind, Option<u64>)> {
     match event {
         Event::InputIntent {
             operation_id, data, ..
-        } => Some((
-            *operation_id,
-            OperationKind::Input,
-            Some(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX)),
-        )),
+        } => {
+            return Some((
+                *operation_id,
+                OperationKind::Input,
+                Some(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX)),
+            ));
+        }
         Event::ResizeIntent { operation_id, .. } => {
-            Some((*operation_id, OperationKind::Resize, None))
+            return Some((*operation_id, OperationKind::Resize, None));
         }
         Event::SignalIntent { operation_id, .. } => {
-            Some((*operation_id, OperationKind::Signal, None))
+            return Some((*operation_id, OperationKind::Signal, None));
         }
-        _ => None,
+        _ => return None,
     }
 }
 
-struct OperationResultRef<'a> {
+struct OperationResultRef<'event> {
     operation_id: Uuid,
     kind: OperationKind,
     status: OperationStatus,
     bytes_written: Option<u64>,
-    error_code: &'a Option<String>,
+    error_code: &'event Option<String>,
 }
 
 fn operation_result(event: &Event) -> Option<OperationResultRef<'_>> {
@@ -635,75 +668,87 @@ fn operation_result(event: &Event) -> Option<OperationResultRef<'_>> {
             status,
             bytes_written,
             error_code,
-        } => Some(OperationResultRef {
-            operation_id: *operation_id,
-            kind: OperationKind::Input,
-            status: *status,
-            bytes_written: Some(*bytes_written),
-            error_code,
-        }),
+        } => {
+            return Some(OperationResultRef {
+                operation_id: *operation_id,
+                kind: OperationKind::Input,
+                status: *status,
+                bytes_written: Some(*bytes_written),
+                error_code,
+            });
+        }
         Event::ResizeResult {
             operation_id,
             status,
             error_code,
-        } => Some(OperationResultRef {
-            operation_id: *operation_id,
-            kind: OperationKind::Resize,
-            status: *status,
-            bytes_written: None,
-            error_code,
-        }),
+        } => {
+            return Some(OperationResultRef {
+                operation_id: *operation_id,
+                kind: OperationKind::Resize,
+                status: *status,
+                bytes_written: None,
+                error_code,
+            });
+        }
         Event::SignalResult {
             operation_id,
             status,
             error_code,
-        } => Some(OperationResultRef {
-            operation_id: *operation_id,
-            kind: OperationKind::Signal,
-            status: *status,
-            bytes_written: None,
-            error_code,
-        }),
-        _ => None,
+        } => {
+            return Some(OperationResultRef {
+                operation_id: *operation_id,
+                kind: OperationKind::Signal,
+                status: *status,
+                bytes_written: None,
+                error_code,
+            });
+        }
+        _ => return None,
     }
 }
 
 fn validate_parent_directory(path: &Path) -> Result<()> {
-    let parent = path.parent().ok_or_else(|| Error::Filesystem {
-        path: path.to_path_buf(),
-        source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "event log has no parent"),
+    let parent = path.parent().ok_or_else(|| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source: IoError::new(ErrorKind::InvalidInput, "event log has no parent"),
+        };
     })?;
-    let metadata = fs_err::metadata(parent).map_err(|source| Error::Filesystem {
-        path: parent.to_path_buf(),
-        source,
+    let metadata = fs_err::metadata(parent).map_err(|source| {
+        return Error::Filesystem {
+            path: parent.to_path_buf(),
+            source,
+        };
     })?;
     if !metadata.is_dir() {
         return Err(Error::Filesystem {
             path: parent.to_path_buf(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::NotADirectory,
+            source: IoError::new(
+                ErrorKind::NotADirectory,
                 "event log parent is not a directory",
             ),
         });
     }
     let mode = metadata.permissions().mode() & 0o777;
     let owner_uid = metadata.uid();
-    if owner_uid != nix::unistd::Uid::effective().as_raw() || mode != OWNER_DIRECTORY_MODE {
+    if owner_uid != Uid::effective().as_raw() || mode != OWNER_DIRECTORY_MODE {
         return Err(Error::InsecureArtifactDirectory {
             path: parent.to_path_buf(),
             owner_uid,
             mode,
         });
     }
-    Ok(())
+    return Ok(());
 }
 
 fn read_line(reader: &mut impl BufRead, path: &Path, line: u64) -> Result<Option<Vec<u8>>> {
     let mut bytes = Vec::new();
     loop {
-        let available = reader.fill_buf().map_err(|source| Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
+        let available = reader.fill_buf().map_err(|source| {
+            return Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            };
         })?;
         if available.is_empty() {
             return if bytes.is_empty() {
@@ -719,14 +764,15 @@ fn read_line(reader: &mut impl BufRead, path: &Path, line: u64) -> Result<Option
 
         let consumed = available
             .iter()
-            .position(|byte| *byte == b'\n')
-            .map_or(available.len(), |position| position + 1);
+            .position(|byte| return *byte == b'\n')
+            .map_or(available.len(), |position| return position + 1);
         let new_length = bytes.len().saturating_add(consumed);
         if u64::try_from(new_length).unwrap_or(u64::MAX) > MAX_LINE_BYTES {
             return Err(invalid_log(path, line, "line exceeds 64 MiB limit"));
         }
-        bytes.extend_from_slice(&available[..consumed]);
-        let complete = available[consumed - 1] == b'\n';
+        let (chunk, _) = available.split_at(consumed);
+        bytes.extend_from_slice(chunk);
+        let complete = chunk.last() == Some(&b'\n');
         reader.consume(consumed);
         if complete {
             bytes.pop();
@@ -740,26 +786,28 @@ where
     T: for<'de> serde::Deserialize<'de>,
 {
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    serde_path_to_error::deserialize(&mut deserializer)
+    return serde_path_to_error::deserialize(&mut deserializer)
         .map_err(|error| {
             let json_path = error.path().to_string();
             let source = error.into_inner();
-            Error::InvalidJson {
+            return Error::InvalidJson {
                 path: path.to_path_buf(),
                 json_path,
                 source,
-            }
+            };
         })
         .map_err(|error| match error {
             Error::InvalidJson {
                 json_path, source, ..
-            } => Error::InvalidEventLog {
-                path: path.to_path_buf(),
-                line,
-                reason: format!("JSON decoding failed at `{json_path}`: {source}"),
-            },
-            other => other,
-        })
+            } => {
+                return Error::InvalidEventLog {
+                    path: path.to_path_buf(),
+                    line,
+                    reason: format!("JSON decoding failed at `{json_path}`: {source}"),
+                };
+            }
+            other => return other,
+        });
 }
 
 fn validate_header(path: &Path, header: &EventLogHeader) -> Result<()> {
@@ -793,22 +841,22 @@ fn validate_header(path: &Path, header: &EventLogHeader) -> Result<()> {
             "terminal palette must be empty or contain exactly 256 colors",
         ));
     }
-    Ok(())
+    return Ok(());
 }
 
 fn chained_hash(previous: Hash, body: &[u8]) -> Hash {
     let mut hasher = blake3::Hasher::new();
     hasher.update(previous.as_bytes());
     hasher.update(body);
-    hasher.finalize()
+    return hasher.finalize();
 }
 
 fn invalid_log(path: &Path, line: u64, reason: impl Into<String>) -> Error {
-    Error::InvalidEventLog {
+    return Error::InvalidEventLog {
         path: path.to_path_buf(),
         line,
         reason: reason.into(),
-    }
+    };
 }
 
 #[cfg(test)]
@@ -822,7 +870,7 @@ mod tests {
     use crate::event::{ByteString, InputKind, InputSource, OperationStatus};
 
     fn header(clock: &SessionClock) -> EventLogHeader {
-        EventLogHeader::new(
+        return EventLogHeader::new(
             Uuid::now_v7(),
             clock.started_unix_ns(),
             120,
@@ -830,7 +878,7 @@ mod tests {
             1080,
             720,
             "xterm-ghostty",
-        )
+        );
     }
 
     fn secure_directory(path: &Path) {
@@ -1060,7 +1108,10 @@ mod tests {
 
         assert_eq!(report.valid_events, 2);
         assert_eq!(
-            report.discarded_tail.as_ref().map(|issue| issue.line),
+            report
+                .discarded_tail
+                .as_ref()
+                .map(|issue| return issue.line),
             Some(4)
         );
         assert_eq!(report.pending_operations.len(), 1);

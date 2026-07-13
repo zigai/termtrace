@@ -13,17 +13,17 @@ use crate::{
 };
 
 #[derive(Serialize)]
-struct CastHeader<'a> {
+struct CastHeader<'environment> {
     version: u8,
     width: u16,
     height: u16,
     timestamp: u64,
-    env: CastEnvironment<'a>,
+    env: CastEnvironment<'environment>,
 }
 
 #[derive(Serialize)]
-struct CastEnvironment<'a> {
-    term: &'a str,
+struct CastEnvironment<'term> {
+    term: &'term str,
 }
 
 /// Export an asciinema v2 cast without changing canonical evidence.
@@ -120,7 +120,7 @@ pub fn export_asciicast(
             _ => {}
         }
     }
-    write_secure(output.as_ref(), &encoded)
+    return write_secure(output.as_ref(), &encoded);
 }
 
 fn write_cast_event(
@@ -130,15 +130,17 @@ fn write_cast_event(
     data: &str,
     path: &Path,
 ) -> Result<()> {
-    write_line(output, &(seconds, code, data), path)
+    return write_line(output, &(seconds, code, data), path);
 }
 
 fn write_line(output: &mut Vec<u8>, value: &impl Serialize, path: &Path) -> Result<()> {
-    serde_json::to_writer(&mut *output, value).map_err(|source| crate::Error::InvalidJson {
-        path: path.to_path_buf(),
-        json_path: "$".to_owned(),
-        source,
+    serde_json::to_writer(&mut *output, value).map_err(|source| {
+        return crate::Error::InvalidJson {
+            path: path.to_path_buf(),
+            json_path: "$".to_owned(),
+            source,
+        };
     })?;
     output.push(b'\n');
-    Ok(())
+    return Ok(());
 }

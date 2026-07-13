@@ -5,6 +5,7 @@ use std::{
     fs::File,
     io::{BufWriter, Write as _},
     path::{Path, PathBuf},
+    slice,
 };
 
 use schemars::JsonSchema;
@@ -193,14 +194,14 @@ struct ReplayBuilder {
 }
 
 #[derive(Serialize)]
-struct StateHashMetadata<'a> {
+struct StateHashMetadata<'state> {
     cols: u16,
     rows: u16,
-    cursor: &'a CursorState,
-    modes: &'a ModeState,
-    colors: &'a ColorState,
-    active_style: &'a CellStyle,
-    metadata: &'a TerminalMetadata,
+    cursor: &'state CursorState,
+    modes: &'state ModeState,
+    colors: &'state ColorState,
+    active_style: &'state CellStyle,
+    metadata: &'state TerminalMetadata,
 }
 
 /// Replay a validated event log and collect every distinct state.
@@ -212,9 +213,9 @@ pub fn replay(log: &EventLog) -> Result<CollectedReplay> {
     let mut states = Vec::new();
     let artifacts = replay_with(log, |record, _| {
         states.push(record);
-        Ok(())
+        return Ok(());
     })?;
-    Ok(CollectedReplay { states, artifacts })
+    return Ok(CollectedReplay { states, artifacts });
 }
 
 /// Reconstruct one state selected by state, event, time, or final position.
@@ -228,7 +229,9 @@ pub fn inspect(log: &EventLog, selector: StateSelector) -> Result<StateInspectio
         let matches = match selector {
             StateSelector::Final => true,
             StateSelector::StateId(id) => record.state_id == id,
-            StateSelector::EventSeq(seq) => record.event_seq.is_none_or(|event| event <= seq),
+            StateSelector::EventSeq(seq) => {
+                record.event_seq.is_none_or(|event| return event <= seq)
+            }
             StateSelector::MonotonicNs(time) => record.monotonic_ns <= time,
         };
         if matches {
@@ -237,9 +240,9 @@ pub fn inspect(log: &EventLog, selector: StateSelector) -> Result<StateInspectio
                 state: state.clone(),
             });
         }
-        Ok(())
+        return Ok(());
     })?;
-    selected.ok_or_else(|| invalid_replay("no semantic state matches the selector"))
+    return selected.ok_or_else(|| return invalid_replay("no semantic state matches the selector"));
 }
 
 fn replay_with(
@@ -253,7 +256,7 @@ fn replay_with(
         match &record.event {
             Event::Output { data } => {
                 for (offset, byte) in data.as_bytes().iter().enumerate() {
-                    builder.engine.write(std::slice::from_ref(byte));
+                    builder.engine.write(slice::from_ref(byte));
                     drop(builder.engine.take_responses());
                     builder.capture(
                         Some(record.seq),
@@ -285,9 +288,9 @@ fn replay_with(
                 status: OperationStatus::Applied,
                 ..
             } => {
-                let geometry = resize_intents
-                    .remove(operation_id)
-                    .ok_or_else(|| invalid_replay("applied resize result is missing its intent"))?;
+                let geometry = resize_intents.remove(operation_id).ok_or_else(|| {
+                    return invalid_replay("applied resize result is missing its intent");
+                })?;
                 builder.engine.resize(
                     geometry.cols,
                     geometry.rows,
@@ -305,27 +308,27 @@ fn replay_with(
     let final_state_hash = builder
         .previous_hash
         .clone()
-        .ok_or_else(|| invalid_replay("replay produced no initial state"))?;
-    Ok(ReplayArtifacts {
+        .ok_or_else(|| return invalid_replay("replay produced no initial state"))?;
+    return Ok(ReplayArtifacts {
         state_count: builder.state_count,
         final_state_hash,
         final_text: builder.engine.format(Format::Plain)?,
         final_vt: builder.engine.format(Format::Vt)?,
         final_html: builder.engine.format(Format::Html)?,
-    })
+    });
 }
 
 impl ReplayBuilder {
     fn new(log: &EventLog) -> Result<Self> {
         let mut engine = GhosttyVt::new(log.header.cols, log.header.rows, 100_000)?;
         engine.apply_terminal_colors(&log.header.colors)?;
-        Ok(Self {
+        return Ok(Self {
             engine,
             previous: None,
             previous_hash: None,
             state_count: 0,
             row_hashes: Vec::new(),
-        })
+        });
     }
 
     fn capture(
@@ -358,10 +361,10 @@ impl ReplayBuilder {
         self.state_count = self
             .state_count
             .checked_add(1)
-            .ok_or_else(|| invalid_replay("semantic state identifier overflow"))?;
+            .ok_or_else(|| return invalid_replay("semantic state identifier overflow"))?;
         self.previous = Some(state);
         self.previous_hash = Some(hash);
-        Ok(())
+        return Ok(());
     }
 
     fn hash_state(&mut self, state: &SemanticState) -> Result<String> {
@@ -374,12 +377,16 @@ impl ReplayBuilder {
                 || self
                     .previous
                     .as_ref()
-                    .and_then(|previous| previous.grid.get(usize::from(row.row)))
-                    .is_none_or(|previous| previous.cells != row.cells);
+                    .and_then(|previous| return previous.grid.get(usize::from(row.row)))
+                    .is_none_or(|previous| return previous.cells != row.cells);
             if changed {
                 let encoded = serde_json::to_vec(&row.cells)
-                    .map_err(|source| json_error(PathBuf::from("<semantic-row>"), source))?;
-                self.row_hashes[usize::from(row.row)] = blake3::hash(&encoded);
+                    .map_err(|source| return json_error(PathBuf::from("<semantic-row>"), source))?;
+                let slot = self
+                    .row_hashes
+                    .get_mut(usize::from(row.row))
+                    .ok_or_else(|| return invalid_replay("semantic row is outside the viewport"))?;
+                *slot = blake3::hash(&encoded);
             }
         }
         let metadata = StateHashMetadata {
@@ -392,14 +399,14 @@ impl ReplayBuilder {
             metadata: &state.metadata,
         };
         let encoded = serde_json::to_vec(&metadata)
-            .map_err(|source| json_error(PathBuf::from("<semantic-metadata>"), source))?;
+            .map_err(|source| return json_error(PathBuf::from("<semantic-metadata>"), source))?;
         let mut hash = blake3::Hasher::new();
         hash.update(b"termtrace-semantic-state-v1\0");
         hash.update(&encoded);
         for row_hash in &self.row_hashes {
             hash.update(row_hash.as_bytes());
         }
-        Ok(hash.finalize().to_hex().to_string())
+        return Ok(hash.finalize().to_hex().to_string());
     }
 }
 
@@ -422,20 +429,22 @@ pub fn index_session(session_directory: impl AsRef<Path>) -> Result<IndexOutcome
     let result = write_index(&staging, &log).and_then(|artifacts| {
         commit_directory(session_directory, &staging, &destination)?;
         sync_directory(session_directory)?;
-        Ok(IndexOutcome {
+        return Ok(IndexOutcome {
             directory: destination.clone(),
             state_count: artifacts.state_count,
             final_state_hash: artifacts.final_state_hash,
-        })
+        });
     });
     if result.is_err() && staging.exists() {
-        let cleanup = fs_err::remove_dir_all(&staging).map_err(|source| Error::Filesystem {
-            path: staging,
-            source,
+        let cleanup = fs_err::remove_dir_all(&staging).map_err(|source| {
+            return Error::Filesystem {
+                path: staging,
+                source,
+            };
         });
         return finish_with_cleanup(result, cleanup);
     }
-    result
+    return result;
 }
 
 fn write_index(directory: &Path, log: &EventLog) -> Result<ReplayArtifacts> {
@@ -451,7 +460,7 @@ fn write_index(directory: &Path, log: &EventLog) -> Result<ReplayArtifacts> {
             monotonic_ns: record.monotonic_ns,
             presented: record.presented,
         };
-        write_json_line(&mut index, &entry, directory)
+        return write_json_line(&mut index, &entry, directory);
     })?;
     finish_writer(states, &directory.join("states.jsonl"))?;
     finish_writer(index, &directory.join("state-index.jsonl"))?;
@@ -461,7 +470,7 @@ fn write_index(directory: &Path, log: &EventLog) -> Result<ReplayArtifacts> {
     let manifest = ReplayManifest {
         version: STATE_FORMAT_VERSION,
         session_id: log.header.session_id,
-        source_event_hash: log.events.last().map(|record| record.hash.clone()),
+        source_event_hash: log.events.last().map(|record| return record.hash.clone()),
         ghostty_revision: GHOSTTY_REVISION.to_owned(),
         state_count: artifacts.state_count,
         final_state_hash: artifacts.final_state_hash.clone(),
@@ -474,61 +483,65 @@ fn write_index(directory: &Path, log: &EventLog) -> Result<ReplayArtifacts> {
         ],
     };
     let manifest_bytes = serde_json::to_vec_pretty(&manifest)
-        .map_err(|source| json_error(directory.join("manifest.json"), source))?;
+        .map_err(|source| return json_error(directory.join("manifest.json"), source))?;
     write_secure(&directory.join("manifest.json"), &manifest_bytes)?;
     sync_directory(directory)?;
-    Ok(artifacts)
+    return Ok(artifacts);
 }
 
 fn state_delta(previous: Option<&SemanticState>, current: &SemanticState) -> StateDelta {
-    StateDelta {
+    return StateDelta {
         geometry: if previous
-            .is_some_and(|state| state.cols == current.cols && state.rows == current.rows)
+            .is_some_and(|state| return state.cols == current.cols && state.rows == current.rows)
         {
             None
         } else {
             Some((current.cols, current.rows))
         },
-        cursor: changed(previous.map(|state| &state.cursor), &current.cursor),
-        modes: changed(previous.map(|state| &state.modes), &current.modes),
-        colors: changed(previous.map(|state| &state.colors), &current.colors),
+        cursor: changed(previous.map(|state| return &state.cursor), &current.cursor),
+        modes: changed(previous.map(|state| return &state.modes), &current.modes),
+        colors: changed(previous.map(|state| return &state.colors), &current.colors),
         active_style: changed(
-            previous.map(|state| &state.active_style),
+            previous.map(|state| return &state.active_style),
             &current.active_style,
         ),
-        metadata: changed(previous.map(|state| &state.metadata), &current.metadata),
+        metadata: changed(
+            previous.map(|state| return &state.metadata),
+            &current.metadata,
+        ),
         rows: row_diffs(previous, current),
-    }
+    };
 }
 
 fn changed<T: Clone + Eq>(previous: Option<&T>, current: &T) -> Option<T> {
-    (previous != Some(current)).then(|| current.clone())
+    return (previous != Some(current)).then(|| return current.clone());
 }
 
 fn row_diffs(previous: Option<&SemanticState>, current: &SemanticState) -> Vec<RowDiff> {
-    current
+    return current
         .grid
         .iter()
         .filter_map(|row| {
-            let old_row = previous.and_then(|state| state.grid.get(usize::from(row.row)));
+            let old_row = previous.and_then(|state| return state.grid.get(usize::from(row.row)));
             let cells = row
                 .cells
                 .iter()
                 .filter(|cell| {
-                    old_row.and_then(|old| old.cells.get(usize::from(cell.column))) != Some(*cell)
+                    return old_row.and_then(|old| return old.cells.get(usize::from(cell.column)))
+                        != Some(*cell);
                 })
                 .cloned()
                 .collect::<Vec<_>>();
-            (!cells.is_empty()).then_some(RowDiff {
+            return (!cells.is_empty()).then_some(RowDiff {
                 row: row.row,
                 cells,
-            })
+            });
         })
-        .collect()
+        .collect();
 }
 
 fn cell_size(pixels: u16, cells: u16) -> u32 {
-    u32::from(pixels.checked_div(cells).unwrap_or(0).max(1))
+    return u32::from(pixels.checked_div(cells).unwrap_or(0).max(1));
 }
 
 fn write_json_line(
@@ -537,35 +550,39 @@ fn write_json_line(
     path: &Path,
 ) -> Result<()> {
     serde_json::to_writer(&mut *writer, value)
-        .map_err(|source| json_error(path.to_path_buf(), source))?;
-    writer.write_all(b"\n").map_err(|source| Error::Filesystem {
-        path: path.to_path_buf(),
-        source,
-    })
+        .map_err(|source| return json_error(path.to_path_buf(), source))?;
+    return writer.write_all(b"\n").map_err(|source| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        };
+    });
 }
 
 fn finish_with_cleanup<T>(primary: Result<T>, cleanup: Result<()>) -> Result<T> {
     match (primary, cleanup) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Ok(_), Err(cleanup)) => Err(cleanup),
-        (Err(primary), Ok(())) => Err(primary),
-        (Err(primary), Err(cleanup)) => Err(Error::CleanupFailed {
-            primary: Box::new(primary),
-            cleanup: Box::new(cleanup),
-        }),
+        (Ok(value), Ok(())) => return Ok(value),
+        (Ok(_), Err(cleanup)) => return Err(cleanup),
+        (Err(primary), Ok(())) => return Err(primary),
+        (Err(primary), Err(cleanup)) => {
+            return Err(Error::CleanupFailed {
+                primary: Box::new(primary),
+                cleanup: Box::new(cleanup),
+            });
+        }
     }
 }
 
 fn json_error(path: PathBuf, source: serde_json::Error) -> Error {
-    Error::InvalidJson {
+    return Error::InvalidJson {
         path,
         json_path: "$".to_owned(),
         source,
-    }
+    };
 }
 
 fn invalid_replay(reason: &str) -> Error {
-    Error::InvalidReplay {
+    return Error::InvalidReplay {
         reason: reason.to_owned(),
-    }
+    };
 }

@@ -39,7 +39,7 @@ pub fn inspect_session(
     selector: StateSelector,
 ) -> Result<StateInspection> {
     let log = EventLog::read(session_directory.as_ref().join("events.jsonl"))?;
-    inspect(&log, selector)
+    return inspect(&log, selector);
 }
 
 /// Render a complete semantic state as compact agent-readable text.
@@ -59,7 +59,7 @@ pub fn state_text(state: &SemanticState) -> String {
             output.push('\n');
         }
     }
-    output
+    return output;
 }
 
 /// Wait until exact bytes appear in the canonical output stream.
@@ -122,20 +122,20 @@ fn find_output(log: &EventLog, needle: &[u8]) -> Option<WaitOutcome> {
             }
         }
     }
-    None
+    return None;
 }
 
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
+    return haystack
         .windows(needle.len())
-        .position(|window| window == needle)
+        .position(|window| return window == needle);
 }
 
 fn wait_error(message: &str) -> Error {
-    Error::ControlRejected {
+    return Error::ControlRejected {
         code: "wait_failed".to_owned(),
         message: message.to_owned(),
-    }
+    };
 }
 
 #[cfg(test)]
