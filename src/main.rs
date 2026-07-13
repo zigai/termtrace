@@ -59,6 +59,10 @@ struct RecordArgs {
     #[arg(long, default_value = "xterm-ghostty")]
     term: String,
 
+    /// Do not forward standard input to the child PTY.
+    #[arg(long)]
+    no_input: bool,
+
     /// Executable and arguments, following `--`.
     #[arg(last = true, required = true)]
     command: Vec<OsString>,
@@ -99,6 +103,7 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         cell_width_px: arguments.cell_width,
         cell_height_px: arguments.cell_height,
         term: arguments.term,
+        forward_stdin: !arguments.no_input,
     })?;
     eprintln!("recording: {}", outcome.event_log.display());
 

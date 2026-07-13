@@ -4,6 +4,7 @@ use std::{
     ffi::OsString,
     fs::{DirBuilder, Permissions},
     io::{Read, Write},
+    os::fd::{AsFd as _, OwnedFd},
     os::unix::fs::{DirBuilderExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
     sync::mpsc::{self, RecvTimeoutError},
@@ -12,15 +13,22 @@ use std::{
 };
 
 use nix::{
-    sys::signal::{Signal, killpg},
-    unistd::Pid,
+    poll::{PollFd, PollFlags, PollTimeout, poll},
+    sys::{
+        signal::{Signal, killpg},
+        termios::{SetArg, Termios, cfmakeraw, tcgetattr, tcsetattr},
+    },
+    unistd::{Pid, isatty, pipe, read as fd_read, write as fd_write},
 };
-use portable_pty::{Child, CommandBuilder, ExitStatus, PtySize, native_pty_system};
+use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
+use signal_hook::{consts::signal::SIGWINCH, iterator::Signals};
 use uuid::Uuid;
 
 use crate::{
     Error, Result,
-    event::{ByteString, Event, EventLogHeader, LifecycleKind},
+    event::{
+        ByteString, Event, EventLogHeader, InputKind, InputSource, LifecycleKind, OperationStatus,
+    },
     event_log::{EventLogWriter, SessionClock},
 };
 
@@ -48,6 +56,8 @@ pub struct RecordOptions {
     pub cell_height_px: u16,
     /// Terminal identity exposed to the child.
     pub term: String,
+    /// Forward standard input to the child PTY.
+    pub forward_stdin: bool,
 }
 
 /// Completed command information.
@@ -67,12 +77,63 @@ enum RuntimeMessage {
     Output(Vec<u8>),
     OutputClosed,
     ReadFailed(String),
+    Input(Vec<u8>),
+    InputClosed,
+    InputFailed(String),
+    Resize(TerminalGeometry),
+    ResizeFailed(String),
 }
 
 struct SpawnedCommand {
+    master: Box<dyn MasterPty + Send>,
     reader: Box<dyn Read + Send>,
+    writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
     pid: Option<u32>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct TerminalGeometry {
+    cols: u16,
+    rows: u16,
+    pixel_width: u16,
+    pixel_height: u16,
+}
+
+impl From<PtySize> for TerminalGeometry {
+    fn from(size: PtySize) -> Self {
+        Self {
+            cols: size.cols,
+            rows: size.rows,
+            pixel_width: size.pixel_width,
+            pixel_height: size.pixel_height,
+        }
+    }
+}
+
+impl From<TerminalGeometry> for PtySize {
+    fn from(geometry: TerminalGeometry) -> Self {
+        Self {
+            rows: geometry.rows,
+            cols: geometry.cols,
+            pixel_width: geometry.pixel_width,
+            pixel_height: geometry.pixel_height,
+        }
+    }
+}
+
+struct InputWorker {
+    cancel: OwnedFd,
+    thread: thread::JoinHandle<()>,
+}
+
+struct TerminalModeGuard {
+    original: Option<Termios>,
+}
+
+struct ResizeWorker {
+    handle: signal_hook::iterator::Handle,
+    thread: thread::JoinHandle<()>,
 }
 
 struct RuntimeOutcome {
@@ -89,7 +150,9 @@ struct RuntimeOutcome {
 /// the canonical event log cannot be durably committed.
 pub fn record(options: &RecordOptions) -> Result<RecordOutcome> {
     let stdout = std::io::stdout();
-    record_to(options, &mut stdout.lock())
+    let mut terminal_mode = TerminalModeGuard::enter(options.forward_stdin)?;
+    let result = record_to(options, &mut stdout.lock());
+    finish_with_cleanup(result, terminal_mode.restore())
 }
 
 fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordOutcome> {
@@ -101,6 +164,8 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         clock.started_unix_ns(),
         options.cols,
         options.rows,
+        pty_size.pixel_width,
+        pty_size.pixel_height,
         &options.term,
     );
     let event_log_path = options.output_directory.join("events.jsonl");
@@ -115,7 +180,13 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         let _ = spawned.child.kill();
         return Err(error);
     }
-    let runtime = match consume_runtime(&mut spawned, &mut event_log, output) {
+    let runtime = match consume_runtime(
+        &mut spawned,
+        &mut event_log,
+        output,
+        options.forward_stdin,
+        TerminalGeometry::from(pty_size),
+    ) {
         Ok(runtime) => runtime,
         Err(error) => {
             terminate_process_group(spawned.pid);
@@ -182,22 +253,40 @@ fn spawn_command(options: &RecordOptions, pty_size: PtySize) -> Result<SpawnedCo
         .master
         .try_clone_reader()
         .map_err(|error| terminal_error("clone PTY reader", error.to_string()))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|error| terminal_error("take PTY writer", error.to_string()))?;
     let child = pair
         .slave
         .spawn_command(command)
         .map_err(|error| terminal_error("spawn terminal command", error.to_string()))?;
     drop(pair.slave);
     let pid = child.process_id();
-    Ok(SpawnedCommand { reader, child, pid })
+    Ok(SpawnedCommand {
+        master: pair.master,
+        reader,
+        writer,
+        child,
+        pid,
+    })
 }
 
 fn consume_runtime(
     spawned: &mut SpawnedCommand,
     event_log: &mut EventLogWriter,
     output: &mut impl Write,
+    forward_stdin: bool,
+    initial_geometry: TerminalGeometry,
 ) -> Result<RuntimeOutcome> {
+    let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
     let reader = std::mem::replace(&mut spawned.reader, Box::new(std::io::empty()));
-    let (receiver, reader_thread) = spawn_reader(reader)?;
+    let reader_thread = spawn_reader(reader, sender.clone())?;
+    let input_worker = forward_stdin
+        .then(|| spawn_input(sender.clone()))
+        .transpose()?;
+    let resize_worker = spawn_resize(sender.clone(), initial_geometry)?;
+    drop(sender);
 
     let mut output_closed = false;
     let mut exit_status = None;
@@ -211,7 +300,7 @@ fn consume_runtime(
                 Ok(RuntimeMessage::Output(data)) => {
                     output_bytes =
                         output_bytes.saturating_add(u64::try_from(data.len()).unwrap_or(u64::MAX));
-                    event_log.append(Event::Output {
+                    event_log.append_buffered(Event::Output {
                         data: ByteString::from(data.as_slice()),
                     })?;
                     output
@@ -232,13 +321,26 @@ fn consume_runtime(
                 Ok(RuntimeMessage::ReadFailed(reason)) => {
                     return Err(terminal_error("read PTY output", reason));
                 }
+                Ok(RuntimeMessage::Input(data)) => {
+                    apply_input(spawned.writer.as_mut(), event_log, &data)?;
+                }
+                Ok(RuntimeMessage::InputFailed(reason)) => {
+                    return Err(terminal_error("read standard input", reason));
+                }
+                Ok(RuntimeMessage::Resize(geometry)) => {
+                    apply_resize(spawned.master.as_mut(), event_log, geometry)?;
+                }
+                Ok(RuntimeMessage::ResizeFailed(reason)) => {
+                    return Err(terminal_error("read terminal geometry", reason));
+                }
                 Err(RecvTimeoutError::Disconnected) if !output_closed => {
                     return Err(terminal_error(
                         "receive runtime event",
                         "PTY reader disconnected before reporting closure",
                     ));
                 }
-                Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => {}
+                Ok(RuntimeMessage::InputClosed)
+                | Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => {}
             }
 
             if exit_status.is_none() {
@@ -269,11 +371,14 @@ fn consume_runtime(
         terminate_process_group(spawned.pid);
         let _ = spawned.child.kill();
     }
-    let join_result = reader_thread
+    let input_stop = input_worker.map_or(Ok(()), InputWorker::stop);
+    let resize_stop = resize_worker.map_or(Ok(()), ResizeWorker::stop);
+    let reader_join = reader_thread
         .join()
         .map_err(|_| terminal_error("join PTY reader", "reader thread panicked"));
-    let status = result?;
-    join_result?;
+    let result = finish_with_cleanup(result, input_stop);
+    let result = finish_with_cleanup(result, resize_stop);
+    let status = finish_with_cleanup(result, reader_join)?;
 
     Ok(RuntimeOutcome {
         status,
@@ -283,8 +388,8 @@ fn consume_runtime(
 
 fn spawn_reader(
     mut reader: Box<dyn Read + Send>,
-) -> Result<(mpsc::Receiver<RuntimeMessage>, thread::JoinHandle<()>)> {
-    let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
+    sender: mpsc::SyncSender<RuntimeMessage>,
+) -> Result<thread::JoinHandle<()>> {
     let thread = thread::Builder::new()
         .name("termtrace-pty-reader".to_owned())
         .spawn(move || {
@@ -317,7 +422,309 @@ fn spawn_reader(
             }
         })
         .map_err(|error| terminal_error("spawn PTY reader", error.to_string()))?;
-    Ok((receiver, thread))
+    Ok(thread)
+}
+
+fn spawn_input(sender: mpsc::SyncSender<RuntimeMessage>) -> Result<InputWorker> {
+    let (cancel_read, cancel) = pipe()
+        .map_err(|error| terminal_error("create input cancellation pipe", error.to_string()))?;
+    let thread = thread::Builder::new()
+        .name("termtrace-stdin-reader".to_owned())
+        .spawn(move || input_loop(&cancel_read, &sender))
+        .map_err(|error| terminal_error("spawn standard-input reader", error.to_string()))?;
+    Ok(InputWorker { cancel, thread })
+}
+
+fn spawn_resize(
+    sender: mpsc::SyncSender<RuntimeMessage>,
+    initial: TerminalGeometry,
+) -> Result<Option<ResizeWorker>> {
+    let stdin = std::io::stdin();
+    if !isatty(&stdin)
+        .map_err(|error| terminal_error("inspect standard input", error.to_string()))?
+    {
+        return Ok(None);
+    }
+    let mut signals = Signals::new([SIGWINCH])
+        .map_err(|error| terminal_error("listen for terminal resize", error.to_string()))?;
+    let handle = signals.handle();
+    let thread = thread::Builder::new()
+        .name("termtrace-resize-listener".to_owned())
+        .spawn(move || {
+            let stdin = std::io::stdin();
+            let mut previous = initial;
+            for _ in signals.forever() {
+                match rustix::termios::tcgetwinsize(&stdin) {
+                    Ok(size) => {
+                        let Some(geometry) = geometry_from_winsize(size, initial) else {
+                            continue;
+                        };
+                        if geometry != previous {
+                            previous = geometry;
+                            if sender.send(RuntimeMessage::Resize(geometry)).is_err() {
+                                return;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        let _ = sender.send(RuntimeMessage::ResizeFailed(error.to_string()));
+                        return;
+                    }
+                }
+            }
+        })
+        .map_err(|error| terminal_error("spawn terminal-resize listener", error.to_string()))?;
+    Ok(Some(ResizeWorker { handle, thread }))
+}
+
+fn geometry_from_winsize(
+    size: rustix::termios::Winsize,
+    fallback: TerminalGeometry,
+) -> Option<TerminalGeometry> {
+    if size.ws_col == 0 || size.ws_row == 0 {
+        return None;
+    }
+    let cell_width = fallback.pixel_width.checked_div(fallback.cols)?.max(1);
+    let cell_height = fallback.pixel_height.checked_div(fallback.rows)?.max(1);
+    Some(TerminalGeometry {
+        cols: size.ws_col,
+        rows: size.ws_row,
+        pixel_width: if size.ws_xpixel == 0 {
+            size.ws_col.saturating_mul(cell_width)
+        } else {
+            size.ws_xpixel
+        },
+        pixel_height: if size.ws_ypixel == 0 {
+            size.ws_row.saturating_mul(cell_height)
+        } else {
+            size.ws_ypixel
+        },
+    })
+}
+
+fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
+    let stdin = std::io::stdin();
+    let mut buffer = [0_u8; READ_BUFFER_BYTES];
+    loop {
+        let mut descriptors = [
+            PollFd::new(stdin.as_fd(), PollFlags::POLLIN),
+            PollFd::new(cancel.as_fd(), PollFlags::POLLIN),
+        ];
+        match poll(&mut descriptors, PollTimeout::NONE) {
+            Ok(_) => {}
+            Err(nix::errno::Errno::EINTR) => continue,
+            Err(error) => {
+                let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
+                return;
+            }
+        }
+        if poll_ready(&descriptors[1]) {
+            return;
+        }
+        if !poll_ready(&descriptors[0]) {
+            continue;
+        }
+        match fd_read(&stdin, &mut buffer) {
+            Ok(0) => {
+                let _ = sender.send(RuntimeMessage::InputClosed);
+                return;
+            }
+            Ok(length) => {
+                if sender
+                    .send(RuntimeMessage::Input(buffer[..length].to_vec()))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            Err(nix::errno::Errno::EINTR) => {}
+            Err(error) => {
+                let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
+                return;
+            }
+        }
+    }
+}
+
+fn poll_ready(descriptor: &PollFd<'_>) -> bool {
+    descriptor
+        .revents()
+        .unwrap_or(PollFlags::empty())
+        .intersects(
+            PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR | PollFlags::POLLNVAL,
+        )
+}
+
+fn apply_input(writer: &mut dyn Write, event_log: &mut EventLogWriter, data: &[u8]) -> Result<()> {
+    let operation_id = Uuid::now_v7();
+    event_log.append(Event::InputIntent {
+        operation_id,
+        source: InputSource::Human,
+        input_kind: InputKind::Raw,
+        data: ByteString::from(data),
+        intent: None,
+    })?;
+    let (bytes_written, write_error) = write_input(writer, data);
+    let status = if write_error.is_some() {
+        OperationStatus::Failed
+    } else {
+        OperationStatus::Applied
+    };
+    let error_code = write_error.as_ref().map(io_error_code);
+    let result_write = event_log
+        .append(Event::InputResult {
+            operation_id,
+            status,
+            bytes_written,
+            error_code,
+        })
+        .map(|_| ());
+    let Some(error) = write_error else {
+        return result_write;
+    };
+    finish_with_cleanup(
+        Err(terminal_error("write PTY input", error.to_string())),
+        result_write,
+    )
+}
+
+fn apply_resize(
+    master: &mut dyn MasterPty,
+    event_log: &mut EventLogWriter,
+    geometry: TerminalGeometry,
+) -> Result<()> {
+    let operation_id = Uuid::now_v7();
+    event_log.append(Event::ResizeIntent {
+        operation_id,
+        cols: geometry.cols,
+        rows: geometry.rows,
+        pixel_width: geometry.pixel_width,
+        pixel_height: geometry.pixel_height,
+    })?;
+    let resize_result = master.resize(geometry.into());
+    let status = if resize_result.is_ok() {
+        OperationStatus::Applied
+    } else {
+        OperationStatus::Failed
+    };
+    let result_write = event_log
+        .append(Event::ResizeResult {
+            operation_id,
+            status,
+            error_code: resize_result
+                .as_ref()
+                .err()
+                .map(|_| "pty_resize_failed".to_owned()),
+        })
+        .map(|_| ());
+    let Some(error) = resize_result.err() else {
+        return result_write;
+    };
+    finish_with_cleanup(
+        Err(terminal_error("resize child PTY", error.to_string())),
+        result_write,
+    )
+}
+
+fn write_input(writer: &mut dyn Write, data: &[u8]) -> (u64, Option<std::io::Error>) {
+    let mut offset = 0_usize;
+    while offset < data.len() {
+        match writer.write(&data[offset..]) {
+            Ok(0) => {
+                return (
+                    u64::try_from(offset).unwrap_or(u64::MAX),
+                    Some(std::io::Error::new(
+                        std::io::ErrorKind::WriteZero,
+                        "PTY accepted zero input bytes",
+                    )),
+                );
+            }
+            Ok(written) => offset = offset.saturating_add(written),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => return (u64::try_from(offset).unwrap_or(u64::MAX), Some(error)),
+        }
+    }
+    (u64::try_from(offset).unwrap_or(u64::MAX), None)
+}
+
+fn io_error_code(error: &std::io::Error) -> String {
+    error.raw_os_error().map_or_else(
+        || format!("io_{:?}", error.kind()).to_ascii_lowercase(),
+        |errno| format!("os_errno_{errno}"),
+    )
+}
+
+impl InputWorker {
+    fn stop(self) -> Result<()> {
+        let cancel_result = match fd_write(&self.cancel, b"x") {
+            Ok(_) | Err(nix::errno::Errno::EPIPE) => Ok(()),
+            Err(error) => Err(terminal_error(
+                "cancel standard-input reader",
+                error.to_string(),
+            )),
+        };
+        let join_result = self
+            .thread
+            .join()
+            .map_err(|_| terminal_error("join standard-input reader", "input thread panicked"));
+        finish_with_cleanup(cancel_result, join_result)
+    }
+}
+
+impl ResizeWorker {
+    fn stop(self) -> Result<()> {
+        self.handle.close();
+        self.thread
+            .join()
+            .map_err(|_| terminal_error("join terminal-resize listener", "resize thread panicked"))
+    }
+}
+
+impl TerminalModeGuard {
+    fn enter(enabled: bool) -> Result<Self> {
+        let stdin = std::io::stdin();
+        if !enabled
+            || !isatty(&stdin)
+                .map_err(|error| terminal_error("inspect standard input", error.to_string()))?
+        {
+            return Ok(Self { original: None });
+        }
+        let original = tcgetattr(&stdin)
+            .map_err(|error| terminal_error("read terminal mode", error.to_string()))?;
+        let mut raw = original.clone();
+        cfmakeraw(&mut raw);
+        tcsetattr(&stdin, SetArg::TCSANOW, &raw)
+            .map_err(|error| terminal_error("enter raw terminal mode", error.to_string()))?;
+        Ok(Self {
+            original: Some(original),
+        })
+    }
+
+    fn restore(&mut self) -> Result<()> {
+        let Some(original) = self.original.take() else {
+            return Ok(());
+        };
+        tcsetattr(std::io::stdin(), SetArg::TCSANOW, &original)
+            .map_err(|error| terminal_error("restore terminal mode", error.to_string()))
+    }
+}
+
+impl Drop for TerminalModeGuard {
+    fn drop(&mut self) {
+        let _ = self.restore();
+    }
+}
+
+fn finish_with_cleanup<T>(primary: Result<T>, cleanup: Result<()>) -> Result<T> {
+    match (primary, cleanup) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Ok(_), Err(cleanup)) => Err(cleanup),
+        (Err(primary), Ok(())) => Err(primary),
+        (Err(primary), Err(cleanup)) => Err(Error::CleanupFailed {
+            primary: Box::new(primary),
+            cleanup: Box::new(cleanup),
+        }),
+    }
 }
 
 fn create_session_directory(path: &Path) -> Result<()> {
@@ -394,6 +801,7 @@ mod tests {
             cell_width_px: 9,
             cell_height_px: 18,
             term: "xterm-ghostty".to_owned(),
+            forward_stdin: false,
         };
 
         let mut mirrored_output = Vec::new();
@@ -453,6 +861,7 @@ mod tests {
             cell_width_px: 9,
             cell_height_px: 18,
             term: "xterm-ghostty".to_owned(),
+            forward_stdin: false,
         };
 
         let error = record(&options).expect_err("existing directory must fail");
@@ -475,6 +884,7 @@ mod tests {
             cell_width_px: 9,
             cell_height_px: 18,
             term: "xterm-ghostty".to_owned(),
+            forward_stdin: false,
         };
         let started = Instant::now();
         let mut output = Vec::new();

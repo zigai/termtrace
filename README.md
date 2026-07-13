@@ -14,7 +14,7 @@ The raw event log is authoritative. Videos, screenshots, text, JSON, VT, and HTM
 
 Termtrace is under active development. The architecture and acceptance criteria are documented in [Architecture](docs/architecture.md).
 
-The first functional recording path is available for non-interactive commands:
+The functional PTY proxy supports both interactive and non-interactive commands:
 
 ```bash
 cargo run -- record \
@@ -24,7 +24,9 @@ cargo run -- record \
   -- your-command --argument
 ```
 
-Command output is mirrored unchanged. The child receives a real PTY with `TERM=xterm-ghostty` and `COLORTERM=truecolor`; the command's exit status is propagated. The new owner-only session directory contains an integrity-chained `events.jsonl` recording with raw bytes encoded as Base64.
+Command output is mirrored unchanged. Standard input is forwarded in raw mode, outer-terminal resizes are propagated, and host terminal settings are restored on every normal and error path. Use `--no-input` for a detached producer. The child receives a real PTY with `TERM=xterm-ghostty` and `COLORTERM=truecolor`; the command's exit status is propagated.
+
+The new owner-only session directory contains an integrity-chained `events.jsonl` recording with raw bytes encoded as Base64. Inputs and resizes are represented by durable intent/result pairs. A crash between the pair is reported as uncertain, never silently retried. High-volume output is buffered between durable control boundaries so recording does not add an `fsync` pause to every PTY read.
 
 Termtrace refuses to reuse an existing session directory. This prevents accidental evidence loss and makes every run independently auditable.
 

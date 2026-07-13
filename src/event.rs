@@ -92,6 +92,10 @@ pub struct EventLogHeader {
     pub cols: u16,
     /// Initial terminal rows.
     pub rows: u16,
+    /// Initial terminal pixel width.
+    pub pixel_width: u16,
+    /// Initial terminal pixel height.
+    pub pixel_height: u16,
     /// Terminal identity exposed to the child process.
     pub term: String,
 }
@@ -103,6 +107,8 @@ impl EventLogHeader {
         started_unix_ns: u128,
         cols: u16,
         rows: u16,
+        pixel_width: u16,
+        pixel_height: u16,
         term: impl Into<String>,
     ) -> Self {
         Self {
@@ -112,6 +118,8 @@ impl EventLogHeader {
             started_unix_ns,
             cols,
             rows,
+            pixel_width,
+            pixel_height,
             term: term.into(),
         }
     }
@@ -206,10 +214,10 @@ pub enum Event {
         cols: u16,
         /// Rows after the resize.
         rows: u16,
-        /// Cell width reported to the child, in pixels.
-        cell_width_px: u16,
-        /// Cell height reported to the child, in pixels.
-        cell_height_px: u16,
+        /// Total pixel width reported to the child.
+        pixel_width: u16,
+        /// Total pixel height reported to the child.
+        pixel_height: u16,
     },
     /// Result of one resize intent.
     ResizeResult {

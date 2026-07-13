@@ -69,6 +69,7 @@ pub struct EventLogWriter {
     clock: SessionClock,
     next_seq: u64,
     previous_hash: Hash,
+    poisoned: bool,
 }
 
 impl EventLogWriter {
@@ -127,6 +128,7 @@ impl EventLogWriter {
             clock,
             next_seq: 0,
             previous_hash,
+            poisoned: false,
         })
     }
 
@@ -140,8 +142,36 @@ impl EventLogWriter {
         self.append_at(self.clock.elapsed_ns(), event)
     }
 
+    /// Append an event without an immediate `fsync`.
+    ///
+    /// Buffered events become durable with the next [`Self::append`] call.
+    /// This is intended for high-volume PTY output; control intents and results
+    /// must use [`Self::append`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when serialization or buffered writing fails, or when
+    /// an earlier I/O failure poisoned the writer.
+    pub fn append_buffered(&mut self, event: Event) -> Result<u64> {
+        self.append_at_policy(self.clock.elapsed_ns(), event, false)
+    }
+
     fn append_at(&mut self, monotonic_ns: u64, event: Event) -> Result<u64> {
+        self.append_at_policy(monotonic_ns, event, true)
+    }
+
+    fn append_at_policy(&mut self, monotonic_ns: u64, event: Event, durable: bool) -> Result<u64> {
+        if self.poisoned {
+            return Err(Error::EventLogPoisoned {
+                path: self.path.clone(),
+            });
+        }
         let seq = self.next_seq;
+        let next_seq = seq.checked_add(1).ok_or_else(|| Error::InvalidEventLog {
+            path: self.path.clone(),
+            line: seq.saturating_add(2),
+            reason: "event sequence overflow".to_owned(),
+        })?;
         let body = EventBody {
             seq,
             monotonic_ns,
@@ -166,24 +196,26 @@ impl EventLogWriter {
             source,
         })?;
 
-        self.writer
+        let write_result = self
+            .writer
             .write_all(&record_bytes)
-            .and_then(|()| self.writer.write_all(b"\n"))
-            .and_then(|()| self.writer.flush())
-            .and_then(|()| self.writer.get_ref().sync_data())
-            .map_err(|source| Error::Filesystem {
+            .and_then(|()| self.writer.write_all(b"\n"));
+        let write_result = if durable {
+            write_result
+                .and_then(|()| self.writer.flush())
+                .and_then(|()| self.writer.get_ref().sync_data())
+        } else {
+            write_result
+        };
+        if let Err(source) = write_result {
+            self.poisoned = true;
+            return Err(Error::Filesystem {
                 path: self.path.clone(),
                 source,
-            })?;
+            });
+        }
 
-        self.next_seq = self
-            .next_seq
-            .checked_add(1)
-            .ok_or_else(|| Error::InvalidEventLog {
-                path: self.path.clone(),
-                line: seq.saturating_add(2),
-                reason: "event sequence overflow".to_owned(),
-            })?;
+        self.next_seq = next_seq;
         self.previous_hash = hash;
         Ok(seq)
     }
@@ -596,6 +628,8 @@ mod tests {
             clock.started_unix_ns(),
             120,
             40,
+            1080,
+            720,
             "xterm-ghostty",
         )
     }

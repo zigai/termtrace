@@ -111,6 +111,28 @@ pub enum Error {
         /// Cell height in pixels.
         cell_height_px: u16,
     },
+
+    /// Cleanup failed after a primary runtime failure.
+    #[error("{primary}; cleanup also failed: {cleanup}")]
+    #[diagnostic(code(termtrace::cleanup_failed))]
+    CleanupFailed {
+        /// Failure that caused the operation to stop.
+        #[source]
+        primary: Box<Error>,
+        /// Independent failure encountered while restoring host state.
+        cleanup: Box<Error>,
+    },
+
+    /// An event-log writer cannot safely continue after a partial I/O failure.
+    #[error("event log writer for `{path}` is poisoned by an earlier I/O failure")]
+    #[diagnostic(
+        code(termtrace::event_log_poisoned),
+        help("Stop the session and preserve the recording for prefix recovery")
+    )]
+    EventLogPoisoned {
+        /// Event-log path.
+        path: PathBuf,
+    },
 }
 
 /// Result type used throughout Termtrace.
