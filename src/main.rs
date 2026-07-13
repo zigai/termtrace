@@ -313,7 +313,11 @@ fn init_diagnostics(level: tracing::Level) {
     tracing_subscriber::registry()
         .with(filter)
         .with(tracing_error::ErrorLayer::default())
-        .with(tracing_subscriber::fmt::layer().with_target(false))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_writer(std::io::stderr),
+        )
         .init();
 }
 
