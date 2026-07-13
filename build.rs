@@ -1,38 +1,52 @@
-//! Generate bindings and link the pinned libghostty-vt build.
+//! Link the pinned libghostty-vt build.
 
-use std::{env, path::PathBuf};
+use std::{env, error::Error, io, path::PathBuf};
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=TERMTRACE_GHOSTTY_PREFIX");
     println!("cargo:rerun-if-changed=vendor/ghostty/.git");
+    println!("cargo:rerun-if-changed=src/ghostty_vt/bindings.rs");
 
-    let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"));
-    let prefix = env::var_os("TERMTRACE_GHOSTTY_PREFIX")
-        .map_or_else(|| root.join("vendor/ghostty/zig-out"), PathBuf::from);
+    let Some(manifest_dir) = env::var_os("CARGO_MANIFEST_DIR") else {
+        return Err(io::Error::other("CARGO_MANIFEST_DIR is not set").into());
+    };
+    let root = PathBuf::from(manifest_dir);
+    let external_prefix = env::var_os("TERMTRACE_GHOSTTY_PREFIX");
+    let prefix = external_prefix.as_ref().map_or_else(
+        || {
+            return root.join("vendor/ghostty/zig-out");
+        },
+        |value| {
+            return PathBuf::from(value);
+        },
+    );
     let include = prefix.join("include");
     let header = include.join("ghostty/vt.h");
     let library = prefix.join("lib/libghostty-vt.a");
-    assert!(
-        header.is_file() && library.is_file(),
-        "pinned libghostty-vt is not built; run scripts/bootstrap-ghostty-vt.sh"
-    );
+    println!("cargo:rerun-if-changed={}", header.display());
+    println!("cargo:rerun-if-changed={}", library.display());
 
-    let bindings = bindgen::Builder::default()
-        .header(header.display().to_string())
-        .clang_arg(format!("-I{}", include.display()))
-        .allowlist_function("ghostty_.*")
-        .allowlist_type("Ghostty.*")
-        .allowlist_var("GHOSTTY_.*")
-        .derive_debug(true)
-        .derive_default(true)
-        .generate_comments(true)
-        .layout_tests(false)
-        .generate()
-        .expect("generate pinned libghostty-vt bindings");
-    let output = PathBuf::from(env::var_os("OUT_DIR").expect("build output directory"));
-    bindings
-        .write_to_file(output.join("ghostty_vt_bindings.rs"))
-        .expect("write libghostty-vt bindings");
+    if !header.is_file() || !library.is_file() {
+        let message = if external_prefix.is_some() {
+            format!(
+                "TERMTRACE_GHOSTTY_PREFIX does not contain a compatible libghostty-vt\n\
+                 expected header: {}\n\
+                 expected library: {}",
+                header.display(),
+                library.display()
+            )
+        } else {
+            format!(
+                "pinned libghostty-vt is not ready\n\
+                 run `scripts/bootstrap.sh` from the repository root\n\
+                 expected header: {}\n\
+                 expected library: {}",
+                header.display(),
+                library.display()
+            )
+        };
+        return Err(message.into());
+    }
 
     println!(
         "cargo:rustc-link-search=native={}",
@@ -42,4 +56,5 @@ fn main() {
     println!("cargo:rustc-link-lib=dylib=m");
     println!("cargo:rustc-link-lib=dylib=dl");
     println!("cargo:rustc-link-lib=dylib=pthread");
+    return Ok(());
 }

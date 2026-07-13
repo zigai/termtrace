@@ -22,8 +22,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.91.1
         with:
           components: clippy,rustfmt
+      - id: ghostty
+        name: Read pinned Ghostty revision
+        run: echo "revision=$(git -C vendor/ghostty rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Cache Zig and libghostty-vt
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tools
+            vendor/ghostty/.zig-cache
+            vendor/ghostty/zig-out
+          key: ghostty-vt-${{ runner.os }}-${{ runner.arch }}-${{ steps.ghostty.outputs.revision }}-${{ hashFiles('scripts/bootstrap-ghostty-vt.sh') }}
       - uses: Swatinem/rust-cache@v2
-      - run: scripts/bootstrap-ghostty-vt.sh
+      - run: scripts/bootstrap.sh
       - run: bash -n scripts/*.sh demos/*.sh demos/apps/*.sh
       - run: python3 -m py_compile demos/apps/terminal_showcase.py
       - run: cargo fmt --all -- --check

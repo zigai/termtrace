@@ -6,6 +6,11 @@ readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ghostty="$root/vendor/ghostty"
 readonly tools="$root/.tools"
 
+if [[ "$(uname -s)" != Linux ]]; then
+  echo "libghostty-vt bootstrap currently supports Linux only" >&2
+  exit 2
+fi
+
 case "$(uname -m)" in
   x86_64)
     readonly zig_arch=x86_64
