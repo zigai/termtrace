@@ -37,6 +37,43 @@ pub enum Error {
         #[source]
         source: serde_json::Error,
     },
+
+    /// A recording violates the event-log format or integrity chain.
+    #[error("invalid event log `{path}` at line {line}: {reason}")]
+    #[diagnostic(
+        code(termtrace::invalid_event_log),
+        help(
+            "Preserve the original recording; valid events before the failure remain recoverable"
+        )
+    )]
+    InvalidEventLog {
+        /// Recording path.
+        path: PathBuf,
+        /// One-based line number.
+        line: u64,
+        /// Validation failure.
+        reason: String,
+    },
+
+    /// The system clock cannot be represented by the event format.
+    #[error("system clock is earlier than the Unix epoch")]
+    #[diagnostic(code(termtrace::clock_before_epoch))]
+    ClockBeforeEpoch,
+
+    /// A session artifact directory could expose sensitive terminal data.
+    #[error("insecure artifact directory `{path}` (owner uid {owner_uid}, mode {mode:#o})")]
+    #[diagnostic(
+        code(termtrace::insecure_artifact_directory),
+        help("Use a directory owned by the current user with mode 0700")
+    )]
+    InsecureArtifactDirectory {
+        /// Directory that failed validation.
+        path: PathBuf,
+        /// Filesystem owner user ID.
+        owner_uid: u32,
+        /// Permission bits.
+        mode: u32,
+    },
 }
 
 /// Result type used throughout Termtrace.
