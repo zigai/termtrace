@@ -2,9 +2,13 @@
 
 use std::{ffi::OsString, path::PathBuf, process::ExitCode};
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use miette::{IntoDiagnostic as _, Result};
-use termtrace::record::{RecordOptions, record};
+use termtrace::{
+    control::{ControlCommand, ProcessSignal, request},
+    event::ByteString,
+    record::{RecordOptions, record},
+};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Debug, Parser)]
@@ -27,6 +31,109 @@ enum Command {
     Version,
     /// Run a command in a PTY and preserve its byte-exact event stream.
     Record(RecordArgs),
+    /// Verify that a live session control socket is responsive.
+    Ping(SessionArgs),
+    /// Print machine-readable live session status.
+    Status(SessionArgs),
+    /// Send text or file bytes to a live child PTY.
+    Send(SendArgs),
+    /// Resize a live child PTY.
+    Resize(ResizeArgs),
+    /// Signal a live child process group.
+    Signal(SignalArgs),
+    /// Add a marker to a live session timeline.
+    Mark(MarkArgs),
+    /// Request graceful termination of a live session child.
+    Stop(SessionArgs),
+}
+
+#[derive(Debug, Args)]
+struct SessionArgs {
+    /// Live session directory containing `control.sock`.
+    #[arg(long)]
+    session: PathBuf,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("input")
+        .required(true)
+        .multiple(false)
+        .args(["text", "file"])
+))]
+struct SendArgs {
+    /// Live session directory.
+    #[arg(long)]
+    session: PathBuf,
+    /// UTF-8 text to send exactly, without an implicit newline.
+    #[arg(long)]
+    text: Option<String>,
+    /// File whose bytes are sent exactly.
+    #[arg(long)]
+    file: Option<PathBuf>,
+    /// Human-readable reason retained with the input event.
+    #[arg(long)]
+    intent: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct ResizeArgs {
+    /// Live session directory.
+    #[arg(long)]
+    session: PathBuf,
+    /// Terminal columns.
+    #[arg(long)]
+    cols: u16,
+    /// Terminal rows.
+    #[arg(long)]
+    rows: u16,
+    /// Total pixel width; defaults to columns multiplied by 9.
+    #[arg(long)]
+    pixel_width: Option<u16>,
+    /// Total pixel height; defaults to rows multiplied by 18.
+    #[arg(long)]
+    pixel_height: Option<u16>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliSignal {
+    Interrupt,
+    Terminate,
+    Hangup,
+    User1,
+    User2,
+}
+
+impl From<CliSignal> for ProcessSignal {
+    fn from(signal: CliSignal) -> Self {
+        match signal {
+            CliSignal::Interrupt => Self::Interrupt,
+            CliSignal::Terminate => Self::Terminate,
+            CliSignal::Hangup => Self::Hangup,
+            CliSignal::User1 => Self::User1,
+            CliSignal::User2 => Self::User2,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct SignalArgs {
+    /// Live session directory.
+    #[arg(long)]
+    session: PathBuf,
+    /// Allow-listed signal.
+    #[arg(long, value_enum)]
+    signal: CliSignal,
+}
+
+#[derive(Debug, Args)]
+struct MarkArgs {
+    /// Live session directory.
+    #[arg(long)]
+    session: PathBuf,
+    /// Marker label.
+    #[arg(long)]
+    label: String,
 }
 
 #[derive(Debug, Args)]
@@ -90,7 +197,65 @@ fn main() -> Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Record(arguments) => run_record(arguments),
+        Command::Ping(arguments) => run_control(arguments.session, ControlCommand::Ping),
+        Command::Status(arguments) => run_control(arguments.session, ControlCommand::Status),
+        Command::Send(arguments) => run_send(arguments),
+        Command::Resize(arguments) => run_resize(arguments),
+        Command::Signal(arguments) => run_control(
+            arguments.session,
+            ControlCommand::Signal {
+                signal: arguments.signal.into(),
+            },
+        ),
+        Command::Mark(arguments) => run_control(
+            arguments.session,
+            ControlCommand::Mark {
+                label: arguments.label,
+            },
+        ),
+        Command::Stop(arguments) => run_control(arguments.session, ControlCommand::Stop),
     }
+}
+
+fn run_control(session: PathBuf, command: ControlCommand) -> Result<ExitCode> {
+    let data = request(session, command)?;
+    println!("{}", serde_json::to_string(&data).into_diagnostic()?);
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_send(arguments: SendArgs) -> Result<ExitCode> {
+    let data = match (arguments.text, arguments.file) {
+        (Some(text), None) => text.into_bytes(),
+        (None, Some(path)) => fs_err::read(path).into_diagnostic()?,
+        (Some(_), Some(_)) | (None, None) => unreachable!("clap validates the input group"),
+    };
+    run_control(
+        arguments.session,
+        ControlCommand::Input {
+            data: ByteString::new(data),
+            intent: arguments.intent,
+        },
+    )
+}
+
+fn run_resize(arguments: ResizeArgs) -> Result<ExitCode> {
+    let pixel_width = arguments
+        .pixel_width
+        .or_else(|| arguments.cols.checked_mul(9))
+        .ok_or_else(|| miette::miette!("pixel width overflow; pass --pixel-width explicitly"))?;
+    let pixel_height = arguments
+        .pixel_height
+        .or_else(|| arguments.rows.checked_mul(18))
+        .ok_or_else(|| miette::miette!("pixel height overflow; pass --pixel-height explicitly"))?;
+    run_control(
+        arguments.session,
+        ControlCommand::Resize {
+            cols: arguments.cols,
+            rows: arguments.rows,
+            pixel_width,
+            pixel_height,
+        },
+    )
 }
 
 fn run_record(arguments: RecordArgs) -> Result<ExitCode> {

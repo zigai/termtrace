@@ -30,6 +30,24 @@ The new owner-only session directory contains an integrity-chained `events.jsonl
 
 Termtrace refuses to reuse an existing session directory. This prevents accidental evidence loss and makes every run independently auditable.
 
+## Live agent control
+
+Every active recording exposes an owner-only `control.sock` inside its session directory. Requests use bounded, newline-framed, versioned JSON and Linux peer credentials must match the recording owner. The CLI is a thin client:
+
+```bash
+termtrace status --session /tmp/example.termtrace
+termtrace send --session /tmp/example.termtrace \
+  --text $'inspect src\n' --intent 'run repository inspection'
+termtrace resize --session /tmp/example.termtrace --cols 120 --rows 36
+termtrace mark --session /tmp/example.termtrace --label before-build
+termtrace signal --session /tmp/example.termtrace --signal interrupt
+termtrace stop --session /tmp/example.termtrace
+```
+
+Use `termtrace send --file PATH` for arbitrary bytes. The Rust API also exposes `control::send_request`; retain and resend the same request UUID after a transport failure. The session actor returns the cached result and never applies that mutation twice. Reusing a UUID for a different command is rejected.
+
+The socket disappears when the child exits. Completed-session inspection reads the canonical log rather than pretending that a dead control endpoint is live.
+
 ## Development
 
 The repository pins its Rust toolchain. Validate a change with:

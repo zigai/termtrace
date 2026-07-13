@@ -73,6 +73,11 @@ pub struct EventLogWriter {
 }
 
 impl EventLogWriter {
+    /// Sequence number that will be assigned to the next event.
+    pub fn next_seq(&self) -> u64 {
+        self.next_seq
+    }
+
     /// Create a new owner-only event log and durably write its header.
     ///
     /// # Errors

@@ -260,6 +260,15 @@ pub enum Event {
         /// Component that generated the response.
         responder: String,
     },
+    /// Result of an agent control query.
+    ControlResponse {
+        /// Correlation identifier from the control request.
+        request_id: Uuid,
+        /// Stable command name.
+        command: String,
+        /// Structured response data.
+        response: serde_json::Value,
+    },
     /// A process or host lifecycle transition.
     Lifecycle {
         /// Transition kind.

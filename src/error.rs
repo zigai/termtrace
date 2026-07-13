@@ -133,6 +133,24 @@ pub enum Error {
         /// Event-log path.
         path: PathBuf,
     },
+
+    /// A control request or response violated the versioned protocol.
+    #[error("invalid control protocol message: {reason}")]
+    #[diagnostic(code(termtrace::invalid_control_protocol))]
+    InvalidControlProtocol {
+        /// Protocol validation failure.
+        reason: String,
+    },
+
+    /// A live session rejected a well-formed control request.
+    #[error("live session rejected control request `{code}`: {message}")]
+    #[diagnostic(code(termtrace::control_rejected))]
+    ControlRejected {
+        /// Stable machine-readable rejection code.
+        code: String,
+        /// Human-readable context.
+        message: String,
+    },
 }
 
 /// Result type used throughout Termtrace.

@@ -1,11 +1,13 @@
 //! One-shot PTY recording with byte-exact event persistence.
 
 use std::{
+    collections::HashMap,
     ffi::OsString,
     fs::{DirBuilder, Permissions},
-    io::{Read, Write},
+    io::{BufRead as _, BufReader, Read, Write},
     os::fd::{AsFd as _, OwnedFd},
     os::unix::fs::{DirBuilderExt as _, PermissionsExt as _},
+    os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
     sync::mpsc::{self, RecvTimeoutError},
     thread,
@@ -16,6 +18,7 @@ use nix::{
     poll::{PollFd, PollFlags, PollTimeout, poll},
     sys::{
         signal::{Signal, killpg},
+        socket::{getsockopt, sockopt::PeerCredentials},
         termios::{SetArg, Termios, cfmakeraw, tcgetattr, tcsetattr},
     },
     unistd::{Pid, isatty, pipe, read as fd_read, write as fd_write},
@@ -26,6 +29,10 @@ use uuid::Uuid;
 
 use crate::{
     Error, Result,
+    control::{
+        CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME, ControlCommand, ControlData, ControlRequest,
+        ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES, ProcessSignal, validate_frame,
+    },
     event::{
         ByteString, Event, EventLogHeader, InputKind, InputSource, LifecycleKind, OperationStatus,
     },
@@ -82,6 +89,11 @@ enum RuntimeMessage {
     InputFailed(String),
     Resize(TerminalGeometry),
     ResizeFailed(String),
+    Control {
+        request: ControlRequest,
+        response: mpsc::SyncSender<ControlResponse>,
+    },
+    ControlServerFailed(String),
 }
 
 struct SpawnedCommand {
@@ -136,8 +148,26 @@ struct ResizeWorker {
     thread: thread::JoinHandle<()>,
 }
 
+struct ControlWorker {
+    cancel: OwnedFd,
+    socket_path: PathBuf,
+    thread: thread::JoinHandle<()>,
+}
+
+struct RuntimeWorkers {
+    reader: thread::JoinHandle<()>,
+    input: Option<InputWorker>,
+    resize: Option<ResizeWorker>,
+    control: ControlWorker,
+}
+
 struct RuntimeOutcome {
     status: ExitStatus,
+    output_bytes: u64,
+}
+
+struct RuntimeProgress {
+    output_closed: bool,
     output_bytes: u64,
 }
 
@@ -186,6 +216,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         output,
         options.forward_stdin,
         TerminalGeometry::from(pty_size),
+        &options.output_directory,
     ) {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -278,69 +309,46 @@ fn consume_runtime(
     output: &mut impl Write,
     forward_stdin: bool,
     initial_geometry: TerminalGeometry,
+    session_directory: &Path,
 ) -> Result<RuntimeOutcome> {
     let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
     let reader = std::mem::replace(&mut spawned.reader, Box::new(std::io::empty()));
-    let reader_thread = spawn_reader(reader, sender.clone())?;
-    let input_worker = forward_stdin
-        .then(|| spawn_input(sender.clone()))
-        .transpose()?;
-    let resize_worker = spawn_resize(sender.clone(), initial_geometry)?;
+    let workers = RuntimeWorkers::start(
+        reader,
+        &sender,
+        forward_stdin,
+        initial_geometry,
+        session_directory,
+    )?;
     drop(sender);
 
-    let mut output_closed = false;
+    let mut progress = RuntimeProgress {
+        output_closed: false,
+        output_bytes: 0,
+    };
     let mut exit_status = None;
-    let mut output_bytes = 0_u64;
     let mut drain_deadline: Option<Instant> = None;
     let mut process_group_killed = false;
+    let mut control_history: HashMap<Uuid, (ControlCommand, ControlResponse)> = HashMap::new();
 
     let result = (|| {
-        while !output_closed || exit_status.is_none() {
+        while !progress.output_closed || exit_status.is_none() {
             match receiver.recv_timeout(Duration::from_millis(10)) {
-                Ok(RuntimeMessage::Output(data)) => {
-                    output_bytes =
-                        output_bytes.saturating_add(u64::try_from(data.len()).unwrap_or(u64::MAX));
-                    event_log.append_buffered(Event::Output {
-                        data: ByteString::from(data.as_slice()),
-                    })?;
-                    output
-                        .write_all(&data)
-                        .and_then(|()| output.flush())
-                        .map_err(|source| Error::Filesystem {
-                            path: PathBuf::from("<stdout>"),
-                            source,
-                        })?;
-                }
-                Ok(RuntimeMessage::OutputClosed) => {
-                    output_closed = true;
-                    event_log.append(Event::Lifecycle {
-                        lifecycle_kind: LifecycleKind::OutputClosed,
-                        pid: spawned.pid,
-                    })?;
-                }
-                Ok(RuntimeMessage::ReadFailed(reason)) => {
-                    return Err(terminal_error("read PTY output", reason));
-                }
-                Ok(RuntimeMessage::Input(data)) => {
-                    apply_input(spawned.writer.as_mut(), event_log, &data)?;
-                }
-                Ok(RuntimeMessage::InputFailed(reason)) => {
-                    return Err(terminal_error("read standard input", reason));
-                }
-                Ok(RuntimeMessage::Resize(geometry)) => {
-                    apply_resize(spawned.master.as_mut(), event_log, geometry)?;
-                }
-                Ok(RuntimeMessage::ResizeFailed(reason)) => {
-                    return Err(terminal_error("read terminal geometry", reason));
-                }
-                Err(RecvTimeoutError::Disconnected) if !output_closed => {
+                Ok(message) => process_runtime_message(
+                    message,
+                    spawned,
+                    event_log,
+                    output,
+                    &mut progress,
+                    &mut control_history,
+                )?,
+                Err(RecvTimeoutError::Disconnected) if !progress.output_closed => {
                     return Err(terminal_error(
                         "receive runtime event",
                         "PTY reader disconnected before reporting closure",
                     ));
                 }
-                Ok(RuntimeMessage::InputClosed)
-                | Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => {}
             }
 
             if exit_status.is_none() {
@@ -348,11 +356,13 @@ fn consume_runtime(
                     .child
                     .try_wait()
                     .map_err(|error| terminal_error("poll child", error.to_string()))?;
-                if exit_status.is_some() && !output_closed {
+                if exit_status.is_some() && !progress.output_closed {
                     drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
                 }
             }
-            if drain_deadline.is_some_and(|deadline| Instant::now() >= deadline) && !output_closed {
+            if drain_deadline.is_some_and(|deadline| Instant::now() >= deadline)
+                && !progress.output_closed
+            {
                 if process_group_killed {
                     return Err(terminal_error(
                         "drain PTY output",
@@ -371,19 +381,80 @@ fn consume_runtime(
         terminate_process_group(spawned.pid);
         let _ = spawned.child.kill();
     }
-    let input_stop = input_worker.map_or(Ok(()), InputWorker::stop);
-    let resize_stop = resize_worker.map_or(Ok(()), ResizeWorker::stop);
-    let reader_join = reader_thread
-        .join()
-        .map_err(|_| terminal_error("join PTY reader", "reader thread panicked"));
-    let result = finish_with_cleanup(result, input_stop);
-    let result = finish_with_cleanup(result, resize_stop);
-    let status = finish_with_cleanup(result, reader_join)?;
+    let status = workers.finish(result)?;
 
     Ok(RuntimeOutcome {
         status,
-        output_bytes,
+        output_bytes: progress.output_bytes,
     })
+}
+
+fn process_runtime_message(
+    message: RuntimeMessage,
+    spawned: &mut SpawnedCommand,
+    event_log: &mut EventLogWriter,
+    output: &mut impl Write,
+    progress: &mut RuntimeProgress,
+    control_history: &mut HashMap<Uuid, (ControlCommand, ControlResponse)>,
+) -> Result<()> {
+    match message {
+        RuntimeMessage::Output(data) => {
+            progress.output_bytes = progress
+                .output_bytes
+                .saturating_add(u64::try_from(data.len()).unwrap_or(u64::MAX));
+            event_log.append_buffered(Event::Output {
+                data: ByteString::from(data.as_slice()),
+            })?;
+            output
+                .write_all(&data)
+                .and_then(|()| output.flush())
+                .map_err(|source| Error::Filesystem {
+                    path: PathBuf::from("<stdout>"),
+                    source,
+                })?;
+        }
+        RuntimeMessage::OutputClosed => {
+            progress.output_closed = true;
+            event_log.append(Event::Lifecycle {
+                lifecycle_kind: LifecycleKind::OutputClosed,
+                pid: spawned.pid,
+            })?;
+        }
+        RuntimeMessage::ReadFailed(reason) => {
+            return Err(terminal_error("read PTY output", reason));
+        }
+        RuntimeMessage::Input(data) => apply_input(
+            spawned.writer.as_mut(),
+            event_log,
+            Uuid::now_v7(),
+            InputSource::Human,
+            InputKind::Raw,
+            None,
+            &data,
+        )?,
+        RuntimeMessage::InputClosed => {}
+        RuntimeMessage::InputFailed(reason) => {
+            return Err(terminal_error("read standard input", reason));
+        }
+        RuntimeMessage::Resize(geometry) => {
+            apply_resize(spawned.master.as_mut(), event_log, Uuid::now_v7(), geometry)?;
+        }
+        RuntimeMessage::ResizeFailed(reason) => {
+            return Err(terminal_error("read terminal geometry", reason));
+        }
+        RuntimeMessage::Control { request, response } => handle_control_request(
+            spawned,
+            event_log,
+            progress.output_bytes,
+            request,
+            &response,
+            control_history,
+        )?,
+        RuntimeMessage::ControlServerFailed(reason) => {
+            return Err(terminal_error("serve control socket", reason));
+        }
+    }
+    Ok(())
 }
 
 fn spawn_reader(
@@ -477,6 +548,188 @@ fn spawn_resize(
     Ok(Some(ResizeWorker { handle, thread }))
 }
 
+fn spawn_control_server(
+    session_directory: &Path,
+    sender: mpsc::SyncSender<RuntimeMessage>,
+) -> Result<ControlWorker> {
+    let socket_path = session_directory.join(CONTROL_SOCKET_NAME);
+    let listener = UnixListener::bind(&socket_path).map_err(|source| Error::Filesystem {
+        path: socket_path.clone(),
+        source,
+    })?;
+    fs_err::set_permissions(&socket_path, Permissions::from_mode(0o600)).map_err(|source| {
+        cleanup_failed_control_socket(
+            &socket_path,
+            Error::Filesystem {
+                path: socket_path.clone(),
+                source,
+            },
+        )
+    })?;
+    listener.set_nonblocking(true).map_err(|source| {
+        cleanup_failed_control_socket(
+            &socket_path,
+            Error::Filesystem {
+                path: socket_path.clone(),
+                source,
+            },
+        )
+    })?;
+    let (cancel_read, cancel) = pipe().map_err(|error| {
+        cleanup_failed_control_socket(
+            &socket_path,
+            terminal_error("create control cancellation pipe", error.to_string()),
+        )
+    })?;
+    let thread_socket_path = socket_path.clone();
+    let thread = thread::Builder::new()
+        .name("termtrace-control-server".to_owned())
+        .spawn(move || {
+            if let Err(error) = control_server_loop(&listener, &cancel_read, &sender) {
+                let _ = sender.send(RuntimeMessage::ControlServerFailed(error.to_string()));
+            }
+        })
+        .map_err(|error| {
+            cleanup_failed_control_socket(
+                &socket_path,
+                terminal_error("spawn control server", error.to_string()),
+            )
+        })?;
+    tracing::debug!(socket = %thread_socket_path.display(), "control socket ready");
+    Ok(ControlWorker {
+        cancel,
+        socket_path,
+        thread,
+    })
+}
+
+fn cleanup_failed_control_socket(socket_path: &Path, primary: Error) -> Error {
+    match fs_err::remove_file(socket_path) {
+        Ok(()) => primary,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => primary,
+        Err(source) => Error::CleanupFailed {
+            primary: Box::new(primary),
+            cleanup: Box::new(Error::Filesystem {
+                path: socket_path.to_path_buf(),
+                source,
+            }),
+        },
+    }
+}
+
+fn control_server_loop(
+    listener: &UnixListener,
+    cancel: &OwnedFd,
+    sender: &mpsc::SyncSender<RuntimeMessage>,
+) -> Result<()> {
+    loop {
+        let (listener_ready, cancel_ready) = {
+            let mut descriptors = [
+                PollFd::new(listener.as_fd(), PollFlags::POLLIN),
+                PollFd::new(cancel.as_fd(), PollFlags::POLLIN),
+            ];
+            match poll(&mut descriptors, PollTimeout::NONE) {
+                Ok(_) => (poll_ready(&descriptors[0]), poll_ready(&descriptors[1])),
+                Err(nix::errno::Errno::EINTR) => continue,
+                Err(error) => return Err(terminal_error("poll control socket", error.to_string())),
+            }
+        };
+        if cancel_ready {
+            return Ok(());
+        }
+        if !listener_ready {
+            continue;
+        }
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    if let Err(error) = handle_control_connection(stream, sender) {
+                        tracing::warn!(error = %error, "control connection rejected");
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(error) => {
+                    return Err(terminal_error(
+                        "accept control connection",
+                        error.to_string(),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+fn handle_control_connection(
+    mut stream: UnixStream,
+    sender: &mpsc::SyncSender<RuntimeMessage>,
+) -> Result<()> {
+    let credentials = getsockopt(&stream, PeerCredentials)
+        .map_err(|error| terminal_error("authenticate control peer", error.to_string()))?;
+    if credentials.uid() != nix::unistd::Uid::effective().as_raw() {
+        return Err(Error::ControlRejected {
+            code: "unauthorized_peer".to_owned(),
+            message: "control peer uid does not own this session".to_owned(),
+        });
+    }
+    let timeout = Some(Duration::from_secs(10));
+    stream
+        .set_read_timeout(timeout)
+        .and_then(|()| stream.set_write_timeout(timeout))
+        .map_err(|error| terminal_error("configure control connection", error.to_string()))?;
+    let mut encoded = Vec::new();
+    BufReader::new(
+        stream
+            .try_clone()
+            .map_err(|error| terminal_error("clone control connection", error.to_string()))?,
+    )
+    .take(MAX_CONTROL_MESSAGE_BYTES + 1)
+    .read_until(b'\n', &mut encoded)
+    .map_err(|error| terminal_error("read control request", error.to_string()))?;
+    validate_frame(&encoded)?;
+    let request: ControlRequest =
+        serde_json::from_slice(&encoded).map_err(|source| Error::InvalidJson {
+            path: PathBuf::from("<control-socket>"),
+            json_path: "$".to_owned(),
+            source,
+        })?;
+    if request.version != CONTROL_PROTOCOL_VERSION {
+        return write_control_response(
+            &mut stream,
+            &ControlResponse {
+                version: CONTROL_PROTOCOL_VERSION,
+                request_id: request.request_id,
+                result: ControlResult::Error {
+                    code: "unsupported_version".to_owned(),
+                    message: format!("protocol version {} is unsupported", request.version),
+                },
+            },
+        );
+    }
+    let (response_sender, response_receiver) = mpsc::sync_channel(1);
+    sender
+        .send(RuntimeMessage::Control {
+            request,
+            response: response_sender,
+        })
+        .map_err(|error| terminal_error("dispatch control request", error.to_string()))?;
+    let response = response_receiver
+        .recv_timeout(Duration::from_secs(10))
+        .map_err(|error| terminal_error("wait for control response", error.to_string()))?;
+    write_control_response(&mut stream, &response)
+}
+
+fn write_control_response(stream: &mut UnixStream, response: &ControlResponse) -> Result<()> {
+    serde_json::to_writer(&mut *stream, &response).map_err(|source| Error::InvalidJson {
+        path: PathBuf::from("<control-socket>"),
+        json_path: "$".to_owned(),
+        source,
+    })?;
+    stream
+        .write_all(b"\n")
+        .and_then(|()| stream.flush())
+        .map_err(|error| terminal_error("write control response", error.to_string()))
+}
+
 fn geometry_from_winsize(
     size: rustix::termios::Winsize,
     fallback: TerminalGeometry,
@@ -555,14 +808,273 @@ fn poll_ready(descriptor: &PollFd<'_>) -> bool {
         )
 }
 
-fn apply_input(writer: &mut dyn Write, event_log: &mut EventLogWriter, data: &[u8]) -> Result<()> {
-    let operation_id = Uuid::now_v7();
+fn handle_control_request(
+    spawned: &mut SpawnedCommand,
+    event_log: &mut EventLogWriter,
+    output_bytes: u64,
+    request: ControlRequest,
+    response_sender: &mpsc::SyncSender<ControlResponse>,
+    history: &mut HashMap<Uuid, (ControlCommand, ControlResponse)>,
+) -> Result<()> {
+    if let Some((original, response)) = history.get(&request.request_id) {
+        let response = if original == &request.command {
+            response.clone()
+        } else {
+            control_error_response(
+                request.request_id,
+                "request_id_collision",
+                "request identifier was already used for a different command",
+            )
+        };
+        let _ = response_sender.send(response);
+        return Ok(());
+    }
+
+    let outcome = execute_control_command(
+        spawned,
+        event_log,
+        output_bytes,
+        request.request_id,
+        &request.command,
+    );
+    let response = match &outcome {
+        Ok(data) => ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id: request.request_id,
+            result: ControlResult::Ok { data: data.clone() },
+        },
+        Err(error) => control_error_response(
+            request.request_id,
+            control_error_code(error),
+            error.to_string(),
+        ),
+    };
+    history.insert(request.request_id, (request.command, response.clone()));
+    if response_sender.send(response).is_err() {
+        tracing::warn!(request_id = %request.request_id, "control response receiver disconnected");
+    }
+    match outcome {
+        Ok(_) | Err(Error::ControlRejected { .. }) => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn execute_control_command(
+    spawned: &mut SpawnedCommand,
+    event_log: &mut EventLogWriter,
+    output_bytes: u64,
+    request_id: Uuid,
+    command: &ControlCommand,
+) -> Result<ControlData> {
+    match command {
+        ControlCommand::Ping => {
+            event_log.append(Event::ControlResponse {
+                request_id,
+                command: "ping".to_owned(),
+                response: serde_json::json!({"responsive": true}),
+            })?;
+            Ok(ControlData::Acknowledged)
+        }
+        ControlCommand::Status => {
+            let observed_seq = event_log.next_seq();
+            event_log.append(Event::ControlResponse {
+                request_id,
+                command: "status".to_owned(),
+                response: serde_json::json!({
+                    "pid": spawned.pid,
+                    "output_bytes": output_bytes,
+                    "observed_next_event_seq": observed_seq,
+                }),
+            })?;
+            Ok(ControlData::Status {
+                pid: spawned.pid,
+                output_bytes,
+                next_event_seq: event_log.next_seq(),
+            })
+        }
+        ControlCommand::Input { data, intent } => {
+            validate_control_input(data.as_bytes(), intent.as_deref())?;
+            apply_input(
+                spawned.writer.as_mut(),
+                event_log,
+                request_id,
+                InputSource::Agent,
+                InputKind::Raw,
+                intent.clone(),
+                data.as_bytes(),
+            )?;
+            Ok(ControlData::Acknowledged)
+        }
+        ControlCommand::Resize {
+            cols,
+            rows,
+            pixel_width,
+            pixel_height,
+        } => {
+            let geometry = TerminalGeometry {
+                cols: *cols,
+                rows: *rows,
+                pixel_width: *pixel_width,
+                pixel_height: *pixel_height,
+            };
+            validate_control_geometry(geometry)?;
+            apply_resize(spawned.master.as_mut(), event_log, request_id, geometry)?;
+            Ok(ControlData::Acknowledged)
+        }
+        ControlCommand::Signal { signal } => {
+            apply_signal(spawned.pid, event_log, request_id, *signal)?;
+            Ok(ControlData::Acknowledged)
+        }
+        ControlCommand::Mark { label } => {
+            let label = label.trim();
+            if label.is_empty() || label.len() > 256 {
+                return Err(control_rejected(
+                    "invalid_marker",
+                    "marker must contain 1 to 256 UTF-8 bytes",
+                ));
+            }
+            event_log.append(Event::Marker {
+                label: label.to_owned(),
+            })?;
+            Ok(ControlData::Acknowledged)
+        }
+        ControlCommand::Stop => {
+            apply_signal(spawned.pid, event_log, request_id, ProcessSignal::Terminate)?;
+            Ok(ControlData::Acknowledged)
+        }
+    }
+}
+
+fn validate_control_input(data: &[u8], intent: Option<&str>) -> Result<()> {
+    if data.is_empty() || data.len() > 64 * 1024 {
+        return Err(control_rejected(
+            "invalid_input",
+            "input must contain 1 to 65536 bytes",
+        ));
+    }
+    if intent.is_some_and(|value| value.len() > 1024) {
+        return Err(control_rejected(
+            "invalid_intent",
+            "input intent must not exceed 1024 UTF-8 bytes",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_control_geometry(geometry: TerminalGeometry) -> Result<()> {
+    if geometry.cols == 0
+        || geometry.rows == 0
+        || geometry.pixel_width == 0
+        || geometry.pixel_height == 0
+    {
+        return Err(control_rejected(
+            "invalid_geometry",
+            "columns, rows, pixel width, and pixel height must be non-zero",
+        ));
+    }
+    Ok(())
+}
+
+fn apply_signal(
+    pid: Option<u32>,
+    event_log: &mut EventLogWriter,
+    operation_id: Uuid,
+    signal: ProcessSignal,
+) -> Result<()> {
+    let (signal, name) = nix_signal(signal);
+    event_log.append(Event::SignalIntent {
+        operation_id,
+        number: signal as i32,
+        name: name.to_owned(),
+    })?;
+    let signal_result = pid
+        .and_then(|value| i32::try_from(value).ok())
+        .ok_or(nix::errno::Errno::ESRCH)
+        .and_then(|value| killpg(Pid::from_raw(value), signal));
+    let status = if signal_result.is_ok() {
+        OperationStatus::Applied
+    } else {
+        OperationStatus::Failed
+    };
+    let result_write = event_log
+        .append(Event::SignalResult {
+            operation_id,
+            status,
+            error_code: signal_result
+                .as_ref()
+                .err()
+                .map(|error| format!("os_errno_{}", *error as i32)),
+        })
+        .map(|_| ());
+    let Some(error) = signal_result.err() else {
+        return result_write;
+    };
+    finish_with_cleanup(
+        Err(terminal_error(
+            "signal child process group",
+            error.to_string(),
+        )),
+        result_write,
+    )
+}
+
+fn nix_signal(signal: ProcessSignal) -> (Signal, &'static str) {
+    match signal {
+        ProcessSignal::Interrupt => (Signal::SIGINT, "SIGINT"),
+        ProcessSignal::Terminate => (Signal::SIGTERM, "SIGTERM"),
+        ProcessSignal::Hangup => (Signal::SIGHUP, "SIGHUP"),
+        ProcessSignal::User1 => (Signal::SIGUSR1, "SIGUSR1"),
+        ProcessSignal::User2 => (Signal::SIGUSR2, "SIGUSR2"),
+    }
+}
+
+fn control_error_response(
+    request_id: Uuid,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> ControlResponse {
+    ControlResponse {
+        version: CONTROL_PROTOCOL_VERSION,
+        request_id,
+        result: ControlResult::Error {
+            code: code.into(),
+            message: message.into(),
+        },
+    }
+}
+
+fn control_error_code(error: &Error) -> &str {
+    match error {
+        Error::ControlRejected { code, .. } => code,
+        Error::EventLogPoisoned { .. } | Error::InvalidEventLog { .. } => "event_log_failed",
+        Error::Filesystem { .. } => "io_failed",
+        Error::TerminalOperation { .. } => "terminal_operation_failed",
+        _ => "internal_error",
+    }
+}
+
+fn control_rejected(code: &str, message: &str) -> Error {
+    Error::ControlRejected {
+        code: code.to_owned(),
+        message: message.to_owned(),
+    }
+}
+
+fn apply_input(
+    writer: &mut dyn Write,
+    event_log: &mut EventLogWriter,
+    operation_id: Uuid,
+    source: InputSource,
+    input_kind: InputKind,
+    intent: Option<String>,
+    data: &[u8],
+) -> Result<()> {
     event_log.append(Event::InputIntent {
         operation_id,
-        source: InputSource::Human,
-        input_kind: InputKind::Raw,
+        source,
+        input_kind,
         data: ByteString::from(data),
-        intent: None,
+        intent,
     })?;
     let (bytes_written, write_error) = write_input(writer, data);
     let status = if write_error.is_some() {
@@ -591,9 +1103,9 @@ fn apply_input(writer: &mut dyn Write, event_log: &mut EventLogWriter, data: &[u
 fn apply_resize(
     master: &mut dyn MasterPty,
     event_log: &mut EventLogWriter,
+    operation_id: Uuid,
     geometry: TerminalGeometry,
 ) -> Result<()> {
-    let operation_id = Uuid::now_v7();
     event_log.append(Event::ResizeIntent {
         operation_id,
         cols: geometry.cols,
@@ -677,6 +1189,87 @@ impl ResizeWorker {
         self.thread
             .join()
             .map_err(|_| terminal_error("join terminal-resize listener", "resize thread panicked"))
+    }
+}
+
+impl ControlWorker {
+    fn stop(self) -> Result<()> {
+        let cancel_result = match fd_write(&self.cancel, b"x") {
+            Ok(_) | Err(nix::errno::Errno::EPIPE) => Ok(()),
+            Err(error) => Err(terminal_error("cancel control server", error.to_string())),
+        };
+        let join_result = self
+            .thread
+            .join()
+            .map_err(|_| terminal_error("join control server", "control thread panicked"));
+        let remove_result = match fs_err::remove_file(&self.socket_path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(Error::Filesystem {
+                path: self.socket_path,
+                source,
+            }),
+        };
+        let result = finish_with_cleanup(cancel_result, join_result);
+        finish_with_cleanup(result, remove_result)
+    }
+}
+
+impl RuntimeWorkers {
+    fn start(
+        reader: Box<dyn Read + Send>,
+        sender: &mpsc::SyncSender<RuntimeMessage>,
+        forward_stdin: bool,
+        initial_geometry: TerminalGeometry,
+        session_directory: &Path,
+    ) -> Result<Self> {
+        let control = spawn_control_server(session_directory, sender.clone())?;
+        let resize = match spawn_resize(sender.clone(), initial_geometry) {
+            Ok(worker) => worker,
+            Err(error) => return finish_with_cleanup(Err(error), control.stop()),
+        };
+        let input = match forward_stdin
+            .then(|| spawn_input(sender.clone()))
+            .transpose()
+        {
+            Ok(worker) => worker,
+            Err(error) => {
+                let cleanup =
+                    finish_with_cleanup(resize.map_or(Ok(()), ResizeWorker::stop), control.stop());
+                return finish_with_cleanup(Err(error), cleanup);
+            }
+        };
+        let reader = match spawn_reader(reader, sender.clone()) {
+            Ok(worker) => worker,
+            Err(error) => {
+                let cleanup = finish_with_cleanup(
+                    input.map_or(Ok(()), InputWorker::stop),
+                    resize.map_or(Ok(()), ResizeWorker::stop),
+                );
+                let cleanup = finish_with_cleanup(cleanup, control.stop());
+                return finish_with_cleanup(Err(error), cleanup);
+            }
+        };
+        Ok(Self {
+            reader,
+            input,
+            resize,
+            control,
+        })
+    }
+
+    fn finish<T>(self, primary: Result<T>) -> Result<T> {
+        let control_stop = self.control.stop();
+        let input_stop = self.input.map_or(Ok(()), InputWorker::stop);
+        let resize_stop = self.resize.map_or(Ok(()), ResizeWorker::stop);
+        let reader_join = self
+            .reader
+            .join()
+            .map_err(|_| terminal_error("join PTY reader", "reader thread panicked"));
+        let result = finish_with_cleanup(primary, control_stop);
+        let result = finish_with_cleanup(result, input_stop);
+        let result = finish_with_cleanup(result, resize_stop);
+        finish_with_cleanup(result, reader_join)
     }
 }
 
