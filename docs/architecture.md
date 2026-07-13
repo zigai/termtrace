@@ -31,6 +31,10 @@ The pinned libghostty state machine runs live as the terminal host. Its write-PT
 
 The event header pins the effective foreground, background, cursor color, and 256-color palette. Recording reads these from `ghostty +show-config` when available and records a configuration hash as provenance; pinned libghostty defaults are an explicit fallback. Replay never substitutes the current machine's theme.
 
+Geometry can be explicit, inherited from the controlling terminal, or fitted to a target capture viewport. Fitting launches the real Ghostty application on Xvfb and uses XTWINOPS reports for grid size, cell pixels, and text-area pixels. The resulting geometry, viewport, source, and effective-config hash are immutable session provenance. Native playback applies the initial grid before event time zero and verifies the live report; it never guesses font metrics from point size.
+
+A recording may replace the normal Ghostty user config with `--ghostty-config` and then apply focused font, padding, foreground, and background overrides. Termtrace resolves recursive config files, applies those overrides last, validates the result through Ghostty, strips recursive file controls, and stores a canonical effective profile in the session. Geometry fitting, recorded terminal colors, and native capture all consume that same hashed profile. Referenced resources such as fonts and shaders remain external host dependencies.
+
 Every input, resize, and signal uses a unique intent/result pair. The intent is durably written before the syscall; the result records complete application or a stable failure code. An intent left without a result after interruption is reported as uncertain and is never retried automatically. Input results also carry the exact number of bytes written so partial writes cannot masquerade as successful delivery.
 
 tmux is supported as a target command but is not required. Asciicast is an interoperability export and is never the canonical recording.
@@ -47,7 +51,7 @@ Video sampling does not limit semantic capture. A state that exists between vide
 
 `libghostty-vt` is pinned behind a narrow internal adapter. Its unstable upstream API must not leak into Termtrace's public artifact or control schemas. Upgrades require replay fixtures and semantic-diff review.
 
-The current pin is Ghostty `55a3e33ab26a23d75b274b23c7f76d837db00578`, built with Zig 0.15.2. Build-time bindings remain private; stable serializable Rust structures form the artifact boundary.
+The current pin is Ghostty `55a3e33ab26a23d75b274b23c7f76d837db00578`, built with Zig 0.15.2. Checked-in generated bindings remain private and are refreshed only during an intentional Ghostty upgrade; stable serializable Rust structures form the artifact boundary.
 
 The Linux Ghostty GUI currently has no stable headless framebuffer or screenshot API. Native pixels are therefore captured from a real Ghostty process on a virtual display rather than recreated by Termtrace.
 

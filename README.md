@@ -19,10 +19,28 @@ The functional PTY proxy supports both interactive and non-interactive commands:
 ```bash
 cargo run -- record \
   --out /tmp/example.termtrace \
+  --geometry fit --viewport 1920x1080 \
+  --ghostty-config ./recording.ghostty \
+  --font-size 16 --padding-x 8 --padding-y 8 \
+  -- your-command --argument
+```
+
+Fitted geometry launches a short Ghostty probe on the requested viewport and measures the actual grid, text area, and cell size from the configured font, cell adjustments, padding, and display environment. The measured values and Ghostty configuration hash are retained in `session.json`. Ghostty and Xvfb are required for this mode.
+
+`--ghostty-config PATH` uses that file instead of the normal user configuration. A focused set of convenience flags is applied after the file and therefore wins: `--font-family`, `--font-size`, `--padding-x`, `--padding-y`, `--foreground`, and `--background`. Without `--ghostty-config`, fitted geometry resolves the current user configuration as its base. Termtrace flattens the result into `ghostty-config.txt` in the session and uses that same hashed profile for geometry probing, terminal colors, and later native capture. The source config may subsequently move or change; external resources such as the selected font or custom shader are referenced, not bundled.
+
+Manual geometry remains available when native capture is not planned:
+
+```bash
+termtrace record \
+  --out /tmp/example.termtrace \
+  --geometry manual \
   --cols 160 --rows 40 \
   --cell-width 9 --cell-height 18 \
   -- your-command --argument
 ```
+
+Use `--geometry inherit` to copy the controlling terminal's rows and columns. Kernel-reported pixel dimensions are preferred; `--cell-width` and `--cell-height` are deterministic fallbacks when the terminal reports only its grid.
 
 Command output is mirrored unchanged. Standard input is forwarded in raw mode, outer-terminal resizes are propagated, and host terminal settings are restored on every normal and error path. Use `--no-input` for a detached producer. The child receives a real PTY with `TERM=xterm-ghostty` and `COLORTERM=truecolor`; the command's exit status is propagated.
 
@@ -72,11 +90,12 @@ The derived directory is assembled privately and atomically renamed with no-repl
 ## Native Ghostty pixels
 
 ```bash
-termtrace capture --session /tmp/example.termtrace \
-  --width 1920 --height 1080 --fps 24
+termtrace capture --session /tmp/example.termtrace --fps 24
 ```
 
-Capture launches the installed Ghostty GTK/OpenGL application on a private Xvfb display. Ghostty reads the normal user configuration; Termtrace saves the fully resolved config and its BLAKE3 hash, so settings such as the pure-black background, font, palette, padding, and shader choices are evidence rather than assumptions. Command-line overrides only isolate the process, disable single-instance behavior, position and expand the window to the capture surface, and prevent persisted window state from changing the result.
+Capture uses the viewport retained by `--viewport`; recordings without one retain the 1280x720 default. Supplying both `--width` and `--height` overrides it. Before event time zero, playback forces the recorded initial grid and verifies Ghostty's live geometry. A fitted recording also verifies the measured text-area pixels and effective configuration hash, failing instead of silently changing wrapping.
+
+Capture launches the installed Ghostty GTK/OpenGL application on a private Xvfb display. Recordings made with fitted geometry or any visual-profile option use the canonical `ghostty-config.txt` saved in the session, so settings such as background, font, palette, padding, and shader choices are evidence rather than assumptions. Older and manual recordings without a saved profile retain the normal user-config behavior. Capture-only command-line overrides isolate the process, disable single-instance behavior, position and expand the window to the capture surface, and prevent persisted window state from changing the result.
 
 `visual/session.mkv` is lossless RGB H.264 at exactly 24 FPS. `visual/final.png` is a direct X11 frame with the mouse hidden. FFprobe output, process logs, config, provenance, and `video-map.jsonl` are retained beside them. Failed captures preserve their owner-only diagnostic directory instead of deleting the evidence.
 
@@ -87,12 +106,11 @@ Run `scripts/native-smoke-test.sh` on a Linux host with Ghostty, Xvfb, FFmpeg/FF
 The repository pins Rust, Ghostty, and Zig. Bootstrap a fresh clone and validate a change with:
 
 ```bash
-git submodule update --init --recursive
-scripts/bootstrap-ghostty-vt.sh
+scripts/bootstrap.sh
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 cargo build --release --all-features
 ```
 
-The bootstrap script downloads Zig 0.15.2 from ziglang.org, verifies its pinned SHA-256, and builds Ghostty revision `55a3e33ab26a23d75b274b23c7f76d837db00578`. Generated bindings remain private behind the safe `ghostty_vt` adapter. Set `TERMTRACE_GHOSTTY_PREFIX` only when intentionally testing an equivalent external libghostty-vt installation.
+The bootstrap initializes the Ghostty submodule, downloads Zig 0.15.2 from ziglang.org, verifies its pinned SHA-256, and builds Ghostty revision `55a3e33ab26a23d75b274b23c7f76d837db00578`. Checked-in bindings keep bindgen and libclang out of normal builds and remain private behind the safe `ghostty_vt` adapter. They are regenerated explicitly only during a pinned Ghostty upgrade. Set `TERMTRACE_GHOSTTY_PREFIX` only when intentionally testing an equivalent external libghostty-vt installation.

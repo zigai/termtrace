@@ -2,7 +2,7 @@
 
 ## Build says libghostty-vt is missing
 
-Initialize submodules and run `scripts/bootstrap-ghostty-vt.sh`. An external build can be selected with `TERMTRACE_GHOSTTY_PREFIX`, but it must provide compatible `include/ghostty/vt.h` and `lib/libghostty-vt.a`; compatibility is intentionally not shimmed.
+Run `scripts/bootstrap.sh` from the repository root. It initializes the Ghostty submodule, provisions the pinned Zig toolchain, and builds libghostty-vt. An external build can be selected with `TERMTRACE_GHOSTTY_PREFIX`, but it must provide compatible `include/ghostty/vt.h` and `lib/libghostty-vt.a`; compatibility is intentionally not shimmed.
 
 ## A control command cannot connect
 
@@ -27,7 +27,9 @@ Termtrace preserves a `visual-failed-*` owner-only directory. Inspect `ghostty.s
 
 The capture manifest includes Ghostty and FFmpeg versions, the resolved Ghostty configuration and hash, exact launch overrides, and FFprobe evidence. A successful process exit without valid probe evidence is still a failure.
 
-If Ghostty's effective configuration changed after recording, capture stops instead of rendering mismatched colors or fonts. Restore that configuration or create a new recording; the canonical event header contains the expected hash.
+Recordings made with fitted geometry or `--ghostty-config`/visual convenience flags contain their canonical effective Ghostty profile, so changing or deleting the original config file does not affect capture. The referenced fonts, shaders, background images, and other external resources must still be installed. Legacy or manual recordings without a saved profile continue to validate the current user config and stop if it changed.
+
+If capture reports a geometry mismatch, the recorded grid does not fit the selected viewport with the available Ghostty font metrics. Prefer recording with `--geometry fit --viewport WIDTHxHEIGHT`. For a fitted recording, confirm that the font and other external profile resources still exist, or make a new recording rather than overriding the viewport until wrapping happens to look close.
 
 ## Video does not show every transient state
 
