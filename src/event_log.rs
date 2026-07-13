@@ -779,6 +779,20 @@ fn validate_header(path: &Path, header: &EventLogHeader) -> Result<()> {
     if header.term.is_empty() {
         return Err(invalid_log(path, 1, "terminal identity must not be empty"));
     }
+    if header.colors.source.is_empty() {
+        return Err(invalid_log(
+            path,
+            1,
+            "terminal color source must not be empty",
+        ));
+    }
+    if !header.colors.palette.is_empty() && header.colors.palette.len() != 256 {
+        return Err(invalid_log(
+            path,
+            1,
+            "terminal palette must be empty or contain exactly 256 colors",
+        ));
+    }
     Ok(())
 }
 

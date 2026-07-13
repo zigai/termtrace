@@ -26,7 +26,7 @@ cargo run -- record \
 
 Command output is mirrored unchanged. Standard input is forwarded in raw mode, outer-terminal resizes are propagated, and host terminal settings are restored on every normal and error path. Use `--no-input` for a detached producer. The child receives a real PTY with `TERM=xterm-ghostty` and `COLORTERM=truecolor`; the command's exit status is propagated.
 
-The new owner-only session directory contains an integrity-chained `events.jsonl` recording with raw bytes encoded as Base64. Inputs and resizes are represented by durable intent/result pairs. A crash between the pair is reported as uncertain, never silently retried. High-volume output is buffered between durable control boundaries so recording does not add an `fsync` pause to every PTY read.
+The new owner-only session directory contains an integrity-chained `events.jsonl` recording with raw bytes encoded as Base64. Inputs and resizes are represented by durable intent/result pairs. A crash between the pair is reported as uncertain, never silently retried. High-volume output is buffered between durable control boundaries so recording does not add an `fsync` pause to every PTY read. A live pinned-libghostty engine answers terminal queries and audits each generated reply as distinct host input. The header also pins Ghostty's effective foreground, pure-black background, cursor color, and complete palette for deterministic replay.
 
 Termtrace refuses to reuse an existing session directory. This prevents accidental evidence loss and makes every run independently auditable.
 

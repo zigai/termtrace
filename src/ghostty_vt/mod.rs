@@ -8,7 +8,10 @@ use std::{ffi::c_void, mem::size_of, ptr};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, Result, event::ByteString};
+use crate::{
+    Error, Result,
+    event::{ByteString, TerminalColors},
+};
 
 mod sys;
 
@@ -226,6 +229,12 @@ pub struct GhosttyVt {
     terminal: sys::GhosttyTerminal,
     render: sys::GhosttyRenderState,
     last_snapshot: Option<SemanticState>,
+    responses: Box<ResponseState>,
+}
+
+#[derive(Default)]
+struct ResponseState {
+    pending: Vec<Vec<u8>>,
 }
 
 impl GhosttyVt {
@@ -253,6 +262,29 @@ impl GhosttyVt {
                 },
             )
         })?;
+        let mut responses = Box::<ResponseState>::default();
+        let userdata = (&raw mut *responses).cast::<c_void>();
+        if let Err(error) = check("set terminal callback userdata", unsafe {
+            sys::ghostty_terminal_set(
+                terminal,
+                sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_USERDATA,
+                userdata,
+            )
+        }) {
+            unsafe { sys::ghostty_terminal_free(terminal) };
+            return Err(error);
+        }
+        let callback = (write_pty_callback as *const ()).cast::<c_void>();
+        if let Err(error) = check("set terminal write callback", unsafe {
+            sys::ghostty_terminal_set(
+                terminal,
+                sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_WRITE_PTY,
+                callback,
+            )
+        }) {
+            unsafe { sys::ghostty_terminal_free(terminal) };
+            return Err(error);
+        }
         let mut render = ptr::null_mut();
         if let Err(error) = check("create render state", unsafe {
             sys::ghostty_render_state_new(ptr::null(), &raw mut render)
@@ -264,12 +296,67 @@ impl GhosttyVt {
             terminal,
             render,
             last_snapshot: None,
+            responses,
         })
     }
 
     /// Feed exact PTY output bytes through Ghostty's VT parser.
     pub fn write(&mut self, bytes: &[u8]) {
         unsafe { sys::ghostty_terminal_vt_write(self.terminal, bytes.as_ptr(), bytes.len()) };
+    }
+
+    /// Drain terminal query responses emitted synchronously by the VT engine.
+    pub fn take_responses(&mut self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut self.responses.pending)
+    }
+
+    /// Apply captured host defaults before processing terminal output.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the palette length is invalid or libghostty
+    /// rejects a color option.
+    pub fn apply_terminal_colors(&mut self, colors: &TerminalColors) -> Result<()> {
+        set_color_option(
+            self.terminal,
+            sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND,
+            colors.foreground,
+            "set foreground color",
+        )?;
+        set_color_option(
+            self.terminal,
+            sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND,
+            colors.background,
+            "set background color",
+        )?;
+        if let Some(cursor) = colors.cursor {
+            set_color_option(
+                self.terminal,
+                sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_CURSOR,
+                cursor,
+                "set cursor color",
+            )?;
+        }
+        if !colors.palette.is_empty() {
+            if colors.palette.len() != 256 {
+                return Err(Error::TerminalOperation {
+                    operation: "set terminal palette",
+                    reason: format!(
+                        "expected an empty or 256-color palette, got {} colors",
+                        colors.palette.len()
+                    ),
+                });
+            }
+            let palette: Vec<_> = colors.palette.iter().copied().map(ffi_rgb).collect();
+            check("set terminal palette", unsafe {
+                sys::ghostty_terminal_set(
+                    self.terminal,
+                    sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_PALETTE,
+                    palette.as_ptr().cast::<c_void>(),
+                )
+            })?;
+        }
+        Ok(())
     }
 
     /// Resize the semantic terminal.
@@ -947,6 +1034,40 @@ fn check(operation: &'static str, result: sys::GhosttyResult) -> Result<()> {
     }
 }
 
+fn ffi_rgb([r, g, b]: [u8; 3]) -> sys::GhosttyColorRgb {
+    sys::GhosttyColorRgb { r, g, b }
+}
+
+fn set_color_option(
+    terminal: sys::GhosttyTerminal,
+    option: sys::GhosttyTerminalOption,
+    color: [u8; 3],
+    operation: &'static str,
+) -> Result<()> {
+    let color = ffi_rgb(color);
+    check(operation, unsafe {
+        sys::ghostty_terminal_set(terminal, option, (&raw const color).cast::<c_void>())
+    })
+}
+
+unsafe extern "C" fn write_pty_callback(
+    _terminal: sys::GhosttyTerminal,
+    userdata: *mut c_void,
+    data: *const u8,
+    len: usize,
+) {
+    if userdata.is_null() || (data.is_null() && len != 0) {
+        return;
+    }
+    let bytes = if len == 0 {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(data, len) }.to_vec()
+    };
+    let responses = unsafe { &mut *userdata.cast::<ResponseState>() };
+    responses.pending.push(bytes);
+}
+
 fn invalid_snapshot(operation: &'static str) -> Error {
     Error::GhosttyVt {
         operation,
@@ -1069,5 +1190,13 @@ mod tests {
         terminal.resize(10, 3, 9, 18).expect("resize");
         let resized = terminal.snapshot().expect("resized snapshot");
         assert_eq!((resized.cols, resized.rows), (10, 3));
+    }
+
+    #[test]
+    fn emits_terminal_query_responses() {
+        let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
+        terminal.write(b"\x1b[3;5H\x1b[6n");
+        assert_eq!(terminal.take_responses(), vec![b"\x1b[3;5R".to_vec()]);
+        assert!(terminal.take_responses().is_empty());
     }
 }

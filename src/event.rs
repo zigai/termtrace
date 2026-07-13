@@ -112,6 +112,37 @@ pub struct EventLogHeader {
     pub pixel_height: u16,
     /// Terminal identity exposed to the child process.
     pub term: String,
+    /// Default colors presented by the emulated terminal host.
+    #[serde(default)]
+    pub colors: TerminalColors,
+}
+
+/// Default terminal colors captured independently from application SGR output.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalColors {
+    /// Provenance of the color values.
+    pub source: String,
+    /// Default foreground as red, green, and blue bytes.
+    pub foreground: [u8; 3],
+    /// Default background as red, green, and blue bytes.
+    pub background: [u8; 3],
+    /// Default cursor color when explicitly configured.
+    pub cursor: Option<[u8; 3]>,
+    /// Complete 256-color palette, or empty to use libghostty's built-in palette.
+    pub palette: Vec<[u8; 3]>,
+}
+
+impl Default for TerminalColors {
+    fn default() -> Self {
+        Self {
+            source: "libghostty_builtin".to_owned(),
+            foreground: [0xff, 0xff, 0xff],
+            background: [0, 0, 0],
+            cursor: None,
+            palette: Vec::new(),
+        }
+    }
 }
 
 impl EventLogHeader {
@@ -135,7 +166,15 @@ impl EventLogHeader {
             pixel_width,
             pixel_height,
             term: term.into(),
+            colors: TerminalColors::default(),
         }
+    }
+
+    /// Override the terminal color profile embedded in a new header.
+    #[must_use]
+    pub fn with_colors(mut self, colors: TerminalColors) -> Self {
+        self.colors = colors;
+        self
     }
 }
 

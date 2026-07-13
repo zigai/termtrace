@@ -10,6 +10,8 @@ Use `send --text` for UTF-8 and `send --file` for exact bytes. Every mutation ha
 
 Signals are allowlisted: interrupt, terminate, hangup, user1, and user2. `SIGKILL` is intentionally absent. `stop` is a graceful `SIGTERM` request. Markers are durable timeline annotations.
 
+Terminal-generated replies are marked `source: host`. A `query_response` event preserves the triggering control sequence and exact response before the corresponding input intent/result. Agents should not synthesize a second response.
+
 ## Wait and inspect
 
 ```bash

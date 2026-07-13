@@ -38,8 +38,10 @@ use crate::{
     },
     event::{
         ByteString, Event, EventLogHeader, InputKind, InputSource, LifecycleKind, OperationStatus,
+        TerminalColors,
     },
     event_log::{EventLogWriter, SessionClock},
+    ghostty_vt::GhosttyVt,
     session::{
         SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, SessionCompletion, SessionGeometry,
         SessionManifest,
@@ -70,6 +72,8 @@ pub struct RecordOptions {
     pub cell_height_px: u16,
     /// Terminal identity exposed to the child.
     pub term: String,
+    /// Default colors exposed by the terminal host and pinned into replay.
+    pub colors: TerminalColors,
     /// Forward standard input to the child PTY.
     pub forward_stdin: bool,
 }
@@ -178,6 +182,27 @@ struct RuntimeProgress {
     output_bytes: u64,
 }
 
+struct LiveTerminal {
+    semantic: GhosttyVt,
+    query_tracker: QueryTracker,
+}
+
+#[derive(Default)]
+struct QueryTracker {
+    sequence: Vec<u8>,
+    kind: QueryKind,
+}
+
+#[derive(Clone, Copy, Default)]
+enum QueryKind {
+    #[default]
+    None,
+    Escape,
+    Csi,
+    Osc,
+    Single,
+}
+
 /// Record a command running in a real pseudo-terminal and mirror its output.
 ///
 /// # Errors
@@ -205,7 +230,8 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         pty_size.pixel_width,
         pty_size.pixel_height,
         &options.term,
-    );
+    )
+    .with_colors(options.colors.clone());
     let event_log_path = options.output_directory.join("events.jsonl");
     let mut event_log = EventLogWriter::create(&event_log_path, &header, clock)?;
     write_session_manifest(options, pty_size, session_id, header.started_unix_ns)?;
@@ -226,6 +252,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         options.forward_stdin,
         TerminalGeometry::from(pty_size),
         &options.output_directory,
+        &options.colors,
     ) {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -386,7 +413,20 @@ fn consume_runtime(
     forward_stdin: bool,
     initial_geometry: TerminalGeometry,
     session_directory: &Path,
+    colors: &TerminalColors,
 ) -> Result<RuntimeOutcome> {
+    let mut semantic = GhosttyVt::new(initial_geometry.cols, initial_geometry.rows, 100_000)?;
+    semantic.apply_terminal_colors(colors)?;
+    semantic.resize(
+        initial_geometry.cols,
+        initial_geometry.rows,
+        geometry_cell_size(initial_geometry.pixel_width, initial_geometry.cols),
+        geometry_cell_size(initial_geometry.pixel_height, initial_geometry.rows),
+    )?;
+    let mut live_terminal = LiveTerminal {
+        semantic,
+        query_tracker: QueryTracker::default(),
+    };
     let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
     let reader = std::mem::replace(&mut spawned.reader, Box::new(std::io::empty()));
     let workers = RuntimeWorkers::start(
@@ -417,6 +457,7 @@ fn consume_runtime(
                     output,
                     &mut progress,
                     &mut control_history,
+                    &mut live_terminal,
                 )?,
                 Err(RecvTimeoutError::Disconnected) if !progress.output_closed => {
                     return Err(terminal_error(
@@ -472,6 +513,7 @@ fn process_runtime_message(
     output: &mut impl Write,
     progress: &mut RuntimeProgress,
     control_history: &mut HashMap<Uuid, (ControlCommand, ControlResponse)>,
+    live: &mut LiveTerminal,
 ) -> Result<()> {
     match message {
         RuntimeMessage::Output(data) => {
@@ -488,6 +530,13 @@ fn process_runtime_message(
                     path: PathBuf::from("<stdout>"),
                     source,
                 })?;
+            process_semantic_output(
+                &mut live.semantic,
+                &mut live.query_tracker,
+                spawned.writer.as_mut(),
+                event_log,
+                &data,
+            )?;
         }
         RuntimeMessage::OutputClosed => {
             progress.output_closed = true;
@@ -514,6 +563,7 @@ fn process_runtime_message(
         }
         RuntimeMessage::Resize(geometry) => {
             apply_resize(spawned.master.as_mut(), event_log, Uuid::now_v7(), geometry)?;
+            resize_semantic(&mut live.semantic, geometry)?;
         }
         RuntimeMessage::ResizeFailed(reason) => {
             return Err(terminal_error("read terminal geometry", reason));
@@ -525,6 +575,7 @@ fn process_runtime_message(
             request,
             &response,
             control_history,
+            &mut live.semantic,
         )?,
         RuntimeMessage::ControlServerFailed(reason) => {
             return Err(terminal_error("serve control socket", reason));
@@ -891,6 +942,7 @@ fn handle_control_request(
     request: ControlRequest,
     response_sender: &mpsc::SyncSender<ControlResponse>,
     history: &mut HashMap<Uuid, (ControlCommand, ControlResponse)>,
+    semantic: &mut GhosttyVt,
 ) -> Result<()> {
     if let Some((original, response)) = history.get(&request.request_id) {
         let response = if original == &request.command {
@@ -912,6 +964,7 @@ fn handle_control_request(
         output_bytes,
         request.request_id,
         &request.command,
+        semantic,
     );
     let response = match &outcome {
         Ok(data) => ControlResponse {
@@ -941,6 +994,7 @@ fn execute_control_command(
     output_bytes: u64,
     request_id: Uuid,
     command: &ControlCommand,
+    semantic: &mut GhosttyVt,
 ) -> Result<ControlData> {
     match command {
         ControlCommand::Ping => {
@@ -995,6 +1049,7 @@ fn execute_control_command(
             };
             validate_control_geometry(geometry)?;
             apply_resize(spawned.master.as_mut(), event_log, request_id, geometry)?;
+            resize_semantic(semantic, geometry)?;
             Ok(ControlData::Acknowledged)
         }
         ControlCommand::Signal { signal } => {
@@ -1134,6 +1189,117 @@ fn control_rejected(code: &str, message: &str) -> Error {
         code: code.to_owned(),
         message: message.to_owned(),
     }
+}
+
+fn process_semantic_output(
+    semantic: &mut GhosttyVt,
+    tracker: &mut QueryTracker,
+    writer: &mut dyn Write,
+    event_log: &mut EventLogWriter,
+    data: &[u8],
+) -> Result<()> {
+    for byte in data {
+        let complete = tracker.push(*byte);
+        semantic.write(std::slice::from_ref(byte));
+        for response in semantic.take_responses() {
+            event_log.append(Event::QueryResponse {
+                query: ByteString::from(tracker.bytes()),
+                response: ByteString::from(response.as_slice()),
+                responder: "pinned-libghostty-vt".to_owned(),
+            })?;
+            apply_input(
+                writer,
+                event_log,
+                Uuid::now_v7(),
+                InputSource::Host,
+                InputKind::Raw,
+                Some("terminal query response".to_owned()),
+                &response,
+            )?;
+        }
+        if complete {
+            tracker.clear();
+        }
+    }
+    Ok(())
+}
+
+impl QueryTracker {
+    fn push(&mut self, byte: u8) -> bool {
+        const MAX_QUERY_BYTES: usize = 64 * 1024;
+        match self.kind {
+            QueryKind::None => match byte {
+                0x1b => {
+                    self.sequence.push(byte);
+                    self.kind = QueryKind::Escape;
+                    false
+                }
+                0x9b => {
+                    self.sequence.push(byte);
+                    self.kind = QueryKind::Csi;
+                    false
+                }
+                0x9d => {
+                    self.sequence.push(byte);
+                    self.kind = QueryKind::Osc;
+                    false
+                }
+                0x05 => {
+                    self.sequence.push(byte);
+                    self.kind = QueryKind::Single;
+                    true
+                }
+                _ => false,
+            },
+            QueryKind::Escape => {
+                self.sequence.push(byte);
+                match byte {
+                    b'[' => {
+                        self.kind = QueryKind::Csi;
+                        false
+                    }
+                    b']' => {
+                        self.kind = QueryKind::Osc;
+                        false
+                    }
+                    _ => true,
+                }
+            }
+            QueryKind::Csi => {
+                self.sequence.push(byte);
+                (0x40..=0x7e).contains(&byte) || self.sequence.len() > MAX_QUERY_BYTES
+            }
+            QueryKind::Osc => {
+                self.sequence.push(byte);
+                byte == 0x07
+                    || self.sequence.ends_with(b"\x1b\\")
+                    || self.sequence.len() > MAX_QUERY_BYTES
+            }
+            QueryKind::Single => true,
+        }
+    }
+
+    fn bytes(&self) -> &[u8] {
+        &self.sequence
+    }
+
+    fn clear(&mut self) {
+        self.sequence.clear();
+        self.kind = QueryKind::None;
+    }
+}
+
+fn resize_semantic(semantic: &mut GhosttyVt, geometry: TerminalGeometry) -> Result<()> {
+    semantic.resize(
+        geometry.cols,
+        geometry.rows,
+        geometry_cell_size(geometry.pixel_width, geometry.cols),
+        geometry_cell_size(geometry.pixel_height, geometry.rows),
+    )
+}
+
+fn geometry_cell_size(pixels: u16, cells: u16) -> u32 {
+    u32::from(pixels.checked_div(cells).unwrap_or(0).max(1))
 }
 
 fn apply_input(
@@ -1474,6 +1640,7 @@ mod tests {
             cell_width_px: 9,
             cell_height_px: 18,
             term: "xterm-ghostty".to_owned(),
+            colors: TerminalColors::default(),
             forward_stdin: false,
         };
 
@@ -1550,6 +1717,7 @@ mod tests {
             cell_width_px: 9,
             cell_height_px: 18,
             term: "xterm-ghostty".to_owned(),
+            colors: TerminalColors::default(),
             forward_stdin: false,
         };
 
@@ -1573,6 +1741,7 @@ mod tests {
             cell_width_px: 9,
             cell_height_px: 18,
             term: "xterm-ghostty".to_owned(),
+            colors: TerminalColors::default(),
             forward_stdin: false,
         };
         let started = Instant::now();
@@ -1586,5 +1755,46 @@ mod tests {
             started.elapsed() < Duration::from_secs(5),
             "retained PTY was not terminated promptly"
         );
+    }
+
+    #[test]
+    fn answers_and_audits_terminal_queries() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let options = RecordOptions {
+            output_directory: temporary.path().join("query"),
+            command: vec![
+                OsString::from("/usr/bin/python3"),
+                OsString::from("-c"),
+                OsString::from(
+                    "import os,tty; tty.setraw(0); os.write(1,b'\\x1b[6n'); r=os.read(0,32); os.write(1,b'GOT:'+r.hex().encode())",
+                ),
+            ],
+            working_directory: None,
+            cols: 80,
+            rows: 24,
+            cell_width_px: 9,
+            cell_height_px: 18,
+            term: "xterm-ghostty".to_owned(),
+            colors: TerminalColors::default(),
+            forward_stdin: false,
+        };
+        let mut output = Vec::new();
+
+        let outcome = record_to(&options, &mut output).expect("record query command");
+        let log = EventLog::read(outcome.event_log).expect("valid query log");
+
+        assert!(output.windows(4).any(|window| window == b"GOT:"));
+        assert!(log.events.iter().any(|record| matches!(
+            &record.event,
+            Event::QueryResponse { query, response, .. }
+                if query.as_bytes() == b"\x1b[6n" && response.as_bytes() == b"\x1b[1;1R"
+        )));
+        assert!(log.events.iter().any(|record| matches!(
+            record.event,
+            Event::InputIntent {
+                source: InputSource::Host,
+                ..
+            }
+        )));
     }
 }

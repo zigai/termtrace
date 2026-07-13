@@ -168,6 +168,21 @@ fn capture_staged(
     staging: &Path,
 ) -> Result<VisualManifest> {
     let resolved_config = command_output("ghostty", &["+show-config"])?;
+    let config_hash = blake3::hash(&resolved_config).to_hex().to_string();
+    if let Some(expected) = event_log
+        .header
+        .colors
+        .source
+        .strip_prefix("ghostty_show_config_blake3:")
+        && expected != config_hash
+    {
+        return Err(Error::ExternalCommand {
+            program: "ghostty".to_owned(),
+            reason: format!(
+                "effective configuration changed since recording (recorded {expected}, current {config_hash})"
+            ),
+        });
+    }
     write_secure(&staging.join("ghostty-config.txt"), &resolved_config)?;
     let ghostty_version =
         String::from_utf8_lossy(&command_output("ghostty", &["+version"])?).into();
@@ -234,7 +249,7 @@ fn capture_staged(
         height: options.height,
         capture_started_unix_ns,
         replay_origin_unix_ns: timing.replay_origin_unix_ns,
-        ghostty_config_hash: blake3::hash(&resolved_config).to_hex().to_string(),
+        ghostty_config_hash: config_hash,
         ghostty_version,
         ffmpeg_version,
         ghostty_overrides: overrides,

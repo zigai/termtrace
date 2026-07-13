@@ -27,6 +27,8 @@ Termtrace preserves a `visual-failed-*` owner-only directory. Inspect `ghostty.s
 
 The capture manifest includes Ghostty and FFmpeg versions, the resolved Ghostty configuration and hash, exact launch overrides, and FFprobe evidence. A successful process exit without valid probe evidence is still a failure.
 
+If Ghostty's effective configuration changed after recording, capture stops instead of rendering mismatched colors or fonts. Restore that configuration or create a new recording; the canonical event header contains the expected hash.
+
 ## Video does not show every transient state
 
 At 24 FPS, a frame spans roughly 41.7 ms. This limits the video only. `states.jsonl` remains byte-granular, including mode-2026 suppressed states, and `video-map.jsonl` marks non-presented states with a null frame.

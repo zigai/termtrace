@@ -11,6 +11,7 @@ use termtrace::{
     inspection::{inspect_session, state_text, wait_for_output},
     interop::export_asciicast,
     playback::{PlaybackOptions, playback},
+    profile::resolved_terminal_colors,
     record::{RecordOptions, record},
     replay::{StateSelector, index_session},
     schema::write_all as write_schemas,
@@ -498,6 +499,7 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         cell_width_px: arguments.cell_width,
         cell_height_px: arguments.cell_height,
         term: arguments.term,
+        colors: resolved_terminal_colors()?,
         forward_stdin: !arguments.no_input,
     })?;
     eprintln!("recording: {}", outcome.event_log.display());

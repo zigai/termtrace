@@ -254,6 +254,7 @@ fn replay_with(
             Event::Output { data } => {
                 for (offset, byte) in data.as_bytes().iter().enumerate() {
                     builder.engine.write(std::slice::from_ref(byte));
+                    drop(builder.engine.take_responses());
                     builder.capture(
                         Some(record.seq),
                         Some(u64::try_from(offset).unwrap_or(u64::MAX)),
@@ -316,8 +317,10 @@ fn replay_with(
 
 impl ReplayBuilder {
     fn new(log: &EventLog) -> Result<Self> {
+        let mut engine = GhosttyVt::new(log.header.cols, log.header.rows, 100_000)?;
+        engine.apply_terminal_colors(&log.header.colors)?;
         Ok(Self {
-            engine: GhosttyVt::new(log.header.cols, log.header.rows, 100_000)?,
+            engine,
             previous: None,
             previous_hash: None,
             state_count: 0,

@@ -1,9 +1,101 @@
 {
+  "$defs": {
+    "TerminalColors": {
+      "additionalProperties": false,
+      "description": "Default terminal colors captured independently from application SGR output.",
+      "properties": {
+        "background": {
+          "description": "Default background as red, green, and blue bytes.",
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "cursor": {
+          "description": "Default cursor color when explicitly configured.",
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "foreground": {
+          "description": "Default foreground as red, green, and blue bytes.",
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "palette": {
+          "description": "Complete 256-color palette, or empty to use libghostty's built-in palette.",
+          "items": {
+            "items": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "source": {
+          "description": "Provenance of the color values.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "foreground",
+        "background",
+        "palette"
+      ],
+      "type": "object"
+    }
+  },
   "$id": "https://github.com/zigai/termtrace/schemas/event-log-header.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Metadata written before the first event.",
   "properties": {
+    "colors": {
+      "$ref": "#/$defs/TerminalColors",
+      "default": {
+        "background": [
+          0,
+          0,
+          0
+        ],
+        "cursor": null,
+        "foreground": [
+          255,
+          255,
+          255
+        ],
+        "palette": [],
+        "source": "libghostty_builtin"
+      },
+      "description": "Default colors presented by the emulated terminal host."
+    },
     "cols": {
       "description": "Initial terminal columns.",
       "format": "uint16",
