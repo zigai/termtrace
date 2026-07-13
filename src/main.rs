@@ -5,15 +5,15 @@ use std::{ffi::OsString, path::PathBuf, process::ExitCode, time::Duration};
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
-    control::{ControlCommand, ProcessSignal, request},
-    event::ByteString,
+    control::{CONTROL_PROTOCOL_VERSION, ControlCommand, ProcessSignal, request},
+    event::{ByteString, EVENT_LOG_VERSION},
     event_log::EventLog,
     inspection::{inspect_session, state_text, wait_for_output},
     interop::export_asciicast,
     playback::{PlaybackOptions, playback},
     profile::resolved_terminal_colors,
     record::{RecordOptions, record},
-    replay::{StateSelector, index_session},
+    replay::{GHOSTTY_REVISION, STATE_FORMAT_VERSION, StateSelector, index_session},
     schema::write_all as write_schemas,
     visual::{CaptureOptions, capture},
 };
@@ -331,6 +331,10 @@ fn dispatch(command: Command) -> Result<ExitCode> {
     match command {
         Command::Version => {
             println!("termtrace {}", env!("CARGO_PKG_VERSION"));
+            println!("libghostty-vt {GHOSTTY_REVISION}");
+            println!("event-log v{EVENT_LOG_VERSION}");
+            println!("state-format v{STATE_FORMAT_VERSION}");
+            println!("control-protocol v{CONTROL_PROTOCOL_VERSION}");
             Ok(ExitCode::SUCCESS)
         }
         Command::Record(arguments) => run_record(arguments),

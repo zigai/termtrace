@@ -20,7 +20,12 @@ fn version_subcommand_reports_package_version() {
         .stdout(predicate::str::contains(concat!(
             "termtrace ",
             env!("CARGO_PKG_VERSION")
-        )));
+        )))
+        .stdout(predicate::str::contains(format!(
+            "libghostty-vt {}",
+            termtrace::replay::GHOSTTY_REVISION
+        )))
+        .stdout(predicate::str::contains("event-log v1"));
 }
 
 #[test]
