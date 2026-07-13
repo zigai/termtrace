@@ -159,12 +159,30 @@ fn live_control_drives_and_audits_a_detached_session() {
         let mut command = Command::cargo_bin("termtrace").expect("binary should build");
         command.args(arguments).assert().success();
     }
+    let waiter = StdCommand::new(binary)
+        .args([
+            "wait",
+            "--session",
+            session.to_str().expect("UTF-8 path"),
+            "--text",
+            "agent:hello",
+            "--timeout-ms",
+            "5000",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn output waiter");
+    thread::sleep(Duration::from_millis(50));
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
     send.args(["send", "--session"])
         .arg(&session)
         .args(["--text", "hello\n", "--intent", "complete shell read"])
         .assert()
         .success();
+
+    let wait_output = waiter.wait_with_output().expect("wait for output waiter");
+    assert!(wait_output.status.success(), "wait failed: {wait_output:?}");
 
     let output = child.wait_with_output().expect("wait for recorder");
     assert!(output.status.success(), "recorder failed: {output:?}");
@@ -233,6 +251,21 @@ fn index_replays_every_distinct_state_deterministically() {
 
     let event_log = termtrace::event_log::EventLog::read(session.join("events.jsonl"))
         .expect("valid event log");
+    let cast = temporary.path().join("session.cast");
+    let mut export = Command::cargo_bin("termtrace").expect("binary should build");
+    export
+        .args(["export-asciicast", "--session"])
+        .arg(&session)
+        .args(["--out"])
+        .arg(&cast)
+        .assert()
+        .success();
+    let cast_text = fs_err::read_to_string(&cast).expect("asciicast");
+    let mut cast_lines = cast_text.lines();
+    let cast_header: serde_json::Value =
+        serde_json::from_str(cast_lines.next().expect("cast header")).expect("cast header JSON");
+    assert_eq!(cast_header["version"], 2);
+    assert!(cast_lines.next().is_some(), "cast should contain output");
     let first = termtrace::replay::replay(&event_log).expect("first replay");
     let second = termtrace::replay::replay(&event_log).expect("second replay");
     assert_eq!(first, second, "replay must be deterministic");
@@ -258,6 +291,22 @@ fn index_replays_every_distinct_state_deterministically() {
         .assert()
         .success();
     assert_replay_artifacts(&session, first.artifacts.state_count);
+    let mut inspect_text = Command::cargo_bin("termtrace").expect("binary should build");
+    inspect_text
+        .args(["inspect", "--session"])
+        .arg(&session)
+        .args(["--format", "text"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("AB界"));
+    let mut inspect_initial = Command::cargo_bin("termtrace").expect("binary should build");
+    inspect_initial
+        .args(["inspect", "--session"])
+        .arg(&session)
+        .args(["--state", "0", "--format", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""state_id": 0"#));
 
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
@@ -313,4 +362,55 @@ fn assert_replay_artifacts(session: &std::path::Path, expected_states: u64) {
     );
     let html = fs_err::read_to_string(derived.join("final.html")).expect("final HTML");
     assert!(html.contains('A') && html.contains('B'));
+
+    validate_json_file("session.schema.json", &session.join("session.json"));
+    validate_json_file("completion.schema.json", &session.join("completion.json"));
+    validate_json_file(
+        "replay-manifest.schema.json",
+        &derived.join("manifest.json"),
+    );
+    validate_json_lines("state-record.schema.json", &derived.join("states.jsonl"));
+    validate_json_lines(
+        "state-index-entry.schema.json",
+        &derived.join("state-index.jsonl"),
+    );
+    let event_log = fs_err::read_to_string(session.join("events.jsonl")).expect("event log");
+    let mut event_lines = event_log.lines();
+    validate_json_value(
+        "event-log-header.schema.json",
+        &serde_json::from_str(event_lines.next().expect("event header")).expect("header JSON"),
+    );
+    for line in event_lines {
+        validate_json_value(
+            "event-record.schema.json",
+            &serde_json::from_str(line).expect("event JSON"),
+        );
+    }
+}
+
+fn validate_json_file(schema: &str, instance: &std::path::Path) {
+    let value = serde_json::from_slice(&fs_err::read(instance).expect("instance file"))
+        .expect("instance JSON");
+    validate_json_value(schema, &value);
+}
+
+fn validate_json_lines(schema: &str, instance: &std::path::Path) {
+    for line in fs_err::read_to_string(instance)
+        .expect("JSONL instance")
+        .lines()
+    {
+        validate_json_value(schema, &serde_json::from_str(line).expect("JSONL value"));
+    }
+}
+
+fn validate_json_value(schema: &str, instance: &serde_json::Value) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("schemas")
+        .join(schema);
+    let schema_value: serde_json::Value =
+        serde_json::from_slice(&fs_err::read(path).expect("schema file")).expect("schema JSON");
+    let validator = jsonschema::validator_for(&schema_value).expect("valid schema");
+    if let Err(error) = validator.validate(instance) {
+        panic!("{schema} rejected instance: {error}");
+    }
 }

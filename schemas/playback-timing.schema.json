@@ -1,0 +1,25 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/playback-timing.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Clock handshake written before playback begins.",
+  "properties": {
+    "replay_origin_unix_ns": {
+      "description": "Wall-clock time corresponding to event monotonic time zero.",
+      "format": "uint128",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "speed": {
+      "description": "Playback speed multiplier (`1` for native timing).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "replay_origin_unix_ns",
+    "speed"
+  ],
+  "title": "PlaybackTiming",
+  "type": "object"
+}

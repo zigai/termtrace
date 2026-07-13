@@ -1,11 +1,13 @@
 //! One-shot PTY recording with byte-exact event persistence.
 
 use std::{
+    collections::BTreeMap,
     collections::HashMap,
     ffi::OsString,
     fs::{DirBuilder, Permissions},
     io::{BufRead as _, BufReader, Read, Write},
     os::fd::{AsFd as _, OwnedFd},
+    os::unix::ffi::OsStrExt as _,
     os::unix::fs::{DirBuilderExt as _, PermissionsExt as _},
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
@@ -29,6 +31,7 @@ use uuid::Uuid;
 
 use crate::{
     Error, Result,
+    artifact::write_secure,
     control::{
         CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME, ControlCommand, ControlData, ControlRequest,
         ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES, ProcessSignal, validate_frame,
@@ -37,6 +40,10 @@ use crate::{
         ByteString, Event, EventLogHeader, InputKind, InputSource, LifecycleKind, OperationStatus,
     },
     event_log::{EventLogWriter, SessionClock},
+    session::{
+        SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, SessionCompletion, SessionGeometry,
+        SessionManifest,
+    },
 };
 
 const SESSION_DIRECTORY_MODE: u32 = 0o700;
@@ -189,8 +196,9 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     let pty_size = validate_options(options)?;
     create_session_directory(&options.output_directory)?;
     let clock = SessionClock::now()?;
+    let session_id = Uuid::now_v7();
     let header = EventLogHeader::new(
-        Uuid::now_v7(),
+        session_id,
         clock.started_unix_ns(),
         options.cols,
         options.rows,
@@ -200,6 +208,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     );
     let event_log_path = options.output_directory.join("events.jsonl");
     let mut event_log = EventLogWriter::create(&event_log_path, &header, clock)?;
+    write_session_manifest(options, pty_size, session_id, header.started_unix_ns)?;
 
     let mut spawned = spawn_command(options, pty_size)?;
     if let Err(error) = event_log.append(Event::Lifecycle {
@@ -232,6 +241,17 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         signal: None,
         signal_name: signal_name.clone(),
     })?;
+    write_session_completion(
+        options,
+        &SessionCompletion {
+            session_id,
+            exit_code,
+            signal_name: signal_name.clone(),
+            output_bytes: runtime.output_bytes,
+            final_event_hash: event_log.current_hash(),
+            event_count: event_log.next_seq(),
+        },
+    )?;
 
     Ok(RecordOutcome {
         exit_code,
@@ -239,6 +259,62 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         output_bytes: runtime.output_bytes,
         event_log: event_log_path,
     })
+}
+
+fn write_session_manifest(
+    options: &RecordOptions,
+    size: PtySize,
+    session_id: Uuid,
+    started_unix_ns: u128,
+) -> Result<()> {
+    let mut child_environment = BTreeMap::new();
+    child_environment.insert("COLORTERM".to_owned(), "truecolor".to_owned());
+    child_environment.insert("TERM".to_owned(), options.term.clone());
+    let manifest = SessionManifest {
+        format: SESSION_MANIFEST_FORMAT.to_owned(),
+        version: SESSION_MANIFEST_VERSION,
+        session_id,
+        started_unix_ns,
+        command: options
+            .command
+            .iter()
+            .map(|value| ByteString::from(value.as_os_str().as_bytes()))
+            .collect(),
+        working_directory: options
+            .working_directory
+            .as_deref()
+            .map(|path| ByteString::from(path.as_os_str().as_bytes())),
+        geometry: SessionGeometry {
+            cols: size.cols,
+            rows: size.rows,
+            pixel_width: size.pixel_width,
+            pixel_height: size.pixel_height,
+        },
+        child_environment,
+        termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
+        operating_system: std::env::consts::OS.to_owned(),
+        architecture: std::env::consts::ARCH.to_owned(),
+        event_log: "events.jsonl".to_owned(),
+        control_socket: CONTROL_SOCKET_NAME.to_owned(),
+        contains_sensitive_terminal_data: true,
+    };
+    write_json_secure(&options.output_directory.join("session.json"), &manifest)
+}
+
+fn write_session_completion(options: &RecordOptions, completion: &SessionCompletion) -> Result<()> {
+    write_json_secure(
+        &options.output_directory.join("completion.json"),
+        &completion,
+    )
+}
+
+fn write_json_secure(path: &Path, value: &impl serde::Serialize) -> Result<()> {
+    let encoded = serde_json::to_vec_pretty(value).map_err(|source| Error::InvalidJson {
+        path: path.to_path_buf(),
+        json_path: "$".to_owned(),
+        source,
+    })?;
+    write_secure(path, &encoded)
 }
 
 fn validate_options(options: &RecordOptions) -> Result<PtySize> {
@@ -1375,7 +1451,11 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::{event::Event, event_log::EventLog};
+    use crate::{
+        event::Event,
+        event_log::EventLog,
+        session::{SessionCompletion, SessionManifest},
+    };
 
     #[test]
     fn records_exact_output_and_exit_after_output_close() {
@@ -1440,6 +1520,22 @@ mod tests {
             })
             .expect("output closed event");
         assert!(output_closed_index < recording.events.len() - 1);
+        let manifest: SessionManifest = serde_json::from_slice(
+            &fs_err::read(session.join("session.json")).expect("session manifest"),
+        )
+        .expect("valid session manifest");
+        let completion: SessionCompletion = serde_json::from_slice(
+            &fs_err::read(session.join("completion.json")).expect("completion manifest"),
+        )
+        .expect("valid completion manifest");
+        assert_eq!(manifest.session_id, recording.header.session_id);
+        assert_eq!(completion.session_id, recording.header.session_id);
+        assert_eq!(
+            completion.final_event_hash,
+            recording.events.last().unwrap().hash
+        );
+        assert_eq!(completion.event_count, recording.events.len() as u64);
+        assert_eq!(manifest.command[0].as_bytes(), b"/bin/sh");
     }
 
     #[test]

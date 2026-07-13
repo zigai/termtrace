@@ -78,6 +78,11 @@ impl EventLogWriter {
         self.next_seq
     }
 
+    /// Hex hash of the most recently appended record, or the header before events.
+    pub fn current_hash(&self) -> String {
+        self.previous_hash.to_hex().to_string()
+    }
+
     /// Create a new owner-only event log and durably write its header.
     ///
     /// # Errors
@@ -261,6 +266,49 @@ pub struct PendingOperation {
     pub expected_bytes: Option<u64>,
 }
 
+/// First invalid tail encountered during prefix recovery.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, schemars::JsonSchema)]
+pub struct RecoveryIssue {
+    /// One-based source line where validation failed.
+    pub line: u64,
+    /// Stable human-readable validation failure.
+    pub reason: String,
+}
+
+/// Evidence produced by non-destructive event-log prefix recovery.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, schemars::JsonSchema)]
+pub struct RecoveryReport {
+    /// Original source path.
+    pub source: PathBuf,
+    /// New owner-only recovered path.
+    pub recovered: PathBuf,
+    /// Number of integrity-checked events retained.
+    pub valid_events: u64,
+    /// Invalid tail, if one was discarded.
+    pub discarded_tail: Option<RecoveryIssue>,
+    /// Operations with a durable intent but uncertain result.
+    pub pending_operations: Vec<PendingOperationReport>,
+}
+
+/// Serializable uncertain-operation summary.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, schemars::JsonSchema)]
+pub struct PendingOperationReport {
+    /// Operation identifier.
+    pub operation_id: Uuid,
+    /// Stable operation kind.
+    pub kind: String,
+    /// Intent sequence number.
+    pub intent_seq: u64,
+    /// Intended input byte count.
+    pub expected_bytes: Option<u64>,
+}
+
+struct ParsedEventLog {
+    log: EventLog,
+    valid_lines: u64,
+    issue: Option<RecoveryIssue>,
+}
+
 impl EventLog {
     /// Read and validate a complete event log.
     ///
@@ -270,89 +318,221 @@ impl EventLog {
     /// headers, truncation, non-contiguous ordering, time reversal, or a broken
     /// integrity chain.
     pub fn read(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        let file = File::open(path).map_err(|source| Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        let mut reader = BufReader::new(file);
+        Ok(parse_event_log(path.as_ref(), false)?.log)
+    }
 
-        let header_bytes = read_line(&mut reader, path, 1)?
-            .ok_or_else(|| invalid_log(path, 1, "missing header"))?;
-        let header: EventLogHeader = parse_json_line(path, 1, &header_bytes)?;
-        validate_header(path, &header)?;
-
-        let mut previous_hash = blake3::hash(&header_bytes);
-        let mut previous_time = 0_u64;
-        let mut expected_seq = 0_u64;
-        let mut line_number = 2_u64;
-        let mut events = Vec::new();
-        let mut seen_operations = HashSet::new();
-        let mut pending_operations = HashMap::new();
-
-        while let Some(line) = read_line(&mut reader, path, line_number)? {
-            let record: EventRecord = parse_json_line(path, line_number, &line)?;
-            if record.seq != expected_seq {
-                return Err(invalid_log(
-                    path,
-                    line_number,
-                    format!("expected sequence {expected_seq}, found {}", record.seq),
-                ));
-            }
-            if record.monotonic_ns < previous_time {
-                return Err(invalid_log(
-                    path,
-                    line_number,
-                    "monotonic timestamp moved backwards",
-                ));
-            }
-            if record.prev_hash != previous_hash.to_hex().as_str() {
-                return Err(invalid_log(
-                    path,
-                    line_number,
-                    "previous hash does not match",
-                ));
-            }
-
-            let body = EventBody {
-                seq: record.seq,
-                monotonic_ns: record.monotonic_ns,
-                event: &record.event,
-            };
-            let body_bytes = serde_json::to_vec(&body).map_err(|source| Error::InvalidJson {
-                path: path.to_path_buf(),
-                json_path: "$".to_owned(),
-                source,
-            })?;
-            let expected_hash = chained_hash(previous_hash, &body_bytes);
-            if record.hash != expected_hash.to_hex().as_str() {
-                return Err(invalid_log(path, line_number, "event hash does not match"));
-            }
-            validate_operation_transition(
-                path,
-                line_number,
-                &record,
-                &mut seen_operations,
-                &mut pending_operations,
-            )?;
-
-            previous_hash = expected_hash;
-            previous_time = record.monotonic_ns;
-            expected_seq = expected_seq
-                .checked_add(1)
-                .ok_or_else(|| invalid_log(path, line_number, "event sequence overflow"))?;
-            events.push(record);
-            line_number = line_number.saturating_add(1);
-        }
-
-        let mut pending_operations = pending_operations.into_values().collect::<Vec<_>>();
-        pending_operations.sort_by_key(|operation| operation.intent_seq);
-        Ok(Self {
-            header,
-            events,
+    /// Copy the longest integrity-checked prefix to a new owner-only file.
+    ///
+    /// The source is never modified. A malformed header is not recoverable;
+    /// any later truncation, corruption, or schema failure becomes a reported
+    /// discarded tail. Unmatched operation intents remain explicitly pending.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid header, insecure destination, existing
+    /// output, source I/O failure, or durable output failure.
+    pub fn recover_prefix(
+        source: impl AsRef<Path>,
+        recovered: impl AsRef<Path>,
+    ) -> Result<RecoveryReport> {
+        let source = source.as_ref();
+        let recovered = recovered.as_ref();
+        let parsed = parse_event_log(source, true)?;
+        validate_parent_directory(recovered)?;
+        copy_lines(source, recovered, parsed.valid_lines)?;
+        let verified = Self::read(recovered)?;
+        let pending_operations = verified
+            .pending_operations
+            .iter()
+            .map(|operation| PendingOperationReport {
+                operation_id: operation.operation_id,
+                kind: match operation.kind {
+                    OperationKind::Input => "input",
+                    OperationKind::Resize => "resize",
+                    OperationKind::Signal => "signal",
+                }
+                .to_owned(),
+                intent_seq: operation.intent_seq,
+                expected_bytes: operation.expected_bytes,
+            })
+            .collect();
+        Ok(RecoveryReport {
+            source: source.to_path_buf(),
+            recovered: recovered.to_path_buf(),
+            valid_events: u64::try_from(verified.events.len()).unwrap_or(u64::MAX),
+            discarded_tail: parsed.issue,
             pending_operations,
         })
     }
+}
+
+struct LogValidation {
+    previous_hash: Hash,
+    previous_time: u64,
+    expected_seq: u64,
+    seen_operations: HashSet<Uuid>,
+    pending_operations: HashMap<Uuid, PendingOperation>,
+}
+
+impl LogValidation {
+    fn validate_record(&mut self, path: &Path, line: u64, bytes: &[u8]) -> Result<EventRecord> {
+        let record: EventRecord = parse_json_line(path, line, bytes)?;
+        if record.seq != self.expected_seq {
+            return Err(invalid_log(
+                path,
+                line,
+                format!(
+                    "expected sequence {}, found {}",
+                    self.expected_seq, record.seq
+                ),
+            ));
+        }
+        if record.monotonic_ns < self.previous_time {
+            return Err(invalid_log(
+                path,
+                line,
+                "monotonic timestamp moved backwards",
+            ));
+        }
+        if record.prev_hash != self.previous_hash.to_hex().as_str() {
+            return Err(invalid_log(path, line, "previous hash does not match"));
+        }
+        let body = EventBody {
+            seq: record.seq,
+            monotonic_ns: record.monotonic_ns,
+            event: &record.event,
+        };
+        let body_bytes = serde_json::to_vec(&body).map_err(|source| Error::InvalidJson {
+            path: path.to_path_buf(),
+            json_path: "$".to_owned(),
+            source,
+        })?;
+        let expected_hash = chained_hash(self.previous_hash, &body_bytes);
+        if record.hash != expected_hash.to_hex().as_str() {
+            return Err(invalid_log(path, line, "event hash does not match"));
+        }
+        validate_operation_transition(
+            path,
+            line,
+            &record,
+            &mut self.seen_operations,
+            &mut self.pending_operations,
+        )?;
+        self.previous_hash = expected_hash;
+        self.previous_time = record.monotonic_ns;
+        self.expected_seq = self
+            .expected_seq
+            .checked_add(1)
+            .ok_or_else(|| invalid_log(path, line, "event sequence overflow"))?;
+        Ok(record)
+    }
+}
+
+fn parse_event_log(path: &Path, recover_tail: bool) -> Result<ParsedEventLog> {
+    let file = File::open(path).map_err(|source| Error::Filesystem {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut reader = BufReader::new(file);
+    let header_bytes =
+        read_line(&mut reader, path, 1)?.ok_or_else(|| invalid_log(path, 1, "missing header"))?;
+    let header: EventLogHeader = parse_json_line(path, 1, &header_bytes)?;
+    validate_header(path, &header)?;
+    let mut validation = LogValidation {
+        previous_hash: blake3::hash(&header_bytes),
+        previous_time: 0,
+        expected_seq: 0,
+        seen_operations: HashSet::new(),
+        pending_operations: HashMap::new(),
+    };
+    let mut events = Vec::new();
+    let mut line_number = 2_u64;
+    let issue = loop {
+        let line = match read_line(&mut reader, path, line_number) {
+            Ok(Some(line)) => line,
+            Ok(None) => break None,
+            Err(error) if recover_tail => break Some(recovery_issue(&error, line_number)),
+            Err(error) => return Err(error),
+        };
+        match validation.validate_record(path, line_number, &line) {
+            Ok(record) => events.push(record),
+            Err(error) if recover_tail => break Some(recovery_issue(&error, line_number)),
+            Err(error) => return Err(error),
+        }
+        line_number = line_number.saturating_add(1);
+    };
+    let mut pending_operations = validation
+        .pending_operations
+        .into_values()
+        .collect::<Vec<_>>();
+    pending_operations.sort_by_key(|operation| operation.intent_seq);
+    Ok(ParsedEventLog {
+        valid_lines: u64::try_from(events.len())
+            .unwrap_or(u64::MAX)
+            .saturating_add(1),
+        log: EventLog {
+            header,
+            events,
+            pending_operations,
+        },
+        issue,
+    })
+}
+
+fn recovery_issue(error: &Error, fallback_line: u64) -> RecoveryIssue {
+    match error {
+        Error::InvalidEventLog { line, reason, .. } => RecoveryIssue {
+            line: *line,
+            reason: reason.clone(),
+        },
+        _ => RecoveryIssue {
+            line: fallback_line,
+            reason: error.to_string(),
+        },
+    }
+}
+
+fn copy_lines(source: &Path, recovered: &Path, count: u64) -> Result<()> {
+    let input = File::open(source).map_err(|source_error| Error::Filesystem {
+        path: source.to_path_buf(),
+        source: source_error,
+    })?;
+    let output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(OWNER_FILE_MODE)
+        .open(recovered)
+        .map_err(|source| Error::Filesystem {
+            path: recovered.to_path_buf(),
+            source,
+        })?;
+    let mut reader = BufReader::new(input);
+    let mut writer = BufWriter::new(output);
+    for line in 1..=count {
+        let mut bytes = Vec::new();
+        let read = reader
+            .read_until(b'\n', &mut bytes)
+            .map_err(|source_error| Error::Filesystem {
+                path: source.to_path_buf(),
+                source: source_error,
+            })?;
+        if read == 0 || bytes.last() != Some(&b'\n') {
+            return Err(invalid_log(source, line, "valid prefix copy was truncated"));
+        }
+        writer
+            .write_all(&bytes)
+            .map_err(|source| Error::Filesystem {
+                path: recovered.to_path_buf(),
+                source,
+            })?;
+    }
+    writer
+        .flush()
+        .and_then(|()| writer.get_ref().sync_data())
+        .map_err(|source| Error::Filesystem {
+            path: recovered.to_path_buf(),
+            source,
+        })
 }
 
 fn validate_operation_transition(
@@ -820,6 +1000,66 @@ mod tests {
 
         let error = EventLog::read(&path).expect_err("truncation must fail");
         assert!(matches!(error, Error::InvalidEventLog { line: 2, .. }));
+    }
+
+    #[test]
+    fn recovers_valid_prefix_and_reports_uncertain_intent() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let directory = temporary.path().join("session");
+        secure_directory(&directory);
+        let source = directory.join("damaged.jsonl");
+        let recovered = directory.join("recovered.jsonl");
+        let clock = SessionClock::now().expect("valid clock");
+        let mut writer =
+            EventLogWriter::create(&source, &header(&clock), clock).expect("create log");
+        let operation_id = Uuid::now_v7();
+        writer
+            .append_at(
+                1,
+                Event::Output {
+                    data: ByteString::from(&b"safe"[..]),
+                },
+            )
+            .expect("append output");
+        writer
+            .append_at(
+                2,
+                Event::InputIntent {
+                    operation_id,
+                    source: InputSource::Agent,
+                    input_kind: InputKind::Text,
+                    data: ByteString::from(&b"x"[..]),
+                    intent: None,
+                },
+            )
+            .expect("append intent");
+        drop(writer);
+        let original_valid = fs_err::read(&source).expect("valid prefix");
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(&source)
+            .expect("append damage");
+        file.write_all(br#"{"seq":2"#).expect("write truncation");
+        file.sync_data().expect("sync damage");
+
+        let report = EventLog::recover_prefix(&source, &recovered).expect("recover prefix");
+
+        assert_eq!(report.valid_events, 2);
+        assert_eq!(
+            report.discarded_tail.as_ref().map(|issue| issue.line),
+            Some(4)
+        );
+        assert_eq!(report.pending_operations.len(), 1);
+        assert_eq!(report.pending_operations[0].operation_id, operation_id);
+        assert_eq!(
+            fs_err::read(&recovered).expect("recovered bytes"),
+            original_valid
+        );
+        assert!(
+            fs_err::read(&source)
+                .expect("source retained")
+                .ends_with(br#"{"seq":2"#)
+        );
     }
 
     #[test]

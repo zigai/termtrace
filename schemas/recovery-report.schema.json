@@ -1,0 +1,104 @@
+{
+  "$defs": {
+    "PendingOperationReport": {
+      "description": "Serializable uncertain-operation summary.",
+      "properties": {
+        "expected_bytes": {
+          "description": "Intended input byte count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "intent_seq": {
+          "description": "Intent sequence number.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "description": "Stable operation kind.",
+          "type": "string"
+        },
+        "operation_id": {
+          "description": "Operation identifier.",
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation_id",
+        "kind",
+        "intent_seq"
+      ],
+      "type": "object"
+    },
+    "RecoveryIssue": {
+      "description": "First invalid tail encountered during prefix recovery.",
+      "properties": {
+        "line": {
+          "description": "One-based source line where validation failed.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "description": "Stable human-readable validation failure.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "line",
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/recovery-report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Evidence produced by non-destructive event-log prefix recovery.",
+  "properties": {
+    "discarded_tail": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RecoveryIssue"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Invalid tail, if one was discarded."
+    },
+    "pending_operations": {
+      "description": "Operations with a durable intent but uncertain result.",
+      "items": {
+        "$ref": "#/$defs/PendingOperationReport"
+      },
+      "type": "array"
+    },
+    "recovered": {
+      "description": "New owner-only recovered path.",
+      "type": "string"
+    },
+    "source": {
+      "description": "Original source path.",
+      "type": "string"
+    },
+    "valid_events": {
+      "description": "Number of integrity-checked events retained.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "source",
+    "recovered",
+    "valid_events",
+    "pending_operations"
+  ],
+  "title": "RecoveryReport",
+  "type": "object"
+}

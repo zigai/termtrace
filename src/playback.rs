@@ -9,6 +9,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -18,7 +19,7 @@ use crate::{
 };
 
 /// Clock handshake written before playback begins.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PlaybackTiming {
     /// Wall-clock time corresponding to event monotonic time zero.
     pub replay_origin_unix_ns: u128,

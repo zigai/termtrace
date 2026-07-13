@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -21,7 +22,7 @@ pub const CONTROL_SOCKET_NAME: &str = "control.sock";
 pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 1024 * 1024;
 
 /// Safely supported process-group signals.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessSignal {
     /// Interrupt the foreground application (`SIGINT`).
@@ -37,7 +38,7 @@ pub enum ProcessSignal {
 }
 
 /// One command sent to the live session actor.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlCommand {
     /// Verify that the host and protocol are responsive.
@@ -77,7 +78,7 @@ pub enum ControlCommand {
 }
 
 /// Request envelope carried as one JSON line.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ControlRequest {
     /// Protocol version.
@@ -100,7 +101,7 @@ impl ControlRequest {
 }
 
 /// Successful response payload.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlData {
     /// No additional data is required.
@@ -117,7 +118,7 @@ pub enum ControlData {
 }
 
 /// Response envelope carried as one JSON line.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ControlResponse {
     /// Protocol version.
@@ -129,7 +130,7 @@ pub struct ControlResponse {
 }
 
 /// Successful response or stable rejection.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlResult {
     /// Command was accepted and completely applied.

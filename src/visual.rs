@@ -10,6 +10,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -52,7 +53,7 @@ pub struct CaptureOutcome {
 }
 
 /// State-to-video mapping entry.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct VideoMapEntry {
     /// Semantic state identifier.
     pub state_id: u64,
@@ -67,7 +68,7 @@ pub struct VideoMapEntry {
 }
 
 /// Provenance and probe evidence for native visual artifacts.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct VisualManifest {
     /// Manifest schema version.
     pub version: u32,

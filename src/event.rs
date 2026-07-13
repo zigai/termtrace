@@ -1,6 +1,6 @@
 //! Versioned events that make up the canonical terminal execution record.
 
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -76,8 +76,22 @@ impl<'de> Deserialize<'de> for ByteString {
     }
 }
 
+impl schemars::JsonSchema for ByteString {
+    fn schema_name() -> Cow<'static, str> {
+        Cow::Borrowed("Base64Bytes")
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "contentEncoding": "base64",
+            "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+        })
+    }
+}
+
 /// Metadata written before the first event.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EventLogHeader {
     /// Constant format identifier.
@@ -126,7 +140,7 @@ impl EventLogHeader {
 }
 
 /// Origin of bytes sent to the child process.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum InputSource {
     /// Input received from the attached native terminal.
@@ -138,7 +152,7 @@ pub enum InputSource {
 }
 
 /// User-facing interpretation of an input byte sequence.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum InputKind {
     /// Uninterpreted bytes.
@@ -152,7 +166,7 @@ pub enum InputKind {
 }
 
 /// Why a process lifecycle transition occurred.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LifecycleKind {
     /// The PTY and child process were created.
@@ -164,7 +178,7 @@ pub enum LifecycleKind {
 }
 
 /// Result of a state-changing operation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationStatus {
     /// The complete operation was applied once.
@@ -174,7 +188,7 @@ pub enum OperationStatus {
 }
 
 /// One ordered session event.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Event {
     /// Bytes read from the child PTY.
@@ -295,7 +309,7 @@ pub enum Event {
 }
 
 /// Integrity-chained event persisted as one JSON line.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EventRecord {
     /// Contiguous zero-based event sequence.

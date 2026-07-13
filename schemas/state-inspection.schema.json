@@ -1,0 +1,745 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "CellState": {
+      "description": "One visible cell in a semantic snapshot.",
+      "properties": {
+        "column": {
+          "description": "Zero-based column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "grapheme": {
+          "description": "Full UTF-8 grapheme cluster; empty for a blank cell.",
+          "type": "string"
+        },
+        "resolved_background": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rgb"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Resolved explicit background, before terminal-default fallback."
+        },
+        "resolved_foreground": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rgb"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Resolved explicit foreground, before terminal-default fallback."
+        },
+        "selected": {
+          "description": "Whether the cell is selected.",
+          "type": "boolean"
+        },
+        "style": {
+          "$ref": "#/$defs/CellStyle",
+          "description": "Visual style."
+        }
+      },
+      "required": [
+        "column",
+        "grapheme",
+        "style",
+        "selected"
+      ],
+      "type": "object"
+    },
+    "CellStyle": {
+      "description": "Complete style attached to one terminal cell.",
+      "properties": {
+        "background": {
+          "$ref": "#/$defs/ColorSpec",
+          "description": "Background color source."
+        },
+        "blink": {
+          "description": "Blink attribute.",
+          "type": "boolean"
+        },
+        "bold": {
+          "description": "Bold attribute.",
+          "type": "boolean"
+        },
+        "faint": {
+          "description": "Faint attribute.",
+          "type": "boolean"
+        },
+        "foreground": {
+          "$ref": "#/$defs/ColorSpec",
+          "description": "Foreground color source."
+        },
+        "inverse": {
+          "description": "Inverse-video attribute.",
+          "type": "boolean"
+        },
+        "invisible": {
+          "description": "Invisible attribute.",
+          "type": "boolean"
+        },
+        "italic": {
+          "description": "Italic attribute.",
+          "type": "boolean"
+        },
+        "overline": {
+          "description": "Overline attribute.",
+          "type": "boolean"
+        },
+        "strikethrough": {
+          "description": "Strikethrough attribute.",
+          "type": "boolean"
+        },
+        "underline": {
+          "description": "Upstream SGR underline value (`0` through `5`).",
+          "format": "int32",
+          "type": "integer"
+        },
+        "underline_color": {
+          "$ref": "#/$defs/ColorSpec",
+          "description": "Underline color source."
+        }
+      },
+      "required": [
+        "foreground",
+        "background",
+        "underline_color",
+        "bold",
+        "italic",
+        "faint",
+        "blink",
+        "inverse",
+        "invisible",
+        "strikethrough",
+        "overline",
+        "underline"
+      ],
+      "type": "object"
+    },
+    "ColorSpec": {
+      "description": "Cell color source before default-color fallback.",
+      "oneOf": [
+        {
+          "description": "No explicit color.",
+          "properties": {
+            "kind": {
+              "const": "none",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Index into the active 256-color palette.",
+          "properties": {
+            "kind": {
+              "const": "palette",
+              "type": "string"
+            },
+            "value": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Explicit true color.",
+          "properties": {
+            "kind": {
+              "const": "rgb",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Rgb"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ColorState": {
+      "description": "Active terminal colors.",
+      "properties": {
+        "background": {
+          "$ref": "#/$defs/Rgb",
+          "description": "Default/current background."
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rgb"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit cursor color."
+        },
+        "foreground": {
+          "$ref": "#/$defs/Rgb",
+          "description": "Default/current foreground."
+        },
+        "palette": {
+          "description": "Active 256-color palette.",
+          "items": {
+            "$ref": "#/$defs/Rgb"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "background",
+        "foreground",
+        "palette"
+      ],
+      "type": "object"
+    },
+    "CursorState": {
+      "description": "Cursor state at one semantic boundary.",
+      "properties": {
+        "blinking": {
+          "description": "Blink mode.",
+          "type": "boolean"
+        },
+        "column": {
+          "description": "Viewport column when available.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "in_viewport": {
+          "description": "Whether the cursor lies in the viewport.",
+          "type": "boolean"
+        },
+        "row": {
+          "description": "Viewport row when available.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "style": {
+          "$ref": "#/$defs/CursorStyle",
+          "description": "Visual shape."
+        },
+        "visible": {
+          "description": "Visibility mode.",
+          "type": "boolean"
+        },
+        "wide_tail": {
+          "description": "Whether the cursor is on a wide-character tail.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "visible",
+        "blinking",
+        "in_viewport",
+        "style"
+      ],
+      "type": "object"
+    },
+    "CursorStyle": {
+      "description": "Cursor visual style.",
+      "oneOf": [
+        {
+          "const": "bar",
+          "description": "Vertical bar.",
+          "type": "string"
+        },
+        {
+          "const": "block",
+          "description": "Filled block.",
+          "type": "string"
+        },
+        {
+          "const": "underline",
+          "description": "Underline.",
+          "type": "string"
+        },
+        {
+          "const": "hollow_block",
+          "description": "Hollow block.",
+          "type": "string"
+        }
+      ]
+    },
+    "DirtyState": {
+      "description": "Global render dirtiness reported by Ghostty.",
+      "oneOf": [
+        {
+          "const": "clean",
+          "description": "No visual change.",
+          "type": "string"
+        },
+        {
+          "const": "partial",
+          "description": "One or more rows changed.",
+          "type": "string"
+        },
+        {
+          "const": "full",
+          "description": "Full redraw required.",
+          "type": "string"
+        }
+      ]
+    },
+    "ModeState": {
+      "description": "Terminal modes relevant to presentation and input.",
+      "properties": {
+        "alternate_screen": {
+          "description": "Any alternate-screen mode.",
+          "type": "boolean"
+        },
+        "bracketed_paste": {
+          "description": "DEC bracketed-paste mode 2004.",
+          "type": "boolean"
+        },
+        "synchronized_output": {
+          "description": "DEC synchronized-output mode 2026.",
+          "type": "boolean"
+        },
+        "values": {
+          "description": "Complete stable inventory of known ANSI and DEC modes.",
+          "items": {
+            "$ref": "#/$defs/TerminalMode"
+          },
+          "type": "array"
+        },
+        "wraparound": {
+          "description": "DEC auto-wrap mode 7.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "synchronized_output",
+        "alternate_screen",
+        "wraparound",
+        "bracketed_paste",
+        "values"
+      ],
+      "type": "object"
+    },
+    "Rgb": {
+      "description": "RGB color independent of libghostty's unstable ABI.",
+      "properties": {
+        "b": {
+          "description": "Blue channel.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "g": {
+          "description": "Green channel.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "r": {
+          "description": "Red channel.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "r",
+        "g",
+        "b"
+      ],
+      "type": "object"
+    },
+    "RowDiff": {
+      "description": "Fine-grained changes for one viewport row.",
+      "properties": {
+        "cells": {
+          "description": "Cells whose complete semantic value changed.",
+          "items": {
+            "$ref": "#/$defs/CellState"
+          },
+          "type": "array"
+        },
+        "row": {
+          "description": "Zero-based row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "row",
+        "cells"
+      ],
+      "type": "object"
+    },
+    "RowState": {
+      "description": "One viewport row.",
+      "properties": {
+        "cells": {
+          "description": "All cells, including blanks.",
+          "items": {
+            "$ref": "#/$defs/CellState"
+          },
+          "type": "array"
+        },
+        "dirty": {
+          "description": "Whether Ghostty marked this row dirty during the update.",
+          "type": "boolean"
+        },
+        "row": {
+          "description": "Zero-based viewport row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "row",
+        "dirty",
+        "cells"
+      ],
+      "type": "object"
+    },
+    "SemanticState": {
+      "description": "Authoritative semantic terminal state copied out of libghostty-vt.",
+      "properties": {
+        "active_style": {
+          "$ref": "#/$defs/CellStyle",
+          "description": "Current SGR style used by future printed cells."
+        },
+        "colors": {
+          "$ref": "#/$defs/ColorState",
+          "description": "Active colors and palette."
+        },
+        "cols": {
+          "description": "Viewport columns.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cursor": {
+          "$ref": "#/$defs/CursorState",
+          "description": "Cursor state."
+        },
+        "dirty": {
+          "$ref": "#/$defs/DirtyState",
+          "description": "Global render dirtiness."
+        },
+        "dirty_rows": {
+          "description": "Rows marked dirty by Ghostty.",
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "grid": {
+          "description": "Complete viewport grid.",
+          "items": {
+            "$ref": "#/$defs/RowState"
+          },
+          "type": "array"
+        },
+        "metadata": {
+          "$ref": "#/$defs/TerminalMetadata",
+          "description": "OSC-controlled terminal metadata."
+        },
+        "modes": {
+          "$ref": "#/$defs/ModeState",
+          "description": "Presentation/input modes."
+        },
+        "rows": {
+          "description": "Viewport rows.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cols",
+        "rows",
+        "dirty",
+        "dirty_rows",
+        "cursor",
+        "modes",
+        "colors",
+        "active_style",
+        "metadata",
+        "grid"
+      ],
+      "type": "object"
+    },
+    "StateDelta": {
+      "description": "Delta from the previous distinct state.",
+      "properties": {
+        "active_style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CellStyle"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "New active SGR style when it changed."
+        },
+        "colors": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "New colors and palette when they changed."
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CursorState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "New cursor when it changed."
+        },
+        "geometry": {
+          "description": "New `(cols, rows)` when geometry changed.",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          ],
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminalMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "New terminal metadata when it changed."
+        },
+        "modes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModeState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "New terminal modes when they changed."
+        },
+        "rows": {
+          "description": "Cell-level row deltas.",
+          "items": {
+            "$ref": "#/$defs/RowDiff"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "rows"
+      ],
+      "type": "object"
+    },
+    "StateRecord": {
+      "description": "One distinct semantic state boundary.",
+      "properties": {
+        "delta": {
+          "$ref": "#/$defs/StateDelta",
+          "description": "Stable delta from the preceding distinct state."
+        },
+        "event_byte_offset": {
+          "description": "Zero-based byte offset inside an output event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "event_seq": {
+          "description": "Canonical event responsible for this state; absent for initial state.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ghostty_dirty": {
+          "$ref": "#/$defs/DirtyState",
+          "description": "Ghostty's global dirty classification."
+        },
+        "ghostty_dirty_rows": {
+          "description": "Rows Ghostty marked dirty.",
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "monotonic_ns": {
+          "description": "Monotonic event timestamp in nanoseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "presented": {
+          "description": "Whether this state was eligible for presentation.",
+          "type": "boolean"
+        },
+        "state_hash": {
+          "description": "BLAKE3 of the complete normalized semantic state.",
+          "type": "string"
+        },
+        "state_id": {
+          "description": "Dense zero-based state identifier.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "state_id",
+        "monotonic_ns",
+        "state_hash",
+        "presented",
+        "ghostty_dirty",
+        "ghostty_dirty_rows",
+        "delta"
+      ],
+      "type": "object"
+    },
+    "TerminalMetadata": {
+      "description": "Terminal metadata controlled by OSC sequences.",
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Raw title bytes."
+        },
+        "working_directory": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Raw working-directory bytes."
+        }
+      },
+      "required": [
+        "title",
+        "working_directory"
+      ],
+      "type": "object"
+    },
+    "TerminalMode": {
+      "description": "One ANSI or DEC mode value.",
+      "properties": {
+        "ansi": {
+          "description": "`true` for ANSI mode, `false` for DEC-private mode.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "Current set/reset value.",
+          "type": "boolean"
+        },
+        "number": {
+          "description": "Numeric mode identifier.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "number",
+        "ansi",
+        "enabled"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/state-inspection.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One fully reconstructed state and its index metadata.",
+  "properties": {
+    "record": {
+      "$ref": "#/$defs/StateRecord",
+      "description": "State index metadata and delta provenance."
+    },
+    "state": {
+      "$ref": "#/$defs/SemanticState",
+      "description": "Complete semantic state, not a delta."
+    }
+  },
+  "required": [
+    "record",
+    "state"
+  ],
+  "title": "StateInspection",
+  "type": "object"
+}

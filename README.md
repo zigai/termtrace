@@ -30,6 +30,8 @@ The new owner-only session directory contains an integrity-chained `events.jsonl
 
 Termtrace refuses to reuse an existing session directory. This prevents accidental evidence loss and makes every run independently auditable.
 
+Detailed references: [installation](docs/installation.md), [agent workflows](docs/agent-workflows.md), [semantic replay](docs/semantic-replay.md), [formats and schemas](docs/formats.md), and [troubleshooting](docs/troubleshooting.md).
+
 ## Live agent control
 
 Every active recording exposes an owner-only `control.sock` inside its session directory. Requests use bounded, newline-framed, versioned JSON and Linux peer credentials must match the recording owner. The CLI is a thin client:

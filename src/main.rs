@@ -7,9 +7,13 @@ use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
     control::{ControlCommand, ProcessSignal, request},
     event::ByteString,
+    event_log::EventLog,
+    inspection::{inspect_session, state_text, wait_for_output},
+    interop::export_asciicast,
     playback::{PlaybackOptions, playback},
     record::{RecordOptions, record},
-    replay::index_session,
+    replay::{StateSelector, index_session},
+    schema::write_all as write_schemas,
     visual::{CaptureOptions, capture},
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -55,6 +59,86 @@ enum Command {
     /// Internal timed event playback used as Ghostty's child process.
     #[command(hide = true)]
     Playback(PlaybackArgs),
+    /// Reconstruct one semantic state as JSON or text.
+    Inspect(InspectArgs),
+    /// Wait for exact UTF-8 text in canonical PTY output.
+    Wait(WaitArgs),
+    /// Copy the longest integrity-checked event prefix without modifying source.
+    Recover(RecoverArgs),
+    /// Generate JSON Schemas for public events, controls, and artifacts.
+    Schemas(SchemaArgs),
+    /// Export a lossy UTF-8 asciinema v2 interoperability cast.
+    ExportAsciicast(ExportArgs),
+}
+
+#[derive(Debug, Args)]
+struct ExportArgs {
+    /// Source session directory.
+    #[arg(long)]
+    session: PathBuf,
+    /// New asciicast v2 output path.
+    #[arg(long)]
+    out: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct SchemaArgs {
+    /// Destination directory.
+    #[arg(long)]
+    out: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct RecoverArgs {
+    /// Damaged or truncated source event log.
+    #[arg(long)]
+    event_log: PathBuf,
+    /// New recovered event-log path in an owner-only directory.
+    #[arg(long)]
+    out: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum InspectFormat {
+    Json,
+    Text,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("selector")
+        .multiple(false)
+        .args(["state", "event_seq", "monotonic_ns"])
+))]
+struct InspectArgs {
+    /// Source session directory.
+    #[arg(long)]
+    session: PathBuf,
+    /// Exact semantic state identifier.
+    #[arg(long)]
+    state: Option<u64>,
+    /// Latest state at or before this event sequence.
+    #[arg(long)]
+    event_seq: Option<u64>,
+    /// Latest state at or before this monotonic nanosecond timestamp.
+    #[arg(long)]
+    monotonic_ns: Option<u64>,
+    /// Output representation.
+    #[arg(long, value_enum, default_value_t = InspectFormat::Json)]
+    format: InspectFormat,
+}
+
+#[derive(Debug, Args)]
+struct WaitArgs {
+    /// Live session directory.
+    #[arg(long)]
+    session: PathBuf,
+    /// Exact UTF-8 text to observe across output chunks.
+    #[arg(long)]
+    text: String,
+    /// Maximum wait duration in milliseconds.
+    #[arg(long, default_value_t = 30_000)]
+    timeout_ms: u64,
 }
 
 #[derive(Debug, Args)]
@@ -235,8 +319,11 @@ fn init_diagnostics(level: tracing::Level) {
 fn main() -> Result<ExitCode> {
     let cli = Cli::parse();
     init_diagnostics(cli.log);
+    dispatch(cli.command)
+}
 
-    match cli.command {
+fn dispatch(command: Command) -> Result<ExitCode> {
+    match command {
         Command::Version => {
             println!("termtrace {}", env!("CARGO_PKG_VERSION"));
             Ok(ExitCode::SUCCESS)
@@ -259,46 +346,105 @@ fn main() -> Result<ExitCode> {
             },
         ),
         Command::Stop(arguments) => run_control(arguments.session, ControlCommand::Stop),
-        Command::Index(arguments) => {
-            let outcome = index_session(arguments.session)?;
-            println!(
-                "{}",
-                serde_json::json!({
-                    "directory": outcome.directory,
-                    "state_count": outcome.state_count,
-                    "final_state_hash": outcome.final_state_hash,
-                })
-            );
-            Ok(ExitCode::SUCCESS)
-        }
-        Command::Capture(arguments) => {
-            let outcome = capture(&CaptureOptions {
-                session_directory: arguments.session,
-                width: arguments.width,
-                height: arguments.height,
-                fps: arguments.fps,
-            })?;
-            println!(
-                "{}",
-                serde_json::json!({
-                    "directory": outcome.directory,
-                    "video": outcome.video,
-                    "screenshot": outcome.screenshot,
-                })
-            );
-            Ok(ExitCode::SUCCESS)
-        }
-        Command::Playback(arguments) => {
-            playback(&PlaybackOptions {
-                session_directory: arguments.session,
-                timing_file: arguments.timing_file,
-                ready_file: arguments.ready_file,
-                start_delay: Duration::from_millis(arguments.start_delay_ms),
-                final_hold: Duration::from_millis(arguments.final_hold_ms),
-            })?;
+        Command::Index(arguments) => run_index(arguments),
+        Command::Capture(arguments) => run_capture(arguments),
+        Command::Playback(arguments) => run_playback(arguments),
+        Command::Inspect(arguments) => run_inspect(arguments),
+        Command::Wait(arguments) => run_wait(arguments),
+        Command::Recover(arguments) => run_recover(arguments),
+        Command::Schemas(arguments) => run_schemas(arguments),
+        Command::ExportAsciicast(arguments) => {
+            export_asciicast(arguments.session, arguments.out)?;
             Ok(ExitCode::SUCCESS)
         }
     }
+}
+
+fn run_index(arguments: SessionArgs) -> Result<ExitCode> {
+    let outcome = index_session(arguments.session)?;
+    println!(
+        "{}",
+        serde_json::json!({
+            "directory": outcome.directory,
+            "state_count": outcome.state_count,
+            "final_state_hash": outcome.final_state_hash,
+        })
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_capture(arguments: CaptureArgs) -> Result<ExitCode> {
+    let outcome = capture(&CaptureOptions {
+        session_directory: arguments.session,
+        width: arguments.width,
+        height: arguments.height,
+        fps: arguments.fps,
+    })?;
+    println!(
+        "{}",
+        serde_json::json!({
+            "directory": outcome.directory,
+            "video": outcome.video,
+            "screenshot": outcome.screenshot,
+        })
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> {
+    playback(&PlaybackOptions {
+        session_directory: arguments.session,
+        timing_file: arguments.timing_file,
+        ready_file: arguments.ready_file,
+        start_delay: Duration::from_millis(arguments.start_delay_ms),
+        final_hold: Duration::from_millis(arguments.final_hold_ms),
+    })?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
+    let selector = match (arguments.state, arguments.event_seq, arguments.monotonic_ns) {
+        (Some(state), None, None) => StateSelector::StateId(state),
+        (None, Some(sequence), None) => StateSelector::EventSeq(sequence),
+        (None, None, Some(time)) => StateSelector::MonotonicNs(time),
+        (None, None, None) => StateSelector::Final,
+        _ => unreachable!("clap validates selector exclusivity"),
+    };
+    let inspection = inspect_session(arguments.session, selector)?;
+    match arguments.format {
+        InspectFormat::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&inspection).into_diagnostic()?
+        ),
+        InspectFormat::Text => println!("{}", state_text(&inspection.state)),
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_wait(arguments: WaitArgs) -> Result<ExitCode> {
+    let outcome = wait_for_output(
+        arguments.session,
+        arguments.text.as_bytes(),
+        Duration::from_millis(arguments.timeout_ms),
+    )?;
+    println!("{}", serde_json::to_string(&outcome).into_diagnostic()?);
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_recover(arguments: RecoverArgs) -> Result<ExitCode> {
+    let report = EventLog::recover_prefix(arguments.event_log, arguments.out)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).into_diagnostic()?
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_schemas(arguments: SchemaArgs) -> Result<ExitCode> {
+    for path in write_schemas(arguments.out)? {
+        println!("{}", path.display());
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn run_control(session: PathBuf, command: ControlCommand) -> Result<ExitCode> {

@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -32,7 +33,7 @@ pub const STATE_FORMAT_VERSION: u32 = 1;
 pub const DERIVED_DIRECTORY: &str = "derived";
 
 /// Fine-grained changes for one viewport row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RowDiff {
     /// Zero-based row.
     pub row: u16,
@@ -41,7 +42,7 @@ pub struct RowDiff {
 }
 
 /// Delta from the previous distinct state.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateDelta {
     /// New `(cols, rows)` when geometry changed.
     pub geometry: Option<(u16, u16)>,
@@ -60,7 +61,7 @@ pub struct StateDelta {
 }
 
 /// One distinct semantic state boundary.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateRecord {
     /// Dense zero-based state identifier.
     pub state_id: u64,
@@ -83,7 +84,7 @@ pub struct StateRecord {
 }
 
 /// Compact event/video mapping information for one state.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateIndexEntry {
     /// State identifier.
     pub state_id: u64,
@@ -123,8 +124,30 @@ pub struct CollectedReplay {
     pub artifacts: ReplayArtifacts,
 }
 
+/// Selector for one reconstructed semantic state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StateSelector {
+    /// Final distinct state.
+    Final,
+    /// Exact state identifier.
+    StateId(u64),
+    /// Latest state at or before an event sequence.
+    EventSeq(u64),
+    /// Latest state at or before a monotonic timestamp.
+    MonotonicNs(u64),
+}
+
+/// One fully reconstructed state and its index metadata.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StateInspection {
+    /// State index metadata and delta provenance.
+    pub record: StateRecord,
+    /// Complete semantic state, not a delta.
+    pub state: SemanticState,
+}
+
 /// Manifest committed with derived replay artifacts.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ReplayManifest {
     /// Artifact schema version.
     pub version: u32,
@@ -187,16 +210,41 @@ struct StateHashMetadata<'a> {
 /// Returns an error when libghostty-vt or state serialization fails.
 pub fn replay(log: &EventLog) -> Result<CollectedReplay> {
     let mut states = Vec::new();
-    let artifacts = replay_with(log, |record| {
+    let artifacts = replay_with(log, |record, _| {
         states.push(record);
         Ok(())
     })?;
     Ok(CollectedReplay { states, artifacts })
 }
 
+/// Reconstruct one state selected by state, event, time, or final position.
+///
+/// # Errors
+///
+/// Returns an error when the source cannot replay or no state matches.
+pub fn inspect(log: &EventLog, selector: StateSelector) -> Result<StateInspection> {
+    let mut selected = None;
+    replay_with(log, |record, state| {
+        let matches = match selector {
+            StateSelector::Final => true,
+            StateSelector::StateId(id) => record.state_id == id,
+            StateSelector::EventSeq(seq) => record.event_seq.is_none_or(|event| event <= seq),
+            StateSelector::MonotonicNs(time) => record.monotonic_ns <= time,
+        };
+        if matches {
+            selected = Some(StateInspection {
+                record,
+                state: state.clone(),
+            });
+        }
+        Ok(())
+    })?;
+    selected.ok_or_else(|| invalid_replay("no semantic state matches the selector"))
+}
+
 fn replay_with(
     log: &EventLog,
-    mut state_sink: impl FnMut(StateRecord) -> Result<()>,
+    mut state_sink: impl FnMut(StateRecord, &SemanticState) -> Result<()>,
 ) -> Result<ReplayArtifacts> {
     let mut builder = ReplayBuilder::new(log)?;
     builder.capture(None, None, 0, &mut state_sink)?;
@@ -282,7 +330,7 @@ impl ReplayBuilder {
         event_seq: Option<u64>,
         event_byte_offset: Option<u64>,
         monotonic_ns: u64,
-        sink: &mut impl FnMut(StateRecord) -> Result<()>,
+        sink: &mut impl FnMut(StateRecord, &SemanticState) -> Result<()>,
     ) -> Result<()> {
         let Some(state) = self.engine.snapshot_if_changed()? else {
             return Ok(());
@@ -303,7 +351,7 @@ impl ReplayBuilder {
             ghostty_dirty_rows: state.dirty_rows.clone(),
             delta,
         };
-        sink(record)?;
+        sink(record, &state)?;
         self.state_count = self
             .state_count
             .checked_add(1)
@@ -390,7 +438,7 @@ pub fn index_session(session_directory: impl AsRef<Path>) -> Result<IndexOutcome
 fn write_index(directory: &Path, log: &EventLog) -> Result<ReplayArtifacts> {
     let mut states = secure_writer(&directory.join("states.jsonl"))?;
     let mut index = secure_writer(&directory.join("state-index.jsonl"))?;
-    let artifacts = replay_with(log, |record| {
+    let artifacts = replay_with(log, |record, _| {
         write_json_line(&mut states, &record, directory)?;
         let entry = StateIndexEntry {
             state_id: record.state_id,

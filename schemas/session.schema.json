@@ -1,0 +1,145 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "SessionGeometry": {
+      "description": "Initial PTY geometry.",
+      "properties": {
+        "cols": {
+          "description": "Columns.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pixel_height": {
+          "description": "Total pixel height.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pixel_width": {
+          "description": "Total pixel width.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "description": "Rows.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cols",
+        "rows",
+        "pixel_width",
+        "pixel_height"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/session.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Immutable provenance written before the child is spawned.",
+  "properties": {
+    "architecture": {
+      "description": "Build target architecture.",
+      "type": "string"
+    },
+    "child_environment": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Allowlisted child environment overrides.",
+      "type": "object"
+    },
+    "command": {
+      "description": "Exact executable and argument bytes.",
+      "items": {
+        "$ref": "#/$defs/Base64Bytes"
+      },
+      "type": "array"
+    },
+    "contains_sensitive_terminal_data": {
+      "description": "Explicit sensitivity warning.",
+      "type": "boolean"
+    },
+    "control_socket": {
+      "description": "Live control socket relative path.",
+      "type": "string"
+    },
+    "event_log": {
+      "description": "Canonical event-log relative path.",
+      "type": "string"
+    },
+    "format": {
+      "description": "Stable format identifier.",
+      "type": "string"
+    },
+    "geometry": {
+      "$ref": "#/$defs/SessionGeometry",
+      "description": "Initial PTY geometry."
+    },
+    "operating_system": {
+      "description": "Build target operating system.",
+      "type": "string"
+    },
+    "session_id": {
+      "description": "Session identifier shared with the event log.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "started_unix_ns": {
+      "description": "Unix wall-clock origin in nanoseconds.",
+      "format": "uint128",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "termtrace_version": {
+      "description": "Termtrace package version.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "working_directory": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Base64Bytes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Exact working-directory bytes when overridden."
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "session_id",
+    "started_unix_ns",
+    "command",
+    "geometry",
+    "child_environment",
+    "termtrace_version",
+    "operating_system",
+    "architecture",
+    "event_log",
+    "control_socket",
+    "contains_sensitive_terminal_data"
+  ],
+  "title": "SessionManifest",
+  "type": "object"
+}

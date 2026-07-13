@@ -1,0 +1,136 @@
+{
+  "$defs": {
+    "ControlData": {
+      "description": "Successful response payload.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "No additional data is required.",
+          "properties": {
+            "kind": {
+              "const": "acknowledged",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Live session status.",
+          "properties": {
+            "kind": {
+              "const": "status",
+              "type": "string"
+            },
+            "next_event_seq": {
+              "description": "Next canonical event sequence number.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "output_bytes": {
+              "description": "Output bytes recorded so far.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pid": {
+              "description": "Child process identifier when available.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "output_bytes",
+            "next_event_seq"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ControlResult": {
+      "description": "Successful response or stable rejection.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Command was accepted and completely applied.",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ControlData",
+              "description": "Command-specific data."
+            },
+            "status": {
+              "const": "ok",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Command was rejected or failed.",
+          "properties": {
+            "code": {
+              "description": "Stable machine-readable code.",
+              "type": "string"
+            },
+            "message": {
+              "description": "Human-readable diagnostic.",
+              "type": "string"
+            },
+            "status": {
+              "const": "error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "code",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/control-response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Response envelope carried as one JSON line.",
+  "properties": {
+    "request_id": {
+      "description": "Identifier copied from the request.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "result": {
+      "$ref": "#/$defs/ControlResult",
+      "description": "Success or structured rejection."
+    },
+    "version": {
+      "description": "Protocol version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "request_id",
+    "result"
+  ],
+  "title": "ControlResponse",
+  "type": "object"
+}

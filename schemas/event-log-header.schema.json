@@ -1,0 +1,74 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/event-log-header.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Metadata written before the first event.",
+  "properties": {
+    "cols": {
+      "description": "Initial terminal columns.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "format": {
+      "description": "Constant format identifier.",
+      "type": "string"
+    },
+    "pixel_height": {
+      "description": "Initial terminal pixel height.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "pixel_width": {
+      "description": "Initial terminal pixel width.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "rows": {
+      "description": "Initial terminal rows.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "session_id": {
+      "description": "Globally unique session identifier.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "started_unix_ns": {
+      "description": "Wall-clock Unix timestamp corresponding to monotonic time zero.",
+      "format": "uint128",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "term": {
+      "description": "Terminal identity exposed to the child process.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "session_id",
+    "started_unix_ns",
+    "cols",
+    "rows",
+    "pixel_width",
+    "pixel_height",
+    "term"
+  ],
+  "title": "EventLogHeader",
+  "type": "object"
+}

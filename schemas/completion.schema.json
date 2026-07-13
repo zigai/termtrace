@@ -1,0 +1,51 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/completion.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Immutable completion facts written after the final event is durable.",
+  "properties": {
+    "event_count": {
+      "description": "Number of canonical events.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "exit_code": {
+      "description": "Normal exit code when available.",
+      "format": "int32",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "final_event_hash": {
+      "description": "Hash of the final canonical event.",
+      "type": "string"
+    },
+    "output_bytes": {
+      "description": "Total raw output bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "session_id": {
+      "description": "Session identifier.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "signal_name": {
+      "description": "Signal name when available.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "session_id",
+    "output_bytes",
+    "final_event_hash",
+    "event_count"
+  ],
+  "title": "SessionCompletion",
+  "type": "object"
+}

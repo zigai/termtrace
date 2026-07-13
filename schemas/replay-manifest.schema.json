@@ -1,0 +1,56 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/replay-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Manifest committed with derived replay artifacts.",
+  "properties": {
+    "files": {
+      "description": "Relative artifact paths.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "final_state_hash": {
+      "description": "Final semantic state hash.",
+      "type": "string"
+    },
+    "ghostty_revision": {
+      "description": "Exact Ghostty source revision.",
+      "type": "string"
+    },
+    "session_id": {
+      "description": "Source session identifier.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "source_event_hash": {
+      "description": "Source event-log terminal hash.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "state_count": {
+      "description": "Number of distinct semantic states.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "version": {
+      "description": "Artifact schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "session_id",
+    "ghostty_revision",
+    "state_count",
+    "final_state_hash",
+    "files"
+  ],
+  "title": "ReplayManifest",
+  "type": "object"
+}

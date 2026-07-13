@@ -5,6 +5,7 @@
 
 use std::{ffi::c_void, mem::size_of, ptr};
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result, event::ByteString};
@@ -12,7 +13,7 @@ use crate::{Error, Result, event::ByteString};
 mod sys;
 
 /// RGB color independent of libghostty's unstable ABI.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Rgb {
     /// Red channel.
     pub r: u8,
@@ -23,7 +24,7 @@ pub struct Rgb {
 }
 
 /// Cell color source before default-color fallback.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum ColorSpec {
     /// No explicit color.
@@ -35,7 +36,7 @@ pub enum ColorSpec {
 }
 
 /// Complete style attached to one terminal cell.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CellStyle {
     /// Foreground color source.
     pub foreground: ColorSpec,
@@ -64,7 +65,7 @@ pub struct CellStyle {
 }
 
 /// One visible cell in a semantic snapshot.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CellState {
     /// Zero-based column.
     pub column: u16,
@@ -81,7 +82,7 @@ pub struct CellState {
 }
 
 /// One viewport row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RowState {
     /// Zero-based viewport row.
     pub row: u16,
@@ -92,7 +93,7 @@ pub struct RowState {
 }
 
 /// Global render dirtiness reported by Ghostty.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DirtyState {
     /// No visual change.
@@ -104,7 +105,7 @@ pub enum DirtyState {
 }
 
 /// Cursor visual style.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CursorStyle {
     /// Vertical bar.
@@ -118,7 +119,7 @@ pub enum CursorStyle {
 }
 
 /// Cursor state at one semantic boundary.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CursorState {
     /// Visibility mode.
     pub visible: bool,
@@ -137,7 +138,7 @@ pub struct CursorState {
 }
 
 /// Terminal modes relevant to presentation and input.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModeState {
     /// DEC synchronized-output mode 2026.
     pub synchronized_output: bool,
@@ -152,7 +153,7 @@ pub struct ModeState {
 }
 
 /// One ANSI or DEC mode value.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TerminalMode {
     /// Numeric mode identifier.
     pub number: u16,
@@ -163,7 +164,7 @@ pub struct TerminalMode {
 }
 
 /// Active terminal colors.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ColorState {
     /// Default/current background.
     pub background: Rgb,
@@ -176,7 +177,7 @@ pub struct ColorState {
 }
 
 /// Terminal metadata controlled by OSC sequences.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TerminalMetadata {
     /// Raw title bytes.
     pub title: ByteString,
@@ -185,7 +186,7 @@ pub struct TerminalMetadata {
 }
 
 /// Authoritative semantic terminal state copied out of libghostty-vt.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SemanticState {
     /// Viewport columns.
     pub cols: u16,

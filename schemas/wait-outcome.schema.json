@@ -1,0 +1,32 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/wait-outcome.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Successful raw-output wait evidence.",
+  "properties": {
+    "event_seq": {
+      "description": "Event containing the end of the first observed match.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "monotonic_ns": {
+      "description": "Monotonic timestamp of the containing event.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "output_end_offset": {
+      "description": "End offset in the concatenated output stream.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "event_seq",
+    "output_end_offset",
+    "monotonic_ns"
+  ],
+  "title": "WaitOutcome",
+  "type": "object"
+}

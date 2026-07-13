@@ -1,0 +1,44 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/video-map-entry.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "State-to-video mapping entry.",
+  "properties": {
+    "frame": {
+      "description": "Approximate zero-based video frame; absent for suppressed states.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "monotonic_ns": {
+      "description": "Monotonic semantic timestamp.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "presented": {
+      "description": "Whether Ghostty was allowed to present this state.",
+      "type": "boolean"
+    },
+    "state_hash": {
+      "description": "Semantic state hash.",
+      "type": "string"
+    },
+    "state_id": {
+      "description": "Semantic state identifier.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "state_id",
+    "state_hash",
+    "monotonic_ns",
+    "presented"
+  ],
+  "title": "VideoMapEntry",
+  "type": "object"
+}
