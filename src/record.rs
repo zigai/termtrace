@@ -713,7 +713,7 @@ fn spawn_control_server(
         .name("termtrace-control-server".to_owned())
         .spawn(move || {
             if let Err(error) = control_server_loop(&listener, &cancel_read, &sender) {
-                let _ = sender.send(RuntimeMessage::ControlServerFailed(error.to_string()));
+                let _ = sender.try_send(RuntimeMessage::ControlServerFailed(error.to_string()));
             }
         })
         .map_err(|error| {
@@ -770,9 +770,7 @@ fn control_server_loop(
         loop {
             match listener.accept() {
                 Ok((stream, _)) => {
-                    if let Err(error) = handle_control_connection(stream, sender) {
-                        tracing::warn!(error = %error, "control connection rejected");
-                    }
+                    let _ = handle_control_connection(stream, sender, cancel);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
                 Err(error) => {
@@ -789,6 +787,7 @@ fn control_server_loop(
 fn handle_control_connection(
     mut stream: UnixStream,
     sender: &mpsc::SyncSender<RuntimeMessage>,
+    cancel: &OwnedFd,
 ) -> Result<()> {
     let credentials = getsockopt(&stream, PeerCredentials)
         .map_err(|error| terminal_error("authenticate control peer", error.to_string()))?;
@@ -833,16 +832,70 @@ fn handle_control_connection(
         );
     }
     let (response_sender, response_receiver) = mpsc::sync_channel(1);
-    sender
-        .send(RuntimeMessage::Control {
-            request,
-            response: response_sender,
-        })
-        .map_err(|error| terminal_error("dispatch control request", error.to_string()))?;
-    let response = response_receiver
-        .recv_timeout(Duration::from_secs(10))
-        .map_err(|error| terminal_error("wait for control response", error.to_string()))?;
+    let mut message = RuntimeMessage::Control {
+        request,
+        response: response_sender,
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match sender.try_send(message) {
+            Ok(()) => break,
+            Err(mpsc::TrySendError::Full(returned)) => {
+                if cancellation_requested(cancel)? {
+                    return Ok(());
+                }
+                if Instant::now() >= deadline {
+                    return Err(terminal_error(
+                        "dispatch control request",
+                        "recording actor is unresponsive",
+                    ));
+                }
+                message = returned;
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                return Err(terminal_error(
+                    "dispatch control request",
+                    "recording actor disconnected",
+                ));
+            }
+        }
+    }
+    let response = loop {
+        match response_receiver.recv_timeout(Duration::from_millis(50)) {
+            Ok(response) => break response,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if cancellation_requested(cancel)? {
+                    return Ok(());
+                }
+                if Instant::now() >= deadline {
+                    return Err(terminal_error(
+                        "wait for control response",
+                        "recording actor is unresponsive",
+                    ));
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(terminal_error(
+                    "wait for control response",
+                    "recording actor disconnected",
+                ));
+            }
+        }
+    };
     write_control_response(&mut stream, &response)
+}
+
+fn cancellation_requested(cancel: &OwnedFd) -> Result<bool> {
+    let mut descriptors = [PollFd::new(cancel.as_fd(), PollFlags::POLLIN)];
+    match poll(&mut descriptors, PollTimeout::ZERO) {
+        Ok(_) => Ok(poll_ready(&descriptors[0])),
+        Err(nix::errno::Errno::EINTR) => Ok(false),
+        Err(error) => Err(terminal_error(
+            "poll control cancellation",
+            error.to_string(),
+        )),
+    }
 }
 
 fn write_control_response(stream: &mut UnixStream, response: &ControlResponse) -> Result<()> {
@@ -1796,5 +1849,30 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn control_shutdown_cancels_an_inflight_request() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let worker = spawn_control_server(temporary.path(), sender).expect("control server");
+        let socket = temporary.path().join(CONTROL_SOCKET_NAME);
+        let client = thread::spawn(move || {
+            let mut stream = UnixStream::connect(socket).expect("connect control client");
+            let request = ControlRequest::new(ControlCommand::Ping);
+            serde_json::to_writer(&mut stream, &request).expect("encode request");
+            stream.write_all(b"\n").expect("terminate request");
+            let mut response = Vec::new();
+            stream.read_to_end(&mut response).expect("read shutdown");
+        });
+        let pending = receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("inflight request");
+
+        let started = Instant::now();
+        worker.stop().expect("cancel control server");
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(pending);
+        client.join().expect("join control client");
     }
 }
