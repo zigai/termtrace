@@ -8,6 +8,7 @@ use termtrace::{
     control::{ControlCommand, ProcessSignal, request},
     event::ByteString,
     record::{RecordOptions, record},
+    replay::index_session,
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -45,6 +46,8 @@ enum Command {
     Mark(MarkArgs),
     /// Request graceful termination of a live session child.
     Stop(SessionArgs),
+    /// Replay canonical events and build semantic state artifacts.
+    Index(SessionArgs),
 }
 
 #[derive(Debug, Args)]
@@ -214,6 +217,18 @@ fn main() -> Result<ExitCode> {
             },
         ),
         Command::Stop(arguments) => run_control(arguments.session, ControlCommand::Stop),
+        Command::Index(arguments) => {
+            let outcome = index_session(arguments.session)?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "directory": outcome.directory,
+                    "state_count": outcome.state_count,
+                    "final_state_hash": outcome.final_state_hash,
+                })
+            );
+            Ok(ExitCode::SUCCESS)
+        }
     }
 }
 

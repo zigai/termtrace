@@ -213,3 +213,104 @@ fn assert_control_events(recording: &termtrace::event_log::EventLog) {
     )));
     assert!(recording.pending_operations.is_empty());
 }
+
+#[test]
+fn index_replays_every_distinct_state_deterministically() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("replay");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            r"printf '\033[?2026hA\033[38;2;1;2;3mB\033[?2026l界\n\033[?1049hALT\033[?1049l'",
+        ])
+        .assert()
+        .success();
+
+    let event_log = termtrace::event_log::EventLog::read(session.join("events.jsonl"))
+        .expect("valid event log");
+    let first = termtrace::replay::replay(&event_log).expect("first replay");
+    let second = termtrace::replay::replay(&event_log).expect("second replay");
+    assert_eq!(first, second, "replay must be deterministic");
+    assert!(first.states.iter().any(|state| !state.presented));
+    assert!(first.states.iter().any(|state| {
+        state
+            .delta
+            .modes
+            .as_ref()
+            .is_some_and(|modes| modes.alternate_screen)
+    }));
+    assert!(
+        first
+            .states
+            .windows(2)
+            .all(|pair| pair[0].state_hash != pair[1].state_hash)
+    );
+
+    let mut index = Command::cargo_bin("termtrace").expect("binary should build");
+    index
+        .args(["index", "--session"])
+        .arg(&session)
+        .assert()
+        .success();
+    assert_replay_artifacts(&session, first.artifacts.state_count);
+
+    let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
+    duplicate
+        .args(["index", "--session"])
+        .arg(&session)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already exists"));
+}
+
+fn assert_replay_artifacts(session: &std::path::Path, expected_states: u64) {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let derived = session.join("derived");
+    assert_eq!(
+        fs_err::metadata(&derived)
+            .expect("derived metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    for file in [
+        "states.jsonl",
+        "state-index.jsonl",
+        "final.txt",
+        "final.vt",
+        "final.html",
+        "manifest.json",
+    ] {
+        let path = derived.join(file);
+        assert!(path.is_file(), "missing {}", path.display());
+        assert_eq!(
+            fs_err::metadata(path)
+                .expect("artifact metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    let lines = fs_err::read_to_string(derived.join("states.jsonl"))
+        .expect("states")
+        .lines()
+        .count();
+    assert_eq!(u64::try_from(lines).unwrap(), expected_states);
+    let text = fs_err::read_to_string(derived.join("final.txt")).expect("final text");
+    assert!(text.contains("AB界"));
+    assert!(
+        !fs_err::read(derived.join("final.vt"))
+            .expect("final VT")
+            .is_empty()
+    );
+    let html = fs_err::read_to_string(derived.join("final.html")).expect("final HTML");
+    assert!(html.contains('A') && html.contains('B'));
+}

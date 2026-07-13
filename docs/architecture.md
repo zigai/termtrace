@@ -43,6 +43,8 @@ Video sampling does not limit semantic capture. A state that exists between vide
 
 `libghostty-vt` is pinned behind a narrow internal adapter. Its unstable upstream API must not leak into Termtrace's public artifact or control schemas. Upgrades require replay fixtures and semantic-diff review.
 
+The current pin is Ghostty `55a3e33ab26a23d75b274b23c7f76d837db00578`, built with Zig 0.15.2. Build-time bindings remain private; stable serializable Rust structures form the artifact boundary.
+
 The Linux Ghostty GUI currently has no stable headless framebuffer or screenshot API. Native pixels are therefore captured from a real Ghostty process on a virtual display rather than recreated by Termtrace.
 
 ## Failure policy

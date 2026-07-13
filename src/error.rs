@@ -151,6 +151,35 @@ pub enum Error {
         /// Human-readable context.
         message: String,
     },
+
+    /// The pinned libghostty-vt semantic engine rejected an operation.
+    #[error("libghostty-vt operation `{operation}` failed with result {result}")]
+    #[diagnostic(code(termtrace::libghostty_vt))]
+    GhosttyVt {
+        /// Stable adapter operation name.
+        operation: &'static str,
+        /// Upstream `GhosttyResult` numeric value.
+        result: i32,
+    },
+
+    /// Derived artifacts already exist and are never replaced implicitly.
+    #[error("derived artifact directory `{path}` already exists")]
+    #[diagnostic(
+        code(termtrace::derived_artifacts_exist),
+        help("Move or remove the existing derived directory before indexing again")
+    )]
+    DerivedArtifactsExist {
+        /// Existing derived artifact directory.
+        path: PathBuf,
+    },
+
+    /// Canonical events cannot be deterministically replayed.
+    #[error("invalid replay input: {reason}")]
+    #[diagnostic(code(termtrace::invalid_replay))]
+    InvalidReplay {
+        /// Replay invariant that was violated.
+        reason: String,
+    },
 }
 
 /// Result type used throughout Termtrace.

@@ -1,6 +1,6 @@
 /target/
+/.tools/
 /.idea/
 /.vscode/
 *.profraw
 *.termtrace
-

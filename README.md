@@ -48,13 +48,32 @@ Use `termtrace send --file PATH` for arbitrary bytes. The Rust API also exposes 
 
 The socket disappears when the child exits. Completed-session inspection reads the canonical log rather than pretending that a dead control endpoint is live.
 
-## Development
-
-The repository pins its Rust toolchain. Validate a change with:
+## Semantic replay
 
 ```bash
+termtrace index --session /tmp/example.termtrace
+```
+
+Replay validates the event hash chain, feeds each output byte through the pinned libghostty-vt parser, and stores every distinct state under `derived/`. Synchronized-output intermediate states remain indexed with `presented: false`; video frame rate never limits semantic evidence.
+
+- `states.jsonl` contains cursor, modes, colors, active SGR style, OSC metadata, Ghostty dirty rows, and cell-level grapheme/style/color diffs.
+- `state-index.jsonl` maps state hashes to event sequence, byte offset, monotonic time, and presentation status.
+- `final.txt`, `final.vt`, and `final.html` come from Ghostty's formatter.
+- `manifest.json` pins the source event hash, schema version, Ghostty revision, artifact paths, and final state hash.
+
+The derived directory is assembled privately and atomically renamed with no-replace semantics. Existing results are never overwritten implicitly.
+
+## Development
+
+The repository pins Rust, Ghostty, and Zig. Bootstrap a fresh clone and validate a change with:
+
+```bash
+git submodule update --init --recursive
+scripts/bootstrap-ghostty-vt.sh
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 cargo build --release --all-features
 ```
+
+The bootstrap script downloads Zig 0.15.2 from ziglang.org, verifies its pinned SHA-256, and builds Ghostty revision `55a3e33ab26a23d75b274b23c7f76d837db00578`. Generated bindings remain private behind the safe `ghostty_vt` adapter. Set `TERMTRACE_GHOSTTY_PREFIX` only when intentionally testing an equivalent external libghostty-vt installation.
