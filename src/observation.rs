@@ -4,7 +4,20 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{event::ByteString, event_log::CanonicalBoundary, ghostty_vt::ModeState};
+use std::{
+    os::unix::ffi::OsStrExt as _,
+    path::{Path, PathBuf},
+};
+
+use crate::{
+    Error, Result,
+    control::{ControlCommand, ControlData, request},
+    event::ByteString,
+    event_log::{CanonicalBoundary, EventLog},
+    ghostty_vt::{ModeState, SemanticState},
+    replay::{StateSelector, inspect},
+    session::{read_manifest, validate_completed_log},
+};
 
 /// Source category for one observation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -126,4 +139,168 @@ pub struct Observation {
     pub frame: ObservationFrame,
     /// BLAKE3 of canonical JSON for `frame`.
     pub payload_hash: String,
+}
+
+/// Observe a responsive live session or validated completed session.
+///
+/// # Errors
+///
+/// Returns an error when canonical identity/validation fails, a live selector
+/// is not supported, actor observation fails, or replay cannot resolve the point.
+pub fn observe_session(session: &Path, state_point: StatePoint) -> Result<Observation> {
+    let canonical = session.canonicalize().map_err(|source| {
+        return Error::Filesystem {
+            path: session.to_path_buf(),
+            source,
+        };
+    })?;
+    let manifest = read_manifest(&canonical)?;
+    if canonical.join("completion.json").is_file() {
+        return observe_completed(&canonical, manifest.session_id, state_point);
+    }
+    if state_point != StatePoint::LatestPresented {
+        return Err(observation_error(
+            "live sessions currently support only latest-presented selection",
+        ));
+    }
+    let snapshot = request(&canonical, ControlCommand::Snapshot)?;
+    let ControlData::Snapshot {
+        viewport_text,
+        state_hash,
+        presented,
+        cols,
+        rows,
+        cursor_column,
+        cursor_row,
+        cursor_visible,
+        modes,
+        observed_monotonic_ns,
+        boundaries,
+    } = snapshot
+    else {
+        return Err(observation_error(
+            "actor returned an unexpected observation",
+        ));
+    };
+    let frame = ObservationFrame {
+        viewport_text,
+        cols,
+        rows,
+        cursor_column,
+        cursor_row,
+        cursor_visible,
+        modes,
+    };
+    let payload_hash = frame_hash(&frame)?;
+    return Ok(Observation {
+        source_kind: ObservationSourceKind::LiveSession,
+        session_id: Some(manifest.session_id),
+        canonical_session: Some(ByteString::from(canonical.as_os_str().as_bytes())),
+        source_completed: false,
+        state_point,
+        state_id: None,
+        state_hash,
+        event_seq: boundaries.observed.next_event_seq.checked_sub(1),
+        monotonic_ns: Some(observed_monotonic_ns),
+        presented,
+        boundary: boundaries.observed,
+        capture_quality: CaptureQuality::Live,
+        truth_layer: TruthLayer::Semantic,
+        frame,
+        payload_hash,
+    });
+}
+
+fn observe_completed(session: &Path, session_id: Uuid, point: StatePoint) -> Result<Observation> {
+    let log = EventLog::read(session.join("events.jsonl"))?;
+    let completion = validate_completed_log(session, &log)?;
+    let selector = match &point {
+        StatePoint::LatestPresented => StateSelector::Final,
+        StatePoint::StateId { state_id } => StateSelector::StateId(*state_id),
+        StatePoint::EventSeq { event_seq } => StateSelector::EventSeq(*event_seq),
+        StatePoint::MonotonicNs { monotonic_ns } => StateSelector::MonotonicNs(*monotonic_ns),
+        StatePoint::Marker { .. } => {
+            return Err(observation_error("marker selection is not implemented yet"));
+        }
+    };
+    let inspection = inspect(&log, selector)?;
+    if matches!(point, StatePoint::LatestPresented) && !inspection.record.presented {
+        return Err(observation_error(
+            "final semantic state is hidden; select an explicit state with hidden-state permission",
+        ));
+    }
+    let frame = frame_from_state(&inspection.state);
+    let payload_hash = frame_hash(&frame)?;
+    return Ok(Observation {
+        source_kind: ObservationSourceKind::CompletedSession,
+        session_id: Some(session_id),
+        canonical_session: Some(ByteString::from(session.as_os_str().as_bytes())),
+        source_completed: true,
+        state_point: point,
+        state_id: Some(inspection.record.state_id),
+        state_hash: inspection.record.state_hash,
+        event_seq: inspection.record.event_seq,
+        monotonic_ns: Some(inspection.record.monotonic_ns),
+        presented: inspection.record.presented,
+        boundary: CanonicalBoundary {
+            next_event_seq: completion.event_count,
+            event_hash: completion.final_event_hash,
+            output_bytes: completion.output_bytes,
+        },
+        capture_quality: CaptureQuality::Completed,
+        truth_layer: TruthLayer::Semantic,
+        frame,
+        payload_hash,
+    });
+}
+
+fn frame_from_state(state: &SemanticState) -> ObservationFrame {
+    return ObservationFrame {
+        viewport_text: viewport_text(state),
+        cols: state.cols,
+        rows: state.rows,
+        cursor_column: state.cursor.column,
+        cursor_row: state.cursor.row,
+        cursor_visible: state.cursor.visible,
+        modes: state.modes.clone(),
+    };
+}
+
+fn viewport_text(state: &SemanticState) -> String {
+    let mut output = String::new();
+    for (index, row) in state.grid.iter().enumerate() {
+        let start = output.len();
+        for cell in &row.cells {
+            if cell.grapheme.is_empty() {
+                output.push(' ');
+            } else {
+                output.push_str(&cell.grapheme);
+            }
+        }
+        while output.len() > start && output.ends_with(' ') {
+            output.pop();
+        }
+        if index + 1 < state.grid.len() {
+            output.push('\n');
+        }
+    }
+    return output;
+}
+
+fn frame_hash(frame: &ObservationFrame) -> Result<String> {
+    let bytes = serde_json::to_vec(frame).map_err(|source| {
+        return Error::InvalidJson {
+            path: PathBuf::from("<observation-frame>"),
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
+    return Ok(blake3::hash(&bytes).to_hex().to_string());
+}
+
+fn observation_error(reason: impl Into<String>) -> Error {
+    return Error::TerminalOperation {
+        operation: "observe terminal state",
+        reason: reason.into(),
+    };
 }

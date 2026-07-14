@@ -8,6 +8,8 @@ Register a memorable local name with `termtrace register NAME --session SESSION`
 
 Use `termtrace list` for live aliases and `termtrace list --all --json` when diagnosing completed, stale, missing, or incompatible bindings. `termtrace remove NAME` removes only navigation metadata and reports `evidence_preserved: true`; evidence deletion is intentionally not part of that command.
 
+Use `termtrace show NAME` for the latest presented viewport. The live fast path does not replay the event log; after completion the same command validates and replays canonical evidence. Add `--format json-compact` when automation needs source identity, state hash, presentation status, boundary, capture quality, cursor/modes, and payload hash.
+
 Choose provenance deliberately for the workload. The default `minimal` policy avoids retaining locale/timezone values. Use `--provenance reproducible` when those values are needed to recreate behavior, or `--provenance custom --provenance-env NAME=hash` to retain equality evidence without the value. `not-captured` records an explicit omission; it is different from an unselected variable.
 
 Before handing off a reproducible session, inspect `execution_provenance.executable`, `invoked_file`, and `runtime.recorder.binary`. A `captured` content identity can be compared to candidate files; `unresolved` or `unavailable` is an explicit reproducibility gap rather than permission to infer a match.

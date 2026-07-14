@@ -1318,6 +1318,66 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
 }
 
 #[test]
+fn show_uses_actor_fast_path_and_validated_completed_replay() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "start",
+            "demo",
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; printf SHOWME; while :; do sleep .1; done",
+        ])
+        .assert()
+        .success();
+    let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
+    wait.env("TERMTRACE_STATE_DIR", &state)
+        .args(["wait", "demo", "SHOWME", "--timeout-ms", "5000"])
+        .assert()
+        .success();
+    let mut live_show = Command::cargo_bin("termtrace").expect("binary should build");
+    live_show
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["show", "demo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("SHOWME"));
+    let mut live_json = Command::cargo_bin("termtrace").expect("binary should build");
+    let live = live_json
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["show", "demo", "--format", "json-compact"])
+        .assert()
+        .success();
+    let live: serde_json::Value =
+        serde_json::from_slice(&live.get_output().stdout).expect("live observation");
+    assert_eq!(
+        live.pointer("/source_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("live_session")
+    );
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "demo", "--wait"])
+        .assert()
+        .success();
+    let mut completed_json = Command::cargo_bin("termtrace").expect("binary should build");
+    completed_json
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["show", "demo", "--format", "json-compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            r#""source_kind":"completed_session""#,
+        ))
+        .stdout(predicate::str::contains(r#""capture_quality":"completed""#))
+        .stdout(predicate::str::contains(r#""source_completed":true"#));
+}
+
+#[test]
 fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("live-snapshot");

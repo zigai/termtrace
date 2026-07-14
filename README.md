@@ -99,6 +99,8 @@ termtrace send /tmp/example.termtrace \
 termtrace send /tmp/example.termtrace up
 termtrace wait /tmp/example.termtrace 'Ready' --stable-for 250ms
 termtrace wait /tmp/example.termtrace --output 'earlier diagnostic'
+termtrace show /tmp/example.termtrace
+termtrace show /tmp/example.termtrace --format json-compact
 termtrace resize /tmp/example.termtrace --cols 120 --rows 36
 termtrace mark /tmp/example.termtrace --label before-build
 termtrace signal /tmp/example.termtrace --signal interrupt
@@ -108,6 +110,8 @@ termtrace stop /tmp/example.termtrace --wait
 The live-command positional target accepts a registry name or any path containing `/`. Use `name:VALUE` and `path:VALUE` to resolve an otherwise ambiguous string explicitly. `send` accepts a sequence of named keys (including arrows, navigation/function keys, `shift-tab`, and `ctrl-a` through `ctrl-z`), `text:VALUE`, `paste:VALUE`, `raw:VALUE`, and `raw-file:PATH` atoms, or one `--stdin` burst. Semantic paste consults live bracketed-paste mode and rejects delimiter/control injection instead of silently rewriting it. `--pace 35ms` delays between atoms and splits text only at Unicode scalar boundaries. The JSON response reports the sequence and every atom's operation ID, exact emitted bytes, byte count, and canonical range. Named keys are encoded inside the actor from current terminal modes; canonical evidence retains both the symbolic key and exact bytes. The Rust API also exposes `control::send_request`; retain and resend the same request UUID after a transport failure. The session actor returns the exact persisted result and never applies that mutation twice, even after its bounded memory cache has evicted the request. Reusing a UUID for a different mutation is rejected. Read-only requests are observations and are deliberately excluded from permanent deduplication.
 
 The socket disappears when the child exits. `stop --wait` does not return until `completion.json` is durable and binds the session manifest, event header, final `Exit`, hash, count, output byte count, and exit outcome. `status --wait-complete` provides the same completion barrier without sending a signal. Marker responses include their canonical event sequence.
+
+`show SESSION` prints the latest presentation-eligible viewport. A live session uses the actor snapshot fast path and is labeled `capture_quality: live`; a completed session validates completion and the event chain before replay and is labeled `completed`. `--format json` or `json-compact` emits the stable truth-labeled observation envelope. Completed evidence also accepts `--state`, `--event-seq`, or `--at` selectors.
 
 ## Semantic replay
 

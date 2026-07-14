@@ -33,6 +33,7 @@ use termtrace::{
         inspect_session, state_text, wait_for_completion, wait_for_output, wait_for_screen,
     },
     interop::export_asciicast,
+    observation::{StatePoint, observe_session},
     playback::{PlaybackOptions, playback},
     profile::{
         ResolvedGhosttyProfile, resolve_ghostty_profile, resolved_terminal_colors,
@@ -118,6 +119,8 @@ enum Command {
     GeometryProbe(GeometryProbeArgs),
     /// Reconstruct one semantic state as JSON or text.
     Inspect(InspectArgs),
+    /// Show a truth-labeled live or completed terminal viewport.
+    Show(ShowArgs),
     /// Wait for exact UTF-8 text in canonical PTY output.
     Wait(WaitArgs),
     /// Copy the longest integrity-checked event prefix without modifying source.
@@ -267,6 +270,36 @@ struct InspectArgs {
     /// Restrict output to one zero-based row; JSON includes complete cell data.
     #[arg(long)]
     row: Option<u16>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ShowFormat {
+    Text,
+    Json,
+    JsonCompact,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("show_selector")
+        .multiple(false)
+        .args(["state", "event_seq", "at"])
+))]
+struct ShowArgs {
+    /// Live session name or canonical completed session path.
+    session: PathBuf,
+    /// Exact semantic state identifier.
+    #[arg(long)]
+    state: Option<u64>,
+    /// Latest state at or before this event sequence.
+    #[arg(long)]
+    event_seq: Option<u64>,
+    /// Latest state at or before this session offset.
+    #[arg(long, value_parser = parse_time_offset_ns)]
+    at: Option<u64>,
+    /// Output representation.
+    #[arg(long, value_enum, default_value_t = ShowFormat::Text)]
+    format: ShowFormat,
 }
 
 #[derive(Debug, Args)]
@@ -801,6 +834,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
             return Ok(ExitCode::SUCCESS);
         }
         Command::Inspect(arguments) => return run_inspect(arguments),
+        Command::Show(arguments) => return run_show(arguments),
         Command::Wait(arguments) => return run_wait(arguments),
         Command::Recover(arguments) => return run_recover(arguments),
         Command::Schemas(arguments) => return run_schemas(arguments),
@@ -1041,6 +1075,26 @@ fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
             return write_stdout(format!("{}\n", state_text(&inspection.state)));
         }
     }
+}
+
+fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
+    let session = resolve_session_ref(arguments.session)?;
+    let point = match (arguments.state, arguments.event_seq, arguments.at) {
+        (Some(state_id), None, None) => StatePoint::StateId { state_id },
+        (None, Some(event_seq), None) => StatePoint::EventSeq { event_seq },
+        (None, None, Some(monotonic_ns)) => StatePoint::MonotonicNs { monotonic_ns },
+        (None, None, None) => StatePoint::LatestPresented,
+        _ => return Err(miette::miette!("exactly one show selector may be supplied")),
+    };
+    let observation = observe_session(&session, point)?;
+    return match arguments.format {
+        ShowFormat::Text => write_stdout(format!("{}\n", observation.frame.viewport_text)),
+        ShowFormat::Json => write_stdout(format!(
+            "{}\n",
+            serde_json::to_string_pretty(&observation).into_diagnostic()?
+        )),
+        ShowFormat::JsonCompact => write_json_line(&observation),
+    };
 }
 
 fn run_wait(arguments: WaitArgs) -> Result<ExitCode> {
