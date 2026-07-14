@@ -13,6 +13,7 @@ pub mod interop;
 pub mod playback;
 pub mod profile;
 pub mod provenance;
+pub mod receipt;
 pub mod record;
 pub mod replay;
 pub mod request_journal;

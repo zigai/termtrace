@@ -1,0 +1,155 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "EvidenceReceiptPayload": {
+      "additionalProperties": false,
+      "description": "Canonical unsigned roots covered by a detached receipt.",
+      "properties": {
+        "artifact_root_count": {
+          "description": "Number of artifact-root records covered by this checkpoint.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "artifact_root_hash": {
+          "description": "Artifact-root record hash at the checkpoint, when non-empty.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "canonicalization": {
+          "description": "Pinned canonical payload encoding.",
+          "type": "string"
+        },
+        "completion_hash": {
+          "description": "Exact completion-document BLAKE3.",
+          "type": "string"
+        },
+        "created_unix_ns": {
+          "description": "Unix wall-clock time supplied by the signing host.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "creation_time_source": {
+          "description": "Explicit source of the creation time.",
+          "type": "string"
+        },
+        "domain": {
+          "description": "Domain identifier included in the signed object.",
+          "type": "string"
+        },
+        "event_count": {
+          "description": "Number of canonical events.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "final_event_hash": {
+          "description": "Final canonical event BLAKE3.",
+          "type": "string"
+        },
+        "session_id": {
+          "description": "Immutable session identifier.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "session_manifest_hash": {
+          "description": "Exact immutable session-manifest BLAKE3.",
+          "type": "string"
+        },
+        "signer_key_id": {
+          "description": "Signer identity interpreted through the caller's trust policy.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Payload schema version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "domain",
+        "version",
+        "session_id",
+        "session_manifest_hash",
+        "final_event_hash",
+        "event_count",
+        "completion_hash",
+        "artifact_root_count",
+        "signer_key_id",
+        "created_unix_ns",
+        "creation_time_source",
+        "canonicalization"
+      ],
+      "type": "object"
+    },
+    "EvidenceSignature": {
+      "additionalProperties": false,
+      "description": "Detached signature metadata and bytes.",
+      "properties": {
+        "key_id": {
+          "description": "Signer identity interpreted through an allowed-signers policy.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace supplied to the external signature implementation.",
+          "type": "string"
+        },
+        "scheme": {
+          "description": "External signature scheme.",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact detached signature bytes."
+        }
+      },
+      "required": [
+        "scheme",
+        "namespace",
+        "key_id",
+        "value"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/evidence-receipt.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Detached evidence receipt envelope.",
+  "properties": {
+    "format": {
+      "description": "Stable envelope format identifier.",
+      "type": "string"
+    },
+    "payload": {
+      "$ref": "#/$defs/EvidenceReceiptPayload",
+      "description": "Canonical unsigned payload."
+    },
+    "signature": {
+      "$ref": "#/$defs/EvidenceSignature",
+      "description": "Detached signature excluded from the signed payload."
+    },
+    "version": {
+      "description": "Envelope schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "payload",
+    "signature"
+  ],
+  "title": "EvidenceReceipt",
+  "type": "object"
+}

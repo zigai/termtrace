@@ -15,6 +15,7 @@ use crate::{
     event::{ByteString, Event},
     event_log::{DurabilityPolicy, DurabilityRecord, EventLog},
     provenance::ExecutionProvenance,
+    receipt::{EVIDENCE_RECEIPT_NAME, verify_ssh_receipt},
     request_journal::{MUTATION_JOURNAL_NAME, validate_mutation_journal},
 };
 
@@ -31,7 +32,7 @@ pub const COMPLETION_VALIDATION_VERSION: u32 = 1;
 /// Verification report format identifier.
 pub const VERIFICATION_REPORT_FORMAT: &str = "termtrace-verification";
 /// Verification report schema version.
-pub const VERIFICATION_REPORT_VERSION: u32 = 3;
+pub const VERIFICATION_REPORT_VERSION: u32 = 4;
 
 /// Requested depth for an offline evidence verification.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -81,12 +82,22 @@ pub struct VerificationReport {
     pub artifact_roots_verified: u64,
     /// Whether artifact authenticity was established from a trusted checkpoint.
     pub artifact_authenticity_established: bool,
+    /// Whether canonical session authenticity was established from a trusted receipt.
+    pub session_authenticity_established: bool,
     /// State of the disposable mutation deduplication acceleration journal.
     pub mutation_journal_status: MutationJournalStatus,
     /// Number of mutation outcomes verified against canonical ranges.
     pub mutation_journal_records_verified: u64,
     /// Journal-only diagnostic when acceleration is invalid.
     pub mutation_journal_error: Option<String>,
+    /// Whether a detached evidence receipt was present.
+    pub signature_receipt_present: bool,
+    /// Signer identity asserted by the detached receipt.
+    pub signature_signer_key_id: Option<String>,
+    /// Whether the detached signature matches the exact receipt payload.
+    pub signature_cryptographic_valid: bool,
+    /// Whether the configured trust policy accepts the signer identity/key.
+    pub signature_signer_trusted: bool,
     /// Stable findings; empty when verification succeeds.
     pub findings: Vec<VerificationFinding>,
 }
@@ -294,6 +305,15 @@ pub fn verify_session(
     session_directory: impl AsRef<Path>,
     level: VerificationLevel,
 ) -> VerificationReport {
+    return verify_session_with_trust(session_directory, level, None);
+}
+
+/// Verify a session with an optional OpenSSH allowed-signers trust policy.
+pub fn verify_session_with_trust(
+    session_directory: impl AsRef<Path>,
+    level: VerificationLevel,
+    allowed_signers: Option<&Path>,
+) -> VerificationReport {
     let session_directory = session_directory.as_ref();
     let mut report = VerificationReport {
         format: VERIFICATION_REPORT_FORMAT.to_owned(),
@@ -306,9 +326,14 @@ pub fn verify_session(
         final_event_hash: None,
         artifact_roots_verified: 0,
         artifact_authenticity_established: false,
+        session_authenticity_established: false,
         mutation_journal_status: MutationJournalStatus::Missing,
         mutation_journal_records_verified: 0,
         mutation_journal_error: None,
+        signature_receipt_present: false,
+        signature_signer_key_id: None,
+        signature_cryptographic_valid: false,
+        signature_signer_trusted: false,
         findings: Vec::new(),
     };
     let manifest_path = session_directory.join("session.json");
@@ -413,10 +438,53 @@ pub fn verify_session(
         VerificationLevel::Structure | VerificationLevel::Content => report.valid = true,
         VerificationLevel::DurabilityRecord => report.valid = true,
         VerificationLevel::Signature => {
-            report.findings.push(VerificationFinding {
-                code: "signature_receipt_missing".to_owned(),
-                message: "no detached evidence receipt is available".to_owned(),
-            });
+            let receipt_path = session_directory.join(EVIDENCE_RECEIPT_NAME);
+            if !receipt_path.exists() {
+                report.findings.push(VerificationFinding {
+                    code: "signature_receipt_missing".to_owned(),
+                    message: "no detached evidence receipt is available".to_owned(),
+                });
+                return report;
+            }
+            report.signature_receipt_present = true;
+            match verify_ssh_receipt(session_directory, allowed_signers) {
+                Ok(signature) => {
+                    report.signature_signer_key_id = Some(signature.signer_key_id);
+                    report.signature_cryptographic_valid = signature.cryptographic_valid;
+                    report.signature_signer_trusted = signature.signer_trusted;
+                    report.session_authenticity_established = signature.signer_trusted;
+                    report.artifact_authenticity_established = signature.signer_trusted
+                        && signature.artifact_root_count > 0
+                        && signature.artifact_root_count == report.artifact_roots_verified;
+                    if !signature.cryptographic_valid {
+                        report.findings.push(VerificationFinding {
+                            code: "signature_invalid".to_owned(),
+                            message: "the detached signature does not match the receipt payload"
+                                .to_owned(),
+                        });
+                    } else if allowed_signers.is_none() {
+                        report.findings.push(VerificationFinding {
+                            code: "signature_trust_policy_missing".to_owned(),
+                            message:
+                                "cryptography is valid but no allowed-signers policy was supplied"
+                                    .to_owned(),
+                        });
+                    } else if !signature.signer_trusted {
+                        report.findings.push(VerificationFinding {
+                            code: "signature_signer_untrusted".to_owned(),
+                            message:
+                                "the allowed-signers policy does not trust this signer identity/key"
+                                    .to_owned(),
+                        });
+                    } else {
+                        report.valid = true;
+                    }
+                }
+                Err(error) => report.findings.push(VerificationFinding {
+                    code: "signature_receipt_invalid".to_owned(),
+                    message: error.to_string(),
+                }),
+            }
         }
     }
     return report;

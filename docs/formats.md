@@ -28,6 +28,10 @@ Control responses carry separate durable and observed event/hash/output boundari
 
 A completed session must end in `Exit` and contain no pending mutation intent. Run `termtrace verify SESSION --level content --json` for a stable offline report, or use `--level durability-record` to additionally require the internally consistent chain-bound persistence record. Offline verification cannot prove that historical sync calls reached stable media. A valid unsigned hash graph establishes integrity relative to the roots in the session; it does not authenticate who created them.
 
+`evidence-receipt.json` is an optional detached envelope. Its unsigned payload binds the session ID, manifest hash, final event hash/count, exact completion hash, and an artifact-root count/head checkpoint. The exact signed bytes are the ASCII domain prefix `TERMTRACE-EVIDENCE-RECEIPT-V1` plus a NUL byte and compact Serde JSON of the fixed-order typed payload. The signature is excluded from the payload and uses the `termtrace-evidence` OpenSSH namespace. Receipt creation time comes from the signing host's system clock and is not an external timestamp.
+
+`verify --level signature` first performs complete content verification, then checks payload roots and detached cryptography. It reports `signature_cryptographic_valid`, `signature_signer_trusted`, and `session_authenticity_established` independently. Trust requires a caller-owned OpenSSH allowed-signers file. Artifact authenticity is true only when a trusted receipt covers the complete currently verified artifact-root catalog.
+
 ## Semantic derived
 
 - `derived/states.jsonl.zst`: Zstandard-compressed JSONL distinct state deltas.

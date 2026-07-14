@@ -16,7 +16,7 @@ use tempfile::TempDir;
 use termtrace::{
     Error,
     control::{ControlCommand, ControlData, ControlRequest, send_request},
-    event::{EVENT_LOG_VERSION, Event, InputSource, OperationStatus},
+    event::{ByteString, EVENT_LOG_VERSION, Event, InputSource, OperationStatus},
     event_log::EventLog,
     provenance::{
         ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind, ProvenanceSensitivity,
@@ -101,6 +101,102 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
         .stdout(predicate::str::contains(
             r#""code":"session_manifest_hash_mismatch""#,
         ));
+}
+
+#[test]
+fn detached_receipt_separates_cryptography_from_signer_trust() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("signed-session");
+    let key = temporary.path().join("signing-key");
+    let allowed = temporary.path().join("allowed-signers");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/true"])
+        .assert()
+        .success();
+    assert!(
+        StdCommand::new("ssh-keygen")
+            .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+            .arg(&key)
+            .status()
+            .expect("launch key generator")
+            .success(),
+        "generate signing key"
+    );
+    let public = fs_err::read_to_string(key.with_extension("pub")).expect("public key");
+    let mut fields = public.split_whitespace();
+    let algorithm = fields.next().expect("public key algorithm");
+    let encoded = fields.next().expect("public key value");
+    fs_err::write(&allowed, format!("fixture-signer {algorithm} {encoded}\n"))
+        .expect("allowed signers");
+
+    let mut sign = Command::cargo_bin("termtrace").expect("binary should build");
+    sign.arg("sign")
+        .arg(&session)
+        .arg("--key")
+        .arg(&key)
+        .args(["--signer", "fixture-signer"])
+        .assert()
+        .success();
+
+    let mut cryptography_only = Command::cargo_bin("termtrace").expect("binary should build");
+    cryptography_only
+        .arg("verify")
+        .arg(&session)
+        .args(["--level", "signature", "--json"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            r#""signature_cryptographic_valid":true"#,
+        ))
+        .stdout(predicate::str::contains(
+            r#""signature_signer_trusted":false"#,
+        ))
+        .stdout(predicate::str::contains(
+            r#""code":"signature_trust_policy_missing""#,
+        ));
+
+    let mut trusted = Command::cargo_bin("termtrace").expect("binary should build");
+    trusted
+        .arg("verify")
+        .arg(&session)
+        .args(["--level", "signature", "--allowed-signers"])
+        .arg(&allowed)
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            r#""session_authenticity_established":true"#,
+        ))
+        .stdout(predicate::str::contains(
+            r#""signature_signer_trusted":true"#,
+        ));
+
+    let receipt_path = session.join("evidence-receipt.json");
+    let mut receipt: serde_json::Value =
+        serde_json::from_slice(&fs_err::read(&receipt_path).expect("receipt"))
+            .expect("receipt JSON");
+    *receipt
+        .pointer_mut("/signature/value")
+        .expect("signature value") = serde_json::to_value(ByteString::from(b"invalid".as_slice()))
+        .expect("invalid signature value");
+    fs_err::write(
+        &receipt_path,
+        serde_json::to_vec_pretty(&receipt).expect("tampered receipt JSON"),
+    )
+    .expect("tamper receipt");
+    let mut tampered = Command::cargo_bin("termtrace").expect("binary should build");
+    tampered
+        .arg("verify")
+        .arg(&session)
+        .args(["--level", "signature", "--allowed-signers"])
+        .arg(&allowed)
+        .arg("--json")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(r#""code":"signature_invalid""#));
 }
 
 #[test]

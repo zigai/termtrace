@@ -123,6 +123,10 @@
       "description": "Canonical session directory checked by the verifier.",
       "type": "string"
     },
+    "session_authenticity_established": {
+      "description": "Whether canonical session authenticity was established from a trusted receipt.",
+      "type": "boolean"
+    },
     "session_id": {
       "description": "Immutable session identifier, when readable.",
       "format": "uuid",
@@ -137,6 +141,25 @@
         "string",
         "null"
       ]
+    },
+    "signature_cryptographic_valid": {
+      "description": "Whether the detached signature matches the exact receipt payload.",
+      "type": "boolean"
+    },
+    "signature_receipt_present": {
+      "description": "Whether a detached evidence receipt was present.",
+      "type": "boolean"
+    },
+    "signature_signer_key_id": {
+      "description": "Signer identity asserted by the detached receipt.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signature_signer_trusted": {
+      "description": "Whether the configured trust policy accepts the signer identity/key.",
+      "type": "boolean"
     },
     "valid": {
       "description": "Whether every invariant at the requested level passed.",
@@ -157,8 +180,12 @@
     "valid",
     "artifact_roots_verified",
     "artifact_authenticity_established",
+    "session_authenticity_established",
     "mutation_journal_status",
     "mutation_journal_records_verified",
+    "signature_receipt_present",
+    "signature_cryptographic_valid",
+    "signature_signer_trusted",
     "findings"
   ],
   "title": "VerificationReport",

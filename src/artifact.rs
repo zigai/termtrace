@@ -19,7 +19,8 @@ use uuid::Uuid;
 
 use crate::{Error, Result};
 
-const ARTIFACT_ROOT_LOG: &str = "artifact-roots.jsonl";
+/// Relative append-only artifact-root catalog path.
+pub const ARTIFACT_ROOT_LOG: &str = "artifact-roots.jsonl";
 const ARTIFACT_ROOT_LOCK: &str = ".artifact-roots.lock";
 const ARTIFACT_ROOT_FORMAT: &str = "termtrace-artifact-root";
 const ARTIFACT_ROOT_VERSION: u32 = 1;

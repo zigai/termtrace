@@ -52,6 +52,16 @@ Execution context uses an explicit `--provenance minimal|reproducible|custom` po
 
 Termtrace refuses to reuse an existing session directory. This prevents accidental evidence loss and makes every run independently auditable. The canonical session manifest is written before the event header, and its exact hash is bound through the event chain and completion manifest. Verify a finished recording with `termtrace verify /tmp/example.termtrace --level content --json`.
 
+After content verification, optionally create a detached OpenSSH receipt without importing key material into Termtrace:
+
+```bash
+termtrace sign /tmp/example.termtrace --key ~/.ssh/evidence_ed25519 --signer evidence@example
+termtrace verify /tmp/example.termtrace --level signature \
+  --allowed-signers ./evidence-allowed-signers --json
+```
+
+The receipt signs canonical session/completion roots and the current artifact-root checkpoint. Verification reports cryptographic validity separately from whether the caller-supplied allowed-signers policy trusts the asserted identity. A locally stored receipt does not prevent deletion or complete replacement by an attacker controlling the signing key.
+
 Detailed references: [installation](docs/installation.md), [agent workflows](docs/agent-workflows.md), [semantic replay](docs/semantic-replay.md), [formats and schemas](docs/formats.md), and [troubleshooting](docs/troubleshooting.md).
 
 ## Reproducible demos
@@ -89,7 +99,7 @@ Replay requires and validates `completion.json`, checks the event hash chain, fe
 - `final.txt`, `final.vt`, and `final.html` come from Ghostty's formatter.
 - `manifest.json` pins the source event hash, schema version, Ghostty revision, final state hash, and whole-file length/BLAKE3/type/sensitivity metadata for every payload member.
 
-Completed semantic and native derivations are also chained in `artifact-roots.jsonl`, separately from the permanently closed event log. `termtrace verify /tmp/example.termtrace --level content --json` verifies the local catalog, manifests, and every payload member; it explicitly leaves artifact authenticity false without a trusted detached checkpoint.
+Completed semantic and native derivations are also chained in `artifact-roots.jsonl`, separately from the permanently closed event log. `termtrace verify /tmp/example.termtrace --level content --json` verifies the local catalog, manifests, and every payload member; it explicitly leaves artifact authenticity false without a trusted detached checkpoint. Create the no-replace receipt after publishing final derivations: it authenticates only the artifact-root prefix named by its count and hash, so later derivations leave their artifact authenticity unestablished.
 
 The derived directory is assembled privately and atomically renamed with no-replace semantics. Existing results are never overwritten implicitly.
 

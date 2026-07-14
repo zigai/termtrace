@@ -44,6 +44,15 @@ termtrace capture --session SESSION --from-marker settled
 termtrace verify SESSION --level content --json
 ```
 
+For authenticated handoff, verify content before signing, retain the trust policy separately, and check it at review time:
+
+```bash
+termtrace sign SESSION --key SSH_KEY --signer BUILD_IDENTITY
+termtrace verify SESSION --level signature --allowed-signers ALLOWED_SIGNERS --json
+```
+
+Do not treat a successful cryptographic check without an allowed-signers policy as trusted identity. Create the no-replace receipt after publishing the final derivations. It checkpoints only the artifact-root prefix that existed when it was created; additional derivations remain locally verifiable but unauthenticated by that receipt.
+
 Normal `index` and every `capture` require `completion.json` to bind the exact session manifest and event header, agree with the canonical final hash, event count, output byte count, and exit outcome, and identify a final `Exit` with no pending mutation. This prevents a settled-but-live TUI from producing an index that silently becomes stale. `status --wait-complete` waits without stopping the child. If a live prefix is genuinely needed, `index --live-snapshot` writes a hash-addressed, explicitly incomplete directory; create a fresh final index after completion. Existing artifact directories are never replaced.
 
 Use `index --presented-only` (and the same capture flag) when synchronized-output internals are unnecessary. Full indexing remains the default. Marker labels used as `--from-marker` or `--to-marker` must occur exactly once.

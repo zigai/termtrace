@@ -27,6 +27,7 @@ use termtrace::{
         terminal_colors_for_profile,
     },
     provenance::{ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind},
+    receipt::create_ssh_receipt,
     record::{RecordOptions, record},
     replay::{
         GHOSTTY_REVISION, IndexOptions, STATE_FORMAT_VERSION, StateSelection, StateSelector,
@@ -35,7 +36,7 @@ use termtrace::{
     schema::write_all as write_schemas,
     session::{
         CaptureTarget, GeometryProvenance, GeometrySource, GhosttyVisualOverrides, SessionGeometry,
-        VerificationLevel, read_manifest, verify_session,
+        VerificationLevel, read_manifest, verify_session_with_trust,
     },
     timeline::{parse_time_offset_ns, resolve_source_selection},
     visual::{CaptureOptions, capture, probe_ghostty_geometry},
@@ -64,6 +65,8 @@ enum Command {
     Record(RecordArgs),
     /// Verify a completed session's structure and evidence bindings offline.
     Verify(VerifyArgs),
+    /// Create a detached OpenSSH receipt for verified evidence roots.
+    Sign(SignArgs),
     /// Verify that a live session control socket is responsive.
     Ping(SessionArgs),
     /// Print machine-readable live session status.
@@ -129,6 +132,21 @@ struct VerifyArgs {
     /// Emit the stable machine-readable report.
     #[arg(long)]
     json: bool,
+    /// OpenSSH allowed-signers file used to establish signer trust.
+    #[arg(long)]
+    allowed_signers: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SignArgs {
+    /// Completed canonical session directory.
+    session: PathBuf,
+    /// OpenSSH private key, or public key backed by an available signing agent.
+    #[arg(long)]
+    key: PathBuf,
+    /// Identity that an allowed-signers policy will bind to this key.
+    #[arg(long)]
+    signer: String,
 }
 
 #[derive(Debug, Args)]
@@ -584,6 +602,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         }
         Command::Record(arguments) => return run_record(arguments),
         Command::Verify(arguments) => return run_verify(arguments),
+        Command::Sign(arguments) => return run_sign(arguments),
         Command::Ping(arguments) => return run_control(arguments.session, ControlCommand::Ping),
         Command::Status(arguments) => return run_status(arguments),
         Command::Send(arguments) => return run_send(arguments),
@@ -624,7 +643,17 @@ fn dispatch(command: Command) -> Result<ExitCode> {
 }
 
 fn run_verify(arguments: VerifyArgs) -> Result<ExitCode> {
-    let report = verify_session(arguments.session, arguments.level.into());
+    if arguments.allowed_signers.is_some() && !matches!(arguments.level, VerifyLevelArg::Signature)
+    {
+        return Err(miette::miette!(
+            "--allowed-signers requires --level signature"
+        ));
+    }
+    let report = verify_session_with_trust(
+        arguments.session,
+        arguments.level.into(),
+        arguments.allowed_signers.as_deref(),
+    );
     let valid = report.valid;
     if arguments.json {
         write_json_line(&report)?;
@@ -644,6 +673,15 @@ fn run_verify(arguments: VerifyArgs) -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     return Ok(ExitCode::FAILURE);
+}
+
+fn run_sign(arguments: SignArgs) -> Result<ExitCode> {
+    let receipt = create_ssh_receipt(&arguments.session, &arguments.key, &arguments.signer)?;
+    return write_json_line(&serde_json::json!({
+        "receipt": receipt,
+        "scheme": "openssh",
+        "signer_key_id": arguments.signer,
+    }));
 }
 
 fn run_index(arguments: IndexArgs) -> Result<ExitCode> {
