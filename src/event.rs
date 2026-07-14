@@ -396,6 +396,116 @@ pub struct EventRecord {
     pub event: Event,
 }
 
+/// Hash-and-length summary for one elided canonical byte field.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BytePayloadSummary {
+    /// Event field name (`data`, `query`, or `response`).
+    pub field: String,
+    /// Exact byte count.
+    pub byte_count: u64,
+    /// BLAKE3 of the exact bytes.
+    pub blake3: String,
+}
+
+/// Stable JSONL projection of one canonical event record.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EventProjection {
+    /// Canonical event sequence.
+    pub seq: u64,
+    /// Session-monotonic event timestamp.
+    pub monotonic_ns: u64,
+    /// Canonical event hash.
+    pub hash: String,
+    /// Stable event variant name.
+    pub event_type: String,
+    /// Whether exact byte fields were elided.
+    pub metadata_only: bool,
+    /// Exact typed event when byte payloads were retained.
+    pub event: Option<Event>,
+    /// Non-byte event fields when exact payloads were elided.
+    pub metadata: Option<serde_json::Value>,
+    /// Hash-and-length summaries when byte fields were elided.
+    pub byte_payloads: Vec<BytePayloadSummary>,
+}
+
+impl EventProjection {
+    /// Project one canonical record, optionally eliding exact byte payloads.
+    #[must_use]
+    pub fn from_record(record: &EventRecord, metadata_only: bool) -> Self {
+        let byte_payloads = if metadata_only {
+            byte_summaries(&record.event)
+        } else {
+            Vec::new()
+        };
+        return Self {
+            seq: record.seq,
+            monotonic_ns: record.monotonic_ns,
+            hash: record.hash.clone(),
+            event_type: event_type(&record.event).to_owned(),
+            metadata_only,
+            event: (!metadata_only).then(|| return record.event.clone()),
+            metadata: metadata_only.then(|| return event_metadata(&record.event)),
+            byte_payloads,
+        };
+    }
+}
+
+fn event_metadata(event: &Event) -> serde_json::Value {
+    let Ok(mut value) = serde_json::to_value(event) else {
+        return serde_json::Value::Null;
+    };
+    if let Some(object) = value.as_object_mut() {
+        object.remove("data");
+        object.remove("query");
+        object.remove("response");
+    }
+    return value;
+}
+
+/// Stable snake-case event variant name.
+#[must_use]
+pub fn event_type(event: &Event) -> &'static str {
+    return match event {
+        Event::Output { .. } => "output",
+        Event::InputIntent { .. } => "input_intent",
+        Event::InputResult { .. } => "input_result",
+        Event::ResizeIntent { .. } => "resize_intent",
+        Event::ResizeResult { .. } => "resize_result",
+        Event::SignalIntent { .. } => "signal_intent",
+        Event::SignalResult { .. } => "signal_result",
+        Event::Marker { .. } => "marker",
+        Event::QueryResponse { .. } => "query_response",
+        Event::Lifecycle { .. } => "lifecycle",
+        Event::Exit { .. } => "exit",
+        Event::HostError { .. } => "host_error",
+    };
+}
+
+fn byte_summaries(event: &Event) -> Vec<BytePayloadSummary> {
+    return match event {
+        Event::Output { data } | Event::InputIntent { data, .. } => {
+            vec![byte_summary("data", data)]
+        }
+        Event::QueryResponse {
+            query, response, ..
+        } => vec![
+            byte_summary("query", query),
+            byte_summary("response", response),
+        ],
+        _ => Vec::new(),
+    };
+}
+
+fn byte_summary(field: &str, bytes: &ByteString) -> BytePayloadSummary {
+    return BytePayloadSummary {
+        field: field.to_owned(),
+        byte_count: u64::try_from(bytes.as_bytes().len()).unwrap_or(u64::MAX),
+        blake3: blake3::hash(bytes.as_bytes()).to_hex().to_string(),
+    };
+}
+
 /// Canonical portion of an event covered by its integrity hash.
 #[derive(Serialize)]
 pub(crate) struct EventBody<'event> {

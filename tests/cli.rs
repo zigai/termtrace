@@ -1765,6 +1765,47 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
 }
 
 #[test]
+fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("event-stream-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf secret-bytes"])
+        .assert()
+        .success();
+
+    let mut metadata = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = metadata
+        .arg("events")
+        .arg(&session)
+        .args(["--type", "output", "--metadata-only"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""event_type":"output""#))
+        .stdout(predicate::str::contains(r#""metadata_only":true"#))
+        .stdout(predicate::str::contains(r#""field":"data""#))
+        .stdout(predicate::str::contains(r#""byte_count":12"#))
+        .stdout(predicate::str::contains(r#""event":null"#))
+        .stdout(predicate::str::contains("secret-bytes").not())
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(output.split(|byte| return *byte == b'\n').count(), 2);
+
+    let mut exact = Command::cargo_bin("termtrace").expect("binary should build");
+    exact
+        .arg("events")
+        .arg(&session)
+        .args(["--type", "output"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""metadata_only":false"#))
+        .stdout(predicate::str::contains(r#""type":"output""#));
+}
+
+#[test]
 fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("live-snapshot");

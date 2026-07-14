@@ -127,6 +127,8 @@ The socket disappears when the child exits. `stop --wait` does not return until 
 
 `output SESSION --raw` validates completed evidence and writes only the exact concatenation of canonical child PTY output bytes. It performs no UTF-8 decoding, control stripping, newline insertion, or input synthesis. Half-open `--from-event-seq`/`--to-event-seq` bounds and the shared time/marker range selectors restrict whole canonical output events.
 
+`events SESSION` streams stable JSONL projections of validated canonical records. `--type output,input_intent,marker` filters variants; event/time/marker bounds use the same half-open contract. `--metadata-only` removes exact `data`, `query`, and `response` bytes while retaining all non-byte metadata plus a BLAKE3 and byte count for each elided field.
+
 ## Semantic replay
 
 ```bash

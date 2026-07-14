@@ -16,7 +16,7 @@ use crate::{
     artifact::ArtifactRootRecord,
     control::{ControlRequest, ControlResponse},
     diff::SemanticDiff,
-    event::{EventLogHeader, EventRecord},
+    event::{EventLogHeader, EventProjection, EventRecord},
     event_log::RecoveryReport,
     inspection::{ScreenWaitOutcome, WaitOutcome},
     observation::Observation,
@@ -50,6 +50,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
     return Ok(vec![
         schema::<EventLogHeader>("event-log-header.schema.json")?,
         schema::<EventRecord>("event-record.schema.json")?,
+        schema::<EventProjection>("event-projection.schema.json")?,
         schema::<ControlRequest>("control-request.schema.json")?,
         schema::<ControlResponse>("control-response.schema.json")?,
         schema::<SessionManifest>("session.schema.json")?,
