@@ -205,6 +205,12 @@
               "$ref": "#/$defs/ModeState",
               "description": "Presentation-eligible terminal modes."
             },
+            "observed_monotonic_ns": {
+              "description": "Session-monotonic observation timestamp.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
             "presented": {
               "description": "Always true for this presentation-filtered endpoint.",
               "type": "boolean"
@@ -233,6 +239,7 @@
             "cols",
             "rows",
             "cursor_visible",
+            "observed_monotonic_ns",
             "modes",
             "boundaries"
           ],

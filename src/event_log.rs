@@ -177,6 +177,11 @@ pub struct EventLogWriter {
 }
 
 impl EventLogWriter {
+    /// Current nanoseconds on the session's monotonic clock.
+    pub fn elapsed_ns(&self) -> u64 {
+        return self.clock.elapsed_ns();
+    }
+
     /// Sequence number that will be assigned to the next event.
     pub fn next_seq(&self) -> u64 {
         return self.next_seq;

@@ -1,0 +1,176 @@
+{
+  "$defs": {
+    "ActorBoundaries": {
+      "additionalProperties": false,
+      "description": "Durable and latest actor-processed positions returned by live operations.",
+      "properties": {
+        "durable": {
+          "$ref": "#/$defs/CanonicalBoundary",
+          "description": "Latest boundary whose file synchronization completed successfully."
+        },
+        "observed": {
+          "$ref": "#/$defs/CanonicalBoundary",
+          "description": "Latest boundary processed by the session actor, possibly volatile."
+        }
+      },
+      "required": [
+        "durable",
+        "observed"
+      ],
+      "type": "object"
+    },
+    "CanonicalBoundary": {
+      "additionalProperties": false,
+      "description": "Actor-consistent position in the canonical event stream.",
+      "properties": {
+        "event_hash": {
+          "description": "Hash of the preceding event, or the event header at sequence zero.",
+          "type": "string"
+        },
+        "next_event_seq": {
+          "description": "Sequence number that will be assigned to the next event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_bytes": {
+          "description": "PTY output bytes included through this boundary.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "next_event_seq",
+        "event_hash",
+        "output_bytes"
+      ],
+      "type": "object"
+    },
+    "ScreenPredicate": {
+      "description": "Exact predicate evaluated against the latest presented viewport.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Viewport text contains this exact UTF-8 string.",
+          "properties": {
+            "predicate": {
+              "const": "contains",
+              "type": "string"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Viewport text does not contain this exact UTF-8 string.",
+          "properties": {
+            "predicate": {
+              "const": "absent",
+              "type": "string"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/screen-wait-outcome.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Successful presented-screen wait evidence.",
+  "properties": {
+    "boundaries": {
+      "$ref": "#/$defs/ActorBoundaries",
+      "description": "Actor-consistent canonical source boundaries."
+    },
+    "child_completed": {
+      "description": "Whether completion was present when the result was returned.",
+      "type": "boolean"
+    },
+    "cols": {
+      "description": "Terminal columns.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "completion_quality": {
+      "description": "`stable` or `matched_unsettled`.",
+      "type": "string"
+    },
+    "first_match_monotonic_ns": {
+      "description": "First session-monotonic timestamp at which this unchanged state matched.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "predicate": {
+      "$ref": "#/$defs/ScreenPredicate",
+      "description": "Predicate that matched."
+    },
+    "presented": {
+      "description": "Whether the observed state was presentation eligible.",
+      "type": "boolean"
+    },
+    "rows": {
+      "description": "Terminal rows.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scope": {
+      "description": "Observation scope, fixed to `screen`.",
+      "type": "string"
+    },
+    "stable_for_ns": {
+      "description": "Requested stability duration.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stable_through_monotonic_ns": {
+      "description": "Last session-monotonic timestamp through which the state remained stable.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "state_hash": {
+      "description": "Full presentation-eligible semantic state hash.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "predicate",
+    "scope",
+    "state_hash",
+    "presented",
+    "first_match_monotonic_ns",
+    "stable_through_monotonic_ns",
+    "stable_for_ns",
+    "boundaries",
+    "child_completed",
+    "cols",
+    "rows",
+    "completion_quality"
+  ],
+  "title": "ScreenWaitOutcome",
+  "type": "object"
+}

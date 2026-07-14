@@ -16,7 +16,7 @@ use crate::{
     control::{ControlRequest, ControlResponse},
     event::{EventLogHeader, EventRecord},
     event_log::RecoveryReport,
-    inspection::WaitOutcome,
+    inspection::{ScreenWaitOutcome, WaitOutcome},
     playback::{PlaybackFailure, PlaybackTiming},
     provenance::{EnvironmentProvenance, ExecutionProvenance, ProvenancePolicy},
     receipt::EvidenceReceipt,
@@ -66,6 +66,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<VideoMapEntry>("video-map-entry.schema.json")?,
         schema::<RecoveryReport>("recovery-report.schema.json")?,
         schema::<WaitOutcome>("wait-outcome.schema.json")?,
+        schema::<ScreenWaitOutcome>("screen-wait-outcome.schema.json")?,
         schema::<PlaybackTiming>("playback-timing.schema.json")?,
         schema::<PlaybackFailure>("playback-failure.schema.json")?,
     ]);

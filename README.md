@@ -97,6 +97,8 @@ termtrace status /tmp/example.termtrace
 termtrace send /tmp/example.termtrace \
   text:$'inspect src\n' --intent 'run repository inspection'
 termtrace send /tmp/example.termtrace up
+termtrace wait /tmp/example.termtrace 'Ready' --stable-for 250ms
+termtrace wait /tmp/example.termtrace --output 'earlier diagnostic'
 termtrace resize /tmp/example.termtrace --cols 120 --rows 36
 termtrace mark /tmp/example.termtrace --label before-build
 termtrace signal /tmp/example.termtrace --signal interrupt

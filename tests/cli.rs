@@ -1007,7 +1007,7 @@ fn live_control_drives_and_audits_a_detached_session() {
         .args([
             "wait",
             session.to_str().expect("UTF-8 path"),
-            "--text",
+            "--output",
             "agent:hello",
             "--timeout-ms",
             "5000",
@@ -1090,7 +1090,7 @@ fn named_key_is_encoded_from_live_application_cursor_mode() {
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
     wait.arg("wait")
         .arg(&session)
-        .args(["--text", "READY", "--timeout-ms", "5000"])
+        .args(["--output", "READY", "--timeout-ms", "5000"])
         .assert()
         .success();
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
@@ -1145,7 +1145,7 @@ fn paced_unicode_text_splits_only_at_scalar_boundaries() {
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
     wait.arg("wait")
         .arg(&session)
-        .args(["--text", "READY", "--timeout-ms", "5000"])
+        .args(["--output", "READY", "--timeout-ms", "5000"])
         .assert()
         .success();
 
@@ -1213,7 +1213,7 @@ fn semantic_paste_uses_live_bracketed_mode_and_records_wrappers() {
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
     wait.arg("wait")
         .arg(&session)
-        .args(["--text", "READY", "--timeout-ms", "5000"])
+        .args(["--output", "READY", "--timeout-ms", "5000"])
         .assert()
         .success();
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
@@ -1251,7 +1251,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
             "--",
             "/usr/bin/python3",
             "-c",
-            "import os,time; os.write(1,b'VISIBLE'); time.sleep(.1); os.write(1,b'\\x1b[?2026hHIDDEN'); time.sleep(.5); os.write(1,b'\\r\\x1b[2KBUSY\\x1b[?2026l'); time.sleep(.2)",
+            "import os,time; os.write(1,b'VISIBLE'); time.sleep(.1); os.write(1,b'\\x1b[?2026hHIDDEN'); time.sleep(.5); os.write(1,b'\\r\\x1b[2KBUSY\\x1b[?2026l'); time.sleep(2)",
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -1288,6 +1288,29 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
     }
     .expect("snapshot response");
     assert!(viewport_text.contains("BUSY"));
+    let mut visible_wait = Command::cargo_bin("termtrace").expect("binary should build");
+    visible_wait
+        .arg("wait")
+        .arg(&session)
+        .args(["BUSY", "--stable-for", "50ms", "--timeout-ms", "1000"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""scope":"screen""#))
+        .stdout(predicate::str::contains(r#""completion_quality":"stable""#));
+    let mut absent_wait = Command::cargo_bin("termtrace").expect("binary should build");
+    absent_wait
+        .arg("wait")
+        .arg(&session)
+        .args([
+            "--screen-absent",
+            "VISIBLE",
+            "--stable-for",
+            "20ms",
+            "--timeout-ms",
+            "1000",
+        ])
+        .assert()
+        .success();
     let output = child
         .wait_with_output()
         .expect("snapshot fixture completion");

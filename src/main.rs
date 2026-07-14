@@ -29,7 +29,10 @@ use termtrace::{
     event_log::{DurabilityMode, DurabilityPolicy, EventLog},
     geometry::{inherited_geometry, run_probe},
     ghostty_vt::{KeyModifiers, NamedKey, RowState},
-    inspection::{inspect_session, state_text, wait_for_completion, wait_for_output},
+    inspection::{
+        ScreenPredicate, inspect_session, state_text, wait_for_completion, wait_for_output,
+        wait_for_screen,
+    },
     interop::export_asciicast,
     playback::{PlaybackOptions, playback},
     profile::{
@@ -268,12 +271,26 @@ struct InspectArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("predicate")
+        .required(true)
+        .multiple(false)
+        .args(["screen", "output", "screen_absent"])
+))]
 struct WaitArgs {
     /// Live session name or canonical path.
     session: PathBuf,
-    /// Exact UTF-8 text to observe across output chunks.
+    /// Exact UTF-8 text required in the latest presented viewport.
+    screen: Option<String>,
+    /// Exact UTF-8 text to find in canonical output history.
     #[arg(long)]
-    text: String,
+    output: Option<String>,
+    /// Exact UTF-8 text required to be absent from the presented viewport.
+    #[arg(long)]
+    screen_absent: Option<String>,
+    /// Require an unchanged matching presented state for this duration.
+    #[arg(long, value_parser = parse_pace_duration, default_value = "0ms")]
+    stable_for: Duration,
     /// Maximum wait duration in milliseconds.
     #[arg(long, default_value_t = 30_000)]
     timeout_ms: u64,
@@ -1029,12 +1046,26 @@ fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
 
 fn run_wait(arguments: WaitArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
-    let outcome = wait_for_output(
+    let timeout = Duration::from_millis(arguments.timeout_ms);
+    if let Some(output) = arguments.output {
+        if !arguments.stable_for.is_zero() {
+            return Err(miette::miette!(
+                "--stable-for applies only to screen predicates"
+            ));
+        }
+        return write_json_line(&wait_for_output(session, output.as_bytes(), timeout)?);
+    }
+    let predicate = match (arguments.screen, arguments.screen_absent) {
+        (Some(text), None) => ScreenPredicate::Contains { text },
+        (None, Some(text)) => ScreenPredicate::Absent { text },
+        _ => return Err(miette::miette!("exactly one wait predicate is required")),
+    };
+    return write_json_line(&wait_for_screen(
         session,
-        arguments.text.as_bytes(),
-        Duration::from_millis(arguments.timeout_ms),
-    )?;
-    return write_json_line(&outcome);
+        predicate,
+        arguments.stable_for,
+        timeout,
+    )?);
 }
 
 fn run_recover(arguments: RecoverArgs) -> Result<ExitCode> {

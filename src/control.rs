@@ -172,6 +172,8 @@ pub enum ControlData {
         cursor_row: Option<u16>,
         /// Whether the cursor is visible.
         cursor_visible: bool,
+        /// Session-monotonic observation timestamp.
+        observed_monotonic_ns: u64,
         /// Presentation-eligible terminal modes.
         modes: ModeState,
         /// Durable and observed source boundaries at observation time.

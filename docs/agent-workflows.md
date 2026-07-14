@@ -23,7 +23,7 @@ Terminal-generated replies are marked `source: host`. A `query_response` event p
 ## Wait and inspect
 
 ```bash
-termtrace wait SESSION --text 'ready>' --timeout-ms 30000
+termtrace wait SESSION 'ready>' --stable-for 250ms --timeout-ms 30000
 termtrace inspect --session SESSION --format text
 termtrace inspect --session SESSION --state 42 --format json
 termtrace inspect --session SESSION --event-seq 120 --format json
@@ -40,7 +40,7 @@ termtrace inspect --session SESSION --state 42 --row 16 --format json-compact
 Use an explicit completion barrier before post-processing:
 
 ```bash
-termtrace wait SESSION --text READY
+termtrace wait SESSION --output READY
 termtrace mark SESSION --label settled
 termtrace stop SESSION --wait
 termtrace index --session SESSION --from-marker settled

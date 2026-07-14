@@ -10,7 +10,7 @@ Confirm `control.sock` exists, inspect the recorder process, then run `termtrace
 
 ## Wait reports a temporary invalid tail
 
-Active buffered writers can expose a short read race. `termtrace wait` retries this only while the control socket remains responsive. Completed invalid logs fail validation and should be recovered explicitly.
+Use positional text or `--screen-absent` for the latest presented viewport; these sample the actor's presentation-filtered state and can require `--stable-for`. Use `--output` only for canonical output history. Active buffered writers can expose a short read race during output-history reads; completed invalid logs fail validation and should be recovered explicitly.
 
 ## Recover a damaged log
 

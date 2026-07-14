@@ -1357,6 +1357,7 @@ fn execute_control_command(
                 cursor_column: live.presented.cursor.column,
                 cursor_row: live.presented.cursor.row,
                 cursor_visible: live.presented.cursor.visible,
+                observed_monotonic_ns: event_log.elapsed_ns(),
                 modes: live.presented.modes.clone(),
                 boundaries: actor_boundaries(event_log),
             });
