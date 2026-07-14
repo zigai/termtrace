@@ -17,8 +17,8 @@ trap 'tmux -L "$TMUX_SOCKET" kill-server >/dev/null 2>&1 || true' EXIT
 "$TERMTRACE_BIN" record \
   --no-input \
   --out "$SESSION" \
-  --cols 100 \
-  --rows 30 \
+  --geometry fit \
+  --viewport 1920x1080 \
   -- tmux \
     -L "$TMUX_SOCKET" \
     -f /dev/null \
@@ -39,6 +39,7 @@ printf '{"truncated_tail":' >>"$DEMO_DIRECTORY/damaged-events.jsonl"
   >"$DEMO_DIRECTORY/recovery-report.json"
 cmp "$SESSION/events.jsonl" "$DEMO_DIRECTORY/recovered/events.jsonl"
 "$TERMTRACE_BIN" index --session "$DEMO_DIRECTORY/recovered" \
+  --live-snapshot \
   >"$DEMO_DIRECTORY/recovered-index.json"
 "$TERMTRACE_BIN" inspect --session "$DEMO_DIRECTORY/recovered" --format text \
   >"$DEMO_DIRECTORY/recovered-final-screen.txt"
@@ -56,6 +57,7 @@ done <"$SESSION/events.jsonl" >"$DEMO_DIRECTORY/tampered/events.jsonl"
 chmod 600 "$DEMO_DIRECTORY/tampered/events.jsonl"
 set +e
 "$TERMTRACE_BIN" index --session "$DEMO_DIRECTORY/tampered" \
+  --live-snapshot \
   >"$DEMO_DIRECTORY/tamper.stdout.log" \
   2>"$DEMO_DIRECTORY/tamper-rejected.log"
 TAMPER_STATUS=$?

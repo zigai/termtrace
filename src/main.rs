@@ -4,7 +4,7 @@ use std::{
     ffi::OsString,
     fmt::Write as _,
     io::{self, Write as _},
-    os::unix::ffi::OsStringExt as _,
+    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
     path::{Path, PathBuf},
     process::ExitCode,
     result::Result as StdResult,
@@ -236,8 +236,7 @@ struct InspectArgs {
 
 #[derive(Debug, Args)]
 struct WaitArgs {
-    /// Live session directory.
-    #[arg(long)]
+    /// Live session name or canonical path.
     session: PathBuf,
     /// Exact UTF-8 text to observe across output chunks.
     #[arg(long)]
@@ -336,15 +335,13 @@ struct PlaybackArgs {
 
 #[derive(Debug, Args)]
 struct SessionArgs {
-    /// Live session directory containing `control.sock`.
-    #[arg(long)]
+    /// Live session name or canonical path.
     session: PathBuf,
 }
 
 #[derive(Debug, Args)]
 struct StatusArgs {
-    /// Session directory containing a live control socket or completion manifest.
-    #[arg(long)]
+    /// Session name or canonical path.
     session: PathBuf,
     /// Wait for durable completion instead of returning live counters.
     #[arg(long)]
@@ -356,8 +353,7 @@ struct StatusArgs {
 
 #[derive(Debug, Args)]
 struct StopArgs {
-    /// Live session directory containing `control.sock`.
-    #[arg(long)]
+    /// Live session name or canonical path.
     session: PathBuf,
     /// Wait for and validate durable completion after stop is acknowledged.
     #[arg(long)]
@@ -375,8 +371,7 @@ struct StopArgs {
         .args(["text", "file"])
 ))]
 struct SendArgs {
-    /// Live session directory.
-    #[arg(long)]
+    /// Live session name or canonical path.
     session: PathBuf,
     /// UTF-8 text to send exactly, without an implicit newline.
     #[arg(long)]
@@ -391,8 +386,7 @@ struct SendArgs {
 
 #[derive(Debug, Args)]
 struct ResizeArgs {
-    /// Live session directory.
-    #[arg(long)]
+    /// Live session name or canonical path.
     session: PathBuf,
     /// Terminal columns.
     #[arg(long)]
@@ -431,8 +425,7 @@ impl From<CliSignal> for ProcessSignal {
 
 #[derive(Debug, Args)]
 struct SignalArgs {
-    /// Live session directory.
-    #[arg(long)]
+    /// Live session name or canonical path.
     session: PathBuf,
     /// Allow-listed signal.
     #[arg(long, value_enum)]
@@ -441,8 +434,7 @@ struct SignalArgs {
 
 #[derive(Debug, Args)]
 struct MarkArgs {
-    /// Live session directory.
-    #[arg(long)]
+    /// Live session name or canonical path.
     session: PathBuf,
     /// Marker label.
     #[arg(long)]
@@ -866,8 +858,9 @@ fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
 }
 
 fn run_wait(arguments: WaitArgs) -> Result<ExitCode> {
+    let session = resolve_session_ref(arguments.session)?;
     let outcome = wait_for_output(
-        arguments.session,
+        session,
         arguments.text.as_bytes(),
         Duration::from_millis(arguments.timeout_ms),
     )?;
@@ -891,45 +884,70 @@ fn run_schemas(arguments: SchemaArgs) -> Result<ExitCode> {
 }
 
 fn run_control(session: PathBuf, command: ControlCommand) -> Result<ExitCode> {
+    let session = resolve_session_ref(session)?;
     let data = request(session, command)?;
     return write_json_line(&data);
 }
 
 fn run_status(arguments: StatusArgs) -> Result<ExitCode> {
-    let completion_path = arguments.session.join("completion.json");
+    let session = resolve_session_ref(arguments.session)?;
+    let completion_path = session.join("completion.json");
     if arguments.wait_complete || completion_path.is_file() {
-        let completion = wait_for_completion(
-            &arguments.session,
-            Duration::from_millis(arguments.timeout_ms),
-        )?;
+        let completion =
+            wait_for_completion(&session, Duration::from_millis(arguments.timeout_ms))?;
         return write_json_line(&serde_json::json!({
             "kind": "completed",
             "completion": completion,
         }));
     }
-    return run_control(arguments.session, ControlCommand::Status);
+    let data = request(session, ControlCommand::Status)?;
+    return write_json_line(&data);
 }
 
 fn run_stop(arguments: StopArgs) -> Result<ExitCode> {
-    if arguments.session.join("completion.json").is_file() {
-        let completion = wait_for_completion(&arguments.session, Duration::ZERO)?;
+    let session = resolve_session_ref(arguments.session)?;
+    if session.join("completion.json").is_file() {
+        let completion = wait_for_completion(&session, Duration::ZERO)?;
         return write_json_line(&serde_json::json!({
             "kind": "completed",
             "completion": completion,
         }));
     }
-    let acknowledged = request(&arguments.session, ControlCommand::Stop)?;
+    let acknowledged = request(&session, ControlCommand::Stop)?;
     if !arguments.wait {
         return write_json_line(&acknowledged);
     }
-    let completion = wait_for_completion(
-        &arguments.session,
-        Duration::from_millis(arguments.timeout_ms),
-    )?;
+    let completion = wait_for_completion(&session, Duration::from_millis(arguments.timeout_ms))?;
     return write_json_line(&serde_json::json!({
         "kind": "completed",
         "completion": completion,
     }));
+}
+
+fn resolve_session_ref(target: PathBuf) -> Result<PathBuf> {
+    let bytes = target.as_os_str().as_bytes();
+    if let Some(path) = bytes.strip_prefix(b"path:") {
+        if path.is_empty() {
+            return Err(miette::miette!("path: session reference is empty"));
+        }
+        return Ok(PathBuf::from(OsString::from_vec(path.to_vec())));
+    }
+    if let Some(name) = bytes.strip_prefix(b"name:") {
+        let name = str::from_utf8(name)
+            .map_err(|_| miette::miette!("name: session reference must be valid UTF-8"))?;
+        return Ok(SessionRegistry::open_default()?
+            .resolve(name)?
+            .session_path());
+    }
+    if bytes.contains(&b'/') || bytes.starts_with(b".") {
+        return Ok(target);
+    }
+    let name = target
+        .to_str()
+        .ok_or_else(|| miette::miette!("non-UTF-8 session paths require the path: prefix"))?;
+    return Ok(SessionRegistry::open_default()?
+        .resolve(name)?
+        .session_path());
 }
 
 fn resolve_cli_range(session: &Path, range: &TimeRangeArgs) -> Result<(Option<u64>, Option<u64>)> {

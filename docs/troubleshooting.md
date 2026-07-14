@@ -35,7 +35,7 @@ If capture reports a geometry mismatch, the recorded grid does not fit the selec
 
 ## Index reports an incomplete or stale session
 
-Seeing expected screen text does not complete a recording. Run `termtrace stop --session SESSION --wait` or `termtrace status --session SESSION --wait-complete` before normal indexing. Use `index --live-snapshot` only when an explicitly incomplete prefix is intended; its source-hash suffix prevents it from occupying the final derived directory, and capture refuses incomplete provenance. If capture names a provenance mismatch, remove the named final derived directory and regenerate it from the completed log.
+Seeing expected screen text does not complete a recording. Run `termtrace stop SESSION --wait` or `termtrace status SESSION --wait-complete` before normal indexing. Use `index --live-snapshot` only when an explicitly incomplete prefix is intended; its source-hash suffix prevents it from occupying the final derived directory, and capture refuses incomplete provenance. If capture names a provenance mismatch, remove the named final derived directory and regenerate it from the completed log.
 
 For a ranged capture, create the semantic index with exactly the same `--from` and `--to` values first. Bounds are resolved to absolute nanoseconds and select `[from, to)`; the error names the matching index command and deterministic directory. Do not rename a range directory or reuse an index from different bounds. If fast-forward geometry verification fails, inspect pre-range resize intent/result events rather than increasing delays: capture uses a terminal-query barrier and does not guess that Ghostty caught up.
 

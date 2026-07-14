@@ -34,6 +34,8 @@ A completed session must end in `Exit` and contain no pending mutation intent. R
 
 Named-session registry entries are mutable convenience metadata outside canonical evidence. Each owner-only `registry/NAME.json` binds a validated alias to exact canonical path bytes, the immutable session ID, control-protocol version, publication time, and optional recorder PID/process-start pair. Resolution reopens the manifest and rejects path or identity substitution. Registering an alias never modifies the session and never replaces an existing binding.
 
+Live commands use one positional session-reference grammar. A value containing `/` or beginning with `.` is a path; any other value is a registry name. `path:` and `name:` force either interpretation, including a relative single-component path. The former preserves non-UTF-8 path bytes; registry names are restricted to the versioned ASCII alias grammar.
+
 ## Semantic derived
 
 - `derived/states.jsonl.zst`: Zstandard-compressed JSONL distinct state deltas.

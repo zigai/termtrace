@@ -17,42 +17,42 @@ trap 'stop_recorder_on_error "$SESSION"' EXIT
 "$TERMTRACE_BIN" record \
   --no-input \
   --out "$SESSION" \
-  --cols 100 \
-  --rows 28 \
+  --geometry fit \
+  --viewport 1920x1080 \
   -- python3 "$DEMO_REPO_ROOT/demos/apps/terminal_showcase.py" control \
   >"$DEMO_DIRECTORY/live-output.ansi" \
   2>"$STDERR_LOG" &
 RECORDER_PID=$!
 
 wait_for_control "$SESSION" "$STDERR_LOG"
-"$TERMTRACE_BIN" ping --session "$SESSION" >"$DEMO_DIRECTORY/ping.json"
-"$TERMTRACE_BIN" status --session "$SESSION" >"$DEMO_DIRECTORY/status.json"
-"$TERMTRACE_BIN" wait --session "$SESSION" --text CONTROL_READY --timeout-ms 5000 \
+"$TERMTRACE_BIN" ping "$SESSION" >"$DEMO_DIRECTORY/ping.json"
+"$TERMTRACE_BIN" status "$SESSION" >"$DEMO_DIRECTORY/status.json"
+"$TERMTRACE_BIN" wait "$SESSION" CONTROL_READY --timeout-ms 5000 \
   >"$DEMO_DIRECTORY/wait-ready.json"
-"$TERMTRACE_BIN" mark --session "$SESSION" --label controls-begin \
+"$TERMTRACE_BIN" mark "$SESSION" --label controls-begin \
   >"$DEMO_DIRECTORY/mark-begin.json"
 
 "$TERMTRACE_BIN" send \
-  --session "$SESSION" \
-  --text $'hello-from-agent\n' \
+  "$SESSION" \
+  "text:"$'hello-from-agent\n' \
   --intent 'demonstrate exact UTF-8 text input' >"$DEMO_DIRECTORY/send-text.json"
-"$TERMTRACE_BIN" wait --session "$SESSION" --text INPUT:hello-from-agent --timeout-ms 5000 \
+"$TERMTRACE_BIN" wait "$SESSION" INPUT:hello-from-agent --timeout-ms 5000 \
   >"$DEMO_DIRECTORY/wait-input.json"
 
 for signal_name in user2 hangup interrupt; do
-  "$TERMTRACE_BIN" signal --session "$SESSION" --signal "$signal_name" \
+  "$TERMTRACE_BIN" signal "$SESSION" --signal "$signal_name" \
     >"$DEMO_DIRECTORY/signal-$signal_name.json"
 done
-"$TERMTRACE_BIN" wait --session "$SESSION" --text SIGNAL:SIGUSR2 --timeout-ms 5000 \
+"$TERMTRACE_BIN" wait "$SESSION" SIGNAL:SIGUSR2 --timeout-ms 5000 \
   >"$DEMO_DIRECTORY/wait-user2.json"
-"$TERMTRACE_BIN" wait --session "$SESSION" --text SIGNAL:SIGHUP --timeout-ms 5000 \
+"$TERMTRACE_BIN" wait "$SESSION" SIGNAL:SIGHUP --timeout-ms 5000 \
   >"$DEMO_DIRECTORY/wait-hangup.json"
-"$TERMTRACE_BIN" wait --session "$SESSION" --text SIGNAL:SIGINT --timeout-ms 5000 \
+"$TERMTRACE_BIN" wait "$SESSION" SIGNAL:SIGINT --timeout-ms 5000 \
   >"$DEMO_DIRECTORY/wait-interrupt.json"
-"$TERMTRACE_BIN" mark --session "$SESSION" --label signals-observed \
+"$TERMTRACE_BIN" mark "$SESSION" --label signals-observed \
   >"$DEMO_DIRECTORY/mark-signals.json"
 
-"$TERMTRACE_BIN" stop --session "$SESSION" >"$DEMO_DIRECTORY/stop.json"
+"$TERMTRACE_BIN" stop "$SESSION" >"$DEMO_DIRECTORY/stop.json"
 wait_for_recorder "$STDERR_LOG"
 trap - EXIT
 derive_and_capture "$SESSION" "$DEMO_DIRECTORY"

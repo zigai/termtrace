@@ -522,6 +522,20 @@ fn live_control_drives_and_audits_a_detached_session() {
         thread::sleep(Duration::from_millis(10));
     }
     assert!(socket.exists(), "control socket did not become ready");
+    let registry_state = temporary.path().join("registry-state");
+    let mut register = Command::cargo_bin("termtrace").expect("binary should build");
+    register
+        .env("TERMTRACE_STATE_DIR", &registry_state)
+        .args(["register", "live-demo", "--session"])
+        .arg(&session)
+        .assert()
+        .success();
+    let mut named_ping = Command::cargo_bin("termtrace").expect("binary should build");
+    named_ping
+        .env("TERMTRACE_STATE_DIR", &registry_state)
+        .args(["ping", "live-demo"])
+        .assert()
+        .success();
 
     let first_boundary = match send_request(&session, &ControlRequest::new(ControlCommand::Status))
         .expect("first observer-free status")
@@ -560,18 +574,16 @@ fn live_control_drives_and_audits_a_detached_session() {
     ));
 
     for arguments in [
-        vec!["ping", "--session", session.to_str().expect("UTF-8 path")],
-        vec!["status", "--session", session.to_str().expect("UTF-8 path")],
+        vec!["ping", session.to_str().expect("UTF-8 path")],
+        vec!["status", session.to_str().expect("UTF-8 path")],
         vec![
             "mark",
-            "--session",
             session.to_str().expect("UTF-8 path"),
             "--label",
             "before-input",
         ],
         vec![
             "resize",
-            "--session",
             session.to_str().expect("UTF-8 path"),
             "--cols",
             "100",
@@ -585,7 +597,6 @@ fn live_control_drives_and_audits_a_detached_session() {
     let waiter = StdCommand::new(binary)
         .args([
             "wait",
-            "--session",
             session.to_str().expect("UTF-8 path"),
             "--text",
             "agent:hello",
@@ -598,7 +609,7 @@ fn live_control_drives_and_audits_a_detached_session() {
         .expect("spawn output waiter");
     thread::sleep(Duration::from_millis(50));
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
-    send.args(["send", "--session"])
+    send.arg("send")
         .arg(&session)
         .args(["--text", "hello\n", "--intent", "complete shell read"])
         .assert()
@@ -666,7 +677,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
 
     let mut marker = Command::cargo_bin("termtrace").expect("binary should build");
     marker
-        .args(["mark", "--session"])
+        .arg("mark")
         .arg(&session)
         .args(["--label", "settled"])
         .assert()
@@ -719,7 +730,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     assert_eq!(snapshot_manifest.state_selection, StateSelection::Presented);
 
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
-    stop.args(["stop", "--wait", "--timeout-ms", "5000", "--session"])
+    stop.args(["stop", "--wait", "--timeout-ms", "5000"])
         .arg(&session)
         .assert()
         .success()
@@ -729,7 +740,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
 
     let mut status = Command::cargo_bin("termtrace").expect("binary should build");
     status
-        .args(["status", "--wait-complete", "--session"])
+        .args(["status", "--wait-complete"])
         .arg(&session)
         .assert()
         .success()

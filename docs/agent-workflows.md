@@ -4,7 +4,7 @@
 
 Run `termtrace record --no-input --out SESSION -- COMMAND ...` in a supervised background process. The owner-only `SESSION/control.sock` appears when control is ready. `termtrace ping` and `termtrace status` are explicit readiness probes; do not infer readiness from arbitrary screen text.
 
-Register a memorable local name with `termtrace register NAME --session SESSION`; `termtrace resolve NAME` returns the byte-exact canonical path and `--json` returns the bound session ID and protocol metadata. Registration is no-replace. Use canonical paths for evidence handoff until the shared positional session-reference grammar is enabled across commands.
+Register a memorable local name with `termtrace register NAME --session SESSION`; `termtrace resolve NAME` returns the byte-exact canonical path and `--json` returns the bound session ID and protocol metadata. Registration is no-replace. Live commands accept one positional target: a registered name, a path containing `/`, or an explicit `name:`/`path:` reference when the spelling would be ambiguous.
 
 Choose provenance deliberately for the workload. The default `minimal` policy avoids retaining locale/timezone values. Use `--provenance reproducible` when those values are needed to recreate behavior, or `--provenance custom --provenance-env NAME=hash` to retain equality evidence without the value. `not-captured` records an explicit omission; it is different from an unselected variable.
 
@@ -21,7 +21,7 @@ Terminal-generated replies are marked `source: host`. A `query_response` event p
 ## Wait and inspect
 
 ```bash
-termtrace wait --session SESSION --text 'ready>' --timeout-ms 30000
+termtrace wait SESSION --text 'ready>' --timeout-ms 30000
 termtrace inspect --session SESSION --format text
 termtrace inspect --session SESSION --state 42 --format json
 termtrace inspect --session SESSION --event-seq 120 --format json
@@ -38,9 +38,9 @@ termtrace inspect --session SESSION --state 42 --row 16 --format json-compact
 Use an explicit completion barrier before post-processing:
 
 ```bash
-termtrace wait --session SESSION --text READY
-termtrace mark --session SESSION --label settled
-termtrace stop --session SESSION --wait
+termtrace wait SESSION --text READY
+termtrace mark SESSION --label settled
+termtrace stop SESSION --wait
 termtrace index --session SESSION --from-marker settled
 termtrace capture --session SESSION --from-marker settled
 termtrace verify SESSION --level content --json
