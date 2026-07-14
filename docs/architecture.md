@@ -29,6 +29,8 @@ Ghostty on Xvfb <─────┘
 
 The proxy forwards bytes unchanged. It owns the target PTY, logs before acknowledging state-changing control requests, propagates window changes, and distinguishes input originating from a human terminal, an agent, or an automatic host response.
 
+Read-only control operations are observations rather than execution events. Ping, status, wait registration/polling, and live boundary discovery return actor-consistent `observed` and `durable` positions without changing the event count or hash. Mutations and explicit markers remain canonical.
+
 The target process starts in the recorder's effective current directory unless `--cwd` overrides it. Termtrace resolves that directory once before creating provenance or spawning the PTY child, so the manifest and process cannot disagree.
 
 The pinned libghostty state machine runs live as the terminal host. Its write-PTY callback answers status, cursor, and mode queries; each exact query/response is logged before the response is delivered through a host input intent/result. This keeps detached TUIs functional without conflating generated responses with human or agent input.

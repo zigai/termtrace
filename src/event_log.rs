@@ -11,6 +11,8 @@ use std::{
 
 use blake3::Hash;
 use nix::unistd::Uid;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
@@ -25,6 +27,18 @@ use crate::{
 const OWNER_DIRECTORY_MODE: u32 = 0o700;
 const OWNER_FILE_MODE: u32 = 0o600;
 const MAX_LINE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Actor-consistent position in the canonical event stream.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalBoundary {
+    /// Sequence number that will be assigned to the next event.
+    pub next_event_seq: u64,
+    /// Hash of the preceding event, or the event header at sequence zero.
+    pub event_hash: String,
+    /// PTY output bytes included through this boundary.
+    pub output_bytes: u64,
+}
 
 /// Monotonic and wall-clock origins shared by one recording.
 #[derive(Clone, Debug)]
@@ -71,6 +85,10 @@ pub struct EventLogWriter {
     clock: SessionClock,
     next_seq: u64,
     previous_hash: Hash,
+    observed_output_bytes: u64,
+    durable_next_seq: u64,
+    durable_hash: Hash,
+    durable_output_bytes: u64,
     poisoned: bool,
 }
 
@@ -83,6 +101,24 @@ impl EventLogWriter {
     /// Hex hash of the most recently appended record, or the header before events.
     pub fn current_hash(&self) -> String {
         return self.previous_hash.to_hex().to_string();
+    }
+
+    /// Latest actor-processed boundary, which may include buffered output.
+    pub fn observed_boundary(&self) -> CanonicalBoundary {
+        return CanonicalBoundary {
+            next_event_seq: self.next_seq,
+            event_hash: self.previous_hash.to_hex().to_string(),
+            output_bytes: self.observed_output_bytes,
+        };
+    }
+
+    /// Latest boundary known to have completed the configured file sync.
+    pub fn durable_boundary(&self) -> CanonicalBoundary {
+        return CanonicalBoundary {
+            next_event_seq: self.durable_next_seq,
+            event_hash: self.durable_hash.to_hex().to_string(),
+            output_bytes: self.durable_output_bytes,
+        };
     }
 
     /// Create a new owner-only event log and durably write its header.
@@ -147,6 +183,10 @@ impl EventLogWriter {
             clock,
             next_seq: 0,
             previous_hash,
+            observed_output_bytes: 0,
+            durable_next_seq: 0,
+            durable_hash: previous_hash,
+            durable_output_bytes: 0,
             poisoned: false,
         });
     }
@@ -206,6 +246,20 @@ impl EventLogWriter {
             };
         })?;
         let hash = chained_hash(self.previous_hash, &body_bytes);
+        let output_bytes = match &event {
+            Event::Output { data } => u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX),
+            _ => 0,
+        };
+        let next_output_bytes = self
+            .observed_output_bytes
+            .checked_add(output_bytes)
+            .ok_or_else(|| {
+                return invalid_log(
+                    &self.path,
+                    seq.saturating_add(2),
+                    "output byte count overflow",
+                );
+            })?;
         let record = EventRecord {
             seq,
             monotonic_ns,
@@ -242,6 +296,12 @@ impl EventLogWriter {
 
         self.next_seq = next_seq;
         self.previous_hash = hash;
+        self.observed_output_bytes = next_output_bytes;
+        if durable {
+            self.durable_next_seq = next_seq;
+            self.durable_hash = hash;
+            self.durable_output_bytes = next_output_bytes;
+        }
         return Ok(seq);
     }
 }
@@ -1016,6 +1076,35 @@ mod tests {
             & 0o777;
         assert_eq!(directory_mode, OWNER_DIRECTORY_MODE);
         assert_eq!(file_mode, OWNER_FILE_MODE);
+    }
+
+    #[test]
+    fn distinguishes_observed_and_durable_boundaries() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let path = temporary.path().join("session/events.jsonl");
+        secure_directory(path.parent().expect("parent"));
+        let clock = SessionClock::now().expect("valid clock");
+        let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("create log");
+        assert_eq!(writer.observed_boundary(), writer.durable_boundary());
+
+        writer
+            .append_buffered(Event::Output {
+                data: ByteString::from(&b"x"[..]),
+            })
+            .expect("buffer output");
+        assert_eq!(writer.observed_boundary().next_event_seq, 1);
+        assert_eq!(writer.observed_boundary().output_bytes, 1);
+        assert_eq!(writer.durable_boundary().next_event_seq, 0);
+        assert_eq!(writer.durable_boundary().output_bytes, 0);
+
+        writer
+            .append(Event::Marker {
+                label: "flush".to_owned(),
+            })
+            .expect("durable marker");
+        assert_eq!(writer.observed_boundary(), writer.durable_boundary());
+        assert_eq!(writer.durable_boundary().next_event_seq, 2);
+        assert_eq!(writer.durable_boundary().output_bytes, 1);
     }
 
     #[test]

@@ -305,35 +305,6 @@
         },
         {
           "additionalProperties": false,
-          "description": "Result of an agent control query.",
-          "properties": {
-            "command": {
-              "description": "Stable command name.",
-              "type": "string"
-            },
-            "request_id": {
-              "description": "Correlation identifier from the control request.",
-              "format": "uuid",
-              "type": "string"
-            },
-            "response": {
-              "description": "Structured response data."
-            },
-            "type": {
-              "const": "control_response",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "request_id",
-            "command",
-            "response"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
           "description": "A process or host lifecycle transition.",
           "properties": {
             "lifecycle_kind": {

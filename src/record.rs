@@ -43,8 +43,9 @@ use crate::{
     Error, Result,
     artifact::{sync_parent_directory, write_secure},
     control::{
-        CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME, ControlCommand, ControlData, ControlRequest,
-        ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES, ProcessSignal, validate_frame,
+        ActorBoundaries, CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME, ControlCommand,
+        ControlData, ControlRequest, ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES,
+        ProcessSignal, validate_frame,
     },
     event::{
         ByteString, Event, EventLogHeader, InputKind, InputSource, LifecycleKind, OperationStatus,
@@ -665,7 +666,6 @@ fn process_runtime_message(
         RuntimeMessage::Control { request, response } => handle_control_request(
             spawned,
             event_log,
-            progress.output_bytes,
             request,
             &response,
             control_history,
@@ -1091,12 +1091,15 @@ fn poll_ready(descriptor: &PollFd<'_>) -> bool {
 fn handle_control_request(
     spawned: &mut SpawnedCommand,
     event_log: &mut EventLogWriter,
-    output_bytes: u64,
     request: ControlRequest,
     response_sender: &mpsc::SyncSender<ControlResponse>,
     history: &mut HashMap<Uuid, (ControlCommand, ControlResponse)>,
     semantic: &mut GhosttyVt,
 ) -> Result<()> {
+    let read_only = matches!(
+        request.command,
+        ControlCommand::Ping | ControlCommand::Status
+    );
     if let Some((original, response)) = history.get(&request.request_id) {
         let response = if original == &request.command {
             response.clone()
@@ -1114,7 +1117,6 @@ fn handle_control_request(
     let outcome = execute_control_command(
         spawned,
         event_log,
-        output_bytes,
         request.request_id,
         &request.command,
         semantic,
@@ -1131,7 +1133,9 @@ fn handle_control_request(
             error.to_string(),
         ),
     };
-    history.insert(request.request_id, (request.command, response.clone()));
+    if !read_only {
+        history.insert(request.request_id, (request.command, response.clone()));
+    }
     if response_sender.send(response).is_err() {
         tracing::warn!(request_id = %request.request_id, "control response receiver disconnected");
     }
@@ -1144,35 +1148,20 @@ fn handle_control_request(
 fn execute_control_command(
     spawned: &mut SpawnedCommand,
     event_log: &mut EventLogWriter,
-    output_bytes: u64,
     request_id: Uuid,
     command: &ControlCommand,
     semantic: &mut GhosttyVt,
 ) -> Result<ControlData> {
     match command {
         ControlCommand::Ping => {
-            event_log.append(Event::ControlResponse {
-                request_id,
-                command: "ping".to_owned(),
-                response: serde_json::json!({"responsive": true}),
-            })?;
-            return Ok(ControlData::Acknowledged);
+            return Ok(ControlData::Acknowledged {
+                boundaries: actor_boundaries(event_log),
+            });
         }
         ControlCommand::Status => {
-            let observed_seq = event_log.next_seq();
-            event_log.append(Event::ControlResponse {
-                request_id,
-                command: "status".to_owned(),
-                response: serde_json::json!({
-                    "pid": spawned.pid,
-                    "output_bytes": output_bytes,
-                    "observed_next_event_seq": observed_seq,
-                }),
-            })?;
             return Ok(ControlData::Status {
                 pid: spawned.pid,
-                output_bytes,
-                next_event_seq: event_log.next_seq(),
+                boundaries: actor_boundaries(event_log),
             });
         }
         ControlCommand::Input { data, intent } => {
@@ -1186,7 +1175,9 @@ fn execute_control_command(
                 intent.clone(),
                 data.as_bytes(),
             )?;
-            return Ok(ControlData::Acknowledged);
+            return Ok(ControlData::Acknowledged {
+                boundaries: actor_boundaries(event_log),
+            });
         }
         ControlCommand::Resize {
             cols,
@@ -1203,11 +1194,15 @@ fn execute_control_command(
             validate_control_geometry(geometry)?;
             apply_resize(spawned.master.as_mut(), event_log, request_id, geometry)?;
             resize_semantic(semantic, geometry)?;
-            return Ok(ControlData::Acknowledged);
+            return Ok(ControlData::Acknowledged {
+                boundaries: actor_boundaries(event_log),
+            });
         }
         ControlCommand::Signal { signal } => {
             apply_signal(spawned.pid, event_log, request_id, *signal)?;
-            return Ok(ControlData::Acknowledged);
+            return Ok(ControlData::Acknowledged {
+                boundaries: actor_boundaries(event_log),
+            });
         }
         ControlCommand::Mark { label } => {
             let label = label.trim();
@@ -1223,13 +1218,23 @@ fn execute_control_command(
             return Ok(ControlData::Marked {
                 label: label.to_owned(),
                 event_seq,
+                boundaries: actor_boundaries(event_log),
             });
         }
         ControlCommand::Stop => {
             apply_signal(spawned.pid, event_log, request_id, ProcessSignal::Terminate)?;
-            return Ok(ControlData::Acknowledged);
+            return Ok(ControlData::Acknowledged {
+                boundaries: actor_boundaries(event_log),
+            });
         }
     }
+}
+
+fn actor_boundaries(event_log: &EventLogWriter) -> ActorBoundaries {
+    return ActorBoundaries {
+        durable: event_log.durable_boundary(),
+        observed: event_log.observed_boundary(),
+    };
 }
 
 fn validate_control_input(data: &[u8], intent: Option<&str>) -> Result<()> {

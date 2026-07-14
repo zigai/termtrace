@@ -791,7 +791,7 @@ fn resolve_cli_range(session: &Path, range: &TimeRangeArgs) -> Result<(Option<u6
     let event_path = session.join("events.jsonl");
     let live_event_count = if !session.join("completion.json").is_file() {
         match request(session, ControlCommand::Status) {
-            Ok(ControlData::Status { next_event_seq, .. }) => Some(next_event_seq),
+            Ok(ControlData::Status { boundaries, .. }) => Some(boundaries.durable.next_event_seq),
             Ok(_) => {
                 return Err(miette::miette!(
                     "live status returned an unexpected response"

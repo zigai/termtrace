@@ -14,7 +14,7 @@ use std::{
 use tempfile::TempDir;
 use termtrace::{
     Error,
-    control::{ControlCommand, ControlRequest, send_request},
+    control::{ControlCommand, ControlData, ControlRequest, send_request},
     event::{EVENT_LOG_VERSION, Event, InputSource, OperationStatus},
     event_log::EventLog,
     replay::{
@@ -293,6 +293,24 @@ fn live_control_drives_and_audits_a_detached_session() {
         thread::sleep(Duration::from_millis(10));
     }
     assert!(socket.exists(), "control socket did not become ready");
+
+    let first_boundary = match send_request(&session, &ControlRequest::new(ControlCommand::Status))
+        .expect("first observer-free status")
+    {
+        ControlData::Status { boundaries, .. } => Some(boundaries),
+        _ => None,
+    }
+    .expect("status response data");
+    send_request(&session, &ControlRequest::new(ControlCommand::Ping)).expect("observer-free ping");
+    let second_boundary =
+        match send_request(&session, &ControlRequest::new(ControlCommand::Status))
+            .expect("second observer-free status")
+        {
+            ControlData::Status { boundaries, .. } => Some(boundaries),
+            _ => None,
+        }
+        .expect("status response data");
+    assert_eq!(first_boundary, second_boundary);
 
     let duplicate_request = ControlRequest::new(ControlCommand::Mark {
         label: "deduplicated".to_owned(),

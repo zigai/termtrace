@@ -23,7 +23,7 @@ termtrace inspect --session SESSION --monotonic-ns 500000000 --format json
 termtrace inspect --session SESSION --state 42 --row 16 --format json-compact
 ```
 
-`wait` searches exact canonical output bytes, including matches spanning PTY reads. Each poll creates a durable status boundary so buffered output is inspectable. It fails explicitly on timeout or child exit.
+`wait` searches exact canonical output bytes, including matches spanning PTY reads. Ping, status, wait polling, and live-snapshot boundary discovery do not append events. Every live response distinguishes the latest actor-observed boundary from the file-synchronized durable boundary; forensic readers consume the durable prefix unless explicitly labeled volatile. It fails explicitly on timeout or child exit.
 
 `inspect` replays from canonical events and returns a complete state, not a delta. JSON includes graphemes, styles, resolved colors, cursor, all known modes, OSC metadata, dirty evidence, and provenance. Text is a compact viewport view. `--row N` emits only one complete row plus bounded record provenance, and `json-compact` avoids pretty-print overhead. Output commands treat a downstream broken pipe as a normal early consumer exit.
 

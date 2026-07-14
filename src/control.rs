@@ -12,10 +12,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Error, Result, event::ByteString};
+use crate::{Error, Result, event::ByteString, event_log::CanonicalBoundary};
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 2;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 3;
 /// Relative socket path inside a live session directory.
 pub const CONTROL_SOCKET_NAME: &str = "control.sock";
 /// Maximum encoded request or response size.
@@ -105,15 +105,16 @@ impl ControlRequest {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlData {
     /// No additional data is required.
-    Acknowledged,
+    Acknowledged {
+        /// Durable and observed canonical positions after the operation.
+        boundaries: ActorBoundaries,
+    },
     /// Live session status.
     Status {
         /// Child process identifier when available.
         pid: Option<u32>,
-        /// Output bytes recorded so far.
-        output_bytes: u64,
-        /// Next canonical event sequence number.
-        next_event_seq: u64,
+        /// Durable and observed canonical positions at status evaluation.
+        boundaries: ActorBoundaries,
     },
     /// Canonical position of an appended marker.
     Marked {
@@ -121,7 +122,19 @@ pub enum ControlData {
         label: String,
         /// Canonical event sequence containing the marker.
         event_seq: u64,
+        /// Durable and observed canonical positions after the marker.
+        boundaries: ActorBoundaries,
     },
+}
+
+/// Durable and latest actor-processed positions returned by live operations.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ActorBoundaries {
+    /// Latest boundary whose file synchronization completed successfully.
+    pub durable: CanonicalBoundary,
+    /// Latest boundary processed by the session actor, possibly volatile.
+    pub observed: CanonicalBoundary,
 }
 
 /// Response envelope carried as one JSON line.

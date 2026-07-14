@@ -570,7 +570,7 @@ pub fn index_session_with_options(
         // buffered output is complete on disk before this process snapshots it.
         // A crashed session has no socket, so fall back to its static valid prefix.
         match request(session_directory, ControlCommand::Status) {
-            Ok(ControlData::Status { next_event_seq, .. }) => Some(next_event_seq),
+            Ok(ControlData::Status { boundaries, .. }) => Some(boundaries.durable.next_event_seq),
             Ok(_) => {
                 return Err(invalid_replay(
                     "live status returned an unexpected control response",

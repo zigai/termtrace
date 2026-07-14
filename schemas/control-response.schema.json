@@ -1,5 +1,52 @@
 {
   "$defs": {
+    "ActorBoundaries": {
+      "additionalProperties": false,
+      "description": "Durable and latest actor-processed positions returned by live operations.",
+      "properties": {
+        "durable": {
+          "$ref": "#/$defs/CanonicalBoundary",
+          "description": "Latest boundary whose file synchronization completed successfully."
+        },
+        "observed": {
+          "$ref": "#/$defs/CanonicalBoundary",
+          "description": "Latest boundary processed by the session actor, possibly volatile."
+        }
+      },
+      "required": [
+        "durable",
+        "observed"
+      ],
+      "type": "object"
+    },
+    "CanonicalBoundary": {
+      "additionalProperties": false,
+      "description": "Actor-consistent position in the canonical event stream.",
+      "properties": {
+        "event_hash": {
+          "description": "Hash of the preceding event, or the event header at sequence zero.",
+          "type": "string"
+        },
+        "next_event_seq": {
+          "description": "Sequence number that will be assigned to the next event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_bytes": {
+          "description": "PTY output bytes included through this boundary.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "next_event_seq",
+        "event_hash",
+        "output_bytes"
+      ],
+      "type": "object"
+    },
     "ControlData": {
       "description": "Successful response payload.",
       "oneOf": [
@@ -7,13 +54,18 @@
           "additionalProperties": false,
           "description": "No additional data is required.",
           "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed canonical positions after the operation."
+            },
             "kind": {
               "const": "acknowledged",
               "type": "string"
             }
           },
           "required": [
-            "kind"
+            "kind",
+            "boundaries"
           ],
           "type": "object"
         },
@@ -21,21 +73,13 @@
           "additionalProperties": false,
           "description": "Live session status.",
           "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed canonical positions at status evaluation."
+            },
             "kind": {
               "const": "status",
               "type": "string"
-            },
-            "next_event_seq": {
-              "description": "Next canonical event sequence number.",
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "output_bytes": {
-              "description": "Output bytes recorded so far.",
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
             },
             "pid": {
               "description": "Child process identifier when available.",
@@ -49,8 +93,7 @@
           },
           "required": [
             "kind",
-            "output_bytes",
-            "next_event_seq"
+            "boundaries"
           ],
           "type": "object"
         },
@@ -58,6 +101,10 @@
           "additionalProperties": false,
           "description": "Canonical position of an appended marker.",
           "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed canonical positions after the marker."
+            },
             "event_seq": {
               "description": "Canonical event sequence containing the marker.",
               "format": "uint64",
@@ -76,7 +123,8 @@
           "required": [
             "kind",
             "label",
-            "event_seq"
+            "event_seq",
+            "boundaries"
           ],
           "type": "object"
         }
