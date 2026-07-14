@@ -129,6 +129,8 @@ The socket disappears when the child exits. `stop --wait` does not return until 
 
 `events SESSION` streams stable JSONL projections of validated canonical records. `--type output,input_intent,marker` filters variants; event/time/marker bounds use the same half-open contract. `--metadata-only` removes exact `data`, `query`, and `response` bytes while retaining all non-byte metadata plus a BLAKE3 and byte count for each elided field.
 
+Generate completion scripts directly from the installed command graph with `termtrace completions bash|zsh|fish|elvish|powershell`. For example, Zsh users can write `termtrace completions zsh > ~/.zfunc/_termtrace` and ensure that directory is on `fpath` before `compinit`.
+
 ## Semantic replay
 
 ```bash

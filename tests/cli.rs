@@ -60,6 +60,27 @@ fn version_subcommand_reports_package_version() {
 }
 
 #[test]
+fn completions_are_generated_from_the_current_command_graph() {
+    for (shell, signature) in [
+        ("bash", "complete -F _termtrace"),
+        ("zsh", "#compdef termtrace"),
+        ("fish", "complete -c termtrace"),
+        ("elvish", "edit:completion:arg-completer[termtrace]"),
+        ("powershell", "Register-ArgumentCompleter"),
+    ] {
+        let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+        command
+            .args(["completions", shell])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(signature))
+            .stdout(predicate::str::contains("timeline"))
+            .stdout(predicate::str::contains("explain"))
+            .stdout(predicate::str::contains("events"));
+    }
+}
+
+#[test]
 fn verify_reports_manifest_binding_and_detects_tampering() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("verified-session");

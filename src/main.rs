@@ -17,7 +17,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, CommandFactory as _, Parser, Subcommand, ValueEnum};
+use clap_complete::{Shell, generate};
 use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
     Error,
@@ -138,6 +139,8 @@ enum Command {
     Output(OutputArgs),
     /// Stream filtered canonical event projections as JSONL.
     Events(EventsArgs),
+    /// Generate a shell completion script from the current command graph.
+    Completions(CompletionsArgs),
     /// Wait for exact UTF-8 text in canonical PTY output.
     Wait(WaitArgs),
     /// Copy the longest integrity-checked event prefix without modifying source.
@@ -487,6 +490,13 @@ struct EventsArgs {
     to_event_seq: Option<u64>,
     #[command(flatten)]
     range: TimeRangeArgs,
+}
+
+#[derive(Debug, Args)]
+struct CompletionsArgs {
+    /// Target shell.
+    #[arg(value_enum)]
+    shell: Shell,
 }
 
 #[derive(Debug, Args)]
@@ -1027,6 +1037,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Explain(arguments) => return run_explain(arguments),
         Command::Output(arguments) => return run_output(arguments),
         Command::Events(arguments) => return run_events(arguments),
+        Command::Completions(arguments) => return run_completions(arguments),
         Command::Wait(arguments) => return run_wait(arguments),
         Command::Recover(arguments) => return run_recover(arguments),
         Command::Schemas(arguments) => return run_schemas(arguments),
@@ -1472,6 +1483,17 @@ fn run_events(arguments: EventsArgs) -> Result<ExitCode> {
             arguments.metadata_only,
         ))?;
     }
+    return Ok(ExitCode::SUCCESS);
+}
+
+fn run_completions(arguments: CompletionsArgs) -> Result<ExitCode> {
+    let mut command = Cli::command();
+    generate(
+        arguments.shell,
+        &mut command,
+        "termtrace",
+        &mut io::stdout(),
+    );
     return Ok(ExitCode::SUCCESS);
 }
 

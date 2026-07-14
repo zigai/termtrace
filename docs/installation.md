@@ -1,5 +1,9 @@
 # Installation
 
+## Shell completions
+
+`termtrace completions SHELL` prints a completion script generated from the exact installed CLI. Supported shells are Bash, Zsh, Fish, Elvish, and PowerShell. Install the output in the shell's normal completion directory or source it from the shell configuration; regenerate it after upgrading so newly added commands and options are present.
+
 ## Supported host
 
 The production capture path targets Linux because Ghostty's GTK application, Xvfb, X11 peer/process facilities, and `renameat2(RENAME_NOREPLACE)` are used directly. Semantic replay supports x86_64 and aarch64 Linux bootstrap archives.
