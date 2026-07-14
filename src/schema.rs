@@ -17,6 +17,7 @@ use crate::{
     event::{EventLogHeader, EventRecord},
     event_log::RecoveryReport,
     inspection::{ScreenWaitOutcome, WaitOutcome},
+    observation::Observation,
     playback::{PlaybackFailure, PlaybackTiming},
     provenance::{EnvironmentProvenance, ExecutionProvenance, ProvenancePolicy},
     receipt::EvidenceReceipt,
@@ -67,6 +68,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<RecoveryReport>("recovery-report.schema.json")?,
         schema::<WaitOutcome>("wait-outcome.schema.json")?,
         schema::<ScreenWaitOutcome>("screen-wait-outcome.schema.json")?,
+        schema::<Observation>("observation.schema.json")?,
         schema::<PlaybackTiming>("playback-timing.schema.json")?,
         schema::<PlaybackFailure>("playback-failure.schema.json")?,
     ]);

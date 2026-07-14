@@ -10,6 +10,7 @@ pub mod geometry;
 pub mod ghostty_vt;
 pub mod inspection;
 pub mod interop;
+pub mod observation;
 pub mod playback;
 pub mod profile;
 pub mod provenance;

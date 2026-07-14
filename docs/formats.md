@@ -28,6 +28,8 @@ Execution provenance also records the requested and resolved executable paths, r
 
 Control responses carry separate durable and observed event/hash/output boundaries. Read-only control traffic is not an event and cannot change the canonical hash. A marker is the explicit operation for placing an observation in the execution timeline.
 
+`Observation` is the shared state-view envelope for CLI and client layers. It labels source kind, canonical session identity and completion, requested `StatePoint`, state/event/time identity, presentation eligibility, validated or observed boundary, capture quality, semantic/native truth layer, compact frame, and frame hash. Plain-text rendering may emit only `frame.viewport_text`; structured output retains the complete envelope.
+
 `requests.jsonl` supports persistent idempotency after bounded memory-cache eviction. It is not a canonical evidence root: readers may discard and reconstruct retry state from canonical events, and `termtrace verify` reports a missing, verified, or invalid journal without allowing journal damage to invalidate an otherwise complete event chain.
 
 A completed session must end in `Exit` and contain no pending mutation intent. Run `termtrace verify SESSION --level content --json` for a stable offline report, or use `--level durability-record` to additionally require the internally consistent chain-bound persistence record. Offline verification cannot prove that historical sync calls reached stable media. A valid unsigned hash graph establishes integrity relative to the roots in the session; it does not authenticate who created them.
