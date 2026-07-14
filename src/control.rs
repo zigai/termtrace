@@ -123,6 +123,23 @@ pub enum ControlData {
         /// Durable and observed canonical positions after the operation.
         boundaries: ActorBoundaries,
     },
+    /// Exact result of one applied input operation.
+    InputApplied {
+        /// Canonical operation identifier (the caller request ID).
+        operation_id: Uuid,
+        /// Semantic input category.
+        input_kind: InputKind,
+        /// Exact bytes emitted by the actor.
+        data: ByteString,
+        /// Number of bytes written completely.
+        bytes_written: u64,
+        /// Canonical intent event sequence.
+        intent_event_seq: u64,
+        /// Canonical result event sequence.
+        result_event_seq: u64,
+        /// Durable and observed positions after application.
+        boundaries: ActorBoundaries,
+    },
     /// Live session status.
     Status {
         /// Child process identifier when available.

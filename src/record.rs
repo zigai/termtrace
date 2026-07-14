@@ -212,6 +212,12 @@ struct RuntimeProgress {
     output_bytes: u64,
 }
 
+struct InputApplication {
+    bytes_written: u64,
+    intent_event_seq: u64,
+    result_event_seq: u64,
+}
+
 #[derive(Clone)]
 struct CachedMutation {
     command_hash: String,
@@ -789,16 +795,18 @@ fn process_runtime_message(
         RuntimeMessage::ReadFailed(reason) => {
             return Err(terminal_error("read PTY output", reason));
         }
-        RuntimeMessage::Input(data) => apply_input(
-            spawned.writer.as_mut(),
-            event_log,
-            Uuid::now_v7(),
-            InputSource::Human,
-            InputKind::Raw,
-            InputDescriptor::Raw,
-            None,
-            &data,
-        )?,
+        RuntimeMessage::Input(data) => {
+            apply_input(
+                spawned.writer.as_mut(),
+                event_log,
+                Uuid::now_v7(),
+                InputSource::Human,
+                InputKind::Raw,
+                InputDescriptor::Raw,
+                None,
+                &data,
+            )?;
+        }
         RuntimeMessage::InputClosed => {}
         RuntimeMessage::InputFailed(reason) => {
             return Err(terminal_error("read standard input", reason));
@@ -1331,7 +1339,7 @@ fn execute_control_command(
             intent,
         } => {
             validate_control_input(data.as_bytes(), intent.as_deref())?;
-            apply_input(
+            let applied = apply_input(
                 spawned.writer.as_mut(),
                 event_log,
                 request_id,
@@ -1344,7 +1352,13 @@ fn execute_control_command(
                 intent.clone(),
                 data.as_bytes(),
             )?;
-            return Ok(ControlData::Acknowledged {
+            return Ok(ControlData::InputApplied {
+                operation_id: request_id,
+                input_kind: *input_kind,
+                data: data.clone(),
+                bytes_written: applied.bytes_written,
+                intent_event_seq: applied.intent_event_seq,
+                result_event_seq: applied.result_event_seq,
                 boundaries: actor_boundaries(event_log),
             });
         }
@@ -1360,7 +1374,7 @@ fn execute_control_command(
                     "the requested key press produced no terminal bytes",
                 ));
             }
-            apply_input(
+            let applied = apply_input(
                 spawned.writer.as_mut(),
                 event_log,
                 request_id,
@@ -1378,7 +1392,13 @@ fn execute_control_command(
                 Some(semantic_key_name(*key)),
                 encoded.data.as_bytes(),
             )?;
-            return Ok(ControlData::Acknowledged {
+            return Ok(ControlData::InputApplied {
+                operation_id: request_id,
+                input_kind: InputKind::Keys,
+                data: encoded.data,
+                bytes_written: applied.bytes_written,
+                intent_event_seq: applied.intent_event_seq,
+                result_event_seq: applied.result_event_seq,
                 boundaries: actor_boundaries(event_log),
             });
         }
@@ -1706,8 +1726,8 @@ fn apply_input(
     descriptor: InputDescriptor,
     intent: Option<String>,
     data: &[u8],
-) -> Result<()> {
-    event_log.append(Event::InputIntent {
+) -> Result<InputApplication> {
+    let intent_event_seq = event_log.append(Event::InputIntent {
         operation_id,
         source,
         input_kind,
@@ -1722,20 +1742,23 @@ fn apply_input(
         OperationStatus::Applied
     };
     let error_code = write_error.as_ref().map(io_error_code);
-    let result_write = event_log
-        .append(Event::InputResult {
-            operation_id,
-            status,
-            bytes_written,
-            error_code,
-        })
-        .map(|_| ());
+    let result_write = event_log.append(Event::InputResult {
+        operation_id,
+        status,
+        bytes_written,
+        error_code,
+    });
     let Some(error) = write_error else {
-        return result_write;
+        let result_event_seq = result_write?;
+        return Ok(InputApplication {
+            bytes_written,
+            intent_event_seq,
+            result_event_seq,
+        });
     };
     return finish_with_cleanup(
         Err(terminal_error("write PTY input", error.to_string())),
-        result_write,
+        result_write.map(|_| ()),
     );
 }
 
