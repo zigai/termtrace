@@ -14,7 +14,7 @@ use crate::{
     control::{ControlCommand, ControlData, request},
     event::{ByteString, Event},
     event_log::{CanonicalBoundary, EventLog},
-    ghostty_vt::{ModeState, SemanticState},
+    ghostty_vt::{GhosttyVt, ModeState, SemanticState},
     replay::{StateSelector, inspect},
     session::{read_manifest, validate_completed_log},
 };
@@ -55,6 +55,16 @@ pub enum TruthLayer {
     Semantic,
     /// Pixels captured from the native terminal renderer.
     Native,
+}
+
+/// Integrity relationship between an observation and canonical evidence.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationIntegrity {
+    /// State derives from a validated canonical hash chain or live actor boundary.
+    CanonicalChained,
+    /// State derives from an unchained byte stream.
+    Unchained,
 }
 
 /// Shared state selection vocabulary.
@@ -135,6 +145,8 @@ pub struct Observation {
     pub capture_quality: CaptureQuality,
     /// Rendering truth layer.
     pub truth_layer: TruthLayer,
+    /// Integrity relationship to canonical execution evidence.
+    pub integrity: ObservationIntegrity,
     /// Compact stable frame.
     pub frame: ObservationFrame,
     /// BLAKE3 of canonical JSON for `frame`.
@@ -220,6 +232,7 @@ pub fn observe_session_with_options(
         boundary: boundaries.observed,
         capture_quality: CaptureQuality::Live,
         truth_layer: TruthLayer::Semantic,
+        integrity: ObservationIntegrity::CanonicalChained,
         frame,
         payload_hash,
     });
@@ -278,6 +291,50 @@ fn observe_completed(
         },
         capture_quality: CaptureQuality::Completed,
         truth_layer: TruthLayer::Semantic,
+        integrity: ObservationIntegrity::CanonicalChained,
+        frame,
+        payload_hash,
+    });
+}
+
+/// Render an unchained ANSI/VT stream into a truth-labeled observation.
+///
+/// # Errors
+///
+/// Returns an error when geometry or semantic-state capture is invalid.
+pub fn observe_ansi_stream(bytes: &[u8], cols: u16, rows: u16) -> Result<Observation> {
+    let mut terminal = GhosttyVt::new(cols, rows, 0)?;
+    terminal.write(bytes);
+    let state = terminal.snapshot()?;
+    let state_bytes = serde_json::to_vec(&state).map_err(|source| {
+        return Error::InvalidJson {
+            path: PathBuf::from("<ansi-state>"),
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
+    let state_hash = blake3::hash(&state_bytes).to_hex().to_string();
+    let frame = frame_from_state(&state);
+    let payload_hash = frame_hash(&frame)?;
+    return Ok(Observation {
+        source_kind: ObservationSourceKind::AnsiStream,
+        session_id: None,
+        canonical_session: None,
+        source_completed: false,
+        state_point: StatePoint::LatestPresented,
+        state_id: None,
+        state_hash,
+        event_seq: None,
+        monotonic_ns: None,
+        presented: true,
+        boundary: CanonicalBoundary {
+            next_event_seq: 0,
+            event_hash: blake3::hash(bytes).to_hex().to_string(),
+            output_bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+        },
+        capture_quality: CaptureQuality::Incomplete,
+        truth_layer: TruthLayer::Semantic,
+        integrity: ObservationIntegrity::Unchained,
         frame,
         payload_hash,
     });

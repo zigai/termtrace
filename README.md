@@ -101,6 +101,7 @@ termtrace wait /tmp/example.termtrace 'Ready' --stable-for 250ms
 termtrace wait /tmp/example.termtrace --output 'earlier diagnostic'
 termtrace show /tmp/example.termtrace
 termtrace show /tmp/example.termtrace --format json-compact
+termtrace show --input trace.ansi --cols 100 --rows 30
 termtrace resize /tmp/example.termtrace --cols 120 --rows 36
 termtrace mark /tmp/example.termtrace --label before-build
 termtrace signal /tmp/example.termtrace --signal interrupt
@@ -112,6 +113,8 @@ The live-command positional target accepts a registry name or any path containin
 The socket disappears when the child exits. `stop --wait` does not return until `completion.json` is durable and binds the session manifest, event header, final `Exit`, hash, count, output byte count, and exit outcome. `status --wait-complete` provides the same completion barrier without sending a signal. Marker responses include their canonical event sequence.
 
 `show SESSION` prints the latest presentation-eligible viewport. A live session uses the actor snapshot fast path and is labeled `capture_quality: live`; a completed session validates completion and the event chain before replay and is labeled `completed`. `--format json` or `json-compact` emits the stable truth-labeled observation envelope. Completed evidence accepts `--state`, `--event-seq`, `--at`, or unique `--at-marker` selectors. Explicit selectors still reject synchronized-output hidden states unless `--include-hidden` is present; the default always chooses the latest presented state.
+
+`show --input PATH` renders an ANSI/VT byte stream at explicit `--cols`/`--rows` geometry; `--input -` reads standard input. Structured output labels this source `ansi_stream`, `integrity: unchained`, and `capture_quality: incomplete`: it is a semantic convenience view, not canonical execution evidence.
 
 ## Semantic replay
 

@@ -1458,6 +1458,32 @@ fn show_requires_explicit_permission_for_hidden_states() {
 }
 
 #[test]
+fn show_labels_ansi_files_and_stdin_as_unchained() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let ansi = temporary.path().join("input.ansi");
+    fs_err::write(&ansi, b"\x1b[31mERROR\x1b[0m\n").expect("ANSI fixture");
+    let mut file_show = Command::cargo_bin("termtrace").expect("binary should build");
+    file_show
+        .args(["show", "--input"])
+        .arg(&ansi)
+        .args(["--format", "json-compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""source_kind":"ansi_stream""#))
+        .stdout(predicate::str::contains(r#""integrity":"unchained""#))
+        .stdout(predicate::str::contains(r#""session_id":null"#))
+        .stdout(predicate::str::contains("ERROR"));
+
+    let mut stdin_show = Command::cargo_bin("termtrace").expect("binary should build");
+    stdin_show
+        .args(["show", "--input", "-"])
+        .write_stdin("wide:界")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("wide:界"));
+}
+
+#[test]
 fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("live-snapshot");

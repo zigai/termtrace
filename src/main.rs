@@ -33,7 +33,7 @@ use termtrace::{
         inspect_session, state_text, wait_for_completion, wait_for_output, wait_for_screen,
     },
     interop::export_asciicast,
-    observation::{StatePoint, observe_session_with_options},
+    observation::{StatePoint, observe_ansi_stream, observe_session_with_options},
     playback::{PlaybackOptions, playback},
     profile::{
         ResolvedGhosttyProfile, resolve_ghostty_profile, resolved_terminal_colors,
@@ -281,13 +281,28 @@ enum ShowFormat {
 
 #[derive(Debug, Args)]
 #[command(group(
+    ArgGroup::new("show_source")
+        .required(true)
+        .multiple(false)
+        .args(["session", "input"])
+))]
+#[command(group(
     ArgGroup::new("show_selector")
         .multiple(false)
         .args(["state", "event_seq", "at", "at_marker"])
 ))]
 struct ShowArgs {
     /// Live session name or canonical completed session path.
-    session: PathBuf,
+    session: Option<PathBuf>,
+    /// ANSI/VT byte stream path, or `-` for standard input.
+    #[arg(long)]
+    input: Option<PathBuf>,
+    /// ANSI stream columns.
+    #[arg(long, default_value_t = 80)]
+    cols: u16,
+    /// ANSI stream rows.
+    #[arg(long, default_value_t = 24)]
+    rows: u16,
     /// Exact semantic state identifier.
     #[arg(long)]
     state: Option<u64>,
@@ -1084,7 +1099,6 @@ fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
 }
 
 fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
-    let session = resolve_session_ref(arguments.session)?;
     let point = match (
         arguments.state,
         arguments.event_seq,
@@ -1098,7 +1112,28 @@ fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
         (None, None, None, None) => StatePoint::LatestPresented,
         _ => return Err(miette::miette!("exactly one show selector may be supplied")),
     };
-    let observation = observe_session_with_options(&session, point, arguments.include_hidden)?;
+    let observation = match (arguments.session, arguments.input) {
+        (Some(session), None) => {
+            let session = resolve_session_ref(session)?;
+            observe_session_with_options(&session, point, arguments.include_hidden)?
+        }
+        (None, Some(input)) => {
+            if point != StatePoint::LatestPresented || arguments.include_hidden {
+                return Err(miette::miette!(
+                    "ANSI streams support only latest-presented selection"
+                ));
+            }
+            let bytes = if input == Path::new("-") {
+                let mut bytes = Vec::new();
+                io::stdin().read_to_end(&mut bytes).into_diagnostic()?;
+                bytes
+            } else {
+                fs_err::read(input).into_diagnostic()?
+            };
+            observe_ansi_stream(&bytes, arguments.cols, arguments.rows)?
+        }
+        _ => return Err(miette::miette!("exactly one show source is required")),
+    };
     return match arguments.format {
         ShowFormat::Text => write_stdout(format!("{}\n", observation.frame.viewport_text)),
         ShowFormat::Json => write_stdout(format!(

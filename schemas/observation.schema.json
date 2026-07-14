@@ -154,6 +154,21 @@
       ],
       "type": "object"
     },
+    "ObservationIntegrity": {
+      "description": "Integrity relationship between an observation and canonical evidence.",
+      "oneOf": [
+        {
+          "const": "canonical_chained",
+          "description": "State derives from a validated canonical hash chain or live actor boundary.",
+          "type": "string"
+        },
+        {
+          "const": "unchained",
+          "description": "State derives from an unchained byte stream.",
+          "type": "string"
+        }
+      ]
+    },
     "ObservationSourceKind": {
       "description": "Source category for one observation.",
       "oneOf": [
@@ -359,6 +374,10 @@
       "$ref": "#/$defs/ObservationFrame",
       "description": "Compact stable frame."
     },
+    "integrity": {
+      "$ref": "#/$defs/ObservationIntegrity",
+      "description": "Integrity relationship to canonical execution evidence."
+    },
     "monotonic_ns": {
       "description": "Session-monotonic timestamp when known.",
       "format": "uint64",
@@ -423,6 +442,7 @@
     "boundary",
     "capture_quality",
     "truth_layer",
+    "integrity",
     "frame",
     "payload_hash"
   ],

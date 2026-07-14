@@ -10,6 +10,8 @@ Use `termtrace list` for live aliases and `termtrace list --all --json` when dia
 
 Use `termtrace show NAME` for the latest presented viewport. The live fast path does not replay the event log; after completion the same command validates and replays canonical evidence. Add `--format json-compact` when automation needs source identity, state hash, presentation status, boundary, capture quality, cursor/modes, and payload hash.
 
+Use `termtrace show --input trace.ansi` or pipe bytes to `--input -` only for an immediate semantic rendering of an ANSI/VT stream. Choose `--cols` and `--rows` when the default 80×24 geometry is unsuitable. This source is explicitly unchained and incomplete; do not treat it as session evidence.
+
 Choose provenance deliberately for the workload. The default `minimal` policy avoids retaining locale/timezone values. Use `--provenance reproducible` when those values are needed to recreate behavior, or `--provenance custom --provenance-env NAME=hash` to retain equality evidence without the value. `not-captured` records an explicit omission; it is different from an unselected variable.
 
 Before handing off a reproducible session, inspect `execution_provenance.executable`, `invoked_file`, and `runtime.recorder.binary`. A `captured` content identity can be compared to candidate files; `unresolved` or `unavailable` is an explicit reproducibility gap rather than permission to infer a match.
