@@ -46,6 +46,8 @@ One-off command observations are completed canonical sessions with `source_kind:
 
 `CapabilityReport` records package/build and semantic-engine identities, target OS/architecture, and ordered bounded probe results. Each capability has a stable ID, ready/blocked status, diagnostic code, detail, and optional remediation. A ready native-tool inventory does not replace the exact-grid probe performed by an actual capture.
 
+`SaveManifest` is committed last inside a private staging directory before atomic no-replace publication. It binds the canonical identity/path, requested `StatePoint`, resolved state ID/hash, completed final event hash, explicit sensitivity label, and exact path/media type/size/BLAKE3 for every saved representation. The manifest does not hash itself.
+
 `requests.jsonl` supports persistent idempotency after bounded memory-cache eviction. It is not a canonical evidence root: readers may discard and reconstruct retry state from canonical events, and `termtrace verify` reports a missing, verified, or invalid journal without allowing journal damage to invalidate an otherwise complete event chain.
 
 A completed session must end in `Exit` and contain no pending mutation intent. Run `termtrace verify SESSION --level content --json` for a stable offline report, or use `--level durability-record` to additionally require the internally consistent chain-bound persistence record. Offline verification cannot prove that historical sync calls reached stable media. A valid unsigned hash graph establishes integrity relative to the roots in the session; it does not authenticate who created them.

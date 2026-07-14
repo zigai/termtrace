@@ -1,0 +1,209 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "SavedFile": {
+      "additionalProperties": false,
+      "description": "One manifested saved file.",
+      "properties": {
+        "blake3": {
+          "description": "BLAKE3 of exact file bytes.",
+          "type": "string"
+        },
+        "byte_count": {
+          "description": "Exact byte count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "media_type": {
+          "description": "Media type.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Relative filename.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "media_type",
+        "byte_count",
+        "blake3"
+      ],
+      "type": "object"
+    },
+    "StatePoint": {
+      "description": "Shared state selection vocabulary.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Latest presentation-eligible state.",
+          "properties": {
+            "selector": {
+              "const": "latest_presented",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact semantic state identifier.",
+          "properties": {
+            "selector": {
+              "const": "state_id",
+              "type": "string"
+            },
+            "state_id": {
+              "description": "Exact semantic state identifier.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "selector",
+            "state_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Latest state at or before an event sequence.",
+          "properties": {
+            "event_seq": {
+              "description": "Canonical event sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "selector": {
+              "const": "event_seq",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "event_seq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Latest state at or before a session-monotonic timestamp.",
+          "properties": {
+            "monotonic_ns": {
+              "description": "Session-monotonic nanoseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "selector": {
+              "const": "monotonic_ns",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "monotonic_ns"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "State at a uniquely named marker.",
+          "properties": {
+            "label": {
+              "description": "Unique marker label.",
+              "type": "string"
+            },
+            "selector": {
+              "const": "marker",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "label"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/save-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Manifest binding every saved representation to one source state.",
+  "properties": {
+    "canonical_session": {
+      "$ref": "#/$defs/Base64Bytes",
+      "description": "Exact canonical session path bytes."
+    },
+    "files": {
+      "description": "Manifested representations.",
+      "items": {
+        "$ref": "#/$defs/SavedFile"
+      },
+      "type": "array"
+    },
+    "format": {
+      "description": "Stable manifest format.",
+      "type": "string"
+    },
+    "sensitivity": {
+      "description": "Explicit sensitivity classification.",
+      "type": "string"
+    },
+    "session_id": {
+      "description": "Canonical session identity.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "source_final_event_hash": {
+      "description": "Final canonical event hash.",
+      "type": "string"
+    },
+    "state_hash": {
+      "description": "Resolved complete semantic state hash.",
+      "type": "string"
+    },
+    "state_id": {
+      "description": "Resolved state identifier.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "state_point": {
+      "$ref": "#/$defs/StatePoint",
+      "description": "Requested semantic point."
+    },
+    "version": {
+      "description": "Manifest version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "session_id",
+    "canonical_session",
+    "state_point",
+    "state_id",
+    "state_hash",
+    "source_final_event_hash",
+    "sensitivity",
+    "files"
+  ],
+  "title": "SaveManifest",
+  "type": "object"
+}

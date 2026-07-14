@@ -133,6 +133,8 @@ Generate completion scripts directly from the installed command graph with `term
 
 Run `termtrace doctor` for bounded local capability probes or `termtrace capabilities --json` for the stable inventory. `doctor --require core,semantic` fails unless every named tier is ready; `--explain` prints focused remediation for blocked tiers. Native screenshot and video readiness remain separate, and video checks FFmpeg's `libx264rgb` encoder. `termtrace version --json` reports package/build, semantic-engine, format/protocol, OS, and architecture identifiers.
 
+`save SESSION --format txt,json,deep-json --out NEW_DIRECTORY` resolves one presented semantic state and publishes all requested representations atomically. State/event/time/marker selectors match `show`; hidden states require explicit permission. `save-manifest.json` binds every member's path, media type, byte count, and BLAKE3 to one canonical session/final-event root and semantic state hash, and labels terminal screen content as potentially secret. Existing destinations are never replaced.
+
 ## Semantic replay
 
 ```bash

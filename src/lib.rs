@@ -21,6 +21,7 @@ pub mod receipt;
 pub mod record;
 pub mod replay;
 pub mod request_journal;
+pub mod save;
 pub mod schema;
 pub mod session;
 pub mod session_registry;

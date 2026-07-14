@@ -52,6 +52,7 @@ use termtrace::{
         GHOSTTY_REVISION, IndexOptions, STATE_FORMAT_VERSION, StateSelection, StateSelector,
         index_session_with_options,
     },
+    save::{SaveFormat, save},
     schema::write_all as write_schemas,
     session::{
         CaptureTarget, GeometryProvenance, GeometrySource, GhosttyVisualOverrides, SessionGeometry,
@@ -146,6 +147,8 @@ enum Command {
     Events(EventsArgs),
     /// Generate a shell completion script from the current command graph.
     Completions(CompletionsArgs),
+    /// Atomically publish representations of one semantic state.
+    Save(SaveArgs),
     /// Wait for exact UTF-8 text in canonical PTY output.
     Wait(WaitArgs),
     /// Copy the longest integrity-checked event prefix without modifying source.
@@ -535,6 +538,55 @@ struct CompletionsArgs {
     /// Target shell.
     #[arg(value_enum)]
     shell: Shell,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum SaveFormatArg {
+    Txt,
+    Json,
+    DeepJson,
+}
+
+impl From<SaveFormatArg> for SaveFormat {
+    fn from(value: SaveFormatArg) -> Self {
+        return match value {
+            SaveFormatArg::Txt => Self::Txt,
+            SaveFormatArg::Json => Self::Json,
+            SaveFormatArg::DeepJson => Self::DeepJson,
+        };
+    }
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("save_selector")
+        .multiple(false)
+        .args(["state", "event_seq", "at", "at_marker"])
+))]
+struct SaveArgs {
+    /// Completed session name or canonical path.
+    session: PathBuf,
+    /// New destination directory.
+    #[arg(long)]
+    out: PathBuf,
+    /// One or more comma-separated representations.
+    #[arg(long, value_enum, value_delimiter = ',', required = true)]
+    format: Vec<SaveFormatArg>,
+    /// Exact semantic state identifier.
+    #[arg(long)]
+    state: Option<u64>,
+    /// Latest state at or before this event sequence.
+    #[arg(long)]
+    event_seq: Option<u64>,
+    /// Latest state at or before this session offset.
+    #[arg(long, value_parser = parse_time_offset_ns)]
+    at: Option<u64>,
+    /// State at a unique marker.
+    #[arg(long)]
+    at_marker: Option<String>,
+    /// Permit an explicitly selected synchronized-output hidden state.
+    #[arg(long)]
+    include_hidden: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1072,6 +1124,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Output(arguments) => return run_output(arguments),
         Command::Events(arguments) => return run_events(arguments),
         Command::Completions(arguments) => return run_completions(arguments),
+        Command::Save(arguments) => return run_save(arguments),
         Command::Wait(arguments) => return run_wait(arguments),
         Command::Recover(arguments) => return run_recover(arguments),
         Command::Schemas(arguments) => return run_schemas(arguments),
@@ -1795,6 +1848,42 @@ fn run_completions(arguments: CompletionsArgs) -> Result<ExitCode> {
         &mut io::stdout(),
     );
     return Ok(ExitCode::SUCCESS);
+}
+
+fn run_save(arguments: SaveArgs) -> Result<ExitCode> {
+    let session = resolve_session_ref(arguments.session)?;
+    let point = match (
+        arguments.state,
+        arguments.event_seq,
+        arguments.at,
+        arguments.at_marker,
+    ) {
+        (Some(state_id), None, None, None) => StatePoint::StateId { state_id },
+        (None, Some(event_seq), None, None) => StatePoint::EventSeq { event_seq },
+        (None, None, Some(monotonic_ns), None) => StatePoint::MonotonicNs { monotonic_ns },
+        (None, None, None, Some(label)) => StatePoint::Marker { label },
+        (None, None, None, None) => StatePoint::LatestPresented,
+        _ => return Err(miette::miette!("exactly one save selector may be supplied")),
+    };
+    let formats = arguments
+        .format
+        .into_iter()
+        .map(SaveFormat::from)
+        .collect::<Vec<_>>();
+    let outcome = save(
+        &session,
+        &arguments.out,
+        point,
+        &formats,
+        arguments.include_hidden,
+    )?;
+    return write_json_line(&serde_json::json!({
+        "directory": outcome.directory,
+        "state_id": outcome.manifest.state_id,
+        "state_hash": outcome.manifest.state_hash,
+        "files": outcome.manifest.files,
+        "manifest": outcome.directory.join("save-manifest.json"),
+    }));
 }
 
 fn explain_text(report: &ExplainReport) -> Result<String> {

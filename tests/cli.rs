@@ -1582,6 +1582,69 @@ fn show_records_one_off_commands_as_completed_evidence() {
 }
 
 #[test]
+fn save_atomically_publishes_one_state_with_manifested_files() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("save-session");
+    let destination = temporary.path().join("saved-state");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf '\\033[35mSAVED\\033[0m'"])
+        .assert()
+        .success();
+    let mut save = Command::cargo_bin("termtrace").expect("binary should build");
+    save.arg("save")
+        .arg(&session)
+        .args(["--out"])
+        .arg(&destination)
+        .args(["--format", "txt,json,deep-json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("save-manifest.json"));
+
+    assert_eq!(
+        fs_err::metadata(&destination)
+            .expect("saved directory metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs_err::read(destination.join("save-manifest.json")).expect("save manifest"),
+    )
+    .expect("manifest JSON");
+    assert_eq!(manifest["format"], "termtrace-save");
+    assert_eq!(
+        manifest["sensitivity"],
+        "terminal_screen_may_contain_secrets"
+    );
+    assert_eq!(manifest["files"].as_array().map(Vec::len), Some(3));
+    assert!(
+        fs_err::read_to_string(destination.join("screen.txt"))
+            .expect("screen text")
+            .contains("SAVED")
+    );
+    for file in manifest["files"].as_array().expect("manifested files") {
+        let path = destination.join(file["path"].as_str().expect("relative path"));
+        let bytes = fs_err::read(path).expect("saved member");
+        assert_eq!(file["blake3"], blake3::hash(&bytes).to_hex().to_string());
+    }
+
+    let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
+    duplicate
+        .arg("save")
+        .arg(&session)
+        .args(["--out"])
+        .arg(&destination)
+        .args(["--format", "txt"])
+        .assert()
+        .failure();
+    assert!(destination.join("semantic-state.json").is_file());
+}
+
+#[test]
 fn timeline_streams_presented_states_and_canonical_operations() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("timeline-session");
