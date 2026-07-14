@@ -47,7 +47,7 @@ Use `termtrace diff SESSION --from-marker BEFORE --to-marker AFTER` after locati
 
 Use `termtrace explain SESSION --event-seq N --context 8` to attribute a suspicious region to exact output frames and nearby semantic states. Findings have stable codes, conservative confidence, token IDs, and explicit facts. Treat `clear_then_repaint_candidate` as semantic evidence only; it deliberately states that native pixel flicker was not established.
 
-Use `termtrace output SESSION --raw` only when a byte-exact child-output stream is required. It is output history, not the visible viewport; use `show` for the latter. The command validates completion and the event chain before emitting bytes, preserves invalid UTF-8 and controls, and treats a downstream closed pipe as normal completion.
+Use `termtrace output SESSION --raw` only when a byte-exact child-output stream is required. It is output history, not the visible viewport; use `show` for the latter. The command validates completion and the event chain before emitting bytes, preserves invalid UTF-8 and controls, and treats a downstream closed pipe as normal completion. With `--follow`, only actor-durable complete records are emitted; the follower retries the completion/socket handoff and never emits a partial JSONL tail.
 
 Use `termtrace events SESSION --type marker,input_intent,exit` for typed canonical history. Add `--metadata-only` before sharing diagnostic output when exact child/input/query bytes are unnecessary; the projection retains non-byte fields and byte equality evidence without the payload. Screen text and remaining metadata may still be sensitive.
 

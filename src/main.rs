@@ -494,6 +494,9 @@ struct OutputArgs {
     /// Write exact concatenated child PTY bytes without decoding.
     #[arg(long, required = true)]
     raw: bool,
+    /// Continue emitting newly durable output until the session completes.
+    #[arg(long)]
+    follow: bool,
     /// Inclusive canonical event sequence.
     #[arg(long, conflicts_with_all = ["start_monotonic_ns", "from_marker"])]
     from_event_seq: Option<u64>,
@@ -1508,6 +1511,22 @@ fn run_explain(arguments: ExplainArgs) -> Result<ExitCode> {
 
 fn run_output(arguments: OutputArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
+    if arguments.follow {
+        if arguments.range.from_marker.is_some()
+            || arguments.range.to_marker.is_some()
+            || arguments.range.start_monotonic_ns.is_some()
+            || arguments.range.end_monotonic_ns.is_some()
+        {
+            return Err(miette::miette!(
+                "live output following currently supports event-sequence bounds only"
+            ));
+        }
+        return follow_output(
+            &session,
+            arguments.from_event_seq.unwrap_or(0),
+            arguments.to_event_seq,
+        );
+    }
     let log = EventLog::read(session.join("events.jsonl"))?;
     validate_completed_log(&session, &log)?;
     let time_range = resolve_source_selection(
@@ -1538,6 +1557,80 @@ fn run_output(arguments: OutputArgs) -> Result<ExitCode> {
         }
     }
     return write_stdout(output);
+}
+
+fn follow_output(
+    session: &Path,
+    mut next_event_seq: u64,
+    end_event_seq: Option<u64>,
+) -> Result<ExitCode> {
+    loop {
+        let completion_exists = session.join("completion.json").is_file();
+        let log = if completion_exists {
+            let log = EventLog::read(session.join("events.jsonl"))?;
+            validate_completed_log(session, &log)?;
+            log
+        } else {
+            let response = match request(session, ControlCommand::Status) {
+                Ok(response) => response,
+                Err(_) if session.join("completion.json").is_file() => continue,
+                Err(error) => return Err(error.into()),
+            };
+            let ControlData::Status { boundaries, .. } = response else {
+                return Err(miette::miette!(
+                    "live status returned an unexpected response"
+                ));
+            };
+            EventLog::read_prefix(
+                session.join("events.jsonl"),
+                boundaries.durable.next_event_seq,
+            )?
+        };
+        let available = u64::try_from(log.events.len()).unwrap_or(u64::MAX);
+        if next_event_seq > available {
+            return Err(miette::miette!(
+                "output resume cursor {next_event_seq} exceeds durable event count {available}"
+            ));
+        }
+        let emit_end = end_event_seq.unwrap_or(available).min(available);
+        let mut bytes = Vec::new();
+        for record in &log.events {
+            if record.seq < next_event_seq || record.seq >= emit_end {
+                continue;
+            }
+            if let Event::Output { data } = &record.event {
+                bytes.extend_from_slice(data.as_bytes());
+            }
+        }
+        if !bytes.is_empty() && !write_follow_stdout(&bytes)? {
+            return Ok(ExitCode::SUCCESS);
+        }
+        next_event_seq = emit_end;
+        if completion_exists && end_event_seq.is_some_and(|end| return end > available) {
+            return Err(miette::miette!(
+                "output end cursor exceeds completed event count {available}"
+            ));
+        }
+        if end_event_seq.is_some_and(|end| return next_event_seq >= end)
+            || (completion_exists && next_event_seq >= available)
+        {
+            return Ok(ExitCode::SUCCESS);
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn write_follow_stdout(output: &[u8]) -> Result<bool> {
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    return match stdout
+        .write_all(output)
+        .and_then(|()| return stdout.flush())
+    {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(false),
+        Err(error) => Err(error).into_diagnostic(),
+    };
 }
 
 fn run_events(arguments: EventsArgs) -> Result<ExitCode> {

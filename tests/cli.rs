@@ -1816,6 +1816,56 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
 }
 
 #[test]
+fn output_follow_emits_each_durable_prefix_once_until_completion() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("follow-output-session");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let recorder = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--durability",
+            "strict",
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf A; sleep 0.15; printf '\\033[31mB\\377'",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn recorder");
+    wait_for_path(&session.join("control.sock"));
+    let follower = StdCommand::new(binary)
+        .arg("output")
+        .arg(&session)
+        .args(["--raw", "--follow"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn output follower");
+    let recorder_output = recorder.wait_with_output().expect("wait for recorder");
+    assert!(recorder_output.status.success(), "{recorder_output:?}");
+    let followed = follower.wait_with_output().expect("wait for follower");
+    assert!(followed.status.success(), "{followed:?}");
+    let log = EventLog::read(session.join("events.jsonl")).expect("completed event log");
+    let expected = log
+        .events
+        .iter()
+        .filter_map(|record| {
+            return match &record.event {
+                Event::Output { data } => Some(data.as_bytes()),
+                _ => None,
+            };
+        })
+        .flatten()
+        .copied()
+        .collect::<Vec<_>>();
+    assert_eq!(followed.stdout, expected);
+}
+
+#[test]
 fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("event-stream-session");
