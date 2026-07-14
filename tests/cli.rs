@@ -349,6 +349,15 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .assert()
         .success();
     let manifest = read_manifest(&session).expect("manifest");
+    let evidence_before = ["session.json", "events.jsonl", "completion.json"]
+        .into_iter()
+        .map(|name| {
+            return (
+                name,
+                fs_err::read(session.join(name)).expect("evidence file"),
+            );
+        })
+        .collect::<Vec<_>>();
 
     let mut register = Command::cargo_bin("termtrace").expect("binary should build");
     register
@@ -399,6 +408,37 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .arg(&session)
         .assert()
         .failure();
+
+    let mut active_only = Command::cargo_bin("termtrace").expect("binary should build");
+    active_only
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["list", "--json"])
+        .assert()
+        .success()
+        .stdout("[]\n");
+    let mut all = Command::cargo_bin("termtrace").expect("binary should build");
+    all.env("TERMTRACE_STATE_DIR", &state)
+        .args(["list", "--all", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""lifecycle":"completed""#))
+        .stdout(predicate::str::contains(r#""alias":"demo""#));
+
+    let mut remove = Command::cargo_bin("termtrace").expect("binary should build");
+    remove
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["remove", "demo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""evidence_preserved":true"#));
+    assert!(!entry_path.exists(), "registry entry should be removed");
+    for (name, expected) in evidence_before {
+        assert_eq!(
+            fs_err::read(session.join(name)).expect("preserved evidence"),
+            expected,
+            "remove changed {name}"
+        );
+    }
 }
 
 #[test]
@@ -536,6 +576,30 @@ fn live_control_drives_and_audits_a_detached_session() {
         .args(["ping", "live-demo"])
         .assert()
         .success();
+    let entry: serde_json::Value = serde_json::from_slice(
+        &fs_err::read(registry_state.join("registry/live-demo.json")).expect("registry entry"),
+    )
+    .expect("registry JSON");
+    assert!(
+        entry
+            .pointer("/recorder_pid")
+            .and_then(serde_json::Value::as_u64)
+            .is_some()
+    );
+    assert!(
+        entry
+            .pointer("/recorder_process_start_ticks")
+            .and_then(serde_json::Value::as_u64)
+            .is_some()
+    );
+    let mut named_list = Command::cargo_bin("termtrace").expect("binary should build");
+    named_list
+        .env("TERMTRACE_STATE_DIR", &registry_state)
+        .args(["list", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""lifecycle":"live""#))
+        .stdout(predicate::str::contains(r#""alias":"live-demo""#));
 
     let first_boundary = match send_request(&session, &ControlRequest::new(ControlCommand::Status))
         .expect("first observer-free status")

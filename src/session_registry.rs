@@ -2,16 +2,21 @@
 
 use std::{
     env,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fs::{File, OpenOptions, Permissions},
     io::Read as _,
     os::unix::ffi::{OsStrExt as _, OsStringExt as _},
     os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
+    os::unix::net::UnixStream,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use nix::{libc::O_NOFOLLOW, unistd::getuid};
+use nix::{
+    libc::O_NOFOLLOW,
+    sys::socket::{getsockopt, sockopt::PeerCredentials},
+    unistd::getuid,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -19,9 +24,12 @@ use uuid::Uuid;
 use crate::{
     Error, Result,
     artifact::{sync_parent_directory, write_secure},
-    control::CONTROL_PROTOCOL_VERSION,
+    control::{CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME},
     event::ByteString,
-    session::{SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, read_manifest},
+    session::{
+        SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, SessionGeometry, read_completion,
+        read_manifest,
+    },
 };
 
 /// Registry-entry format identifier.
@@ -52,6 +60,67 @@ pub struct RegistryEntry {
     pub control_protocol_version: u32,
     /// Registry publication time from the local system clock.
     pub registered_unix_ns: u128,
+}
+
+/// Lifecycle classification derived without changing canonical evidence.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RegistryLifecycle {
+    /// Recorder identity and control socket are present.
+    Live,
+    /// A completion manifest exists for the registered session ID.
+    Completed,
+    /// Evidence exists but has neither a live recorder identity nor completion.
+    Incomplete,
+    /// Socket or PID metadata remains but the recorder identity no longer matches.
+    Stale,
+    /// Canonical evidence is missing, insecure, or unreadable.
+    MissingEvidence,
+    /// The manifest session ID differs from the registered immutable identity.
+    IdentityMismatch,
+    /// Registry or control protocol format is unsupported.
+    Incompatible,
+}
+
+impl RegistryLifecycle {
+    /// Stable lowercase CLI and diagnostic spelling.
+    pub fn as_str(self) -> &'static str {
+        return match self {
+            Self::Live => "live",
+            Self::Completed => "completed",
+            Self::Incomplete => "incomplete",
+            Self::Stale => "stale",
+            Self::MissingEvidence => "missing_evidence",
+            Self::IdentityMismatch => "identity_mismatch",
+            Self::Incompatible => "incompatible",
+        };
+    }
+}
+
+/// One registry listing row with evidence-derived session summary.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RegistryListEntry {
+    /// Friendly alias.
+    pub alias: String,
+    /// Exact canonical session path bytes.
+    pub canonical_session: ByteString,
+    /// Immutable registered session ID.
+    pub session_id: Uuid,
+    /// Effective command bytes when the manifest is readable.
+    pub command: Option<Vec<ByteString>>,
+    /// Effective working directory when the manifest is readable.
+    pub working_directory: Option<ByteString>,
+    /// Initial grid and pixel geometry when the manifest is readable.
+    pub geometry: Option<SessionGeometry>,
+    /// Session wall-clock origin when the manifest is readable.
+    pub started_unix_ns: Option<u128>,
+    /// Registry publication time.
+    pub registered_unix_ns: u128,
+    /// Current derived lifecycle classification.
+    pub lifecycle: RegistryLifecycle,
+    /// Focused diagnostic for unhealthy entries.
+    pub diagnostic: Option<String>,
 }
 
 impl RegistryEntry {
@@ -127,14 +196,15 @@ impl SessionRegistry {
             .duration_since(UNIX_EPOCH)
             .map_err(|_| return Error::ClockBeforeEpoch)?
             .as_nanos();
+        let process_identity = recorder_process_identity(&canonical);
         let entry = RegistryEntry {
             format: REGISTRY_ENTRY_FORMAT.to_owned(),
             version: REGISTRY_ENTRY_VERSION,
             alias: alias.to_owned(),
             canonical_session: ByteString::from(canonical.as_os_str().as_bytes()),
             session_id: manifest.session_id,
-            recorder_pid: None,
-            recorder_process_start_ticks: None,
+            recorder_pid: process_identity.map(|identity| return identity.0),
+            recorder_process_start_ticks: process_identity.map(|identity| return identity.1),
             control_protocol_version: CONTROL_PROTOCOL_VERSION,
             registered_unix_ns,
         };
@@ -194,9 +264,184 @@ impl SessionRegistry {
         return Ok(entry);
     }
 
+    /// List live aliases, or every alias when `include_all` is true.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the registry directory or an entry cannot be read
+    /// securely. Broken session evidence is represented as a lifecycle row.
+    pub fn list(&self, include_all: bool) -> Result<Vec<RegistryListEntry>> {
+        let mut rows = Vec::new();
+        for item in fs_err::read_dir(&self.directory).map_err(|source| {
+            return Error::Filesystem {
+                path: self.directory.clone(),
+                source,
+            };
+        })? {
+            let item = item.map_err(|source| {
+                return Error::Filesystem {
+                    path: self.directory.clone(),
+                    source,
+                };
+            })?;
+            let path = item.path();
+            if path.extension() != Some(OsStr::new("json")) {
+                continue;
+            }
+            let entry = read_entry_nofollow(&path)?;
+            let row = inspect_entry(&entry);
+            if include_all || row.lifecycle == RegistryLifecycle::Live {
+                rows.push(row);
+            }
+        }
+        rows.sort_by(|left, right| return left.alias.cmp(&right.alias));
+        return Ok(rows);
+    }
+
+    /// Remove only a valid registry binding and preserve its session directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the alias or entry is invalid or removal cannot be
+    /// durably published.
+    pub fn remove(&self, alias: &str) -> Result<RegistryEntry> {
+        validate_alias(alias)?;
+        let path = self.entry_path(alias);
+        let entry = read_entry_nofollow(&path)?;
+        if entry.alias != alias {
+            return Err(registry_error(
+                "remove registry entry",
+                "entry alias does not match its filename",
+            ));
+        }
+        fs_err::remove_file(&path).map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+        sync_parent_directory(&path)?;
+        return Ok(entry);
+    }
+
     fn entry_path(&self, alias: &str) -> PathBuf {
         return self.directory.join(format!("{alias}.json"));
     }
+}
+
+fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
+    let mut row = RegistryListEntry {
+        alias: entry.alias.clone(),
+        canonical_session: entry.canonical_session.clone(),
+        session_id: entry.session_id,
+        command: None,
+        working_directory: None,
+        geometry: None,
+        started_unix_ns: None,
+        registered_unix_ns: entry.registered_unix_ns,
+        lifecycle: RegistryLifecycle::MissingEvidence,
+        diagnostic: None,
+    };
+    if entry.format != REGISTRY_ENTRY_FORMAT
+        || entry.version != REGISTRY_ENTRY_VERSION
+        || entry.control_protocol_version != CONTROL_PROTOCOL_VERSION
+        || entry.recorder_pid.is_some() != entry.recorder_process_start_ticks.is_some()
+    {
+        row.lifecycle = RegistryLifecycle::Incompatible;
+        row.diagnostic =
+            Some("registry format, protocol, or process identity is incompatible".to_owned());
+        return row;
+    }
+    let session = entry.session_path();
+    if let Err(error) = validate_owner_directory(&session) {
+        row.diagnostic = Some(error.to_string());
+        return row;
+    }
+    let canonical = match session.canonicalize() {
+        Ok(path) if path.as_os_str().as_bytes() == entry.canonical_session.as_bytes() => path,
+        Ok(_) => {
+            row.diagnostic = Some("canonical session path changed after registration".to_owned());
+            return row;
+        }
+        Err(error) => {
+            row.diagnostic = Some(error.to_string());
+            return row;
+        }
+    };
+    let manifest = match read_manifest(&canonical) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            row.diagnostic = Some(error.to_string());
+            return row;
+        }
+    };
+    row.command = Some(manifest.command.clone());
+    row.working_directory = manifest.working_directory.clone();
+    row.geometry = Some(manifest.geometry.clone());
+    row.started_unix_ns = Some(manifest.started_unix_ns);
+    if manifest.session_id != entry.session_id {
+        row.lifecycle = RegistryLifecycle::IdentityMismatch;
+        row.diagnostic = Some("manifest session ID differs from registry binding".to_owned());
+        return row;
+    }
+    let completion_path = canonical.join("completion.json");
+    if completion_path.exists() {
+        match read_completion(&canonical) {
+            Ok(completion) if completion.session_id == entry.session_id => {
+                row.lifecycle = RegistryLifecycle::Completed;
+                return row;
+            }
+            Ok(_) => {
+                row.lifecycle = RegistryLifecycle::IdentityMismatch;
+                row.diagnostic =
+                    Some("completion session ID differs from registry binding".to_owned());
+                return row;
+            }
+            Err(error) => {
+                row.lifecycle = RegistryLifecycle::MissingEvidence;
+                row.diagnostic = Some(error.to_string());
+                return row;
+            }
+        }
+    }
+    let socket_exists = canonical.join(CONTROL_SOCKET_NAME).exists();
+    match (entry.recorder_pid, entry.recorder_process_start_ticks) {
+        (Some(pid), Some(start_ticks))
+            if socket_exists && process_start_ticks(pid) == Some(start_ticks) =>
+        {
+            row.lifecycle = RegistryLifecycle::Live;
+        }
+        (Some(_), Some(_)) => {
+            row.lifecycle = RegistryLifecycle::Stale;
+            row.diagnostic =
+                Some("recorder PID/start identity or control socket is stale".to_owned());
+        }
+        (None, None) if socket_exists => row.lifecycle = RegistryLifecycle::Live,
+        (None, None) => row.lifecycle = RegistryLifecycle::Incomplete,
+        _ => {
+            row.lifecycle = RegistryLifecycle::Incompatible;
+            row.diagnostic = Some("partial recorder process identity".to_owned());
+        }
+    }
+    return row;
+}
+
+fn recorder_process_identity(session: &Path) -> Option<(u32, u64)> {
+    let stream = UnixStream::connect(session.join(CONTROL_SOCKET_NAME)).ok()?;
+    let credentials = getsockopt(&stream, PeerCredentials).ok()?;
+    let pid = u32::try_from(credentials.pid()).ok()?;
+    return Some((pid, process_start_ticks(pid)?));
+}
+
+fn process_start_ticks(pid: u32) -> Option<u64> {
+    let stat = fs_err::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let close = stat.rfind(')')?;
+    return stat
+        .get(close + 1..)?
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok();
 }
 
 fn default_state_root() -> Result<PathBuf> {

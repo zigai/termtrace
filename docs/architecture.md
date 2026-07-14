@@ -15,6 +15,8 @@ Detached receipt signing is a narrow external boundary. Termtrace assembles and 
 
 Friendly names are resolved through a separate owner-only registry boundary. Entries are no-replace files opened without following symlinks and contain both exact canonical path bytes and the immutable manifest session ID. Every resolution validates ownership, permissions, canonical path stability, supported format/protocol, and manifest identity. Aliases therefore remain mutable navigation metadata rather than provenance roots.
 
+Live registration records socket peer credentials plus process-start ticks, preventing a reused PID from making a stale alias appear healthy. Registry listing derives lifecycle from that pair, socket presence, immutable manifest identity, and completion identity without appending canonical observations. Removing an alias validates and unlinks only its owner-only entry, then synchronizes the registry directory; it has no evidence-deletion path.
+
 Full-session derivation preserves the original `derived/` and `visual/` layouts. A requested half-open interval receives deterministic range-specific directories. Semantic replay reconstructs the prefix without materializing prefix states. Native playback emits the prefix without source-time sleeps, performs a non-mutating terminal-query barrier, and publishes its capture clock only after Ghostty has processed that prefix. FFmpeg therefore records neither the prefix nor its original elapsed time.
 
 ## Runtime topology

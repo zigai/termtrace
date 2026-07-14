@@ -23,7 +23,7 @@ use crate::{
     replay::{ReplayManifest, StateIndexEntry, StateInspection, StateRecord},
     request_journal::MutationJournalRecord,
     session::{SessionCompletion, SessionManifest, VerificationReport},
-    session_registry::RegistryEntry,
+    session_registry::{RegistryEntry, RegistryListEntry},
     visual::{VideoMapEntry, VisualManifest},
 };
 
@@ -57,6 +57,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<ExecutionProvenance>("execution-provenance.schema.json")?,
         schema::<EvidenceReceipt>("evidence-receipt.schema.json")?,
         schema::<RegistryEntry>("registry-entry.schema.json")?,
+        schema::<RegistryListEntry>("registry-list-entry.schema.json")?,
         schema::<StateRecord>("state-record.schema.json")?,
         schema::<StateIndexEntry>("state-index-entry.schema.json")?,
         schema::<StateInspection>("state-inspection.schema.json")?,

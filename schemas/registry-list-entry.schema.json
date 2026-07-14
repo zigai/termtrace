@@ -1,0 +1,175 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "RegistryLifecycle": {
+      "description": "Lifecycle classification derived without changing canonical evidence.",
+      "oneOf": [
+        {
+          "const": "live",
+          "description": "Recorder identity and control socket are present.",
+          "type": "string"
+        },
+        {
+          "const": "completed",
+          "description": "A completion manifest exists for the registered session ID.",
+          "type": "string"
+        },
+        {
+          "const": "incomplete",
+          "description": "Evidence exists but has neither a live recorder identity nor completion.",
+          "type": "string"
+        },
+        {
+          "const": "stale",
+          "description": "Socket or PID metadata remains but the recorder identity no longer matches.",
+          "type": "string"
+        },
+        {
+          "const": "missing_evidence",
+          "description": "Canonical evidence is missing, insecure, or unreadable.",
+          "type": "string"
+        },
+        {
+          "const": "identity_mismatch",
+          "description": "The manifest session ID differs from the registered immutable identity.",
+          "type": "string"
+        },
+        {
+          "const": "incompatible",
+          "description": "Registry or control protocol format is unsupported.",
+          "type": "string"
+        }
+      ]
+    },
+    "SessionGeometry": {
+      "description": "Initial PTY geometry.",
+      "properties": {
+        "cols": {
+          "description": "Columns.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pixel_height": {
+          "description": "Total pixel height.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pixel_width": {
+          "description": "Total pixel width.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "description": "Rows.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cols",
+        "rows",
+        "pixel_width",
+        "pixel_height"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/registry-list-entry.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One registry listing row with evidence-derived session summary.",
+  "properties": {
+    "alias": {
+      "description": "Friendly alias.",
+      "type": "string"
+    },
+    "canonical_session": {
+      "$ref": "#/$defs/Base64Bytes",
+      "description": "Exact canonical session path bytes."
+    },
+    "command": {
+      "description": "Effective command bytes when the manifest is readable.",
+      "items": {
+        "$ref": "#/$defs/Base64Bytes"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "diagnostic": {
+      "description": "Focused diagnostic for unhealthy entries.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "geometry": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SessionGeometry"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Initial grid and pixel geometry when the manifest is readable."
+    },
+    "lifecycle": {
+      "$ref": "#/$defs/RegistryLifecycle",
+      "description": "Current derived lifecycle classification."
+    },
+    "registered_unix_ns": {
+      "description": "Registry publication time.",
+      "format": "uint128",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "session_id": {
+      "description": "Immutable registered session ID.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "started_unix_ns": {
+      "description": "Session wall-clock origin when the manifest is readable.",
+      "format": "uint128",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "working_directory": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Base64Bytes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Effective working directory when the manifest is readable."
+    }
+  },
+  "required": [
+    "alias",
+    "canonical_session",
+    "session_id",
+    "registered_unix_ns",
+    "lifecycle"
+  ],
+  "title": "RegistryListEntry",
+  "type": "object"
+}

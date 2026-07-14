@@ -78,9 +78,12 @@ Canonical paths remain evidence identity. For a memorable local handle, register
 termtrace register demo --session /tmp/example.termtrace
 termtrace resolve demo
 termtrace resolve demo --json
+termtrace list
+termtrace list --all --json
+termtrace remove demo
 ```
 
-Registry entries live under an owner-only per-user state root, bind the immutable session ID and exact canonical path, and are created without replacement. `TERMTRACE_STATE_DIR` selects an explicit root; otherwise XDG state conventions are used.
+Registry entries live under an owner-only per-user state root, bind the immutable session ID and exact canonical path, and are created without replacement. Live registration also retains the recorder peer PID and Linux process-start identity so listing can detect stale sockets without PID-reuse mistakes. `list` shows live aliases by default; `--all` includes completed, incomplete, stale, missing, identity-mismatched, and incompatible entries with diagnostics. `remove` deletes only the alias file and never session evidence. `TERMTRACE_STATE_DIR` selects an explicit root; otherwise XDG state conventions are used.
 
 ```bash
 termtrace status /tmp/example.termtrace

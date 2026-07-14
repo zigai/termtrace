@@ -73,6 +73,10 @@ enum Command {
     Register(RegisterArgs),
     /// Resolve a friendly name to its canonical session directory.
     Resolve(ResolveArgs),
+    /// List registered sessions and their derived lifecycle.
+    List(ListArgs),
+    /// Remove only a friendly registry binding, preserving evidence.
+    Remove(RemoveArgs),
     /// Verify that a live session control socket is responsive.
     Ping(SessionArgs),
     /// Print machine-readable live session status.
@@ -171,6 +175,22 @@ struct ResolveArgs {
     /// Emit the complete registry entry as JSON.
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ListArgs {
+    /// Include completed, incomplete, stale, and unhealthy entries.
+    #[arg(long)]
+    all: bool,
+    /// Emit the complete listing as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct RemoveArgs {
+    /// Friendly session name to unbind.
+    name: String,
 }
 
 #[derive(Debug, Args)]
@@ -621,6 +641,8 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Sign(arguments) => return run_sign(arguments),
         Command::Register(arguments) => return run_register(arguments),
         Command::Resolve(arguments) => return run_resolve(arguments),
+        Command::List(arguments) => return run_list(arguments),
+        Command::Remove(arguments) => return run_remove(arguments),
         Command::Ping(arguments) => return run_control(arguments.session, ControlCommand::Ping),
         Command::Status(arguments) => return run_status(arguments),
         Command::Send(arguments) => return run_send(arguments),
@@ -717,6 +739,41 @@ fn run_resolve(arguments: ResolveArgs) -> Result<ExitCode> {
     let mut path = entry.session_path().into_os_string().into_vec();
     path.push(b'\n');
     return write_stdout(path);
+}
+
+fn run_list(arguments: ListArgs) -> Result<ExitCode> {
+    let registry = SessionRegistry::open_default()?;
+    let entries = registry.list(arguments.all)?;
+    if arguments.json {
+        return write_json_line(&entries);
+    }
+    let mut output = String::new();
+    for entry in entries {
+        let path = PathBuf::from(OsString::from_vec(
+            entry.canonical_session.as_bytes().to_vec(),
+        ));
+        writeln!(
+            output,
+            "{}\t{}\t{}\t{}",
+            entry.alias,
+            entry.lifecycle.as_str(),
+            entry.session_id,
+            path.display()
+        )
+        .into_diagnostic()?;
+    }
+    return write_stdout(output);
+}
+
+fn run_remove(arguments: RemoveArgs) -> Result<ExitCode> {
+    let registry = SessionRegistry::open_default()?;
+    let entry = registry.remove(&arguments.name)?;
+    return write_json_line(&serde_json::json!({
+        "alias": entry.alias,
+        "canonical_session": entry.canonical_session,
+        "session_id": entry.session_id,
+        "evidence_preserved": true,
+    }));
 }
 
 fn run_index(arguments: IndexArgs) -> Result<ExitCode> {

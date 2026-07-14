@@ -6,6 +6,8 @@ Run `termtrace record --no-input --out SESSION -- COMMAND ...` in a supervised b
 
 Register a memorable local name with `termtrace register NAME --session SESSION`; `termtrace resolve NAME` returns the byte-exact canonical path and `--json` returns the bound session ID and protocol metadata. Registration is no-replace. Live commands accept one positional target: a registered name, a path containing `/`, or an explicit `name:`/`path:` reference when the spelling would be ambiguous.
 
+Use `termtrace list` for live aliases and `termtrace list --all --json` when diagnosing completed, stale, missing, or incompatible bindings. `termtrace remove NAME` removes only navigation metadata and reports `evidence_preserved: true`; evidence deletion is intentionally not part of that command.
+
 Choose provenance deliberately for the workload. The default `minimal` policy avoids retaining locale/timezone values. Use `--provenance reproducible` when those values are needed to recreate behavior, or `--provenance custom --provenance-env NAME=hash` to retain equality evidence without the value. `not-captured` records an explicit omission; it is different from an unselected variable.
 
 Before handing off a reproducible session, inspect `execution_provenance.executable`, `invoked_file`, and `runtime.recorder.binary`. A `captured` content identity can be compared to candidate files; `unresolved` or `unavailable` is an explicit reproducibility gap rather than permission to infer a match.
