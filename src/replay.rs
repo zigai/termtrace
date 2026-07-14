@@ -158,6 +158,8 @@ pub struct CollectedReplay {
 pub enum StateSelector {
     /// Final distinct state.
     Final,
+    /// Latest state eligible for terminal presentation.
+    LatestPresented,
     /// Exact state identifier.
     StateId(u64),
     /// Latest state at or before an event sequence.
@@ -272,6 +274,7 @@ pub fn inspect(log: &EventLog, selector: StateSelector) -> Result<StateInspectio
     replay_with(log, None, |record, state| {
         let matches = match selector {
             StateSelector::Final => true,
+            StateSelector::LatestPresented => record.presented,
             StateSelector::StateId(id) => record.state_id == id,
             StateSelector::EventSeq(seq) => {
                 record.event_seq.is_none_or(|event| return event <= seq)

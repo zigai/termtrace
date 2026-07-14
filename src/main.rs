@@ -33,7 +33,7 @@ use termtrace::{
         inspect_session, state_text, wait_for_completion, wait_for_output, wait_for_screen,
     },
     interop::export_asciicast,
-    observation::{StatePoint, observe_session},
+    observation::{StatePoint, observe_session_with_options},
     playback::{PlaybackOptions, playback},
     profile::{
         ResolvedGhosttyProfile, resolve_ghostty_profile, resolved_terminal_colors,
@@ -283,7 +283,7 @@ enum ShowFormat {
 #[command(group(
     ArgGroup::new("show_selector")
         .multiple(false)
-        .args(["state", "event_seq", "at"])
+        .args(["state", "event_seq", "at", "at_marker"])
 ))]
 struct ShowArgs {
     /// Live session name or canonical completed session path.
@@ -297,6 +297,12 @@ struct ShowArgs {
     /// Latest state at or before this session offset.
     #[arg(long, value_parser = parse_time_offset_ns)]
     at: Option<u64>,
+    /// State at a unique marker label.
+    #[arg(long)]
+    at_marker: Option<String>,
+    /// Permit an explicitly selected synchronized-output hidden state.
+    #[arg(long)]
+    include_hidden: bool,
     /// Output representation.
     #[arg(long, value_enum, default_value_t = ShowFormat::Text)]
     format: ShowFormat,
@@ -1079,14 +1085,20 @@ fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
 
 fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
-    let point = match (arguments.state, arguments.event_seq, arguments.at) {
-        (Some(state_id), None, None) => StatePoint::StateId { state_id },
-        (None, Some(event_seq), None) => StatePoint::EventSeq { event_seq },
-        (None, None, Some(monotonic_ns)) => StatePoint::MonotonicNs { monotonic_ns },
-        (None, None, None) => StatePoint::LatestPresented,
+    let point = match (
+        arguments.state,
+        arguments.event_seq,
+        arguments.at,
+        arguments.at_marker,
+    ) {
+        (Some(state_id), None, None, None) => StatePoint::StateId { state_id },
+        (None, Some(event_seq), None, None) => StatePoint::EventSeq { event_seq },
+        (None, None, Some(monotonic_ns), None) => StatePoint::MonotonicNs { monotonic_ns },
+        (None, None, None, Some(label)) => StatePoint::Marker { label },
+        (None, None, None, None) => StatePoint::LatestPresented,
         _ => return Err(miette::miette!("exactly one show selector may be supplied")),
     };
-    let observation = observe_session(&session, point)?;
+    let observation = observe_session_with_options(&session, point, arguments.include_hidden)?;
     return match arguments.format {
         ShowFormat::Text => write_stdout(format!("{}\n", observation.frame.viewport_text)),
         ShowFormat::Json => write_stdout(format!(

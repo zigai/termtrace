@@ -24,13 +24,13 @@ use termtrace::{
         OperationStatus,
     },
     event_log::EventLog,
-    inspection::wait_for_output,
+    inspection::{inspect_session, wait_for_output},
     provenance::{
         ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind, ProvenanceSensitivity,
         collect_execution_provenance,
     },
     replay::{
-        GHOSTTY_REVISION, IndexOptions, ReplayManifest, StateRecord, StateSelection,
+        GHOSTTY_REVISION, IndexOptions, ReplayManifest, StateRecord, StateSelection, StateSelector,
         derived_directory_name, index_session_range, index_session_with_options, replay,
     },
     request_journal::read_mutation_journal,
@@ -1037,6 +1037,41 @@ fn live_control_drives_and_audits_a_detached_session() {
 
     let recording = EventLog::read(session.join("events.jsonl")).expect("valid event log");
     assert_control_events(&recording, &session);
+    let marker = recording
+        .events
+        .iter()
+        .find(|record| {
+            return matches!(&record.event, Event::Marker { label, .. } if label == "before-input");
+        })
+        .expect("before-input marker");
+    let selectors = [
+        vec!["--at-marker".to_owned(), "before-input".to_owned()],
+        vec!["--event-seq".to_owned(), marker.seq.to_string()],
+        vec!["--at".to_owned(), format!("{}ns", marker.monotonic_ns)],
+    ];
+    let mut selected_hashes = Vec::new();
+    for selector in selectors {
+        let mut show = Command::cargo_bin("termtrace").expect("binary should build");
+        let shown = show
+            .arg("show")
+            .arg(&session)
+            .args(selector)
+            .args(["--format", "json-compact"])
+            .assert()
+            .success();
+        let observation: serde_json::Value =
+            serde_json::from_slice(&shown.get_output().stdout).expect("selected observation");
+        selected_hashes.push(
+            observation
+                .pointer("/state_hash")
+                .and_then(serde_json::Value::as_str)
+                .expect("state hash")
+                .to_owned(),
+        );
+    }
+    assert!(selected_hashes.windows(2).all(|pair| {
+        return matches!(pair, [left, right] if left == right);
+    }));
     let journal_path = session.join("requests.jsonl");
     validate_json_lines("mutation-journal-record.schema.json", &journal_path);
     let mutation_records = read_mutation_journal(&journal_path).expect("mutation journal");
@@ -1375,6 +1410,51 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
         ))
         .stdout(predicate::str::contains(r#""capture_quality":"completed""#))
         .stdout(predicate::str::contains(r#""source_completed":true"#));
+}
+
+#[test]
+fn show_requires_explicit_permission_for_hidden_states() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("hidden-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", r"printf '\033[?2026hHIDDEN'"])
+        .assert()
+        .success();
+    let hidden = inspect_session(&session, StateSelector::Final).expect("hidden final state");
+    assert!(!hidden.record.presented);
+    let mut default_show = Command::cargo_bin("termtrace").expect("binary should build");
+    default_show
+        .arg("show")
+        .arg(&session)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("HIDDEN").not());
+    let mut rejected = Command::cargo_bin("termtrace").expect("binary should build");
+    rejected
+        .arg("show")
+        .arg(&session)
+        .args(["--state", &hidden.record.state_id.to_string()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("hidden"));
+    let mut included = Command::cargo_bin("termtrace").expect("binary should build");
+    included
+        .arg("show")
+        .arg(&session)
+        .args([
+            "--state",
+            &hidden.record.state_id.to_string(),
+            "--include-hidden",
+            "--format",
+            "json-compact",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""presented":false"#))
+        .stdout(predicate::str::contains("HIDDEN"));
 }
 
 #[test]

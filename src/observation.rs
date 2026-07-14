@@ -12,7 +12,7 @@ use std::{
 use crate::{
     Error, Result,
     control::{ControlCommand, ControlData, request},
-    event::ByteString,
+    event::{ByteString, Event},
     event_log::{CanonicalBoundary, EventLog},
     ghostty_vt::{ModeState, SemanticState},
     replay::{StateSelector, inspect},
@@ -148,6 +148,20 @@ pub struct Observation {
 /// Returns an error when canonical identity/validation fails, a live selector
 /// is not supported, actor observation fails, or replay cannot resolve the point.
 pub fn observe_session(session: &Path, state_point: StatePoint) -> Result<Observation> {
+    return observe_session_with_options(session, state_point, false);
+}
+
+/// Observe a session with explicit permission to select hidden semantic states.
+///
+/// # Errors
+///
+/// Returns the same errors as [`observe_session`] and rejects a hidden selected
+/// state unless `include_hidden` is true.
+pub fn observe_session_with_options(
+    session: &Path,
+    state_point: StatePoint,
+    include_hidden: bool,
+) -> Result<Observation> {
     let canonical = session.canonicalize().map_err(|source| {
         return Error::Filesystem {
             path: session.to_path_buf(),
@@ -156,7 +170,7 @@ pub fn observe_session(session: &Path, state_point: StatePoint) -> Result<Observ
     })?;
     let manifest = read_manifest(&canonical)?;
     if canonical.join("completion.json").is_file() {
-        return observe_completed(&canonical, manifest.session_id, state_point);
+        return observe_completed(&canonical, manifest.session_id, state_point, include_hidden);
     }
     if state_point != StatePoint::LatestPresented {
         return Err(observation_error(
@@ -211,22 +225,37 @@ pub fn observe_session(session: &Path, state_point: StatePoint) -> Result<Observ
     });
 }
 
-fn observe_completed(session: &Path, session_id: Uuid, point: StatePoint) -> Result<Observation> {
+fn observe_completed(
+    session: &Path,
+    session_id: Uuid,
+    point: StatePoint,
+    include_hidden: bool,
+) -> Result<Observation> {
     let log = EventLog::read(session.join("events.jsonl"))?;
     let completion = validate_completed_log(session, &log)?;
     let selector = match &point {
-        StatePoint::LatestPresented => StateSelector::Final,
+        StatePoint::LatestPresented => StateSelector::LatestPresented,
         StatePoint::StateId { state_id } => StateSelector::StateId(*state_id),
         StatePoint::EventSeq { event_seq } => StateSelector::EventSeq(*event_seq),
         StatePoint::MonotonicNs { monotonic_ns } => StateSelector::MonotonicNs(*monotonic_ns),
-        StatePoint::Marker { .. } => {
-            return Err(observation_error("marker selection is not implemented yet"));
+        StatePoint::Marker { label } => {
+            let mut matches = log.events.iter().filter(|record| {
+                return matches!(&record.event, Event::Marker { label: value, .. } if value == label);
+            });
+            let event_seq = matches
+                .next()
+                .map(|record| return record.seq)
+                .ok_or_else(|| return observation_error("marker does not exist"))?;
+            if matches.next().is_some() {
+                return Err(observation_error("marker label is ambiguous"));
+            }
+            StateSelector::EventSeq(event_seq)
         }
     };
     let inspection = inspect(&log, selector)?;
-    if matches!(point, StatePoint::LatestPresented) && !inspection.record.presented {
+    if !inspection.record.presented && !include_hidden {
         return Err(observation_error(
-            "final semantic state is hidden; select an explicit state with hidden-state permission",
+            "selected semantic state is hidden; pass explicit hidden-state permission",
         ));
     }
     let frame = frame_from_state(&inspection.state);
