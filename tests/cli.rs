@@ -1188,6 +1188,58 @@ fn paced_unicode_text_splits_only_at_scalar_boundaries() {
 }
 
 #[test]
+fn semantic_paste_uses_live_bracketed_mode_and_records_wrappers() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("paste-session");
+    let child = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,tty; tty.setraw(0); os.write(1,b'\\x1b[?2004hREADY'); d=b''\nwhile len(d)<19: d+=os.read(0,19-len(d))\nos.write(1,b'PASTE:'+d.hex().encode())",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn paste fixture");
+    let socket = session.join("control.sock");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !socket.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
+    wait.arg("wait")
+        .arg(&session)
+        .args(["--text", "READY", "--timeout-ms", "5000"])
+        .assert()
+        .success();
+    let mut send = Command::cargo_bin("termtrace").expect("binary should build");
+    send.arg("send")
+        .arg(&session)
+        .arg("paste:one\ntwo")
+        .assert()
+        .success();
+    let output = child.wait_with_output().expect("paste fixture completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+    let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+    assert!(log.events.iter().any(|record| matches!(
+        &record.event,
+        Event::InputIntent {
+            input_kind: InputKind::Paste,
+            descriptor: InputDescriptor::Paste {
+                bracketed: true,
+                terminal_modes_hash,
+            },
+            data,
+            ..
+        } if terminal_modes_hash.len() == 64
+            && data.as_bytes() == b"\x1b[200~one\ntwo\x1b[201~"
+    )));
+}
+
+#[test]
 fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("live-snapshot");

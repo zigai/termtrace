@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use uuid::Uuid;
 
 /// Current on-disk event-log format version.
-pub const EVENT_LOG_VERSION: u32 = 4;
+pub const EVENT_LOG_VERSION: u32 = 5;
 
 /// Stable event-log format identifier.
 pub const EVENT_LOG_FORMAT: &str = "termtrace-events";
@@ -230,6 +230,13 @@ pub enum InputDescriptor {
         super_key: bool,
         /// Pinned encoder identity.
         encoder: String,
+        /// BLAKE3 of canonical JSON for the terminal mode snapshot.
+        terminal_modes_hash: String,
+    },
+    /// Paste content encoded against live bracketed-paste mode.
+    Paste {
+        /// Whether the actor applied bracketed-paste wrappers.
+        bracketed: bool,
         /// BLAKE3 of canonical JSON for the terminal mode snapshot.
         terminal_modes_hash: String,
     },

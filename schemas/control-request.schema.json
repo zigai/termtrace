@@ -93,6 +93,25 @@
         },
         {
           "additionalProperties": false,
+          "description": "Paste UTF-8 bytes using the actor's live bracketed-paste mode.",
+          "properties": {
+            "command": {
+              "const": "paste",
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Paste content before mode-dependent wrapping or newline conversion."
+            }
+          },
+          "required": [
+            "command",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Change the child PTY geometry.",
           "properties": {
             "cols": {

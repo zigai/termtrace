@@ -484,6 +484,30 @@
             "terminal_modes_hash"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Paste content encoded against live bracketed-paste mode.",
+          "properties": {
+            "bracketed": {
+              "description": "Whether the actor applied bracketed-paste wrappers.",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "paste",
+              "type": "string"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "bracketed",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
         }
       ]
     },

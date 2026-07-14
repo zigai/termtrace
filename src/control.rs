@@ -20,7 +20,7 @@ use crate::{
 };
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 4;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 5;
 /// Relative socket path inside a live session directory.
 pub const CONTROL_SOCKET_NAME: &str = "control.sock";
 /// Maximum encoded request or response size.
@@ -65,6 +65,11 @@ pub enum ControlCommand {
         key: NamedKey,
         /// Typed modifier state.
         modifiers: KeyModifiers,
+    },
+    /// Paste UTF-8 bytes using the actor's live bracketed-paste mode.
+    Paste {
+        /// Paste content before mode-dependent wrapping or newline conversion.
+        data: ByteString,
     },
     /// Change the child PTY geometry.
     Resize {

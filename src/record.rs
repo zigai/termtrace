@@ -1402,6 +1402,36 @@ fn execute_control_command(
                 boundaries: actor_boundaries(event_log),
             });
         }
+        ControlCommand::Paste { data } => {
+            validate_control_input(data.as_bytes(), Some("paste"))?;
+            let modes = semantic.snapshot()?.modes;
+            let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
+                return terminal_error("serialize paste modes", error.to_string());
+            })?;
+            let encoded = encode_paste(data.as_bytes(), modes.bracketed_paste)?;
+            let applied = apply_input(
+                spawned.writer.as_mut(),
+                event_log,
+                request_id,
+                InputSource::Agent,
+                InputKind::Paste,
+                InputDescriptor::Paste {
+                    bracketed: modes.bracketed_paste,
+                    terminal_modes_hash: blake3::hash(&mode_bytes).to_hex().to_string(),
+                },
+                Some("paste".to_owned()),
+                &encoded,
+            )?;
+            return Ok(ControlData::InputApplied {
+                operation_id: request_id,
+                input_kind: InputKind::Paste,
+                data: ByteString::new(encoded),
+                bytes_written: applied.bytes_written,
+                intent_event_seq: applied.intent_event_seq,
+                result_event_seq: applied.result_event_seq,
+                boundaries: actor_boundaries(event_log),
+            });
+        }
         ControlCommand::Resize {
             cols,
             rows,
@@ -1715,6 +1745,32 @@ fn semantic_key_name(key: NamedKey) -> String {
         NamedKey::Function(number) => format!("f{number}"),
         NamedKey::Letter(letter) => letter.to_ascii_lowercase().to_string(),
     };
+}
+
+fn encode_paste(data: &[u8], bracketed: bool) -> Result<Vec<u8>> {
+    if data.windows(6).any(|window| return window == b"\x1b[201~")
+        || data.iter().any(|byte| {
+            return (*byte < 0x20 && !matches!(*byte, b'\t' | b'\n' | b'\r'))
+                || *byte == 0x7f
+                || *byte == 0x1b;
+        })
+    {
+        return Err(control_rejected(
+            "unsafe_paste_content",
+            "paste contains an escape, delimiter, or unsupported control byte",
+        ));
+    }
+    if bracketed {
+        let mut encoded = Vec::with_capacity(data.len().saturating_add(12));
+        encoded.extend_from_slice(b"\x1b[200~");
+        encoded.extend_from_slice(data);
+        encoded.extend_from_slice(b"\x1b[201~");
+        return Ok(encoded);
+    }
+    return Ok(data
+        .iter()
+        .map(|byte| return if *byte == b'\n' { b'\r' } else { *byte })
+        .collect());
 }
 
 fn apply_input(
@@ -2170,6 +2226,19 @@ mod tests {
         );
         assert_eq!(completion.event_count, recording.events.len() as u64);
         assert_eq!(manifest.command[0].as_bytes(), b"/bin/sh");
+    }
+
+    #[test]
+    fn paste_encoding_is_explicit_and_rejects_delimiter_injection() {
+        assert_eq!(
+            encode_paste(b"one\ntwo", true).expect("bracketed paste"),
+            b"\x1b[200~one\ntwo\x1b[201~"
+        );
+        assert_eq!(
+            encode_paste(b"one\ntwo", false).expect("plain paste"),
+            b"one\rtwo"
+        );
+        assert!(encode_paste(b"unsafe\x1b[201~command", true).is_err());
     }
 
     #[test]

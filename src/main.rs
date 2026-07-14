@@ -406,7 +406,7 @@ struct StopArgs {
 struct SendArgs {
     /// Live session name or canonical path.
     session: PathBuf,
-    /// Named keys, text:VALUE, raw:VALUE, or raw-file:PATH atoms.
+    /// Named keys, text:VALUE, paste:VALUE, raw:VALUE, or raw-file:PATH atoms.
     #[arg(value_name = "ATOM", num_args = 1..)]
     atoms: Vec<String>,
     /// Read one exact raw burst from standard input.
@@ -1257,6 +1257,11 @@ fn control_command_for_atom(atom: &str, intent: Option<String>) -> Result<Contro
     if let Some((key, modifiers)) = parse_named_key(atom)? {
         return Ok(ControlCommand::Key { key, modifiers });
     }
+    if let Some(paste) = atom.strip_prefix("paste:") {
+        return Ok(ControlCommand::Paste {
+            data: ByteString::new(paste.as_bytes().to_vec()),
+        });
+    }
     let (data, input_kind) = if let Some(text) = atom.strip_prefix("text:") {
         (text.as_bytes().to_vec(), InputKind::Text)
     } else if let Some(raw) = atom.strip_prefix("raw:") {
@@ -1265,7 +1270,7 @@ fn control_command_for_atom(atom: &str, intent: Option<String>) -> Result<Contro
         (fs_err::read(path).into_diagnostic()?, InputKind::Raw)
     } else {
         return Err(miette::miette!(
-            "unknown input atom; use a named key, text:VALUE, raw:VALUE, or raw-file:PATH"
+            "unknown input atom; use a named key, text:VALUE, paste:VALUE, raw:VALUE, or raw-file:PATH"
         ));
     };
     return Ok(ControlCommand::Input {
