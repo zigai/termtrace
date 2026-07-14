@@ -1907,6 +1907,68 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
 }
 
 #[test]
+fn events_follow_resumes_filtered_durable_records_without_duplicates() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("follow-events-session");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let recorder = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--durability",
+            "strict",
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf first; sleep 0.15; printf second",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn recorder");
+    wait_for_path(&session.join("control.sock"));
+    let follower = StdCommand::new(binary)
+        .arg("events")
+        .arg(&session)
+        .args(["--follow", "--type", "output", "--metadata-only"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn event follower");
+    assert!(
+        recorder
+            .wait_with_output()
+            .expect("wait for recorder")
+            .status
+            .success()
+    );
+    let followed = follower.wait_with_output().expect("wait for follower");
+    assert!(followed.status.success(), "{followed:?}");
+    let projected = followed
+        .stdout
+        .split(|byte| return *byte == b'\n')
+        .filter(|line| return !line.is_empty())
+        .map(|line| return serde_json::from_slice::<serde_json::Value>(line).expect("projection"))
+        .collect::<Vec<_>>();
+    let log = EventLog::read(session.join("events.jsonl")).expect("completed event log");
+    let expected_sequences = log
+        .events
+        .iter()
+        .filter(|record| return matches!(record.event, Event::Output { .. }))
+        .map(|record| return record.seq)
+        .collect::<Vec<_>>();
+    let projected_sequences = projected
+        .iter()
+        .map(|value| return value["seq"].as_u64().expect("sequence"))
+        .collect::<Vec<_>>();
+    assert_eq!(projected_sequences, expected_sequences);
+    assert!(projected.iter().all(|value| {
+        return value["event_type"] == "output" && value["metadata_only"] == true;
+    }));
+}
+
+#[test]
 fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("live-snapshot");

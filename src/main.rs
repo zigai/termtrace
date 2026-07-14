@@ -517,6 +517,9 @@ struct EventsArgs {
     /// Elide exact byte payloads while retaining their lengths and hashes.
     #[arg(long)]
     metadata_only: bool,
+    /// Continue streaming newly durable records until completion.
+    #[arg(long)]
+    follow: bool,
     /// Inclusive canonical event sequence.
     #[arg(long, conflicts_with_all = ["start_monotonic_ns", "from_marker"])]
     from_event_seq: Option<u64>,
@@ -1564,6 +1567,7 @@ fn follow_output(
     mut next_event_seq: u64,
     end_event_seq: Option<u64>,
 ) -> Result<ExitCode> {
+    let mut control_failure_since = None;
     loop {
         let completion_exists = session.join("completion.json").is_file();
         let log = if completion_exists {
@@ -1572,9 +1576,19 @@ fn follow_output(
             log
         } else {
             let response = match request(session, ControlCommand::Status) {
-                Ok(response) => response,
+                Ok(response) => {
+                    control_failure_since = None;
+                    response
+                }
                 Err(_) if session.join("completion.json").is_file() => continue,
-                Err(error) => return Err(error.into()),
+                Err(error) => {
+                    let since = control_failure_since.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= Duration::from_secs(2) {
+                        return Err(error.into());
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                    continue;
+                }
             };
             let ControlData::Status { boundaries, .. } = response else {
                 return Err(miette::miette!(
@@ -1633,8 +1647,32 @@ fn write_follow_stdout(output: &[u8]) -> Result<bool> {
     };
 }
 
+fn write_follow_json_line(value: &impl serde::Serialize) -> Result<bool> {
+    let mut encoded = serde_json::to_vec(value).into_diagnostic()?;
+    encoded.push(b'\n');
+    return write_follow_stdout(&encoded);
+}
+
 fn run_events(arguments: EventsArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
+    if arguments.follow {
+        if arguments.range.from_marker.is_some()
+            || arguments.range.to_marker.is_some()
+            || arguments.range.start_monotonic_ns.is_some()
+            || arguments.range.end_monotonic_ns.is_some()
+        {
+            return Err(miette::miette!(
+                "live event following currently supports event-sequence bounds only"
+            ));
+        }
+        return follow_events(
+            &session,
+            arguments.from_event_seq.unwrap_or(0),
+            arguments.to_event_seq,
+            &arguments.event_types,
+            arguments.metadata_only,
+        );
+    }
     let log = EventLog::read(session.join("events.jsonl"))?;
     validate_completed_log(&session, &log)?;
     let time_range = resolve_source_selection(
@@ -1671,6 +1709,81 @@ fn run_events(arguments: EventsArgs) -> Result<ExitCode> {
         ))?;
     }
     return Ok(ExitCode::SUCCESS);
+}
+
+fn follow_events(
+    session: &Path,
+    mut next_event_seq: u64,
+    end_event_seq: Option<u64>,
+    event_types: &[String],
+    metadata_only: bool,
+) -> Result<ExitCode> {
+    let mut control_failure_since = None;
+    loop {
+        let completion_exists = session.join("completion.json").is_file();
+        let log = if completion_exists {
+            let log = EventLog::read(session.join("events.jsonl"))?;
+            validate_completed_log(session, &log)?;
+            log
+        } else {
+            let response = match request(session, ControlCommand::Status) {
+                Ok(response) => {
+                    control_failure_since = None;
+                    response
+                }
+                Err(_) if session.join("completion.json").is_file() => continue,
+                Err(error) => {
+                    let since = control_failure_since.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= Duration::from_secs(2) {
+                        return Err(error.into());
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                    continue;
+                }
+            };
+            let ControlData::Status { boundaries, .. } = response else {
+                return Err(miette::miette!(
+                    "live status returned an unexpected response"
+                ));
+            };
+            EventLog::read_prefix(
+                session.join("events.jsonl"),
+                boundaries.durable.next_event_seq,
+            )?
+        };
+        let available = u64::try_from(log.events.len()).unwrap_or(u64::MAX);
+        if next_event_seq > available {
+            return Err(miette::miette!(
+                "event resume cursor {next_event_seq} exceeds durable event count {available}"
+            ));
+        }
+        let emit_end = end_event_seq.unwrap_or(available).min(available);
+        for record in &log.events {
+            let kind = event_type(&record.event);
+            if record.seq < next_event_seq
+                || record.seq >= emit_end
+                || (!event_types.is_empty()
+                    && !event_types.iter().any(|value| return value == kind))
+            {
+                continue;
+            }
+            if !write_follow_json_line(&EventProjection::from_record(record, metadata_only))? {
+                return Ok(ExitCode::SUCCESS);
+            }
+        }
+        next_event_seq = emit_end;
+        if completion_exists && end_event_seq.is_some_and(|end| return end > available) {
+            return Err(miette::miette!(
+                "event end cursor exceeds completed event count {available}"
+            ));
+        }
+        if end_event_seq.is_some_and(|end| return next_event_seq >= end)
+            || (completion_exists && next_event_seq >= available)
+        {
+            return Ok(ExitCode::SUCCESS);
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn run_completions(arguments: CompletionsArgs) -> Result<ExitCode> {
