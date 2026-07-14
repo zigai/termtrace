@@ -25,5 +25,6 @@ pub mod session_registry;
 mod terminal_mode;
 pub mod timeline;
 pub mod visual;
+pub mod vt_framer;
 
 pub use error::{Error, Result};

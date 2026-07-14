@@ -28,6 +28,7 @@ use crate::{
     session_registry::{RegistryEntry, RegistryListEntry},
     timeline::TimelineEntry,
     visual::{VideoMapEntry, VisualManifest},
+    vt_framer::VtToken,
 };
 
 /// One generated schema file.
@@ -73,6 +74,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<Observation>("observation.schema.json")?,
         schema::<TimelineEntry>("timeline-entry.schema.json")?,
         schema::<SemanticDiff>("semantic-diff.schema.json")?,
+        schema::<VtToken>("vt-token.schema.json")?,
         schema::<PlaybackTiming>("playback-timing.schema.json")?,
         schema::<PlaybackFailure>("playback-failure.schema.json")?,
     ]);

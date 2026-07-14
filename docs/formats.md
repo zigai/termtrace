@@ -36,6 +36,8 @@ One-off command observations are completed canonical sessions with `source_kind:
 
 `SemanticDiff` binds two requested `StatePoint`s to resolved state hashes and event/time provenance. Optional before/after objects report geometry, cursor, modes, colors, active style, metadata, and presentation changes; row records contain every complete changed cell. Endpoint dirty classifications and dirty rows remain evidence alongside, but are not used to invent cell changes.
 
+`VtToken` is a lossless explanatory frame, not a second terminal emulator. It contains exact Base64 bytes, a stable family/description, event-resolution timing, and ordered half-open byte segments within canonical output events. Concatenating token bytes reproduces canonical output exactly. Tokens spanning PTY reads retain multiple source segments; oversized strings fail at the checked bound instead of growing without limit.
+
 `requests.jsonl` supports persistent idempotency after bounded memory-cache eviction. It is not a canonical evidence root: readers may discard and reconstruct retry state from canonical events, and `termtrace verify` reports a missing, verified, or invalid journal without allowing journal damage to invalidate an otherwise complete event chain.
 
 A completed session must end in `Exit` and contain no pending mutation intent. Run `termtrace verify SESSION --level content --json` for a stable offline report, or use `--level durability-record` to additionally require the internally consistent chain-bound persistence record. Offline verification cannot prove that historical sync calls reached stable media. A valid unsigned hash graph establishes integrity relative to the roots in the session; it does not authenticate who created them.
