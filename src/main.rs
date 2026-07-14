@@ -21,7 +21,10 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
     Error,
-    control::{CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ProcessSignal, request},
+    control::{
+        CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, ProcessSignal,
+        request, send_request,
+    },
     event::{ByteString, EVENT_LOG_VERSION, InputKind},
     event_log::{DurabilityMode, DurabilityPolicy, EventLog},
     geometry::{inherited_geometry, run_probe},
@@ -398,16 +401,20 @@ struct StopArgs {
     ArgGroup::new("input")
         .required(true)
         .multiple(false)
-        .args(["atom", "stdin"])
+        .args(["atoms", "stdin"])
 ))]
 struct SendArgs {
     /// Live session name or canonical path.
     session: PathBuf,
-    /// One named key, text:VALUE, raw:VALUE, or raw-file:PATH atom.
-    atom: Option<String>,
+    /// Named keys, text:VALUE, raw:VALUE, or raw-file:PATH atoms.
+    #[arg(value_name = "ATOM", num_args = 1..)]
+    atoms: Vec<String>,
     /// Read one exact raw burst from standard input.
     #[arg(long)]
     stdin: bool,
+    /// Delay between atoms; paced text is split by Unicode scalar.
+    #[arg(long, value_parser = parse_pace_duration, default_value = "0ms")]
+    pace: Duration,
     /// Human-readable reason retained with the input event.
     #[arg(long)]
     intent: Option<String>,
@@ -1203,12 +1210,52 @@ fn run_send(arguments: SendArgs) -> Result<ExitCode> {
             },
         );
     }
-    let atom = arguments
-        .atom
-        .as_deref()
-        .ok_or_else(|| miette::miette!("one input atom is required"))?;
+    let session = resolve_session_ref(arguments.session)?;
+    let mut commands = Vec::new();
+    for atom in &arguments.atoms {
+        if arguments.pace.is_zero() || !atom.starts_with("text:") {
+            commands.push(control_command_for_atom(atom, arguments.intent.clone())?);
+            continue;
+        }
+        let text = atom.strip_prefix("text:").unwrap_or_default();
+        for scalar in text.chars() {
+            commands.push(ControlCommand::Input {
+                data: ByteString::new(scalar.to_string().into_bytes()),
+                input_kind: InputKind::Text,
+                intent: arguments.intent.clone(),
+            });
+        }
+    }
+    if commands.is_empty() || commands.len() > 4096 {
+        return Err(miette::miette!(
+            "input sequence must contain 1 to 4096 atoms"
+        ));
+    }
+    let sequence_id = uuid::Uuid::now_v7();
+    let mut outcomes = Vec::with_capacity(commands.len());
+    for (index, command) in commands.into_iter().enumerate() {
+        if index != 0 && !arguments.pace.is_zero() {
+            thread::sleep(arguments.pace);
+        }
+        let request = ControlRequest::new(command);
+        let data = send_request(&session, &request)?;
+        outcomes.push(serde_json::json!({
+            "atom_id": request.request_id,
+            "status": "applied",
+            "result": data,
+        }));
+    }
+    return write_json_line(&serde_json::json!({
+        "kind": "input_sequence",
+        "sequence_id": sequence_id,
+        "pace_ns": arguments.pace.as_nanos(),
+        "atoms": outcomes,
+    }));
+}
+
+fn control_command_for_atom(atom: &str, intent: Option<String>) -> Result<ControlCommand> {
     if let Some((key, modifiers)) = parse_named_key(atom)? {
-        return run_control(arguments.session, ControlCommand::Key { key, modifiers });
+        return Ok(ControlCommand::Key { key, modifiers });
     }
     let (data, input_kind) = if let Some(text) = atom.strip_prefix("text:") {
         (text.as_bytes().to_vec(), InputKind::Text)
@@ -1221,14 +1268,19 @@ fn run_send(arguments: SendArgs) -> Result<ExitCode> {
             "unknown input atom; use a named key, text:VALUE, raw:VALUE, or raw-file:PATH"
         ));
     };
-    return run_control(
-        arguments.session,
-        ControlCommand::Input {
-            data: ByteString::new(data),
-            input_kind,
-            intent: arguments.intent,
-        },
-    );
+    return Ok(ControlCommand::Input {
+        data: ByteString::new(data),
+        input_kind,
+        intent,
+    });
+}
+
+fn parse_pace_duration(value: &str) -> StdResult<Duration, String> {
+    let nanoseconds = parse_time_offset_ns(value)?;
+    if nanoseconds > 60_000_000_000 {
+        return Err("pace must not exceed 60s".to_owned());
+    }
+    return Ok(Duration::from_nanos(nanoseconds));
 }
 
 fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifiers)>> {

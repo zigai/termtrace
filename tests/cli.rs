@@ -1119,6 +1119,75 @@ fn named_key_is_encoded_from_live_application_cursor_mode() {
 }
 
 #[test]
+fn paced_unicode_text_splits_only_at_scalar_boundaries() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("paced-session");
+    let child = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,tty; tty.setraw(0); os.write(1,b'READY'); d=b''\nwhile len(d)<6: d+=os.read(0,6-len(d))\nos.write(1,b'GOT:'+d.hex().encode())",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn paced fixture");
+    let socket = session.join("control.sock");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !socket.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(socket.exists(), "paced fixture did not become ready");
+    let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
+    wait.arg("wait")
+        .arg(&session)
+        .args(["--text", "READY", "--timeout-ms", "5000"])
+        .assert()
+        .success();
+
+    let mut send = Command::cargo_bin("termtrace").expect("binary should build");
+    let sent = send
+        .arg("send")
+        .arg(&session)
+        .args(["--pace", "1ms", "text:é界", "enter"])
+        .assert()
+        .success();
+    let response: serde_json::Value =
+        serde_json::from_slice(&sent.get_output().stdout).expect("sequence response");
+    assert_eq!(
+        response
+            .pointer("/atoms")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(3)
+    );
+    let output = child.wait_with_output().expect("paced fixture completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+    let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+    let text_chunks = log
+        .events
+        .iter()
+        .filter_map(|record| match &record.event {
+            Event::InputIntent {
+                input_kind: InputKind::Text,
+                data,
+                ..
+            } => return Some(data.as_bytes()),
+            _ => return None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(text_chunks, vec!["é".as_bytes(), "界".as_bytes()]);
+    assert!(
+        text_chunks
+            .iter()
+            .all(|chunk| return str::from_utf8(chunk).is_ok())
+    );
+}
+
+#[test]
 fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("live-snapshot");
