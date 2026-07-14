@@ -19,7 +19,10 @@ use tempfile::TempDir;
 use termtrace::{
     Error,
     control::{ControlCommand, ControlData, ControlRequest, send_request},
-    event::{ByteString, EVENT_LOG_VERSION, Event, InputKind, InputSource, OperationStatus},
+    event::{
+        ByteString, EVENT_LOG_VERSION, Event, InputDescriptor, InputKind, InputSource,
+        OperationStatus,
+    },
     event_log::EventLog,
     provenance::{
         ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind, ProvenanceSensitivity,
@@ -1016,7 +1019,7 @@ fn live_control_drives_and_audits_a_detached_session() {
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
     send.arg("send")
         .arg(&session)
-        .args(["--text", "hello\n", "--intent", "complete shell read"])
+        .args(["text:hello\n", "--intent", "complete shell read"])
         .assert()
         .success();
 
@@ -1057,6 +1060,62 @@ fn live_control_drives_and_audits_a_detached_session() {
         .stdout(predicate::str::contains(
             r#""mutation_journal_records_verified":4"#,
         ));
+}
+
+#[test]
+fn named_key_is_encoded_from_live_application_cursor_mode() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("key-session");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let child = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,tty; tty.setraw(0); os.write(1,b'\\x1b[?1hREADY'); d=os.read(0,3); os.write(1,b'KEY:'+d.hex().encode())",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn key fixture");
+    let socket = session.join("control.sock");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !socket.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(socket.exists(), "key fixture did not become ready");
+    let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
+    wait.arg("wait")
+        .arg(&session)
+        .args(["--text", "READY", "--timeout-ms", "5000"])
+        .assert()
+        .success();
+    let mut send = Command::cargo_bin("termtrace").expect("binary should build");
+    send.arg("send").arg(&session).arg("up").assert().success();
+    let output = child.wait_with_output().expect("key fixture completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+
+    let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+    assert!(log.events.iter().any(|record| matches!(
+        &record.event,
+        Event::InputIntent {
+            source: InputSource::Agent,
+            input_kind: InputKind::Keys,
+            descriptor: InputDescriptor::Key {
+                key,
+                encoder,
+                terminal_modes_hash,
+                ..
+            },
+            data,
+            ..
+        } if key == "up"
+            && encoder == "libghostty-key-encoder-v1"
+            && terminal_modes_hash.len() == 64
+            && data.as_bytes() == b"\x1bOA"
+    )));
 }
 
 #[test]

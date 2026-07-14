@@ -803,7 +803,7 @@ mod tests {
     use super::*;
     use crate::provenance::{ProvenancePolicy, collect_execution_provenance};
     use crate::{
-        event::{EventLogHeader, InputKind, InputSource},
+        event::{EventLogHeader, InputDescriptor, InputKind, InputSource},
         event_log::{EventLogWriter, SessionClock},
     };
 
@@ -917,6 +917,7 @@ mod tests {
                 operation_id,
                 source: InputSource::Agent,
                 input_kind: InputKind::Text,
+                descriptor: InputDescriptor::Text,
                 data: ByteString::from(&b"x"[..]),
                 intent: None,
             },

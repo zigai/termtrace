@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use uuid::Uuid;
 
 /// Current on-disk event-log format version.
-pub const EVENT_LOG_VERSION: u32 = 3;
+pub const EVENT_LOG_VERSION: u32 = 4;
 
 /// Stable event-log format identifier.
 pub const EVENT_LOG_FORMAT: &str = "termtrace-events";
@@ -208,6 +208,33 @@ pub enum InputKind {
     Paste,
 }
 
+/// Structured semantic provenance for exact input bytes.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum InputDescriptor {
+    /// Uninterpreted caller or host bytes.
+    Raw,
+    /// UTF-8 text intentionally entered as textual content.
+    Text,
+    /// One semantic key encoded against a live terminal-mode snapshot.
+    Key {
+        /// Stable symbolic key spelling.
+        key: String,
+        /// Shift modifier.
+        shift: bool,
+        /// Control modifier.
+        control: bool,
+        /// Alt modifier.
+        alt: bool,
+        /// Super modifier.
+        super_key: bool,
+        /// Pinned encoder identity.
+        encoder: String,
+        /// BLAKE3 of canonical JSON for the terminal mode snapshot.
+        terminal_modes_hash: String,
+    },
+}
+
 /// Why a process lifecycle transition occurred.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -247,6 +274,8 @@ pub enum Event {
         source: InputSource,
         /// High-level input category.
         input_kind: InputKind,
+        /// Structured semantic source of the exact emitted bytes.
+        descriptor: InputDescriptor,
         /// Exact emitted bytes.
         data: ByteString,
         /// Optional symbolic intent such as `ctrl-c` or `paste`.

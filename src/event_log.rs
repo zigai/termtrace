@@ -1179,7 +1179,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::event::{ByteString, InputKind, InputSource, OperationStatus};
+    use crate::event::{ByteString, InputDescriptor, InputKind, InputSource, OperationStatus};
 
     fn header(clock: &SessionClock) -> EventLogHeader {
         return EventLogHeader::new(
@@ -1224,6 +1224,7 @@ mod tests {
                     operation_id: input_id,
                     source: InputSource::Agent,
                     input_kind: InputKind::Keys,
+                    descriptor: InputDescriptor::Raw,
                     data: ByteString::from(&b"\x03"[..]),
                     intent: Some("ctrl-c".to_owned()),
                 },
@@ -1409,6 +1410,7 @@ mod tests {
                     operation_id,
                     source: InputSource::Agent,
                     input_kind: InputKind::Text,
+                    descriptor: InputDescriptor::Text,
                     data: ByteString::from(&b"hello"[..]),
                     intent: None,
                 },
@@ -1532,6 +1534,7 @@ mod tests {
                     operation_id,
                     source: InputSource::Agent,
                     input_kind: InputKind::Text,
+                    descriptor: InputDescriptor::Text,
                     data: ByteString::from(&b"x"[..]),
                     intent: None,
                 },

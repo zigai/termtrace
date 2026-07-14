@@ -69,6 +69,30 @@
         },
         {
           "additionalProperties": false,
+          "description": "Encode and apply one symbolic key against the actor's live terminal modes.",
+          "properties": {
+            "command": {
+              "const": "key",
+              "type": "string"
+            },
+            "key": {
+              "$ref": "#/$defs/NamedKey",
+              "description": "Layout-independent key."
+            },
+            "modifiers": {
+              "$ref": "#/$defs/KeyModifiers",
+              "description": "Typed modifier state."
+            }
+          },
+          "required": [
+            "command",
+            "key",
+            "modifiers"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Change the child PTY geometry.",
           "properties": {
             "cols": {
@@ -189,6 +213,140 @@
           "const": "paste",
           "description": "Pasted content.",
           "type": "string"
+        }
+      ]
+    },
+    "KeyModifiers": {
+      "description": "Typed modifier state for one semantic key event.",
+      "properties": {
+        "alt": {
+          "description": "Alt modifier.",
+          "type": "boolean"
+        },
+        "control": {
+          "description": "Control modifier.",
+          "type": "boolean"
+        },
+        "shift": {
+          "description": "Shift modifier.",
+          "type": "boolean"
+        },
+        "super_key": {
+          "description": "Super modifier.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "shift",
+        "control",
+        "alt",
+        "super_key"
+      ],
+      "type": "object"
+    },
+    "NamedKey": {
+      "description": "Layout-independent key accepted by the pinned terminal key encoder.",
+      "oneOf": [
+        {
+          "const": "enter",
+          "description": "Enter/Return terminal key (distinct from raw line feed).",
+          "type": "string"
+        },
+        {
+          "const": "escape",
+          "description": "Escape key.",
+          "type": "string"
+        },
+        {
+          "const": "tab",
+          "description": "Horizontal tab key.",
+          "type": "string"
+        },
+        {
+          "const": "backspace",
+          "description": "Backspace key.",
+          "type": "string"
+        },
+        {
+          "const": "delete",
+          "description": "Forward delete key.",
+          "type": "string"
+        },
+        {
+          "const": "insert",
+          "description": "Insert key.",
+          "type": "string"
+        },
+        {
+          "const": "home",
+          "description": "Home key.",
+          "type": "string"
+        },
+        {
+          "const": "end",
+          "description": "End key.",
+          "type": "string"
+        },
+        {
+          "const": "page_up",
+          "description": "Page-up key.",
+          "type": "string"
+        },
+        {
+          "const": "page_down",
+          "description": "Page-down key.",
+          "type": "string"
+        },
+        {
+          "const": "arrow_up",
+          "description": "Up arrow.",
+          "type": "string"
+        },
+        {
+          "const": "arrow_down",
+          "description": "Down arrow.",
+          "type": "string"
+        },
+        {
+          "const": "arrow_left",
+          "description": "Left arrow.",
+          "type": "string"
+        },
+        {
+          "const": "arrow_right",
+          "description": "Right arrow.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Function key numbered 1 through 24.",
+          "properties": {
+            "function": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "ASCII letter used for Ctrl+A through Ctrl+Z.",
+          "properties": {
+            "letter": {
+              "maxLength": 1,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "letter"
+          ],
+          "type": "object"
         }
       ]
     },

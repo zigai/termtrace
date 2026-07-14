@@ -16,6 +16,7 @@ use crate::{
     Error, Result,
     event::{ByteString, InputKind},
     event_log::CanonicalBoundary,
+    ghostty_vt::{KeyModifiers, NamedKey},
 };
 
 /// Current control protocol version.
@@ -57,6 +58,13 @@ pub enum ControlCommand {
         input_kind: InputKind,
         /// Optional human-readable intent.
         intent: Option<String>,
+    },
+    /// Encode and apply one symbolic key against the actor's live terminal modes.
+    Key {
+        /// Layout-independent key.
+        key: NamedKey,
+        /// Typed modifier state.
+        modifiers: KeyModifiers,
     },
     /// Change the child PTY geometry.
     Resize {

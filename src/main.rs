@@ -5,7 +5,7 @@ use std::{
     ffi::OsString,
     fmt::Write as _,
     fs::{File, OpenOptions},
-    io::{self, Write as _},
+    io::{self, Read as _, Write as _},
     os::unix::{
         ffi::{OsStrExt as _, OsStringExt as _},
         fs::OpenOptionsExt as _,
@@ -25,7 +25,7 @@ use termtrace::{
     event::{ByteString, EVENT_LOG_VERSION, InputKind},
     event_log::{DurabilityMode, DurabilityPolicy, EventLog},
     geometry::{inherited_geometry, run_probe},
-    ghostty_vt::RowState,
+    ghostty_vt::{KeyModifiers, NamedKey, RowState},
     inspection::{inspect_session, state_text, wait_for_completion, wait_for_output},
     interop::export_asciicast,
     playback::{PlaybackOptions, playback},
@@ -398,17 +398,16 @@ struct StopArgs {
     ArgGroup::new("input")
         .required(true)
         .multiple(false)
-        .args(["text", "file"])
+        .args(["atom", "stdin"])
 ))]
 struct SendArgs {
     /// Live session name or canonical path.
     session: PathBuf,
-    /// UTF-8 text to send exactly, without an implicit newline.
+    /// One named key, text:VALUE, raw:VALUE, or raw-file:PATH atom.
+    atom: Option<String>,
+    /// Read one exact raw burst from standard input.
     #[arg(long)]
-    text: Option<String>,
-    /// File whose bytes are sent exactly.
-    #[arg(long)]
-    file: Option<PathBuf>,
+    stdin: bool,
     /// Human-readable reason retained with the input event.
     #[arg(long)]
     intent: Option<String>,
@@ -1192,14 +1191,35 @@ fn write_stdout(output: impl AsRef<[u8]>) -> Result<ExitCode> {
 }
 
 fn run_send(arguments: SendArgs) -> Result<ExitCode> {
-    let (data, input_kind) = match (arguments.text, arguments.file) {
-        (Some(text), None) => (text.into_bytes(), InputKind::Text),
-        (None, Some(path)) => (fs_err::read(path).into_diagnostic()?, InputKind::Raw),
-        (Some(_), Some(_)) | (None, None) => {
-            return Err(miette::miette!(
-                "exactly one of --text or --file is required"
-            ));
-        }
+    if arguments.stdin {
+        let mut data = Vec::new();
+        io::stdin().read_to_end(&mut data).into_diagnostic()?;
+        return run_control(
+            arguments.session,
+            ControlCommand::Input {
+                data: ByteString::new(data),
+                input_kind: InputKind::Raw,
+                intent: arguments.intent,
+            },
+        );
+    }
+    let atom = arguments
+        .atom
+        .as_deref()
+        .ok_or_else(|| miette::miette!("one input atom is required"))?;
+    if let Some((key, modifiers)) = parse_named_key(atom)? {
+        return run_control(arguments.session, ControlCommand::Key { key, modifiers });
+    }
+    let (data, input_kind) = if let Some(text) = atom.strip_prefix("text:") {
+        (text.as_bytes().to_vec(), InputKind::Text)
+    } else if let Some(raw) = atom.strip_prefix("raw:") {
+        (raw.as_bytes().to_vec(), InputKind::Raw)
+    } else if let Some(path) = atom.strip_prefix("raw-file:") {
+        (fs_err::read(path).into_diagnostic()?, InputKind::Raw)
+    } else {
+        return Err(miette::miette!(
+            "unknown input atom; use a named key, text:VALUE, raw:VALUE, or raw-file:PATH"
+        ));
     };
     return run_control(
         arguments.session,
@@ -1209,6 +1229,55 @@ fn run_send(arguments: SendArgs) -> Result<ExitCode> {
             intent: arguments.intent,
         },
     );
+}
+
+fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifiers)>> {
+    let mut modifiers = KeyModifiers::default();
+    let key = match atom {
+        "enter" => NamedKey::Enter,
+        "escape" | "esc" => NamedKey::Escape,
+        "tab" => NamedKey::Tab,
+        "shift-tab" => {
+            modifiers.shift = true;
+            NamedKey::Tab
+        }
+        "backspace" => NamedKey::Backspace,
+        "delete" => NamedKey::Delete,
+        "insert" => NamedKey::Insert,
+        "home" => NamedKey::Home,
+        "end" => NamedKey::End,
+        "page-up" => NamedKey::PageUp,
+        "page-down" => NamedKey::PageDown,
+        "up" => NamedKey::ArrowUp,
+        "down" => NamedKey::ArrowDown,
+        "left" => NamedKey::ArrowLeft,
+        "right" => NamedKey::ArrowRight,
+        value if value.len() >= 2 && value.starts_with('f') => {
+            let suffix = value
+                .strip_prefix('f')
+                .ok_or_else(|| miette::miette!("function key must be f1 through f24"))?;
+            let number = suffix
+                .parse::<u8>()
+                .map_err(|_| miette::miette!("function key must be f1 through f24"))?;
+            if !(1..=24).contains(&number) {
+                return Err(miette::miette!("function key must be f1 through f24"));
+            }
+            NamedKey::Function(number)
+        }
+        value if value.len() == 6 && value.starts_with("ctrl-") => {
+            let letter = value
+                .chars()
+                .nth(5)
+                .ok_or_else(|| miette::miette!("control key must be ctrl-a through ctrl-z"))?;
+            if !letter.is_ascii_alphabetic() {
+                return Err(miette::miette!("control key must be ctrl-a through ctrl-z"));
+            }
+            modifiers.control = true;
+            NamedKey::Letter(letter)
+        }
+        _ => return Ok(None),
+    };
+    return Ok(Some((key, modifiers)));
 }
 
 fn run_resize(arguments: ResizeArgs) -> Result<ExitCode> {

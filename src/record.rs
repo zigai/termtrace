@@ -49,11 +49,11 @@ use crate::{
         ProcessSignal, validate_frame,
     },
     event::{
-        ByteString, Event, EventLogHeader, InputKind, InputSource, LifecycleKind, OperationStatus,
-        TerminalColors,
+        ByteString, Event, EventLogHeader, InputDescriptor, InputKind, InputSource, LifecycleKind,
+        OperationStatus, TerminalColors,
     },
     event_log::{DurabilityPolicy, EventLogWriter, SessionClock},
-    ghostty_vt::GhosttyVt,
+    ghostty_vt::{GhosttyVt, NamedKey},
     profile::ResolvedGhosttyProfile,
     provenance::{ProvenancePolicy, collect_execution_provenance},
     request_journal::{
@@ -795,6 +795,7 @@ fn process_runtime_message(
             Uuid::now_v7(),
             InputSource::Human,
             InputKind::Raw,
+            InputDescriptor::Raw,
             None,
             &data,
         )?,
@@ -1336,8 +1337,46 @@ fn execute_control_command(
                 request_id,
                 InputSource::Agent,
                 *input_kind,
+                match input_kind {
+                    InputKind::Text => InputDescriptor::Text,
+                    InputKind::Raw | InputKind::Keys | InputKind::Paste => InputDescriptor::Raw,
+                },
                 intent.clone(),
                 data.as_bytes(),
+            )?;
+            return Ok(ControlData::Acknowledged {
+                boundaries: actor_boundaries(event_log),
+            });
+        }
+        ControlCommand::Key { key, modifiers } => {
+            let modes = semantic.snapshot()?.modes;
+            let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
+                return terminal_error("serialize keyboard modes", error.to_string());
+            })?;
+            let encoded = semantic.encode_key(*key, *modifiers)?;
+            if encoded.data.as_bytes().is_empty() {
+                return Err(control_rejected(
+                    "key_has_no_output",
+                    "the requested key press produced no terminal bytes",
+                ));
+            }
+            apply_input(
+                spawned.writer.as_mut(),
+                event_log,
+                request_id,
+                InputSource::Agent,
+                InputKind::Keys,
+                InputDescriptor::Key {
+                    key: semantic_key_name(*key),
+                    shift: modifiers.shift,
+                    control: modifiers.control,
+                    alt: modifiers.alt,
+                    super_key: modifiers.super_key,
+                    encoder: encoded.encoder,
+                    terminal_modes_hash: blake3::hash(&mode_bytes).to_hex().to_string(),
+                },
+                Some(semantic_key_name(*key)),
+                encoded.data.as_bytes(),
             )?;
             return Ok(ControlData::Acknowledged {
                 boundaries: actor_boundaries(event_log),
@@ -1542,6 +1581,7 @@ fn process_semantic_output(
                     Uuid::now_v7(),
                     InputSource::Host,
                     InputKind::Raw,
+                    InputDescriptor::Raw,
                     Some("terminal query response".to_owned()),
                     &response,
                 )?;
@@ -1636,12 +1676,34 @@ fn geometry_cell_size(pixels: u16, cells: u16) -> u32 {
     return u32::from(pixels.checked_div(cells).unwrap_or(0).max(1));
 }
 
+fn semantic_key_name(key: NamedKey) -> String {
+    return match key {
+        NamedKey::Enter => "enter".to_owned(),
+        NamedKey::Escape => "escape".to_owned(),
+        NamedKey::Tab => "tab".to_owned(),
+        NamedKey::Backspace => "backspace".to_owned(),
+        NamedKey::Delete => "delete".to_owned(),
+        NamedKey::Insert => "insert".to_owned(),
+        NamedKey::Home => "home".to_owned(),
+        NamedKey::End => "end".to_owned(),
+        NamedKey::PageUp => "page-up".to_owned(),
+        NamedKey::PageDown => "page-down".to_owned(),
+        NamedKey::ArrowUp => "up".to_owned(),
+        NamedKey::ArrowDown => "down".to_owned(),
+        NamedKey::ArrowLeft => "left".to_owned(),
+        NamedKey::ArrowRight => "right".to_owned(),
+        NamedKey::Function(number) => format!("f{number}"),
+        NamedKey::Letter(letter) => letter.to_ascii_lowercase().to_string(),
+    };
+}
+
 fn apply_input(
     writer: &mut dyn Write,
     event_log: &mut EventLogWriter,
     operation_id: Uuid,
     source: InputSource,
     input_kind: InputKind,
+    descriptor: InputDescriptor,
     intent: Option<String>,
     data: &[u8],
 ) -> Result<()> {
@@ -1649,6 +1711,7 @@ fn apply_input(
         operation_id,
         source,
         input_kind,
+        descriptor,
         data: ByteString::from(data),
         intent,
     })?;

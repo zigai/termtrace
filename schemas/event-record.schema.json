@@ -35,6 +35,10 @@
               "$ref": "#/$defs/Base64Bytes",
               "description": "Exact emitted bytes."
             },
+            "descriptor": {
+              "$ref": "#/$defs/InputDescriptor",
+              "description": "Structured semantic source of the exact emitted bytes."
+            },
             "input_kind": {
               "$ref": "#/$defs/InputKind",
               "description": "High-level input category."
@@ -65,6 +69,7 @@
             "operation_id",
             "source",
             "input_kind",
+            "descriptor",
             "data"
           ],
           "type": "object"
@@ -395,6 +400,88 @@
             "type",
             "code",
             "message"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "InputDescriptor": {
+      "description": "Structured semantic provenance for exact input bytes.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Uninterpreted caller or host bytes.",
+          "properties": {
+            "kind": {
+              "const": "raw",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "UTF-8 text intentionally entered as textual content.",
+          "properties": {
+            "kind": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One semantic key encoded against a live terminal-mode snapshot.",
+          "properties": {
+            "alt": {
+              "description": "Alt modifier.",
+              "type": "boolean"
+            },
+            "control": {
+              "description": "Control modifier.",
+              "type": "boolean"
+            },
+            "encoder": {
+              "description": "Pinned encoder identity.",
+              "type": "string"
+            },
+            "key": {
+              "description": "Stable symbolic key spelling.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "key",
+              "type": "string"
+            },
+            "shift": {
+              "description": "Shift modifier.",
+              "type": "boolean"
+            },
+            "super_key": {
+              "description": "Super modifier.",
+              "type": "boolean"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "key",
+            "shift",
+            "control",
+            "alt",
+            "super_key",
+            "encoder",
+            "terminal_modes_hash"
           ],
           "type": "object"
         }
