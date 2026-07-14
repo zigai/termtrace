@@ -21,6 +21,21 @@
         "end_monotonic_ns"
       ],
       "type": "object"
+    },
+    "StateSelection": {
+      "description": "Semantic states retained in one derived index.",
+      "oneOf": [
+        {
+          "const": "all",
+          "description": "Retain every distinct state, including synchronized-output internals.",
+          "type": "string"
+        },
+        {
+          "const": "presented",
+          "description": "Retain only states eligible for presentation by a native terminal.",
+          "type": "string"
+        }
+      ]
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/replay-manifest.schema.json",
@@ -34,6 +49,13 @@
       },
       "type": "array"
     },
+    "final_retained_state_hash": {
+      "description": "Hash of the final state retained in filtered artifact files.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "final_state_hash": {
       "description": "Semantic state hash at the selected interval's end.",
       "type": "string"
@@ -42,10 +64,20 @@
       "description": "Exact Ghostty source revision.",
       "type": "string"
     },
+    "semantic_state_count": {
+      "description": "Number of distinct semantic states encountered during replay.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
     "session_id": {
       "description": "Source session identifier.",
       "format": "uuid",
       "type": "string"
+    },
+    "source_complete": {
+      "description": "Whether completion proved the source event log immutable.",
+      "type": "boolean"
     },
     "source_event_hash": {
       "description": "Source event-log terminal hash.",
@@ -66,10 +98,14 @@
       "description": "Selected half-open source interval, absent for a full-session index."
     },
     "state_count": {
-      "description": "Number of distinct semantic states.",
+      "description": "Number of state records retained in the artifact files.",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "state_selection": {
+      "$ref": "#/$defs/StateSelection",
+      "description": "Semantic states retained in the JSONL artifacts."
     },
     "version": {
       "description": "Artifact schema version.",
@@ -81,8 +117,11 @@
   "required": [
     "version",
     "session_id",
+    "source_complete",
+    "state_selection",
     "ghostty_revision",
     "state_count",
+    "semantic_state_count",
     "final_state_hash",
     "files"
   ],

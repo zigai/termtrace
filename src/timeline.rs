@@ -5,7 +5,7 @@ use std::result::Result as StdResult;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, Result};
+use crate::{Error, Result, event::Event, event_log::EventLog};
 
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 const NANOS_PER_MINUTE: u64 = 60 * NANOS_PER_SECOND;
@@ -57,6 +57,9 @@ pub fn resolve_source_range(
     if start.is_none() && end.is_none() {
         return Ok(None);
     }
+    // A half-open range ending at the final timestamp would exclude the final
+    // event. Advance by one nanosecond so an omitted end still means "through
+    // the complete session" without giving ranged replay a special last-event case.
     let source_end = final_monotonic_ns.checked_add(1).ok_or_else(|| {
         return range_error("source timeline ends at u64::MAX and cannot form an exclusive bound");
     })?;
@@ -81,6 +84,74 @@ pub fn resolve_source_range(
         start_monotonic_ns: start,
         end_monotonic_ns: end,
     }));
+}
+
+/// Resolve optional numeric or marker bounds into canonical timestamps.
+///
+/// Marker labels must identify exactly one canonical marker. Start markers are
+/// inclusive and end markers are exclusive, matching numeric range semantics.
+///
+/// # Errors
+///
+/// Returns an error for mixed selectors, missing or duplicate marker labels,
+/// or an invalid resulting source range.
+pub fn resolve_source_selection(
+    log: &EventLog,
+    start: Option<u64>,
+    end: Option<u64>,
+    from_marker: Option<&str>,
+    to_marker: Option<&str>,
+) -> Result<Option<SourceRange>> {
+    if start.is_some() && from_marker.is_some() {
+        return Err(range_error(
+            "choose either `--from` or `--from-marker`, not both",
+        ));
+    }
+    if end.is_some() && to_marker.is_some() {
+        return Err(range_error(
+            "choose either `--to` or `--to-marker`, not both",
+        ));
+    }
+    let start = match from_marker {
+        Some(label) => Some(resolve_marker(log, label)?),
+        None => start,
+    };
+    let end = match to_marker {
+        Some(label) => Some(resolve_marker(log, label)?),
+        None => end,
+    };
+    let final_monotonic_ns = log
+        .events
+        .last()
+        .map_or(0, |record| return record.monotonic_ns);
+    return resolve_source_range(start, end, final_monotonic_ns);
+}
+
+fn resolve_marker(log: &EventLog, label: &str) -> Result<u64> {
+    if label.is_empty() {
+        return Err(range_error("marker label must not be empty"));
+    }
+    let matches = log
+        .events
+        .iter()
+        .filter(|record| {
+            return matches!(&record.event, Event::Marker { label: value } if value == label);
+        })
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [record] => return Ok(record.monotonic_ns),
+        [] => {
+            return Err(range_error(format!(
+                "marker `{label}` does not exist in the canonical event log"
+            )));
+        }
+        _ => {
+            return Err(range_error(format!(
+                "marker `{label}` occurs {} times; marker range selectors require a unique label",
+                matches.len()
+            )));
+        }
+    }
 }
 
 /// Parse a human-readable non-negative source offset into nanoseconds.

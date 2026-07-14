@@ -173,6 +173,19 @@ pub enum Error {
         path: PathBuf,
     },
 
+    /// An immutable post-processing command was attempted before recording ended.
+    #[error("session `{session}` is not complete")]
+    #[diagnostic(
+        code(termtrace::session_incomplete),
+        help(
+            "Stop the recording and wait for completion, or use `index --live-snapshot` for an explicitly incomplete prefix"
+        )
+    )]
+    SessionIncomplete {
+        /// Session directory without a durable completion manifest.
+        session: PathBuf,
+    },
+
     /// Canonical events cannot be deterministically replayed.
     #[error("invalid replay input: {reason}")]
     #[diagnostic(code(termtrace::invalid_replay))]

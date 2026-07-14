@@ -34,6 +34,13 @@ pub struct PlaybackTiming {
     pub source_range: Option<SourceRange>,
 }
 
+/// Structured failure handshake written before playback exits unsuccessfully.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlaybackFailure {
+    /// Human-readable root cause from the playback process.
+    pub message: String,
+}
+
 /// Configuration for timed playback inside Ghostty.
 #[derive(Clone, Debug)]
 pub struct PlaybackOptions {
@@ -41,6 +48,8 @@ pub struct PlaybackOptions {
     pub session_directory: PathBuf,
     /// Handshake JSON path.
     pub timing_file: PathBuf,
+    /// Failure handshake JSON path.
+    pub error_file: PathBuf,
     /// File created after all canonical events are emitted.
     pub ready_file: PathBuf,
     /// Delay before source-range start (or event time zero for full playback).
@@ -60,6 +69,23 @@ pub struct PlaybackOptions {
 /// Returns an error for invalid timing, event-log validation, output, or
 /// handshake persistence failures.
 pub fn playback(options: &PlaybackOptions) -> Result<()> {
+    let result = playback_inner(options);
+    if let Err(error) = result {
+        let report = PlaybackFailure {
+            message: error.to_string(),
+        };
+        if let Err(report_error) = write_create_new_json(&options.error_file, &report) {
+            return Err(Error::CleanupFailed {
+                primary: Box::new(error),
+                cleanup: Box::new(report_error),
+            });
+        }
+        return Err(error);
+    }
+    return Ok(());
+}
+
+fn playback_inner(options: &PlaybackOptions) -> Result<()> {
     let mut terminal_mode = RawTerminalGuard::enter(true)?;
     if let Err(error) = prepare_terminal_geometry(options) {
         return finish_with_cleanup(Err(error), terminal_mode.restore());
@@ -110,6 +136,9 @@ fn playback_with_raw_input(options: &PlaybackOptions, input_is_terminal: bool) -
     )?;
     let mut resize_intents = HashMap::new();
     if let Some(range) = source_range {
+        // The timing file is the capture parent's permission to start FFmpeg.
+        // Replay the prefix before that handshake and without source-time sleeps,
+        // otherwise a short clip would still encode or wait through the full pre-roll.
         let manifest = read_manifest(&options.session_directory)?;
         let mut expected_grid = (manifest.geometry.cols, manifest.geometry.rows);
         {
@@ -128,6 +157,9 @@ fn playback_with_raw_input(options: &PlaybackOptions, input_is_terminal: bool) -
                 )?;
             }
         }
+        // Flushing stdout only transfers bytes into the PTY. A query ordered after
+        // the prefix, followed by its response, proves Ghostty has consumed every
+        // earlier byte without mutating the terminal's visual state.
         let reported = query_terminal()?;
         if (reported.cols, reported.rows) != expected_grid {
             return Err(Error::InvalidReplay {
@@ -139,6 +171,8 @@ fn playback_with_raw_input(options: &PlaybackOptions, input_is_terminal: bool) -
         }
     }
 
+    // The barrier above must own stdin to read Ghostty's reply. Start the drain
+    // only afterward so later application queries cannot block timed playback.
     let mut input_drain = TerminalInputDrain::start(input_is_terminal)?;
     let result = timed_playback(options, &log, source_range, &mut resize_intents);
     return finish_with_cleanup(result, input_drain.stop());
@@ -183,6 +217,9 @@ fn timed_playback(
         emit_event(&mut output, resize_intents, &record.event, None)?;
     }
     if let Some(range) = source_range {
+        // The final in-range event may precede `end`. Keep the source clock
+        // running through the empty tail so clip duration and frame mapping
+        // describe the requested interval rather than the last visible mutation.
         sleep_until(monotonic_origin + Duration::from_nanos(range.duration_ns()));
     }
     write_create_new(&options.ready_file, b"ready\n")?;

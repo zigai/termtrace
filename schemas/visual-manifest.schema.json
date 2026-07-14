@@ -21,6 +21,77 @@
         "end_monotonic_ns"
       ],
       "type": "object"
+    },
+    "StateSelection": {
+      "description": "Semantic states retained in one derived index.",
+      "oneOf": [
+        {
+          "const": "all",
+          "description": "Retain every distinct state, including synchronized-output internals.",
+          "type": "string"
+        },
+        {
+          "const": "presented",
+          "description": "Retain only states eligible for presentation by a native terminal.",
+          "type": "string"
+        }
+      ]
+    },
+    "TerminalGeometryReport": {
+      "description": "Geometry reported by a live terminal through XTWINOPS queries.",
+      "properties": {
+        "cell_height": {
+          "description": "Height of one rendered cell in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cell_width": {
+          "description": "Width of one rendered cell in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cols": {
+          "description": "Terminal columns.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "description": "Terminal rows.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text_height": {
+          "description": "Height of the complete text area in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text_width": {
+          "description": "Width of the complete text area in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cols",
+        "rows",
+        "cell_width",
+        "cell_height",
+        "text_width",
+        "text_height"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/visual-manifest.schema.json",
@@ -43,6 +114,10 @@
       "maximum": 65535,
       "minimum": 0,
       "type": "integer"
+    },
+    "geometry_report": {
+      "$ref": "#/$defs/TerminalGeometryReport",
+      "description": "Parent-side Ghostty geometry preflight at the capture viewport."
     },
     "ghostty_config_hash": {
       "description": "BLAKE3 of Ghostty's resolved configuration.",
@@ -98,6 +173,10 @@
       ],
       "description": "Selected half-open source interval, absent for a full-session capture."
     },
+    "state_selection": {
+      "$ref": "#/$defs/StateSelection",
+      "description": "Semantic index retention mode used for frame mapping."
+    },
     "version": {
       "description": "Manifest schema version.",
       "format": "uint32",
@@ -118,6 +197,8 @@
   "required": [
     "version",
     "session_id",
+    "state_selection",
+    "geometry_report",
     "fps",
     "width",
     "height",

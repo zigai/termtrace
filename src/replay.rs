@@ -2,8 +2,8 @@
 
 use std::{
     collections::HashMap,
-    fs::File,
-    io::{BufWriter, Write as _},
+    fmt::Write as _,
+    io::Write,
     path::{Path, PathBuf},
     slice,
 };
@@ -15,24 +15,50 @@ use uuid::Uuid;
 use crate::{
     Error, Result,
     artifact::{
-        commit_directory, create_private_directory, finish_writer, secure_writer, sync_directory,
-        write_secure,
+        commit_directory, create_private_directory, finish_writer, secure_file, secure_writer,
+        sync_directory, write_secure,
     },
+    control::{ControlCommand, ControlData, request},
     event::{Event, OperationStatus},
     event_log::EventLog,
     ghostty_vt::{
         CellState, CellStyle, ColorState, CursorState, DirtyState, Format, GhosttyVt, ModeState,
         SemanticState, TerminalMetadata,
     },
+    session::validate_completed_log,
     timeline::{SourceRange, resolve_source_range},
 };
 
 /// Pinned Ghostty source revision used by the semantic adapter.
 pub const GHOSTTY_REVISION: &str = "55a3e33ab26a23d75b274b23c7f76d837db00578";
 /// Derived artifact format version.
-pub const STATE_FORMAT_VERSION: u32 = 1;
+pub const STATE_FORMAT_VERSION: u32 = 2;
 /// Relative directory containing replay-derived artifacts.
 pub const DERIVED_DIRECTORY: &str = "derived";
+
+/// Semantic states retained in one derived index.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StateSelection {
+    /// Retain every distinct state, including synchronized-output internals.
+    #[default]
+    All,
+    /// Retain only states eligible for presentation by a native terminal.
+    Presented,
+}
+
+/// Policy for one semantic indexing operation.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct IndexOptions {
+    /// Optional inclusive source offset.
+    pub start_monotonic_ns: Option<u64>,
+    /// Optional exclusive source offset.
+    pub end_monotonic_ns: Option<u64>,
+    /// Permit a hash-addressed snapshot when completion is absent.
+    pub live_snapshot: bool,
+    /// Semantic states retained in artifacts.
+    pub state_selection: StateSelection,
+}
 
 /// Fine-grained changes for one viewport row.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -159,12 +185,20 @@ pub struct ReplayManifest {
     pub source_event_hash: Option<String>,
     /// Selected half-open source interval, absent for a full-session index.
     pub source_range: Option<SourceRange>,
+    /// Whether completion proved the source event log immutable.
+    pub source_complete: bool,
+    /// Semantic states retained in the JSONL artifacts.
+    pub state_selection: StateSelection,
     /// Exact Ghostty source revision.
     pub ghostty_revision: String,
-    /// Number of distinct semantic states.
+    /// Number of state records retained in the artifact files.
     pub state_count: u64,
+    /// Number of distinct semantic states encountered during replay.
+    pub semantic_state_count: u64,
     /// Semantic state hash at the selected interval's end.
     pub final_state_hash: String,
+    /// Hash of the final state retained in filtered artifact files.
+    pub final_retained_state_hash: Option<String>,
     /// Relative artifact paths.
     pub files: Vec<String>,
 }
@@ -174,8 +208,14 @@ pub struct ReplayManifest {
 pub struct IndexOutcome {
     /// Atomically committed derived directory.
     pub directory: PathBuf,
-    /// Number of distinct states.
+    /// Number of state records retained in artifacts.
     pub state_count: u64,
+    /// Total distinct states encountered during replay.
+    pub semantic_state_count: u64,
+    /// Whether the source had immutable completion evidence.
+    pub source_complete: bool,
+    /// State retention policy used by this index.
+    pub state_selection: StateSelection,
     /// Semantic state hash at the selected interval's end.
     pub final_state_hash: String,
 }
@@ -258,6 +298,9 @@ fn replay_with(
     if source_range.is_none() {
         builder.capture(None, None, 0, &mut state_sink)?;
     }
+    // Ranged replay suppresses prefix snapshots, not prefix execution. Output,
+    // resize intents, and their later results must still cross the boundary so
+    // the baseline at `start` represents the same terminal the user actually saw.
     let mut emitted_range_baseline = false;
     for record in &log.events {
         let emit = source_range.is_none_or(|range| return range.contains(record.monotonic_ns));
@@ -271,6 +314,9 @@ fn replay_with(
             let range = source_range.ok_or_else(|| {
                 return invalid_replay("range baseline requested without a source range");
             })?;
+            // Capture before applying an event exactly at `start`. This preserves
+            // the [start, end) contract: state 0 is the boundary state, and the
+            // event at the inclusive boundary remains an observable transition.
             builder.capture_baseline(range.start_monotonic_ns, &mut state_sink)?;
             emitted_range_baseline = true;
         }
@@ -385,6 +431,9 @@ impl ReplayBuilder {
         sink: &mut impl FnMut(StateRecord, &SemanticState) -> Result<()>,
     ) -> Result<()> {
         let state = self.engine.snapshot()?;
+        // Keep the warmed Ghostty engine, but forget emission history. The first
+        // ranged record must be a complete delta with dense state ID 0; carrying
+        // prefix hashes here would either suppress it or make it depend on omitted states.
         self.previous = None;
         self.previous_hash = None;
         self.state_count = 0;
@@ -476,7 +525,7 @@ impl ReplayBuilder {
 /// Returns an error for invalid source logs, existing artifacts, replay
 /// failures, serialization failures, or non-durable filesystem operations.
 pub fn index_session(session_directory: impl AsRef<Path>) -> Result<IndexOutcome> {
-    return index_session_range(session_directory, None, None);
+    return index_session_with_options(session_directory, IndexOptions::default());
 }
 
 /// Generate replay artifacts for a validated half-open source-time interval.
@@ -489,27 +538,106 @@ pub fn index_session_range(
     start_monotonic_ns: Option<u64>,
     end_monotonic_ns: Option<u64>,
 ) -> Result<IndexOutcome> {
+    return index_session_with_options(
+        session_directory,
+        IndexOptions {
+            start_monotonic_ns,
+            end_monotonic_ns,
+            ..IndexOptions::default()
+        },
+    );
+}
+
+/// Generate replay artifacts under explicit completion and retention policy.
+///
+/// # Errors
+///
+/// Returns an error for incomplete sources unless `live_snapshot` is enabled,
+/// invalid bounds, existing artifacts, replay failures, or artifact I/O.
+pub fn index_session_with_options(
+    session_directory: impl AsRef<Path>,
+    options: IndexOptions,
+) -> Result<IndexOutcome> {
     let session_directory = session_directory.as_ref();
+    let completion_exists = session_directory.join("completion.json").is_file();
+    if !completion_exists && !options.live_snapshot {
+        return Err(Error::SessionIncomplete {
+            session: session_directory.to_path_buf(),
+        });
+    }
+    let live_event_count = if !completion_exists {
+        // A successful status request is a durable actor boundary: all earlier
+        // buffered output is complete on disk before this process snapshots it.
+        // A crashed session has no socket, so fall back to its static valid prefix.
+        match request(session_directory, ControlCommand::Status) {
+            Ok(ControlData::Status { next_event_seq, .. }) => Some(next_event_seq),
+            Ok(_) => {
+                return Err(invalid_replay(
+                    "live status returned an unexpected control response",
+                ));
+            }
+            Err(error) => {
+                tracing::debug!(%error, "live snapshot has no responsive control boundary");
+                None
+            }
+        }
+    } else {
+        None
+    };
     let event_path = session_directory.join("events.jsonl");
-    let log = EventLog::read(&event_path)?;
+    let log = match live_event_count {
+        Some(event_count) => EventLog::read_prefix(&event_path, event_count)?,
+        None => EventLog::read(&event_path)?,
+    };
+    let source_complete = if completion_exists {
+        validate_completed_log(session_directory, &log)?;
+        true
+    } else {
+        false
+    };
     let final_monotonic_ns = log
         .events
         .last()
         .map_or(0, |record| return record.monotonic_ns);
-    let source_range =
-        resolve_source_range(start_monotonic_ns, end_monotonic_ns, final_monotonic_ns)?;
-    let destination = session_directory.join(derived_directory_name(source_range));
+    let source_range = resolve_source_range(
+        options.start_monotonic_ns,
+        options.end_monotonic_ns,
+        final_monotonic_ns,
+    )?;
+    let mut directory_name = derived_directory_name_for(source_range, options.state_selection);
+    if !source_complete {
+        let source_hash = log.events.last().map_or_else(
+            || return log.header.session_id.simple().to_string(),
+            |record| {
+                return record.hash.clone();
+            },
+        );
+        let short_hash = source_hash.get(..12).unwrap_or(source_hash.as_str());
+        write!(directory_name, "-snapshot-{short_hash}")
+            .map_err(|_| return invalid_replay("format live snapshot directory name"))?;
+    }
+    let destination = session_directory.join(directory_name);
     if destination.exists() {
         return Err(Error::ArtifactExists { path: destination });
     }
     let staging = session_directory.join(format!(".derived.{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
-    let result = write_index(&staging, &log, source_range).and_then(|artifacts| {
+    let result = write_index(
+        &staging,
+        &log,
+        source_range,
+        source_complete,
+        options.state_selection,
+    )
+    .and_then(|(artifacts, retained_state_count)| {
         commit_directory(session_directory, &staging, &destination)?;
         sync_directory(session_directory)?;
         return Ok(IndexOutcome {
             directory: destination.clone(),
-            state_count: artifacts.state_count,
+            state_count: retained_state_count,
+            semantic_state_count: artifacts.state_count,
+            source_complete,
+            state_selection: options.state_selection,
             final_state_hash: artifacts.final_state_hash,
         });
     });
@@ -527,9 +655,21 @@ pub fn index_session_range(
 
 /// Resolve the deterministic derived artifact directory for a source range.
 pub fn derived_directory_name(source_range: Option<SourceRange>) -> String {
+    return derived_directory_name_for(source_range, StateSelection::All);
+}
+
+/// Resolve a deterministic derived directory for a range and retention mode.
+pub fn derived_directory_name_for(
+    source_range: Option<SourceRange>,
+    state_selection: StateSelection,
+) -> String {
+    let base = match state_selection {
+        StateSelection::All => DERIVED_DIRECTORY.to_owned(),
+        StateSelection::Presented => format!("{DERIVED_DIRECTORY}-presented"),
+    };
     return source_range.map_or_else(
-        || return DERIVED_DIRECTORY.to_owned(),
-        |range| return format!("{DERIVED_DIRECTORY}-{}", range.artifact_suffix()),
+        || return base.clone(),
+        |range| return format!("{base}-{}", range.artifact_suffix()),
     );
 }
 
@@ -537,10 +677,36 @@ fn write_index(
     directory: &Path,
     log: &EventLog,
     source_range: Option<SourceRange>,
-) -> Result<ReplayArtifacts> {
-    let mut states = secure_writer(&directory.join("states.jsonl"))?;
+    source_complete: bool,
+    state_selection: StateSelection,
+) -> Result<(ReplayArtifacts, u64)> {
+    let states_path = directory.join("states.jsonl.zst");
+    let states_file = secure_file(&states_path)?;
+    let mut states = zstd::stream::write::Encoder::new(states_file, 3).map_err(|source| {
+        return Error::Filesystem {
+            path: states_path.clone(),
+            source,
+        };
+    })?;
+    states.include_checksum(true).map_err(|source| {
+        return Error::Filesystem {
+            path: states_path.clone(),
+            source,
+        };
+    })?;
     let mut index = secure_writer(&directory.join("state-index.jsonl"))?;
-    let artifacts = replay_with(log, source_range, |record, _| {
+    let mut retained_state_count = 0_u64;
+    let mut final_retained_state_hash = None;
+    let mut previous_retained_state = None;
+    let artifacts = replay_with(log, source_range, |mut record, state| {
+        if state_selection == StateSelection::Presented && !record.presented {
+            return Ok(());
+        }
+        if state_selection == StateSelection::Presented {
+            record.state_id = retained_state_count;
+            record.delta = state_delta(previous_retained_state.as_ref(), state);
+            previous_retained_state = Some(state.clone());
+        }
         write_json_line(&mut states, &record, directory)?;
         let entry = StateIndexEntry {
             state_id: record.state_id,
@@ -550,9 +716,25 @@ fn write_index(
             monotonic_ns: record.monotonic_ns,
             presented: record.presented,
         };
-        return write_json_line(&mut index, &entry, directory);
+        write_json_line(&mut index, &entry, directory)?;
+        final_retained_state_hash = Some(record.state_hash);
+        retained_state_count = retained_state_count
+            .checked_add(1)
+            .ok_or_else(|| return invalid_replay("retained semantic state count overflow"))?;
+        return Ok(());
     })?;
-    finish_writer(states, &directory.join("states.jsonl"))?;
+    let states_file = states.finish().map_err(|source| {
+        return Error::Filesystem {
+            path: states_path.clone(),
+            source,
+        };
+    })?;
+    states_file.sync_data().map_err(|source| {
+        return Error::Filesystem {
+            path: states_path.clone(),
+            source,
+        };
+    })?;
     finish_writer(index, &directory.join("state-index.jsonl"))?;
     write_secure(&directory.join("final.txt"), &artifacts.final_text)?;
     write_secure(&directory.join("final.vt"), &artifacts.final_vt)?;
@@ -562,11 +744,15 @@ fn write_index(
         session_id: log.header.session_id,
         source_event_hash: log.events.last().map(|record| return record.hash.clone()),
         source_range,
+        source_complete,
+        state_selection,
         ghostty_revision: GHOSTTY_REVISION.to_owned(),
-        state_count: artifacts.state_count,
+        state_count: retained_state_count,
+        semantic_state_count: artifacts.state_count,
         final_state_hash: artifacts.final_state_hash.clone(),
+        final_retained_state_hash,
         files: vec![
-            "states.jsonl".to_owned(),
+            "states.jsonl.zst".to_owned(),
             "state-index.jsonl".to_owned(),
             "final.txt".to_owned(),
             "final.vt".to_owned(),
@@ -577,7 +763,7 @@ fn write_index(
         .map_err(|source| return json_error(directory.join("manifest.json"), source))?;
     write_secure(&directory.join("manifest.json"), &manifest_bytes)?;
     sync_directory(directory)?;
-    return Ok(artifacts);
+    return Ok((artifacts, retained_state_count));
 }
 
 fn state_delta(previous: Option<&SemanticState>, current: &SemanticState) -> StateDelta {
@@ -635,11 +821,7 @@ fn cell_size(pixels: u16, cells: u16) -> u32 {
     return u32::from(pixels.checked_div(cells).unwrap_or(0).max(1));
 }
 
-fn write_json_line(
-    writer: &mut BufWriter<File>,
-    value: &impl Serialize,
-    path: &Path,
-) -> Result<()> {
+fn write_json_line(writer: &mut impl Write, value: &impl Serialize, path: &Path) -> Result<()> {
     serde_json::to_writer(&mut *writer, value)
         .map_err(|source| return json_error(path.to_path_buf(), source))?;
     return writer.write_all(b"\n").map_err(|source| {

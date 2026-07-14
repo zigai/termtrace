@@ -6,7 +6,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Error, Result, event::ByteString};
+use crate::{
+    Error, Result,
+    event::{ByteString, Event},
+    event_log::EventLog,
+};
 
 /// Session manifest format identifier.
 pub const SESSION_MANIFEST_FORMAT: &str = "termtrace-session";
@@ -180,4 +184,90 @@ pub fn read_manifest(session_directory: &Path) -> Result<SessionManifest> {
             source,
         };
     });
+}
+
+/// Read immutable completion facts from a completed session directory.
+///
+/// # Errors
+///
+/// Returns an error when the completion manifest cannot be read or decoded.
+pub fn read_completion(session_directory: &Path) -> Result<SessionCompletion> {
+    let path = session_directory.join("completion.json");
+    let bytes = fs_err::read(&path).map_err(|source| {
+        return Error::Filesystem {
+            path: path.clone(),
+            source,
+        };
+    })?;
+    let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
+    return serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+        let json_path = error.path().to_string();
+        let source = error.into_inner();
+        return Error::InvalidJson {
+            path,
+            json_path,
+            source,
+        };
+    });
+}
+
+/// Verify that an event log is the exact immutable log named by completion.
+///
+/// # Errors
+///
+/// Returns an error when completion is absent or disagrees with canonical data.
+pub fn validate_completed_log(
+    session_directory: &Path,
+    log: &EventLog,
+) -> Result<SessionCompletion> {
+    if !session_directory.join("completion.json").is_file() {
+        return Err(Error::SessionIncomplete {
+            session: session_directory.to_path_buf(),
+        });
+    }
+    let completion = read_completion(session_directory)?;
+    let final_event_hash = log.events.last().map(|record| return record.hash.as_str());
+    let event_count = u64::try_from(log.events.len()).unwrap_or(u64::MAX);
+    if completion.session_id != log.header.session_id {
+        return Err(Error::InvalidReplay {
+            reason: "completion session identifier does not match the event log".to_owned(),
+        });
+    }
+    if final_event_hash != Some(completion.final_event_hash.as_str()) {
+        return Err(Error::InvalidReplay {
+            reason: format!(
+                "completion final hash `{}` does not match event-log hash `{}`",
+                completion.final_event_hash,
+                final_event_hash.unwrap_or("<missing>")
+            ),
+        });
+    }
+    if completion.event_count != event_count {
+        return Err(Error::InvalidReplay {
+            reason: format!(
+                "completion event count {} does not match event-log count {event_count}",
+                completion.event_count
+            ),
+        });
+    }
+    let output_bytes = log.events.iter().try_fold(0_u64, |total, record| {
+        let bytes = match &record.event {
+            Event::Output { data } => u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX),
+            _ => 0,
+        };
+        return total.checked_add(bytes).ok_or_else(|| {
+            return Error::InvalidReplay {
+                reason: "canonical output byte count overflow".to_owned(),
+            };
+        });
+    })?;
+    if completion.output_bytes != output_bytes {
+        return Err(Error::InvalidReplay {
+            reason: format!(
+                "completion output byte count {} does not match event-log count {output_bytes}",
+                completion.output_bytes
+            ),
+        });
+    }
+    return Ok(completion);
 }

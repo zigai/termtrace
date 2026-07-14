@@ -16,7 +16,7 @@ use crate::{
     event::{EventLogHeader, EventRecord},
     event_log::RecoveryReport,
     inspection::WaitOutcome,
-    playback::PlaybackTiming,
+    playback::{PlaybackFailure, PlaybackTiming},
     replay::{ReplayManifest, StateIndexEntry, StateInspection, StateRecord},
     session::{SessionCompletion, SessionManifest},
     visual::{VideoMapEntry, VisualManifest},
@@ -53,6 +53,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<RecoveryReport>("recovery-report.schema.json")?,
         schema::<WaitOutcome>("wait-outcome.schema.json")?,
         schema::<PlaybackTiming>("playback-timing.schema.json")?,
+        schema::<PlaybackFailure>("playback-failure.schema.json")?,
     ]);
 }
 

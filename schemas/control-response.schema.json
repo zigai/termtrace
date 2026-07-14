@@ -53,6 +53,32 @@
             "next_event_seq"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Canonical position of an appended marker.",
+          "properties": {
+            "event_seq": {
+              "description": "Canonical event sequence containing the marker.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "marked",
+              "type": "string"
+            },
+            "label": {
+              "description": "Normalized marker label.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "label",
+            "event_seq"
+          ],
+          "type": "object"
         }
       ]
     },

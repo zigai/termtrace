@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::{Error, Result, event::ByteString};
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 1;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 2;
 /// Relative socket path inside a live session directory.
 pub const CONTROL_SOCKET_NAME: &str = "control.sock";
 /// Maximum encoded request or response size.
@@ -114,6 +114,13 @@ pub enum ControlData {
         output_bytes: u64,
         /// Next canonical event sequence number.
         next_event_seq: u64,
+    },
+    /// Canonical position of an appended marker.
+    Marked {
+        /// Normalized marker label.
+        label: String,
+        /// Canonical event sequence containing the marker.
+        event_seq: u64,
     },
 }
 

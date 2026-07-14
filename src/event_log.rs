@@ -331,7 +331,20 @@ impl EventLog {
     /// headers, truncation, non-contiguous ordering, time reversal, or a broken
     /// integrity chain.
     pub fn read(path: impl AsRef<Path>) -> Result<Self> {
-        return Ok(parse_event_log(path.as_ref(), false)?.log);
+        return Ok(parse_event_log(path.as_ref(), false, None)?.log);
+    }
+
+    /// Read and validate exactly the first `event_count` canonical events.
+    ///
+    /// Bytes after the requested complete prefix are deliberately ignored. This
+    /// lets a client consume the durable boundary reported by a live session
+    /// without racing a subsequent append.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the requested prefix is unavailable or invalid.
+    pub fn read_prefix(path: impl AsRef<Path>, event_count: u64) -> Result<Self> {
+        return Ok(parse_event_log(path.as_ref(), false, Some(event_count))?.log);
     }
 
     /// Copy the longest integrity-checked prefix to a new owner-only file.
@@ -350,7 +363,7 @@ impl EventLog {
     ) -> Result<RecoveryReport> {
         let source = source.as_ref();
         let recovered = recovered.as_ref();
-        let parsed = parse_event_log(source, true)?;
+        let parsed = parse_event_log(source, true, None)?;
         validate_parent_directory(recovered)?;
         copy_lines(source, recovered, parsed.valid_lines)?;
         let verified = Self::read(recovered)?;
@@ -445,7 +458,11 @@ impl LogValidation {
     }
 }
 
-fn parse_event_log(path: &Path, recover_tail: bool) -> Result<ParsedEventLog> {
+fn parse_event_log(
+    path: &Path,
+    recover_tail: bool,
+    event_limit: Option<u64>,
+) -> Result<ParsedEventLog> {
     let file = File::open(path).map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),
@@ -467,9 +484,24 @@ fn parse_event_log(path: &Path, recover_tail: bool) -> Result<ParsedEventLog> {
     let mut events = Vec::new();
     let mut line_number = 2_u64;
     let issue = loop {
+        if event_limit == Some(u64::try_from(events.len()).unwrap_or(u64::MAX)) {
+            break None;
+        }
         let line = match read_line(&mut reader, path, line_number) {
             Ok(Some(line)) => line,
-            Ok(None) => break None,
+            Ok(None) => {
+                if let Some(limit) = event_limit {
+                    return Err(invalid_log(
+                        path,
+                        line_number,
+                        format!(
+                            "requested {limit} prefix events, found only {}",
+                            events.len()
+                        ),
+                    ));
+                }
+                break None;
+            }
             Err(error) if recover_tail => break Some(recovery_issue(&error, line_number)),
             Err(error) => return Err(error),
         };
@@ -938,6 +970,24 @@ mod tests {
             &recording.events[0].event,
             Event::Output { data } if data.as_bytes() == b"\x1b[31m\xff"
         ));
+        let prefix = EventLog::read_prefix(&path, 2).expect("validated live prefix");
+        assert_eq!(prefix.events.len(), 2);
+        assert_eq!(prefix.pending_operations.len(), 1);
+        assert!(EventLog::read_prefix(&path, 4).is_err());
+        OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("append simulated concurrent tail")
+            .write_all(b"{\"partial\"")
+            .expect("write simulated concurrent tail");
+        assert_eq!(
+            EventLog::read_prefix(&path, 3)
+                .expect("prefix ignores later partial append")
+                .events
+                .len(),
+            3
+        );
+        assert!(EventLog::read(&path).is_err());
 
         let directory_mode = fs_err::metadata(path.parent().expect("parent"))
             .expect("directory metadata")

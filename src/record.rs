@@ -232,6 +232,9 @@ pub fn record(options: &RecordOptions) -> Result<RecordOutcome> {
 
 fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordOutcome> {
     let pty_size = validate_options(options)?;
+    // Resolve this once and pass the same owned path to provenance and spawn.
+    // Leaving cwd unset is not equivalent: portable-pty falls back to $HOME,
+    // which would make a wrapper command silently leave the caller's project.
     let working_directory = resolve_working_directory(options.working_directory.as_deref())?;
     create_session_directory(&options.output_directory)?;
     if let Some(profile) = &options.ghostty_profile {
@@ -1195,10 +1198,13 @@ fn execute_control_command(
                     "marker must contain 1 to 256 UTF-8 bytes",
                 ));
             }
-            event_log.append(Event::Marker {
+            let event_seq = event_log.append(Event::Marker {
                 label: label.to_owned(),
             })?;
-            return Ok(ControlData::Acknowledged);
+            return Ok(ControlData::Marked {
+                label: label.to_owned(),
+                event_seq,
+            });
         }
         ControlCommand::Stop => {
             apply_signal(spawned.pid, event_log, request_id, ProcessSignal::Terminate)?;

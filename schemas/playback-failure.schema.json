@@ -1,0 +1,16 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/playback-failure.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Structured failure handshake written before playback exits unsuccessfully.",
+  "properties": {
+    "message": {
+      "description": "Human-readable root cause from the playback process.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "message"
+  ],
+  "title": "PlaybackFailure",
+  "type": "object"
+}

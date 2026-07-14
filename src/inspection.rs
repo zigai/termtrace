@@ -16,6 +16,7 @@ use crate::{
     event_log::EventLog,
     ghostty_vt::SemanticState,
     replay::{StateInspection, StateSelector, inspect},
+    session::{SessionCompletion, validate_completed_log},
 };
 
 /// Successful raw-output wait evidence.
@@ -103,6 +104,31 @@ pub fn wait_for_output(
         }
         if Instant::now() >= deadline {
             return Err(wait_error("timed out before output matched"));
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Wait until a recording publishes completion and verify it against events.
+///
+/// # Errors
+///
+/// Returns an error when timeout expires or completion disagrees with the log.
+pub fn wait_for_completion(
+    session_directory: impl AsRef<Path>,
+    timeout: Duration,
+) -> Result<SessionCompletion> {
+    let session = session_directory.as_ref();
+    let event_path = session.join("events.jsonl");
+    let completion_path = session.join("completion.json");
+    let deadline = Instant::now() + timeout;
+    loop {
+        if completion_path.is_file() {
+            let log = EventLog::read(&event_path)?;
+            return validate_completed_log(session, &log);
+        }
+        if Instant::now() >= deadline {
+            return Err(wait_error("timed out before session completion"));
         }
         thread::sleep(Duration::from_millis(50));
     }

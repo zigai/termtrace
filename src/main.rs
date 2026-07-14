@@ -2,8 +2,9 @@
 
 use std::{
     ffi::OsString,
+    fmt::Write as _,
     io::{self, Write as _},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::ExitCode,
     result::Result as StdResult,
     time::Duration,
@@ -12,11 +13,13 @@ use std::{
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
-    control::{CONTROL_PROTOCOL_VERSION, ControlCommand, ProcessSignal, request},
+    Error,
+    control::{CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ProcessSignal, request},
     event::{ByteString, EVENT_LOG_VERSION},
     event_log::EventLog,
     geometry::{inherited_geometry, run_probe},
-    inspection::{inspect_session, state_text, wait_for_output},
+    ghostty_vt::RowState,
+    inspection::{inspect_session, state_text, wait_for_completion, wait_for_output},
     interop::export_asciicast,
     playback::{PlaybackOptions, playback},
     profile::{
@@ -24,13 +27,16 @@ use termtrace::{
         terminal_colors_for_profile,
     },
     record::{RecordOptions, record},
-    replay::{GHOSTTY_REVISION, STATE_FORMAT_VERSION, StateSelector, index_session_range},
+    replay::{
+        GHOSTTY_REVISION, IndexOptions, STATE_FORMAT_VERSION, StateSelection, StateSelector,
+        index_session_with_options,
+    },
     schema::write_all as write_schemas,
     session::{
         CaptureTarget, GeometryProvenance, GeometrySource, GhosttyVisualOverrides, SessionGeometry,
         read_manifest,
     },
-    timeline::parse_time_offset_ns,
+    timeline::{parse_time_offset_ns, resolve_source_selection},
     visual::{CaptureOptions, capture, probe_ghostty_geometry},
 };
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, registry, util::SubscriberInitExt};
@@ -58,7 +64,7 @@ enum Command {
     /// Verify that a live session control socket is responsive.
     Ping(SessionArgs),
     /// Print machine-readable live session status.
-    Status(SessionArgs),
+    Status(StatusArgs),
     /// Send text or file bytes to a live child PTY.
     Send(SendArgs),
     /// Resize a live child PTY.
@@ -68,7 +74,7 @@ enum Command {
     /// Add a marker to a live session timeline.
     Mark(MarkArgs),
     /// Request graceful termination of a live session child.
-    Stop(SessionArgs),
+    Stop(StopArgs),
     /// Replay canonical events and build semantic state artifacts.
     Index(IndexArgs),
     /// Capture actual Ghostty pixels on a private headless display.
@@ -121,6 +127,7 @@ struct RecoverArgs {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum InspectFormat {
     Json,
+    JsonCompact,
     Text,
 }
 
@@ -146,6 +153,9 @@ struct InspectArgs {
     /// Output representation.
     #[arg(long, value_enum, default_value_t = InspectFormat::Json)]
     format: InspectFormat,
+    /// Restrict output to one zero-based row; JSON includes complete cell data.
+    #[arg(long)]
+    row: Option<u16>,
 }
 
 #[derive(Debug, Args)]
@@ -166,27 +176,36 @@ struct CaptureArgs {
     /// Indexed source session directory.
     #[arg(long)]
     session: PathBuf,
-    /// Capture width; defaults to the recorded viewport or 1280 pixels.
+    /// Whole capture viewport width; defaults to recorded viewport or 1280.
     #[arg(long, requires = "height")]
     width: Option<u16>,
-    /// Capture height; defaults to the recorded viewport or 720 pixels.
+    /// Whole capture viewport height; defaults to recorded viewport or 720.
     #[arg(long, requires = "width")]
     height: Option<u16>,
     /// Video frame rate; native capture currently requires 24.
     #[arg(long, default_value_t = 24)]
     fps: u16,
+    /// Use a matching index containing only terminal-presentable states.
+    #[arg(long)]
+    presented_only: bool,
     #[command(flatten)]
     range: TimeRangeArgs,
 }
 
-#[derive(Clone, Copy, Debug, Default, Args)]
+#[derive(Clone, Debug, Default, Args)]
 struct TimeRangeArgs {
     /// Inclusive source offset, such as `90s`, `2m`, or `00:01:30.5`.
-    #[arg(long = "from", value_name = "OFFSET", value_parser = parse_time_offset_ns)]
+    #[arg(long = "from", value_name = "OFFSET", value_parser = parse_time_offset_ns, conflicts_with = "from_marker")]
     start_monotonic_ns: Option<u64>,
+    /// Inclusive source marker; the label must occur exactly once.
+    #[arg(long, value_name = "LABEL", conflicts_with = "start_monotonic_ns")]
+    from_marker: Option<String>,
     /// Exclusive source offset, in the same format as `--from`.
-    #[arg(long = "to", value_name = "OFFSET", value_parser = parse_time_offset_ns)]
+    #[arg(long = "to", value_name = "OFFSET", value_parser = parse_time_offset_ns, conflicts_with = "to_marker")]
     end_monotonic_ns: Option<u64>,
+    /// Exclusive source marker; the label must occur exactly once.
+    #[arg(long, value_name = "LABEL", conflicts_with = "end_monotonic_ns")]
+    to_marker: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -194,6 +213,12 @@ struct IndexArgs {
     /// Source session directory.
     #[arg(long)]
     session: PathBuf,
+    /// Index a hash-addressed prefix when the recording is still active.
+    #[arg(long)]
+    live_snapshot: bool,
+    /// Retain only states eligible for native terminal presentation.
+    #[arg(long)]
+    presented_only: bool,
     #[command(flatten)]
     range: TimeRangeArgs,
 }
@@ -213,6 +238,9 @@ struct PlaybackArgs {
     /// Playback clock handshake path.
     #[arg(long)]
     timing_file: PathBuf,
+    /// Structured failure handshake path.
+    #[arg(long)]
+    error_file: PathBuf,
     /// Final-frame readiness path.
     #[arg(long)]
     ready_file: PathBuf,
@@ -235,6 +263,32 @@ struct SessionArgs {
     /// Live session directory containing `control.sock`.
     #[arg(long)]
     session: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct StatusArgs {
+    /// Session directory containing a live control socket or completion manifest.
+    #[arg(long)]
+    session: PathBuf,
+    /// Wait for durable completion instead of returning live counters.
+    #[arg(long)]
+    wait_complete: bool,
+    /// Maximum completion wait in milliseconds.
+    #[arg(long, default_value_t = 30_000)]
+    timeout_ms: u64,
+}
+
+#[derive(Debug, Args)]
+struct StopArgs {
+    /// Live session directory containing `control.sock`.
+    #[arg(long)]
+    session: PathBuf,
+    /// Wait for and validate durable completion after stop is acknowledged.
+    #[arg(long)]
+    wait: bool,
+    /// Maximum completion wait in milliseconds.
+    #[arg(long, default_value_t = 30_000)]
+    timeout_ms: u64,
 }
 
 #[derive(Debug, Args)]
@@ -422,18 +476,15 @@ fn main() -> Result<ExitCode> {
 fn dispatch(command: Command) -> Result<ExitCode> {
     match command {
         Command::Version => {
-            println!("termtrace {}", env!("CARGO_PKG_VERSION"));
-            println!("libghostty-vt {GHOSTTY_REVISION}");
-            println!("event-log v{EVENT_LOG_VERSION}");
-            println!("state-format v{STATE_FORMAT_VERSION}");
-            println!("control-protocol v{CONTROL_PROTOCOL_VERSION}");
-            return Ok(ExitCode::SUCCESS);
+            return write_stdout(format!(
+                "termtrace {}\nbuild {}\nlibghostty-vt {GHOSTTY_REVISION}\nevent-log v{EVENT_LOG_VERSION}\nstate-format v{STATE_FORMAT_VERSION}\ncontrol-protocol v{CONTROL_PROTOCOL_VERSION}\n",
+                env!("CARGO_PKG_VERSION"),
+                env!("TERMTRACE_BUILD_REVISION")
+            ));
         }
         Command::Record(arguments) => return run_record(arguments),
         Command::Ping(arguments) => return run_control(arguments.session, ControlCommand::Ping),
-        Command::Status(arguments) => {
-            return run_control(arguments.session, ControlCommand::Status);
-        }
+        Command::Status(arguments) => return run_status(arguments),
         Command::Send(arguments) => return run_send(arguments),
         Command::Resize(arguments) => return run_resize(arguments),
         Command::Signal(arguments) => {
@@ -452,7 +503,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
                 },
             );
         }
-        Command::Stop(arguments) => return run_control(arguments.session, ControlCommand::Stop),
+        Command::Stop(arguments) => return run_stop(arguments),
         Command::Index(arguments) => return run_index(arguments),
         Command::Capture(arguments) => return run_capture(arguments),
         Command::Playback(arguments) => return run_playback(arguments),
@@ -472,23 +523,37 @@ fn dispatch(command: Command) -> Result<ExitCode> {
 }
 
 fn run_index(arguments: IndexArgs) -> Result<ExitCode> {
-    let outcome = index_session_range(
+    if !arguments.live_snapshot && !arguments.session.join("completion.json").is_file() {
+        return Err(Error::SessionIncomplete {
+            session: arguments.session,
+        }
+        .into());
+    }
+    let (start_monotonic_ns, end_monotonic_ns) =
+        resolve_cli_range(&arguments.session, &arguments.range)?;
+    let state_selection = selection(arguments.presented_only);
+    let outcome = index_session_with_options(
         arguments.session,
-        arguments.range.start_monotonic_ns,
-        arguments.range.end_monotonic_ns,
+        IndexOptions {
+            start_monotonic_ns,
+            end_monotonic_ns,
+            live_snapshot: arguments.live_snapshot,
+            state_selection,
+        },
     )?;
-    println!(
-        "{}",
-        serde_json::json!({
-            "directory": outcome.directory,
-            "state_count": outcome.state_count,
-            "final_state_hash": outcome.final_state_hash,
-        })
-    );
-    return Ok(ExitCode::SUCCESS);
+    return write_json_line(&serde_json::json!({
+        "directory": outcome.directory,
+        "state_count": outcome.state_count,
+        "semantic_state_count": outcome.semantic_state_count,
+        "source_complete": outcome.source_complete,
+        "state_selection": outcome.state_selection,
+        "final_state_hash": outcome.final_state_hash,
+    }));
 }
 
 fn run_capture(arguments: CaptureArgs) -> Result<ExitCode> {
+    let (start_monotonic_ns, end_monotonic_ns) =
+        resolve_cli_range(&arguments.session, &arguments.range)?;
     let target = match (arguments.width, arguments.height) {
         (Some(width), Some(height)) => CaptureTarget { width, height },
         (None, None) => {
@@ -512,24 +577,22 @@ fn run_capture(arguments: CaptureArgs) -> Result<ExitCode> {
         width: target.width,
         height: target.height,
         fps: arguments.fps,
-        start_monotonic_ns: arguments.range.start_monotonic_ns,
-        end_monotonic_ns: arguments.range.end_monotonic_ns,
+        start_monotonic_ns,
+        end_monotonic_ns,
+        state_selection: selection(arguments.presented_only),
     })?;
-    println!(
-        "{}",
-        serde_json::json!({
-            "directory": outcome.directory,
-            "video": outcome.video,
-            "screenshot": outcome.screenshot,
-        })
-    );
-    return Ok(ExitCode::SUCCESS);
+    return write_json_line(&serde_json::json!({
+        "directory": outcome.directory,
+        "video": outcome.video,
+        "screenshot": outcome.screenshot,
+    }));
 }
 
 fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> {
     playback(&PlaybackOptions {
         session_directory: arguments.session,
         timing_file: arguments.timing_file,
+        error_file: arguments.error_file,
         ready_file: arguments.ready_file,
         start_delay: Duration::from_millis(arguments.start_delay_ms),
         final_hold: Duration::from_millis(arguments.final_hold_ms),
@@ -552,14 +615,49 @@ fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
         }
     };
     let inspection = inspect_session(arguments.session, selector)?;
-    match arguments.format {
-        InspectFormat::Json => println!(
-            "{}",
-            serde_json::to_string_pretty(&inspection).into_diagnostic()?
-        ),
-        InspectFormat::Text => println!("{}", state_text(&inspection.state)),
+    if let Some(row_number) = arguments.row {
+        let row = inspection
+            .state
+            .grid
+            .iter()
+            .find(|row| return row.row == row_number)
+            .ok_or_else(|| miette::miette!("semantic row {row_number} does not exist"))?;
+        let record = serde_json::json!({
+            "state_id": inspection.record.state_id,
+            "event_seq": inspection.record.event_seq,
+            "event_byte_offset": inspection.record.event_byte_offset,
+            "monotonic_ns": inspection.record.monotonic_ns,
+            "state_hash": inspection.record.state_hash,
+            "presented": inspection.record.presented,
+        });
+        return match arguments.format {
+            InspectFormat::Json => write_stdout(format!(
+                "{}\n",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "record": record,
+                    "row": row,
+                }))
+                .into_diagnostic()?
+            )),
+            InspectFormat::JsonCompact => write_json_line(&serde_json::json!({
+                "record": record,
+                "row": row,
+            })),
+            InspectFormat::Text => write_stdout(format!("{}\n", row_text(row))),
+        };
     }
-    return Ok(ExitCode::SUCCESS);
+    match arguments.format {
+        InspectFormat::Json => {
+            return write_stdout(format!(
+                "{}\n",
+                serde_json::to_string_pretty(&inspection).into_diagnostic()?
+            ));
+        }
+        InspectFormat::JsonCompact => return write_json_line(&inspection),
+        InspectFormat::Text => {
+            return write_stdout(format!("{}\n", state_text(&inspection.state)));
+        }
+    }
 }
 
 fn run_wait(arguments: WaitArgs) -> Result<ExitCode> {
@@ -568,30 +666,142 @@ fn run_wait(arguments: WaitArgs) -> Result<ExitCode> {
         arguments.text.as_bytes(),
         Duration::from_millis(arguments.timeout_ms),
     )?;
-    println!("{}", serde_json::to_string(&outcome).into_diagnostic()?);
-    return Ok(ExitCode::SUCCESS);
+    return write_json_line(&outcome);
 }
 
 fn run_recover(arguments: RecoverArgs) -> Result<ExitCode> {
     let report = EventLog::recover_prefix(arguments.event_log, arguments.out)?;
-    println!(
-        "{}",
+    return write_stdout(format!(
+        "{}\n",
         serde_json::to_string_pretty(&report).into_diagnostic()?
-    );
-    return Ok(ExitCode::SUCCESS);
+    ));
 }
 
 fn run_schemas(arguments: SchemaArgs) -> Result<ExitCode> {
+    let mut output = String::new();
     for path in write_schemas(arguments.out)? {
-        println!("{}", path.display());
+        writeln!(output, "{}", path.display()).into_diagnostic()?;
     }
-    return Ok(ExitCode::SUCCESS);
+    return write_stdout(output);
 }
 
 fn run_control(session: PathBuf, command: ControlCommand) -> Result<ExitCode> {
     let data = request(session, command)?;
-    println!("{}", serde_json::to_string(&data).into_diagnostic()?);
-    return Ok(ExitCode::SUCCESS);
+    return write_json_line(&data);
+}
+
+fn run_status(arguments: StatusArgs) -> Result<ExitCode> {
+    let completion_path = arguments.session.join("completion.json");
+    if arguments.wait_complete || completion_path.is_file() {
+        let completion = wait_for_completion(
+            &arguments.session,
+            Duration::from_millis(arguments.timeout_ms),
+        )?;
+        return write_json_line(&serde_json::json!({
+            "kind": "completed",
+            "completion": completion,
+        }));
+    }
+    return run_control(arguments.session, ControlCommand::Status);
+}
+
+fn run_stop(arguments: StopArgs) -> Result<ExitCode> {
+    if arguments.session.join("completion.json").is_file() {
+        let completion = wait_for_completion(&arguments.session, Duration::ZERO)?;
+        return write_json_line(&serde_json::json!({
+            "kind": "completed",
+            "completion": completion,
+        }));
+    }
+    let acknowledged = request(&arguments.session, ControlCommand::Stop)?;
+    if !arguments.wait {
+        return write_json_line(&acknowledged);
+    }
+    let completion = wait_for_completion(
+        &arguments.session,
+        Duration::from_millis(arguments.timeout_ms),
+    )?;
+    return write_json_line(&serde_json::json!({
+        "kind": "completed",
+        "completion": completion,
+    }));
+}
+
+fn resolve_cli_range(session: &Path, range: &TimeRangeArgs) -> Result<(Option<u64>, Option<u64>)> {
+    if range.from_marker.is_none() && range.to_marker.is_none() {
+        return Ok((range.start_monotonic_ns, range.end_monotonic_ns));
+    }
+    let event_path = session.join("events.jsonl");
+    let live_event_count = if !session.join("completion.json").is_file() {
+        match request(session, ControlCommand::Status) {
+            Ok(ControlData::Status { next_event_seq, .. }) => Some(next_event_seq),
+            Ok(_) => {
+                return Err(miette::miette!(
+                    "live status returned an unexpected response"
+                ));
+            }
+            Err(error) => {
+                tracing::debug!(%error, "marker selection has no responsive control boundary");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let log = match live_event_count {
+        Some(event_count) => EventLog::read_prefix(event_path, event_count)?,
+        None => EventLog::read(event_path)?,
+    };
+    let resolved = resolve_source_selection(
+        &log,
+        range.start_monotonic_ns,
+        range.end_monotonic_ns,
+        range.from_marker.as_deref(),
+        range.to_marker.as_deref(),
+    )?;
+    return Ok(resolved.map_or((None, None), |value| {
+        return (Some(value.start_monotonic_ns), Some(value.end_monotonic_ns));
+    }));
+}
+
+fn selection(presented_only: bool) -> StateSelection {
+    if presented_only {
+        return StateSelection::Presented;
+    }
+    return StateSelection::All;
+}
+
+fn row_text(row: &RowState) -> String {
+    let mut text = String::new();
+    for cell in &row.cells {
+        if cell.grapheme.is_empty() {
+            text.push(' ');
+        } else {
+            text.push_str(&cell.grapheme);
+        }
+    }
+    return text.trim_end().to_owned();
+}
+
+fn write_json_line(value: &impl serde::Serialize) -> Result<ExitCode> {
+    let mut encoded = serde_json::to_vec(value).into_diagnostic()?;
+    encoded.push(b'\n');
+    return write_stdout(encoded);
+}
+
+fn write_stdout(output: impl AsRef<[u8]>) -> Result<ExitCode> {
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    match stdout
+        .write_all(output.as_ref())
+        .and_then(|()| return stdout.flush())
+    {
+        Ok(()) => return Ok(ExitCode::SUCCESS),
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {
+            return Ok(ExitCode::SUCCESS);
+        }
+        Err(error) => return Err(error).into_diagnostic(),
+    }
 }
 
 fn run_send(arguments: SendArgs) -> Result<ExitCode> {

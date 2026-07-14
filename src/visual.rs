@@ -23,10 +23,15 @@ use crate::{
     },
     event_log::EventLog,
     geometry::TerminalGeometryReport,
-    playback::PlaybackTiming,
+    playback::{PlaybackFailure, PlaybackTiming},
     profile::{ResolvedGhosttyProfile, materialize_profile},
-    replay::{GHOSTTY_REVISION, ReplayManifest, StateIndexEntry, derived_directory_name},
-    session::{CaptureTarget, read_manifest},
+    replay::{
+        GHOSTTY_REVISION, ReplayManifest, STATE_FORMAT_VERSION, StateIndexEntry, StateSelection,
+        derived_directory_name_for,
+    },
+    session::{
+        CaptureTarget, GeometrySource, SessionGeometry, read_manifest, validate_completed_log,
+    },
     timeline::{SourceRange, resolve_source_range},
 };
 
@@ -48,6 +53,8 @@ pub struct CaptureOptions {
     pub start_monotonic_ns: Option<u64>,
     /// Optional exclusive source offset.
     pub end_monotonic_ns: Option<u64>,
+    /// Semantic index retention mode to consume.
+    pub state_selection: StateSelection,
 }
 
 /// Completed native capture.
@@ -94,6 +101,10 @@ pub struct VisualManifest {
     pub source_event_hash: Option<String>,
     /// Selected half-open source interval, absent for a full-session capture.
     pub source_range: Option<SourceRange>,
+    /// Semantic index retention mode used for frame mapping.
+    pub state_selection: StateSelection,
+    /// Parent-side Ghostty geometry preflight at the capture viewport.
+    pub geometry_report: TerminalGeometryReport,
     /// Video frame rate.
     pub fps: u16,
     /// Capture width.
@@ -136,7 +147,13 @@ struct DisplayLease {
 /// launch/exit failures, timeouts, probe mismatches, or artifact I/O failure.
 pub fn capture(options: &CaptureOptions) -> Result<CaptureOutcome> {
     validate_options(options)?;
+    if !options.session_directory.join("completion.json").is_file() {
+        return Err(Error::SessionIncomplete {
+            session: options.session_directory.clone(),
+        });
+    }
     let event_log = EventLog::read(options.session_directory.join("events.jsonl"))?;
+    validate_completed_log(&options.session_directory, &event_log)?;
     let final_monotonic_ns = event_log
         .events
         .last()
@@ -146,16 +163,25 @@ pub fn capture(options: &CaptureOptions) -> Result<CaptureOutcome> {
         options.end_monotonic_ns,
         final_monotonic_ns,
     )?;
-    let state_index = read_state_index(&options.session_directory, source_range)?;
+    // A range-specific directory name is not sufficient provenance. Verify the
+    // semantic index against the canonical log before using its hashes to build
+    // a video map, or renamed/stale artifacts could appear internally consistent.
+    let state_index = read_state_index(
+        &options.session_directory,
+        source_range,
+        options.state_selection,
+    )?;
     validate_replay_manifest(
         &options.session_directory,
         &event_log,
         &state_index,
         source_range,
+        options.state_selection,
     )?;
-    let destination = options
-        .session_directory
-        .join(visual_directory_name(source_range));
+    let destination = options.session_directory.join(visual_directory_name_for(
+        source_range,
+        options.state_selection,
+    ));
     if destination.exists() {
         return Err(Error::ArtifactExists { path: destination });
     }
@@ -238,8 +264,14 @@ fn probe_ghostty_geometry_staged(
     wait_for_x_socket(&lease, &mut xvfb, Duration::from_secs(5))?;
     let report_path = staging.join("geometry.json");
     let overrides = ghostty_overrides();
-    let mut ghostty =
-        spawn_geometry_probe(staging, &display, &report_path, &overrides, &profile_root)?;
+    let mut ghostty = spawn_geometry_probe(
+        staging,
+        &display,
+        &report_path,
+        &overrides,
+        &profile_root,
+        "ghostty",
+    )?;
     let report: TerminalGeometryReport =
         wait_for_json(&report_path, &mut ghostty, Duration::from_secs(20))?;
     wait_for_success(&mut ghostty, Duration::from_secs(5), staging)?;
@@ -346,6 +378,10 @@ fn capture_staged(
         });
     }
     write_secure(&staging.join("ghostty-config.txt"), &resolved_config)?;
+    let profile_root = match profile_root {
+        Some(path) => path,
+        None => materialize_profile(&staging.join("ghostty-profile"), &resolved_config)?,
+    };
     let ghostty_version =
         String::from_utf8_lossy(&command_output("ghostty", &["+version"])?).into();
     let ffmpeg_version_output = command_output("ffmpeg", &["-version"])?;
@@ -359,30 +395,61 @@ fn capture_staged(
     let display = format!(":{}", lease.number);
     let mut xvfb = spawn_xvfb(&lease, options.width, options.height, staging)?;
     wait_for_x_socket(&lease, &mut xvfb, Duration::from_secs(5))?;
-    let timing_file = staging.join("playback-timing.json");
-    let ready_file = staging.join("playback-ready");
+    let geometry_path = staging.join("geometry-preflight.json");
     let overrides = ghostty_overrides();
+    let mut geometry_probe = spawn_geometry_probe(
+        staging,
+        &display,
+        &geometry_path,
+        &overrides,
+        &profile_root,
+        "geometry-preflight",
+    )?;
+    let geometry_report: TerminalGeometryReport =
+        wait_for_json(&geometry_path, &mut geometry_probe, Duration::from_secs(20))?;
+    wait_for_success(&mut geometry_probe, Duration::from_secs(5), staging)?;
+    validate_capture_geometry(
+        session_manifest.geometry,
+        session_manifest.geometry_provenance.source,
+        geometry_report,
+        options.width,
+        options.height,
+    )?;
+    let timing_file = staging.join("playback-timing.json");
+    let error_file = staging.join("playback-error.json");
+    let ready_file = staging.join("playback-ready");
     let mut ghostty = spawn_ghostty(
         options,
         staging,
         &display,
         &timing_file,
+        &error_file,
         &ready_file,
         &overrides,
-        profile_root.as_deref(),
+        Some(&profile_root),
     )?;
-    let timing: PlaybackTiming =
-        wait_for_json(&timing_file, &mut ghostty, Duration::from_secs(20))?;
+    let timing: PlaybackTiming = wait_for_playback_handshake(
+        &timing_file,
+        &error_file,
+        &mut ghostty,
+        Duration::from_secs(20),
+    )?;
     if timing.source_range != source_range {
         return Err(Error::InvalidReplay {
             reason: "playback timing source range does not match the capture request".to_owned(),
         });
     }
+    // The query barrier proves terminal parsing is caught up, but GTK still has
+    // to present the surface to X11. This 200 ms startup margin is empirical; it
+    // is not part of the canonical replay clock or the selected source interval.
     thread::sleep(Duration::from_millis(200));
 
     let capture_started_unix_ns = unix_now_ns()?;
     let video_path = staging.join("session.mkv");
     let mut ffmpeg = spawn_video_ffmpeg(options, staging, &display, &video_path)?;
+    // Bound readiness by the interval played at native speed. Using full-session
+    // duration here would reintroduce pre-roll latency as a timeout even though
+    // playback already fast-forwarded it.
     let recording_duration = source_range.map_or_else(
         || {
             return event_log.events.last().map_or(Duration::ZERO, |event| {
@@ -415,13 +482,15 @@ fn capture_staged(
         source_range,
     )?;
     let manifest = VisualManifest {
-        version: 1,
+        version: 2,
         session_id: event_log.header.session_id,
         source_event_hash: event_log
             .events
             .last()
             .map(|event| return event.hash.clone()),
         source_range,
+        state_selection: options.state_selection,
+        geometry_report,
         fps: options.fps,
         width: options.width,
         height: options.height,
@@ -445,14 +514,12 @@ fn capture_staged(
             };
         })?;
     }
-    if let Some(profile_root) = profile_root {
-        fs_err::remove_dir_all(&profile_root).map_err(|source| {
-            return Error::Filesystem {
-                path: profile_root,
-                source,
-            };
-        })?;
-    }
+    fs_err::remove_dir_all(&profile_root).map_err(|source| {
+        return Error::Filesystem {
+            path: profile_root,
+            source,
+        };
+    })?;
     sync_directory(staging)?;
     drop(lease);
     return Ok(manifest);
@@ -467,11 +534,63 @@ fn validate_options(options: &CaptureOptions) -> Result<()> {
     return Ok(());
 }
 
+fn validate_capture_geometry(
+    expected: SessionGeometry,
+    source: GeometrySource,
+    reported: TerminalGeometryReport,
+    viewport_width: u16,
+    viewport_height: u16,
+) -> Result<()> {
+    let actual = reported.session_geometry()?;
+    if actual.cols != expected.cols || actual.rows != expected.rows {
+        return Err(Error::InvalidReplay {
+            reason: format!(
+                "capture viewport {viewport_width}x{viewport_height} renders {}x{} cells ({}x{} text pixels), but the recording requires {}x{} cells; re-record with `--geometry fit --viewport {viewport_width}x{viewport_height}` or choose a compatible viewport/profile",
+                actual.cols,
+                actual.rows,
+                actual.pixel_width,
+                actual.pixel_height,
+                expected.cols,
+                expected.rows
+            ),
+        });
+    }
+    if source == GeometrySource::GhosttyFit
+        && (reported.text_width != expected.pixel_width
+            || reported.text_height != expected.pixel_height)
+    {
+        return Err(Error::InvalidReplay {
+            reason: format!(
+                "capture viewport reproduces the {}x{} grid but its text area is {}x{} pixels instead of the fitted {}x{} pixels; use the recorded viewport and Ghostty profile",
+                expected.cols,
+                expected.rows,
+                reported.text_width,
+                reported.text_height,
+                expected.pixel_width,
+                expected.pixel_height
+            ),
+        });
+    }
+    return Ok(());
+}
+
 /// Resolve the deterministic visual artifact directory for a source range.
 pub fn visual_directory_name(source_range: Option<SourceRange>) -> String {
+    return visual_directory_name_for(source_range, StateSelection::All);
+}
+
+/// Resolve a deterministic visual directory for a range and index mode.
+pub fn visual_directory_name_for(
+    source_range: Option<SourceRange>,
+    state_selection: StateSelection,
+) -> String {
+    let base = match state_selection {
+        StateSelection::All => VISUAL_DIRECTORY.to_owned(),
+        StateSelection::Presented => format!("{VISUAL_DIRECTORY}-presented"),
+    };
     return source_range.map_or_else(
-        || return VISUAL_DIRECTORY.to_owned(),
-        |range| return format!("{VISUAL_DIRECTORY}-{}", range.artifact_suffix()),
+        || return base.clone(),
+        |range| return format!("{base}-{}", range.artifact_suffix()),
     );
 }
 
@@ -517,9 +636,12 @@ fn spawn_geometry_probe(
     report_path: &Path,
     overrides: &[String],
     profile_root: &Path,
+    log_stem: &str,
 ) -> Result<ManagedChild> {
-    let stdout = secure_file(&staging.join("ghostty.stdout.log"))?;
-    let stderr = secure_file(&staging.join("ghostty.stderr.log"))?;
+    let stdout_path = staging.join(format!("{log_stem}.stdout.log"));
+    let stderr_path = staging.join(format!("{log_stem}.stderr.log"));
+    let stdout = secure_file(&stdout_path)?;
+    let stderr = secure_file(&stderr_path)?;
     let executable = current_exe().map_err(|source| {
         return Error::Filesystem {
             path: PathBuf::from("<current-executable>"),
@@ -554,6 +676,7 @@ fn spawn_ghostty(
     staging: &Path,
     display: &str,
     timing_file: &Path,
+    error_file: &Path,
     ready_file: &Path,
     overrides: &[String],
     profile_root: Option<&Path>,
@@ -575,6 +698,8 @@ fn spawn_ghostty(
         .arg(&options.session_directory)
         .arg("--timing-file")
         .arg(timing_file)
+        .arg("--error-file")
+        .arg(error_file)
         .arg("--ready-file")
         .arg(ready_file)
         .arg("--start-delay-ms")
@@ -627,6 +752,8 @@ fn spawn_video_ffmpeg(
             "-i",
             display,
             "-an",
+            "-r",
+            &options.fps.to_string(),
             "-c:v",
             "libx264rgb",
             "-crf",
@@ -717,17 +844,22 @@ fn probe_video(path: &Path, fps: u16, width: u16, height: u16) -> Result<serde_j
         .and_then(serde_json::Value::as_str)
         .and_then(|value| return value.parse::<u64>().ok())
         .unwrap_or(0);
-    if stream
+    let actual_rate = stream
         .get("avg_frame_rate")
         .and_then(serde_json::Value::as_str)
-        != Some(&expected)
-        || stream.get("width").and_then(serde_json::Value::as_u64) != Some(u64::from(width))
-        || stream.get("height").and_then(serde_json::Value::as_u64) != Some(u64::from(height))
+        .unwrap_or("<missing>");
+    let actual_width = stream.get("width").and_then(serde_json::Value::as_u64);
+    let actual_height = stream.get("height").and_then(serde_json::Value::as_u64);
+    if actual_rate != expected
+        || actual_width != Some(u64::from(width))
+        || actual_height != Some(u64::from(height))
         || frame_count == 0
     {
-        return Err(invalid_probe(
-            "video frame-rate or frame-count probe failed",
-        ));
+        return Err(invalid_probe(&format!(
+            "video probe expected {width}x{height} at {expected} with frames, got {}x{} at {actual_rate} with {frame_count} frames",
+            actual_width.map_or_else(|| return "?".to_owned(), |value| return value.to_string()),
+            actual_height.map_or_else(|| return "?".to_owned(), |value| return value.to_string())
+        )));
     }
     return Ok(probe);
 }
@@ -760,9 +892,10 @@ fn probe_screenshot(path: &Path, width: u16, height: u16) -> Result<serde_json::
 fn read_state_index(
     session: &Path,
     source_range: Option<SourceRange>,
+    state_selection: StateSelection,
 ) -> Result<Vec<StateIndexEntry>> {
     let path = session
-        .join(derived_directory_name(source_range))
+        .join(derived_directory_name_for(source_range, state_selection))
         .join("state-index.jsonl");
     if !path.is_file() {
         let range_flags = source_range.map_or_else(String::new, |range| {
@@ -810,9 +943,10 @@ fn validate_replay_manifest(
     event_log: &EventLog,
     state_index: &[StateIndexEntry],
     source_range: Option<SourceRange>,
+    state_selection: StateSelection,
 ) -> Result<()> {
     let path = session
-        .join(derived_directory_name(source_range))
+        .join(derived_directory_name_for(source_range, state_selection))
         .join("manifest.json");
     let bytes = fs_err::read(&path).map_err(|source| {
         return Error::Filesystem {
@@ -827,18 +961,48 @@ fn validate_replay_manifest(
         .last()
         .map(|event| return event.hash.clone());
     let indexed_count = u64::try_from(state_index.len()).unwrap_or(u64::MAX);
-    let final_state_hash = state_index
+    let mut mismatches = Vec::new();
+    if manifest.version != STATE_FORMAT_VERSION {
+        mismatches.push("state format version");
+    }
+    if manifest.session_id != event_log.header.session_id {
+        mismatches.push("session identifier");
+    }
+    if manifest.source_event_hash != source_event_hash {
+        mismatches.push("source event hash");
+    }
+    if manifest.source_range != source_range {
+        mismatches.push("source range");
+    }
+    if !manifest.source_complete {
+        mismatches.push("completion status");
+    }
+    if manifest.state_selection != state_selection {
+        mismatches.push("state selection");
+    }
+    if manifest.ghostty_revision != GHOSTTY_REVISION {
+        mismatches.push("Ghostty revision");
+    }
+    if manifest.state_count != indexed_count {
+        mismatches.push("retained state count");
+    }
+    let final_retained_state_hash = state_index
         .last()
-        .map(|state| return state.state_hash.as_str());
-    if manifest.session_id != event_log.header.session_id
-        || manifest.source_event_hash != source_event_hash
-        || manifest.source_range != source_range
-        || manifest.ghostty_revision != GHOSTTY_REVISION
-        || manifest.state_count != indexed_count
-        || final_state_hash != Some(manifest.final_state_hash.as_str())
+        .map(|entry| return entry.state_hash.as_str());
+    if manifest.final_retained_state_hash.as_deref() != final_retained_state_hash {
+        mismatches.push("final retained state hash");
+    }
+    if state_selection == StateSelection::Presented
+        && state_index.iter().any(|entry| return !entry.presented)
     {
+        mismatches.push("presented-only contents");
+    }
+    if !mismatches.is_empty() {
         return Err(Error::InvalidReplay {
-            reason: "semantic index provenance does not match the capture request".to_owned(),
+            reason: format!(
+                "semantic index does not match the capture request ({}); remove the matching derived directory and run `termtrace index` after recording completion",
+                mismatches.join(", ")
+            ),
         });
     }
     return Ok(());
@@ -854,6 +1018,9 @@ fn write_video_map(
 ) -> Result<()> {
     let mut writer = secure_writer(path)?;
     for state in states {
+        // State timestamps stay absolute so callers can join this map back to the
+        // canonical event log. Only presentation math becomes range-relative;
+        // rewriting provenance timestamps would make two range maps incomparable.
         let relative_source_ns = match source_range {
             Some(range) if range.contains(state.monotonic_ns) => {
                 state.monotonic_ns - range.start_monotonic_ns
@@ -1008,6 +1175,43 @@ fn wait_for_json<T: for<'de> Deserialize<'de>>(
             return Err(Error::ExternalCommand {
                 program: process.name.to_owned(),
                 reason: format!("timed out waiting for JSON handshake `{}`", path.display()),
+            });
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn wait_for_playback_handshake(
+    timing_path: &Path,
+    error_path: &Path,
+    process: &mut ManagedChild,
+    timeout: Duration,
+) -> Result<PlaybackTiming> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if error_path.is_file()
+            && let Ok(failure) = read_json::<PlaybackFailure>(error_path)
+        {
+            return Err(Error::InvalidReplay {
+                reason: format!("playback child failed before capture: {}", failure.message),
+            });
+        }
+        if timing_path.is_file()
+            && let Ok(timing) = read_json(timing_path)
+        {
+            return Ok(timing);
+        }
+        if let Some(status) = process.try_wait()? {
+            return Err(status_error(process.name, status));
+        }
+        if Instant::now() >= deadline {
+            return Err(Error::ExternalCommand {
+                program: process.name.to_owned(),
+                reason: format!(
+                    "timed out waiting for playback timing `{}` or failure `{}`",
+                    timing_path.display(),
+                    error_path.display()
+                ),
             });
         }
         thread::sleep(Duration::from_millis(20));
@@ -1187,5 +1391,66 @@ fn finish_with_cleanup<T>(primary: Result<T>, cleanup: Result<()>) -> Result<T> 
                 cleanup: Box::new(cleanup),
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_geometry_error_reports_actual_and_recorded_grids() {
+        let error = validate_capture_geometry(
+            SessionGeometry {
+                cols: 180,
+                rows: 50,
+                pixel_width: 1620,
+                pixel_height: 900,
+            },
+            GeometrySource::Manual,
+            TerminalGeometryReport {
+                cols: 230,
+                rows: 56,
+                cell_width: 7,
+                cell_height: 16,
+                text_width: 1610,
+                text_height: 896,
+            },
+            1620,
+            900,
+        )
+        .expect_err("mismatched grid must fail");
+        let message = error.to_string();
+        assert!(message.contains("renders 230x56 cells"));
+        assert!(message.contains("requires 180x50 cells"));
+        assert!(message.contains("--geometry fit --viewport 1620x900"));
+    }
+
+    #[test]
+    fn playback_failure_handshake_preempts_timeout() {
+        let temporary = tempfile::TempDir::new().expect("temporary directory");
+        let timing_path = temporary.path().join("timing.json");
+        let error_path = temporary.path().join("playback-error.json");
+        write_secure(
+            &error_path,
+            &serde_json::to_vec(&PlaybackFailure {
+                message: "recorded 180x50 but rendered 230x56".to_owned(),
+            })
+            .expect("failure JSON"),
+        )
+        .expect("failure handshake");
+        let child = Command::new("/bin/sleep")
+            .arg("5")
+            .spawn()
+            .expect("sleep process");
+        let mut child = ManagedChild::new("playback-test", child);
+        let error = wait_for_playback_handshake(
+            &timing_path,
+            &error_path,
+            &mut child,
+            Duration::from_secs(1),
+        )
+        .expect_err("failure handshake must win");
+        assert!(error.to_string().contains("rendered 230x56"));
     }
 }
