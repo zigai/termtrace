@@ -1708,6 +1708,63 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
 }
 
 #[test]
+fn output_raw_reproduces_exact_canonical_child_bytes() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("raw-output-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf 'A\\033[31mB\\033[0m\\377C'"])
+        .assert()
+        .success();
+    let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
+    let expected = log
+        .events
+        .iter()
+        .filter_map(|record| {
+            return match &record.event {
+                Event::Output { data } => Some(data.as_bytes()),
+                _ => None,
+            };
+        })
+        .flatten()
+        .copied()
+        .collect::<Vec<_>>();
+
+    let mut output = Command::cargo_bin("termtrace").expect("binary should build");
+    output
+        .arg("output")
+        .arg(&session)
+        .arg("--raw")
+        .assert()
+        .success()
+        .stdout(predicate::eq(expected.clone()));
+
+    let output_events = log
+        .events
+        .iter()
+        .filter(|record| return matches!(record.event, Event::Output { .. }))
+        .map(|record| return record.seq)
+        .collect::<Vec<_>>();
+    let first = output_events.first().copied().expect("output event");
+    let mut bounded = Command::cargo_bin("termtrace").expect("binary should build");
+    bounded
+        .arg("output")
+        .arg(&session)
+        .args([
+            "--raw",
+            "--from-event-seq",
+            &first.to_string(),
+            "--to-event-seq",
+            &first.saturating_add(1).to_string(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::eq(expected));
+}
+
+#[test]
 fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("live-snapshot");

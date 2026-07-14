@@ -47,6 +47,8 @@ Use `termtrace diff SESSION --from-marker BEFORE --to-marker AFTER` after locati
 
 Use `termtrace explain SESSION --event-seq N --context 8` to attribute a suspicious region to exact output frames and nearby semantic states. Findings have stable codes, conservative confidence, token IDs, and explicit facts. Treat `clear_then_repaint_candidate` as semantic evidence only; it deliberately states that native pixel flicker was not established.
 
+Use `termtrace output SESSION --raw` only when a byte-exact child-output stream is required. It is output history, not the visible viewport; use `show` for the latter. The command validates completion and the event chain before emitting bytes, preserves invalid UTF-8 and controls, and treats a downstream closed pipe as normal completion.
+
 ## Complete and derive
 
 Use an explicit completion barrier before post-processing:

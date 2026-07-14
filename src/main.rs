@@ -134,6 +134,8 @@ enum Command {
     Diff(DiffArgs),
     /// Explain exact VT and semantic evidence around one state point.
     Explain(ExplainArgs),
+    /// Write exact canonical child PTY output bytes.
+    Output(OutputArgs),
     /// Wait for exact UTF-8 text in canonical PTY output.
     Wait(WaitArgs),
     /// Copy the longest integrity-checked event prefix without modifying source.
@@ -446,6 +448,23 @@ struct ExplainArgs {
     /// Output representation.
     #[arg(long, value_enum, default_value_t = ExplainFormat::Text)]
     format: ExplainFormat,
+}
+
+#[derive(Debug, Args)]
+struct OutputArgs {
+    /// Completed session name or canonical path.
+    session: PathBuf,
+    /// Write exact concatenated child PTY bytes without decoding.
+    #[arg(long, required = true)]
+    raw: bool,
+    /// Inclusive canonical event sequence.
+    #[arg(long, conflicts_with_all = ["start_monotonic_ns", "from_marker"])]
+    from_event_seq: Option<u64>,
+    /// Exclusive canonical event sequence.
+    #[arg(long, conflicts_with_all = ["end_monotonic_ns", "to_marker"])]
+    to_event_seq: Option<u64>,
+    #[command(flatten)]
+    range: TimeRangeArgs,
 }
 
 #[derive(Debug, Args)]
@@ -984,6 +1003,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Timeline(arguments) => return run_timeline(arguments),
         Command::Diff(arguments) => return run_diff(arguments),
         Command::Explain(arguments) => return run_explain(arguments),
+        Command::Output(arguments) => return run_output(arguments),
         Command::Wait(arguments) => return run_wait(arguments),
         Command::Recover(arguments) => return run_recover(arguments),
         Command::Schemas(arguments) => return run_schemas(arguments),
@@ -1356,6 +1376,40 @@ fn run_explain(arguments: ExplainArgs) -> Result<ExitCode> {
         )),
         ExplainFormat::JsonCompact => write_json_line(&report),
     };
+}
+
+fn run_output(arguments: OutputArgs) -> Result<ExitCode> {
+    let session = resolve_session_ref(arguments.session)?;
+    let log = EventLog::read(session.join("events.jsonl"))?;
+    validate_completed_log(&session, &log)?;
+    let time_range = resolve_source_selection(
+        &log,
+        arguments.range.start_monotonic_ns,
+        arguments.range.end_monotonic_ns,
+        arguments.range.from_marker.as_deref(),
+        arguments.range.to_marker.as_deref(),
+    )?;
+    let event_count = u64::try_from(log.events.len()).unwrap_or(u64::MAX);
+    let from_event = arguments.from_event_seq.unwrap_or(0);
+    let to_event = arguments.to_event_seq.unwrap_or(event_count);
+    if from_event > to_event || to_event > event_count {
+        return Err(miette::miette!(
+            "output event range must satisfy 0 <= FROM <= TO <= {event_count}"
+        ));
+    }
+    let mut output = Vec::new();
+    for record in &log.events {
+        if record.seq < from_event
+            || record.seq >= to_event
+            || time_range.is_some_and(|range| return !range.contains(record.monotonic_ns))
+        {
+            continue;
+        }
+        if let Event::Output { data } = &record.event {
+            output.extend_from_slice(data.as_bytes());
+        }
+    }
+    return write_stdout(output);
 }
 
 fn explain_text(report: &ExplainReport) -> Result<String> {

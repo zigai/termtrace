@@ -125,6 +125,8 @@ The socket disappears when the child exits. `stop --wait` does not return until 
 
 `explain SESSION --event-seq N` resolves the associated semantic state and reports exact framed bytes plus nearby semantic transitions. Targets also accept `--state`, `--at`, or `--marker`; `--context` selects the event radius. Stable findings currently identify full viewport clears, scrollback clears, hidden cell-changing transients, and clear/repaint candidates. Candidate facts explicitly avoid claiming native pixels flickered.
 
+`output SESSION --raw` validates completed evidence and writes only the exact concatenation of canonical child PTY output bytes. It performs no UTF-8 decoding, control stripping, newline insertion, or input synthesis. Half-open `--from-event-seq`/`--to-event-seq` bounds and the shared time/marker range selectors restrict whole canonical output events.
+
 ## Semantic replay
 
 ```bash
