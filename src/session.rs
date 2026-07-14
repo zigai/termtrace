@@ -21,7 +21,7 @@ use crate::{
 /// Session manifest format identifier.
 pub const SESSION_MANIFEST_FORMAT: &str = "termtrace-session";
 /// Session manifest schema version.
-pub const SESSION_MANIFEST_VERSION: u32 = 5;
+pub const SESSION_MANIFEST_VERSION: u32 = 6;
 /// Completion manifest format identifier.
 pub const SESSION_COMPLETION_FORMAT: &str = "termtrace-completion";
 /// Completion manifest schema version.
@@ -709,12 +709,13 @@ fn content_finding_code(error: &Error) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::{fs::Permissions, os::unix::fs::PermissionsExt as _};
 
     use tempfile::TempDir;
 
     use super::*;
-    use crate::provenance::{ExecutionProvenance, ProvenancePolicy};
+    use crate::provenance::{ProvenancePolicy, collect_execution_provenance};
     use crate::{
         event::{EventLogHeader, InputKind, InputSource},
         event_log::{EventLogWriter, SessionClock},
@@ -744,10 +745,12 @@ mod tests {
             geometry_provenance: GeometryProvenance::default(),
             ghostty_visual: None,
             child_environment: BTreeMap::new(),
-            execution_provenance: ExecutionProvenance {
-                policy: ProvenancePolicy::default(),
-                environment: BTreeMap::new(),
-            },
+            execution_provenance: collect_execution_provenance(
+                &ProvenancePolicy::default(),
+                &BTreeMap::new(),
+                &[OsString::from("/bin/true")],
+                Path::new("/"),
+            ),
             termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
             operating_system: "linux".to_owned(),
             architecture: "test".to_owned(),

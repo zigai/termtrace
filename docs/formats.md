@@ -20,6 +20,8 @@ Only these files describe execution truth. Inputs, resizes, and signals use inte
 
 Environment inventory entries distinguish `value`, `hash`, `name`, and `not_captured`. Value capture includes exact bytes plus BLAKE3; hash capture supports equality checks when a candidate value is available but does not make execution reproducible. Custom variable names are classified as potentially sensitive unless they belong to the conventional terminal/locale/timezone set.
 
+Execution provenance also records the requested and resolved executable paths, recorder binary/build and semantic-engine revisions, real/effective UID and GID, privileged identity state, process umask when exposed by the host, and runtime kernel identity. File content identity is explicit as `not_requested`, `captured`, `unresolved`, or `unavailable`. Reproducible policy hashes complete executable and recorder files plus a direct script argument for recognized interpreters; it does not scan arbitrary arguments and guess which files influenced execution.
+
 Control responses carry separate durable and observed event/hash/output boundaries. Read-only control traffic is not an event and cannot change the canonical hash. A marker is the explicit operation for placing an observation in the execution timeline.
 
 `requests.jsonl` supports persistent idempotency after bounded memory-cache eviction. It is not a canonical evidence root: readers may discard and reconstruct retry state from canonical events, and `termtrace verify` reports a missing, verified, or invalid journal without allowing journal damage to invalidate an otherwise complete event chain.

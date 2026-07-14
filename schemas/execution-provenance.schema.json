@@ -5,6 +5,31 @@
       "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
       "type": "string"
     },
+    "ContentIdentityStatus": {
+      "description": "Whether content identity was retained for a resolved file.",
+      "oneOf": [
+        {
+          "const": "not_requested",
+          "description": "The policy did not request file content hashing.",
+          "type": "string"
+        },
+        {
+          "const": "captured",
+          "description": "BLAKE3 was computed from the complete file.",
+          "type": "string"
+        },
+        {
+          "const": "unresolved",
+          "description": "The path could not be resolved to an executable or regular file.",
+          "type": "string"
+        },
+        {
+          "const": "unavailable",
+          "description": "A resolved file could not be read completely.",
+          "type": "string"
+        }
+      ]
+    },
     "EnvironmentProvenance": {
       "additionalProperties": false,
       "description": "Captured or inventoried environment provenance.",
@@ -44,6 +69,72 @@
         "capture",
         "present",
         "sensitivity"
+      ],
+      "type": "object"
+    },
+    "FileProvenance": {
+      "additionalProperties": false,
+      "description": "Exact requested path plus resolved content identity.",
+      "properties": {
+        "content_hash": {
+          "description": "Complete-file BLAKE3 under a policy that requests content identity.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "content_identity": {
+          "$ref": "#/$defs/ContentIdentityStatus",
+          "description": "Explicit content identity outcome."
+        },
+        "requested": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Bytes supplied by the caller or discovered as an interpreter argument."
+        },
+        "resolved": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Base64Bytes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Canonical resolved path bytes when resolution succeeded."
+        }
+      },
+      "required": [
+        "requested",
+        "content_identity"
+      ],
+      "type": "object"
+    },
+    "KernelProvenance": {
+      "additionalProperties": false,
+      "description": "Runtime kernel identity returned by the host.",
+      "properties": {
+        "machine": {
+          "description": "Runtime machine architecture.",
+          "type": "string"
+        },
+        "release": {
+          "description": "Kernel release.",
+          "type": "string"
+        },
+        "system": {
+          "description": "Operating-system name.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Kernel build/version string.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "system",
+        "release",
+        "version",
+        "machine"
       ],
       "type": "object"
     },
@@ -128,6 +219,96 @@
           "type": "string"
         }
       ]
+    },
+    "RecorderProvenance": {
+      "additionalProperties": false,
+      "description": "Recorder build and binary identity.",
+      "properties": {
+        "binary": {
+          "$ref": "#/$defs/FileProvenance",
+          "description": "Running recorder binary identity."
+        },
+        "semantic_engine_revision": {
+          "description": "Pinned semantic-engine revision.",
+          "type": "string"
+        },
+        "source_revision": {
+          "description": "Source revision embedded at build time.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Package version.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "source_revision",
+        "semantic_engine_revision",
+        "binary"
+      ],
+      "type": "object"
+    },
+    "RuntimeProvenance": {
+      "additionalProperties": false,
+      "description": "Recorder process identity and host context.",
+      "properties": {
+        "effective_gid": {
+          "description": "Effective group ID.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "effective_uid": {
+          "description": "Effective user ID.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "gid": {
+          "description": "Real group ID.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kernel": {
+          "$ref": "#/$defs/KernelProvenance",
+          "description": "Runtime kernel identity."
+        },
+        "privileged": {
+          "description": "Whether the effective identity is privileged root.",
+          "type": "boolean"
+        },
+        "recorder": {
+          "$ref": "#/$defs/RecorderProvenance",
+          "description": "Recorder build/binary identity."
+        },
+        "uid": {
+          "description": "Real user ID.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "umask": {
+          "description": "Process umask read without modifying it, when the host exposes it.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "uid",
+        "effective_uid",
+        "gid",
+        "effective_gid",
+        "privileged",
+        "kernel",
+        "recorder"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/execution-provenance.schema.json",
@@ -142,14 +323,35 @@
       "description": "Selected effective child-environment facts, ordered by name.",
       "type": "object"
     },
+    "executable": {
+      "$ref": "#/$defs/FileProvenance",
+      "description": "Resolved executable identity."
+    },
+    "invoked_file": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FileProvenance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Interpreter-invoked script when it can be identified without guessing."
+    },
     "policy": {
       "$ref": "#/$defs/ProvenancePolicy",
       "description": "Policy that selected the inventory."
+    },
+    "runtime": {
+      "$ref": "#/$defs/RuntimeProvenance",
+      "description": "Recorder, kernel, and local identity facts."
     }
   },
   "required": [
     "policy",
-    "environment"
+    "environment",
+    "executable",
+    "runtime"
   ],
   "title": "ExecutionProvenance",
   "type": "object"

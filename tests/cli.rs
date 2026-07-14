@@ -3,6 +3,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::{
+    ffi::OsString,
     fs::{File, Permissions},
     io::{BufRead as _, BufReader, Read as _, Write as _},
     os::unix::{ffi::OsStrExt as _, fs::PermissionsExt as _},
@@ -18,8 +19,8 @@ use termtrace::{
     event::{EVENT_LOG_VERSION, Event, InputSource, OperationStatus},
     event_log::EventLog,
     provenance::{
-        ExecutionProvenance, ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind,
-        ProvenanceSensitivity,
+        ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind, ProvenanceSensitivity,
+        collect_execution_provenance,
     },
     replay::{
         GHOSTTY_REVISION, IndexOptions, ReplayManifest, StateRecord, StateSelection,
@@ -1229,10 +1230,12 @@ fn playback_does_not_echo_terminal_query_responses() {
         geometry_provenance: GeometryProvenance::default(),
         ghostty_visual: None,
         child_environment: BTreeMap::new(),
-        execution_provenance: ExecutionProvenance {
-            policy: ProvenancePolicy::default(),
-            environment: BTreeMap::new(),
-        },
+        execution_provenance: collect_execution_provenance(
+            &ProvenancePolicy::default(),
+            &BTreeMap::new(),
+            &[OsString::from("/bin/true")],
+            Path::new("/"),
+        ),
         termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
         operating_system: "linux".to_owned(),
         architecture: "test".to_owned(),

@@ -502,6 +502,8 @@ fn write_session_manifest(
         execution_provenance: collect_execution_provenance(
             &options.provenance_policy,
             &child_environment,
+            &options.command,
+            working_directory,
         ),
         child_environment,
         termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),

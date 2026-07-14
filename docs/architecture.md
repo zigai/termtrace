@@ -39,6 +39,8 @@ The target process starts in the recorder's effective current directory unless `
 
 Execution environment collection is policy-driven. `minimal` retains recorder-owned terminal values and inventories common locale/timezone names, `reproducible` retains those effective values and hashes, and `custom` applies explicit per-variable value/hash/name/not-captured rules. The immutable manifest records both the selection policy and the resulting inventory; hashes support later equality checks but are not presented as reproducible values or confidentiality controls.
 
+Executable resolution happens against the same effective working directory and inherited `PATH` used for the child. Reproducible policy streams complete-file hashes for the resolved executable and recorder binary. A direct script is included only for a recognized interpreter with an unambiguous first file argument; unresolved, unreadable, and unrequested identities remain distinct. Runtime UID/GID, privilege, umask, kernel, build, and semantic-engine facts explain the execution host without using a hostname as identity.
+
 The pinned libghostty state machine runs live as the terminal host. Its write-PTY callback answers status, cursor, and mode queries; each exact query/response is logged before the response is delivered through a host input intent/result. This keeps detached TUIs functional without conflating generated responses with human or agent input.
 
 The event header pins the effective foreground, background, cursor color, and 256-color palette. Recording reads these from `ghostty +show-config` when available and records a configuration hash as provenance; pinned libghostty defaults are an explicit fallback. Replay never substitutes the current machine's theme.
