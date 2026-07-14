@@ -1,0 +1,110 @@
+{
+  "$defs": {
+    "ArtifactSourceRange": {
+      "additionalProperties": false,
+      "description": "Half-open canonical source range bound into an artifact catalog root.",
+      "properties": {
+        "end_monotonic_ns": {
+          "description": "Exclusive canonical monotonic end in nanoseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_monotonic_ns": {
+          "description": "Inclusive canonical monotonic start in nanoseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_monotonic_ns",
+        "end_monotonic_ns"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/artifact-root-record.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One hash-chained post-completion artifact-root entry.",
+  "properties": {
+    "artifact_directory": {
+      "description": "Artifact directory relative to the canonical session.",
+      "type": "string"
+    },
+    "derivation_id": {
+      "description": "Unique derivation identifier.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "derivation_type": {
+      "description": "Stable derivation family.",
+      "type": "string"
+    },
+    "format": {
+      "description": "Stable record format identifier.",
+      "type": "string"
+    },
+    "hash": {
+      "description": "Hash of this record body and prior hash.",
+      "type": "string"
+    },
+    "manifest_hash": {
+      "description": "BLAKE3 of the exact artifact manifest bytes.",
+      "type": "string"
+    },
+    "prev_hash": {
+      "description": "Prior catalog record hash, or 64 zeroes for the first entry.",
+      "type": "string"
+    },
+    "seq": {
+      "description": "Contiguous zero-based catalog sequence.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "session_manifest_hash": {
+      "description": "Session-manifest root committed by the event header.",
+      "type": "string"
+    },
+    "source_event_hash": {
+      "description": "Source event boundary used by the derivation.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_range": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArtifactSourceRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Selected half-open canonical source interval, if any."
+    },
+    "version": {
+      "description": "Record schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "seq",
+    "prev_hash",
+    "hash",
+    "derivation_id",
+    "derivation_type",
+    "artifact_directory",
+    "manifest_hash",
+    "session_manifest_hash"
+  ],
+  "title": "ArtifactRootRecord",
+  "type": "object"
+}

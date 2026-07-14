@@ -18,8 +18,9 @@ use uuid::Uuid;
 use crate::{
     Error, Result,
     artifact::{
+        ArtifactMember, ArtifactSourceRange, append_artifact_root, collect_artifact_members,
         commit_directory, create_private_directory, finish_writer, secure_file, secure_writer,
-        sync_directory, write_secure,
+        sync_directory, verify_artifact_members, write_secure,
     },
     event_log::EventLog,
     geometry::TerminalGeometryReport,
@@ -127,6 +128,8 @@ pub struct VisualManifest {
     pub video_probe: serde_json::Value,
     /// Parsed `FFprobe` screenshot evidence.
     pub screenshot_probe: serde_json::Value,
+    /// Whole-file integrity and classification for every payload member.
+    pub members: Vec<ArtifactMember>,
 }
 
 struct ManagedChild {
@@ -207,6 +210,30 @@ pub fn capture(options: &CaptureOptions) -> Result<CaptureOutcome> {
         });
         return finish_with_cleanup(Err(error), cleanup);
     }
+    let manifest_path = destination.join("manifest.json");
+    let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
+        return Error::Filesystem {
+            path: manifest_path,
+            source,
+        };
+    })?;
+    append_artifact_root(
+        &options.session_directory,
+        &destination,
+        "native_capture",
+        &manifest_bytes,
+        &event_log.header.session_manifest_hash,
+        event_log
+            .events
+            .last()
+            .map(|record| return record.hash.as_str()),
+        source_range.map(|range| {
+            return ArtifactSourceRange {
+                start_monotonic_ns: range.start_monotonic_ns,
+                end_monotonic_ns: range.end_monotonic_ns,
+            };
+        }),
+    )?;
     return Ok(outcome(destination));
 }
 
@@ -481,8 +508,23 @@ fn capture_staged(
         timing.replay_origin_unix_ns,
         source_range,
     )?;
+    for transient in [&timing_file, &ready_file] {
+        fs_err::remove_file(transient).map_err(|source| {
+            return Error::Filesystem {
+                path: transient.clone(),
+                source,
+            };
+        })?;
+    }
+    fs_err::remove_dir_all(&profile_root).map_err(|source| {
+        return Error::Filesystem {
+            path: profile_root,
+            source,
+        };
+    })?;
+    let members = collect_artifact_members(staging)?;
     let manifest = VisualManifest {
-        version: 2,
+        version: 3,
         session_id: event_log.header.session_id,
         source_event_hash: event_log
             .events
@@ -502,24 +544,12 @@ fn capture_staged(
         ghostty_overrides: overrides,
         video_probe,
         screenshot_probe,
+        members,
     };
     let encoded = serde_json::to_vec_pretty(&manifest)
         .map_err(|source| return json_error(staging.join("manifest.json"), source))?;
     write_secure(&staging.join("manifest.json"), &encoded)?;
-    for transient in [&timing_file, &ready_file] {
-        fs_err::remove_file(transient).map_err(|source| {
-            return Error::Filesystem {
-                path: transient.clone(),
-                source,
-            };
-        })?;
-    }
-    fs_err::remove_dir_all(&profile_root).map_err(|source| {
-        return Error::Filesystem {
-            path: profile_root,
-            source,
-        };
-    })?;
+    verify_artifact_members(staging, &manifest.members)?;
     sync_directory(staging)?;
     drop(lease);
     return Ok(manifest);
@@ -956,6 +986,12 @@ fn validate_replay_manifest(
     })?;
     let manifest: ReplayManifest =
         serde_json::from_slice(&bytes).map_err(|source| return json_error(path.clone(), source))?;
+    let artifact_directory = path.parent().ok_or_else(|| {
+        return Error::InvalidReplay {
+            reason: "semantic manifest has no artifact directory".to_owned(),
+        };
+    })?;
+    verify_artifact_members(artifact_directory, &manifest.members)?;
     let source_event_hash = event_log
         .events
         .last()

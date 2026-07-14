@@ -1,5 +1,68 @@
 {
   "$defs": {
+    "ArtifactMember": {
+      "additionalProperties": false,
+      "description": "Whole-file integrity metadata embedded in a derived manifest.",
+      "properties": {
+        "blake3": {
+          "description": "BLAKE3 of the complete file.",
+          "type": "string"
+        },
+        "byte_length": {
+          "description": "Exact byte length.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "media_type": {
+          "description": "Stable media type.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Normalized relative path below the artifact directory.",
+          "type": "string"
+        },
+        "relationship": {
+          "description": "Relationship to the derivation.",
+          "type": "string"
+        },
+        "schema_type": {
+          "description": "Public schema identifier, when the file is structured data.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sensitivity": {
+          "$ref": "#/$defs/ArtifactSensitivity",
+          "description": "Sensitivity classification."
+        }
+      },
+      "required": [
+        "path",
+        "byte_length",
+        "blake3",
+        "media_type",
+        "sensitivity",
+        "relationship"
+      ],
+      "type": "object"
+    },
+    "ArtifactSensitivity": {
+      "description": "Sensitivity classification for one derived artifact member.",
+      "oneOf": [
+        {
+          "const": "sensitive_terminal_data",
+          "description": "Member contains or may reveal terminal content.",
+          "type": "string"
+        },
+        {
+          "const": "operational_metadata",
+          "description": "Member contains only non-content operational metadata.",
+          "type": "string"
+        }
+      ]
+    },
     "SourceRange": {
       "description": "A non-empty half-open interval on the canonical monotonic timeline.",
       "properties": {
@@ -141,6 +204,13 @@
       "minimum": 0,
       "type": "integer"
     },
+    "members": {
+      "description": "Whole-file integrity and classification for every payload member.",
+      "items": {
+        "$ref": "#/$defs/ArtifactMember"
+      },
+      "type": "array"
+    },
     "replay_origin_unix_ns": {
       "description": "Playback event-time origin.",
       "format": "uint128",
@@ -209,7 +279,8 @@
     "ffmpeg_version",
     "ghostty_overrides",
     "video_probe",
-    "screenshot_probe"
+    "screenshot_probe",
+    "members"
   ],
   "title": "VisualManifest",
   "type": "object"

@@ -85,7 +85,9 @@ Replay requires and validates `completion.json`, checks the event hash chain, fe
 - `states.jsonl.zst` is a Zstandard-compressed JSONL stream containing cursor, modes, colors, active SGR style, OSC metadata, Ghostty dirty rows, and cell-level grapheme/style/color diffs.
 - `state-index.jsonl` maps state hashes to event sequence, byte offset, monotonic time, and presentation status.
 - `final.txt`, `final.vt`, and `final.html` come from Ghostty's formatter.
-- `manifest.json` pins the source event hash, schema version, Ghostty revision, artifact paths, and final state hash.
+- `manifest.json` pins the source event hash, schema version, Ghostty revision, final state hash, and whole-file length/BLAKE3/type/sensitivity metadata for every payload member.
+
+Completed semantic and native derivations are also chained in `artifact-roots.jsonl`, separately from the permanently closed event log. `termtrace verify /tmp/example.termtrace --level content --json` verifies the local catalog, manifests, and every payload member; it explicitly leaves artifact authenticity false without a trusted detached checkpoint.
 
 The derived directory is assembled privately and atomically renamed with no-replace semantics. Existing results are never overwritten implicitly.
 

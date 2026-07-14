@@ -15,8 +15,9 @@ use uuid::Uuid;
 use crate::{
     Error, Result,
     artifact::{
+        ArtifactMember, ArtifactSourceRange, append_artifact_root, collect_artifact_members,
         commit_directory, create_private_directory, finish_writer, secure_file, secure_writer,
-        sync_directory, write_secure,
+        sync_directory, verify_artifact_members, write_secure,
     },
     control::{ControlCommand, ControlData, request},
     event::{Event, OperationStatus},
@@ -32,7 +33,7 @@ use crate::{
 /// Pinned Ghostty source revision used by the semantic adapter.
 pub const GHOSTTY_REVISION: &str = "55a3e33ab26a23d75b274b23c7f76d837db00578";
 /// Derived artifact format version.
-pub const STATE_FORMAT_VERSION: u32 = 2;
+pub const STATE_FORMAT_VERSION: u32 = 3;
 /// Relative directory containing replay-derived artifacts.
 pub const DERIVED_DIRECTORY: &str = "derived";
 
@@ -199,8 +200,8 @@ pub struct ReplayManifest {
     pub final_state_hash: String,
     /// Hash of the final state retained in filtered artifact files.
     pub final_retained_state_hash: Option<String>,
-    /// Relative artifact paths.
-    pub files: Vec<String>,
+    /// Whole-file integrity and classification for every payload member.
+    pub members: Vec<ArtifactMember>,
 }
 
 /// Completed indexing paths.
@@ -631,7 +632,29 @@ pub fn index_session_with_options(
     )
     .and_then(|(artifacts, retained_state_count)| {
         commit_directory(session_directory, &staging, &destination)?;
-        sync_directory(session_directory)?;
+        let manifest_path = destination.join("manifest.json");
+        let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
+            return Error::Filesystem {
+                path: manifest_path,
+                source,
+            };
+        })?;
+        if source_complete {
+            append_artifact_root(
+                session_directory,
+                &destination,
+                "semantic_index",
+                &manifest_bytes,
+                &log.header.session_manifest_hash,
+                log.events.last().map(|record| return record.hash.as_str()),
+                source_range.map(|range| {
+                    return ArtifactSourceRange {
+                        start_monotonic_ns: range.start_monotonic_ns,
+                        end_monotonic_ns: range.end_monotonic_ns,
+                    };
+                }),
+            )?;
+        }
         return Ok(IndexOutcome {
             directory: destination.clone(),
             state_count: retained_state_count,
@@ -739,6 +762,7 @@ fn write_index(
     write_secure(&directory.join("final.txt"), &artifacts.final_text)?;
     write_secure(&directory.join("final.vt"), &artifacts.final_vt)?;
     write_secure(&directory.join("final.html"), &artifacts.final_html)?;
+    let members = collect_artifact_members(directory)?;
     let manifest = ReplayManifest {
         version: STATE_FORMAT_VERSION,
         session_id: log.header.session_id,
@@ -751,17 +775,12 @@ fn write_index(
         semantic_state_count: artifacts.state_count,
         final_state_hash: artifacts.final_state_hash.clone(),
         final_retained_state_hash,
-        files: vec![
-            "states.jsonl.zst".to_owned(),
-            "state-index.jsonl".to_owned(),
-            "final.txt".to_owned(),
-            "final.vt".to_owned(),
-            "final.html".to_owned(),
-        ],
+        members,
     };
     let manifest_bytes = serde_json::to_vec_pretty(&manifest)
         .map_err(|source| return json_error(directory.join("manifest.json"), source))?;
     write_secure(&directory.join("manifest.json"), &manifest_bytes)?;
+    verify_artifact_members(directory, &manifest.members)?;
     sync_directory(directory)?;
     return Ok((artifacts, retained_state_count));
 }

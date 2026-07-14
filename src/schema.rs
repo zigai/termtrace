@@ -12,6 +12,7 @@ use jsonschema::meta::is_valid;
 
 use crate::{
     Error, Result,
+    artifact::ArtifactRootRecord,
     control::{ControlRequest, ControlResponse},
     event::{EventLogHeader, EventRecord},
     event_log::RecoveryReport,
@@ -45,6 +46,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<SessionManifest>("session.schema.json")?,
         schema::<SessionCompletion>("completion.schema.json")?,
         schema::<VerificationReport>("verification-report.schema.json")?,
+        schema::<ArtifactRootRecord>("artifact-root-record.schema.json")?,
         schema::<StateRecord>("state-record.schema.json")?,
         schema::<StateIndexEntry>("state-index-entry.schema.json")?,
         schema::<StateInspection>("state-inspection.schema.json")?,

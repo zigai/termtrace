@@ -1,6 +1,6 @@
 //! Core types and services for recording and inspecting terminal sessions.
 
-mod artifact;
+pub mod artifact;
 
 pub mod control;
 pub mod error;

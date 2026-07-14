@@ -1,5 +1,68 @@
 {
   "$defs": {
+    "ArtifactMember": {
+      "additionalProperties": false,
+      "description": "Whole-file integrity metadata embedded in a derived manifest.",
+      "properties": {
+        "blake3": {
+          "description": "BLAKE3 of the complete file.",
+          "type": "string"
+        },
+        "byte_length": {
+          "description": "Exact byte length.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "media_type": {
+          "description": "Stable media type.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Normalized relative path below the artifact directory.",
+          "type": "string"
+        },
+        "relationship": {
+          "description": "Relationship to the derivation.",
+          "type": "string"
+        },
+        "schema_type": {
+          "description": "Public schema identifier, when the file is structured data.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sensitivity": {
+          "$ref": "#/$defs/ArtifactSensitivity",
+          "description": "Sensitivity classification."
+        }
+      },
+      "required": [
+        "path",
+        "byte_length",
+        "blake3",
+        "media_type",
+        "sensitivity",
+        "relationship"
+      ],
+      "type": "object"
+    },
+    "ArtifactSensitivity": {
+      "description": "Sensitivity classification for one derived artifact member.",
+      "oneOf": [
+        {
+          "const": "sensitive_terminal_data",
+          "description": "Member contains or may reveal terminal content.",
+          "type": "string"
+        },
+        {
+          "const": "operational_metadata",
+          "description": "Member contains only non-content operational metadata.",
+          "type": "string"
+        }
+      ]
+    },
     "SourceRange": {
       "description": "A non-empty half-open interval on the canonical monotonic timeline.",
       "properties": {
@@ -42,13 +105,6 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Manifest committed with derived replay artifacts.",
   "properties": {
-    "files": {
-      "description": "Relative artifact paths.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
     "final_retained_state_hash": {
       "description": "Hash of the final state retained in filtered artifact files.",
       "type": [
@@ -63,6 +119,13 @@
     "ghostty_revision": {
       "description": "Exact Ghostty source revision.",
       "type": "string"
+    },
+    "members": {
+      "description": "Whole-file integrity and classification for every payload member.",
+      "items": {
+        "$ref": "#/$defs/ArtifactMember"
+      },
+      "type": "array"
     },
     "semantic_state_count": {
       "description": "Number of distinct semantic states encountered during replay.",
@@ -123,7 +186,7 @@
     "state_count",
     "semantic_state_count",
     "final_state_hash",
-    "files"
+    "members"
   ],
   "title": "ReplayManifest",
   "type": "object"

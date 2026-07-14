@@ -701,6 +701,37 @@ fn index_replays_every_distinct_state_deterministically() {
         .success()
         .stdout(predicate::str::contains(r#""row":0"#));
 
+    validate_json_lines(
+        "artifact-root-record.schema.json",
+        &session.join("artifact-roots.jsonl"),
+    );
+    let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
+    verify
+        .arg("verify")
+        .arg(&session)
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""artifact_roots_verified":2"#))
+        .stdout(predicate::str::contains(
+            r#""artifact_authenticity_established":false"#,
+        ));
+
+    let tampered_member = session.join("derived/final.txt");
+    let mut contents = fs_err::read(&tampered_member).expect("derived member");
+    contents.extend_from_slice(b"tampered");
+    fs_err::write(&tampered_member, contents).expect("tamper derived member");
+    let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
+    verify
+        .arg("verify")
+        .arg(&session)
+        .arg("--json")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            r#""code":"artifact_integrity_invalid""#,
+        ));
+
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
         .args(["index", "--session"])

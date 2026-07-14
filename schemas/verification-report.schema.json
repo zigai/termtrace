@@ -50,6 +50,16 @@
   "additionalProperties": false,
   "description": "Machine-readable result from offline session verification.",
   "properties": {
+    "artifact_authenticity_established": {
+      "description": "Whether artifact authenticity was established from a trusted checkpoint.",
+      "type": "boolean"
+    },
+    "artifact_roots_verified": {
+      "description": "Number of locally cataloged artifact roots verified at content level.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
     "final_event_hash": {
       "description": "Final canonical event hash, when readable.",
       "type": [
@@ -108,6 +118,8 @@
     "session",
     "level",
     "valid",
+    "artifact_roots_verified",
+    "artifact_authenticity_established",
     "findings"
   ],
   "title": "VerificationReport",

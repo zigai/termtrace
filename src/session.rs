@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::{
     Error, Result,
+    artifact::verify_session_artifacts,
     event::{ByteString, Event},
     event_log::EventLog,
 };
@@ -74,6 +75,10 @@ pub struct VerificationReport {
     pub session_manifest_hash: Option<String>,
     /// Final canonical event hash, when readable.
     pub final_event_hash: Option<String>,
+    /// Number of locally cataloged artifact roots verified at content level.
+    pub artifact_roots_verified: u64,
+    /// Whether artifact authenticity was established from a trusted checkpoint.
+    pub artifact_authenticity_established: bool,
     /// Stable findings; empty when verification succeeds.
     pub findings: Vec<VerificationFinding>,
 }
@@ -271,6 +276,8 @@ pub fn verify_session(
         session_id: None,
         session_manifest_hash: None,
         final_event_hash: None,
+        artifact_roots_verified: 0,
+        artifact_authenticity_established: false,
         findings: Vec::new(),
     };
     let manifest_path = session_directory.join("session.json");
@@ -284,7 +291,8 @@ pub fn verify_session(
             return report;
         }
     };
-    report.session_manifest_hash = Some(manifest_hash(&manifest_bytes));
+    let actual_manifest_hash = manifest_hash(&manifest_bytes);
+    report.session_manifest_hash = Some(actual_manifest_hash.clone());
     let manifest = match read_manifest(session_directory) {
         Ok(manifest) => manifest,
         Err(error) => {
@@ -342,6 +350,20 @@ pub fn verify_session(
             message: error.to_string(),
         });
         return report;
+    }
+    match verify_session_artifacts(
+        session_directory,
+        &actual_manifest_hash,
+        report.final_event_hash.as_deref(),
+    ) {
+        Ok(count) => report.artifact_roots_verified = count,
+        Err(error) => {
+            report.findings.push(VerificationFinding {
+                code: "artifact_integrity_invalid".to_owned(),
+                message: error.to_string(),
+            });
+            return report;
+        }
     }
     match level {
         VerificationLevel::Structure | VerificationLevel::Content => report.valid = true,

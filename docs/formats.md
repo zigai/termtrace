@@ -26,7 +26,7 @@ A completed session must end in `Exit` and contain no pending mutation intent. R
 - `derived/states.jsonl.zst`: Zstandard-compressed JSONL distinct state deltas.
 - `derived/state-index.jsonl`: compact event/time/hash mappings.
 - `derived/final.txt`, `final.vt`, `final.html`: pinned Ghostty formatter output.
-- `derived/manifest.json`: source and engine provenance.
+- `derived/manifest.json`: source and engine provenance plus the relative path, exact length, whole-file BLAKE3, media/schema type, sensitivity, and relationship of every payload member.
 
 Ranged indexes have the same files under `derived-range-FROM_NS-TO_NS/`. Their manifest `source_range` is a non-empty half-open interval with inclusive `start_monotonic_ns` and exclusive `end_monotonic_ns`; full-session manifests use `null`. `source_complete` proves whether `completion.json` matched the indexed log. Explicit live snapshots are hash-addressed and remain ineligible for native capture. Presented-only indexes use `derived-presented…/`, record `state_selection: "presented"`, and retain both artifact and complete semantic state counts.
 
@@ -38,6 +38,10 @@ Ranged indexes have the same files under `derived-range-FROM_NS-TO_NS/`. Their m
 - `visual/manifest.json`: config hash, versions, launch overrides, clocks, parent-side geometry report, and media probes.
 - component logs and resolved `ghostty-config.txt`.
 
+Native manifests apply the same whole-file member contract, including media, maps, configuration, and diagnostic logs. Symlinks, devices, non-normalized paths, duplicate members, altered members, and files added after manifest construction fail verification.
+
 Ranged captures use `visual-range-FROM_NS-TO_NS/`. Their manifest repeats the exact `source_range`, and video-map timestamps stay on the absolute canonical timeline even though frame calculations are relative to range start. Full-session captures retain `visual/` and a `null` source range.
+
+Completed derivations are appended to the separately locked and synchronized `artifact-roots.jsonl` hash chain. Each root binds the exact manifest, session-manifest hash, source event hash, derivation identity/type, and relative directory. Post-processing never appends to the closed canonical event log. `termtrace verify` checks member self-consistency, source binding, and local catalog order. The local unsigned catalog is not authentication; `artifact_authenticity_established` remains false unless a later trusted detached checkpoint proves it.
 
 All session and derived files are owner-only. Schema validity does not imply trust: terminal content is untrusted and potentially sensitive.
