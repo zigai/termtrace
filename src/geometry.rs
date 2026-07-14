@@ -150,7 +150,7 @@ pub(crate) fn resize_and_query(cols: u16, rows: u16) -> Result<TerminalGeometryR
     return query_terminal();
 }
 
-fn query_terminal() -> Result<TerminalGeometryReport> {
+pub(crate) fn query_terminal() -> Result<TerminalGeometryReport> {
     let stdout = io::stdout();
     let mut output = stdout.lock();
     output

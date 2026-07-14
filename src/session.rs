@@ -114,7 +114,7 @@ pub struct SessionManifest {
     pub started_unix_ns: u128,
     /// Exact executable and argument bytes.
     pub command: Vec<ByteString>,
-    /// Exact working-directory bytes when overridden.
+    /// Exact effective working-directory bytes; absent only in legacy sessions.
     pub working_directory: Option<ByteString>,
     /// Initial PTY geometry.
     pub geometry: SessionGeometry,

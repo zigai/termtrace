@@ -5,7 +5,7 @@ use predicates::prelude::*;
 use std::{
     fs::Permissions,
     io::{Read as _, Write as _},
-    os::unix::fs::PermissionsExt as _,
+    os::unix::{ffi::OsStrExt as _, fs::PermissionsExt as _},
     path::Path,
     process::{Command as StdCommand, Stdio},
     thread,
@@ -17,8 +17,12 @@ use termtrace::{
     control::{ControlCommand, ControlRequest, send_request},
     event::{Event, InputSource, OperationStatus},
     event_log::EventLog,
-    replay::{GHOSTTY_REVISION, replay},
+    replay::{
+        GHOSTTY_REVISION, ReplayManifest, StateRecord, derived_directory_name, index_session_range,
+        replay,
+    },
     session::{CaptureTarget, GeometrySource, read_manifest},
+    timeline::SourceRange,
 };
 
 #[test]
@@ -71,6 +75,57 @@ fn record_mirrors_output_persists_events_and_propagates_exit_code() {
             width: 800,
             height: 600,
         })
+    );
+}
+
+#[test]
+fn record_inherits_and_persists_effective_working_directory() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let workspace = temporary.path().join("workspace");
+    fs_err::create_dir_all(&workspace).expect("workspace directory");
+    let inherited_session = temporary.path().join("inherited-session");
+    let mut inherited = Command::cargo_bin("termtrace").expect("binary should build");
+
+    inherited
+        .current_dir(&workspace)
+        .args(["record", "--no-input", "--out"])
+        .arg(&inherited_session)
+        .args(["--", "/bin/pwd"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(workspace.display().to_string()));
+
+    let inherited_manifest = read_manifest(&inherited_session).expect("inherited manifest");
+    assert_eq!(
+        inherited_manifest
+            .working_directory
+            .expect("effective working directory")
+            .as_bytes(),
+        workspace.as_os_str().as_bytes()
+    );
+
+    let override_directory = temporary.path().join("override");
+    fs_err::create_dir_all(&override_directory).expect("override directory");
+    let override_session = temporary.path().join("override-session");
+    let mut overridden = Command::cargo_bin("termtrace").expect("binary should build");
+    overridden
+        .current_dir(temporary.path())
+        .args(["record", "--no-input", "--cwd", "override", "--out"])
+        .arg(&override_session)
+        .args(["--", "/bin/pwd"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            override_directory.display().to_string(),
+        ));
+
+    let override_manifest = read_manifest(&override_session).expect("override manifest");
+    assert_eq!(
+        override_manifest
+            .working_directory
+            .expect("overridden working directory")
+            .as_bytes(),
+        override_directory.as_os_str().as_bytes()
     );
 }
 
@@ -269,10 +324,14 @@ fn live_control_drives_and_audits_a_detached_session() {
     assert!(!socket.exists(), "control socket should be removed on exit");
 
     let recording = EventLog::read(session.join("events.jsonl")).expect("valid event log");
-    assert_control_events(&recording);
+    assert_control_events(&recording, &session);
 }
 
-fn assert_control_events(recording: &EventLog) {
+#[allow(
+    clippy::expect_used,
+    reason = "test helper should stop when its recording fixture is invalid"
+)]
+fn assert_control_events(recording: &EventLog, session: &Path) {
     assert!(recording.events.iter().any(|record| matches!(
         &record.event,
         Event::InputIntent {
@@ -305,6 +364,61 @@ fn assert_control_events(recording: &EventLog) {
         Event::Marker { label } if label == "before-input"
     )));
     assert!(recording.pending_operations.is_empty());
+
+    let resize_operation = recording
+        .events
+        .iter()
+        .find_map(|record| match record.event {
+            Event::ResizeIntent {
+                operation_id,
+                cols: 100,
+                rows: 30,
+                ..
+            } => return Some(operation_id),
+            _ => return None,
+        })
+        .expect("resize intent");
+    let resize_result_time = recording
+        .events
+        .iter()
+        .find_map(|record| match record.event {
+            Event::ResizeResult {
+                operation_id,
+                status: OperationStatus::Applied,
+                ..
+            } if operation_id == resize_operation => return Some(record.monotonic_ns),
+            _ => return None,
+        })
+        .expect("resize result");
+    let ranged = index_session_range(session, Some(resize_result_time), None)
+        .expect("range crossing resize intent/result");
+    let ranged_states = fs_err::read_to_string(ranged.directory.join("states.jsonl"))
+        .expect("ranged resize states");
+    let ranged_states = ranged_states
+        .lines()
+        .map(|line| return serde_json::from_str::<StateRecord>(line).expect("state JSON"))
+        .collect::<Vec<_>>();
+    assert!(
+        ranged_states
+            .iter()
+            .any(|state| return state.delta.geometry == Some((100, 30)))
+    );
+    assert!(ranged_states.iter().all(|state| {
+        let Some(event_sequence) = state.event_seq else {
+            return true;
+        };
+        return recording.events.iter().any(|record| {
+            return record.seq == event_sequence
+                && matches!(
+                    record.event,
+                    Event::Output { .. }
+                        | Event::ResizeResult {
+                            status: OperationStatus::Applied,
+                            ..
+                        }
+                );
+        });
+    }));
 }
 
 #[test]
@@ -389,6 +503,152 @@ fn index_replays_every_distinct_state_deterministically() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("already exists"));
+}
+
+#[test]
+fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("ranged-replay");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            r"printf BEFORE; sleep 0.08; printf '\033[?2026hRANGE\033[?2026l'; sleep 0.08; printf AFTER",
+        ])
+        .assert()
+        .success();
+
+    let event_log = EventLog::read(session.join("events.jsonl")).expect("valid event log");
+    let range_start = output_timestamp_containing(&event_log, b"RANGE");
+    let range_end = output_timestamp_containing(&event_log, b"AFTER");
+    assert!(range_start < range_end, "fixture outputs must be separated");
+    let source_range = SourceRange {
+        start_monotonic_ns: range_start,
+        end_monotonic_ns: range_end,
+    };
+
+    let mut empty = Command::cargo_bin("termtrace").expect("binary should build");
+    empty
+        .args(["index", "--session"])
+        .arg(&session)
+        .args([
+            "--from",
+            &format!("{range_start}ns"),
+            "--to",
+            &format!("{range_start}ns"),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("must be non-empty"));
+
+    let mut index = Command::cargo_bin("termtrace").expect("binary should build");
+    index
+        .args(["index", "--session"])
+        .arg(&session)
+        .args([
+            "--from",
+            &format!("{range_start}ns"),
+            "--to",
+            &format!("{range_end}ns"),
+        ])
+        .assert()
+        .success();
+
+    let derived = session.join(derived_directory_name(Some(source_range)));
+    let manifest: ReplayManifest = serde_json::from_slice(
+        &fs_err::read(derived.join("manifest.json")).expect("range manifest"),
+    )
+    .expect("range manifest JSON");
+    assert_eq!(manifest.source_range, Some(source_range));
+    validate_json_file(
+        "replay-manifest.schema.json",
+        &derived.join("manifest.json"),
+    );
+    validate_json_lines("state-record.schema.json", &derived.join("states.jsonl"));
+    validate_json_lines(
+        "state-index-entry.schema.json",
+        &derived.join("state-index.jsonl"),
+    );
+    let states = fs_err::read_to_string(derived.join("states.jsonl"))
+        .expect("range states")
+        .lines()
+        .map(|line| return serde_json::from_str::<StateRecord>(line).expect("state JSON"))
+        .collect::<Vec<_>>();
+    assert!(!states.is_empty(), "range must include a baseline");
+    assert_eq!(states[0].state_id, 0);
+    assert_eq!(states[0].event_seq, None);
+    assert_eq!(states[0].monotonic_ns, range_start);
+    assert!(states.iter().all(|state| {
+        return state.monotonic_ns >= range_start && state.monotonic_ns < range_end;
+    }));
+    assert!(states.iter().any(|state| return !state.presented));
+    let final_text = fs_err::read_to_string(derived.join("final.txt")).expect("range final text");
+    assert!(final_text.contains("BEFORERANGE"));
+    assert!(!final_text.contains("AFTER"));
+
+    let mut full = Command::cargo_bin("termtrace").expect("binary should build");
+    full.args(["index", "--session"])
+        .arg(&session)
+        .assert()
+        .success();
+    assert!(session.join("derived").is_dir());
+    assert!(derived.is_dir(), "range index must coexist with full index");
+
+    let mut unmatched_capture = Command::cargo_bin("termtrace").expect("binary should build");
+    unmatched_capture
+        .args(["capture", "--session"])
+        .arg(&session)
+        .args([
+            "--from",
+            &format!("{}ns", range_start + 1),
+            "--to",
+            &format!("{range_end}ns"),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "matching semantic index is missing",
+        ));
+
+    let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
+    duplicate
+        .args(["index", "--session"])
+        .arg(&session)
+        .args([
+            "--from",
+            &format!("{range_start}ns"),
+            "--to",
+            &format!("{range_end}ns"),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already exists"));
+}
+
+#[allow(
+    clippy::expect_used,
+    reason = "test helper should stop when its recording fixture is invalid"
+)]
+fn output_timestamp_containing(event_log: &EventLog, needle: &[u8]) -> u64 {
+    return event_log
+        .events
+        .iter()
+        .find_map(|record| match &record.event {
+            Event::Output { data }
+                if data
+                    .as_bytes()
+                    .windows(needle.len())
+                    .any(|part| return part == needle) =>
+            {
+                return Some(record.monotonic_ns);
+            }
+            _ => return None,
+        })
+        .expect("fixture output event");
 }
 
 #[allow(

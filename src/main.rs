@@ -24,12 +24,13 @@ use termtrace::{
         terminal_colors_for_profile,
     },
     record::{RecordOptions, record},
-    replay::{GHOSTTY_REVISION, STATE_FORMAT_VERSION, StateSelector, index_session},
+    replay::{GHOSTTY_REVISION, STATE_FORMAT_VERSION, StateSelector, index_session_range},
     schema::write_all as write_schemas,
     session::{
         CaptureTarget, GeometryProvenance, GeometrySource, GhosttyVisualOverrides, SessionGeometry,
         read_manifest,
     },
+    timeline::parse_time_offset_ns,
     visual::{CaptureOptions, capture, probe_ghostty_geometry},
 };
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, registry, util::SubscriberInitExt};
@@ -69,7 +70,7 @@ enum Command {
     /// Request graceful termination of a live session child.
     Stop(SessionArgs),
     /// Replay canonical events and build semantic state artifacts.
-    Index(SessionArgs),
+    Index(IndexArgs),
     /// Capture actual Ghostty pixels on a private headless display.
     Capture(CaptureArgs),
     /// Internal timed event playback used as Ghostty's child process.
@@ -174,6 +175,27 @@ struct CaptureArgs {
     /// Video frame rate; native capture currently requires 24.
     #[arg(long, default_value_t = 24)]
     fps: u16,
+    #[command(flatten)]
+    range: TimeRangeArgs,
+}
+
+#[derive(Clone, Copy, Debug, Default, Args)]
+struct TimeRangeArgs {
+    /// Inclusive source offset, such as `90s`, `2m`, or `00:01:30.5`.
+    #[arg(long = "from", value_name = "OFFSET", value_parser = parse_time_offset_ns)]
+    start_monotonic_ns: Option<u64>,
+    /// Exclusive source offset, in the same format as `--from`.
+    #[arg(long = "to", value_name = "OFFSET", value_parser = parse_time_offset_ns)]
+    end_monotonic_ns: Option<u64>,
+}
+
+#[derive(Debug, Args)]
+struct IndexArgs {
+    /// Source session directory.
+    #[arg(long)]
+    session: PathBuf,
+    #[command(flatten)]
+    range: TimeRangeArgs,
 }
 
 #[derive(Debug, Args)]
@@ -200,6 +222,12 @@ struct PlaybackArgs {
     /// Final-frame hold duration.
     #[arg(long)]
     final_hold_ms: u64,
+    /// Inclusive source offset used by ranged native capture.
+    #[arg(long)]
+    from_ns: Option<u64>,
+    /// Exclusive source offset used by ranged native capture.
+    #[arg(long)]
+    to_ns: Option<u64>,
 }
 
 #[derive(Debug, Args)]
@@ -297,7 +325,7 @@ struct RecordArgs {
     #[arg(long)]
     out: PathBuf,
 
-    /// Child working directory.
+    /// Child working directory; defaults to the caller's current directory.
     #[arg(long)]
     cwd: Option<PathBuf>,
 
@@ -443,8 +471,12 @@ fn dispatch(command: Command) -> Result<ExitCode> {
     }
 }
 
-fn run_index(arguments: SessionArgs) -> Result<ExitCode> {
-    let outcome = index_session(arguments.session)?;
+fn run_index(arguments: IndexArgs) -> Result<ExitCode> {
+    let outcome = index_session_range(
+        arguments.session,
+        arguments.range.start_monotonic_ns,
+        arguments.range.end_monotonic_ns,
+    )?;
     println!(
         "{}",
         serde_json::json!({
@@ -480,6 +512,8 @@ fn run_capture(arguments: CaptureArgs) -> Result<ExitCode> {
         width: target.width,
         height: target.height,
         fps: arguments.fps,
+        start_monotonic_ns: arguments.range.start_monotonic_ns,
+        end_monotonic_ns: arguments.range.end_monotonic_ns,
     })?;
     println!(
         "{}",
@@ -499,6 +533,8 @@ fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> {
         ready_file: arguments.ready_file,
         start_delay: Duration::from_millis(arguments.start_delay_ms),
         final_hold: Duration::from_millis(arguments.final_hold_ms),
+        start_monotonic_ns: arguments.from_ns,
+        end_monotonic_ns: arguments.to_ns,
     })?;
     return Ok(ExitCode::SUCCESS);
 }

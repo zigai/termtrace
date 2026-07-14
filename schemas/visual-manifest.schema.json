@@ -1,4 +1,28 @@
 {
+  "$defs": {
+    "SourceRange": {
+      "description": "A non-empty half-open interval on the canonical monotonic timeline.",
+      "properties": {
+        "end_monotonic_ns": {
+          "description": "Exclusive source timestamp in nanoseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_monotonic_ns": {
+          "description": "Inclusive source timestamp in nanoseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_monotonic_ns",
+        "end_monotonic_ns"
+      ],
+      "type": "object"
+    }
+  },
   "$id": "https://github.com/zigai/termtrace/schemas/visual-manifest.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Provenance and probe evidence for native visual artifacts.",
@@ -62,6 +86,17 @@
         "string",
         "null"
       ]
+    },
+    "source_range": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SourceRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Selected half-open source interval, absent for a full-session capture."
     },
     "version": {
       "description": "Manifest schema version.",

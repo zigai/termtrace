@@ -3,7 +3,10 @@
 use std::{
     collections::BTreeMap,
     collections::HashMap,
-    env::consts::{ARCH, OS},
+    env::{
+        self,
+        consts::{ARCH, OS},
+    },
     ffi::OsString,
     fs::{DirBuilder, Permissions},
     io::{self, BufRead as _, BufReader, Error as IoError, ErrorKind, Read, Write},
@@ -229,6 +232,7 @@ pub fn record(options: &RecordOptions) -> Result<RecordOutcome> {
 
 fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordOutcome> {
     let pty_size = validate_options(options)?;
+    let working_directory = resolve_working_directory(options.working_directory.as_deref())?;
     create_session_directory(&options.output_directory)?;
     if let Some(profile) = &options.ghostty_profile {
         write_secure(
@@ -252,9 +256,15 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     .with_colors(options.colors.clone());
     let event_log_path = options.output_directory.join("events.jsonl");
     let mut event_log = EventLogWriter::create(&event_log_path, &header, clock)?;
-    write_session_manifest(options, pty_size, session_id, header.started_unix_ns)?;
+    write_session_manifest(
+        options,
+        &working_directory,
+        pty_size,
+        session_id,
+        header.started_unix_ns,
+    )?;
 
-    let mut spawned = spawn_command(options, pty_size)?;
+    let mut spawned = spawn_command(options, &working_directory, pty_size)?;
     if let Err(error) = event_log.append(Event::Lifecycle {
         lifecycle_kind: LifecycleKind::Spawned,
         pid: spawned.pid,
@@ -308,6 +318,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
 
 fn write_session_manifest(
     options: &RecordOptions,
+    working_directory: &Path,
     size: PtySize,
     session_id: Uuid,
     started_unix_ns: u128,
@@ -325,10 +336,7 @@ fn write_session_manifest(
             .iter()
             .map(|value| return ByteString::from(value.as_os_str().as_bytes()))
             .collect(),
-        working_directory: options
-            .working_directory
-            .as_deref()
-            .map(|path| return ByteString::from(path.as_os_str().as_bytes())),
+        working_directory: Some(ByteString::from(working_directory.as_os_str().as_bytes())),
         geometry: SessionGeometry {
             cols: size.cols,
             rows: size.rows,
@@ -396,7 +404,11 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
     });
 }
 
-fn spawn_command(options: &RecordOptions, pty_size: PtySize) -> Result<SpawnedCommand> {
+fn spawn_command(
+    options: &RecordOptions,
+    working_directory: &Path,
+    pty_size: PtySize,
+) -> Result<SpawnedCommand> {
     let pair = native_pty_system()
         .openpty(pty_size)
         .map_err(|error| return terminal_error("open PTY", error.to_string()))?;
@@ -407,9 +419,7 @@ fn spawn_command(options: &RecordOptions, pty_size: PtySize) -> Result<SpawnedCo
     command.args(arguments);
     command.env("TERM", &options.term);
     command.env("COLORTERM", "truecolor");
-    if let Some(directory) = options.working_directory.as_deref() {
-        command.cwd(directory);
-    }
+    command.cwd(working_directory);
 
     let reader = pair
         .master
@@ -432,6 +442,37 @@ fn spawn_command(options: &RecordOptions, pty_size: PtySize) -> Result<SpawnedCo
         child,
         pid,
     });
+}
+
+fn resolve_working_directory(requested: Option<&Path>) -> Result<PathBuf> {
+    let candidate = match requested {
+        Some(path) if path.is_absolute() => path.to_path_buf(),
+        requested => {
+            let current = env::current_dir().map_err(|source| {
+                return Error::Filesystem {
+                    path: PathBuf::from("."),
+                    source,
+                };
+            })?;
+            match requested {
+                Some(path) => current.join(path),
+                None => current,
+            }
+        }
+    };
+    let resolved = fs_err::canonicalize(&candidate).map_err(|source| {
+        return Error::Filesystem {
+            path: candidate,
+            source,
+        };
+    })?;
+    if !resolved.is_dir() {
+        return Err(terminal_error(
+            "resolve child working directory",
+            format!("`{}` is not a directory", resolved.display()),
+        ));
+    }
+    return Ok(resolved);
 }
 
 fn consume_runtime(

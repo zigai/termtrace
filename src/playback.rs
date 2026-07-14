@@ -17,18 +17,21 @@ use crate::{
     Error, Result,
     event::{Event, OperationStatus},
     event_log::EventLog,
-    geometry::resize_and_query,
+    geometry::{query_terminal, resize_and_query},
     session::{GeometrySource, read_manifest},
     terminal_mode::{RawTerminalGuard, TerminalInputDrain},
+    timeline::{SourceRange, resolve_source_range},
 };
 
 /// Clock handshake written before playback begins.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PlaybackTiming {
-    /// Wall-clock time corresponding to event monotonic time zero.
+    /// Wall-clock time corresponding to source-range start (or event time zero).
     pub replay_origin_unix_ns: u128,
     /// Playback speed multiplier (`1` for native timing).
     pub speed: u32,
+    /// Selected half-open source interval, absent for full-session playback.
+    pub source_range: Option<SourceRange>,
 }
 
 /// Configuration for timed playback inside Ghostty.
@@ -40,10 +43,14 @@ pub struct PlaybackOptions {
     pub timing_file: PathBuf,
     /// File created after all canonical events are emitted.
     pub ready_file: PathBuf,
-    /// Delay before event time zero.
+    /// Delay before source-range start (or event time zero for full playback).
     pub start_delay: Duration,
     /// Time to retain the final native frame.
     pub final_hold: Duration,
+    /// Optional inclusive source offset.
+    pub start_monotonic_ns: Option<u64>,
+    /// Optional exclusive source offset.
+    pub end_monotonic_ns: Option<u64>,
 }
 
 /// Replay canonical output and successful resizes to standard output.
@@ -57,12 +64,7 @@ pub fn playback(options: &PlaybackOptions) -> Result<()> {
     if let Err(error) = prepare_terminal_geometry(options) {
         return finish_with_cleanup(Err(error), terminal_mode.restore());
     }
-    let mut input_drain = match TerminalInputDrain::start(terminal_mode.is_active()) {
-        Ok(input_drain) => input_drain,
-        Err(e) => return finish_with_cleanup(Err(e), terminal_mode.restore()),
-    };
-    let result = playback_with_raw_input(options);
-    let result = finish_with_cleanup(result, input_drain.stop());
+    let result = playback_with_raw_input(options, terminal_mode.is_active());
     return finish_with_cleanup(result, terminal_mode.restore());
 }
 
@@ -95,8 +97,59 @@ fn prepare_terminal_geometry(options: &PlaybackOptions) -> Result<()> {
     return Ok(());
 }
 
-fn playback_with_raw_input(options: &PlaybackOptions) -> Result<()> {
+fn playback_with_raw_input(options: &PlaybackOptions, input_is_terminal: bool) -> Result<()> {
     let log = EventLog::read(options.session_directory.join("events.jsonl"))?;
+    let final_monotonic_ns = log
+        .events
+        .last()
+        .map_or(0, |record| return record.monotonic_ns);
+    let source_range = resolve_source_range(
+        options.start_monotonic_ns,
+        options.end_monotonic_ns,
+        final_monotonic_ns,
+    )?;
+    let mut resize_intents = HashMap::new();
+    if let Some(range) = source_range {
+        let manifest = read_manifest(&options.session_directory)?;
+        let mut expected_grid = (manifest.geometry.cols, manifest.geometry.rows);
+        {
+            let stdout = io::stdout();
+            let mut output = stdout.lock();
+            for record in log
+                .events
+                .iter()
+                .take_while(|record| return record.monotonic_ns < range.start_monotonic_ns)
+            {
+                emit_event(
+                    &mut output,
+                    &mut resize_intents,
+                    &record.event,
+                    Some(&mut expected_grid),
+                )?;
+            }
+        }
+        let reported = query_terminal()?;
+        if (reported.cols, reported.rows) != expected_grid {
+            return Err(Error::InvalidReplay {
+                reason: format!(
+                    "Ghostty fast-forward ended at {}x{} cells instead of canonical {}x{}",
+                    reported.cols, reported.rows, expected_grid.0, expected_grid.1
+                ),
+            });
+        }
+    }
+
+    let mut input_drain = TerminalInputDrain::start(input_is_terminal)?;
+    let result = timed_playback(options, &log, source_range, &mut resize_intents);
+    return finish_with_cleanup(result, input_drain.stop());
+}
+
+fn timed_playback(
+    options: &PlaybackOptions,
+    log: &EventLog,
+    source_range: Option<SourceRange>,
+    resize_intents: &mut HashMap<uuid::Uuid, (u16, u16)>,
+) -> Result<()> {
     let monotonic_origin = Instant::now() + options.start_delay;
     let replay_origin_unix_ns = unix_now_ns()?
         .checked_add(options.start_delay.as_nanos())
@@ -108,50 +161,75 @@ fn playback_with_raw_input(options: &PlaybackOptions) -> Result<()> {
     let timing = PlaybackTiming {
         replay_origin_unix_ns,
         speed: 1,
+        source_range,
     };
     write_create_new_json(&options.timing_file, &timing)?;
     sleep_until(monotonic_origin);
 
     let stdout = io::stdout();
     let mut output = stdout.lock();
-    let mut resize_intents = HashMap::new();
     for record in &log.events {
-        let target = monotonic_origin + Duration::from_nanos(record.monotonic_ns);
-        sleep_until(target);
-        match &record.event {
-            Event::Output { data } => {
-                output
-                    .write_all(data.as_bytes())
-                    .and_then(|()| return output.flush())
-                    .map_err(output_error)?;
-            }
-            Event::ResizeIntent {
-                operation_id,
-                cols,
-                rows,
-                ..
-            } => {
-                resize_intents.insert(*operation_id, (*cols, *rows));
-            }
-            Event::ResizeResult {
-                operation_id,
-                status: OperationStatus::Applied,
-                ..
-            } => {
-                if let Some((cols, rows)) = resize_intents.remove(operation_id) {
-                    write!(output, "\x1b[8;{rows};{cols}t")
-                        .and_then(|()| return output.flush())
-                        .map_err(output_error)?;
-                }
-            }
-            Event::ResizeResult { operation_id, .. } => {
-                resize_intents.remove(operation_id);
-            }
-            _ => {}
+        if source_range.is_some_and(|range| return record.monotonic_ns < range.start_monotonic_ns) {
+            continue;
         }
+        if source_range.is_some_and(|range| return record.monotonic_ns >= range.end_monotonic_ns) {
+            break;
+        }
+        let relative_ns = source_range.map_or(record.monotonic_ns, |range| {
+            return record.monotonic_ns.saturating_sub(range.start_monotonic_ns);
+        });
+        let target = monotonic_origin + Duration::from_nanos(relative_ns);
+        sleep_until(target);
+        emit_event(&mut output, resize_intents, &record.event, None)?;
+    }
+    if let Some(range) = source_range {
+        sleep_until(monotonic_origin + Duration::from_nanos(range.duration_ns()));
     }
     write_create_new(&options.ready_file, b"ready\n")?;
     thread::sleep(options.final_hold);
+    return Ok(());
+}
+
+fn emit_event(
+    output: &mut impl io::Write,
+    resize_intents: &mut HashMap<uuid::Uuid, (u16, u16)>,
+    event: &Event,
+    applied_grid: Option<&mut (u16, u16)>,
+) -> Result<()> {
+    match event {
+        Event::Output { data } => {
+            output
+                .write_all(data.as_bytes())
+                .and_then(|()| return output.flush())
+                .map_err(output_error)?;
+        }
+        Event::ResizeIntent {
+            operation_id,
+            cols,
+            rows,
+            ..
+        } => {
+            resize_intents.insert(*operation_id, (*cols, *rows));
+        }
+        Event::ResizeResult {
+            operation_id,
+            status: OperationStatus::Applied,
+            ..
+        } => {
+            if let Some((cols, rows)) = resize_intents.remove(operation_id) {
+                write!(output, "\x1b[8;{rows};{cols}t")
+                    .and_then(|()| return output.flush())
+                    .map_err(output_error)?;
+                if let Some(grid) = applied_grid {
+                    *grid = (cols, rows);
+                }
+            }
+        }
+        Event::ResizeResult { operation_id, .. } => {
+            resize_intents.remove(operation_id);
+        }
+        _ => {}
+    }
     return Ok(());
 }
 

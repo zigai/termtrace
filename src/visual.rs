@@ -25,8 +25,9 @@ use crate::{
     geometry::TerminalGeometryReport,
     playback::PlaybackTiming,
     profile::{ResolvedGhosttyProfile, materialize_profile},
-    replay::{DERIVED_DIRECTORY, StateIndexEntry},
+    replay::{GHOSTTY_REVISION, ReplayManifest, StateIndexEntry, derived_directory_name},
     session::{CaptureTarget, read_manifest},
+    timeline::{SourceRange, resolve_source_range},
 };
 
 /// Native visual artifact directory name.
@@ -43,6 +44,10 @@ pub struct CaptureOptions {
     pub height: u16,
     /// Encoded video frame rate.
     pub fps: u16,
+    /// Optional inclusive source offset.
+    pub start_monotonic_ns: Option<u64>,
+    /// Optional exclusive source offset.
+    pub end_monotonic_ns: Option<u64>,
 }
 
 /// Completed native capture.
@@ -70,7 +75,7 @@ pub struct VideoMapEntry {
     pub state_id: u64,
     /// Semantic state hash.
     pub state_hash: String,
-    /// Monotonic semantic timestamp.
+    /// Absolute canonical monotonic semantic timestamp.
     pub monotonic_ns: u64,
     /// Approximate zero-based video frame; absent for suppressed states.
     pub frame: Option<u64>,
@@ -87,6 +92,8 @@ pub struct VisualManifest {
     pub session_id: Uuid,
     /// Terminal hash of the source event log.
     pub source_event_hash: Option<String>,
+    /// Selected half-open source interval, absent for a full-session capture.
+    pub source_range: Option<SourceRange>,
     /// Video frame rate.
     pub fps: u16,
     /// Capture width.
@@ -130,8 +137,25 @@ struct DisplayLease {
 pub fn capture(options: &CaptureOptions) -> Result<CaptureOutcome> {
     validate_options(options)?;
     let event_log = EventLog::read(options.session_directory.join("events.jsonl"))?;
-    let state_index = read_state_index(&options.session_directory)?;
-    let destination = options.session_directory.join(VISUAL_DIRECTORY);
+    let final_monotonic_ns = event_log
+        .events
+        .last()
+        .map_or(0, |record| return record.monotonic_ns);
+    let source_range = resolve_source_range(
+        options.start_monotonic_ns,
+        options.end_monotonic_ns,
+        final_monotonic_ns,
+    )?;
+    let state_index = read_state_index(&options.session_directory, source_range)?;
+    validate_replay_manifest(
+        &options.session_directory,
+        &event_log,
+        &state_index,
+        source_range,
+    )?;
+    let destination = options
+        .session_directory
+        .join(visual_directory_name(source_range));
     if destination.exists() {
         return Err(Error::ArtifactExists { path: destination });
     }
@@ -139,7 +163,7 @@ pub fn capture(options: &CaptureOptions) -> Result<CaptureOutcome> {
         .session_directory
         .join(format!(".visual.{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
-    if let Err(error) = capture_staged(options, &event_log, &state_index, &staging) {
+    if let Err(error) = capture_staged(options, &event_log, &state_index, source_range, &staging) {
         return Err(preserve_failed_capture(
             &options.session_directory,
             &staging,
@@ -257,6 +281,7 @@ fn capture_staged(
     options: &CaptureOptions,
     event_log: &EventLog,
     state_index: &[StateIndexEntry],
+    source_range: Option<SourceRange>,
     staging: &Path,
 ) -> Result<VisualManifest> {
     let session_manifest = read_manifest(&options.session_directory)?;
@@ -348,14 +373,24 @@ fn capture_staged(
     )?;
     let timing: PlaybackTiming =
         wait_for_json(&timing_file, &mut ghostty, Duration::from_secs(20))?;
+    if timing.source_range != source_range {
+        return Err(Error::InvalidReplay {
+            reason: "playback timing source range does not match the capture request".to_owned(),
+        });
+    }
     thread::sleep(Duration::from_millis(200));
 
     let capture_started_unix_ns = unix_now_ns()?;
     let video_path = staging.join("session.mkv");
     let mut ffmpeg = spawn_video_ffmpeg(options, staging, &display, &video_path)?;
-    let recording_duration = event_log.events.last().map_or(Duration::ZERO, |event| {
-        return Duration::from_nanos(event.monotonic_ns);
-    });
+    let recording_duration = source_range.map_or_else(
+        || {
+            return event_log.events.last().map_or(Duration::ZERO, |event| {
+                return Duration::from_nanos(event.monotonic_ns);
+            });
+        },
+        |range| return Duration::from_nanos(range.duration_ns()),
+    );
     wait_for_file(
         &ready_file,
         &mut ghostty,
@@ -377,6 +412,7 @@ fn capture_staged(
         options.fps,
         capture_started_unix_ns,
         timing.replay_origin_unix_ns,
+        source_range,
     )?;
     let manifest = VisualManifest {
         version: 1,
@@ -385,6 +421,7 @@ fn capture_staged(
             .events
             .last()
             .map(|event| return event.hash.clone()),
+        source_range,
         fps: options.fps,
         width: options.width,
         height: options.height,
@@ -427,17 +464,15 @@ fn validate_options(options: &CaptureOptions) -> Result<()> {
             reason: "native capture requires at least 320x200 pixels and exactly 24 FPS".to_owned(),
         });
     }
-    if !options
-        .session_directory
-        .join(DERIVED_DIRECTORY)
-        .join("state-index.jsonl")
-        .is_file()
-    {
-        return Err(Error::InvalidReplay {
-            reason: "semantic index is missing; run `termtrace index` first".to_owned(),
-        });
-    }
     return Ok(());
+}
+
+/// Resolve the deterministic visual artifact directory for a source range.
+pub fn visual_directory_name(source_range: Option<SourceRange>) -> String {
+    return source_range.map_or_else(
+        || return VISUAL_DIRECTORY.to_owned(),
+        |range| return format!("{VISUAL_DIRECTORY}-{}", range.artifact_suffix()),
+    );
 }
 
 fn ghostty_overrides() -> Vec<String> {
@@ -545,7 +580,14 @@ fn spawn_ghostty(
         .arg("--start-delay-ms")
         .arg("1500")
         .arg("--final-hold-ms")
-        .arg("1500")
+        .arg("1500");
+    if let Some(start) = options.start_monotonic_ns {
+        command.arg("--from-ns").arg(start.to_string());
+    }
+    if let Some(end) = options.end_monotonic_ns {
+        command.arg("--to-ns").arg(end.to_string());
+    }
+    command
         .env("DISPLAY", display)
         .env("GDK_BACKEND", "x11")
         .env("LIBGL_ALWAYS_SOFTWARE", "1")
@@ -715,8 +757,27 @@ fn probe_screenshot(path: &Path, width: u16, height: u16) -> Result<serde_json::
     return Ok(probe);
 }
 
-fn read_state_index(session: &Path) -> Result<Vec<StateIndexEntry>> {
-    let path = session.join(DERIVED_DIRECTORY).join("state-index.jsonl");
+fn read_state_index(
+    session: &Path,
+    source_range: Option<SourceRange>,
+) -> Result<Vec<StateIndexEntry>> {
+    let path = session
+        .join(derived_directory_name(source_range))
+        .join("state-index.jsonl");
+    if !path.is_file() {
+        let range_flags = source_range.map_or_else(String::new, |range| {
+            return format!(
+                " --from {}ns --to {}ns",
+                range.start_monotonic_ns, range.end_monotonic_ns
+            );
+        });
+        return Err(Error::InvalidReplay {
+            reason: format!(
+                "matching semantic index is missing; run `termtrace index --session {}{range_flags}` first",
+                session.display()
+            ),
+        });
+    }
     let reader = BufReader::new(File::open(&path).map_err(|source| {
         return Error::Filesystem {
             path: path.clone(),
@@ -744,16 +805,73 @@ fn read_state_index(session: &Path) -> Result<Vec<StateIndexEntry>> {
         .collect();
 }
 
+fn validate_replay_manifest(
+    session: &Path,
+    event_log: &EventLog,
+    state_index: &[StateIndexEntry],
+    source_range: Option<SourceRange>,
+) -> Result<()> {
+    let path = session
+        .join(derived_directory_name(source_range))
+        .join("manifest.json");
+    let bytes = fs_err::read(&path).map_err(|source| {
+        return Error::Filesystem {
+            path: path.clone(),
+            source,
+        };
+    })?;
+    let manifest: ReplayManifest =
+        serde_json::from_slice(&bytes).map_err(|source| return json_error(path.clone(), source))?;
+    let source_event_hash = event_log
+        .events
+        .last()
+        .map(|event| return event.hash.clone());
+    let indexed_count = u64::try_from(state_index.len()).unwrap_or(u64::MAX);
+    let final_state_hash = state_index
+        .last()
+        .map(|state| return state.state_hash.as_str());
+    if manifest.session_id != event_log.header.session_id
+        || manifest.source_event_hash != source_event_hash
+        || manifest.source_range != source_range
+        || manifest.ghostty_revision != GHOSTTY_REVISION
+        || manifest.state_count != indexed_count
+        || final_state_hash != Some(manifest.final_state_hash.as_str())
+    {
+        return Err(Error::InvalidReplay {
+            reason: "semantic index provenance does not match the capture request".to_owned(),
+        });
+    }
+    return Ok(());
+}
+
 fn write_video_map(
     path: &Path,
     states: &[StateIndexEntry],
     fps: u16,
     capture_origin: u128,
     replay_origin: u128,
+    source_range: Option<SourceRange>,
 ) -> Result<()> {
     let mut writer = secure_writer(path)?;
     for state in states {
-        let presentation = replay_origin.saturating_add(u128::from(state.monotonic_ns));
+        let relative_source_ns = match source_range {
+            Some(range) if range.contains(state.monotonic_ns) => {
+                state.monotonic_ns - range.start_monotonic_ns
+            }
+            Some(range) => {
+                return Err(Error::InvalidReplay {
+                    reason: format!(
+                        "semantic state {} at {} ns is outside capture range {}..{}",
+                        state.state_id,
+                        state.monotonic_ns,
+                        range.start_monotonic_ns,
+                        range.end_monotonic_ns
+                    ),
+                });
+            }
+            None => state.monotonic_ns,
+        };
+        let presentation = replay_origin.saturating_add(u128::from(relative_source_ns));
         let relative = presentation.saturating_sub(capture_origin);
         let frame = state.presented.then(|| {
             return u64::try_from(relative.saturating_mul(u128::from(fps)) / 1_000_000_000)

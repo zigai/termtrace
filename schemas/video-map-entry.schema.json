@@ -13,7 +13,7 @@
       ]
     },
     "monotonic_ns": {
-      "description": "Monotonic semantic timestamp.",
+      "description": "Absolute canonical monotonic semantic timestamp.",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"

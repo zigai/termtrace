@@ -306,7 +306,7 @@
           "type": "null"
         }
       ],
-      "description": "Exact working-directory bytes when overridden."
+      "description": "Exact effective working-directory bytes; absent only in legacy sessions."
     }
   },
   "required": [

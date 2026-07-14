@@ -24,6 +24,7 @@ use crate::{
         CellState, CellStyle, ColorState, CursorState, DirtyState, Format, GhosttyVt, ModeState,
         SemanticState, TerminalMetadata,
     },
+    timeline::{SourceRange, resolve_source_range},
 };
 
 /// Pinned Ghostty source revision used by the semantic adapter.
@@ -66,7 +67,7 @@ pub struct StateDelta {
 pub struct StateRecord {
     /// Dense zero-based state identifier.
     pub state_id: u64,
-    /// Canonical event responsible for this state; absent for initial state.
+    /// Canonical event responsible for this state; absent for an initial or range-baseline state.
     pub event_seq: Option<u64>,
     /// Zero-based byte offset inside an output event.
     pub event_byte_offset: Option<u64>,
@@ -106,7 +107,7 @@ pub struct StateIndexEntry {
 pub struct ReplayArtifacts {
     /// Number of distinct states, including the initial blank state.
     pub state_count: u64,
-    /// Final semantic state hash.
+    /// Semantic state hash at the selected interval's end.
     pub final_state_hash: String,
     /// Ghostty-formatted final plain text.
     pub final_text: Vec<u8>,
@@ -156,11 +157,13 @@ pub struct ReplayManifest {
     pub session_id: Uuid,
     /// Source event-log terminal hash.
     pub source_event_hash: Option<String>,
+    /// Selected half-open source interval, absent for a full-session index.
+    pub source_range: Option<SourceRange>,
     /// Exact Ghostty source revision.
     pub ghostty_revision: String,
     /// Number of distinct semantic states.
     pub state_count: u64,
-    /// Final semantic state hash.
+    /// Semantic state hash at the selected interval's end.
     pub final_state_hash: String,
     /// Relative artifact paths.
     pub files: Vec<String>,
@@ -173,7 +176,7 @@ pub struct IndexOutcome {
     pub directory: PathBuf,
     /// Number of distinct states.
     pub state_count: u64,
-    /// Final semantic state hash.
+    /// Semantic state hash at the selected interval's end.
     pub final_state_hash: String,
 }
 
@@ -211,7 +214,7 @@ struct StateHashMetadata<'state> {
 /// Returns an error when libghostty-vt or state serialization fails.
 pub fn replay(log: &EventLog) -> Result<CollectedReplay> {
     let mut states = Vec::new();
-    let artifacts = replay_with(log, |record, _| {
+    let artifacts = replay_with(log, None, |record, _| {
         states.push(record);
         return Ok(());
     })?;
@@ -225,7 +228,7 @@ pub fn replay(log: &EventLog) -> Result<CollectedReplay> {
 /// Returns an error when the source cannot replay or no state matches.
 pub fn inspect(log: &EventLog, selector: StateSelector) -> Result<StateInspection> {
     let mut selected = None;
-    replay_with(log, |record, state| {
+    replay_with(log, None, |record, state| {
         let matches = match selector {
             StateSelector::Final => true,
             StateSelector::StateId(id) => record.state_id == id,
@@ -247,23 +250,43 @@ pub fn inspect(log: &EventLog, selector: StateSelector) -> Result<StateInspectio
 
 fn replay_with(
     log: &EventLog,
+    source_range: Option<SourceRange>,
     mut state_sink: impl FnMut(StateRecord, &SemanticState) -> Result<()>,
 ) -> Result<ReplayArtifacts> {
     let mut builder = ReplayBuilder::new(log)?;
-    builder.capture(None, None, 0, &mut state_sink)?;
     let mut resize_intents = HashMap::new();
+    if source_range.is_none() {
+        builder.capture(None, None, 0, &mut state_sink)?;
+    }
+    let mut emitted_range_baseline = false;
     for record in &log.events {
+        let emit = source_range.is_none_or(|range| return range.contains(record.monotonic_ns));
+        if source_range.is_some_and(|range| return record.monotonic_ns >= range.end_monotonic_ns) {
+            break;
+        }
+        if !emitted_range_baseline
+            && source_range
+                .is_some_and(|range| return record.monotonic_ns >= range.start_monotonic_ns)
+        {
+            let range = source_range.ok_or_else(|| {
+                return invalid_replay("range baseline requested without a source range");
+            })?;
+            builder.capture_baseline(range.start_monotonic_ns, &mut state_sink)?;
+            emitted_range_baseline = true;
+        }
         match &record.event {
             Event::Output { data } => {
                 for (offset, byte) in data.as_bytes().iter().enumerate() {
                     builder.engine.write(slice::from_ref(byte));
                     drop(builder.engine.take_responses());
-                    builder.capture(
-                        Some(record.seq),
-                        Some(u64::try_from(offset).unwrap_or(u64::MAX)),
-                        record.monotonic_ns,
-                        &mut state_sink,
-                    )?;
+                    if emit {
+                        builder.capture(
+                            Some(record.seq),
+                            Some(u64::try_from(offset).unwrap_or(u64::MAX)),
+                            record.monotonic_ns,
+                            &mut state_sink,
+                        )?;
+                    }
                 }
             }
             Event::ResizeIntent {
@@ -297,13 +320,25 @@ fn replay_with(
                     cell_size(geometry.pixel_width, geometry.cols),
                     cell_size(geometry.pixel_height, geometry.rows),
                 )?;
-                builder.capture(Some(record.seq), None, record.monotonic_ns, &mut state_sink)?;
+                if emit {
+                    builder.capture(
+                        Some(record.seq),
+                        None,
+                        record.monotonic_ns,
+                        &mut state_sink,
+                    )?;
+                }
             }
             Event::ResizeResult { operation_id, .. } => {
                 resize_intents.remove(operation_id);
             }
             _ => {}
         }
+    }
+    if let Some(range) = source_range
+        && !emitted_range_baseline
+    {
+        builder.capture_baseline(range.start_monotonic_ns, &mut state_sink)?;
     }
     let final_state_hash = builder
         .previous_hash
@@ -341,6 +376,30 @@ impl ReplayBuilder {
         let Some(state) = self.engine.snapshot_if_changed()? else {
             return Ok(());
         };
+        return self.emit_state(state, event_seq, event_byte_offset, monotonic_ns, sink);
+    }
+
+    fn capture_baseline(
+        &mut self,
+        monotonic_ns: u64,
+        sink: &mut impl FnMut(StateRecord, &SemanticState) -> Result<()>,
+    ) -> Result<()> {
+        let state = self.engine.snapshot()?;
+        self.previous = None;
+        self.previous_hash = None;
+        self.state_count = 0;
+        self.row_hashes.clear();
+        return self.emit_state(state, None, None, monotonic_ns, sink);
+    }
+
+    fn emit_state(
+        &mut self,
+        state: SemanticState,
+        event_seq: Option<u64>,
+        event_byte_offset: Option<u64>,
+        monotonic_ns: u64,
+        sink: &mut impl FnMut(StateRecord, &SemanticState) -> Result<()>,
+    ) -> Result<()> {
         let hash = self.hash_state(&state)?;
         if self.previous_hash.as_ref() == Some(&hash) {
             return Ok(());
@@ -417,16 +476,35 @@ impl ReplayBuilder {
 /// Returns an error for invalid source logs, existing artifacts, replay
 /// failures, serialization failures, or non-durable filesystem operations.
 pub fn index_session(session_directory: impl AsRef<Path>) -> Result<IndexOutcome> {
+    return index_session_range(session_directory, None, None);
+}
+
+/// Generate replay artifacts for a validated half-open source-time interval.
+///
+/// # Errors
+///
+/// Returns an error for invalid bounds or any full-index failure.
+pub fn index_session_range(
+    session_directory: impl AsRef<Path>,
+    start_monotonic_ns: Option<u64>,
+    end_monotonic_ns: Option<u64>,
+) -> Result<IndexOutcome> {
     let session_directory = session_directory.as_ref();
     let event_path = session_directory.join("events.jsonl");
     let log = EventLog::read(&event_path)?;
-    let destination = session_directory.join(DERIVED_DIRECTORY);
+    let final_monotonic_ns = log
+        .events
+        .last()
+        .map_or(0, |record| return record.monotonic_ns);
+    let source_range =
+        resolve_source_range(start_monotonic_ns, end_monotonic_ns, final_monotonic_ns)?;
+    let destination = session_directory.join(derived_directory_name(source_range));
     if destination.exists() {
         return Err(Error::ArtifactExists { path: destination });
     }
     let staging = session_directory.join(format!(".derived.{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
-    let result = write_index(&staging, &log).and_then(|artifacts| {
+    let result = write_index(&staging, &log, source_range).and_then(|artifacts| {
         commit_directory(session_directory, &staging, &destination)?;
         sync_directory(session_directory)?;
         return Ok(IndexOutcome {
@@ -447,10 +525,22 @@ pub fn index_session(session_directory: impl AsRef<Path>) -> Result<IndexOutcome
     return result;
 }
 
-fn write_index(directory: &Path, log: &EventLog) -> Result<ReplayArtifacts> {
+/// Resolve the deterministic derived artifact directory for a source range.
+pub fn derived_directory_name(source_range: Option<SourceRange>) -> String {
+    return source_range.map_or_else(
+        || return DERIVED_DIRECTORY.to_owned(),
+        |range| return format!("{DERIVED_DIRECTORY}-{}", range.artifact_suffix()),
+    );
+}
+
+fn write_index(
+    directory: &Path,
+    log: &EventLog,
+    source_range: Option<SourceRange>,
+) -> Result<ReplayArtifacts> {
     let mut states = secure_writer(&directory.join("states.jsonl"))?;
     let mut index = secure_writer(&directory.join("state-index.jsonl"))?;
-    let artifacts = replay_with(log, |record, _| {
+    let artifacts = replay_with(log, source_range, |record, _| {
         write_json_line(&mut states, &record, directory)?;
         let entry = StateIndexEntry {
             state_id: record.state_id,
@@ -471,6 +561,7 @@ fn write_index(directory: &Path, log: &EventLog) -> Result<ReplayArtifacts> {
         version: STATE_FORMAT_VERSION,
         session_id: log.header.session_id,
         source_event_hash: log.events.last().map(|record| return record.hash.clone()),
+        source_range,
         ghostty_revision: GHOSTTY_REVISION.to_owned(),
         state_count: artifacts.state_count,
         final_state_hash: artifacts.final_state_hash.clone(),

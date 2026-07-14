@@ -624,7 +624,7 @@
           ]
         },
         "event_seq": {
-          "description": "Canonical event responsible for this state; absent for initial state.",
+          "description": "Canonical event responsible for this state; absent for an initial or range-baseline state.",
           "format": "uint64",
           "minimum": 0,
           "type": [

@@ -1,13 +1,48 @@
 {
+  "$defs": {
+    "SourceRange": {
+      "description": "A non-empty half-open interval on the canonical monotonic timeline.",
+      "properties": {
+        "end_monotonic_ns": {
+          "description": "Exclusive source timestamp in nanoseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_monotonic_ns": {
+          "description": "Inclusive source timestamp in nanoseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_monotonic_ns",
+        "end_monotonic_ns"
+      ],
+      "type": "object"
+    }
+  },
   "$id": "https://github.com/zigai/termtrace/schemas/playback-timing.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Clock handshake written before playback begins.",
   "properties": {
     "replay_origin_unix_ns": {
-      "description": "Wall-clock time corresponding to event monotonic time zero.",
+      "description": "Wall-clock time corresponding to source-range start (or event time zero).",
       "format": "uint128",
       "minimum": 0,
       "type": "integer"
+    },
+    "source_range": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SourceRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Selected half-open source interval, absent for full-session playback."
     },
     "speed": {
       "description": "Playback speed multiplier (`1` for native timing).",
