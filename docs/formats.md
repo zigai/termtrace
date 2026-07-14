@@ -32,7 +32,7 @@ Control responses carry separate durable and observed event/hash/output boundari
 
 One-off command observations are completed canonical sessions with `source_kind: one_off_command`. The retained canonical path is the recovery and forensic handle even when the child exits unsuccessfully; a command that fails before completion produces no successful observation.
 
-`TimelineEntry` is a streaming diagnostic projection. `semantic_state` items bind state/event/byte identity, presentation eligibility, state hash, dirty classification, changed rows/cell count, and cursor/mode/metadata flags. `canonical_event` items retain the complete typed non-output event. Output events are represented by the semantic states they caused; concise mutation-result events are omitted without altering canonical evidence.
+`TimelineEntry` is a streaming diagnostic projection. `semantic_state` items bind state/event/byte identity, presentation eligibility, state hash, dirty classification, changed rows/cell count, and cursor/mode/metadata flags. `canonical_event` items retain the complete typed non-output event. Optional `vt_token` items embed the lossless frame and source segments. Output events are otherwise represented by the semantic states they caused; concise mutation-result events are omitted without altering canonical evidence.
 
 `SemanticDiff` binds two requested `StatePoint`s to resolved state hashes and event/time provenance. Optional before/after objects report geometry, cursor, modes, colors, active style, metadata, and presentation changes; row records contain every complete changed cell. Endpoint dirty classifications and dirty rows remain evidence alongside, but are not used to invent cell changes.
 

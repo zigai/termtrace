@@ -1584,6 +1584,17 @@ fn timeline_streams_presented_states_and_canonical_operations() {
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""presented":false"#));
+
+    let mut controls = Command::cargo_bin("termtrace").expect("binary should build");
+    controls
+        .arg("timeline")
+        .arg(&session)
+        .args(["--jsonl", "--controls"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""kind":"vt_token""#))
+        .stdout(predicate::str::contains("set synchronized output"))
+        .stdout(predicate::str::contains("reset synchronized output"));
 }
 
 #[test]

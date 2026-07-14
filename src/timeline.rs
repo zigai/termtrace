@@ -6,7 +6,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Error, Result, event::Event, event_log::EventLog, ghostty_vt::DirtyState, replay::replay,
+    Error, Result,
+    event::Event,
+    event_log::EventLog,
+    ghostty_vt::DirtyState,
+    replay::replay,
+    vt_framer::{VtToken, frame_event_log},
 };
 
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
@@ -57,6 +62,11 @@ pub enum TimelineItem {
         /// Exact typed canonical event.
         event: Event,
     },
+    /// One lossless explanatory VT frame.
+    VtToken {
+        /// Exact token and canonical source segments.
+        token: VtToken,
+    },
 }
 
 /// Build a concise ordered timeline from validated canonical events.
@@ -71,6 +81,7 @@ pub enum TimelineItem {
 pub fn build_timeline(
     log: &EventLog,
     include_hidden_states: bool,
+    include_controls: bool,
     range: Option<SourceRange>,
 ) -> Result<Vec<TimelineEntry>> {
     let replay = replay(log)?;
@@ -122,10 +133,31 @@ pub fn build_timeline(
             },
         });
     }
+    if include_controls {
+        for token in frame_event_log(log)? {
+            let Some(first) = token.source.first() else {
+                continue;
+            };
+            if range.is_some_and(|selection| {
+                return !token
+                    .source
+                    .iter()
+                    .any(|segment| return selection.contains(segment.monotonic_ns));
+            }) {
+                continue;
+            }
+            entries.push(TimelineEntry {
+                monotonic_ns: first.monotonic_ns,
+                event_seq: Some(first.event_seq),
+                item: TimelineItem::VtToken { token },
+            });
+        }
+    }
     entries.sort_by_key(|entry| {
         let state_order = match &entry.item {
             TimelineItem::CanonicalEvent { .. } => 0,
-            TimelineItem::SemanticState { .. } => 1,
+            TimelineItem::VtToken { .. } => 1,
+            TimelineItem::SemanticState { .. } => 2,
         };
         return (
             entry.monotonic_ns,
@@ -135,6 +167,10 @@ pub fn build_timeline(
                 TimelineItem::SemanticState {
                     event_byte_offset, ..
                 } => event_byte_offset.unwrap_or(0),
+                TimelineItem::VtToken { token } => token
+                    .source
+                    .first()
+                    .map_or(0, |segment| return segment.start_byte_offset),
                 TimelineItem::CanonicalEvent { .. } => 0,
             },
         );

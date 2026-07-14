@@ -343,6 +343,9 @@ struct TimelineArgs {
     /// Include synchronized-output states that were not presentation eligible.
     #[arg(long)]
     all_states: bool,
+    /// Include lossless framed VT controls and printable runs.
+    #[arg(long)]
+    controls: bool,
     /// Emit one stable JSON object per line.
     #[arg(long)]
     jsonl: bool,
@@ -1247,7 +1250,7 @@ fn run_timeline(arguments: TimelineArgs) -> Result<ExitCode> {
         arguments.range.from_marker.as_deref(),
         arguments.range.to_marker.as_deref(),
     )?;
-    let entries = build_timeline(&log, arguments.all_states, range)?;
+    let entries = build_timeline(&log, arguments.all_states, arguments.controls, range)?;
     if arguments.jsonl {
         for entry in entries {
             write_json_line(&entry)?;
@@ -1372,6 +1375,22 @@ fn timeline_text(entry: &TimelineEntry) -> String {
             metadata_changed,
         ),
         TimelineItem::CanonicalEvent { event } => canonical_event_text(event),
+        TimelineItem::VtToken { token } => {
+            let location = token.source.first().map_or_else(
+                || return "-".to_owned(),
+                |segment| {
+                    return format!("{}..{}", segment.start_byte_offset, segment.end_byte_offset);
+                },
+            );
+            format!(
+                "token {} {:?} bytes={} range={} {}",
+                token.token_id,
+                token.kind,
+                token.raw.as_bytes().len(),
+                location,
+                token.description,
+            )
+        }
     };
     return format!("{seconds}.{fractional:09}s  event {event}  {detail}");
 }
