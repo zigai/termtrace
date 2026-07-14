@@ -520,6 +520,11 @@
           "const": "focus",
           "description": "Terminal-window focus transition.",
           "type": "string"
+        },
+        {
+          "const": "pointer",
+          "description": "Cell-addressed mouse or wheel operation.",
+          "type": "string"
         }
       ]
     },

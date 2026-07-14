@@ -183,6 +183,46 @@
         },
         {
           "additionalProperties": false,
+          "description": "Encode one cell-addressed pointer operation from live mouse modes.",
+          "properties": {
+            "column": {
+              "description": "Zero-based viewport column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "command": {
+              "const": "pointer",
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/$defs/PointerOperation",
+              "description": "Click or vertical scrolling plan."
+            },
+            "row": {
+              "description": "Zero-based viewport row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "strict": {
+              "description": "Reject instead of returning a semantic no-op when reporting is disabled.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "command",
+            "column",
+            "row",
+            "operation",
+            "strict"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Change the child PTY geometry.",
           "properties": {
             "cols": {
@@ -308,6 +348,11 @@
           "const": "focus",
           "description": "Terminal-window focus transition.",
           "type": "string"
+        },
+        {
+          "const": "pointer",
+          "description": "Cell-addressed mouse or wheel operation.",
+          "type": "string"
         }
       ]
     },
@@ -338,6 +383,36 @@
         "super_key"
       ],
       "type": "object"
+    },
+    "MouseButton": {
+      "description": "Stable mouse button identity accepted by the pinned encoder.",
+      "oneOf": [
+        {
+          "const": "left",
+          "description": "Primary button.",
+          "type": "string"
+        },
+        {
+          "const": "middle",
+          "description": "Middle button.",
+          "type": "string"
+        },
+        {
+          "const": "right",
+          "description": "Secondary button.",
+          "type": "string"
+        },
+        {
+          "const": "wheel_up",
+          "description": "Vertical wheel up.",
+          "type": "string"
+        },
+        {
+          "const": "wheel_down",
+          "description": "Vertical wheel down.",
+          "type": "string"
+        }
+      ]
     },
     "NamedKey": {
       "description": "Layout-independent key accepted by the pinned terminal key encoder.",
@@ -440,6 +515,52 @@
           },
           "required": [
             "letter"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PointerOperation": {
+      "description": "One high-level cell-addressed pointer operation.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Press and release one button at a cell.",
+          "properties": {
+            "button": {
+              "$ref": "#/$defs/MouseButton",
+              "description": "Button to click."
+            },
+            "kind": {
+              "const": "click",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "button"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Emit signed vertical wheel ticks at a cell.",
+          "properties": {
+            "kind": {
+              "const": "scroll",
+              "type": "string"
+            },
+            "lines": {
+              "description": "Negative scrolls up and positive scrolls down; zero is invalid.",
+              "format": "int16",
+              "maximum": 32767,
+              "minimum": -32768,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "lines"
           ],
           "type": "object"
         }

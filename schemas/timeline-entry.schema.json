@@ -557,6 +557,96 @@
             "terminal_modes_hash"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Pointer operation encoded against live mouse modes and geometry.",
+          "properties": {
+            "button": {
+              "description": "Button name for clicks, otherwise wheel direction.",
+              "type": "string"
+            },
+            "cols": {
+              "description": "Terminal columns at encoding time.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "column": {
+              "description": "Zero-based viewport column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "encoder": {
+              "description": "Pinned encoder identity.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "pointer",
+              "type": "string"
+            },
+            "lines": {
+              "description": "Signed requested wheel lines, or zero for clicks.",
+              "format": "int16",
+              "maximum": 32767,
+              "minimum": -32768,
+              "type": "integer"
+            },
+            "operation": {
+              "description": "`click` or `scroll`.",
+              "type": "string"
+            },
+            "pixel_height": {
+              "description": "Total terminal surface height in pixels.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pixel_width": {
+              "description": "Total terminal surface width in pixels.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "row": {
+              "description": "Zero-based viewport row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "description": "Terminal rows at encoding time.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "operation",
+            "button",
+            "lines",
+            "column",
+            "row",
+            "cols",
+            "rows",
+            "pixel_width",
+            "pixel_height",
+            "encoder",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -586,6 +676,11 @@
         {
           "const": "focus",
           "description": "Terminal-window focus transition.",
+          "type": "string"
+        },
+        {
+          "const": "pointer",
+          "description": "Cell-addressed mouse or wheel operation.",
           "type": "string"
         }
       ]

@@ -46,14 +46,17 @@ use crate::{
     control::{
         ActorBoundaries, CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME, ControlCommand,
         ControlData, ControlErrorDetails, ControlRequest, ControlResponse, ControlResult,
-        MAX_CONTROL_MESSAGE_BYTES, ProcessSignal, ScreenPredicate, validate_frame,
+        MAX_CONTROL_MESSAGE_BYTES, PointerOperation, ProcessSignal, ScreenPredicate,
+        validate_frame,
     },
     event::{
         ByteString, Event, EventLogHeader, InputDescriptor, InputKind, InputSource, LifecycleKind,
         OperationStatus, TerminalColors,
     },
     event_log::{DurabilityPolicy, EventLogWriter, SessionClock},
-    ghostty_vt::{FocusEvent, GhosttyVt, NamedKey, SemanticState, encode_focus},
+    ghostty_vt::{
+        FocusEvent, GhosttyVt, MouseAction, MouseButton, NamedKey, SemanticState, encode_focus,
+    },
     profile::ResolvedGhosttyProfile,
     provenance::{ProvenancePolicy, collect_execution_provenance},
     request_journal::{
@@ -338,6 +341,7 @@ struct LiveTerminal {
     semantic: GhosttyVt,
     presented: SemanticState,
     query_tracker: QueryTracker,
+    geometry: TerminalGeometry,
 }
 
 struct ScreenWaiter {
@@ -683,6 +687,7 @@ fn consume_runtime(
         semantic,
         presented,
         query_tracker: QueryTracker::default(),
+        geometry: initial_geometry,
     };
     let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
     let journal = MutationJournal::create(session_directory)?;
@@ -841,6 +846,7 @@ fn process_runtime_message(
         RuntimeMessage::Resize(geometry) => {
             apply_resize(spawned.master.as_mut(), event_log, Uuid::now_v7(), geometry)?;
             resize_semantic(&mut live.semantic, geometry)?;
+            live.geometry = geometry;
             let latest = live.semantic.snapshot()?;
             if !latest.modes.synchronized_output {
                 live.presented = latest;
@@ -1509,9 +1515,11 @@ fn execute_control_command(
                 *input_kind,
                 match input_kind {
                     InputKind::Text => InputDescriptor::Text,
-                    InputKind::Raw | InputKind::Keys | InputKind::Paste | InputKind::Focus => {
-                        InputDescriptor::Raw
-                    }
+                    InputKind::Raw
+                    | InputKind::Keys
+                    | InputKind::Paste
+                    | InputKind::Focus
+                    | InputKind::Pointer => InputDescriptor::Raw,
                 },
                 intent.clone(),
                 data.as_bytes(),
@@ -1649,6 +1657,147 @@ fn execute_control_command(
                 boundaries: actor_boundaries(event_log),
             });
         }
+        ControlCommand::Pointer {
+            column,
+            row,
+            operation,
+            strict,
+        } => {
+            if *column >= live.geometry.cols || *row >= live.geometry.rows {
+                return Err(control_rejected(
+                    "pointer_cell_out_of_bounds",
+                    &format!(
+                        "pointer cell {column},{row} is outside {}x{} geometry",
+                        live.geometry.cols, live.geometry.rows
+                    ),
+                ));
+            }
+            let modes = live.semantic.snapshot()?.modes;
+            let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
+                return terminal_error("serialize pointer modes", error.to_string());
+            })?;
+            let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
+            let reporting_enabled = modes.values.iter().any(|mode| {
+                return !mode.ansi && matches!(mode.number, 9 | 1000 | 1002 | 1003) && mode.enabled;
+            });
+            if !reporting_enabled {
+                if *strict {
+                    return Err(control_rejected(
+                        "pointer_reporting_disabled",
+                        "the application has not enabled a DEC mouse tracking mode",
+                    ));
+                }
+                return Ok(ControlData::InputNoop {
+                    input_kind: InputKind::Pointer,
+                    reason: "pointer_reporting_disabled".to_owned(),
+                    terminal_modes_hash,
+                    boundaries: actor_boundaries(event_log),
+                });
+            }
+            let mut encoded = Vec::new();
+            let (operation_name, button_name, lines) = match operation {
+                PointerOperation::Click { button } => {
+                    if matches!(button, MouseButton::WheelUp | MouseButton::WheelDown) {
+                        return Err(control_rejected(
+                            "invalid_pointer_button",
+                            "wheel buttons are reserved for scroll operations",
+                        ));
+                    }
+                    for action in [MouseAction::Press, MouseAction::Release] {
+                        encoded.extend_from_slice(
+                            live.semantic
+                                .encode_mouse(
+                                    action,
+                                    *button,
+                                    *column,
+                                    *row,
+                                    live.geometry.cols,
+                                    live.geometry.rows,
+                                    live.geometry.pixel_width,
+                                    live.geometry.pixel_height,
+                                )?
+                                .as_bytes(),
+                        );
+                    }
+                    ("click", mouse_button_name(*button), 0)
+                }
+                PointerOperation::Scroll { lines } => {
+                    if *lines == 0 || lines.unsigned_abs() > 100 {
+                        return Err(control_rejected(
+                            "invalid_scroll_lines",
+                            "scroll lines must be between -100 and 100 and nonzero",
+                        ));
+                    }
+                    let button = if *lines < 0 {
+                        MouseButton::WheelUp
+                    } else {
+                        MouseButton::WheelDown
+                    };
+                    for _ in 0..lines.unsigned_abs() {
+                        encoded.extend_from_slice(
+                            live.semantic
+                                .encode_mouse(
+                                    MouseAction::Press,
+                                    button,
+                                    *column,
+                                    *row,
+                                    live.geometry.cols,
+                                    live.geometry.rows,
+                                    live.geometry.pixel_width,
+                                    live.geometry.pixel_height,
+                                )?
+                                .as_bytes(),
+                        );
+                    }
+                    ("scroll", mouse_button_name(button), *lines)
+                }
+            };
+            if encoded.is_empty() {
+                if *strict {
+                    return Err(control_rejected(
+                        "pointer_has_no_output",
+                        "the current tracking mode suppressed this pointer operation",
+                    ));
+                }
+                return Ok(ControlData::InputNoop {
+                    input_kind: InputKind::Pointer,
+                    reason: "pointer_has_no_output".to_owned(),
+                    terminal_modes_hash,
+                    boundaries: actor_boundaries(event_log),
+                });
+            }
+            let applied = apply_input(
+                spawned.writer.as_mut(),
+                event_log,
+                request_id,
+                InputSource::Agent,
+                InputKind::Pointer,
+                InputDescriptor::Pointer {
+                    operation: operation_name.to_owned(),
+                    button: button_name.to_owned(),
+                    lines,
+                    column: *column,
+                    row: *row,
+                    cols: live.geometry.cols,
+                    rows: live.geometry.rows,
+                    pixel_width: live.geometry.pixel_width,
+                    pixel_height: live.geometry.pixel_height,
+                    encoder: "libghostty-mouse-encoder-v1".to_owned(),
+                    terminal_modes_hash,
+                },
+                Some(format!("pointer-{operation_name}")),
+                &encoded,
+            )?;
+            return Ok(ControlData::InputApplied {
+                operation_id: request_id,
+                input_kind: InputKind::Pointer,
+                data: ByteString::new(encoded),
+                bytes_written: applied.bytes_written,
+                intent_event_seq: applied.intent_event_seq,
+                result_event_seq: applied.result_event_seq,
+                boundaries: actor_boundaries(event_log),
+            });
+        }
         ControlCommand::Resize {
             cols,
             rows,
@@ -1664,6 +1813,7 @@ fn execute_control_command(
             validate_control_geometry(geometry)?;
             apply_resize(spawned.master.as_mut(), event_log, request_id, geometry)?;
             resize_semantic(&mut live.semantic, geometry)?;
+            live.geometry = geometry;
             let latest = live.semantic.snapshot()?;
             if !latest.modes.synchronized_output {
                 live.presented = latest;
@@ -2071,6 +2221,16 @@ fn semantic_key_name(key: NamedKey) -> String {
         NamedKey::ArrowRight => "right".to_owned(),
         NamedKey::Function(number) => format!("f{number}"),
         NamedKey::Letter(letter) => letter.to_ascii_lowercase().to_string(),
+    };
+}
+
+fn mouse_button_name(button: MouseButton) -> &'static str {
+    return match button {
+        MouseButton::Left => "left",
+        MouseButton::Middle => "middle",
+        MouseButton::Right => "right",
+        MouseButton::WheelUp => "wheel-up",
+        MouseButton::WheelDown => "wheel-down",
     };
 }
 

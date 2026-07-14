@@ -1356,6 +1356,115 @@ fn focus_events_are_mode_gated_encoded_and_audited() {
 }
 
 #[test]
+fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("pointer-session");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let child = StdCommand::new(binary)
+        .args([
+            "record",
+            "--no-input",
+            "--cols",
+            "80",
+            "--rows",
+            "24",
+            "--cell-width",
+            "10",
+            "--cell-height",
+            "20",
+            "--out",
+        ])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,tty\ntty.setraw(0)\nos.write(1,b'\\x1b[?1000h\\x1b[?1006hREADY')\nd=b''\nwhile len(d)<18: d+=os.read(0,18-len(d))\nos.write(1,b'POINTER:'+d.hex().encode())",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pointer fixture");
+    wait_for_path(&session.join("control.sock"));
+    wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("pointer mode ready");
+
+    let mut pointer = Command::cargo_bin("termtrace").expect("binary should build");
+    pointer
+        .arg("pointer")
+        .arg(&session)
+        .args(["click", "--cell", "2,3", "--button", "left", "--strict"])
+        .assert()
+        .success();
+    let output = child
+        .wait_with_output()
+        .expect("pointer fixture completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+
+    let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+    let pointer_event = log.events.iter().find_map(|record| match &record.event {
+        Event::InputIntent {
+            input_kind: InputKind::Pointer,
+            descriptor:
+                InputDescriptor::Pointer {
+                    operation,
+                    button,
+                    lines,
+                    column,
+                    row,
+                    cols,
+                    rows,
+                    pixel_width,
+                    pixel_height,
+                    encoder,
+                    terminal_modes_hash,
+                },
+            data,
+            ..
+        } => {
+            return Some((
+                operation,
+                button,
+                *lines,
+                *column,
+                *row,
+                *cols,
+                *rows,
+                *pixel_width,
+                *pixel_height,
+                encoder,
+                terminal_modes_hash,
+                data.as_bytes(),
+            ));
+        }
+        _ => return None,
+    });
+    let Some((
+        operation,
+        button,
+        lines,
+        column,
+        row,
+        cols,
+        rows,
+        pixel_width,
+        pixel_height,
+        encoder,
+        modes_hash,
+        data,
+    )) = pointer_event
+    else {
+        panic!("missing pointer intent");
+    };
+    assert_eq!(operation, "click");
+    assert_eq!(button, "left");
+    assert_eq!((lines, column, row), (0, 2, 3));
+    assert_eq!((cols, rows, pixel_width, pixel_height), (80, 24, 800, 480));
+    assert_eq!(encoder, "libghostty-mouse-encoder-v1");
+    assert_eq!(modes_hash.len(), 64);
+    assert_eq!(data, b"\x1b[<0;3;4M\x1b[<0;3;4m");
+}
+
+#[test]
 fn paced_unicode_text_splits_only_at_scalar_boundaries() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("paced-session");

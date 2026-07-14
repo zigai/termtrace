@@ -208,6 +208,8 @@ pub enum InputKind {
     Paste,
     /// Terminal-window focus transition.
     Focus,
+    /// Cell-addressed mouse or wheel operation.
+    Pointer,
 }
 
 /// Structured semantic provenance for exact input bytes.
@@ -246,6 +248,31 @@ pub enum InputDescriptor {
     Focus {
         /// Whether the terminal gained (`true`) or lost (`false`) focus.
         focused: bool,
+        /// Pinned encoder identity.
+        encoder: String,
+        /// BLAKE3 of canonical JSON for the terminal mode snapshot.
+        terminal_modes_hash: String,
+    },
+    /// Pointer operation encoded against live mouse modes and geometry.
+    Pointer {
+        /// `click` or `scroll`.
+        operation: String,
+        /// Button name for clicks, otherwise wheel direction.
+        button: String,
+        /// Signed requested wheel lines, or zero for clicks.
+        lines: i16,
+        /// Zero-based viewport column.
+        column: u16,
+        /// Zero-based viewport row.
+        row: u16,
+        /// Terminal columns at encoding time.
+        cols: u16,
+        /// Terminal rows at encoding time.
+        rows: u16,
+        /// Total terminal surface width in pixels.
+        pixel_width: u16,
+        /// Total terminal surface height in pixels.
+        pixel_height: u16,
         /// Pinned encoder identity.
         encoder: String,
         /// BLAKE3 of canonical JSON for the terminal mode snapshot.

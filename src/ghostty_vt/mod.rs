@@ -106,6 +106,32 @@ pub enum FocusEvent {
     Out,
 }
 
+/// Stable mouse button identity accepted by the pinned encoder.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MouseButton {
+    /// Primary button.
+    Left,
+    /// Middle button.
+    Middle,
+    /// Secondary button.
+    Right,
+    /// Vertical wheel up.
+    WheelUp,
+    /// Vertical wheel down.
+    WheelDown,
+}
+
+/// Stable mouse action accepted by the pinned encoder.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MouseAction {
+    /// Button press or wheel tick.
+    Press,
+    /// Button release.
+    Release,
+}
+
 /// Encode one focus transition with the pinned terminal encoder.
 ///
 /// # Errors
@@ -501,6 +527,110 @@ impl GhosttyVt {
             data: ByteString::new(output),
             encoder: "libghostty-key-encoder-v1".to_owned(),
         });
+    }
+
+    /// Encode one cell-addressed pointer event from current terminal mouse modes.
+    ///
+    /// Coordinates are zero-based cells. The encoder receives the center pixel
+    /// of the requested cell and the exact current grid/pixel geometry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid geometry or a pinned encoder failure.
+    pub fn encode_mouse(
+        &self,
+        action: MouseAction,
+        button: MouseButton,
+        column: u16,
+        row: u16,
+        cols: u16,
+        rows: u16,
+        pixel_width: u16,
+        pixel_height: u16,
+    ) -> Result<ByteString> {
+        if cols == 0 || rows == 0 || column >= cols || row >= rows {
+            return Err(Error::GhosttyVt {
+                operation: "validate mouse cell",
+                result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
+            });
+        }
+        let cell_width = u32::from(pixel_width.checked_div(cols).unwrap_or(0).max(1));
+        let cell_height = u32::from(pixel_height.checked_div(rows).unwrap_or(0).max(1));
+        let mut encoder = ptr::null_mut();
+        check("create mouse encoder", unsafe {
+            sys::ghostty_mouse_encoder_new(ptr::null(), &raw mut encoder)
+        })?;
+        let encoder = MouseEncoderGuard(encoder);
+        unsafe { sys::ghostty_mouse_encoder_setopt_from_terminal(encoder.0, self.terminal) };
+        let size = sys::GhosttyMouseEncoderSize {
+            size: size_of::<sys::GhosttyMouseEncoderSize>(),
+            screen_width: u32::from(pixel_width),
+            screen_height: u32::from(pixel_height),
+            cell_width,
+            cell_height,
+            padding_top: 0,
+            padding_bottom: 0,
+            padding_right: 0,
+            padding_left: 0,
+        };
+        unsafe {
+            sys::ghostty_mouse_encoder_setopt(
+                encoder.0,
+                sys::GhosttyMouseEncoderOption_GHOSTTY_MOUSE_ENCODER_OPT_SIZE,
+                (&raw const size).cast::<c_void>(),
+            );
+        }
+        let mut event = ptr::null_mut();
+        check("create mouse event", unsafe {
+            sys::ghostty_mouse_event_new(ptr::null(), &raw mut event)
+        })?;
+        let event = MouseEventGuard(event);
+        let action = match action {
+            MouseAction::Press => sys::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_PRESS,
+            MouseAction::Release => sys::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_RELEASE,
+        };
+        let button = match button {
+            MouseButton::Left => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_LEFT,
+            MouseButton::Middle => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_MIDDLE,
+            MouseButton::Right => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_RIGHT,
+            MouseButton::WheelUp => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_FOUR,
+            MouseButton::WheelDown => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_FIVE,
+        };
+        let position = sys::GhosttyMousePosition {
+            x: (f32::from(column) + 0.5) * cell_width as f32,
+            y: (f32::from(row) + 0.5) * cell_height as f32,
+        };
+        unsafe {
+            sys::ghostty_mouse_event_set_action(event.0, action);
+            sys::ghostty_mouse_event_set_button(event.0, button);
+            sys::ghostty_mouse_event_set_position(event.0, position);
+        }
+        let mut required = 0;
+        let first = unsafe {
+            sys::ghostty_mouse_encoder_encode(
+                encoder.0,
+                event.0,
+                ptr::null_mut(),
+                0,
+                &raw mut required,
+            )
+        };
+        if first != sys::GhosttyResult_GHOSTTY_OUT_OF_SPACE && first != 0 {
+            check("size encoded mouse event", first)?;
+        }
+        let mut output = vec![0_u8; required];
+        let mut written = 0;
+        check("encode mouse event", unsafe {
+            sys::ghostty_mouse_encoder_encode(
+                encoder.0,
+                event.0,
+                output.as_mut_ptr().cast::<c_char>(),
+                output.len(),
+                &raw mut written,
+            )
+        })?;
+        output.truncate(written);
+        return Ok(ByteString::new(output));
     }
 
     /// Drain terminal query responses emitted synchronously by the VT engine.
@@ -1010,6 +1140,22 @@ impl Drop for KeyEventGuard {
     }
 }
 
+struct MouseEncoderGuard(sys::GhosttyMouseEncoder);
+
+impl Drop for MouseEncoderGuard {
+    fn drop(&mut self) {
+        unsafe { sys::ghostty_mouse_encoder_free(self.0) };
+    }
+}
+
+struct MouseEventGuard(sys::GhosttyMouseEvent);
+
+impl Drop for MouseEventGuard {
+    fn drop(&mut self) {
+        unsafe { sys::ghostty_mouse_event_free(self.0) };
+    }
+}
+
 fn physical_key(key: NamedKey) -> Result<(sys::GhosttyKey, Option<[u8; 1]>)> {
     let value = match key {
         NamedKey::Enter => sys::GhosttyKey_GHOSTTY_KEY_ENTER,
@@ -1401,6 +1547,38 @@ mod tests {
             encode_focus(FocusEvent::Out).expect("focus out").as_bytes(),
             b"\x1b[O"
         );
+    }
+
+    #[test]
+    fn mouse_encoder_uses_live_sgr_modes_and_zero_based_cells() {
+        let mut terminal = GhosttyVt::new(80, 24, 100).expect("terminal");
+        terminal.write(b"\x1b[?1000h\x1b[?1006h");
+        let press = terminal
+            .encode_mouse(
+                MouseAction::Press,
+                MouseButton::Left,
+                2,
+                3,
+                80,
+                24,
+                800,
+                480,
+            )
+            .expect("mouse press");
+        let release = terminal
+            .encode_mouse(
+                MouseAction::Release,
+                MouseButton::Left,
+                2,
+                3,
+                80,
+                24,
+                800,
+                480,
+            )
+            .expect("mouse release");
+        assert_eq!(press.as_bytes(), b"\x1b[<0;3;4M");
+        assert_eq!(release.as_bytes(), b"\x1b[<0;3;4m");
     }
 
     #[test]

@@ -16,11 +16,11 @@ use crate::{
     Error, Result,
     event::{ByteString, InputKind},
     event_log::CanonicalBoundary,
-    ghostty_vt::{KeyModifiers, ModeState, NamedKey},
+    ghostty_vt::{KeyModifiers, ModeState, MouseButton, NamedKey},
 };
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 8;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 9;
 /// Relative socket path inside a live session directory.
 pub const CONTROL_SOCKET_NAME: &str = "control.sock";
 /// Maximum encoded request or response size.
@@ -40,6 +40,22 @@ pub enum ProcessSignal {
     User1,
     /// Application-defined signal two (`SIGUSR2`).
     User2,
+}
+
+/// One high-level cell-addressed pointer operation.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PointerOperation {
+    /// Press and release one button at a cell.
+    Click {
+        /// Button to click.
+        button: MouseButton,
+    },
+    /// Emit signed vertical wheel ticks at a cell.
+    Scroll {
+        /// Negative scrolls up and positive scrolls down; zero is invalid.
+        lines: i16,
+    },
 }
 
 /// Exact predicate evaluated against the latest presented viewport.
@@ -102,6 +118,17 @@ pub enum ControlCommand {
     Focus {
         /// Whether the terminal gained (`true`) or lost (`false`) focus.
         focused: bool,
+        /// Reject instead of returning a semantic no-op when reporting is disabled.
+        strict: bool,
+    },
+    /// Encode one cell-addressed pointer operation from live mouse modes.
+    Pointer {
+        /// Zero-based viewport column.
+        column: u16,
+        /// Zero-based viewport row.
+        row: u16,
+        /// Click or vertical scrolling plan.
+        operation: PointerOperation,
         /// Reject instead of returning a semantic no-op when reporting is disabled.
         strict: bool,
     },

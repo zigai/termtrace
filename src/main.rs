@@ -25,14 +25,14 @@ use termtrace::{
     analysis::{ExplainReport, explain},
     capability::{CapabilityReport, CapabilityStatus, probe_capabilities},
     control::{
-        CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, ProcessSignal,
-        ScreenPredicate, request, send_request,
+        CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, PointerOperation,
+        ProcessSignal, ScreenPredicate, request, send_request,
     },
     diff::{SemanticDiff, diff_states, inspect_point},
     event::{ByteString, EVENT_LOG_VERSION, Event, EventProjection, InputKind, event_type},
     event_log::{DurabilityMode, DurabilityPolicy, EventLog},
     geometry::{inherited_geometry, run_probe},
-    ghostty_vt::{Format as GhosttyFormat, KeyModifiers, NamedKey, RowState},
+    ghostty_vt::{Format as GhosttyFormat, KeyModifiers, MouseButton, NamedKey, RowState},
     inspection::{
         inspect_session, state_text, wait_for_completion, wait_for_output, wait_for_screen,
     },
@@ -116,6 +116,8 @@ enum Command {
     Send(SendArgs),
     /// Report terminal-window focus when the application opted in.
     Focus(FocusArgs),
+    /// Send cell-addressed mouse input using live tracking modes.
+    Pointer(PointerArgs),
     /// Resize a live child PTY.
     Resize(ResizeArgs),
     /// Signal a live child process group.
@@ -814,6 +816,71 @@ struct FocusArgs {
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliPointerButton {
+    Left,
+    Middle,
+    Right,
+}
+
+impl From<CliPointerButton> for MouseButton {
+    fn from(button: CliPointerButton) -> Self {
+        return match button {
+            CliPointerButton::Left => Self::Left,
+            CliPointerButton::Middle => Self::Middle,
+            CliPointerButton::Right => Self::Right,
+        };
+    }
+}
+
+#[derive(Debug, Args)]
+struct PointerArgs {
+    /// Live session name or canonical path.
+    session: PathBuf,
+    #[command(subcommand)]
+    operation: PointerCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum PointerCommand {
+    /// Press and release one button at a zero-based cell.
+    Click(PointerClickArgs),
+    /// Emit signed vertical wheel ticks at a zero-based cell.
+    Scroll(PointerScrollArgs),
+}
+
+#[derive(Debug, Args)]
+struct PointerClickArgs {
+    /// Zero-based COLUMN,ROW cell.
+    #[arg(long, value_parser = parse_cell)]
+    cell: (u16, u16),
+    /// Button to click.
+    #[arg(long, value_enum, default_value_t = CliPointerButton::Left)]
+    button: CliPointerButton,
+    /// Reject when tracking suppresses output instead of returning a no-op.
+    #[arg(long)]
+    strict: bool,
+    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
+    #[arg(long = "if-state")]
+    expected_presented_state_hash: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct PointerScrollArgs {
+    /// Zero-based COLUMN,ROW cell.
+    #[arg(long, value_parser = parse_cell)]
+    cell: (u16, u16),
+    /// Signed lines: negative is up and positive is down.
+    #[arg(long)]
+    lines: i16,
+    /// Reject when tracking suppresses output instead of returning a no-op.
+    #[arg(long)]
+    strict: bool,
+    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
+    #[arg(long = "if-state")]
+    expected_presented_state_hash: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
 enum CliSignal {
     Interrupt,
     Terminate,
@@ -1146,6 +1213,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
                 arguments.expected_presented_state_hash,
             );
         }
+        Command::Pointer(arguments) => return run_pointer(arguments),
         Command::Resize(arguments) => return run_resize(arguments),
         Command::Signal(arguments) => {
             return run_control_guarded(
@@ -2538,6 +2606,19 @@ fn parse_pace_duration(value: &str) -> StdResult<Duration, String> {
     return Ok(Duration::from_nanos(nanoseconds));
 }
 
+fn parse_cell(value: &str) -> StdResult<(u16, u16), String> {
+    let (column, row) = value
+        .split_once(',')
+        .ok_or_else(|| return "cell must use zero-based COLUMN,ROW syntax".to_owned())?;
+    let column = column
+        .parse::<u16>()
+        .map_err(|_| return "cell column must be an unsigned 16-bit integer".to_owned())?;
+    let row = row
+        .parse::<u16>()
+        .map_err(|_| return "cell row must be an unsigned 16-bit integer".to_owned())?;
+    return Ok((column, row));
+}
+
 fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifiers)>> {
     let mut modifiers = KeyModifiers::default();
     let key = match atom {
@@ -2605,6 +2686,40 @@ fn run_resize(arguments: ResizeArgs) -> Result<ExitCode> {
             pixel_height,
         },
         arguments.expected_presented_state_hash,
+    );
+}
+
+fn run_pointer(arguments: PointerArgs) -> Result<ExitCode> {
+    let (column, row, operation, strict, expected_presented_state_hash) = match arguments.operation
+    {
+        PointerCommand::Click(click) => (
+            click.cell.0,
+            click.cell.1,
+            PointerOperation::Click {
+                button: click.button.into(),
+            },
+            click.strict,
+            click.expected_presented_state_hash,
+        ),
+        PointerCommand::Scroll(scroll) => (
+            scroll.cell.0,
+            scroll.cell.1,
+            PointerOperation::Scroll {
+                lines: scroll.lines,
+            },
+            scroll.strict,
+            scroll.expected_presented_state_hash,
+        ),
+    };
+    return run_control_guarded(
+        arguments.session,
+        ControlCommand::Pointer {
+            column,
+            row,
+            operation,
+            strict,
+        },
+        expected_presented_state_hash,
     );
 }
 

@@ -26,6 +26,8 @@ When reasoning from a snapshot, pass its `state_hash` back as `--if-state HASH` 
 
 Use `focus SESSION in|out` for an application that enabled DEC focus reporting. The actor evaluates mode 1004 at its ordering point and records focus as its own semantic input kind with the mode hash, pinned encoder, and exact bytes. Disabled reporting is an honest event-free no-op by default; add `--strict` when the test requires the application to have opted in.
 
+Use `pointer SESSION click --cell COLUMN,ROW` or `pointer SESSION scroll --cell COLUMN,ROW --lines N` for applications that enabled mouse tracking. Cells are always zero-based. The actor bounds-checks against current geometry and passes cell-center pixels plus live tracking/encoding modes to the pinned mouse encoder. The canonical descriptor retains the requested operation, cell, grid/pixel geometry, mode hash, encoder, and exact combined bytes; it proves input emission, not that the application activated a UI control.
+
 Signals are allowlisted: interrupt, terminate, hangup, user1, and user2. `SIGKILL` is intentionally absent. `stop` is a graceful `SIGTERM` request. Markers are durable timeline annotations, and a successful `mark` response names the canonical event sequence.
 
 Terminal-generated replies are marked `source: host`. A `query_response` event preserves the triggering control sequence and exact response before the corresponding input intent/result. Agents should not synthesize a second response.
