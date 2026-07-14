@@ -22,7 +22,7 @@ use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
     Error,
     control::{CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ProcessSignal, request},
-    event::{ByteString, EVENT_LOG_VERSION},
+    event::{ByteString, EVENT_LOG_VERSION, InputKind},
     event_log::{DurabilityMode, DurabilityPolicy, EventLog},
     geometry::{inherited_geometry, run_probe},
     ghostty_vt::RowState,
@@ -1192,9 +1192,9 @@ fn write_stdout(output: impl AsRef<[u8]>) -> Result<ExitCode> {
 }
 
 fn run_send(arguments: SendArgs) -> Result<ExitCode> {
-    let data = match (arguments.text, arguments.file) {
-        (Some(text), None) => text.into_bytes(),
-        (None, Some(path)) => fs_err::read(path).into_diagnostic()?,
+    let (data, input_kind) = match (arguments.text, arguments.file) {
+        (Some(text), None) => (text.into_bytes(), InputKind::Text),
+        (None, Some(path)) => (fs_err::read(path).into_diagnostic()?, InputKind::Raw),
         (Some(_), Some(_)) | (None, None) => {
             return Err(miette::miette!(
                 "exactly one of --text or --file is required"
@@ -1205,6 +1205,7 @@ fn run_send(arguments: SendArgs) -> Result<ExitCode> {
         arguments.session,
         ControlCommand::Input {
             data: ByteString::new(data),
+            input_kind,
             intent: arguments.intent,
         },
     );

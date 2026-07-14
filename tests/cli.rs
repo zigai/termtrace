@@ -19,7 +19,7 @@ use tempfile::TempDir;
 use termtrace::{
     Error,
     control::{ControlCommand, ControlData, ControlRequest, send_request},
-    event::{ByteString, EVENT_LOG_VERSION, Event, InputSource, OperationStatus},
+    event::{ByteString, EVENT_LOG_VERSION, Event, InputKind, InputSource, OperationStatus},
     event_log::EventLog,
     provenance::{
         ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind, ProvenanceSensitivity,
@@ -1168,6 +1168,7 @@ fn assert_control_events(recording: &EventLog, session: &Path) {
         &record.event,
         Event::InputIntent {
             source: InputSource::Agent,
+            input_kind: InputKind::Text,
             intent: Some(intent),
             ..
         } if intent == "complete shell read"

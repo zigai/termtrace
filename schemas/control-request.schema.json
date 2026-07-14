@@ -48,6 +48,10 @@
               "$ref": "#/$defs/Base64Bytes",
               "description": "Raw bytes encoded as Base64 in JSON."
             },
+            "input_kind": {
+              "$ref": "#/$defs/InputKind",
+              "description": "Semantic category retained in the canonical input intent."
+            },
             "intent": {
               "description": "Optional human-readable intent.",
               "type": [
@@ -58,7 +62,8 @@
           },
           "required": [
             "command",
-            "data"
+            "data",
+            "input_kind"
           ],
           "type": "object"
         },
@@ -159,6 +164,31 @@
             "command"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "InputKind": {
+      "description": "User-facing interpretation of an input byte sequence.",
+      "oneOf": [
+        {
+          "const": "raw",
+          "description": "Uninterpreted bytes.",
+          "type": "string"
+        },
+        {
+          "const": "text",
+          "description": "Typed textual content.",
+          "type": "string"
+        },
+        {
+          "const": "keys",
+          "description": "One or more symbolic keyboard keys.",
+          "type": "string"
+        },
+        {
+          "const": "paste",
+          "description": "Pasted content.",
+          "type": "string"
         }
       ]
     },

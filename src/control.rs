@@ -12,10 +12,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Error, Result, event::ByteString, event_log::CanonicalBoundary};
+use crate::{
+    Error, Result,
+    event::{ByteString, InputKind},
+    event_log::CanonicalBoundary,
+};
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 3;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 4;
 /// Relative socket path inside a live session directory.
 pub const CONTROL_SOCKET_NAME: &str = "control.sock";
 /// Maximum encoded request or response size.
@@ -49,6 +53,8 @@ pub enum ControlCommand {
     Input {
         /// Raw bytes encoded as Base64 in JSON.
         data: ByteString,
+        /// Semantic category retained in the canonical input intent.
+        input_kind: InputKind,
         /// Optional human-readable intent.
         intent: Option<String>,
     },

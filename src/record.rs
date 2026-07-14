@@ -1324,14 +1324,18 @@ fn execute_control_command(
                 boundaries: actor_boundaries(event_log),
             });
         }
-        ControlCommand::Input { data, intent } => {
+        ControlCommand::Input {
+            data,
+            input_kind,
+            intent,
+        } => {
             validate_control_input(data.as_bytes(), intent.as_deref())?;
             apply_input(
                 spawned.writer.as_mut(),
                 event_log,
                 request_id,
                 InputSource::Agent,
-                InputKind::Raw,
+                *input_kind,
                 intent.clone(),
                 data.as_bytes(),
             )?;
