@@ -25,7 +25,7 @@ use termtrace::{
         CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, ProcessSignal,
         ScreenPredicate, request, send_request,
     },
-    event::{ByteString, EVENT_LOG_VERSION, InputKind},
+    event::{ByteString, EVENT_LOG_VERSION, Event, InputKind},
     event_log::{DurabilityMode, DurabilityPolicy, EventLog},
     geometry::{inherited_geometry, run_probe},
     ghostty_vt::{KeyModifiers, NamedKey, RowState},
@@ -51,10 +51,13 @@ use termtrace::{
     schema::write_all as write_schemas,
     session::{
         CaptureTarget, GeometryProvenance, GeometrySource, GhosttyVisualOverrides, SessionGeometry,
-        SessionLineage, VerificationLevel, manifest_hash, read_manifest, verify_session_with_trust,
+        SessionLineage, VerificationLevel, manifest_hash, read_manifest, validate_completed_log,
+        verify_session_with_trust,
     },
     session_registry::SessionRegistry,
-    timeline::{parse_time_offset_ns, resolve_source_selection},
+    timeline::{
+        TimelineEntry, TimelineItem, build_timeline, parse_time_offset_ns, resolve_source_selection,
+    },
     visual::{CaptureOptions, capture, probe_ghostty_geometry},
 };
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, registry, util::SubscriberInitExt};
@@ -123,6 +126,8 @@ enum Command {
     Inspect(InspectArgs),
     /// Show a truth-labeled live or completed terminal viewport.
     Show(ShowArgs),
+    /// List canonical operations and semantic state transitions in order.
+    Timeline(TimelineArgs),
     /// Wait for exact UTF-8 text in canonical PTY output.
     Wait(WaitArgs),
     /// Copy the longest integrity-checked event prefix without modifying source.
@@ -326,6 +331,20 @@ struct ShowArgs {
     /// Output representation.
     #[arg(long, value_enum, default_value_t = ShowFormat::Text)]
     format: ShowFormat,
+}
+
+#[derive(Debug, Args)]
+struct TimelineArgs {
+    /// Completed session name or canonical path.
+    session: PathBuf,
+    /// Include synchronized-output states that were not presentation eligible.
+    #[arg(long)]
+    all_states: bool,
+    /// Emit one stable JSON object per line.
+    #[arg(long)]
+    jsonl: bool,
+    #[command(flatten)]
+    range: TimeRangeArgs,
 }
 
 #[derive(Debug, Args)]
@@ -861,6 +880,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         }
         Command::Inspect(arguments) => return run_inspect(arguments),
         Command::Show(arguments) => return run_show(arguments),
+        Command::Timeline(arguments) => return run_timeline(arguments),
         Command::Wait(arguments) => return run_wait(arguments),
         Command::Recover(arguments) => return run_recover(arguments),
         Command::Schemas(arguments) => return run_schemas(arguments),
@@ -1154,6 +1174,104 @@ fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
             serde_json::to_string_pretty(&observation).into_diagnostic()?
         )),
         ShowFormat::JsonCompact => write_json_line(&observation),
+    };
+}
+
+fn run_timeline(arguments: TimelineArgs) -> Result<ExitCode> {
+    let session = resolve_session_ref(arguments.session)?;
+    let log = EventLog::read(session.join("events.jsonl"))?;
+    validate_completed_log(&session, &log)?;
+    let range = resolve_source_selection(
+        &log,
+        arguments.range.start_monotonic_ns,
+        arguments.range.end_monotonic_ns,
+        arguments.range.from_marker.as_deref(),
+        arguments.range.to_marker.as_deref(),
+    )?;
+    let entries = build_timeline(&log, arguments.all_states, range)?;
+    if arguments.jsonl {
+        for entry in entries {
+            write_json_line(&entry)?;
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    let mut output = String::new();
+    for entry in entries {
+        writeln!(output, "{}", timeline_text(&entry)).into_diagnostic()?;
+    }
+    return write_stdout(output);
+}
+
+fn timeline_text(entry: &TimelineEntry) -> String {
+    let seconds = entry.monotonic_ns / 1_000_000_000;
+    let fractional = entry.monotonic_ns % 1_000_000_000;
+    let event = entry
+        .event_seq
+        .map_or_else(|| return "-".to_owned(), |seq| return seq.to_string());
+    let detail = match &entry.item {
+        TimelineItem::SemanticState {
+            state_id,
+            event_byte_offset,
+            presented,
+            changed_rows,
+            changed_cells,
+            cursor_changed,
+            modes_changed,
+            metadata_changed,
+            ..
+        } => format!(
+            "state {state_id} byte {} presented={} rows={} cells={} cursor={} modes={} metadata={}",
+            event_byte_offset
+                .map_or_else(|| return "-".to_owned(), |value| return value.to_string()),
+            if *presented { "yes" } else { "no" },
+            changed_rows.len(),
+            changed_cells,
+            cursor_changed,
+            modes_changed,
+            metadata_changed,
+        ),
+        TimelineItem::CanonicalEvent { event } => canonical_event_text(event),
+    };
+    return format!("{seconds}.{fractional:09}s  event {event}  {detail}");
+}
+
+fn canonical_event_text(event: &Event) -> String {
+    return match event {
+        Event::InputIntent {
+            source,
+            input_kind,
+            data,
+            intent,
+            ..
+        } => format!(
+            "input {source:?}/{input_kind:?} bytes={}{}",
+            data.as_bytes().len(),
+            intent
+                .as_ref()
+                .map_or_else(String::new, |value| return format!(" intent={value:?}"))
+        ),
+        Event::ResizeIntent { cols, rows, .. } => {
+            format!("resize {cols}x{rows}")
+        }
+        Event::SignalIntent { name, .. } => format!("signal {name}"),
+        Event::Marker { label, .. } => format!("marker {label:?}"),
+        Event::QueryResponse {
+            query, responder, ..
+        } => format!(
+            "query bytes={} responder={responder}",
+            query.as_bytes().len()
+        ),
+        Event::Lifecycle {
+            lifecycle_kind,
+            pid,
+        } => format!("lifecycle {lifecycle_kind:?} pid={pid:?}"),
+        Event::Exit {
+            code, signal_name, ..
+        } => format!("exit code={code:?} signal={signal_name:?}"),
+        Event::HostError { code, message } => {
+            format!("host_error {code}: {message}")
+        }
+        _ => "canonical operation result".to_owned(),
     };
 }
 

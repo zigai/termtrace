@@ -25,6 +25,7 @@ use crate::{
     request_journal::MutationJournalRecord,
     session::{SessionCompletion, SessionManifest, VerificationReport},
     session_registry::{RegistryEntry, RegistryListEntry},
+    timeline::TimelineEntry,
     visual::{VideoMapEntry, VisualManifest},
 };
 
@@ -69,6 +70,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<WaitOutcome>("wait-outcome.schema.json")?,
         schema::<ScreenWaitOutcome>("screen-wait-outcome.schema.json")?,
         schema::<Observation>("observation.schema.json")?,
+        schema::<TimelineEntry>("timeline-entry.schema.json")?,
         schema::<PlaybackTiming>("playback-timing.schema.json")?,
         schema::<PlaybackFailure>("playback-failure.schema.json")?,
     ]);

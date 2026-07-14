@@ -1531,6 +1531,62 @@ fn show_records_one_off_commands_as_completed_evidence() {
 }
 
 #[test]
+fn timeline_streams_presented_states_and_canonical_operations() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("timeline-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf '\\033[?2026hHIDDEN\\033[?2026lVISIBLE'",
+        ])
+        .assert()
+        .success();
+
+    let mut concise = Command::cargo_bin("termtrace").expect("binary should build");
+    let concise_output = concise
+        .arg("timeline")
+        .arg(&session)
+        .arg("--jsonl")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let concise_entries = concise_output
+        .split(|byte| return *byte == b'\n')
+        .filter(|line| return !line.is_empty())
+        .map(|line| {
+            return serde_json::from_slice::<serde_json::Value>(line).expect("timeline JSON");
+        })
+        .collect::<Vec<_>>();
+    assert!(concise_entries.iter().any(|entry| {
+        return entry.pointer("/item/kind") == Some(&serde_json::json!("canonical_event"));
+    }));
+    assert!(
+        concise_entries
+            .iter()
+            .filter(|entry| {
+                return entry.pointer("/item/kind") == Some(&serde_json::json!("semantic_state"));
+            })
+            .all(|entry| return entry.pointer("/item/presented") == Some(&serde_json::json!(true)))
+    );
+
+    let mut complete = Command::cargo_bin("termtrace").expect("binary should build");
+    complete
+        .arg("timeline")
+        .arg(&session)
+        .args(["--jsonl", "--all-states"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""presented":false"#));
+}
+
+#[test]
 fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("live-snapshot");

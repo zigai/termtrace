@@ -41,6 +41,8 @@ termtrace inspect --session SESSION --state 42 --row 16 --format json-compact
 
 `inspect` replays from canonical events and returns a complete state, not a delta. JSON includes graphemes, styles, resolved colors, cursor, all known modes, OSC metadata, dirty evidence, and provenance. Text is a compact viewport view. `--row N` emits only one complete row plus bounded record provenance, and `json-compact` avoids pretty-print overhead. Output commands treat a downstream broken pipe as a normal early consumer exit.
 
+Start rendering diagnosis with `termtrace timeline SESSION`. The default text view lists canonical operations and presented semantic transitions with their event/byte positions and changed row/cell counts. Add `--jsonl` for streaming automation or `--all-states` when synchronized-output internals matter. Timeline ranges use the same half-open time and unique-marker selectors as indexing and capture.
+
 ## Complete and derive
 
 Use an explicit completion barrier before post-processing:

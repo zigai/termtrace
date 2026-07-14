@@ -119,6 +119,8 @@ The socket disappears when the child exits. `stop --wait` does not return until 
 
 `show -- COMMAND ...` runs a one-off command in a PTY, retains its owner-only canonical session, waits for durable completion, then renders the final presented viewport. Its structured observation is labeled `source_kind: one_off_command`, `integrity: canonical_chained`, and includes the retained session identity/path. Child output is kept in the recording rather than mixed into the observation response.
 
+`timeline SESSION` is the concise discovery view for completed evidence. It merges presentation-eligible semantic transitions with canonical inputs, resizes, signals, markers, queries, lifecycle, errors, and exit. Use `--all-states` to include synchronized-output internals, `--jsonl` for one stable object per line, and the shared `--from`/`--to` or marker range selectors to bound replay.
+
 ## Semantic replay
 
 ```bash

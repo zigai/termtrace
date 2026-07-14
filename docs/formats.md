@@ -32,6 +32,8 @@ Control responses carry separate durable and observed event/hash/output boundari
 
 One-off command observations are completed canonical sessions with `source_kind: one_off_command`. The retained canonical path is the recovery and forensic handle even when the child exits unsuccessfully; a command that fails before completion produces no successful observation.
 
+`TimelineEntry` is a streaming diagnostic projection. `semantic_state` items bind state/event/byte identity, presentation eligibility, state hash, dirty classification, changed rows/cell count, and cursor/mode/metadata flags. `canonical_event` items retain the complete typed non-output event. Output events are represented by the semantic states they caused; concise mutation-result events are omitted without altering canonical evidence.
+
 `requests.jsonl` supports persistent idempotency after bounded memory-cache eviction. It is not a canonical evidence root: readers may discard and reconstruct retry state from canonical events, and `termtrace verify` reports a missing, verified, or invalid journal without allowing journal damage to invalidate an otherwise complete event chain.
 
 A completed session must end in `Exit` and contain no pending mutation intent. Run `termtrace verify SESSION --level content --json` for a stable offline report, or use `--level durability-record` to additionally require the internally consistent chain-bound persistence record. Offline verification cannot prove that historical sync calls reached stable media. A valid unsigned hash graph establishes integrity relative to the roots in the session; it does not authenticate who created them.

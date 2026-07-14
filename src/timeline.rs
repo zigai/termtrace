@@ -5,11 +5,152 @@ use std::result::Result as StdResult;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, Result, event::Event, event_log::EventLog};
+use crate::{
+    Error, Result, event::Event, event_log::EventLog, ghostty_vt::DirtyState, replay::replay,
+};
 
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 const NANOS_PER_MINUTE: u64 = 60 * NANOS_PER_SECOND;
 const NANOS_PER_HOUR: u64 = 60 * NANOS_PER_MINUTE;
+
+/// One ordered, source-bound timeline item.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TimelineEntry {
+    /// Canonical session offset.
+    pub monotonic_ns: u64,
+    /// Responsible canonical event, absent for the initial semantic state.
+    pub event_seq: Option<u64>,
+    /// Timeline item payload.
+    pub item: TimelineItem,
+}
+
+/// Concise canonical or semantic item in a diagnostic timeline.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TimelineItem {
+    /// A distinct Ghostty semantic state transition.
+    SemanticState {
+        /// Dense semantic state identifier.
+        state_id: u64,
+        /// Byte offset within the responsible output event.
+        event_byte_offset: Option<u64>,
+        /// Complete normalized semantic state hash.
+        state_hash: String,
+        /// Whether the state was eligible for presentation.
+        presented: bool,
+        /// Ghostty's dirty classification.
+        ghostty_dirty: DirtyState,
+        /// Rows whose semantic cells changed.
+        changed_rows: Vec<u16>,
+        /// Number of complete semantic cell values changed.
+        changed_cells: u64,
+        /// Whether cursor state changed.
+        cursor_changed: bool,
+        /// Whether terminal modes changed.
+        modes_changed: bool,
+        /// Whether terminal metadata changed.
+        metadata_changed: bool,
+    },
+    /// A non-output canonical event retained verbatim.
+    CanonicalEvent {
+        /// Exact typed canonical event.
+        event: Event,
+    },
+}
+
+/// Build a concise ordered timeline from validated canonical events.
+///
+/// Output byte events are represented by their resulting semantic states;
+/// mutation results are omitted from the default concise view. Other events
+/// retain their exact typed canonical payload.
+///
+/// # Errors
+///
+/// Returns an error when semantic replay fails.
+pub fn build_timeline(
+    log: &EventLog,
+    include_hidden_states: bool,
+    range: Option<SourceRange>,
+) -> Result<Vec<TimelineEntry>> {
+    let replay = replay(log)?;
+    let mut entries = Vec::new();
+    for state in replay.states {
+        if !include_hidden_states && !state.presented {
+            continue;
+        }
+        if range.is_some_and(|selection| return !selection.contains(state.monotonic_ns)) {
+            continue;
+        }
+        let changed_rows = state
+            .delta
+            .rows
+            .iter()
+            .map(|row| return row.row)
+            .collect::<Vec<_>>();
+        let changed_cells = state.delta.rows.iter().fold(0_u64, |count, row| {
+            return count.saturating_add(u64::try_from(row.cells.len()).unwrap_or(u64::MAX));
+        });
+        entries.push(TimelineEntry {
+            monotonic_ns: state.monotonic_ns,
+            event_seq: state.event_seq,
+            item: TimelineItem::SemanticState {
+                state_id: state.state_id,
+                event_byte_offset: state.event_byte_offset,
+                state_hash: state.state_hash,
+                presented: state.presented,
+                ghostty_dirty: state.ghostty_dirty,
+                changed_rows,
+                changed_cells,
+                cursor_changed: state.delta.cursor.is_some(),
+                modes_changed: state.delta.modes.is_some(),
+                metadata_changed: state.delta.metadata.is_some(),
+            },
+        });
+    }
+    for record in &log.events {
+        if range.is_some_and(|selection| return !selection.contains(record.monotonic_ns))
+            || !timeline_event(&record.event)
+        {
+            continue;
+        }
+        entries.push(TimelineEntry {
+            monotonic_ns: record.monotonic_ns,
+            event_seq: Some(record.seq),
+            item: TimelineItem::CanonicalEvent {
+                event: record.event.clone(),
+            },
+        });
+    }
+    entries.sort_by_key(|entry| {
+        let state_order = match &entry.item {
+            TimelineItem::CanonicalEvent { .. } => 0,
+            TimelineItem::SemanticState { .. } => 1,
+        };
+        return (
+            entry.monotonic_ns,
+            entry.event_seq.unwrap_or(0),
+            state_order,
+            match &entry.item {
+                TimelineItem::SemanticState {
+                    event_byte_offset, ..
+                } => event_byte_offset.unwrap_or(0),
+                TimelineItem::CanonicalEvent { .. } => 0,
+            },
+        );
+    });
+    return Ok(entries);
+}
+
+fn timeline_event(event: &Event) -> bool {
+    return !matches!(
+        event,
+        Event::Output { .. }
+            | Event::InputResult { .. }
+            | Event::ResizeResult { .. }
+            | Event::SignalResult { .. }
+    );
+}
 
 /// A non-empty half-open interval on the canonical monotonic timeline.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
