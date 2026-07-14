@@ -60,6 +60,36 @@ fn version_subcommand_reports_package_version() {
 }
 
 #[test]
+fn doctor_reports_capability_boundaries_and_enforces_requirements() {
+    let mut version = Command::cargo_bin("termtrace").expect("binary should build");
+    version
+        .args(["version", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""termtrace_version":"0.1.0""#))
+        .stdout(predicate::str::contains("ghostty_vt_revision"))
+        .stdout(predicate::str::contains("control_protocol_version"));
+
+    let mut semantic = Command::cargo_bin("termtrace").expect("binary should build");
+    semantic
+        .args(["doctor", "--require", "semantic", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""id":"semantic""#))
+        .stdout(predicate::str::contains(r#""status":"ready""#));
+
+    let mut blocked = Command::cargo_bin("termtrace").expect("binary should build");
+    blocked
+        .env("PATH", "")
+        .args(["doctor", "--require", "native-video", "--explain"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("native-video"))
+        .stdout(predicate::str::contains("blocked"))
+        .stdout(predicate::str::contains("fix:"));
+}
+
+#[test]
 fn completions_are_generated_from_the_current_command_graph() {
     for (shell, signature) in [
         ("bash", "complete -F _termtrace"),

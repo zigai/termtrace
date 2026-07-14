@@ -131,6 +131,8 @@ The socket disappears when the child exits. `stop --wait` does not return until 
 
 Generate completion scripts directly from the installed command graph with `termtrace completions bash|zsh|fish|elvish|powershell`. For example, Zsh users can write `termtrace completions zsh > ~/.zfunc/_termtrace` and ensure that directory is on `fpath` before `compinit`.
 
+Run `termtrace doctor` for bounded local capability probes or `termtrace capabilities --json` for the stable inventory. `doctor --require core,semantic` fails unless every named tier is ready; `--explain` prints focused remediation for blocked tiers. Native screenshot and video readiness remain separate, and video checks FFmpeg's `libx264rgb` encoder. `termtrace version --json` reports package/build, semantic-engine, format/protocol, OS, and architecture identifiers.
+
 ## Semantic replay
 
 ```bash

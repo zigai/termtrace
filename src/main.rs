@@ -23,6 +23,7 @@ use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
     Error,
     analysis::{ExplainReport, explain},
+    capability::{CapabilityReport, CapabilityStatus, probe_capabilities},
     control::{
         CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, ProcessSignal,
         ScreenPredicate, request, send_request,
@@ -82,7 +83,11 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Report build and runtime component versions.
-    Version,
+    Version(VersionArgs),
+    /// Probe built-in and optional host capabilities.
+    Doctor(DoctorArgs),
+    /// Report the current bounded capability inventory.
+    Capabilities(CapabilitiesArgs),
     /// Run a command in a PTY and preserve its byte-exact event stream.
     Record(RecordArgs),
     /// Start a detached recording and publish a name after readiness.
@@ -157,6 +162,33 @@ enum VerifyLevelArg {
     Content,
     DurabilityRecord,
     Signature,
+}
+
+#[derive(Debug, Args)]
+struct VersionArgs {
+    /// Emit stable structured component/build metadata.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct DoctorArgs {
+    /// Emit the stable structured capability report.
+    #[arg(long)]
+    json: bool,
+    /// Comma-separated capabilities that must be ready.
+    #[arg(long, value_delimiter = ',', value_parser = parse_capability_id)]
+    require: Vec<String>,
+    /// Include focused remediation for blocked capabilities in text output.
+    #[arg(long)]
+    explain: bool,
+}
+
+#[derive(Debug, Args)]
+struct CapabilitiesArgs {
+    /// Emit the stable structured capability report.
+    #[arg(long)]
+    json: bool,
 }
 
 impl From<VerifyLevelArg> for VerificationLevel {
@@ -986,13 +1018,9 @@ fn main() -> Result<ExitCode> {
 
 fn dispatch(command: Command) -> Result<ExitCode> {
     match command {
-        Command::Version => {
-            return write_stdout(format!(
-                "termtrace {}\nbuild {}\nlibghostty-vt {GHOSTTY_REVISION}\nevent-log v{EVENT_LOG_VERSION}\nstate-format v{STATE_FORMAT_VERSION}\ncontrol-protocol v{CONTROL_PROTOCOL_VERSION}\n",
-                env!("CARGO_PKG_VERSION"),
-                env!("TERMTRACE_BUILD_REVISION")
-            ));
-        }
+        Command::Version(arguments) => return run_version(arguments),
+        Command::Doctor(arguments) => return run_doctor(arguments),
+        Command::Capabilities(arguments) => return run_capabilities(arguments),
         Command::Record(arguments) => return run_record(arguments),
         Command::Start(arguments) => return run_start(arguments),
         Command::Restart(arguments) => return run_restart(arguments),
@@ -1046,6 +1074,72 @@ fn dispatch(command: Command) -> Result<ExitCode> {
             return Ok(ExitCode::SUCCESS);
         }
     }
+}
+
+fn run_version(arguments: VersionArgs) -> Result<ExitCode> {
+    if arguments.json {
+        return write_json_line(&serde_json::json!({
+            "termtrace_version": env!("CARGO_PKG_VERSION"),
+            "build_revision": env!("TERMTRACE_BUILD_REVISION"),
+            "ghostty_vt_revision": GHOSTTY_REVISION,
+            "event_log_version": EVENT_LOG_VERSION,
+            "state_format_version": STATE_FORMAT_VERSION,
+            "control_protocol_version": CONTROL_PROTOCOL_VERSION,
+            "target_os": env::consts::OS,
+            "target_arch": env::consts::ARCH,
+        }));
+    }
+    return write_stdout(format!(
+        "termtrace {}\nbuild {}\nlibghostty-vt {GHOSTTY_REVISION}\nevent-log v{EVENT_LOG_VERSION}\nstate-format v{STATE_FORMAT_VERSION}\ncontrol-protocol v{CONTROL_PROTOCOL_VERSION}\n",
+        env!("CARGO_PKG_VERSION"),
+        env!("TERMTRACE_BUILD_REVISION")
+    ));
+}
+
+fn run_doctor(arguments: DoctorArgs) -> Result<ExitCode> {
+    let report = probe_capabilities();
+    if arguments.json {
+        write_json_line(&report)?;
+    } else {
+        write_stdout(capability_text(&report, arguments.explain)?)?;
+    }
+    if arguments
+        .require
+        .iter()
+        .any(|required| return !report.is_ready(required))
+    {
+        return Ok(ExitCode::FAILURE);
+    }
+    return Ok(ExitCode::SUCCESS);
+}
+
+fn run_capabilities(arguments: CapabilitiesArgs) -> Result<ExitCode> {
+    let report = probe_capabilities();
+    if arguments.json {
+        return write_json_line(&report);
+    }
+    return write_stdout(capability_text(&report, false)?);
+}
+
+fn capability_text(report: &CapabilityReport, explain: bool) -> Result<String> {
+    let mut output = String::new();
+    for capability in &report.capabilities {
+        writeln!(
+            output,
+            "{:<20} {:<7} {}",
+            capability.id,
+            match capability.status {
+                CapabilityStatus::Ready => "ready",
+                CapabilityStatus::Blocked => "blocked",
+            },
+            capability.detail
+        )
+        .into_diagnostic()?;
+        if explain && let Some(remediation) = &capability.remediation {
+            writeln!(output, "  fix: {remediation}").into_diagnostic()?;
+        }
+    }
+    return Ok(output);
 }
 
 fn run_verify(arguments: VerifyArgs) -> Result<ExitCode> {
@@ -2001,6 +2095,23 @@ fn parse_event_type(value: &str) -> StdResult<String, String> {
     return Err(format!(
         "unknown event type `{value}`; expected one of {}",
         EVENT_TYPES.join(",")
+    ));
+}
+
+fn parse_capability_id(value: &str) -> StdResult<String, String> {
+    const CAPABILITIES: &[&str] = &[
+        "core",
+        "semantic",
+        "native-screenshot",
+        "native-video",
+        "receipt-signing",
+    ];
+    if CAPABILITIES.contains(&value) {
+        return Ok(value.to_owned());
+    }
+    return Err(format!(
+        "unknown capability `{value}`; expected one of {}",
+        CAPABILITIES.join(",")
     ));
 }
 

@@ -21,6 +21,8 @@ The production capture path targets Linux because Ghostty's GTK application, Xvf
 - OpenSSH `ssh-keygen` for optional detached evidence receipts
 - jq for the native smoke script
 
+Run `termtrace doctor --explain` after installation. The built-in semantic probe creates and snapshots a tiny terminal. Core checks the current Linux/detached-session boundary; native screenshot checks Ghostty, Xvfb, and D-Bus launch support; native video additionally checks FFmpeg/FFprobe and `libx264rgb`. Use `--require CAPABILITY,...` in CI to turn unavailable guarantees into a failing status rather than relying on tool-name assumptions.
+
 ## Build
 
 ```bash

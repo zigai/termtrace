@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "Capability": {
+      "additionalProperties": false,
+      "description": "Result of one bounded capability probe.",
+      "properties": {
+        "code": {
+          "description": "Stable diagnostic code.",
+          "type": "string"
+        },
+        "detail": {
+          "description": "Human-readable probe result.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Stable capability identifier.",
+          "type": "string"
+        },
+        "remediation": {
+          "description": "Focused remediation when blocked.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus",
+          "description": "Readiness result."
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "code",
+        "detail"
+      ],
+      "type": "object"
+    },
+    "CapabilityStatus": {
+      "description": "Stable capability readiness.",
+      "oneOf": [
+        {
+          "const": "ready",
+          "description": "The bounded local probe succeeded.",
+          "type": "string"
+        },
+        {
+          "const": "blocked",
+          "description": "A required component or guarantee is unavailable.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/capability-report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Complete local capability report.",
+  "properties": {
+    "build_revision": {
+      "description": "Source/build revision.",
+      "type": "string"
+    },
+    "capabilities": {
+      "description": "Ordered capability probes.",
+      "items": {
+        "$ref": "#/$defs/Capability"
+      },
+      "type": "array"
+    },
+    "ghostty_vt_revision": {
+      "description": "Pinned semantic engine revision.",
+      "type": "string"
+    },
+    "target_arch": {
+      "description": "Target architecture.",
+      "type": "string"
+    },
+    "target_os": {
+      "description": "Target operating system.",
+      "type": "string"
+    },
+    "termtrace_version": {
+      "description": "Package version.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "termtrace_version",
+    "build_revision",
+    "ghostty_vt_revision",
+    "target_os",
+    "target_arch",
+    "capabilities"
+  ],
+  "title": "CapabilityReport",
+  "type": "object"
+}

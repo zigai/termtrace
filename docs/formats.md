@@ -44,6 +44,8 @@ One-off command observations are completed canonical sessions with `source_kind:
 
 `EventProjection` is the stable `events` JSONL record. Exact mode embeds the typed canonical `Event`; metadata-only mode retains its non-byte JSON fields and replaces each exact byte field with its name, byte count, and BLAKE3. Sequence, timestamp, canonical event hash, and stable event variant name are always present.
 
+`CapabilityReport` records package/build and semantic-engine identities, target OS/architecture, and ordered bounded probe results. Each capability has a stable ID, ready/blocked status, diagnostic code, detail, and optional remediation. A ready native-tool inventory does not replace the exact-grid probe performed by an actual capture.
+
 `requests.jsonl` supports persistent idempotency after bounded memory-cache eviction. It is not a canonical evidence root: readers may discard and reconstruct retry state from canonical events, and `termtrace verify` reports a missing, verified, or invalid journal without allowing journal damage to invalidate an otherwise complete event chain.
 
 A completed session must end in `Exit` and contain no pending mutation intent. Run `termtrace verify SESSION --level content --json` for a stable offline report, or use `--level durability-record` to additionally require the internally consistent chain-bound persistence record. Offline verification cannot prove that historical sync calls reached stable media. A valid unsigned hash graph establishes integrity relative to the roots in the session; it does not authenticate who created them.
