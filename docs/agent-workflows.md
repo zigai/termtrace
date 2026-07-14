@@ -24,6 +24,8 @@ Use `send SESSION text:VALUE enter` for UTF-8 plus semantic keys, and `raw:`, `r
 
 When reasoning from a snapshot, pass its `state_hash` back as `--if-state HASH` on `send`, `resize`, `signal`, `mark`, or `stop`. A `stale_observation` rejection means output processed before the mutation changed the presented state; inspect again instead of blindly retrying with a new UUID. The rejection includes the current hash plus actor-observed and durable boundaries and records no canonical intent. Each atom in a paced or multi-atom send is guarded separately.
 
+Use `focus SESSION in|out` for an application that enabled DEC focus reporting. The actor evaluates mode 1004 at its ordering point and records focus as its own semantic input kind with the mode hash, pinned encoder, and exact bytes. Disabled reporting is an honest event-free no-op by default; add `--strict` when the test requires the application to have opted in.
+
 Signals are allowlisted: interrupt, terminate, hangup, user1, and user2. `SIGKILL` is intentionally absent. `stop` is a graceful `SIGTERM` request. Markers are durable timeline annotations, and a successful `mark` response names the canonical event sequence.
 
 Terminal-generated replies are marked `source: host`. A `query_response` event preserves the triggering control sequence and exact response before the corresponding input intent/result. Agents should not synthesize a second response.

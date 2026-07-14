@@ -114,6 +114,8 @@ enum Command {
     Status(StatusArgs),
     /// Send text or file bytes to a live child PTY.
     Send(SendArgs),
+    /// Report terminal-window focus when the application opted in.
+    Focus(FocusArgs),
     /// Resize a live child PTY.
     Resize(ResizeArgs),
     /// Signal a live child process group.
@@ -791,6 +793,27 @@ struct ResizeArgs {
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
+enum FocusDirection {
+    In,
+    Out,
+}
+
+#[derive(Debug, Args)]
+struct FocusArgs {
+    /// Live session name or canonical path.
+    session: PathBuf,
+    /// Focus transition to report.
+    #[arg(value_enum)]
+    direction: FocusDirection,
+    /// Reject when reporting is disabled instead of returning a semantic no-op.
+    #[arg(long)]
+    strict: bool,
+    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
+    #[arg(long = "if-state")]
+    expected_presented_state_hash: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
 enum CliSignal {
     Interrupt,
     Terminate,
@@ -1113,6 +1136,16 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Ping(arguments) => return run_control(arguments.session, ControlCommand::Ping),
         Command::Status(arguments) => return run_status(arguments),
         Command::Send(arguments) => return run_send(arguments),
+        Command::Focus(arguments) => {
+            return run_control_guarded(
+                arguments.session,
+                ControlCommand::Focus {
+                    focused: matches!(arguments.direction, FocusDirection::In),
+                    strict: arguments.strict,
+                },
+                arguments.expected_presented_state_hash,
+            );
+        }
         Command::Resize(arguments) => return run_resize(arguments),
         Command::Signal(arguments) => {
             return run_control_guarded(

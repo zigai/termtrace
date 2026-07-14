@@ -508,6 +508,35 @@
             "terminal_modes_hash"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Focus transition encoded while DEC focus reporting was enabled.",
+          "properties": {
+            "encoder": {
+              "description": "Pinned encoder identity.",
+              "type": "string"
+            },
+            "focused": {
+              "description": "Whether the terminal gained (`true`) or lost (`false`) focus.",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "focus",
+              "type": "string"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "focused",
+            "encoder",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -532,6 +561,11 @@
         {
           "const": "paste",
           "description": "Pasted content.",
+          "type": "string"
+        },
+        {
+          "const": "focus",
+          "description": "Terminal-window focus transition.",
           "type": "string"
         }
       ]

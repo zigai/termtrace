@@ -206,6 +206,8 @@ pub enum InputKind {
     Keys,
     /// Pasted content.
     Paste,
+    /// Terminal-window focus transition.
+    Focus,
 }
 
 /// Structured semantic provenance for exact input bytes.
@@ -237,6 +239,15 @@ pub enum InputDescriptor {
     Paste {
         /// Whether the actor applied bracketed-paste wrappers.
         bracketed: bool,
+        /// BLAKE3 of canonical JSON for the terminal mode snapshot.
+        terminal_modes_hash: String,
+    },
+    /// Focus transition encoded while DEC focus reporting was enabled.
+    Focus {
+        /// Whether the terminal gained (`true`) or lost (`false`) focus.
+        focused: bool,
+        /// Pinned encoder identity.
+        encoder: String,
         /// BLAKE3 of canonical JSON for the terminal mode snapshot.
         terminal_modes_hash: String,
     },

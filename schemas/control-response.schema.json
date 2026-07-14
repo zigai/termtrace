@@ -132,6 +132,40 @@
         },
         {
           "additionalProperties": false,
+          "description": "Successful semantic input request that correctly emitted no bytes.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed positions at evaluation."
+            },
+            "input_kind": {
+              "$ref": "#/$defs/InputKind",
+              "description": "Semantic input category."
+            },
+            "kind": {
+              "const": "input_noop",
+              "type": "string"
+            },
+            "reason": {
+              "description": "Stable explanation for the no-op.",
+              "type": "string"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "input_kind",
+            "reason",
+            "terminal_modes_hash",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Live session status.",
           "properties": {
             "boundaries": {
@@ -453,6 +487,11 @@
         {
           "const": "paste",
           "description": "Pasted content.",
+          "type": "string"
+        },
+        {
+          "const": "focus",
+          "description": "Terminal-window focus transition.",
           "type": "string"
         }
       ]

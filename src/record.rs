@@ -53,7 +53,7 @@ use crate::{
         OperationStatus, TerminalColors,
     },
     event_log::{DurabilityPolicy, EventLogWriter, SessionClock},
-    ghostty_vt::{GhosttyVt, NamedKey, SemanticState},
+    ghostty_vt::{FocusEvent, GhosttyVt, NamedKey, SemanticState, encode_focus},
     profile::ResolvedGhosttyProfile,
     provenance::{ProvenancePolicy, collect_execution_provenance},
     request_journal::{
@@ -1509,7 +1509,9 @@ fn execute_control_command(
                 *input_kind,
                 match input_kind {
                     InputKind::Text => InputDescriptor::Text,
-                    InputKind::Raw | InputKind::Keys | InputKind::Paste => InputDescriptor::Raw,
+                    InputKind::Raw | InputKind::Keys | InputKind::Paste | InputKind::Focus => {
+                        InputDescriptor::Raw
+                    }
                 },
                 intent.clone(),
                 data.as_bytes(),
@@ -1588,6 +1590,59 @@ fn execute_control_command(
                 operation_id: request_id,
                 input_kind: InputKind::Paste,
                 data: ByteString::new(encoded),
+                bytes_written: applied.bytes_written,
+                intent_event_seq: applied.intent_event_seq,
+                result_event_seq: applied.result_event_seq,
+                boundaries: actor_boundaries(event_log),
+            });
+        }
+        ControlCommand::Focus { focused, strict } => {
+            let modes = live.semantic.snapshot()?.modes;
+            let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
+                return terminal_error("serialize focus modes", error.to_string());
+            })?;
+            let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
+            let reporting_enabled = modes
+                .values
+                .iter()
+                .any(|mode| return !mode.ansi && mode.number == 1004 && mode.enabled);
+            if !reporting_enabled {
+                if *strict {
+                    return Err(control_rejected(
+                        "focus_reporting_disabled",
+                        "the application has not enabled DEC focus reporting mode 1004",
+                    ));
+                }
+                return Ok(ControlData::InputNoop {
+                    input_kind: InputKind::Focus,
+                    reason: "focus_reporting_disabled".to_owned(),
+                    terminal_modes_hash,
+                    boundaries: actor_boundaries(event_log),
+                });
+            }
+            let encoded = encode_focus(if *focused {
+                FocusEvent::In
+            } else {
+                FocusEvent::Out
+            })?;
+            let applied = apply_input(
+                spawned.writer.as_mut(),
+                event_log,
+                request_id,
+                InputSource::Agent,
+                InputKind::Focus,
+                InputDescriptor::Focus {
+                    focused: *focused,
+                    encoder: "libghostty-focus-encoder-v1".to_owned(),
+                    terminal_modes_hash,
+                },
+                Some(if *focused { "focus-in" } else { "focus-out" }.to_owned()),
+                encoded.as_bytes(),
+            )?;
+            return Ok(ControlData::InputApplied {
+                operation_id: request_id,
+                input_kind: InputKind::Focus,
+                data: encoded,
                 bytes_written: applied.bytes_written,
                 intent_event_seq: applied.intent_event_seq,
                 result_event_seq: applied.result_event_seq,

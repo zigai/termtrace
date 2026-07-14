@@ -338,6 +338,7 @@ pub fn validate_mutation_journal(session: &Path, log: &EventLog) -> Result<u64> 
             let boundaries = match data {
                 ControlData::Acknowledged { boundaries }
                 | ControlData::InputApplied { boundaries, .. }
+                | ControlData::InputNoop { boundaries, .. }
                 | ControlData::Snapshot { boundaries, .. }
                 | ControlData::ScreenWait { boundaries, .. }
                 | ControlData::Status { boundaries, .. }

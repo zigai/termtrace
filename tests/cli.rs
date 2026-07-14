@@ -1288,6 +1288,74 @@ fn named_key_is_encoded_from_live_application_cursor_mode() {
 }
 
 #[test]
+fn focus_events_are_mode_gated_encoded_and_audited() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("focus-session");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let child = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,tty; tty.setraw(0); os.write(1,b'\\x1b[?1004hREADY'); d=os.read(0,3)+os.read(0,3); os.write(1,b'FOCUS:'+d.hex().encode())",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn focus fixture");
+    wait_for_path(&session.join("control.sock"));
+    wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("focus mode ready");
+
+    for direction in ["in", "out"] {
+        let mut focus = Command::cargo_bin("termtrace").expect("binary should build");
+        focus
+            .arg("focus")
+            .arg(&session)
+            .arg(direction)
+            .arg("--strict")
+            .assert()
+            .success();
+    }
+    let output = child.wait_with_output().expect("focus fixture completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+
+    let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+    let focus_events = log
+        .events
+        .iter()
+        .filter_map(|record| match &record.event {
+            Event::InputIntent {
+                input_kind: InputKind::Focus,
+                descriptor:
+                    InputDescriptor::Focus {
+                        focused,
+                        encoder,
+                        terminal_modes_hash,
+                    },
+                data,
+                ..
+            } => {
+                return Some((
+                    *focused,
+                    encoder.as_str(),
+                    terminal_modes_hash.as_str(),
+                    data.as_bytes(),
+                ));
+            }
+            _ => return None,
+        })
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        focus_events.as_slice(),
+        [(true, "libghostty-focus-encoder-v1", first_hash, b"\x1b[I"),
+         (false, "libghostty-focus-encoder-v1", second_hash, b"\x1b[O")]
+            if first_hash.len() == 64 && second_hash.len() == 64
+    ));
+}
+
+#[test]
 fn paced_unicode_text_splits_only_at_scalar_boundaries() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("paced-session");

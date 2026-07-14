@@ -20,7 +20,7 @@ use crate::{
 };
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 7;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 8;
 /// Relative socket path inside a live session directory.
 pub const CONTROL_SOCKET_NAME: &str = "control.sock";
 /// Maximum encoded request or response size.
@@ -97,6 +97,13 @@ pub enum ControlCommand {
     Paste {
         /// Paste content before mode-dependent wrapping or newline conversion.
         data: ByteString,
+    },
+    /// Report a terminal-window focus transition when the application opted in.
+    Focus {
+        /// Whether the terminal gained (`true`) or lost (`false`) focus.
+        focused: bool,
+        /// Reject instead of returning a semantic no-op when reporting is disabled.
+        strict: bool,
     },
     /// Change the child PTY geometry.
     Resize {
@@ -181,6 +188,17 @@ pub enum ControlData {
         /// Canonical result event sequence.
         result_event_seq: u64,
         /// Durable and observed positions after application.
+        boundaries: ActorBoundaries,
+    },
+    /// Successful semantic input request that correctly emitted no bytes.
+    InputNoop {
+        /// Semantic input category.
+        input_kind: InputKind,
+        /// Stable explanation for the no-op.
+        reason: String,
+        /// BLAKE3 of canonical JSON for the terminal mode snapshot.
+        terminal_modes_hash: String,
+        /// Durable and observed positions at evaluation.
         boundaries: ActorBoundaries,
     },
     /// Live session status.

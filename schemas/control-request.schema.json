@@ -159,6 +159,30 @@
         },
         {
           "additionalProperties": false,
+          "description": "Report a terminal-window focus transition when the application opted in.",
+          "properties": {
+            "command": {
+              "const": "focus",
+              "type": "string"
+            },
+            "focused": {
+              "description": "Whether the terminal gained (`true`) or lost (`false`) focus.",
+              "type": "boolean"
+            },
+            "strict": {
+              "description": "Reject instead of returning a semantic no-op when reporting is disabled.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "command",
+            "focused",
+            "strict"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Change the child PTY geometry.",
           "properties": {
             "cols": {
@@ -278,6 +302,11 @@
         {
           "const": "paste",
           "description": "Pasted content.",
+          "type": "string"
+        },
+        {
+          "const": "focus",
+          "description": "Terminal-window focus transition.",
           "type": "string"
         }
       ]

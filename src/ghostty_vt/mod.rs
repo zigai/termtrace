@@ -96,6 +96,45 @@ pub struct EncodedKey {
     pub encoder: String,
 }
 
+/// Terminal-window focus transition reported to an opted-in application.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FocusEvent {
+    /// The terminal window gained focus.
+    In,
+    /// The terminal window lost focus.
+    Out,
+}
+
+/// Encode one focus transition with the pinned terminal encoder.
+///
+/// # Errors
+///
+/// Returns an error when the pinned encoder rejects the event.
+pub fn encode_focus(event: FocusEvent) -> Result<ByteString> {
+    let event = match event {
+        FocusEvent::In => sys::GhosttyFocusEvent_GHOSTTY_FOCUS_GAINED,
+        FocusEvent::Out => sys::GhosttyFocusEvent_GHOSTTY_FOCUS_LOST,
+    };
+    let mut required = 0;
+    let first = unsafe { sys::ghostty_focus_encode(event, ptr::null_mut(), 0, &raw mut required) };
+    if first != sys::GhosttyResult_GHOSTTY_OUT_OF_SPACE && first != 0 {
+        check("size encoded focus event", first)?;
+    }
+    let mut output = vec![0_u8; required];
+    let mut written = 0;
+    check("encode focus event", unsafe {
+        sys::ghostty_focus_encode(
+            event,
+            output.as_mut_ptr().cast::<c_char>(),
+            output.len(),
+            &raw mut written,
+        )
+    })?;
+    output.truncate(written);
+    return Ok(ByteString::new(output));
+}
+
 /// Cell color source before default-color fallback.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
@@ -1351,6 +1390,18 @@ impl From<sys::GhosttyColorRgb> for Rgb {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn focus_encoder_emits_standard_reports() {
+        assert_eq!(
+            encode_focus(FocusEvent::In).expect("focus in").as_bytes(),
+            b"\x1b[I"
+        );
+        assert_eq!(
+            encode_focus(FocusEvent::Out).expect("focus out").as_bytes(),
+            b"\x1b[O"
+        );
+    }
 
     #[test]
     fn captures_unicode_truecolor_cursor_modes_and_alternate_screen() {
