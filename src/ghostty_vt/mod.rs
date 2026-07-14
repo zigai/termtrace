@@ -10,7 +10,7 @@
 )]
 
 use std::{
-    ffi::c_void,
+    ffi::{c_char, c_void},
     mem::{size_of, take},
     ptr, slice,
 };
@@ -34,6 +34,66 @@ pub struct Rgb {
     pub g: u8,
     /// Blue channel.
     pub b: u8,
+}
+
+/// Layout-independent key accepted by the pinned terminal key encoder.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NamedKey {
+    /// Enter/Return terminal key (distinct from raw line feed).
+    Enter,
+    /// Escape key.
+    Escape,
+    /// Horizontal tab key.
+    Tab,
+    /// Backspace key.
+    Backspace,
+    /// Forward delete key.
+    Delete,
+    /// Insert key.
+    Insert,
+    /// Home key.
+    Home,
+    /// End key.
+    End,
+    /// Page-up key.
+    PageUp,
+    /// Page-down key.
+    PageDown,
+    /// Up arrow.
+    ArrowUp,
+    /// Down arrow.
+    ArrowDown,
+    /// Left arrow.
+    ArrowLeft,
+    /// Right arrow.
+    ArrowRight,
+    /// Function key numbered 1 through 24.
+    Function(u8),
+    /// ASCII letter used for Ctrl+A through Ctrl+Z.
+    Letter(char),
+}
+
+/// Typed modifier state for one semantic key event.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct KeyModifiers {
+    /// Shift modifier.
+    pub shift: bool,
+    /// Control modifier.
+    pub control: bool,
+    /// Alt modifier.
+    pub alt: bool,
+    /// Super modifier.
+    pub super_key: bool,
+}
+
+/// Result of encoding a semantic key against current terminal modes.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct EncodedKey {
+    /// Exact bytes to write to the PTY.
+    pub data: ByteString,
+    /// Stable pinned encoder identity.
+    pub encoder: String,
 }
 
 /// Cell color source before default-color fallback.
@@ -317,6 +377,91 @@ impl GhosttyVt {
     /// Feed exact PTY output bytes through Ghostty's VT parser.
     pub fn write(&mut self, bytes: &[u8]) {
         unsafe { sys::ghostty_terminal_vt_write(self.terminal, bytes.as_ptr(), bytes.len()) };
+    }
+
+    /// Encode a typed key using the terminal's current keyboard protocol modes.
+    ///
+    /// The encoder is configured from the live terminal immediately before the
+    /// event is encoded. The host policy fixes option-as-alt to disabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for unsupported function/letter values, allocation
+    /// failure, or a key-encoder failure.
+    pub fn encode_key(&self, key: NamedKey, modifiers: KeyModifiers) -> Result<EncodedKey> {
+        let (physical_key, text) = physical_key(key)?;
+        let mut encoder = ptr::null_mut();
+        check("create key encoder", unsafe {
+            sys::ghostty_key_encoder_new(ptr::null(), &raw mut encoder)
+        })?;
+        let encoder = KeyEncoderGuard(encoder);
+        unsafe {
+            sys::ghostty_key_encoder_setopt_from_terminal(encoder.0, self.terminal);
+        }
+        let option_as_alt = sys::GhosttyOptionAsAlt_GHOSTTY_OPTION_AS_ALT_FALSE;
+        unsafe {
+            sys::ghostty_key_encoder_setopt(
+                encoder.0,
+                sys::GhosttyKeyEncoderOption_GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT,
+                (&raw const option_as_alt).cast::<c_void>(),
+            );
+        }
+        let mut event = ptr::null_mut();
+        check("create key event", unsafe {
+            sys::ghostty_key_event_new(ptr::null(), &raw mut event)
+        })?;
+        let event = KeyEventGuard(event);
+        unsafe {
+            sys::ghostty_key_event_set_action(
+                event.0,
+                sys::GhosttyKeyAction_GHOSTTY_KEY_ACTION_PRESS,
+            );
+            sys::ghostty_key_event_set_key(event.0, physical_key);
+            sys::ghostty_key_event_set_mods(event.0, modifier_bits(modifiers));
+            if let Some(text) = text {
+                sys::ghostty_key_event_set_utf8(
+                    event.0,
+                    text.as_ptr().cast::<c_char>(),
+                    text.len(),
+                );
+                sys::ghostty_key_event_set_unshifted_codepoint(event.0, u32::from(text[0]));
+            }
+        }
+        let mut required = 0;
+        let first = unsafe {
+            sys::ghostty_key_encoder_encode(
+                encoder.0,
+                event.0,
+                ptr::null_mut(),
+                0,
+                &raw mut required,
+            )
+        };
+        if first != sys::GhosttyResult_GHOSTTY_OUT_OF_SPACE && first != 0 {
+            check("size encoded key", first)?;
+        }
+        if required == 0 {
+            return Ok(EncodedKey {
+                data: ByteString::new(Vec::new()),
+                encoder: "libghostty-key-encoder-v1".to_owned(),
+            });
+        }
+        let mut output = vec![0_u8; required];
+        let mut written = 0;
+        check("encode key", unsafe {
+            sys::ghostty_key_encoder_encode(
+                encoder.0,
+                event.0,
+                output.as_mut_ptr().cast::<c_char>(),
+                output.len(),
+                &raw mut written,
+            )
+        })?;
+        output.truncate(written);
+        return Ok(EncodedKey {
+            data: ByteString::new(output),
+            encoder: "libghostty-key-encoder-v1".to_owned(),
+        });
     }
 
     /// Drain terminal query responses emitted synchronously by the VT engine.
@@ -810,6 +955,79 @@ impl Drop for GhosttyVt {
     }
 }
 
+struct KeyEncoderGuard(sys::GhosttyKeyEncoder);
+
+impl Drop for KeyEncoderGuard {
+    fn drop(&mut self) {
+        unsafe { sys::ghostty_key_encoder_free(self.0) };
+    }
+}
+
+struct KeyEventGuard(sys::GhosttyKeyEvent);
+
+impl Drop for KeyEventGuard {
+    fn drop(&mut self) {
+        unsafe { sys::ghostty_key_event_free(self.0) };
+    }
+}
+
+fn physical_key(key: NamedKey) -> Result<(sys::GhosttyKey, Option<[u8; 1]>)> {
+    let value = match key {
+        NamedKey::Enter => sys::GhosttyKey_GHOSTTY_KEY_ENTER,
+        NamedKey::Escape => sys::GhosttyKey_GHOSTTY_KEY_ESCAPE,
+        NamedKey::Tab => sys::GhosttyKey_GHOSTTY_KEY_TAB,
+        NamedKey::Backspace => sys::GhosttyKey_GHOSTTY_KEY_BACKSPACE,
+        NamedKey::Delete => sys::GhosttyKey_GHOSTTY_KEY_DELETE,
+        NamedKey::Insert => sys::GhosttyKey_GHOSTTY_KEY_INSERT,
+        NamedKey::Home => sys::GhosttyKey_GHOSTTY_KEY_HOME,
+        NamedKey::End => sys::GhosttyKey_GHOSTTY_KEY_END,
+        NamedKey::PageUp => sys::GhosttyKey_GHOSTTY_KEY_PAGE_UP,
+        NamedKey::PageDown => sys::GhosttyKey_GHOSTTY_KEY_PAGE_DOWN,
+        NamedKey::ArrowUp => sys::GhosttyKey_GHOSTTY_KEY_ARROW_UP,
+        NamedKey::ArrowDown => sys::GhosttyKey_GHOSTTY_KEY_ARROW_DOWN,
+        NamedKey::ArrowLeft => sys::GhosttyKey_GHOSTTY_KEY_ARROW_LEFT,
+        NamedKey::ArrowRight => sys::GhosttyKey_GHOSTTY_KEY_ARROW_RIGHT,
+        NamedKey::Function(number) if (1..=24).contains(&number) => {
+            return Ok((sys::GhosttyKey_GHOSTTY_KEY_F1 + u32::from(number - 1), None));
+        }
+        NamedKey::Letter(letter) if letter.is_ascii_alphabetic() => {
+            let lower = letter.to_ascii_lowercase();
+            let index = u32::from(lower) - u32::from('a');
+            let byte = u8::try_from(u32::from(lower)).map_err(|_| {
+                return Error::GhosttyVt {
+                    operation: "validate semantic key",
+                    result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
+                };
+            })?;
+            return Ok((sys::GhosttyKey_GHOSTTY_KEY_A + index, Some([byte])));
+        }
+        NamedKey::Function(_) | NamedKey::Letter(_) => {
+            return Err(Error::GhosttyVt {
+                operation: "validate semantic key",
+                result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
+            });
+        }
+    };
+    return Ok((value, None));
+}
+
+fn modifier_bits(modifiers: KeyModifiers) -> sys::GhosttyMods {
+    let mut bits = 0_u16;
+    if modifiers.shift {
+        bits |= 1;
+    }
+    if modifiers.control {
+        bits |= 1 << 1;
+    }
+    if modifiers.alt {
+        bits |= 1 << 2;
+    }
+    if modifiers.super_key {
+        bits |= 1 << 3;
+    }
+    return bits;
+}
+
 struct RenderIterators {
     row: sys::GhosttyRenderStateRowIterator,
     cells: sys::GhosttyRenderStateRowCells,
@@ -1227,5 +1445,41 @@ mod tests {
         terminal.write(b"\x1b[3;5H\x1b[6n");
         assert_eq!(terminal.take_responses(), vec![b"\x1b[3;5R".to_vec()]);
         assert!(terminal.take_responses().is_empty());
+    }
+
+    #[test]
+    fn key_encoder_tracks_live_cursor_mode_and_modifiers() {
+        let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
+        let normal = terminal
+            .encode_key(NamedKey::ArrowUp, KeyModifiers::default())
+            .expect("normal arrow");
+        assert_eq!(normal.data.as_bytes(), b"\x1b[A");
+
+        terminal.write(b"\x1b[?1h");
+        let application = terminal
+            .encode_key(NamedKey::ArrowUp, KeyModifiers::default())
+            .expect("application arrow");
+        assert_eq!(application.data.as_bytes(), b"\x1bOA");
+
+        let control_c = terminal
+            .encode_key(
+                NamedKey::Letter('c'),
+                KeyModifiers {
+                    control: true,
+                    ..KeyModifiers::default()
+                },
+            )
+            .expect("control c");
+        assert_eq!(control_c.data.as_bytes(), b"\x03");
+        let shift_tab = terminal
+            .encode_key(
+                NamedKey::Tab,
+                KeyModifiers {
+                    shift: true,
+                    ..KeyModifiers::default()
+                },
+            )
+            .expect("shift tab");
+        assert_eq!(shift_tab.data.as_bytes(), b"\x1b[Z");
     }
 }
