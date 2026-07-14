@@ -13,6 +13,7 @@ use std::{
 };
 
 use nix::{
+    fcntl::{Flock, FlockArg},
     libc::O_NOFOLLOW,
     sys::socket::{getsockopt, sockopt::PeerCredentials},
     unistd::getuid,
@@ -189,48 +190,51 @@ impl SessionRegistry {
     /// Returns an error for an invalid alias, insecure or unreadable session,
     /// schema/identity mismatch, or existing alias.
     pub fn register(&self, alias: &str, session: &Path) -> Result<RegistryEntry> {
+        let _lock = self.lock()?;
+        return self.register_locked(alias, session);
+    }
+
+    fn register_locked(&self, alias: &str, session: &Path) -> Result<RegistryEntry> {
         validate_alias(alias)?;
-        validate_owner_directory(session)?;
-        let canonical = session.canonicalize().map_err(|source| {
-            return Error::Filesystem {
-                path: session.to_path_buf(),
-                source,
-            };
-        })?;
-        validate_owner_directory(&canonical)?;
-        let manifest = read_manifest(&canonical)?;
-        if manifest.format != SESSION_MANIFEST_FORMAT
-            || manifest.version != SESSION_MANIFEST_VERSION
-        {
+        let entry = self.entry_for(alias, session)?;
+        let encoded = self.encode_entry(&entry)?;
+        write_secure(&self.entry_path(alias), &encoded)?;
+        return Ok(entry);
+    }
+
+    /// Atomically replace an alias only when it still names the expected predecessor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error without changing the binding when the expected identity no
+    /// longer owns the alias, or when successor validation/publication fails.
+    pub fn retarget(
+        &self,
+        alias: &str,
+        expected_session_id: Uuid,
+        successor: &Path,
+    ) -> Result<RegistryEntry> {
+        validate_alias(alias)?;
+        let _lock = self.lock()?;
+        let path = self.entry_path(alias);
+        let current = read_entry_nofollow(&path)?;
+        if current.alias != alias || current.session_id != expected_session_id {
             return Err(registry_error(
-                "register session alias",
-                "session manifest format is unsupported by this registry build",
+                "retarget session alias",
+                "alias owner changed before successor publication",
             ));
         }
-        let registered_unix_ns = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| return Error::ClockBeforeEpoch)?
-            .as_nanos();
-        let process_identity = recorder_process_identity(&canonical);
-        let entry = RegistryEntry {
-            format: REGISTRY_ENTRY_FORMAT.to_owned(),
-            version: REGISTRY_ENTRY_VERSION,
-            alias: alias.to_owned(),
-            canonical_session: ByteString::from(canonical.as_os_str().as_bytes()),
-            session_id: manifest.session_id,
-            recorder_pid: process_identity.map(|identity| return identity.0),
-            recorder_process_start_ticks: process_identity.map(|identity| return identity.1),
-            control_protocol_version: CONTROL_PROTOCOL_VERSION,
-            registered_unix_ns,
-        };
-        let encoded = serde_json::to_vec_pretty(&entry).map_err(|source| {
-            return Error::InvalidJson {
-                path: self.entry_path(alias),
-                json_path: "$".to_owned(),
-                source,
-            };
-        })?;
-        write_secure(&self.entry_path(alias), &encoded)?;
+        let entry = self.entry_for(alias, successor)?;
+        let encoded = self.encode_entry(&entry)?;
+        let temporary = self
+            .directory
+            .join(format!(".{alias}.{}.tmp", Uuid::now_v7()));
+        write_secure(&temporary, &encoded)?;
+        if let Err(source) = fs_err::rename(&temporary, &path) {
+            let _cleanup = fs_err::remove_file(&temporary);
+            return Err(Error::Filesystem { path, source });
+        }
+        sync_parent_directory(&path)?;
         return Ok(entry);
     }
 
@@ -371,6 +375,7 @@ impl SessionRegistry {
     /// durably published.
     pub fn remove(&self, alias: &str) -> Result<RegistryEntry> {
         validate_alias(alias)?;
+        let _lock = self.lock()?;
         let path = self.entry_path(alias);
         let entry = read_entry_nofollow(&path)?;
         if entry.alias != alias {
@@ -391,6 +396,73 @@ impl SessionRegistry {
 
     fn entry_path(&self, alias: &str) -> PathBuf {
         return self.directory.join(format!("{alias}.json"));
+    }
+
+    fn entry_for(&self, alias: &str, session: &Path) -> Result<RegistryEntry> {
+        validate_owner_directory(session)?;
+        let canonical = session.canonicalize().map_err(|source| {
+            return Error::Filesystem {
+                path: session.to_path_buf(),
+                source,
+            };
+        })?;
+        validate_owner_directory(&canonical)?;
+        let manifest = read_manifest(&canonical)?;
+        if manifest.format != SESSION_MANIFEST_FORMAT
+            || manifest.version != SESSION_MANIFEST_VERSION
+        {
+            return Err(registry_error(
+                "publish session alias",
+                "session manifest format is unsupported by this registry build",
+            ));
+        }
+        let registered_unix_ns = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| return Error::ClockBeforeEpoch)?
+            .as_nanos();
+        let process_identity = recorder_process_identity(&canonical);
+        return Ok(RegistryEntry {
+            format: REGISTRY_ENTRY_FORMAT.to_owned(),
+            version: REGISTRY_ENTRY_VERSION,
+            alias: alias.to_owned(),
+            canonical_session: ByteString::from(canonical.as_os_str().as_bytes()),
+            session_id: manifest.session_id,
+            recorder_pid: process_identity.map(|identity| return identity.0),
+            recorder_process_start_ticks: process_identity.map(|identity| return identity.1),
+            control_protocol_version: CONTROL_PROTOCOL_VERSION,
+            registered_unix_ns,
+        });
+    }
+
+    fn encode_entry(&self, entry: &RegistryEntry) -> Result<Vec<u8>> {
+        return serde_json::to_vec_pretty(entry).map_err(|source| {
+            return Error::InvalidJson {
+                path: self.entry_path(&entry.alias),
+                json_path: "$".to_owned(),
+                source,
+            };
+        });
+    }
+
+    fn lock(&self) -> Result<Flock<File>> {
+        let path = self.directory.join(".registry.lock");
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .mode(0o600)
+            .custom_flags(O_NOFOLLOW)
+            .open(&path)
+            .map_err(|source| {
+                return Error::Filesystem {
+                    path: path.clone(),
+                    source,
+                };
+            })?;
+        validate_entry_file(&path, &file)?;
+        return Flock::lock(file, FlockArg::LockExclusive).map_err(|(_, error)| {
+            return registry_error("lock session registry", error.to_string());
+        });
     }
 }
 
@@ -647,7 +719,14 @@ fn registry_error(operation: &'static str, reason: impl Into<String>) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::symlink;
+    use crate::{
+        event::TerminalColors,
+        event_log::DurabilityPolicy,
+        provenance::ProvenancePolicy,
+        record::{RecordOptions, record},
+        session::GeometryProvenance,
+    };
+    use std::{ffi::OsString, os::unix::fs::symlink};
     use tempfile::TempDir;
 
     #[test]
@@ -666,5 +745,50 @@ mod tests {
         fs_err::write(&target, b"{}").expect("target");
         symlink(&target, registry.entry_path("demo")).expect("symlink");
         assert!(registry.resolve("demo").is_err());
+    }
+
+    #[test]
+    fn retarget_uses_compare_and_swap_and_preserves_previous_binding_on_failure() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let registry = SessionRegistry::open(temporary.path().join("state")).expect("registry");
+        let first = record_fixture(temporary.path().join("first"));
+        let second = record_fixture(temporary.path().join("second"));
+        let original = registry.register("demo", &first).expect("register first");
+
+        let rejected = registry.retarget("demo", Uuid::now_v7(), &second);
+        assert!(rejected.is_err());
+        assert_eq!(
+            registry.resolve("demo").unwrap().session_id,
+            original.session_id
+        );
+
+        let successor = registry
+            .retarget("demo", original.session_id, &second)
+            .expect("retarget successor");
+        assert_ne!(successor.session_id, original.session_id);
+        assert_eq!(registry.resolve("demo").unwrap(), successor);
+    }
+
+    fn record_fixture(output_directory: PathBuf) -> PathBuf {
+        record(&RecordOptions {
+            output_directory: output_directory.clone(),
+            creation_alias: None,
+            lineage: None,
+            command: vec![OsString::from("/bin/true")],
+            working_directory: None,
+            cols: 80,
+            rows: 24,
+            cell_width_px: 9,
+            cell_height_px: 18,
+            geometry_provenance: GeometryProvenance::default(),
+            ghostty_profile: None,
+            term: "xterm-ghostty".to_owned(),
+            colors: TerminalColors::default(),
+            forward_stdin: false,
+            durability_policy: DurabilityPolicy::default(),
+            provenance_policy: ProvenancePolicy::default(),
+        })
+        .expect("record fixture");
+        return output_directory;
     }
 }
