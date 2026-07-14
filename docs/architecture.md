@@ -17,6 +17,8 @@ Friendly names are resolved through a separate owner-only registry boundary. Ent
 
 Live registration records socket peer credentials plus process-start ticks, preventing a reused PID from making a stale alias appear healthy. Registry listing derives lifecycle from that pair, socket presence, immutable manifest identity, and completion identity without appending canonical observations. Removing an alias validates and unlinks only its owner-only entry, then synchronizes the registry directory; it has no evidence-deletion path.
 
+Detached start reuses the exact foreground recording option grammar. It allocates a collision-free absent session path, redirects mirrored output and recorder diagnostics to separate owner-only files, launches the recorder with standard input closed, and waits for both immutable manifest publication and a socket-derived recorder PID/start pair. Only then is the alias published. Duplicate aliases fail before allocation; process failure, readiness timeout, or a publication race reports the recoverable orphan and diagnostic paths without deleting evidence.
+
 Full-session derivation preserves the original `derived/` and `visual/` layouts. A requested half-open interval receives deterministic range-specific directories. Semantic replay reconstructs the prefix without materializing prefix states. Native playback emits the prefix without source-time sleeps, performs a non-mutating terminal-query barrier, and publishes its capture clock only after Ghostty has processed that prefix. FFmpeg therefore records neither the prefix nor its original elapsed time.
 
 ## Runtime topology

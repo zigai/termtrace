@@ -13,6 +13,8 @@ The production capture path targets Linux because Ghostty's GTK application, Xvf
 - Xvfb
 - FFmpeg and FFprobe with x11grab, PNG, and libx264rgb
 - dbus-run-session
+- util-linux `setsid` for detached named recordings
+- OpenSSH `ssh-keygen` for optional detached evidence receipts
 - jq for the native smoke script
 
 ## Build

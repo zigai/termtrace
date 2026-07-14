@@ -135,7 +135,19 @@ impl RegistryEntry {
 /// Secure storage boundary for named session aliases.
 #[derive(Clone, Debug)]
 pub struct SessionRegistry {
+    state_root: PathBuf,
     directory: PathBuf,
+}
+
+/// Collision-free paths allocated for one detached recording.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DetachedSessionPaths {
+    /// New canonical session path, not yet created.
+    pub session: PathBuf,
+    /// Owner-only mirrored PTY output log outside canonical evidence.
+    pub stdout_log: PathBuf,
+    /// Owner-only recorder diagnostic log outside canonical evidence.
+    pub stderr_log: PathBuf,
 }
 
 impl SessionRegistry {
@@ -164,7 +176,10 @@ impl SessionRegistry {
         ensure_owner_directory(state_root)?;
         let directory = state_root.join(REGISTRY_DIRECTORY);
         ensure_owner_directory(&directory)?;
-        return Ok(Self { directory });
+        return Ok(Self {
+            state_root: state_root.to_path_buf(),
+            directory,
+        });
     }
 
     /// Register a new alias without replacing an existing binding.
@@ -217,6 +232,56 @@ impl SessionRegistry {
         })?;
         write_secure(&self.entry_path(alias), &encoded)?;
         return Ok(entry);
+    }
+
+    /// Validate that an alias is well formed and currently unbound.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid or already-published aliases.
+    pub fn ensure_available(&self, alias: &str) -> Result<()> {
+        validate_alias(alias)?;
+        let path = self.entry_path(alias);
+        if path.exists() {
+            return Err(registry_error(
+                "reserve session alias",
+                "alias is already registered",
+            ));
+        }
+        return Ok(());
+    }
+
+    /// Allocate collision-free session and detached diagnostic paths.
+    ///
+    /// The canonical session path is intentionally left absent because the
+    /// recorder publishes it with no-replace semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when owner-only state directories cannot be prepared.
+    pub fn allocate_detached_paths(&self) -> Result<DetachedSessionPaths> {
+        let sessions = self.state_root.join("sessions");
+        let diagnostics = self.state_root.join("supervisor");
+        ensure_owner_directory(&sessions)?;
+        ensure_owner_directory(&diagnostics)?;
+        loop {
+            let identity = Uuid::now_v7();
+            let session = sessions.join(format!("{identity}.termtrace"));
+            let stdout_log = diagnostics.join(format!("{identity}.stdout"));
+            let stderr_log = diagnostics.join(format!("{identity}.stderr"));
+            if !session.exists() && !stdout_log.exists() && !stderr_log.exists() {
+                return Ok(DetachedSessionPaths {
+                    session,
+                    stdout_log,
+                    stderr_log,
+                });
+            }
+        }
+    }
+
+    /// Return the live recorder PID/start pair observed through socket credentials.
+    pub fn recorder_identity(&self, session: &Path) -> Option<(u32, u64)> {
+        return recorder_process_identity(session);
     }
 
     /// Resolve and validate an alias against its canonical session manifest.

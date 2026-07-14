@@ -22,7 +22,7 @@ use crate::{
 /// Session manifest format identifier.
 pub const SESSION_MANIFEST_FORMAT: &str = "termtrace-session";
 /// Session manifest schema version.
-pub const SESSION_MANIFEST_VERSION: u32 = 6;
+pub const SESSION_MANIFEST_VERSION: u32 = 7;
 /// Completion manifest format identifier.
 pub const SESSION_COMPLETION_FORMAT: &str = "termtrace-completion";
 /// Completion manifest schema version.
@@ -212,6 +212,8 @@ pub struct SessionManifest {
     pub version: u32,
     /// Session identifier shared with the event log.
     pub session_id: Uuid,
+    /// Friendly alias supplied at creation, never used as canonical identity.
+    pub creation_alias: Option<String>,
     /// Unix wall-clock origin in nanoseconds.
     pub started_unix_ns: u128,
     /// Exact executable and argument bytes.
@@ -801,6 +803,7 @@ mod tests {
             format: SESSION_MANIFEST_FORMAT.to_owned(),
             version: SESSION_MANIFEST_VERSION,
             session_id,
+            creation_alias: None,
             started_unix_ns: clock.started_unix_ns(),
             command: vec![ByteString::from(&b"true"[..])],
             working_directory: Some(ByteString::from(&b"/tmp"[..])),

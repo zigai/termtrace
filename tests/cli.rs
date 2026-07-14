@@ -6,8 +6,11 @@ use std::{
     ffi::OsString,
     fs::{File, Permissions},
     io::{BufRead as _, BufReader, Read as _, Write as _},
-    os::unix::{ffi::OsStrExt as _, fs::PermissionsExt as _},
-    path::Path,
+    os::unix::{
+        ffi::{OsStrExt as _, OsStringExt as _},
+        fs::PermissionsExt as _,
+    },
+    path::{Path, PathBuf},
     process::{Command as StdCommand, Stdio},
     thread,
     time::{Duration, Instant},
@@ -439,6 +442,122 @@ fn registry_binds_alias_to_canonical_session_identity() {
             "remove changed {name}"
         );
     }
+}
+
+#[test]
+fn start_publishes_alias_only_after_detached_recorder_readiness() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    let assertion = start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "start",
+            "demo",
+            "--cols",
+            "90",
+            "--rows",
+            "25",
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; printf READY; while :; do sleep 0.1; done",
+        ])
+        .assert()
+        .success();
+    let response: serde_json::Value =
+        serde_json::from_slice(&assertion.get_output().stdout).expect("start response");
+    assert_eq!(
+        response
+            .pointer("/ready")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert!(
+        response
+            .pointer("/recorder_process_start_ticks")
+            .and_then(serde_json::Value::as_u64)
+            .is_some()
+    );
+    let canonical: ByteString = serde_json::from_value(
+        response
+            .pointer("/canonical_session")
+            .expect("canonical session")
+            .clone(),
+    )
+    .expect("canonical path bytes");
+    let session = PathBuf::from(OsString::from_vec(canonical.as_bytes().to_vec()));
+    let manifest = read_manifest(&session).expect("started manifest");
+    assert_eq!(manifest.creation_alias.as_deref(), Some("demo"));
+    assert_eq!((manifest.geometry.cols, manifest.geometry.rows), (90, 25));
+
+    let mut status = Command::cargo_bin("termtrace").expect("binary should build");
+    status
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["status", "demo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""kind":"status""#));
+    let session_count = fs_err::read_dir(state.join("sessions"))
+        .expect("sessions")
+        .count();
+    let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
+    duplicate
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["start", "demo", "--", "/bin/true"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("alias is already"));
+    assert_eq!(
+        fs_err::read_dir(state.join("sessions"))
+            .expect("sessions")
+            .count(),
+        session_count,
+        "duplicate start must fail before allocating evidence"
+    );
+
+    for key in ["stdout_log", "stderr_log"] {
+        let path = PathBuf::from(
+            response
+                .pointer(&format!("/{key}"))
+                .and_then(serde_json::Value::as_str)
+                .expect("diagnostic path"),
+        );
+        assert_eq!(
+            fs_err::metadata(path)
+                .expect("diagnostic metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "demo", "--wait"])
+        .assert()
+        .success();
+    assert!(session.join("completion.json").is_file());
+
+    let mut failed = Command::cargo_bin("termtrace").expect("binary should build");
+    failed
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "start",
+            "broken",
+            "--",
+            "/definitely/missing/termtrace-command",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "detached recorder exited before readiness",
+        ))
+        .stderr(predicate::str::contains("stdout log"));
+    assert!(
+        !state.join("registry/broken.json").exists(),
+        "failed startup must not publish an alias"
+    );
 }
 
 #[test]
@@ -1454,6 +1573,7 @@ fn playback_does_not_echo_terminal_query_responses() {
         format: SESSION_MANIFEST_FORMAT.to_owned(),
         version: SESSION_MANIFEST_VERSION,
         session_id: header.session_id,
+        creation_alias: None,
         started_unix_ns: header.started_unix_ns,
         command: Vec::new(),
         working_directory: None,

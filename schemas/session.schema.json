@@ -640,6 +640,13 @@
       "description": "Live control socket relative path.",
       "type": "string"
     },
+    "creation_alias": {
+      "description": "Friendly alias supplied at creation, never used as canonical identity.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "durability_policy": {
       "$ref": "#/$defs/DurabilityPolicy",
       "description": "Chain-bound output persistence policy."

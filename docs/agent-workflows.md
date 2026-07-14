@@ -2,7 +2,7 @@
 
 ## Start and discover
 
-Run `termtrace record --no-input --out SESSION -- COMMAND ...` in a supervised background process. The owner-only `SESSION/control.sock` appears when control is ready. `termtrace ping` and `termtrace status` are explicit readiness probes; do not infer readiness from arbitrary screen text.
+Use `termtrace start NAME -- COMMAND ...` for the short detached workflow. It returns only after the owner-only manifest and control identity are ready and includes the canonical path/session ID plus diagnostic log paths. `termtrace record --no-input --out SESSION -- COMMAND ...` remains the explicit foreground/evidence-path primitive. `termtrace ping NAME` and `termtrace status NAME` are readiness probes; do not infer readiness from arbitrary screen text.
 
 Register a memorable local name with `termtrace register NAME --session SESSION`; `termtrace resolve NAME` returns the byte-exact canonical path and `--json` returns the bound session ID and protocol metadata. Registration is no-replace. Live commands accept one positional target: a registered name, a path containing `/`, or an explicit `name:`/`path:` reference when the spelling would be ambiguous.
 

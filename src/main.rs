@@ -1,14 +1,20 @@
 //! Command-line entry point for Termtrace.
 
 use std::{
+    env,
     ffi::OsString,
     fmt::Write as _,
+    fs::{File, OpenOptions},
     io::{self, Write as _},
-    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
+    os::unix::{
+        ffi::{OsStrExt as _, OsStringExt as _},
+        fs::OpenOptionsExt as _,
+    },
     path::{Path, PathBuf},
-    process::ExitCode,
+    process::{Command as ProcessCommand, ExitCode, Stdio},
     result::Result as StdResult,
-    time::Duration,
+    thread,
+    time::{Duration, Instant},
 };
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
@@ -65,6 +71,8 @@ enum Command {
     Version,
     /// Run a command in a PTY and preserve its byte-exact event stream.
     Record(RecordArgs),
+    /// Start a detached recording and publish a name after readiness.
+    Start(StartArgs),
     /// Verify a completed session's structure and evidence bindings offline.
     Verify(VerifyArgs),
     /// Create a detached OpenSSH receipt for verified evidence roots.
@@ -467,6 +475,33 @@ struct RecordArgs {
     #[arg(long)]
     out: PathBuf,
 
+    /// Do not forward standard input to the child PTY.
+    #[arg(long)]
+    no_input: bool,
+
+    /// Friendly invocation context supplied by detached start.
+    #[arg(long, hide = true)]
+    session_alias: Option<String>,
+
+    #[command(flatten)]
+    recording: RecordingArgs,
+}
+
+#[derive(Debug, Args)]
+struct StartArgs {
+    /// New friendly session name.
+    name: String,
+
+    /// Maximum time to wait for manifest and control readiness.
+    #[arg(long, default_value_t = 10_000)]
+    startup_timeout_ms: u64,
+
+    #[command(flatten)]
+    recording: RecordingArgs,
+}
+
+#[derive(Debug, Args)]
+struct RecordingArgs {
     /// Child working directory; defaults to the caller's current directory.
     #[arg(long)]
     cwd: Option<PathBuf>,
@@ -526,10 +561,6 @@ struct RecordArgs {
     /// Terminal identity exposed to the child.
     #[arg(long, default_value = "xterm-ghostty")]
     term: String,
-
-    /// Do not forward standard input to the child PTY.
-    #[arg(long)]
-    no_input: bool,
 
     /// Canonical output persistence policy.
     #[arg(long, value_enum, default_value_t = DurabilityModeArg::Bounded)]
@@ -637,6 +668,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
             ));
         }
         Command::Record(arguments) => return run_record(arguments),
+        Command::Start(arguments) => return run_start(arguments),
         Command::Verify(arguments) => return run_verify(arguments),
         Command::Sign(arguments) => return run_sign(arguments),
         Command::Register(arguments) => return run_register(arguments),
@@ -1124,6 +1156,12 @@ fn run_resize(arguments: ResizeArgs) -> Result<ExitCode> {
 }
 
 fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
+    let RecordArgs {
+        out,
+        no_input,
+        session_alias,
+        recording: arguments,
+    } = arguments;
     if matches!(arguments.durability, DurabilityModeArg::Bounded)
         && (arguments.durability_max_interval_ms == 0
             || arguments.durability_max_uncommitted_bytes == 0)
@@ -1181,7 +1219,8 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         |profile| return terminal_colors_for_profile(profile),
     )?;
     let outcome = record(&RecordOptions {
-        output_directory: arguments.out,
+        output_directory: out,
+        creation_alias: session_alias,
         command: arguments.command,
         working_directory: arguments.cwd,
         cols: geometry.cols,
@@ -1192,7 +1231,7 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         ghostty_profile,
         term: arguments.term,
         colors,
-        forward_stdin: !arguments.no_input,
+        forward_stdin: !no_input,
         durability_policy,
         provenance_policy,
     })?;
@@ -1202,6 +1241,137 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         (Some(code), None) => return u8::try_from(code).map(ExitCode::from).into_diagnostic(),
         _ => return Ok(ExitCode::FAILURE),
     }
+}
+
+fn run_start(arguments: StartArgs) -> Result<ExitCode> {
+    let StartArgs {
+        name,
+        startup_timeout_ms,
+        recording: _recording,
+    } = arguments;
+    if startup_timeout_ms == 0 {
+        return Err(miette::miette!(
+            "--startup-timeout-ms must be greater than zero"
+        ));
+    }
+    let registry = SessionRegistry::open_default()?;
+    registry.ensure_available(&name)?;
+    let paths = registry.allocate_detached_paths()?;
+    let stdout = open_detached_log(&paths.stdout_log)?;
+    let stderr = open_detached_log(&paths.stderr_log)?;
+    let executable = env::current_exe().into_diagnostic()?;
+    let record_arguments = detached_record_arguments(&name, &paths.session)?;
+    let mut recorder = ProcessCommand::new("setsid")
+        .arg(executable)
+        .args(record_arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+        .into_diagnostic()?;
+    let deadline = Instant::now() + Duration::from_millis(startup_timeout_ms);
+    loop {
+        if paths.session.join("session.json").is_file()
+            && registry.recorder_identity(&paths.session).is_some()
+        {
+            let entry = registry.register(&name, &paths.session).map_err(|error| {
+                return miette::miette!(
+                    "recorder became ready but alias publication failed; recoverable orphan: {}; stdout log: {}; stderr log: {}; {error}",
+                    paths.session.display(),
+                    paths.stdout_log.display(),
+                    paths.stderr_log.display(),
+                );
+            })?;
+            return write_json_line(&serde_json::json!({
+                "alias": entry.alias,
+                "canonical_session": entry.canonical_session,
+                "session_id": entry.session_id,
+                "recorder_pid": entry.recorder_pid,
+                "recorder_process_start_ticks": entry.recorder_process_start_ticks,
+                "stdout_log": paths.stdout_log,
+                "stderr_log": paths.stderr_log,
+                "ready": true,
+            }));
+        }
+        if let Some(status) = recorder.try_wait().into_diagnostic()? {
+            return Err(miette::miette!(
+                "detached recorder exited before readiness with {status}; recoverable session candidate: {}; stdout log: {}; stderr log: {}",
+                paths.session.display(),
+                paths.stdout_log.display(),
+                paths.stderr_log.display(),
+            ));
+        }
+        if Instant::now() >= deadline {
+            return Err(miette::miette!(
+                "detached recorder did not become ready within {startup_timeout_ms} ms; it was left running as recoverable orphan: {}; stdout log: {}; stderr log: {}",
+                paths.session.display(),
+                paths.stdout_log.display(),
+                paths.stderr_log.display(),
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn detached_record_arguments(alias: &str, session: &Path) -> Result<Vec<OsString>> {
+    let mut source = env::args_os();
+    let _executable = source.next();
+    let mut arguments = Vec::new();
+    loop {
+        let argument = source.next().ok_or_else(|| {
+            return miette::miette!("cannot locate start subcommand in process arguments");
+        })?;
+        if argument == "start" {
+            break;
+        }
+        arguments.push(argument);
+    }
+    let supplied_name = source
+        .next()
+        .ok_or_else(|| miette::miette!("start session name is missing"))?;
+    if supplied_name != alias {
+        return Err(miette::miette!(
+            "parsed start name does not match process arguments"
+        ));
+    }
+    arguments.push(OsString::from("record"));
+    arguments.push(OsString::from("--no-input"));
+    arguments.push(OsString::from("--out"));
+    arguments.push(session.as_os_str().to_os_string());
+    arguments.push(OsString::from("--session-alias"));
+    arguments.push(OsString::from(alias));
+    while let Some(argument) = source.next() {
+        if argument == "--startup-timeout-ms" {
+            let _timeout = source.next().ok_or_else(|| {
+                return miette::miette!("--startup-timeout-ms value is missing");
+            })?;
+            continue;
+        }
+        if argument
+            .as_os_str()
+            .as_bytes()
+            .starts_with(b"--startup-timeout-ms=")
+        {
+            continue;
+        }
+        arguments.push(argument);
+    }
+    return Ok(arguments);
+}
+
+fn open_detached_log(path: &Path) -> Result<File> {
+    return OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            };
+        })
+        .map_err(Into::into);
 }
 
 fn parse_provenance_rule(value: &str) -> StdResult<(String, ProvenanceCapture), String> {
@@ -1226,7 +1396,7 @@ fn parse_provenance_rule(value: &str) -> StdResult<(String, ProvenanceCapture), 
 }
 
 fn resolve_record_geometry(
-    arguments: &RecordArgs,
+    arguments: &RecordingArgs,
     ghostty_profile: Option<&ResolvedGhosttyProfile>,
 ) -> Result<(SessionGeometry, GeometryProvenance)> {
     match arguments.geometry {

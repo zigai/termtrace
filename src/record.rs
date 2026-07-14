@@ -80,6 +80,8 @@ const MAX_SESSION_MUTATIONS: u64 = 1_000_000;
 pub struct RecordOptions {
     /// New session directory.
     pub output_directory: PathBuf,
+    /// Optional friendly invocation alias retained only as creation context.
+    pub creation_alias: Option<String>,
     /// Executable and arguments.
     pub command: Vec<OsString>,
     /// Child working directory.
@@ -481,6 +483,7 @@ fn write_session_manifest(
         format: SESSION_MANIFEST_FORMAT.to_owned(),
         version: SESSION_MANIFEST_VERSION,
         session_id,
+        creation_alias: options.creation_alias.clone(),
         started_unix_ns,
         command: options
             .command
@@ -1994,6 +1997,7 @@ mod tests {
         let session = temporary.path().join("recording");
         let options = RecordOptions {
             output_directory: session.clone(),
+            creation_alias: None,
             command: vec![
                 OsString::from("/bin/sh"),
                 OsString::from("-c"),
@@ -2079,6 +2083,7 @@ mod tests {
         let temporary = TempDir::new().expect("temporary directory");
         let options = RecordOptions {
             output_directory: temporary.path().to_path_buf(),
+            creation_alias: None,
             command: vec![OsString::from("true")],
             working_directory: None,
             cols: 80,
@@ -2103,6 +2108,7 @@ mod tests {
         let temporary = TempDir::new().expect("temporary directory");
         let options = RecordOptions {
             output_directory: temporary.path().join("recording"),
+            creation_alias: None,
             command: vec![
                 OsString::from("/bin/sh"),
                 OsString::from("-c"),
@@ -2139,6 +2145,7 @@ mod tests {
         let temporary = TempDir::new().expect("temporary directory");
         let options = RecordOptions {
             output_directory: temporary.path().join("query"),
+            creation_alias: None,
             command: vec![
                 OsString::from("/usr/bin/python3"),
                 OsString::from("-c"),
@@ -2184,6 +2191,7 @@ mod tests {
         let temporary = TempDir::new().expect("temporary directory");
         let options = RecordOptions {
             output_directory: temporary.path().join("osc-query"),
+            creation_alias: None,
             command: vec![
                 OsString::from("/usr/bin/python3"),
                 OsString::from("-c"),
