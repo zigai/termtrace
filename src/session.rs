@@ -22,7 +22,7 @@ use crate::{
 /// Session manifest format identifier.
 pub const SESSION_MANIFEST_FORMAT: &str = "termtrace-session";
 /// Session manifest schema version.
-pub const SESSION_MANIFEST_VERSION: u32 = 7;
+pub const SESSION_MANIFEST_VERSION: u32 = 8;
 /// Completion manifest format identifier.
 pub const SESSION_COMPLETION_FORMAT: &str = "termtrace-completion";
 /// Completion manifest schema version.
@@ -202,6 +202,20 @@ pub struct GhosttyVisualProvenance {
     pub effective_config_hash: String,
 }
 
+/// Immutable evidence binding from a successor session to its predecessor.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionLineage {
+    /// Canonical predecessor session identifier.
+    pub predecessor_session_id: Uuid,
+    /// BLAKE3 of the exact predecessor `session.json` bytes.
+    pub predecessor_manifest_hash: String,
+    /// Chain root of the predecessor's final canonical event.
+    pub predecessor_final_event_hash: String,
+    /// Stable reason for creating the successor.
+    pub reason: String,
+}
+
 /// Immutable provenance written before the child is spawned.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -214,6 +228,8 @@ pub struct SessionManifest {
     pub session_id: Uuid,
     /// Friendly alias supplied at creation, never used as canonical identity.
     pub creation_alias: Option<String>,
+    /// Evidence-bound predecessor when this session is an immutable successor.
+    pub lineage: Option<SessionLineage>,
     /// Unix wall-clock origin in nanoseconds.
     pub started_unix_ns: u128,
     /// Exact executable and argument bytes.
@@ -804,6 +820,7 @@ mod tests {
             version: SESSION_MANIFEST_VERSION,
             session_id,
             creation_alias: None,
+            lineage: None,
             started_unix_ns: clock.started_unix_ns(),
             command: vec![ByteString::from(&b"true"[..])],
             working_directory: Some(ByteString::from(&b"/tmp"[..])),

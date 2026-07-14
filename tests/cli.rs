@@ -1574,6 +1574,7 @@ fn playback_does_not_echo_terminal_query_responses() {
         version: SESSION_MANIFEST_VERSION,
         session_id: header.session_id,
         creation_alias: None,
+        lineage: None,
         started_unix_ns: header.started_unix_ns,
         command: Vec::new(),
         working_directory: None,

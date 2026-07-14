@@ -1221,6 +1221,7 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
     let outcome = record(&RecordOptions {
         output_directory: out,
         creation_alias: session_alias,
+        lineage: None,
         command: arguments.command,
         working_directory: arguments.cwd,
         cols: geometry.cols,

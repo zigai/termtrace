@@ -62,8 +62,8 @@ use crate::{
     session::{
         COMPLETION_VALIDATION_VERSION, GeometryProvenance, SESSION_COMPLETION_FORMAT,
         SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
-        SessionCompletion, SessionGeometry, SessionManifest, canonical_manifest_bytes,
-        manifest_hash,
+        SessionCompletion, SessionGeometry, SessionLineage, SessionManifest,
+        canonical_manifest_bytes, manifest_hash,
     },
     terminal_mode::RawTerminalGuard,
 };
@@ -82,6 +82,8 @@ pub struct RecordOptions {
     pub output_directory: PathBuf,
     /// Optional friendly invocation alias retained only as creation context.
     pub creation_alias: Option<String>,
+    /// Immutable predecessor evidence for a restarted successor.
+    pub lineage: Option<SessionLineage>,
     /// Executable and arguments.
     pub command: Vec<OsString>,
     /// Child working directory.
@@ -484,6 +486,7 @@ fn write_session_manifest(
         version: SESSION_MANIFEST_VERSION,
         session_id,
         creation_alias: options.creation_alias.clone(),
+        lineage: options.lineage.clone(),
         started_unix_ns,
         command: options
             .command
@@ -1998,6 +2001,7 @@ mod tests {
         let options = RecordOptions {
             output_directory: session.clone(),
             creation_alias: None,
+            lineage: None,
             command: vec![
                 OsString::from("/bin/sh"),
                 OsString::from("-c"),
@@ -2084,6 +2088,7 @@ mod tests {
         let options = RecordOptions {
             output_directory: temporary.path().to_path_buf(),
             creation_alias: None,
+            lineage: None,
             command: vec![OsString::from("true")],
             working_directory: None,
             cols: 80,
@@ -2109,6 +2114,7 @@ mod tests {
         let options = RecordOptions {
             output_directory: temporary.path().join("recording"),
             creation_alias: None,
+            lineage: None,
             command: vec![
                 OsString::from("/bin/sh"),
                 OsString::from("-c"),
@@ -2146,6 +2152,7 @@ mod tests {
         let options = RecordOptions {
             output_directory: temporary.path().join("query"),
             creation_alias: None,
+            lineage: None,
             command: vec![
                 OsString::from("/usr/bin/python3"),
                 OsString::from("-c"),
@@ -2192,6 +2199,7 @@ mod tests {
         let options = RecordOptions {
             output_directory: temporary.path().join("osc-query"),
             creation_alias: None,
+            lineage: None,
             command: vec![
                 OsString::from("/usr/bin/python3"),
                 OsString::from("-c"),

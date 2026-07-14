@@ -607,6 +607,36 @@
         "pixel_height"
       ],
       "type": "object"
+    },
+    "SessionLineage": {
+      "additionalProperties": false,
+      "description": "Immutable evidence binding from a successor session to its predecessor.",
+      "properties": {
+        "predecessor_final_event_hash": {
+          "description": "Chain root of the predecessor's final canonical event.",
+          "type": "string"
+        },
+        "predecessor_manifest_hash": {
+          "description": "BLAKE3 of the exact predecessor `session.json` bytes.",
+          "type": "string"
+        },
+        "predecessor_session_id": {
+          "description": "Canonical predecessor session identifier.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Stable reason for creating the successor.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "predecessor_session_id",
+        "predecessor_manifest_hash",
+        "predecessor_final_event_hash",
+        "reason"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/session.schema.json",
@@ -687,6 +717,17 @@
       ],
       "default": null,
       "description": "Canonical per-recording Ghostty profile, when explicitly resolved."
+    },
+    "lineage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SessionLineage"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Evidence-bound predecessor when this session is an immutable successor."
     },
     "operating_system": {
       "description": "Build target operating system.",
