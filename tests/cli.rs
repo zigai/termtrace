@@ -680,6 +680,109 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
 }
 
 #[test]
+fn restart_applies_only_explicit_successor_overrides() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let changed_cwd = temporary.path().join("changed");
+    fs_err::create_dir(&changed_cwd).expect("changed cwd");
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "start",
+            "demo",
+            "--cols",
+            "80",
+            "--rows",
+            "24",
+            "--durability",
+            "strict",
+            "--provenance",
+            "reproducible",
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; while :; do sleep 0.1; done",
+        ])
+        .assert()
+        .success();
+
+    let mut restart = Command::cargo_bin("termtrace").expect("binary should build");
+    let restarted = restart
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["restart", "demo", "--cwd"])
+        .arg(&changed_cwd)
+        .args([
+            "--cols",
+            "100",
+            "--cell-width",
+            "7",
+            "--term",
+            "vt100",
+            "--durability",
+            "bounded",
+            "--durability-max-interval-ms",
+            "25",
+            "--durability-max-uncommitted-bytes",
+            "4096",
+            "--provenance",
+            "minimal",
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; while :; do sleep 0.2; done",
+        ])
+        .assert()
+        .success();
+    let response: serde_json::Value =
+        serde_json::from_slice(&restarted.get_output().stdout).expect("restart response");
+    let successor_bytes: ByteString = serde_json::from_value(
+        response
+            .pointer("/successor/canonical_session")
+            .expect("successor path")
+            .clone(),
+    )
+    .expect("successor path bytes");
+    let successor = PathBuf::from(OsString::from_vec(successor_bytes.as_bytes().to_vec()));
+    let manifest = read_manifest(&successor).expect("successor manifest");
+    assert_eq!(
+        manifest.working_directory.as_ref().unwrap().as_bytes(),
+        changed_cwd.as_os_str().as_bytes()
+    );
+    assert_eq!((manifest.geometry.cols, manifest.geometry.rows), (100, 24));
+    assert_eq!(
+        (
+            manifest.geometry.pixel_width,
+            manifest.geometry.pixel_height
+        ),
+        (700, 432)
+    );
+    assert_eq!(
+        manifest.child_environment.get("TERM").map(String::as_str),
+        Some("vt100")
+    );
+    assert_eq!(manifest.durability_policy.maximum_interval_ms, Some(25));
+    assert_eq!(
+        manifest.durability_policy.maximum_uncommitted_bytes,
+        Some(4096)
+    );
+    assert_eq!(
+        manifest.execution_provenance.policy.kind,
+        ProvenancePolicyKind::Minimal
+    );
+    assert_eq!(
+        manifest.command[2].as_bytes(),
+        b"trap 'exit 0' TERM; while :; do sleep 0.2; done"
+    );
+
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "demo", "--wait"])
+        .assert()
+        .success();
+}
+
+#[test]
 fn fitted_geometry_requires_a_viewport() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("missing-viewport");

@@ -489,6 +489,10 @@ struct RecordArgs {
     #[arg(long, hide = true)]
     restart_source: Option<PathBuf>,
 
+    /// Base64-safe JSON restart override descriptor supplied by the supervisor.
+    #[arg(long, hide = true)]
+    restart_overrides: Option<String>,
+
     #[command(flatten)]
     recording: RecordingArgs,
 }
@@ -514,6 +518,60 @@ struct RestartArgs {
     /// Maximum time for predecessor completion and successor readiness.
     #[arg(long, default_value_t = 10_000)]
     timeout_ms: u64,
+
+    /// Override the successor working directory.
+    #[arg(long)]
+    cwd: Option<PathBuf>,
+    /// Override terminal columns while retaining the predecessor when omitted.
+    #[arg(long)]
+    cols: Option<u16>,
+    /// Override terminal rows while retaining the predecessor when omitted.
+    #[arg(long)]
+    rows: Option<u16>,
+    /// Override cell width in pixels.
+    #[arg(long)]
+    cell_width: Option<u16>,
+    /// Override cell height in pixels.
+    #[arg(long)]
+    cell_height: Option<u16>,
+    /// Override the terminal identity exposed to the child.
+    #[arg(long)]
+    term: Option<String>,
+    /// Override the canonical output persistence policy.
+    #[arg(long, value_enum)]
+    durability: Option<DurabilityModeArg>,
+    /// Override the bounded maximum unsynchronized interval.
+    #[arg(long)]
+    durability_max_interval_ms: Option<u64>,
+    /// Override the bounded maximum unsynchronized byte count.
+    #[arg(long)]
+    durability_max_uncommitted_bytes: Option<u64>,
+    /// Override the execution provenance policy.
+    #[arg(long, value_enum)]
+    provenance: Option<ProvenancePolicyArg>,
+    /// Override custom environment rules.
+    #[arg(long = "provenance-env", value_parser = parse_provenance_rule)]
+    provenance_environment: Vec<(String, ProvenanceCapture)>,
+    /// Override the executable and arguments, following `--`.
+    #[arg(last = true)]
+    command: Vec<OsString>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RestartOverrides {
+    cwd: Option<ByteString>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    cell_width: Option<u16>,
+    cell_height: Option<u16>,
+    term: Option<String>,
+    durability: Option<DurabilityModeArg>,
+    durability_max_interval_ms: Option<u64>,
+    durability_max_uncommitted_bytes: Option<u64>,
+    provenance: Option<ProvenancePolicyArg>,
+    provenance_environment: Vec<(String, ProvenanceCapture)>,
+    command: Option<Vec<ByteString>>,
 }
 
 #[derive(Debug, Args)]
@@ -610,14 +668,14 @@ enum GeometryMode {
     Fit,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, ValueEnum)]
 enum DurabilityModeArg {
     Strict,
     Bounded,
     Throughput,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, ValueEnum)]
 enum ProvenancePolicyArg {
     Minimal,
     Reproducible,
@@ -1178,10 +1236,17 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         no_input,
         session_alias,
         restart_source,
+        restart_overrides,
         recording: arguments,
     } = arguments;
     if let Some(predecessor) = restart_source {
-        let options = restarted_record_options(out, session_alias, &predecessor)?;
+        let overrides = restart_overrides
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .into_diagnostic()?
+            .unwrap_or_else(empty_restart_overrides);
+        let options = restarted_record_options(out, session_alias, &predecessor, &overrides)?;
         return report_record_outcome(record(&options)?);
     }
     if matches!(arguments.durability, DurabilityModeArg::Bounded)
@@ -1344,6 +1409,8 @@ fn run_restart(arguments: RestartArgs) -> Result<ExitCode> {
         return Err(miette::miette!("--timeout-ms must be greater than zero"));
     }
     let registry = SessionRegistry::open_default()?;
+    let overrides = restart_overrides_from_args(&arguments)?;
+    let encoded_overrides = serde_json::to_string(&overrides).into_diagnostic()?;
     let predecessor_entry = registry.resolve(&arguments.name)?;
     let predecessor = predecessor_entry.session_path();
     let timeout = Duration::from_millis(arguments.timeout_ms);
@@ -1370,6 +1437,7 @@ fn run_restart(arguments: RestartArgs) -> Result<ExitCode> {
             &arguments.name,
             &paths.session,
             &predecessor,
+            &encoded_overrides,
         ))
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
@@ -1440,7 +1508,12 @@ fn run_restart(arguments: RestartArgs) -> Result<ExitCode> {
     }
 }
 
-fn restart_record_arguments(alias: &str, session: &Path, predecessor: &Path) -> Vec<OsString> {
+fn restart_record_arguments(
+    alias: &str,
+    session: &Path,
+    predecessor: &Path,
+    overrides: &str,
+) -> Vec<OsString> {
     return vec![
         OsString::from("record"),
         OsString::from("--no-input"),
@@ -1450,6 +1523,8 @@ fn restart_record_arguments(alias: &str, session: &Path, predecessor: &Path) -> 
         OsString::from(alias),
         OsString::from("--restart-source"),
         predecessor.as_os_str().to_os_string(),
+        OsString::from("--restart-overrides"),
+        OsString::from(overrides),
         OsString::from("--"),
         OsString::from("/bin/true"),
     ];
@@ -1459,6 +1534,7 @@ fn restarted_record_options(
     output_directory: PathBuf,
     creation_alias: Option<String>,
     predecessor: &Path,
+    overrides: &RestartOverrides,
 ) -> Result<RecordOptions> {
     let manifest_bytes = fs_err::read(predecessor.join("session.json")).into_diagnostic()?;
     let manifest = read_manifest(predecessor)?;
@@ -1497,7 +1573,7 @@ fn restarted_record_options(
         .get("TERM")
         .cloned()
         .ok_or_else(|| miette::miette!("predecessor manifest has no TERM value"))?;
-    return Ok(RecordOptions {
+    let mut options = RecordOptions {
         output_directory,
         creation_alias,
         lineage: Some(SessionLineage {
@@ -1525,7 +1601,144 @@ fn restarted_record_options(
         forward_stdin: false,
         durability_policy: manifest.durability_policy,
         provenance_policy: manifest.execution_provenance.policy,
+    };
+    apply_restart_overrides(&mut options, overrides)?;
+    return Ok(options);
+}
+
+fn empty_restart_overrides() -> RestartOverrides {
+    return RestartOverrides {
+        cwd: None,
+        cols: None,
+        rows: None,
+        cell_width: None,
+        cell_height: None,
+        term: None,
+        durability: None,
+        durability_max_interval_ms: None,
+        durability_max_uncommitted_bytes: None,
+        provenance: None,
+        provenance_environment: Vec::new(),
+        command: None,
+    };
+}
+
+fn restart_overrides_from_args(arguments: &RestartArgs) -> Result<RestartOverrides> {
+    if arguments
+        .command
+        .first()
+        .is_some_and(|value| return value.is_empty())
+    {
+        return Err(miette::miette!("restart command must not be empty"));
+    }
+    return Ok(RestartOverrides {
+        cwd: arguments
+            .cwd
+            .as_ref()
+            .map(|path| return ByteString::from(path.as_os_str().as_bytes())),
+        cols: arguments.cols,
+        rows: arguments.rows,
+        cell_width: arguments.cell_width,
+        cell_height: arguments.cell_height,
+        term: arguments.term.clone(),
+        durability: arguments.durability,
+        durability_max_interval_ms: arguments.durability_max_interval_ms,
+        durability_max_uncommitted_bytes: arguments.durability_max_uncommitted_bytes,
+        provenance: arguments.provenance,
+        provenance_environment: arguments.provenance_environment.clone(),
+        command: (!arguments.command.is_empty()).then(|| {
+            return arguments
+                .command
+                .iter()
+                .map(|value| return ByteString::from(value.as_os_str().as_bytes()))
+                .collect();
+        }),
     });
+}
+
+fn apply_restart_overrides(
+    options: &mut RecordOptions,
+    overrides: &RestartOverrides,
+) -> Result<()> {
+    if let Some(cwd) = &overrides.cwd {
+        options.working_directory =
+            Some(PathBuf::from(OsString::from_vec(cwd.as_bytes().to_vec())));
+    }
+    if let Some(command) = &overrides.command {
+        options.command = command
+            .iter()
+            .map(|value| return OsString::from_vec(value.as_bytes().to_vec()))
+            .collect();
+    }
+    options.cols = overrides.cols.unwrap_or(options.cols);
+    options.rows = overrides.rows.unwrap_or(options.rows);
+    options.cell_width_px = overrides.cell_width.unwrap_or(options.cell_width_px);
+    options.cell_height_px = overrides.cell_height.unwrap_or(options.cell_height_px);
+    if options.cols == 0
+        || options.rows == 0
+        || options.cell_width_px == 0
+        || options.cell_height_px == 0
+    {
+        return Err(miette::miette!(
+            "restart geometry values must be greater than zero"
+        ));
+    }
+    if overrides.cols.is_some()
+        || overrides.rows.is_some()
+        || overrides.cell_width.is_some()
+        || overrides.cell_height.is_some()
+    {
+        options.geometry_provenance = GeometryProvenance::default();
+    }
+    if let Some(term) = &overrides.term {
+        options.term.clone_from(term);
+    }
+    if overrides.durability_max_interval_ms == Some(0)
+        || overrides.durability_max_uncommitted_bytes == Some(0)
+    {
+        return Err(miette::miette!(
+            "bounded durability thresholds must be greater than zero"
+        ));
+    }
+    if let Some(mode) = overrides.durability {
+        let interval = overrides
+            .durability_max_interval_ms
+            .or(options.durability_policy.maximum_interval_ms)
+            .unwrap_or(50);
+        let bytes = overrides
+            .durability_max_uncommitted_bytes
+            .or(options.durability_policy.maximum_uncommitted_bytes)
+            .unwrap_or(65_536);
+        options.durability_policy = mode.policy(interval, bytes);
+    } else if overrides.durability_max_interval_ms.is_some()
+        || overrides.durability_max_uncommitted_bytes.is_some()
+    {
+        if !matches!(options.durability_policy.mode, DurabilityMode::Bounded) {
+            return Err(miette::miette!(
+                "durability thresholds require bounded predecessor policy or --durability bounded"
+            ));
+        }
+        if let Some(value) = overrides.durability_max_interval_ms {
+            options.durability_policy.maximum_interval_ms = Some(value);
+        }
+        if let Some(value) = overrides.durability_max_uncommitted_bytes {
+            options.durability_policy.maximum_uncommitted_bytes = Some(value);
+        }
+    }
+    if !overrides.provenance_environment.is_empty()
+        && !matches!(overrides.provenance, Some(ProvenancePolicyArg::Custom))
+    {
+        return Err(miette::miette!(
+            "--provenance-env requires --provenance custom"
+        ));
+    }
+    if let Some(kind) = overrides.provenance {
+        options.provenance_policy = ProvenancePolicy {
+            kind: kind.into(),
+            environment: overrides.provenance_environment.iter().cloned().collect(),
+        };
+    }
+    return Ok(());
 }
 
 fn detached_record_arguments(alias: &str, session: &Path) -> Result<Vec<OsString>> {
