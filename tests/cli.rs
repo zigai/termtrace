@@ -1663,6 +1663,51 @@ fn diff_reports_complete_cell_changes_and_enforces_expectations() {
 }
 
 #[test]
+fn explain_attributes_controls_without_claiming_pixel_flicker() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("explain-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf 'before\\033[2J\\033[Hafter\\033[3J'",
+        ])
+        .assert()
+        .success();
+    let final_state = inspect_session(&session, StateSelector::Final)
+        .expect("final state")
+        .record
+        .state_id;
+
+    let mut explain = Command::cargo_bin("termtrace").expect("binary should build");
+    explain
+        .arg("explain")
+        .arg(&session)
+        .args([
+            "--state",
+            &final_state.to_string(),
+            "--context",
+            "8",
+            "--format",
+            "json-compact",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""code":"full_viewport_clear""#))
+        .stdout(predicate::str::contains(r#""code":"clear_scrollback""#))
+        .stdout(predicate::str::contains(
+            r#""code":"clear_then_repaint_candidate""#,
+        ))
+        .stdout(predicate::str::contains(
+            "this does not establish that pixels flickered",
+        ));
+}
+
+#[test]
 fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("live-snapshot");

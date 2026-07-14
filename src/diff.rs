@@ -157,7 +157,12 @@ pub fn diff_states(log: &EventLog, from: StatePoint, to: StatePoint) -> Result<S
     });
 }
 
-fn inspect_point(log: &EventLog, point: &StatePoint) -> Result<StateInspection> {
+/// Resolve one shared state point against a canonical event log.
+///
+/// # Errors
+///
+/// Returns an error when replay fails or a marker is missing/ambiguous.
+pub fn inspect_point(log: &EventLog, point: &StatePoint) -> Result<StateInspection> {
     let selector = match point {
         StatePoint::LatestPresented => StateSelector::LatestPresented,
         StatePoint::StateId { state_id } => StateSelector::StateId(*state_id),

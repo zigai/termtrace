@@ -1,0 +1,982 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "CellState": {
+      "description": "One visible cell in a semantic snapshot.",
+      "properties": {
+        "column": {
+          "description": "Zero-based column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "grapheme": {
+          "description": "Full UTF-8 grapheme cluster; empty for a blank cell.",
+          "type": "string"
+        },
+        "resolved_background": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rgb"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Resolved explicit background, before terminal-default fallback."
+        },
+        "resolved_foreground": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rgb"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Resolved explicit foreground, before terminal-default fallback."
+        },
+        "selected": {
+          "description": "Whether the cell is selected.",
+          "type": "boolean"
+        },
+        "style": {
+          "$ref": "#/$defs/CellStyle",
+          "description": "Visual style."
+        }
+      },
+      "required": [
+        "column",
+        "grapheme",
+        "style",
+        "selected"
+      ],
+      "type": "object"
+    },
+    "CellStyle": {
+      "description": "Complete style attached to one terminal cell.",
+      "properties": {
+        "background": {
+          "$ref": "#/$defs/ColorSpec",
+          "description": "Background color source."
+        },
+        "blink": {
+          "description": "Blink attribute.",
+          "type": "boolean"
+        },
+        "bold": {
+          "description": "Bold attribute.",
+          "type": "boolean"
+        },
+        "faint": {
+          "description": "Faint attribute.",
+          "type": "boolean"
+        },
+        "foreground": {
+          "$ref": "#/$defs/ColorSpec",
+          "description": "Foreground color source."
+        },
+        "inverse": {
+          "description": "Inverse-video attribute.",
+          "type": "boolean"
+        },
+        "invisible": {
+          "description": "Invisible attribute.",
+          "type": "boolean"
+        },
+        "italic": {
+          "description": "Italic attribute.",
+          "type": "boolean"
+        },
+        "overline": {
+          "description": "Overline attribute.",
+          "type": "boolean"
+        },
+        "strikethrough": {
+          "description": "Strikethrough attribute.",
+          "type": "boolean"
+        },
+        "underline": {
+          "description": "Upstream SGR underline value (`0` through `5`).",
+          "format": "int32",
+          "type": "integer"
+        },
+        "underline_color": {
+          "$ref": "#/$defs/ColorSpec",
+          "description": "Underline color source."
+        }
+      },
+      "required": [
+        "foreground",
+        "background",
+        "underline_color",
+        "bold",
+        "italic",
+        "faint",
+        "blink",
+        "inverse",
+        "invisible",
+        "strikethrough",
+        "overline",
+        "underline"
+      ],
+      "type": "object"
+    },
+    "ColorSpec": {
+      "description": "Cell color source before default-color fallback.",
+      "oneOf": [
+        {
+          "description": "No explicit color.",
+          "properties": {
+            "kind": {
+              "const": "none",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Index into the active 256-color palette.",
+          "properties": {
+            "kind": {
+              "const": "palette",
+              "type": "string"
+            },
+            "value": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Explicit true color.",
+          "properties": {
+            "kind": {
+              "const": "rgb",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Rgb"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ColorState": {
+      "description": "Active terminal colors.",
+      "properties": {
+        "background": {
+          "$ref": "#/$defs/Rgb",
+          "description": "Default/current background."
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rgb"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit cursor color."
+        },
+        "foreground": {
+          "$ref": "#/$defs/Rgb",
+          "description": "Default/current foreground."
+        },
+        "palette": {
+          "description": "Active 256-color palette.",
+          "items": {
+            "$ref": "#/$defs/Rgb"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "background",
+        "foreground",
+        "palette"
+      ],
+      "type": "object"
+    },
+    "CursorState": {
+      "description": "Cursor state at one semantic boundary.",
+      "properties": {
+        "blinking": {
+          "description": "Blink mode.",
+          "type": "boolean"
+        },
+        "column": {
+          "description": "Viewport column when available.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "in_viewport": {
+          "description": "Whether the cursor lies in the viewport.",
+          "type": "boolean"
+        },
+        "row": {
+          "description": "Viewport row when available.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "style": {
+          "$ref": "#/$defs/CursorStyle",
+          "description": "Visual shape."
+        },
+        "visible": {
+          "description": "Visibility mode.",
+          "type": "boolean"
+        },
+        "wide_tail": {
+          "description": "Whether the cursor is on a wide-character tail.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "visible",
+        "blinking",
+        "in_viewport",
+        "style"
+      ],
+      "type": "object"
+    },
+    "CursorStyle": {
+      "description": "Cursor visual style.",
+      "oneOf": [
+        {
+          "const": "bar",
+          "description": "Vertical bar.",
+          "type": "string"
+        },
+        {
+          "const": "block",
+          "description": "Filled block.",
+          "type": "string"
+        },
+        {
+          "const": "underline",
+          "description": "Underline.",
+          "type": "string"
+        },
+        {
+          "const": "hollow_block",
+          "description": "Hollow block.",
+          "type": "string"
+        }
+      ]
+    },
+    "DirtyState": {
+      "description": "Global render dirtiness reported by Ghostty.",
+      "oneOf": [
+        {
+          "const": "clean",
+          "description": "No visual change.",
+          "type": "string"
+        },
+        {
+          "const": "partial",
+          "description": "One or more rows changed.",
+          "type": "string"
+        },
+        {
+          "const": "full",
+          "description": "Full redraw required.",
+          "type": "string"
+        }
+      ]
+    },
+    "ExplainFinding": {
+      "additionalProperties": false,
+      "description": "One deterministic evidence-backed diagnostic finding.",
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable finding code.",
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "#/$defs/FindingConfidence",
+          "description": "Conservative confidence label."
+        },
+        "facts": {
+          "description": "Exact neutral facts, without pixel-level inference.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "token_ids": {
+          "description": "VT token IDs supporting the finding.",
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "confidence",
+        "token_ids",
+        "facts"
+      ],
+      "type": "object"
+    },
+    "FindingConfidence": {
+      "description": "Conservative confidence label for a derived finding.",
+      "oneOf": [
+        {
+          "const": "high",
+          "description": "Directly encoded control and semantic outcome agree.",
+          "type": "string"
+        },
+        {
+          "const": "medium",
+          "description": "Ordered facts support a candidate but do not prove user perception.",
+          "type": "string"
+        }
+      ]
+    },
+    "ModeState": {
+      "description": "Terminal modes relevant to presentation and input.",
+      "properties": {
+        "alternate_screen": {
+          "description": "Any alternate-screen mode.",
+          "type": "boolean"
+        },
+        "bracketed_paste": {
+          "description": "DEC bracketed-paste mode 2004.",
+          "type": "boolean"
+        },
+        "synchronized_output": {
+          "description": "DEC synchronized-output mode 2026.",
+          "type": "boolean"
+        },
+        "values": {
+          "description": "Complete stable inventory of known ANSI and DEC modes.",
+          "items": {
+            "$ref": "#/$defs/TerminalMode"
+          },
+          "type": "array"
+        },
+        "wraparound": {
+          "description": "DEC auto-wrap mode 7.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "synchronized_output",
+        "alternate_screen",
+        "wraparound",
+        "bracketed_paste",
+        "values"
+      ],
+      "type": "object"
+    },
+    "Rgb": {
+      "description": "RGB color independent of libghostty's unstable ABI.",
+      "properties": {
+        "b": {
+          "description": "Blue channel.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "g": {
+          "description": "Green channel.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "r": {
+          "description": "Red channel.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "r",
+        "g",
+        "b"
+      ],
+      "type": "object"
+    },
+    "RowDiff": {
+      "description": "Fine-grained changes for one viewport row.",
+      "properties": {
+        "cells": {
+          "description": "Cells whose complete semantic value changed.",
+          "items": {
+            "$ref": "#/$defs/CellState"
+          },
+          "type": "array"
+        },
+        "row": {
+          "description": "Zero-based row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "row",
+        "cells"
+      ],
+      "type": "object"
+    },
+    "StateDelta": {
+      "description": "Delta from the previous distinct state.",
+      "properties": {
+        "active_style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CellStyle"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "New active SGR style when it changed."
+        },
+        "colors": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "New colors and palette when they changed."
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CursorState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "New cursor when it changed."
+        },
+        "geometry": {
+          "description": "New `(cols, rows)` when geometry changed.",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          ],
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminalMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "New terminal metadata when it changed."
+        },
+        "modes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModeState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "New terminal modes when they changed."
+        },
+        "rows": {
+          "description": "Cell-level row deltas.",
+          "items": {
+            "$ref": "#/$defs/RowDiff"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "rows"
+      ],
+      "type": "object"
+    },
+    "StatePoint": {
+      "description": "Shared state selection vocabulary.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Latest presentation-eligible state.",
+          "properties": {
+            "selector": {
+              "const": "latest_presented",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact semantic state identifier.",
+          "properties": {
+            "selector": {
+              "const": "state_id",
+              "type": "string"
+            },
+            "state_id": {
+              "description": "Exact semantic state identifier.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "selector",
+            "state_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Latest state at or before an event sequence.",
+          "properties": {
+            "event_seq": {
+              "description": "Canonical event sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "selector": {
+              "const": "event_seq",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "event_seq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Latest state at or before a session-monotonic timestamp.",
+          "properties": {
+            "monotonic_ns": {
+              "description": "Session-monotonic nanoseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "selector": {
+              "const": "monotonic_ns",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "monotonic_ns"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "State at a uniquely named marker.",
+          "properties": {
+            "label": {
+              "description": "Unique marker label.",
+              "type": "string"
+            },
+            "selector": {
+              "const": "marker",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "label"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StateRecord": {
+      "description": "One distinct semantic state boundary.",
+      "properties": {
+        "delta": {
+          "$ref": "#/$defs/StateDelta",
+          "description": "Stable delta from the preceding distinct state."
+        },
+        "event_byte_offset": {
+          "description": "Zero-based byte offset inside an output event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "event_seq": {
+          "description": "Canonical event responsible for this state; absent for an initial or range-baseline state.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ghostty_dirty": {
+          "$ref": "#/$defs/DirtyState",
+          "description": "Ghostty's global dirty classification."
+        },
+        "ghostty_dirty_rows": {
+          "description": "Rows Ghostty marked dirty.",
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "monotonic_ns": {
+          "description": "Monotonic event timestamp in nanoseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "presented": {
+          "description": "Whether this state was eligible for presentation.",
+          "type": "boolean"
+        },
+        "state_hash": {
+          "description": "BLAKE3 of the complete normalized semantic state.",
+          "type": "string"
+        },
+        "state_id": {
+          "description": "Dense zero-based state identifier.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "state_id",
+        "monotonic_ns",
+        "state_hash",
+        "presented",
+        "ghostty_dirty",
+        "ghostty_dirty_rows",
+        "delta"
+      ],
+      "type": "object"
+    },
+    "TerminalMetadata": {
+      "description": "Terminal metadata controlled by OSC sequences.",
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Raw title bytes."
+        },
+        "working_directory": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Raw working-directory bytes."
+        }
+      },
+      "required": [
+        "title",
+        "working_directory"
+      ],
+      "type": "object"
+    },
+    "TerminalMode": {
+      "description": "One ANSI or DEC mode value.",
+      "properties": {
+        "ansi": {
+          "description": "`true` for ANSI mode, `false` for DEC-private mode.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "Current set/reset value.",
+          "type": "boolean"
+        },
+        "number": {
+          "description": "Numeric mode identifier.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "number",
+        "ansi",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "VtSourceSegment": {
+      "additionalProperties": false,
+      "description": "Half-open byte range within one canonical output event.",
+      "properties": {
+        "end_byte_offset": {
+          "description": "Exclusive byte offset within the event payload.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "event_seq": {
+          "description": "Canonical output event sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "monotonic_ns": {
+          "description": "Session-monotonic event timestamp.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_byte_offset": {
+          "description": "Inclusive byte offset within the event payload.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "event_seq",
+        "start_byte_offset",
+        "end_byte_offset",
+        "monotonic_ns"
+      ],
+      "type": "object"
+    },
+    "VtToken": {
+      "additionalProperties": false,
+      "description": "One lossless VT frame with exact canonical source ranges.",
+      "properties": {
+        "description": {
+          "description": "Stable neutral description for common controls.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/VtTokenKind",
+          "description": "Framed sequence family."
+        },
+        "raw": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact bytes, including introducer and terminator."
+        },
+        "source": {
+          "description": "Ordered exact source segments; concatenating them reproduces `raw`.",
+          "items": {
+            "$ref": "#/$defs/VtSourceSegment"
+          },
+          "type": "array"
+        },
+        "timing_resolution": {
+          "description": "Timing resolution; current recordings timestamp complete PTY reads.",
+          "type": "string"
+        },
+        "token_id": {
+          "description": "Dense token identifier.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "token_id",
+        "kind",
+        "raw",
+        "source",
+        "description",
+        "timing_resolution"
+      ],
+      "type": "object"
+    },
+    "VtTokenKind": {
+      "description": "Stable VT token family. This is framing, not terminal interpretation.",
+      "oneOf": [
+        {
+          "const": "printable",
+          "description": "Printable bytes, including valid UTF-8 continuation bytes.",
+          "type": "string"
+        },
+        {
+          "const": "c0",
+          "description": "One C0 control byte.",
+          "type": "string"
+        },
+        {
+          "const": "c1",
+          "description": "One 8-bit C1 control byte.",
+          "type": "string"
+        },
+        {
+          "const": "esc",
+          "description": "ESC sequence.",
+          "type": "string"
+        },
+        {
+          "const": "csi",
+          "description": "Control Sequence Introducer sequence.",
+          "type": "string"
+        },
+        {
+          "const": "osc",
+          "description": "Operating System Command string.",
+          "type": "string"
+        },
+        {
+          "const": "dcs",
+          "description": "Device Control String.",
+          "type": "string"
+        },
+        {
+          "const": "apc",
+          "description": "Application Program Command string.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Syntactically malformed or unrecognized sequence.",
+          "type": "string"
+        },
+        {
+          "const": "incomplete",
+          "description": "Sequence still open at end of canonical output.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/explain-report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Causal evidence around one canonical state point.",
+  "properties": {
+    "context_events": {
+      "description": "Inclusive event-sequence context radius.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "findings": {
+      "description": "Conservative deterministic findings.",
+      "items": {
+        "$ref": "#/$defs/ExplainFinding"
+      },
+      "type": "array"
+    },
+    "session_id": {
+      "description": "Canonical session identity.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "source_event_count": {
+      "description": "Canonical event count anchoring this report's source.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "source_final_event_hash": {
+      "description": "Final canonical event hash anchoring this report's source.",
+      "type": "string"
+    },
+    "states": {
+      "description": "Semantic transitions in the selected event context.",
+      "items": {
+        "$ref": "#/$defs/StateRecord"
+      },
+      "type": "array"
+    },
+    "target": {
+      "$ref": "#/$defs/StatePoint",
+      "description": "Requested target selector."
+    },
+    "target_state": {
+      "$ref": "#/$defs/StateRecord",
+      "description": "Resolved target semantic state."
+    },
+    "tokens": {
+      "description": "Lossless tokens in the selected event context.",
+      "items": {
+        "$ref": "#/$defs/VtToken"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "session_id",
+    "source_final_event_hash",
+    "source_event_count",
+    "target",
+    "target_state",
+    "context_events",
+    "tokens",
+    "states",
+    "findings"
+  ],
+  "title": "ExplainReport",
+  "type": "object"
+}

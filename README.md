@@ -123,6 +123,8 @@ The socket disappears when the child exits. `stop --wait` does not return until 
 
 `diff SESSION --from-state A --to-state B` compares two canonical semantic endpoints. Each endpoint also accepts `--from-event-seq`/`--to-event-seq`, `--from-at`/`--to-at`, or unique marker selectors. JSON contains complete before/after cells plus geometry, cursor, modes, colors, active style, metadata, presentation, hashes, and dirty evidence. `--expect-no-change` exits unsuccessfully when any normalized semantic value differs.
 
+`explain SESSION --event-seq N` resolves the associated semantic state and reports exact framed bytes plus nearby semantic transitions. Targets also accept `--state`, `--at`, or `--marker`; `--context` selects the event radius. Stable findings currently identify full viewport clears, scrollback clears, hidden cell-changing transients, and clear/repaint candidates. Candidate facts explicitly avoid claiming native pixels flickered.
+
 ## Semantic replay
 
 ```bash

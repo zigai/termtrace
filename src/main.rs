@@ -21,6 +21,7 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
     Error,
+    analysis::{ExplainReport, explain},
     control::{
         CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, ProcessSignal,
         ScreenPredicate, request, send_request,
@@ -131,6 +132,8 @@ enum Command {
     Timeline(TimelineArgs),
     /// Compare two canonical semantic state points.
     Diff(DiffArgs),
+    /// Explain exact VT and semantic evidence around one state point.
+    Explain(ExplainArgs),
     /// Wait for exact UTF-8 text in canonical PTY output.
     Wait(WaitArgs),
     /// Copy the longest integrity-checked event prefix without modifying source.
@@ -406,6 +409,43 @@ struct DiffArgs {
     /// Output representation.
     #[arg(long, value_enum, default_value_t = DiffFormat::Text)]
     format: DiffFormat,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ExplainFormat {
+    Text,
+    Json,
+    JsonCompact,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("explain_target")
+        .required(true)
+        .multiple(false)
+        .args(["state", "event_seq", "at", "marker"])
+))]
+struct ExplainArgs {
+    /// Completed session name or canonical path.
+    session: PathBuf,
+    /// Exact semantic state identifier.
+    #[arg(long)]
+    state: Option<u64>,
+    /// Latest state at or before this event sequence.
+    #[arg(long)]
+    event_seq: Option<u64>,
+    /// Latest state at or before this session offset.
+    #[arg(long, value_parser = parse_time_offset_ns)]
+    at: Option<u64>,
+    /// State at a unique marker.
+    #[arg(long)]
+    marker: Option<String>,
+    /// Canonical event radius before and after the target.
+    #[arg(long, default_value_t = 8)]
+    context: u64,
+    /// Output representation.
+    #[arg(long, value_enum, default_value_t = ExplainFormat::Text)]
+    format: ExplainFormat,
 }
 
 #[derive(Debug, Args)]
@@ -943,6 +983,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Show(arguments) => return run_show(arguments),
         Command::Timeline(arguments) => return run_timeline(arguments),
         Command::Diff(arguments) => return run_diff(arguments),
+        Command::Explain(arguments) => return run_explain(arguments),
         Command::Wait(arguments) => return run_wait(arguments),
         Command::Recover(arguments) => return run_recover(arguments),
         Command::Schemas(arguments) => return run_schemas(arguments),
@@ -1294,6 +1335,66 @@ fn run_diff(arguments: DiffArgs) -> Result<ExitCode> {
         return Ok(ExitCode::FAILURE);
     }
     return Ok(ExitCode::SUCCESS);
+}
+
+fn run_explain(arguments: ExplainArgs) -> Result<ExitCode> {
+    let session = resolve_session_ref(arguments.session)?;
+    let log = EventLog::read(session.join("events.jsonl"))?;
+    validate_completed_log(&session, &log)?;
+    let target = diff_point(
+        arguments.state,
+        arguments.event_seq,
+        arguments.at,
+        arguments.marker,
+    )?;
+    let report = explain(&log, target, arguments.context)?;
+    return match arguments.format {
+        ExplainFormat::Text => write_stdout(explain_text(&report)?),
+        ExplainFormat::Json => write_stdout(format!(
+            "{}\n",
+            serde_json::to_string_pretty(&report).into_diagnostic()?
+        )),
+        ExplainFormat::JsonCompact => write_json_line(&report),
+    };
+}
+
+fn explain_text(report: &ExplainReport) -> Result<String> {
+    let mut output = format!(
+        "state {} event {:?} context={} tokens={} states={}\n",
+        report.target_state.state_id,
+        report.target_state.event_seq,
+        report.context_events,
+        report.tokens.len(),
+        report.states.len(),
+    );
+    for token in &report.tokens {
+        let source = token.source.first().map_or_else(
+            || return "event - bytes -".to_owned(),
+            |segment| {
+                return format!(
+                    "event {} bytes {}..{}",
+                    segment.event_seq, segment.start_byte_offset, segment.end_byte_offset
+                );
+            },
+        );
+        writeln!(
+            output,
+            "  token {} {source} {:?}: {}",
+            token.token_id, token.kind, token.description
+        )
+        .into_diagnostic()?;
+    }
+    for finding in &report.findings {
+        writeln!(
+            output,
+            "finding: {} [{:?}] {}",
+            finding.code,
+            finding.confidence,
+            finding.facts.join("; ")
+        )
+        .into_diagnostic()?;
+    }
+    return Ok(output);
 }
 
 fn diff_point(

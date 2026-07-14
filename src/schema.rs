@@ -12,6 +12,7 @@ use jsonschema::meta::is_valid;
 
 use crate::{
     Error, Result,
+    analysis::ExplainReport,
     artifact::ArtifactRootRecord,
     control::{ControlRequest, ControlResponse},
     diff::SemanticDiff,
@@ -75,6 +76,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<TimelineEntry>("timeline-entry.schema.json")?,
         schema::<SemanticDiff>("semantic-diff.schema.json")?,
         schema::<VtToken>("vt-token.schema.json")?,
+        schema::<ExplainReport>("explain-report.schema.json")?,
         schema::<PlaybackTiming>("playback-timing.schema.json")?,
         schema::<PlaybackFailure>("playback-failure.schema.json")?,
     ]);
