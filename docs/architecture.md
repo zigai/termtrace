@@ -31,6 +31,8 @@ The proxy forwards bytes unchanged. It owns the target PTY, logs before acknowle
 
 Read-only control operations are observations rather than execution events. Ping, status, wait registration/polling, and live boundary discovery return actor-consistent `observed` and `durable` positions without changing the event count or hash. Mutations and explicit markers remain canonical.
 
+Output persistence is explicit provenance. `strict` synchronizes every PTY output event, `bounded` synchronizes when either its configured byte limit or elapsed-time limit is reached, and `throughput` buffers output until a durable mutation/lifecycle/completion boundary. The actor checks bounded elapsed deadlines even while the child is idle. Completion reports measured maxima and final synchronization; this is syscall-level evidence under the recorded host assumptions, not offline proof of power-loss survival.
+
 The target process starts in the recorder's effective current directory unless `--cwd` overrides it. Termtrace resolves that directory once before creating provenance or spawning the PTY child, so the manifest and process cannot disagree.
 
 The pinned libghostty state machine runs live as the terminal host. Its write-PTY callback answers status, cursor, and mode queries; each exact query/response is logged before the response is delivered through a host input intent/result. This keeps detached TUIs functional without conflating generated responses with human or agent input.

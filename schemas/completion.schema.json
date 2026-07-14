@@ -1,9 +1,107 @@
 {
+  "$defs": {
+    "DurabilityMode": {
+      "description": "Output persistence behavior selected for one canonical recording.",
+      "oneOf": [
+        {
+          "const": "strict",
+          "description": "Synchronize every PTY output event before processing continues.",
+          "type": "string"
+        },
+        {
+          "const": "bounded",
+          "description": "Synchronize after a configured output-byte or elapsed-time threshold.",
+          "type": "string"
+        },
+        {
+          "const": "throughput",
+          "description": "Buffer PTY output until a mutation, lifecycle, or completion boundary.",
+          "type": "string"
+        }
+      ]
+    },
+    "DurabilityPolicy": {
+      "additionalProperties": false,
+      "description": "Chain-bound configuration for canonical output persistence.",
+      "properties": {
+        "maximum_interval_ms": {
+          "description": "Maximum uncommitted interval for bounded mode.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maximum_uncommitted_bytes": {
+          "description": "Maximum uncommitted PTY bytes for bounded mode.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mode": {
+          "$ref": "#/$defs/DurabilityMode",
+          "description": "Selected persistence behavior."
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "DurabilityRecord": {
+      "additionalProperties": false,
+      "description": "Recorder-observed durability outcomes bound into completion evidence.",
+      "properties": {
+        "final_sync_completed": {
+          "description": "Whether the final event boundary completed file synchronization.",
+          "type": "boolean"
+        },
+        "maximum_observed_uncommitted_bytes": {
+          "description": "Largest PTY byte count pending synchronization.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maximum_observed_uncommitted_ns": {
+          "description": "Largest measured interval with output pending synchronization.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "policy": {
+          "$ref": "#/$defs/DurabilityPolicy",
+          "description": "Chain-bound configured policy."
+        },
+        "sync_count": {
+          "description": "Number of successful event-log data synchronizations after header creation.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "policy",
+        "maximum_observed_uncommitted_bytes",
+        "maximum_observed_uncommitted_ns",
+        "sync_count",
+        "final_sync_completed"
+      ],
+      "type": "object"
+    }
+  },
   "$id": "https://github.com/zigai/termtrace/schemas/completion.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Immutable completion facts written after the final event is durable.",
   "properties": {
+    "durability": {
+      "$ref": "#/$defs/DurabilityRecord",
+      "description": "Recorder-observed persistence behavior and final sync result."
+    },
     "event_count": {
       "description": "Number of canonical events.",
       "format": "uint64",
@@ -81,7 +179,8 @@
     "output_bytes",
     "final_event_hash",
     "event_count",
-    "terminal_event_seq"
+    "terminal_event_seq",
+    "durability"
   ],
   "title": "SessionCompletion",
   "type": "object"

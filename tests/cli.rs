@@ -68,6 +68,16 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
         .stdout(predicate::str::contains(r#""valid":true"#))
         .stdout(predicate::str::contains(r#""level":"content""#));
 
+    let mut verify_durability = Command::cargo_bin("termtrace").expect("binary should build");
+    verify_durability
+        .arg("verify")
+        .arg(&session)
+        .args(["--level", "durability-record", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""valid":true"#))
+        .stdout(predicate::str::contains(r#""level":"durability_record""#));
+
     let manifest_path = session.join("session.json");
     let manifest = fs_err::read_to_string(&manifest_path).expect("session manifest");
     let tampered = manifest.replace("L2Jpbi9zaA==", "L2Jpbi9ueA==");
@@ -1081,7 +1091,7 @@ fn playback_does_not_echo_terminal_query_responses() {
     use portable_pty::{CommandBuilder, PtySize, native_pty_system};
     use termtrace::{
         event::{ByteString, Event, EventLogHeader},
-        event_log::{EventLogWriter, SessionClock},
+        event_log::{DurabilityPolicy, EventLogWriter, SessionClock},
         session::{
             GeometryProvenance, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, SessionGeometry,
             SessionManifest,
@@ -1142,6 +1152,7 @@ fn playback_does_not_echo_terminal_query_responses() {
         event_log: "events.jsonl".to_owned(),
         control_socket: "control.sock".to_owned(),
         contains_sensitive_terminal_data: true,
+        durability_policy: DurabilityPolicy::default(),
     };
     fs_err::write(
         session.join("session.json"),

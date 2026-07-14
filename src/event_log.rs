@@ -6,7 +6,7 @@ use std::{
     io::{BufRead, BufReader, BufWriter, Error as IoError, ErrorKind, Write},
     os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use blake3::Hash;
@@ -27,6 +27,84 @@ use crate::{
 const OWNER_DIRECTORY_MODE: u32 = 0o700;
 const OWNER_FILE_MODE: u32 = 0o600;
 const MAX_LINE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Output persistence behavior selected for one canonical recording.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DurabilityMode {
+    /// Synchronize every PTY output event before processing continues.
+    Strict,
+    /// Synchronize after a configured output-byte or elapsed-time threshold.
+    Bounded,
+    /// Buffer PTY output until a mutation, lifecycle, or completion boundary.
+    Throughput,
+}
+
+/// Chain-bound configuration for canonical output persistence.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DurabilityPolicy {
+    /// Selected persistence behavior.
+    pub mode: DurabilityMode,
+    /// Maximum uncommitted interval for bounded mode.
+    pub maximum_interval_ms: Option<u64>,
+    /// Maximum uncommitted PTY bytes for bounded mode.
+    pub maximum_uncommitted_bytes: Option<u64>,
+}
+
+impl Default for DurabilityPolicy {
+    fn default() -> Self {
+        return Self {
+            mode: DurabilityMode::Bounded,
+            maximum_interval_ms: Some(50),
+            maximum_uncommitted_bytes: Some(64 * 1024),
+        };
+    }
+}
+
+impl DurabilityPolicy {
+    /// Validate that thresholds are present only for bounded mode and are nonzero.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the mode and threshold fields disagree.
+    pub fn validate(&self) -> Result<()> {
+        let valid = match self.mode {
+            DurabilityMode::Strict | DurabilityMode::Throughput => {
+                self.maximum_interval_ms.is_none() && self.maximum_uncommitted_bytes.is_none()
+            }
+            DurabilityMode::Bounded => {
+                self.maximum_interval_ms
+                    .is_some_and(|value| return value > 0)
+                    && self
+                        .maximum_uncommitted_bytes
+                        .is_some_and(|value| return value > 0)
+            }
+        };
+        if !valid {
+            return Err(Error::InvalidReplay {
+                reason: "durability policy thresholds are invalid for the selected mode".to_owned(),
+            });
+        }
+        return Ok(());
+    }
+}
+
+/// Recorder-observed durability outcomes bound into completion evidence.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DurabilityRecord {
+    /// Chain-bound configured policy.
+    pub policy: DurabilityPolicy,
+    /// Largest PTY byte count pending synchronization.
+    pub maximum_observed_uncommitted_bytes: u64,
+    /// Largest measured interval with output pending synchronization.
+    pub maximum_observed_uncommitted_ns: u64,
+    /// Number of successful event-log data synchronizations after header creation.
+    pub sync_count: u64,
+    /// Whether the final event boundary completed file synchronization.
+    pub final_sync_completed: bool,
+}
 
 /// Actor-consistent position in the canonical event stream.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -89,6 +167,12 @@ pub struct EventLogWriter {
     durable_next_seq: u64,
     durable_hash: Hash,
     durable_output_bytes: u64,
+    durability_policy: DurabilityPolicy,
+    uncommitted_output_bytes: u64,
+    uncommitted_since: Option<Instant>,
+    maximum_observed_uncommitted_bytes: u64,
+    maximum_observed_uncommitted_ns: u64,
+    sync_count: u64,
     poisoned: bool,
 }
 
@@ -121,6 +205,19 @@ impl EventLogWriter {
         };
     }
 
+    /// Recorder-observed durability measurements through the latest sync.
+    pub fn durability_record(&self) -> DurabilityRecord {
+        return DurabilityRecord {
+            policy: self.durability_policy.clone(),
+            maximum_observed_uncommitted_bytes: self.maximum_observed_uncommitted_bytes,
+            maximum_observed_uncommitted_ns: self.maximum_observed_uncommitted_ns,
+            sync_count: self.sync_count,
+            final_sync_completed: self.durable_next_seq == self.next_seq
+                && self.durable_hash == self.previous_hash
+                && self.durable_output_bytes == self.observed_output_bytes,
+        };
+    }
+
     /// Create a new owner-only event log and durably write its header.
     ///
     /// # Errors
@@ -132,9 +229,24 @@ impl EventLogWriter {
         header: &EventLogHeader,
         clock: SessionClock,
     ) -> Result<Self> {
+        return Self::create_with_policy(path, header, clock, DurabilityPolicy::default());
+    }
+
+    /// Create a new event log with an explicit chain-bound durability policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid policy or when secure durable creation fails.
+    pub fn create_with_policy(
+        path: impl AsRef<Path>,
+        header: &EventLogHeader,
+        clock: SessionClock,
+        durability_policy: DurabilityPolicy,
+    ) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         validate_parent_directory(&path)?;
         validate_header(&path, header)?;
+        durability_policy.validate()?;
         if header.started_unix_ns != clock.started_unix_ns() {
             return Err(invalid_log(
                 &path,
@@ -187,6 +299,12 @@ impl EventLogWriter {
             durable_next_seq: 0,
             durable_hash: previous_hash,
             durable_output_bytes: 0,
+            durability_policy,
+            uncommitted_output_bytes: 0,
+            uncommitted_since: None,
+            maximum_observed_uncommitted_bytes: 0,
+            maximum_observed_uncommitted_ns: 0,
+            sync_count: 0,
             poisoned: false,
         });
     }
@@ -201,18 +319,61 @@ impl EventLogWriter {
         return self.append_at(self.clock.elapsed_ns(), event);
     }
 
-    /// Append an event without an immediate `fsync`.
-    ///
-    /// Buffered events become durable with the next [`Self::append`] call.
-    /// This is intended for high-volume PTY output; control intents and results
-    /// must use [`Self::append`].
+    /// Append one PTY output event according to the configured durability policy.
     ///
     /// # Errors
     ///
-    /// Returns an error when serialization or buffered writing fails, or when
-    /// an earlier I/O failure poisoned the writer.
-    pub fn append_buffered(&mut self, event: Event) -> Result<u64> {
-        return self.append_at_policy(self.clock.elapsed_ns(), event, false);
+    /// Returns an error for a non-output event or persistence failure.
+    pub fn append_output(&mut self, event: Event) -> Result<u64> {
+        let Event::Output { data } = &event else {
+            return Err(invalid_log(
+                &self.path,
+                self.next_seq.saturating_add(2),
+                "append_output requires an Output event",
+            ));
+        };
+        let output_bytes = u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX);
+        let durable = match self.durability_policy.mode {
+            DurabilityMode::Strict => true,
+            DurabilityMode::Throughput => false,
+            DurabilityMode::Bounded => {
+                let maximum_bytes = self
+                    .durability_policy
+                    .maximum_uncommitted_bytes
+                    .unwrap_or(u64::MAX);
+                let maximum_interval = self
+                    .durability_policy
+                    .maximum_interval_ms
+                    .map_or(Duration::MAX, Duration::from_millis);
+                self.uncommitted_output_bytes.saturating_add(output_bytes) >= maximum_bytes
+                    || self
+                        .uncommitted_since
+                        .is_some_and(|started| return started.elapsed() >= maximum_interval)
+            }
+        };
+        return self.append_at_policy(self.clock.elapsed_ns(), event, durable);
+    }
+
+    /// Synchronize a bounded-policy prefix when its elapsed threshold is due.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when flushing or synchronization fails.
+    pub fn flush_due(&mut self) -> Result<bool> {
+        if self.durability_policy.mode != DurabilityMode::Bounded
+            || self.uncommitted_since.is_none_or(|started| {
+                return started.elapsed()
+                    < Duration::from_millis(
+                        self.durability_policy
+                            .maximum_interval_ms
+                            .unwrap_or(u64::MAX),
+                    );
+            })
+        {
+            return Ok(false);
+        }
+        self.synchronize_observed()?;
+        return Ok(true);
     }
 
     fn append_at(&mut self, monotonic_ns: u64, event: Event) -> Result<u64> {
@@ -297,12 +458,57 @@ impl EventLogWriter {
         self.next_seq = next_seq;
         self.previous_hash = hash;
         self.observed_output_bytes = next_output_bytes;
+        if output_bytes > 0 {
+            if self.uncommitted_since.is_none() {
+                self.uncommitted_since = Some(Instant::now());
+            }
+            self.uncommitted_output_bytes =
+                self.uncommitted_output_bytes.saturating_add(output_bytes);
+            self.maximum_observed_uncommitted_bytes = self
+                .maximum_observed_uncommitted_bytes
+                .max(self.uncommitted_output_bytes);
+        }
         if durable {
             self.durable_next_seq = next_seq;
             self.durable_hash = hash;
             self.durable_output_bytes = next_output_bytes;
+            self.record_successful_sync();
         }
         return Ok(seq);
+    }
+
+    fn synchronize_observed(&mut self) -> Result<()> {
+        if self.poisoned {
+            return Err(Error::EventLogPoisoned {
+                path: self.path.clone(),
+            });
+        }
+        if let Err(source) = self
+            .writer
+            .flush()
+            .and_then(|()| return self.writer.get_ref().sync_data())
+        {
+            self.poisoned = true;
+            return Err(Error::Filesystem {
+                path: self.path.clone(),
+                source,
+            });
+        }
+        self.durable_next_seq = self.next_seq;
+        self.durable_hash = self.previous_hash;
+        self.durable_output_bytes = self.observed_output_bytes;
+        self.record_successful_sync();
+        return Ok(());
+    }
+
+    fn record_successful_sync(&mut self) {
+        if let Some(started) = self.uncommitted_since.take() {
+            let elapsed = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+            self.maximum_observed_uncommitted_ns =
+                self.maximum_observed_uncommitted_ns.max(elapsed);
+        }
+        self.uncommitted_output_bytes = 0;
+        self.sync_count = self.sync_count.saturating_add(1);
     }
 }
 
@@ -967,7 +1173,7 @@ fn invalid_log(path: &Path, line: u64, reason: impl Into<String>) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::Permissions, os::unix::fs::PermissionsExt as _};
+    use std::{fs::Permissions, os::unix::fs::PermissionsExt as _, thread};
 
     use tempfile::TempDir;
     use uuid::Uuid;
@@ -1088,7 +1294,7 @@ mod tests {
         assert_eq!(writer.observed_boundary(), writer.durable_boundary());
 
         writer
-            .append_buffered(Event::Output {
+            .append_output(Event::Output {
                 data: ByteString::from(&b"x"[..]),
             })
             .expect("buffer output");
@@ -1105,6 +1311,85 @@ mod tests {
         assert_eq!(writer.observed_boundary(), writer.durable_boundary());
         assert_eq!(writer.durable_boundary().next_event_seq, 2);
         assert_eq!(writer.durable_boundary().output_bytes, 1);
+    }
+
+    #[test]
+    fn applies_strict_bounded_and_throughput_output_policies() {
+        let temporary = TempDir::new().expect("temporary directory");
+        for (name, policy, expected_durable) in [
+            (
+                "strict",
+                DurabilityPolicy {
+                    mode: DurabilityMode::Strict,
+                    maximum_interval_ms: None,
+                    maximum_uncommitted_bytes: None,
+                },
+                1,
+            ),
+            (
+                "bounded",
+                DurabilityPolicy {
+                    mode: DurabilityMode::Bounded,
+                    maximum_interval_ms: Some(1000),
+                    maximum_uncommitted_bytes: Some(1),
+                },
+                1,
+            ),
+            (
+                "throughput",
+                DurabilityPolicy {
+                    mode: DurabilityMode::Throughput,
+                    maximum_interval_ms: None,
+                    maximum_uncommitted_bytes: None,
+                },
+                0,
+            ),
+        ] {
+            let directory = temporary.path().join(name);
+            secure_directory(&directory);
+            let path = directory.join("events.jsonl");
+            let clock = SessionClock::now().expect("valid clock");
+            let mut writer =
+                EventLogWriter::create_with_policy(&path, &header(&clock), clock, policy)
+                    .expect("create policy writer");
+            writer
+                .append_output(Event::Output {
+                    data: ByteString::from(&b"x"[..]),
+                })
+                .expect("append output");
+            assert_eq!(writer.durable_boundary().next_event_seq, expected_durable);
+        }
+    }
+
+    #[test]
+    fn bounded_policy_flushes_an_idle_pending_prefix() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let directory = temporary.path().join("bounded-time");
+        secure_directory(&directory);
+        let path = directory.join("events.jsonl");
+        let clock = SessionClock::now().expect("valid clock");
+        let mut writer = EventLogWriter::create_with_policy(
+            &path,
+            &header(&clock),
+            clock,
+            DurabilityPolicy {
+                mode: DurabilityMode::Bounded,
+                maximum_interval_ms: Some(1),
+                maximum_uncommitted_bytes: Some(1024),
+            },
+        )
+        .expect("create bounded writer");
+        writer
+            .append_output(Event::Output {
+                data: ByteString::from(&b"x"[..]),
+            })
+            .expect("append buffered output");
+        thread::sleep(Duration::from_millis(5));
+        assert!(writer.flush_due().expect("flush due prefix"));
+        assert_eq!(writer.durable_boundary(), writer.observed_boundary());
+        let record = writer.durability_record();
+        assert!(record.maximum_observed_uncommitted_ns >= 1_000_000);
+        assert!(record.final_sync_completed);
     }
 
     #[test]

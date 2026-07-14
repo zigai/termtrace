@@ -29,6 +29,58 @@
       ],
       "type": "object"
     },
+    "DurabilityMode": {
+      "description": "Output persistence behavior selected for one canonical recording.",
+      "oneOf": [
+        {
+          "const": "strict",
+          "description": "Synchronize every PTY output event before processing continues.",
+          "type": "string"
+        },
+        {
+          "const": "bounded",
+          "description": "Synchronize after a configured output-byte or elapsed-time threshold.",
+          "type": "string"
+        },
+        {
+          "const": "throughput",
+          "description": "Buffer PTY output until a mutation, lifecycle, or completion boundary.",
+          "type": "string"
+        }
+      ]
+    },
+    "DurabilityPolicy": {
+      "additionalProperties": false,
+      "description": "Chain-bound configuration for canonical output persistence.",
+      "properties": {
+        "maximum_interval_ms": {
+          "description": "Maximum uncommitted interval for bounded mode.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maximum_uncommitted_bytes": {
+          "description": "Maximum uncommitted PTY bytes for bounded mode.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mode": {
+          "$ref": "#/$defs/DurabilityMode",
+          "description": "Selected persistence behavior."
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
     "GeometryProvenance": {
       "description": "Provenance for automatic terminal geometry selection.",
       "properties": {
@@ -240,6 +292,10 @@
       "description": "Live control socket relative path.",
       "type": "string"
     },
+    "durability_policy": {
+      "$ref": "#/$defs/DurabilityPolicy",
+      "description": "Chain-bound output persistence policy."
+    },
     "event_log": {
       "description": "Canonical event-log relative path.",
       "type": "string"
@@ -323,7 +379,8 @@
     "architecture",
     "event_log",
     "control_socket",
-    "contains_sensitive_terminal_data"
+    "contains_sensitive_terminal_data",
+    "durability_policy"
   ],
   "title": "SessionManifest",
   "type": "object"

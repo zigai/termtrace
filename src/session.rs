@@ -13,23 +13,23 @@ use crate::{
     Error, Result,
     artifact::verify_session_artifacts,
     event::{ByteString, Event},
-    event_log::EventLog,
+    event_log::{DurabilityPolicy, DurabilityRecord, EventLog},
 };
 
 /// Session manifest format identifier.
 pub const SESSION_MANIFEST_FORMAT: &str = "termtrace-session";
 /// Session manifest schema version.
-pub const SESSION_MANIFEST_VERSION: u32 = 2;
+pub const SESSION_MANIFEST_VERSION: u32 = 3;
 /// Completion manifest format identifier.
 pub const SESSION_COMPLETION_FORMAT: &str = "termtrace-completion";
 /// Completion manifest schema version.
-pub const SESSION_COMPLETION_VERSION: u32 = 2;
+pub const SESSION_COMPLETION_VERSION: u32 = 3;
 /// Validation contract used when the completion manifest was created.
 pub const COMPLETION_VALIDATION_VERSION: u32 = 1;
 /// Verification report format identifier.
 pub const VERIFICATION_REPORT_FORMAT: &str = "termtrace-verification";
 /// Verification report schema version.
-pub const VERIFICATION_REPORT_VERSION: u32 = 1;
+pub const VERIFICATION_REPORT_VERSION: u32 = 2;
 
 /// Requested depth for an offline evidence verification.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -209,6 +209,8 @@ pub struct SessionManifest {
     pub control_socket: String,
     /// Explicit sensitivity warning.
     pub contains_sensitive_terminal_data: bool,
+    /// Chain-bound output persistence policy.
+    pub durability_policy: DurabilityPolicy,
 }
 
 /// Immutable completion facts written after the final event is durable.
@@ -239,6 +241,8 @@ pub struct SessionCompletion {
     pub event_count: u64,
     /// Sequence number of the required terminal `Exit` event.
     pub terminal_event_seq: u64,
+    /// Recorder-observed persistence behavior and final sync result.
+    pub durability: DurabilityRecord,
 }
 
 /// Serialize a session manifest into its sole canonical on-disk form.
@@ -367,13 +371,7 @@ pub fn verify_session(
     }
     match level {
         VerificationLevel::Structure | VerificationLevel::Content => report.valid = true,
-        VerificationLevel::DurabilityRecord => {
-            report.findings.push(VerificationFinding {
-                code: "durability_record_unavailable".to_owned(),
-                message: "this format does not yet contain a verifiable durability record"
-                    .to_owned(),
-            });
-        }
+        VerificationLevel::DurabilityRecord => report.valid = true,
         VerificationLevel::Signature => {
             report.findings.push(VerificationFinding {
                 code: "signature_receipt_missing".to_owned(),
@@ -551,6 +549,18 @@ pub fn validate_completed_log(
             reason: "completion exit outcome does not match the final Exit event".to_owned(),
         });
     }
+    if completion.durability.policy != manifest.durability_policy {
+        return Err(Error::InvalidReplay {
+            reason: "completion durability policy does not match the chain-bound session policy"
+                .to_owned(),
+        });
+    }
+    if !completion.durability.final_sync_completed || completion.durability.sync_count == 0 {
+        return Err(Error::InvalidReplay {
+            reason: "completion does not record a successful final event-log synchronization"
+                .to_owned(),
+        });
+    }
     if !log.pending_operations.is_empty() {
         return Err(Error::InvalidReplay {
             reason: "completed event log contains pending mutation intents".to_owned(),
@@ -589,6 +599,7 @@ fn validate_manifest(manifest: &SessionManifest) -> Result<()> {
             reason: format!("unsupported session format version {}", manifest.version),
         });
     }
+    manifest.durability_policy.validate()?;
     return Ok(());
 }
 
@@ -645,6 +656,9 @@ fn content_finding_code(error: &Error) -> &'static str {
     if reason.contains("exit outcome") {
         return "exit_outcome_mismatch";
     }
+    if reason.contains("durability") || reason.contains("synchronization") {
+        return "durability_record_invalid";
+    }
     return "canonical_content_invalid";
 }
 
@@ -690,6 +704,7 @@ mod tests {
             event_log: "events.jsonl".to_owned(),
             control_socket: "control.sock".to_owned(),
             contains_sensitive_terminal_data: true,
+            durability_policy: DurabilityPolicy::default(),
         };
         let manifest_bytes = canonical_manifest_bytes(&manifest).expect("manifest JSON");
         fs_err::write(session.join("session.json"), &manifest_bytes).expect("write manifest");
@@ -712,6 +727,7 @@ mod tests {
         }
         let event_count = writer.next_seq();
         let final_event_hash = writer.current_hash();
+        let durability = writer.durability_record();
         drop(writer);
         let completion = SessionCompletion {
             format: SESSION_COMPLETION_FORMAT.to_owned(),
@@ -726,6 +742,7 @@ mod tests {
             final_event_hash,
             event_count,
             terminal_event_seq: event_count.saturating_sub(1),
+            durability,
         };
         fs_err::write(
             session.join("completion.json"),

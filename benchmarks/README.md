@@ -18,3 +18,14 @@ jq -e . benchmarks/acceptance-v1.json
 The large-fixture generator and executable benchmark harness are roadmap
 deliverables. Until they exist, their gate results are explicitly unavailable,
 not passing.
+
+Run the durability comparison with the manifest's default 30 repetitions:
+
+```sh
+benchmarks/run-durability.sh
+```
+
+It records elapsed time, peak resident memory, configured policy, observed
+uncommitted maxima, sync count, and final-sync result as JSONL under the ignored
+`benchmarks/results/` directory. `REPETITIONS`, `PAYLOAD_BYTES`, and `OUTPUT`
+may override the run without changing the acceptance contract.

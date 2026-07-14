@@ -51,7 +51,7 @@ use crate::{
         ByteString, Event, EventLogHeader, InputKind, InputSource, LifecycleKind, OperationStatus,
         TerminalColors,
     },
-    event_log::{EventLogWriter, SessionClock},
+    event_log::{DurabilityPolicy, EventLogWriter, SessionClock},
     ghostty_vt::GhosttyVt,
     profile::ResolvedGhosttyProfile,
     session::{
@@ -95,6 +95,8 @@ pub struct RecordOptions {
     pub colors: TerminalColors,
     /// Forward standard input to the child PTY.
     pub forward_stdin: bool,
+    /// Output persistence policy committed into canonical provenance.
+    pub durability_policy: DurabilityPolicy,
 }
 
 /// Completed command information.
@@ -269,7 +271,12 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     )
     .with_colors(options.colors.clone());
     let event_log_path = options.output_directory.join("events.jsonl");
-    let mut event_log = EventLogWriter::create(&event_log_path, &header, clock)?;
+    let mut event_log = EventLogWriter::create_with_policy(
+        &event_log_path,
+        &header,
+        clock,
+        options.durability_policy.clone(),
+    )?;
 
     let mut spawned = spawn_command(options, &working_directory, pty_size)?;
     if let Err(error) = event_log.append(Event::Lifecycle {
@@ -325,6 +332,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
             final_event_hash: event_log.current_hash(),
             event_count: event_log.next_seq(),
             terminal_event_seq,
+            durability: event_log.durability_record(),
         },
     )?;
 
@@ -375,6 +383,7 @@ fn write_session_manifest(
         event_log: "events.jsonl".to_owned(),
         control_socket: CONTROL_SOCKET_NAME.to_owned(),
         contains_sensitive_terminal_data: true,
+        durability_policy: options.durability_policy.clone(),
     };
     let encoded = canonical_manifest_bytes(&manifest)?;
     let hash = manifest_hash(&encoded);
@@ -559,6 +568,7 @@ fn consume_runtime(
                 }
                 Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => {}
             }
+            event_log.flush_due()?;
 
             if exit_status.is_none() {
                 exit_status = spawned
@@ -613,7 +623,7 @@ fn process_runtime_message(
             progress.output_bytes = progress
                 .output_bytes
                 .saturating_add(u64::try_from(data.len()).unwrap_or(u64::MAX));
-            event_log.append_buffered(Event::Output {
+            event_log.append_output(Event::Output {
                 data: ByteString::from(data.as_slice()),
             })?;
             output
@@ -1790,6 +1800,7 @@ mod tests {
             term: "xterm-ghostty".to_owned(),
             colors: TerminalColors::default(),
             forward_stdin: false,
+            durability_policy: DurabilityPolicy::default(),
         };
 
         let mut mirrored_output = Vec::new();
@@ -1869,6 +1880,7 @@ mod tests {
             term: "xterm-ghostty".to_owned(),
             colors: TerminalColors::default(),
             forward_stdin: false,
+            durability_policy: DurabilityPolicy::default(),
         };
 
         let error = record(&options).expect_err("existing directory must fail");
@@ -1895,6 +1907,7 @@ mod tests {
             term: "xterm-ghostty".to_owned(),
             colors: TerminalColors::default(),
             forward_stdin: false,
+            durability_policy: DurabilityPolicy::default(),
         };
         let started = Instant::now();
         let mut output = Vec::new();
@@ -1931,6 +1944,7 @@ mod tests {
             term: "xterm-ghostty".to_owned(),
             colors: TerminalColors::default(),
             forward_stdin: false,
+            durability_policy: DurabilityPolicy::default(),
         };
         let mut output = Vec::new();
 
@@ -1974,6 +1988,7 @@ mod tests {
             term: "xterm-ghostty".to_owned(),
             colors: TerminalColors::default(),
             forward_stdin: false,
+            durability_policy: DurabilityPolicy::default(),
         };
         let mut output = Vec::new();
 

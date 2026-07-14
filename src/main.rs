@@ -16,7 +16,7 @@ use termtrace::{
     Error,
     control::{CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ProcessSignal, request},
     event::{ByteString, EVENT_LOG_VERSION},
-    event_log::EventLog,
+    event_log::{DurabilityMode, DurabilityPolicy, EventLog},
     geometry::{inherited_geometry, run_probe},
     ghostty_vt::RowState,
     inspection::{inspect_session, state_text, wait_for_completion, wait_for_output},
@@ -476,6 +476,18 @@ struct RecordArgs {
     #[arg(long)]
     no_input: bool,
 
+    /// Canonical output persistence policy.
+    #[arg(long, value_enum, default_value_t = DurabilityModeArg::Bounded)]
+    durability: DurabilityModeArg,
+
+    /// Maximum unsynchronized interval in bounded mode.
+    #[arg(long, default_value_t = 50)]
+    durability_max_interval_ms: u64,
+
+    /// Maximum unsynchronized PTY bytes in bounded mode.
+    #[arg(long, default_value_t = 65_536)]
+    durability_max_uncommitted_bytes: u64,
+
     /// Executable and arguments, following `--`.
     #[arg(last = true, required = true)]
     command: Vec<OsString>,
@@ -486,6 +498,35 @@ enum GeometryMode {
     Manual,
     Inherit,
     Fit,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum DurabilityModeArg {
+    Strict,
+    Bounded,
+    Throughput,
+}
+
+impl DurabilityModeArg {
+    fn policy(self, maximum_interval_ms: u64, maximum_uncommitted_bytes: u64) -> DurabilityPolicy {
+        return match self {
+            Self::Strict => DurabilityPolicy {
+                mode: DurabilityMode::Strict,
+                maximum_interval_ms: None,
+                maximum_uncommitted_bytes: None,
+            },
+            Self::Bounded => DurabilityPolicy {
+                mode: DurabilityMode::Bounded,
+                maximum_interval_ms: Some(maximum_interval_ms),
+                maximum_uncommitted_bytes: Some(maximum_uncommitted_bytes),
+            },
+            Self::Throughput => DurabilityPolicy {
+                mode: DurabilityMode::Throughput,
+                maximum_interval_ms: None,
+                maximum_uncommitted_bytes: None,
+            },
+        };
+    }
 }
 
 fn init_diagnostics(level: tracing::Level) {
@@ -901,6 +942,18 @@ fn run_resize(arguments: ResizeArgs) -> Result<ExitCode> {
 }
 
 fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
+    if matches!(arguments.durability, DurabilityModeArg::Bounded)
+        && (arguments.durability_max_interval_ms == 0
+            || arguments.durability_max_uncommitted_bytes == 0)
+    {
+        return Err(miette::miette!(
+            "bounded durability thresholds must be greater than zero"
+        ));
+    }
+    let durability_policy = arguments.durability.policy(
+        arguments.durability_max_interval_ms,
+        arguments.durability_max_uncommitted_bytes,
+    );
     let overrides = GhosttyVisualOverrides {
         font_family: arguments.font_family.clone(),
         font_size: arguments.font_size.clone(),
@@ -947,6 +1000,7 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         term: arguments.term,
         colors,
         forward_stdin: !arguments.no_input,
+        durability_policy,
     })?;
     writeln!(io::stderr(), "recording: {}", outcome.event_log.display()).into_diagnostic()?;
 
