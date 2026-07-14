@@ -1,9 +1,41 @@
+# Rust build outputs
 /target/
-/demo-artifacts/
+
+# Repository-local bootstrap tools and dependency caches
 /.tools/
-/.idea/
-/.vscode/
-*.profraw
+/.zig-cache/
+/zig-cache/
+/zig-out/
+
+# Locally recorded evidence and generated benchmark results
 *.termtrace
+/demo-artifacts/
+/benchmarks/results/
+
+# Python bytecode produced by demo validation
 __pycache__/
 *.py[cod]
+
+# Coverage, profiling, and crash outputs
+/coverage/
+*.profraw
+*.profdata
+perf.data
+perf.data.old
+core
+core.*
+
+# Local environment and editor state
+.env
+.env.*
+!.env.example
+.direnv/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Platform metadata
+.DS_Store
+Thumbs.db

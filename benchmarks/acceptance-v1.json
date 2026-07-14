@@ -1,0 +1,202 @@
+{
+  "$schema": "../schemas/acceptance-benchmark.schema.json",
+  "format": "termtrace-acceptance-benchmark",
+  "version": 1,
+  "baseline": {
+    "termtrace_repository": "https://github.com/zigai/termtrace.git",
+    "termtrace_commit": "f466a692aadbf8a49e739c9d3d48526d640b18e4",
+    "ghostty_repository": "https://github.com/ghostty-org/ghostty.git",
+    "ghostty_vt_commit": "55a3e33ab26a23d75b274b23c7f76d837db00578"
+  },
+  "environment": {
+    "kind": "host",
+    "identifier": "termtrace-linux-amd-7900x-2026-07",
+    "operating_system": "EndeavourOS 2025.03.19",
+    "kernel": "Linux 6.18.38-2-lts",
+    "architecture": "x86_64",
+    "cpu": "AMD Ryzen 9 7900X 12-Core Processor",
+    "logical_cpus": 24,
+    "memory_bytes": 66480795648,
+    "rust_toolchain": "1.91.1 (ed61e7d7e242494fb7057f2657300d9e77bb4fcb)",
+    "ghostty_native": "1.3.1-arch2",
+    "ffmpeg": "8.1.2",
+    "jq": "1.8.2",
+    "notes": "Absolute latency gates apply only to this host identity until a reviewed manifest diff pins a replacement host or OCI digest."
+  },
+  "measurement": {
+    "clock": "CLOCK_MONOTONIC",
+    "warmup_repetitions": 5,
+    "measured_repetitions": 30,
+    "reported_percentiles": [50, 95, 99],
+    "percentile_method": "nearest-rank",
+    "cold_policy": "drop only Termtrace process-local caches by starting a fresh process; do not drop host page cache",
+    "warm_policy": "run five unreported repetitions against the same completed fixture before measurement",
+    "concurrency": 1,
+    "timeout_seconds": 120,
+    "resident_memory_limit_bytes": 536870912
+  },
+  "defaults": {
+    "geometry": {
+      "cols": 120,
+      "rows": 40,
+      "pixel_width": 1200,
+      "pixel_height": 800
+    },
+    "profile": {
+      "term": "xterm-256color",
+      "colorterm": "truecolor",
+      "locale": "C.UTF-8",
+      "timezone": "UTC",
+      "ghostty_config": "font-family = DejaVu Sans Mono\nfont-size = 12\nwindow-padding-x = 0\nwindow-padding-y = 0\n"
+    },
+    "durability_policy": "bounded",
+    "durability_max_interval_ms": 50,
+    "durability_max_uncommitted_bytes": 65536
+  },
+  "fixtures": [
+    {
+      "id": "line-oriented",
+      "kind": "line_oriented",
+      "command": ["/bin/sh", "-c", "i=0; while [ $i -lt 10000 ]; do printf 'line %05d payload payload payload\\n' \"$i\"; i=$((i+1)); done"],
+      "completion_marker": "line 09999 payload payload payload"
+    },
+    {
+      "id": "fullscreen-query-heavy",
+      "kind": "fullscreen_query_heavy",
+      "command": ["python3", "demos/apps/terminal_showcase.py", "semantic"],
+      "completion_marker": "SEMANTIC_DEMO_COMPLETE"
+    },
+    {
+      "id": "million-event-1gib",
+      "kind": "generated_large",
+      "event_count": 1000000,
+      "output_bytes": 1073741824,
+      "generator": "cargo run --release --bin termtrace-fixture -- large --events 1000000 --output-bytes 1073741824",
+      "notes": "The generator is a required roadmap deliverable and this fixture is unavailable until it exists."
+    }
+  ],
+  "gates": [
+    {
+      "id": "cli-command-count-parity",
+      "kind": "ergonomics",
+      "workflows": ["start", "send", "wait", "show", "resize", "restart", "stop", "screenshot", "scenario-test", "edited-video"],
+      "maximum_commands_per_workflow": 1,
+      "maximum_required_identifiers_per_workflow": 1
+    },
+    {
+      "id": "warm-status-p95",
+      "kind": "latency",
+      "operation": "status",
+      "fixture": "fullscreen-query-heavy",
+      "cache_policy": "warm",
+      "percentile": 95,
+      "maximum_ms": 100
+    },
+    {
+      "id": "warm-live-show-p95",
+      "kind": "latency",
+      "operation": "show --format text",
+      "fixture": "fullscreen-query-heavy",
+      "cache_policy": "warm",
+      "percentile": 95,
+      "maximum_ms": 100
+    },
+    {
+      "id": "presented-wait-notification-p95",
+      "kind": "latency_delta",
+      "operation": "wait --scope screen",
+      "fixture": "fullscreen-query-heavy",
+      "percentile": 95,
+      "maximum_delta_ms": 50,
+      "reference": "actor processing timestamp for the matching presented state"
+    },
+    {
+      "id": "input-ack-p95",
+      "kind": "latency",
+      "operation": "send text:x",
+      "fixture": "fullscreen-query-heavy",
+      "cache_policy": "warm",
+      "percentile": 95,
+      "maximum_ms": 100
+    },
+    {
+      "id": "semantic-screenshot-p95",
+      "kind": "latency",
+      "operation": "show --format png --renderer semantic",
+      "fixture": "fullscreen-query-heavy",
+      "cache_policy": "warm",
+      "percentile": 95,
+      "maximum_ms": 1000
+    },
+    {
+      "id": "native-screenshot-p95",
+      "kind": "latency",
+      "operation": "show --format png --renderer native",
+      "fixture": "fullscreen-query-heavy",
+      "cache_policy": "warm",
+      "percentile": 95,
+      "maximum_ms": 10000
+    },
+    {
+      "id": "large-live-independence",
+      "kind": "complexity",
+      "fixture": "million-event-1gib",
+      "operations": ["show", "wait", "events --follow"],
+      "requirement": "latency and resident memory are independent of total canonical log length"
+    },
+    {
+      "id": "large-completed-show-p95",
+      "kind": "latency",
+      "operation": "show --format text",
+      "fixture": "million-event-1gib",
+      "cache_policy": "warm",
+      "percentile": 95,
+      "maximum_ms": 1000
+    },
+    {
+      "id": "large-reviewer-range-load-p95",
+      "kind": "latency",
+      "operation": "reviewer initial range load",
+      "fixture": "million-event-1gib",
+      "cache_policy": "warm",
+      "percentile": 95,
+      "maximum_ms": 2000
+    }
+  ],
+  "invariants": [
+    "canonical_integrity",
+    "presentation_scope",
+    "artifact_provenance",
+    "mutation_retry_exactly_once",
+    "crash_outcome_classification",
+    "geometry_exactness",
+    "schema_consistency",
+    "truth_layer_labeling"
+  ],
+  "artifact_validators": [
+    {
+      "artifact": "json",
+      "command": "jq -e . ARTIFACT"
+    },
+    {
+      "artifact": "jsonl",
+      "command": "jq -s -e 'all(.[]; type == \"object\")' ARTIFACT"
+    },
+    {
+      "artifact": "png",
+      "command": "ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of json ARTIFACT"
+    },
+    {
+      "artifact": "video",
+      "command": "ffprobe -v error -count_frames -show_streams -show_format -of json ARTIFACT"
+    },
+    {
+      "artifact": "evidence",
+      "command": "termtrace verify SESSION --level content --json"
+    },
+    {
+      "artifact": "native-capture",
+      "command": "scripts/native-smoke-test.sh OUTPUT_DIRECTORY"
+    }
+  ]
+}
