@@ -37,6 +37,8 @@ Output persistence is explicit provenance. `strict` synchronizes every PTY outpu
 
 The target process starts in the recorder's effective current directory unless `--cwd` overrides it. Termtrace resolves that directory once before creating provenance or spawning the PTY child, so the manifest and process cannot disagree.
 
+Execution environment collection is policy-driven. `minimal` retains recorder-owned terminal values and inventories common locale/timezone names, `reproducible` retains those effective values and hashes, and `custom` applies explicit per-variable value/hash/name/not-captured rules. The immutable manifest records both the selection policy and the resulting inventory; hashes support later equality checks but are not presented as reproducible values or confidentiality controls.
+
 The pinned libghostty state machine runs live as the terminal host. Its write-PTY callback answers status, cursor, and mode queries; each exact query/response is logged before the response is delivered through a host input intent/result. This keeps detached TUIs functional without conflating generated responses with human or agent input.
 
 The event header pins the effective foreground, background, cursor color, and 256-color palette. Recording reads these from `ghostty +show-config` when available and records a configuration hash as provenance; pinned libghostty defaults are an explicit fallback. Replay never substitutes the current machine's theme.

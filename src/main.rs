@@ -26,6 +26,7 @@ use termtrace::{
         ResolvedGhosttyProfile, resolve_ghostty_profile, resolved_terminal_colors,
         terminal_colors_for_profile,
     },
+    provenance::{ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind},
     record::{RecordOptions, record},
     replay::{
         GHOSTTY_REVISION, IndexOptions, STATE_FORMAT_VERSION, StateSelection, StateSelector,
@@ -488,6 +489,14 @@ struct RecordArgs {
     #[arg(long, default_value_t = 65_536)]
     durability_max_uncommitted_bytes: u64,
 
+    /// Execution provenance collection policy.
+    #[arg(long, value_enum, default_value_t = ProvenancePolicyArg::Minimal)]
+    provenance: ProvenancePolicyArg,
+
+    /// Custom environment rule as NAME=value|hash|name|not-captured.
+    #[arg(long = "provenance-env", value_parser = parse_provenance_rule)]
+    provenance_environment: Vec<(String, ProvenanceCapture)>,
+
     /// Executable and arguments, following `--`.
     #[arg(last = true, required = true)]
     command: Vec<OsString>,
@@ -505,6 +514,23 @@ enum DurabilityModeArg {
     Strict,
     Bounded,
     Throughput,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ProvenancePolicyArg {
+    Minimal,
+    Reproducible,
+    Custom,
+}
+
+impl From<ProvenancePolicyArg> for ProvenancePolicyKind {
+    fn from(value: ProvenancePolicyArg) -> Self {
+        return match value {
+            ProvenancePolicyArg::Minimal => Self::Minimal,
+            ProvenancePolicyArg::Reproducible => Self::Reproducible,
+            ProvenancePolicyArg::Custom => Self::Custom,
+        };
+    }
 }
 
 impl DurabilityModeArg {
@@ -954,6 +980,17 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         arguments.durability_max_interval_ms,
         arguments.durability_max_uncommitted_bytes,
     );
+    if !matches!(arguments.provenance, ProvenancePolicyArg::Custom)
+        && !arguments.provenance_environment.is_empty()
+    {
+        return Err(miette::miette!(
+            "--provenance-env requires --provenance custom"
+        ));
+    }
+    let provenance_policy = ProvenancePolicy {
+        kind: arguments.provenance.into(),
+        environment: arguments.provenance_environment.iter().cloned().collect(),
+    };
     let overrides = GhosttyVisualOverrides {
         font_family: arguments.font_family.clone(),
         font_size: arguments.font_size.clone(),
@@ -1001,6 +1038,7 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         colors,
         forward_stdin: !arguments.no_input,
         durability_policy,
+        provenance_policy,
     })?;
     writeln!(io::stderr(), "recording: {}", outcome.event_log.display()).into_diagnostic()?;
 
@@ -1008,6 +1046,27 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         (Some(code), None) => return u8::try_from(code).map(ExitCode::from).into_diagnostic(),
         _ => return Ok(ExitCode::FAILURE),
     }
+}
+
+fn parse_provenance_rule(value: &str) -> StdResult<(String, ProvenanceCapture), String> {
+    let Some((name, capture)) = value.split_once('=') else {
+        return Err("expected NAME=value|hash|name|not-captured".to_owned());
+    };
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| return byte == b'_' || byte.is_ascii_alphanumeric())
+    {
+        return Err("environment name must contain only ASCII letters, digits, or '_'".to_owned());
+    }
+    let capture = match capture {
+        "value" => ProvenanceCapture::Value,
+        "hash" => ProvenanceCapture::Hash,
+        "name" => ProvenanceCapture::Name,
+        "not-captured" => ProvenanceCapture::NotCaptured,
+        _ => return Err("capture must be value, hash, name, or not-captured".to_owned()),
+    };
+    return Ok((name.to_owned(), capture));
 }
 
 fn resolve_record_geometry(

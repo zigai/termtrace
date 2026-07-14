@@ -1,0 +1,72 @@
+{
+  "$defs": {
+    "ProvenanceCapture": {
+      "description": "How one selected provenance value is represented.",
+      "oneOf": [
+        {
+          "const": "value",
+          "description": "Retain the exact value and its hash.",
+          "type": "string"
+        },
+        {
+          "const": "hash",
+          "description": "Retain only a value hash for later equality checks.",
+          "type": "string"
+        },
+        {
+          "const": "name",
+          "description": "Retain only the variable name and whether it was set.",
+          "type": "string"
+        },
+        {
+          "const": "not_captured",
+          "description": "Explicitly document that the selected value was not captured.",
+          "type": "string"
+        }
+      ]
+    },
+    "ProvenancePolicyKind": {
+      "description": "Built-in execution-provenance collection policy.",
+      "oneOf": [
+        {
+          "const": "minimal",
+          "description": "Retain only essential terminal values and inventory common locale context.",
+          "type": "string"
+        },
+        {
+          "const": "reproducible",
+          "description": "Retain values needed to recreate common locale and timezone behavior.",
+          "type": "string"
+        },
+        {
+          "const": "custom",
+          "description": "Apply only caller-supplied environment capture rules.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/provenance-policy.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Explicit immutable provenance policy.",
+  "properties": {
+    "environment": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ProvenanceCapture"
+      },
+      "description": "Custom environment rules; required to be empty for built-in policies.",
+      "type": "object"
+    },
+    "kind": {
+      "$ref": "#/$defs/ProvenancePolicyKind",
+      "description": "Built-in policy behavior."
+    }
+  },
+  "required": [
+    "kind",
+    "environment"
+  ],
+  "title": "ProvenancePolicy",
+  "type": "object"
+}

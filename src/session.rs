@@ -14,13 +14,14 @@ use crate::{
     artifact::verify_session_artifacts,
     event::{ByteString, Event},
     event_log::{DurabilityPolicy, DurabilityRecord, EventLog},
+    provenance::ExecutionProvenance,
     request_journal::{MUTATION_JOURNAL_NAME, validate_mutation_journal},
 };
 
 /// Session manifest format identifier.
 pub const SESSION_MANIFEST_FORMAT: &str = "termtrace-session";
 /// Session manifest schema version.
-pub const SESSION_MANIFEST_VERSION: u32 = 4;
+pub const SESSION_MANIFEST_VERSION: u32 = 5;
 /// Completion manifest format identifier.
 pub const SESSION_COMPLETION_FORMAT: &str = "termtrace-completion";
 /// Completion manifest schema version.
@@ -216,6 +217,8 @@ pub struct SessionManifest {
     pub ghostty_visual: Option<GhosttyVisualProvenance>,
     /// Allowlisted child environment overrides.
     pub child_environment: BTreeMap<String, String>,
+    /// Sensitivity-aware execution provenance and its explicit collection policy.
+    pub execution_provenance: ExecutionProvenance,
     /// Termtrace package version.
     pub termtrace_version: String,
     /// Build target operating system.
@@ -711,6 +714,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::provenance::{ExecutionProvenance, ProvenancePolicy};
     use crate::{
         event::{EventLogHeader, InputKind, InputSource},
         event_log::{EventLogWriter, SessionClock},
@@ -740,6 +744,10 @@ mod tests {
             geometry_provenance: GeometryProvenance::default(),
             ghostty_visual: None,
             child_environment: BTreeMap::new(),
+            execution_provenance: ExecutionProvenance {
+                policy: ProvenancePolicy::default(),
+                environment: BTreeMap::new(),
+            },
             termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
             operating_system: "linux".to_owned(),
             architecture: "test".to_owned(),

@@ -4,6 +4,8 @@
 
 Run `termtrace record --no-input --out SESSION -- COMMAND ...` in a supervised background process. The owner-only `SESSION/control.sock` appears when control is ready. `termtrace ping` and `termtrace status` are explicit readiness probes; do not infer readiness from arbitrary screen text.
 
+Choose provenance deliberately for the workload. The default `minimal` policy avoids retaining locale/timezone values. Use `--provenance reproducible` when those values are needed to recreate behavior, or `--provenance custom --provenance-env NAME=hash` to retain equality evidence without the value. `not-captured` records an explicit omission; it is different from an unselected variable.
+
 ## Drive safely
 
 Use `send --text` for UTF-8 and `send --file` for exact bytes. Every mutation has a caller-owned UUID, durable intent, explicit result, byte count, and actor-side deduplication. Library clients should retain a `ControlRequest` and use `send_request` with the same UUID after a transport failure. Never create a new UUID to retry input whose outcome is unknown. Exact outcomes persist in `requests.jsonl`, so a retry remains safe after the actor's bounded memory cache evicts the request; read-only observations are not retained there.

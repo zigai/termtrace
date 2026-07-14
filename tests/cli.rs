@@ -17,6 +17,10 @@ use termtrace::{
     control::{ControlCommand, ControlData, ControlRequest, send_request},
     event::{EVENT_LOG_VERSION, Event, InputSource, OperationStatus},
     event_log::EventLog,
+    provenance::{
+        ExecutionProvenance, ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind,
+        ProvenanceSensitivity,
+    },
     replay::{
         GHOSTTY_REVISION, IndexOptions, ReplayManifest, StateRecord, StateSelection,
         derived_directory_name, index_session_range, index_session_with_options, replay,
@@ -130,6 +134,58 @@ fn record_mirrors_output_persists_events_and_propagates_exit_code() {
             height: 600,
         })
     );
+}
+
+#[test]
+fn custom_provenance_policy_hashes_without_retaining_values() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("custom-provenance");
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+
+    command
+        .args([
+            "record",
+            "--no-input",
+            "--provenance",
+            "custom",
+            "--provenance-env",
+            "TERM=hash",
+            "--provenance-env",
+            "PRIVATE_TOKEN=not-captured",
+            "--out",
+        ])
+        .arg(&session)
+        .args(["--", "/bin/true"])
+        .assert()
+        .success();
+
+    let manifest = read_manifest(&session).expect("session manifest");
+    assert_eq!(
+        manifest.execution_provenance.policy.kind,
+        ProvenancePolicyKind::Custom
+    );
+    let terminal = manifest
+        .execution_provenance
+        .environment
+        .get("TERM")
+        .expect("TERM inventory");
+    assert_eq!(terminal.capture, ProvenanceCapture::Hash);
+    assert!(terminal.value.is_none());
+    assert_eq!(
+        terminal.value_hash.as_deref(),
+        Some(blake3::hash(b"xterm-ghostty").to_hex().as_str())
+    );
+    let private = manifest
+        .execution_provenance
+        .environment
+        .get("PRIVATE_TOKEN")
+        .expect("private inventory");
+    assert_eq!(private.capture, ProvenanceCapture::NotCaptured);
+    assert_eq!(
+        private.sensitivity,
+        ProvenanceSensitivity::PotentiallySensitive
+    );
+    assert!(private.value.is_none() && private.value_hash.is_none());
 }
 
 #[test]
@@ -1173,6 +1229,10 @@ fn playback_does_not_echo_terminal_query_responses() {
         geometry_provenance: GeometryProvenance::default(),
         ghostty_visual: None,
         child_environment: BTreeMap::new(),
+        execution_provenance: ExecutionProvenance {
+            policy: ProvenancePolicy::default(),
+            environment: BTreeMap::new(),
+        },
         termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
         operating_system: "linux".to_owned(),
         architecture: "test".to_owned(),

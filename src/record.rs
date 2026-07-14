@@ -55,6 +55,7 @@ use crate::{
     event_log::{DurabilityPolicy, EventLogWriter, SessionClock},
     ghostty_vt::GhosttyVt,
     profile::ResolvedGhosttyProfile,
+    provenance::{ProvenancePolicy, collect_execution_provenance},
     request_journal::{
         MUTATION_JOURNAL_NAME, MutationJournal, MutationJournalRecord, command_hash,
     },
@@ -103,6 +104,8 @@ pub struct RecordOptions {
     pub forward_stdin: bool,
     /// Output persistence policy committed into canonical provenance.
     pub durability_policy: DurabilityPolicy,
+    /// Sensitivity-aware execution provenance collection policy.
+    pub provenance_policy: ProvenancePolicy,
 }
 
 /// Completed command information.
@@ -496,6 +499,10 @@ fn write_session_manifest(
             .ghostty_profile
             .as_ref()
             .map(|profile| return profile.provenance.clone()),
+        execution_provenance: collect_execution_provenance(
+            &options.provenance_policy,
+            &child_environment,
+        ),
         child_environment,
         termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
         operating_system: OS.to_owned(),
@@ -2001,6 +2008,7 @@ mod tests {
             colors: TerminalColors::default(),
             forward_stdin: false,
             durability_policy: DurabilityPolicy::default(),
+            provenance_policy: ProvenancePolicy::default(),
         };
 
         let mut mirrored_output = Vec::new();
@@ -2081,6 +2089,7 @@ mod tests {
             colors: TerminalColors::default(),
             forward_stdin: false,
             durability_policy: DurabilityPolicy::default(),
+            provenance_policy: ProvenancePolicy::default(),
         };
 
         let error = record(&options).expect_err("existing directory must fail");
@@ -2108,6 +2117,7 @@ mod tests {
             colors: TerminalColors::default(),
             forward_stdin: false,
             durability_policy: DurabilityPolicy::default(),
+            provenance_policy: ProvenancePolicy::default(),
         };
         let started = Instant::now();
         let mut output = Vec::new();
@@ -2145,6 +2155,7 @@ mod tests {
             colors: TerminalColors::default(),
             forward_stdin: false,
             durability_policy: DurabilityPolicy::default(),
+            provenance_policy: ProvenancePolicy::default(),
         };
         let mut output = Vec::new();
 
@@ -2189,6 +2200,7 @@ mod tests {
             colors: TerminalColors::default(),
             forward_stdin: false,
             durability_policy: DurabilityPolicy::default(),
+            provenance_policy: ProvenancePolicy::default(),
         };
         let mut output = Vec::new();
 

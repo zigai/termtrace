@@ -81,6 +81,70 @@
       ],
       "type": "object"
     },
+    "EnvironmentProvenance": {
+      "additionalProperties": false,
+      "description": "Captured or inventoried environment provenance.",
+      "properties": {
+        "capture": {
+          "$ref": "#/$defs/ProvenanceCapture",
+          "description": "Representation selected by the policy."
+        },
+        "present": {
+          "description": "Whether the variable existed in the effective child environment.",
+          "type": "boolean"
+        },
+        "sensitivity": {
+          "$ref": "#/$defs/ProvenanceSensitivity",
+          "description": "Sensitivity classification used by exporters and reviewers."
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Base64Bytes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact bytes when capture is `value`."
+        },
+        "value_hash": {
+          "description": "BLAKE3 of the exact value bytes for `value` or `hash` capture.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "capture",
+        "present",
+        "sensitivity"
+      ],
+      "type": "object"
+    },
+    "ExecutionProvenance": {
+      "additionalProperties": false,
+      "description": "Policy plus its immutable environment inventory.",
+      "properties": {
+        "environment": {
+          "additionalProperties": {
+            "$ref": "#/$defs/EnvironmentProvenance"
+          },
+          "description": "Selected effective child-environment facts, ordered by name.",
+          "type": "object"
+        },
+        "policy": {
+          "$ref": "#/$defs/ProvenancePolicy",
+          "description": "Policy that selected the inventory."
+        }
+      },
+      "required": [
+        "policy",
+        "environment"
+      ],
+      "type": "object"
+    },
     "GeometryProvenance": {
       "description": "Provenance for automatic terminal geometry selection.",
       "properties": {
@@ -220,6 +284,88 @@
       ],
       "type": "object"
     },
+    "ProvenanceCapture": {
+      "description": "How one selected provenance value is represented.",
+      "oneOf": [
+        {
+          "const": "value",
+          "description": "Retain the exact value and its hash.",
+          "type": "string"
+        },
+        {
+          "const": "hash",
+          "description": "Retain only a value hash for later equality checks.",
+          "type": "string"
+        },
+        {
+          "const": "name",
+          "description": "Retain only the variable name and whether it was set.",
+          "type": "string"
+        },
+        {
+          "const": "not_captured",
+          "description": "Explicitly document that the selected value was not captured.",
+          "type": "string"
+        }
+      ]
+    },
+    "ProvenancePolicy": {
+      "additionalProperties": false,
+      "description": "Explicit immutable provenance policy.",
+      "properties": {
+        "environment": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ProvenanceCapture"
+          },
+          "description": "Custom environment rules; required to be empty for built-in policies.",
+          "type": "object"
+        },
+        "kind": {
+          "$ref": "#/$defs/ProvenancePolicyKind",
+          "description": "Built-in policy behavior."
+        }
+      },
+      "required": [
+        "kind",
+        "environment"
+      ],
+      "type": "object"
+    },
+    "ProvenancePolicyKind": {
+      "description": "Built-in execution-provenance collection policy.",
+      "oneOf": [
+        {
+          "const": "minimal",
+          "description": "Retain only essential terminal values and inventory common locale context.",
+          "type": "string"
+        },
+        {
+          "const": "reproducible",
+          "description": "Retain values needed to recreate common locale and timezone behavior.",
+          "type": "string"
+        },
+        {
+          "const": "custom",
+          "description": "Apply only caller-supplied environment capture rules.",
+          "type": "string"
+        }
+      ]
+    },
+    "ProvenanceSensitivity": {
+      "description": "Sensitivity classification for one provenance item.",
+      "oneOf": [
+        {
+          "const": "public_configuration",
+          "description": "Conventional terminal, locale, or timezone configuration.",
+          "type": "string"
+        },
+        {
+          "const": "potentially_sensitive",
+          "description": "Caller-selected data that may contain private or proprietary content.",
+          "type": "string"
+        }
+      ]
+    },
     "SessionGeometry": {
       "description": "Initial PTY geometry.",
       "properties": {
@@ -300,6 +446,10 @@
       "description": "Canonical event-log relative path.",
       "type": "string"
     },
+    "execution_provenance": {
+      "$ref": "#/$defs/ExecutionProvenance",
+      "description": "Sensitivity-aware execution provenance and its explicit collection policy."
+    },
     "format": {
       "description": "Stable format identifier.",
       "type": "string"
@@ -378,6 +528,7 @@
     "command",
     "geometry",
     "child_environment",
+    "execution_provenance",
     "termtrace_version",
     "operating_system",
     "architecture",

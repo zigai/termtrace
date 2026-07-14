@@ -1,0 +1,92 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "ProvenanceCapture": {
+      "description": "How one selected provenance value is represented.",
+      "oneOf": [
+        {
+          "const": "value",
+          "description": "Retain the exact value and its hash.",
+          "type": "string"
+        },
+        {
+          "const": "hash",
+          "description": "Retain only a value hash for later equality checks.",
+          "type": "string"
+        },
+        {
+          "const": "name",
+          "description": "Retain only the variable name and whether it was set.",
+          "type": "string"
+        },
+        {
+          "const": "not_captured",
+          "description": "Explicitly document that the selected value was not captured.",
+          "type": "string"
+        }
+      ]
+    },
+    "ProvenanceSensitivity": {
+      "description": "Sensitivity classification for one provenance item.",
+      "oneOf": [
+        {
+          "const": "public_configuration",
+          "description": "Conventional terminal, locale, or timezone configuration.",
+          "type": "string"
+        },
+        {
+          "const": "potentially_sensitive",
+          "description": "Caller-selected data that may contain private or proprietary content.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/environment-provenance.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Captured or inventoried environment provenance.",
+  "properties": {
+    "capture": {
+      "$ref": "#/$defs/ProvenanceCapture",
+      "description": "Representation selected by the policy."
+    },
+    "present": {
+      "description": "Whether the variable existed in the effective child environment.",
+      "type": "boolean"
+    },
+    "sensitivity": {
+      "$ref": "#/$defs/ProvenanceSensitivity",
+      "description": "Sensitivity classification used by exporters and reviewers."
+    },
+    "value": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Base64Bytes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Exact bytes when capture is `value`."
+    },
+    "value_hash": {
+      "description": "BLAKE3 of the exact value bytes for `value` or `hash` capture.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "capture",
+    "present",
+    "sensitivity"
+  ],
+  "title": "EnvironmentProvenance",
+  "type": "object"
+}
