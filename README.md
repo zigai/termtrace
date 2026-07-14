@@ -121,6 +121,8 @@ The socket disappears when the child exits. `stop --wait` does not return until 
 
 `timeline SESSION` is the concise discovery view for completed evidence. It merges presentation-eligible semantic transitions with canonical inputs, resizes, signals, markers, queries, lifecycle, errors, and exit. Use `--all-states` to include synchronized-output internals, `--jsonl` for one stable object per line, and the shared `--from`/`--to` or marker range selectors to bound replay.
 
+`diff SESSION --from-state A --to-state B` compares two canonical semantic endpoints. Each endpoint also accepts `--from-event-seq`/`--to-event-seq`, `--from-at`/`--to-at`, or unique marker selectors. JSON contains complete before/after cells plus geometry, cursor, modes, colors, active style, metadata, presentation, hashes, and dirty evidence. `--expect-no-change` exits unsuccessfully when any normalized semantic value differs.
+
 ## Semantic replay
 
 ```bash

@@ -1587,6 +1587,71 @@ fn timeline_streams_presented_states_and_canonical_operations() {
 }
 
 #[test]
+fn diff_reports_complete_cell_changes_and_enforces_expectations() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("diff-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf 'A界'"])
+        .assert()
+        .success();
+    let final_state = inspect_session(&session, StateSelector::Final)
+        .expect("final state")
+        .record
+        .state_id;
+
+    let mut changed = Command::cargo_bin("termtrace").expect("binary should build");
+    changed
+        .arg("diff")
+        .arg(&session)
+        .args([
+            "--from-state",
+            "0",
+            "--to-state",
+            &final_state.to_string(),
+            "--format",
+            "json-compact",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""changed":true"#))
+        .stdout(predicate::str::contains(r#""grapheme":"A""#))
+        .stdout(predicate::str::contains("界"));
+
+    let mut rejected = Command::cargo_bin("termtrace").expect("binary should build");
+    rejected
+        .arg("diff")
+        .arg(&session)
+        .args([
+            "--from-state",
+            "0",
+            "--to-state",
+            &final_state.to_string(),
+            "--expect-no-change",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("changed=true"));
+
+    let mut unchanged = Command::cargo_bin("termtrace").expect("binary should build");
+    unchanged
+        .arg("diff")
+        .arg(&session)
+        .args([
+            "--from-state",
+            &final_state.to_string(),
+            "--to-state",
+            &final_state.to_string(),
+            "--expect-no-change",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("changed=false"));
+}
+
+#[test]
 fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("live-snapshot");

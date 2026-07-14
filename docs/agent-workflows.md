@@ -43,6 +43,8 @@ termtrace inspect --session SESSION --state 42 --row 16 --format json-compact
 
 Start rendering diagnosis with `termtrace timeline SESSION`. The default text view lists canonical operations and presented semantic transitions with their event/byte positions and changed row/cell counts. Add `--jsonl` for streaming automation or `--all-states` when synchronized-output internals matter. Timeline ranges use the same half-open time and unique-marker selectors as indexing and capture.
 
+Use `termtrace diff SESSION --from-marker BEFORE --to-marker AFTER` after locating endpoints. Structured output preserves complete grapheme/style/color cell values and separates minimal semantic changes from each endpoint's Ghostty dirty evidence. Add `--expect-no-change` in tests; it still prints the reviewable diff before returning a failing status when a change exists.
+
 ## Complete and derive
 
 Use an explicit completion barrier before post-processing:

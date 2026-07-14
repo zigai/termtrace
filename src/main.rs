@@ -25,6 +25,7 @@ use termtrace::{
         CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, ProcessSignal,
         ScreenPredicate, request, send_request,
     },
+    diff::{SemanticDiff, diff_states},
     event::{ByteString, EVENT_LOG_VERSION, Event, InputKind},
     event_log::{DurabilityMode, DurabilityPolicy, EventLog},
     geometry::{inherited_geometry, run_probe},
@@ -128,6 +129,8 @@ enum Command {
     Show(ShowArgs),
     /// List canonical operations and semantic state transitions in order.
     Timeline(TimelineArgs),
+    /// Compare two canonical semantic state points.
+    Diff(DiffArgs),
     /// Wait for exact UTF-8 text in canonical PTY output.
     Wait(WaitArgs),
     /// Copy the longest integrity-checked event prefix without modifying source.
@@ -345,6 +348,61 @@ struct TimelineArgs {
     jsonl: bool,
     #[command(flatten)]
     range: TimeRangeArgs,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum DiffFormat {
+    Text,
+    Json,
+    JsonCompact,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("diff_from")
+        .required(true)
+        .multiple(false)
+        .args(["from_state", "from_event_seq", "from_at", "from_marker"])
+))]
+#[command(group(
+    ArgGroup::new("diff_to")
+        .required(true)
+        .multiple(false)
+        .args(["to_state", "to_event_seq", "to_at", "to_marker"])
+))]
+struct DiffArgs {
+    /// Completed session name or canonical path.
+    session: PathBuf,
+    /// Earlier exact semantic state identifier.
+    #[arg(long)]
+    from_state: Option<u64>,
+    /// Earlier state at or before this event sequence.
+    #[arg(long)]
+    from_event_seq: Option<u64>,
+    /// Earlier state at or before this session offset.
+    #[arg(long, value_parser = parse_time_offset_ns)]
+    from_at: Option<u64>,
+    /// Earlier state at a unique marker.
+    #[arg(long)]
+    from_marker: Option<String>,
+    /// Later exact semantic state identifier.
+    #[arg(long)]
+    to_state: Option<u64>,
+    /// Later state at or before this event sequence.
+    #[arg(long)]
+    to_event_seq: Option<u64>,
+    /// Later state at or before this session offset.
+    #[arg(long, value_parser = parse_time_offset_ns)]
+    to_at: Option<u64>,
+    /// Later state at a unique marker.
+    #[arg(long)]
+    to_marker: Option<String>,
+    /// Fail when any semantic or presentation value changed.
+    #[arg(long)]
+    expect_no_change: bool,
+    /// Output representation.
+    #[arg(long, value_enum, default_value_t = DiffFormat::Text)]
+    format: DiffFormat,
 }
 
 #[derive(Debug, Args)]
@@ -881,6 +939,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Inspect(arguments) => return run_inspect(arguments),
         Command::Show(arguments) => return run_show(arguments),
         Command::Timeline(arguments) => return run_timeline(arguments),
+        Command::Diff(arguments) => return run_diff(arguments),
         Command::Wait(arguments) => return run_wait(arguments),
         Command::Recover(arguments) => return run_recover(arguments),
         Command::Schemas(arguments) => return run_schemas(arguments),
@@ -1200,6 +1259,88 @@ fn run_timeline(arguments: TimelineArgs) -> Result<ExitCode> {
         writeln!(output, "{}", timeline_text(&entry)).into_diagnostic()?;
     }
     return write_stdout(output);
+}
+
+fn run_diff(arguments: DiffArgs) -> Result<ExitCode> {
+    let session = resolve_session_ref(arguments.session)?;
+    let log = EventLog::read(session.join("events.jsonl"))?;
+    validate_completed_log(&session, &log)?;
+    let from = diff_point(
+        arguments.from_state,
+        arguments.from_event_seq,
+        arguments.from_at,
+        arguments.from_marker,
+    )?;
+    let to = diff_point(
+        arguments.to_state,
+        arguments.to_event_seq,
+        arguments.to_at,
+        arguments.to_marker,
+    )?;
+    let difference = diff_states(&log, from, to)?;
+    let changed = difference.changed;
+    let _output_status = match arguments.format {
+        DiffFormat::Text => write_stdout(diff_text(&difference)?)?,
+        DiffFormat::Json => write_stdout(format!(
+            "{}\n",
+            serde_json::to_string_pretty(&difference).into_diagnostic()?
+        ))?,
+        DiffFormat::JsonCompact => write_json_line(&difference)?,
+    };
+    if arguments.expect_no_change && changed {
+        return Ok(ExitCode::FAILURE);
+    }
+    return Ok(ExitCode::SUCCESS);
+}
+
+fn diff_point(
+    state: Option<u64>,
+    event_seq: Option<u64>,
+    monotonic_ns: Option<u64>,
+    marker: Option<String>,
+) -> Result<StatePoint> {
+    return match (state, event_seq, monotonic_ns, marker) {
+        (Some(state_id), None, None, None) => Ok(StatePoint::StateId { state_id }),
+        (None, Some(event_seq), None, None) => Ok(StatePoint::EventSeq { event_seq }),
+        (None, None, Some(monotonic_ns), None) => Ok(StatePoint::MonotonicNs { monotonic_ns }),
+        (None, None, None, Some(label)) => Ok(StatePoint::Marker { label }),
+        _ => Err(miette::miette!(
+            "exactly one diff endpoint selector is required"
+        )),
+    };
+}
+
+fn diff_text(difference: &SemanticDiff) -> Result<String> {
+    let changed_cells = difference.rows.iter().fold(0_usize, |count, row| {
+        return count.saturating_add(row.cells.len());
+    });
+    let mut output = format!(
+        "states {} -> {}  changed={}  rows={}  cells={}\n",
+        difference.from.state_id,
+        difference.to.state_id,
+        difference.changed,
+        difference.rows.len(),
+        changed_cells,
+    );
+    for row in &difference.rows {
+        for cell in &row.cells {
+            let before = cell
+                .before
+                .as_ref()
+                .map_or("∅", |value| return value.grapheme.as_str());
+            let after = cell
+                .after
+                .as_ref()
+                .map_or("∅", |value| return value.grapheme.as_str());
+            writeln!(
+                output,
+                "  ({},{}) {:?} -> {:?}",
+                cell.column, row.row, before, after
+            )
+            .into_diagnostic()?;
+        }
+    }
+    return Ok(output);
 }
 
 fn timeline_text(entry: &TimelineEntry) -> String {

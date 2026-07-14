@@ -14,6 +14,7 @@ use crate::{
     Error, Result,
     artifact::ArtifactRootRecord,
     control::{ControlRequest, ControlResponse},
+    diff::SemanticDiff,
     event::{EventLogHeader, EventRecord},
     event_log::RecoveryReport,
     inspection::{ScreenWaitOutcome, WaitOutcome},
@@ -71,6 +72,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<ScreenWaitOutcome>("screen-wait-outcome.schema.json")?,
         schema::<Observation>("observation.schema.json")?,
         schema::<TimelineEntry>("timeline-entry.schema.json")?,
+        schema::<SemanticDiff>("semantic-diff.schema.json")?,
         schema::<PlaybackTiming>("playback-timing.schema.json")?,
         schema::<PlaybackFailure>("playback-failure.schema.json")?,
     ]);

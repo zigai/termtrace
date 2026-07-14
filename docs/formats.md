@@ -34,6 +34,8 @@ One-off command observations are completed canonical sessions with `source_kind:
 
 `TimelineEntry` is a streaming diagnostic projection. `semantic_state` items bind state/event/byte identity, presentation eligibility, state hash, dirty classification, changed rows/cell count, and cursor/mode/metadata flags. `canonical_event` items retain the complete typed non-output event. Output events are represented by the semantic states they caused; concise mutation-result events are omitted without altering canonical evidence.
 
+`SemanticDiff` binds two requested `StatePoint`s to resolved state hashes and event/time provenance. Optional before/after objects report geometry, cursor, modes, colors, active style, metadata, and presentation changes; row records contain every complete changed cell. Endpoint dirty classifications and dirty rows remain evidence alongside, but are not used to invent cell changes.
+
 `requests.jsonl` supports persistent idempotency after bounded memory-cache eviction. It is not a canonical evidence root: readers may discard and reconstruct retry state from canonical events, and `termtrace verify` reports a missing, verified, or invalid journal without allowing journal damage to invalidate an otherwise complete event chain.
 
 A completed session must end in `Exit` and contain no pending mutation intent. Run `termtrace verify SESSION --level content --json` for a stable offline report, or use `--level durability-record` to additionally require the internally consistent chain-bound persistence record. Offline verification cannot prove that historical sync calls reached stable media. A valid unsigned hash graph establishes integrity relative to the roots in the session; it does not authenticate who created them.

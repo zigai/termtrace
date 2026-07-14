@@ -3,6 +3,7 @@
 pub mod artifact;
 
 pub mod control;
+pub mod diff;
 pub mod error;
 pub mod event;
 pub mod event_log;
