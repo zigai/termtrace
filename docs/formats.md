@@ -20,6 +20,8 @@ Only these files describe execution truth. Inputs, resizes, and signals use inte
 
 Sessions created through `start NAME` retain `creation_alias` as immutable invocation context. It is never substituted for the session ID, manifest hash, or canonical path in evidence relationships; later registry retargeting cannot rewrite it.
 
+A restart successor adds `lineage` to its immutable manifest. The object records `reason: "restart"`, the predecessor session ID, BLAKE3 of the exact predecessor `session.json`, and the predecessor's final event hash from validated completion. Ordinary recordings use `null`. This binds generations without making mutable aliases part of canonical identity.
+
 Environment inventory entries distinguish `value`, `hash`, `name`, and `not_captured`. Value capture includes exact bytes plus BLAKE3; hash capture supports equality checks when a candidate value is available but does not make execution reproducible. Custom variable names are classified as potentially sensitive unless they belong to the conventional terminal/locale/timezone set.
 
 Execution provenance also records the requested and resolved executable paths, recorder binary/build and semantic-engine revisions, real/effective UID and GID, privileged identity state, process umask when exposed by the host, and runtime kernel identity. File content identity is explicit as `not_requested`, `captured`, `unresolved`, or `unavailable`. Reproducible policy hashes complete executable and recorder files plus a direct script argument for recognized interpreters; it does not scan arbitrary arguments and guess which files influenced execution.

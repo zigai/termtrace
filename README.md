@@ -76,6 +76,7 @@ Canonical paths remain evidence identity. For a memorable local handle, register
 
 ```bash
 termtrace start demo --cols 120 --rows 40 -- your-command
+termtrace restart demo
 termtrace status demo
 termtrace register demo --session /tmp/example.termtrace
 termtrace resolve demo
@@ -88,6 +89,8 @@ termtrace remove demo
 Registry entries live under an owner-only per-user state root, bind the immutable session ID and exact canonical path, and are created without replacement. Live registration also retains the recorder peer PID and Linux process-start identity so listing can detect stale sockets without PID-reuse mistakes. `list` shows live aliases by default; `--all` includes completed, incomplete, stale, missing, identity-mismatched, and incompatible entries with diagnostics. `remove` deletes only the alias file and never session evidence. `TERMTRACE_STATE_DIR` selects an explicit root; otherwise XDG state conventions are used.
 
 `start NAME` accepts the same cwd, geometry, profile, durability, provenance, and command flags as `record`, chooses a collision-free owner-only path under the state root, launches `record --no-input`, and publishes the alias only after both the immutable manifest and control peer identity are valid. Mirrored output and recorder diagnostics go to owner-only supervisor logs outside canonical evidence. Startup failure reports those logs and the recoverable session candidate; it does not silently delete incomplete evidence.
+
+`restart NAME` completes the current recording, clones its exact effective command, cwd, grid and pixel geometry, terminal colors/profile, durability policy, and provenance policy into a fresh canonical session, and atomically retargets the alias only after successor readiness. Its JSON result contains both identities and paths. The new manifest binds the predecessor manifest and final event roots; predecessor evidence is never reopened for writing. A failed successor remains a reported recoverable orphan while the alias keeps its previous owner.
 
 ```bash
 termtrace status /tmp/example.termtrace

@@ -30,7 +30,7 @@ use termtrace::{
         derived_directory_name, index_session_range, index_session_with_options, replay,
     },
     request_journal::read_mutation_journal,
-    session::{CaptureTarget, GeometrySource, read_manifest},
+    session::{CaptureTarget, GeometrySource, SessionCompletion, read_manifest},
     timeline::SourceRange,
 };
 
@@ -558,6 +558,125 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         !state.join("registry/broken.json").exists(),
         "failed startup must not publish an alias"
     );
+}
+
+#[test]
+fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let working = temporary.path().join("working");
+    fs_err::create_dir(&working).expect("working directory");
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    let started = start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["start", "demo", "--cwd"])
+        .arg(&working)
+        .args([
+            "--cols",
+            "91",
+            "--rows",
+            "27",
+            "--cell-width",
+            "8",
+            "--cell-height",
+            "16",
+            "--term",
+            "xterm-256color",
+            "--durability",
+            "strict",
+            "--provenance",
+            "reproducible",
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; while :; do sleep 0.1; done",
+        ])
+        .assert()
+        .success();
+    let started_json: serde_json::Value =
+        serde_json::from_slice(&started.get_output().stdout).expect("start response");
+    let predecessor_bytes: ByteString = serde_json::from_value(
+        started_json
+            .pointer("/canonical_session")
+            .expect("predecessor path")
+            .clone(),
+    )
+    .expect("predecessor path bytes");
+    let predecessor = PathBuf::from(OsString::from_vec(predecessor_bytes.as_bytes().to_vec()));
+    let predecessor_manifest = read_manifest(&predecessor).expect("predecessor manifest");
+
+    let mut restart = Command::cargo_bin("termtrace").expect("binary should build");
+    let restarted = restart
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["restart", "demo"])
+        .assert()
+        .success();
+    let response: serde_json::Value =
+        serde_json::from_slice(&restarted.get_output().stdout).expect("restart response");
+    let successor_bytes: ByteString = serde_json::from_value(
+        response
+            .pointer("/successor/canonical_session")
+            .expect("successor path")
+            .clone(),
+    )
+    .expect("successor path bytes");
+    let successor = PathBuf::from(OsString::from_vec(successor_bytes.as_bytes().to_vec()));
+    assert_ne!(predecessor, successor);
+    let predecessor_evidence = ["session.json", "events.jsonl", "completion.json"]
+        .map(|name| return fs_err::read(predecessor.join(name)).expect("predecessor evidence"));
+    let successor_manifest = read_manifest(&successor).expect("successor manifest");
+    assert_eq!(successor_manifest.command, predecessor_manifest.command);
+    assert_eq!(
+        successor_manifest.working_directory,
+        predecessor_manifest.working_directory
+    );
+    assert_eq!(successor_manifest.geometry, predecessor_manifest.geometry);
+    assert_eq!(
+        successor_manifest.geometry_provenance,
+        predecessor_manifest.geometry_provenance
+    );
+    assert_eq!(
+        successor_manifest.durability_policy,
+        predecessor_manifest.durability_policy
+    );
+    assert_eq!(
+        successor_manifest.execution_provenance.policy,
+        predecessor_manifest.execution_provenance.policy
+    );
+    let completion: SessionCompletion =
+        serde_json::from_slice(&predecessor_evidence[2]).expect("predecessor completion");
+    let lineage = successor_manifest.lineage.expect("restart lineage");
+    assert_eq!(
+        lineage.predecessor_session_id,
+        predecessor_manifest.session_id
+    );
+    assert_eq!(
+        lineage.predecessor_manifest_hash,
+        blake3::hash(&predecessor_evidence[0]).to_hex().to_string()
+    );
+    assert_eq!(
+        lineage.predecessor_final_event_hash,
+        completion.final_event_hash
+    );
+
+    let mut resolve = Command::cargo_bin("termtrace").expect("binary should build");
+    resolve
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["resolve", "demo"])
+        .assert()
+        .success()
+        .stdout(format!("{}\n", successor.display()));
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "demo", "--wait"])
+        .assert()
+        .success();
+    for (name, expected) in ["session.json", "events.jsonl", "completion.json"]
+        .into_iter()
+        .zip(predecessor_evidence)
+    {
+        assert_eq!(fs_err::read(predecessor.join(name)).unwrap(), expected);
+    }
 }
 
 #[test]

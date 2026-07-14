@@ -35,7 +35,7 @@ use termtrace::{
     },
     provenance::{ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind},
     receipt::create_ssh_receipt,
-    record::{RecordOptions, record},
+    record::{RecordOptions, RecordOutcome, record},
     replay::{
         GHOSTTY_REVISION, IndexOptions, STATE_FORMAT_VERSION, StateSelection, StateSelector,
         index_session_with_options,
@@ -43,7 +43,7 @@ use termtrace::{
     schema::write_all as write_schemas,
     session::{
         CaptureTarget, GeometryProvenance, GeometrySource, GhosttyVisualOverrides, SessionGeometry,
-        VerificationLevel, read_manifest, verify_session_with_trust,
+        SessionLineage, VerificationLevel, manifest_hash, read_manifest, verify_session_with_trust,
     },
     session_registry::SessionRegistry,
     timeline::{parse_time_offset_ns, resolve_source_selection},
@@ -73,6 +73,8 @@ enum Command {
     Record(RecordArgs),
     /// Start a detached recording and publish a name after readiness.
     Start(StartArgs),
+    /// Stop a named session and atomically publish an immutable successor.
+    Restart(RestartArgs),
     /// Verify a completed session's structure and evidence bindings offline.
     Verify(VerifyArgs),
     /// Create a detached OpenSSH receipt for verified evidence roots.
@@ -483,6 +485,10 @@ struct RecordArgs {
     #[arg(long, hide = true)]
     session_alias: Option<String>,
 
+    /// Completed predecessor used to construct an exact restart successor.
+    #[arg(long, hide = true)]
+    restart_source: Option<PathBuf>,
+
     #[command(flatten)]
     recording: RecordingArgs,
 }
@@ -498,6 +504,16 @@ struct StartArgs {
 
     #[command(flatten)]
     recording: RecordingArgs,
+}
+
+#[derive(Debug, Args)]
+struct RestartArgs {
+    /// Existing friendly session name.
+    name: String,
+
+    /// Maximum time for predecessor completion and successor readiness.
+    #[arg(long, default_value_t = 10_000)]
+    timeout_ms: u64,
 }
 
 #[derive(Debug, Args)]
@@ -669,6 +685,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         }
         Command::Record(arguments) => return run_record(arguments),
         Command::Start(arguments) => return run_start(arguments),
+        Command::Restart(arguments) => return run_restart(arguments),
         Command::Verify(arguments) => return run_verify(arguments),
         Command::Sign(arguments) => return run_sign(arguments),
         Command::Register(arguments) => return run_register(arguments),
@@ -1160,8 +1177,13 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         out,
         no_input,
         session_alias,
+        restart_source,
         recording: arguments,
     } = arguments;
+    if let Some(predecessor) = restart_source {
+        let options = restarted_record_options(out, session_alias, &predecessor)?;
+        return report_record_outcome(record(&options)?);
+    }
     if matches!(arguments.durability, DurabilityModeArg::Bounded)
         && (arguments.durability_max_interval_ms == 0
             || arguments.durability_max_uncommitted_bytes == 0)
@@ -1236,12 +1258,15 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         durability_policy,
         provenance_policy,
     })?;
-    writeln!(io::stderr(), "recording: {}", outcome.event_log.display()).into_diagnostic()?;
+    return report_record_outcome(outcome);
+}
 
-    match (outcome.exit_code, outcome.signal_name) {
-        (Some(code), None) => return u8::try_from(code).map(ExitCode::from).into_diagnostic(),
-        _ => return Ok(ExitCode::FAILURE),
-    }
+fn report_record_outcome(outcome: RecordOutcome) -> Result<ExitCode> {
+    writeln!(io::stderr(), "recording: {}", outcome.event_log.display()).into_diagnostic()?;
+    return match (outcome.exit_code, outcome.signal_name) {
+        (Some(code), None) => u8::try_from(code).map(ExitCode::from).into_diagnostic(),
+        _ => Ok(ExitCode::FAILURE),
+    };
 }
 
 fn run_start(arguments: StartArgs) -> Result<ExitCode> {
@@ -1312,6 +1337,195 @@ fn run_start(arguments: StartArgs) -> Result<ExitCode> {
         }
         thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn run_restart(arguments: RestartArgs) -> Result<ExitCode> {
+    if arguments.timeout_ms == 0 {
+        return Err(miette::miette!("--timeout-ms must be greater than zero"));
+    }
+    let registry = SessionRegistry::open_default()?;
+    let predecessor_entry = registry.resolve(&arguments.name)?;
+    let predecessor = predecessor_entry.session_path();
+    let timeout = Duration::from_millis(arguments.timeout_ms);
+    if !predecessor.join("completion.json").is_file() {
+        request(&predecessor, ControlCommand::Stop)?;
+    }
+    let completion = wait_for_completion(&predecessor, timeout)?;
+    let predecessor_manifest_bytes =
+        fs_err::read(predecessor.join("session.json")).into_diagnostic()?;
+    let expected_lineage = SessionLineage {
+        predecessor_session_id: predecessor_entry.session_id,
+        predecessor_manifest_hash: manifest_hash(&predecessor_manifest_bytes),
+        predecessor_final_event_hash: completion.final_event_hash,
+        reason: "restart".to_owned(),
+    };
+
+    let paths = registry.allocate_detached_paths()?;
+    let stdout = open_detached_log(&paths.stdout_log)?;
+    let stderr = open_detached_log(&paths.stderr_log)?;
+    let executable = env::current_exe().into_diagnostic()?;
+    let mut recorder = ProcessCommand::new("setsid")
+        .arg(executable)
+        .args(restart_record_arguments(
+            &arguments.name,
+            &paths.session,
+            &predecessor,
+        ))
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+        .into_diagnostic()?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        if paths.session.join("session.json").is_file()
+            && registry.recorder_identity(&paths.session).is_some()
+        {
+            let successor_manifest = read_manifest(&paths.session)?;
+            if successor_manifest.lineage.as_ref() != Some(&expected_lineage) {
+                return Err(miette::miette!(
+                    "successor lineage does not match the completed predecessor; alias remains unchanged; recoverable orphan: {}",
+                    paths.session.display()
+                ));
+            }
+            let successor = registry
+                .retarget(
+                    &arguments.name,
+                    predecessor_entry.session_id,
+                    &paths.session,
+                )
+                .map_err(|error| {
+                    return miette::miette!(
+                        "successor became ready but alias retargeting failed; alias remains unchanged; recoverable orphan: {}; stdout log: {}; stderr log: {}; {error}",
+                        paths.session.display(),
+                        paths.stdout_log.display(),
+                        paths.stderr_log.display(),
+                    );
+                })?;
+            return write_json_line(&serde_json::json!({
+                "alias": arguments.name,
+                "predecessor": {
+                    "canonical_session": predecessor_entry.canonical_session,
+                    "session_id": predecessor_entry.session_id,
+                },
+                "successor": {
+                    "canonical_session": successor.canonical_session,
+                    "session_id": successor.session_id,
+                    "recorder_pid": successor.recorder_pid,
+                    "recorder_process_start_ticks": successor.recorder_process_start_ticks,
+                },
+                "stdout_log": paths.stdout_log,
+                "stderr_log": paths.stderr_log,
+                "ready": true,
+            }));
+        }
+        if let Some(status) = recorder.try_wait().into_diagnostic()? {
+            return Err(miette::miette!(
+                "restart successor exited before readiness with {status}; alias remains bound to predecessor; recoverable session candidate: {}; stdout log: {}; stderr log: {}",
+                paths.session.display(),
+                paths.stdout_log.display(),
+                paths.stderr_log.display()
+            ));
+        }
+        if Instant::now() >= deadline {
+            return Err(miette::miette!(
+                "restart successor did not become ready within {} ms; alias remains bound to predecessor; recoverable orphan: {}; stdout log: {}; stderr log: {}",
+                arguments.timeout_ms,
+                paths.session.display(),
+                paths.stdout_log.display(),
+                paths.stderr_log.display()
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn restart_record_arguments(alias: &str, session: &Path, predecessor: &Path) -> Vec<OsString> {
+    return vec![
+        OsString::from("record"),
+        OsString::from("--no-input"),
+        OsString::from("--out"),
+        session.as_os_str().to_os_string(),
+        OsString::from("--session-alias"),
+        OsString::from(alias),
+        OsString::from("--restart-source"),
+        predecessor.as_os_str().to_os_string(),
+        OsString::from("--"),
+        OsString::from("/bin/true"),
+    ];
+}
+
+fn restarted_record_options(
+    output_directory: PathBuf,
+    creation_alias: Option<String>,
+    predecessor: &Path,
+) -> Result<RecordOptions> {
+    let manifest_bytes = fs_err::read(predecessor.join("session.json")).into_diagnostic()?;
+    let manifest = read_manifest(predecessor)?;
+    let completion = wait_for_completion(predecessor, Duration::ZERO)?;
+    let event_log = EventLog::read(predecessor.join(&manifest.event_log))?;
+    let working_directory = manifest
+        .working_directory
+        .as_ref()
+        .map(|value| return PathBuf::from(OsString::from_vec(value.as_bytes().to_vec())))
+        .ok_or_else(|| miette::miette!("predecessor has no effective working directory"))?;
+    if manifest.geometry.cols == 0
+        || manifest.geometry.rows == 0
+        || manifest.geometry.pixel_width % manifest.geometry.cols != 0
+        || manifest.geometry.pixel_height % manifest.geometry.rows != 0
+    {
+        return Err(miette::miette!(
+            "predecessor pixel geometry is not an integral cell grid"
+        ));
+    }
+    let ghostty_profile = manifest
+        .ghostty_visual
+        .as_ref()
+        .map(|provenance| {
+            return fs_err::read(predecessor.join(&provenance.effective_config))
+                .map(|effective_config| {
+                    return ResolvedGhosttyProfile {
+                        effective_config,
+                        provenance: provenance.clone(),
+                    };
+                })
+                .into_diagnostic();
+        })
+        .transpose()?;
+    let term = manifest
+        .child_environment
+        .get("TERM")
+        .cloned()
+        .ok_or_else(|| miette::miette!("predecessor manifest has no TERM value"))?;
+    return Ok(RecordOptions {
+        output_directory,
+        creation_alias,
+        lineage: Some(SessionLineage {
+            predecessor_session_id: manifest.session_id,
+            predecessor_manifest_hash: manifest_hash(&manifest_bytes),
+            predecessor_final_event_hash: completion.final_event_hash,
+            reason: "restart".to_owned(),
+        }),
+        command: manifest
+            .command
+            .iter()
+            .map(|value| {
+                return OsString::from_vec(value.as_bytes().to_vec());
+            })
+            .collect(),
+        working_directory: Some(working_directory),
+        cols: manifest.geometry.cols,
+        rows: manifest.geometry.rows,
+        cell_width_px: manifest.geometry.pixel_width / manifest.geometry.cols,
+        cell_height_px: manifest.geometry.pixel_height / manifest.geometry.rows,
+        geometry_provenance: manifest.geometry_provenance,
+        ghostty_profile,
+        term,
+        colors: event_log.header.colors,
+        forward_stdin: false,
+        durability_policy: manifest.durability_policy,
+        provenance_policy: manifest.execution_provenance.policy,
+    });
 }
 
 fn detached_record_arguments(alias: &str, session: &Path) -> Result<Vec<OsString>> {
