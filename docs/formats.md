@@ -19,19 +19,19 @@ Only these files describe execution truth. Inputs, resizes, and signals use inte
 
 ## Semantic derived
 
-- `derived/states.jsonl`: distinct state deltas.
+- `derived/states.jsonl.zst`: Zstandard-compressed JSONL distinct state deltas.
 - `derived/state-index.jsonl`: compact event/time/hash mappings.
 - `derived/final.txt`, `final.vt`, `final.html`: pinned Ghostty formatter output.
 - `derived/manifest.json`: source and engine provenance.
 
-Ranged indexes have the same files under `derived-range-FROM_NS-TO_NS/`. Their manifest `source_range` is a non-empty half-open interval with inclusive `start_monotonic_ns` and exclusive `end_monotonic_ns`; full-session manifests use `null`.
+Ranged indexes have the same files under `derived-range-FROM_NS-TO_NS/`. Their manifest `source_range` is a non-empty half-open interval with inclusive `start_monotonic_ns` and exclusive `end_monotonic_ns`; full-session manifests use `null`. `source_complete` proves whether `completion.json` matched the indexed log. Explicit live snapshots are hash-addressed and remain ineligible for native capture. Presented-only indexes use `derived-presented…/`, record `state_selection: "presented"`, and retain both artifact and complete semantic state counts.
 
 ## Native visual derived
 
 - `visual/session.mkv`: lossless RGB H.264 at 24 FPS.
 - `visual/final.png`: direct X11 final frame.
 - `visual/video-map.jsonl`: semantic state to approximate frame mapping.
-- `visual/manifest.json`: config hash, versions, launch overrides, clocks, and probes.
+- `visual/manifest.json`: config hash, versions, launch overrides, clocks, parent-side geometry report, and media probes.
 - component logs and resolved `ghostty-config.txt`.
 
 Ranged captures use `visual-range-FROM_NS-TO_NS/`. Their manifest repeats the exact `source_range`, and video-map timestamps stay on the absolute canonical timeline even though frame calculations are relative to range start. Full-session captures retain `visual/` and a `null` source range.

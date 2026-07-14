@@ -9,7 +9,7 @@ Termtrace keeps four truths separate so one representation never silently substi
 3. **Native visual truth:** pixels drawn by the installed Ghostty GTK/OpenGL application on a headless display.
 4. **Encoded visual truth:** screenshots and video produced from native visual capture.
 
-The append-only execution log is canonical. Every other artifact records the event range, clock mapping, component versions, configuration hash, and profile from which it was derived.
+The append-only execution log is canonical. Every other artifact records the event range, clock mapping, component versions, configuration hash, and profile from which it was derived. Immutable post-processing requires `completion.json` to agree with the final event hash, event count, and output count. Explicit live snapshots are source-hash-addressed and marked incomplete rather than being allowed to masquerade as final artifacts.
 
 Full-session derivation preserves the original `derived/` and `visual/` layouts. A requested half-open interval receives deterministic range-specific directories. Semantic replay reconstructs the prefix without materializing prefix states. Native playback emits the prefix without source-time sleeps, performs a non-mutating terminal-query barrier, and publishes its capture clock only after Ghostty has processed that prefix. FFmpeg therefore records neither the prefix nor its original elapsed time.
 
@@ -35,7 +35,7 @@ The pinned libghostty state machine runs live as the terminal host. Its write-PT
 
 The event header pins the effective foreground, background, cursor color, and 256-color palette. Recording reads these from `ghostty +show-config` when available and records a configuration hash as provenance; pinned libghostty defaults are an explicit fallback. Replay never substitutes the current machine's theme.
 
-Geometry can be explicit, inherited from the controlling terminal, or fitted to a target capture viewport. Fitting launches the real Ghostty application on Xvfb and uses XTWINOPS reports for grid size, cell pixels, and text-area pixels. The resulting geometry, viewport, source, and effective-config hash are immutable session provenance. Native playback applies the initial grid before event time zero and verifies the live report; it never guesses font metrics from point size.
+Geometry can be explicit, inherited from the controlling terminal, or fitted to a target capture viewport. Fitting launches the real Ghostty application on Xvfb and uses XTWINOPS reports for grid size, cell pixels, and text-area pixels. The resulting geometry, viewport, source, and effective-config hash are immutable session provenance. Native capture first runs a parent-observed probe on its actual viewport and rejects grid/text mismatch before timed playback. The playback child also publishes a structured failure handshake. Native playback applies and verifies the initial grid before event time zero; it never guesses font metrics from point size.
 
 A recording may replace the normal Ghostty user config with `--ghostty-config` and then apply focused font, padding, foreground, and background overrides. Termtrace resolves recursive config files, applies those overrides last, validates the result through Ghostty, strips recursive file controls, and stores a canonical effective profile in the session. Geometry fitting, recorded terminal colors, and native capture all consume that same hashed profile. Referenced resources such as fonts and shaders remain external host dependencies.
 

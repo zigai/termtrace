@@ -52,7 +52,7 @@ Each visual demo places its principal outputs at:
 demo-artifacts/<demo>/
 ├── run/
 │   ├── events.jsonl
-│   ├── derived/states.jsonl
+│   ├── derived/states.jsonl.zst
 │   ├── derived/state-index.jsonl
 │   ├── visual/session.mkv
 │   └── visual/final.png

@@ -125,5 +125,5 @@ print_demo_result() {
   printf '  video:      %s\n' "$session/visual/session.mkv"
   printf '  showcase:   %s\n' "$directory/showcase.mp4"
   printf '  screenshot: %s\n' "$session/visual/final.png"
-  printf '  states:     %s\n' "$session/derived/states.jsonl"
+  printf '  states:     %s\n' "$session/derived/states.jsonl.zst"
 }

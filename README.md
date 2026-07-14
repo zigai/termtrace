@@ -67,12 +67,12 @@ termtrace send --session /tmp/example.termtrace \
 termtrace resize --session /tmp/example.termtrace --cols 120 --rows 36
 termtrace mark --session /tmp/example.termtrace --label before-build
 termtrace signal --session /tmp/example.termtrace --signal interrupt
-termtrace stop --session /tmp/example.termtrace
+termtrace stop --session /tmp/example.termtrace --wait
 ```
 
 Use `termtrace send --file PATH` for arbitrary bytes. The Rust API also exposes `control::send_request`; retain and resend the same request UUID after a transport failure. The session actor returns the cached result and never applies that mutation twice. Reusing a UUID for a different command is rejected.
 
-The socket disappears when the child exits. Completed-session inspection reads the canonical log rather than pretending that a dead control endpoint is live.
+The socket disappears when the child exits. `stop --wait` does not return until `completion.json` is durable and agrees with the final event hash, count, and output byte count. `status --wait-complete` provides the same completion barrier without sending a signal. Marker responses include their canonical event sequence.
 
 ## Semantic replay
 
@@ -80,23 +80,29 @@ The socket disappears when the child exits. Completed-session inspection reads t
 termtrace index --session /tmp/example.termtrace
 ```
 
-Replay validates the event hash chain, feeds each output byte through the pinned libghostty-vt parser, and stores every distinct state under `derived/`. Synchronized-output intermediate states remain indexed with `presented: false`; video frame rate never limits semantic evidence.
+Replay requires and validates `completion.json`, checks the event hash chain, feeds each output byte through the pinned libghostty-vt parser, and stores every distinct state under `derived/`. Synchronized-output intermediate states remain indexed with `presented: false`; video frame rate never limits semantic evidence. `index --live-snapshot` is the explicit exception for an active or interrupted recording: a responsive actor first reports a durable event-count boundary, Termtrace validates exactly that prefix while ignoring later concurrent appends, and writes a source-hash-addressed `derived-…-snapshot-HASH/` directory marked `source_complete: false`. Native capture will not consume it as final evidence.
 
-- `states.jsonl` contains cursor, modes, colors, active SGR style, OSC metadata, Ghostty dirty rows, and cell-level grapheme/style/color diffs.
+- `states.jsonl.zst` is a Zstandard-compressed JSONL stream containing cursor, modes, colors, active SGR style, OSC metadata, Ghostty dirty rows, and cell-level grapheme/style/color diffs.
 - `state-index.jsonl` maps state hashes to event sequence, byte offset, monotonic time, and presentation status.
 - `final.txt`, `final.vt`, and `final.html` come from Ghostty's formatter.
 - `manifest.json` pins the source event hash, schema version, Ghostty revision, artifact paths, and final state hash.
 
 The derived directory is assembled privately and atomically renamed with no-replace semantics. Existing results are never overwritten implicitly.
 
+For presentation-focused analysis, `termtrace index --presented-only` omits states hidden inside DEC synchronized output while retaining the canonical event log unchanged. It writes `derived-presented/`; pass the matching `--presented-only` flag to capture. The manifest distinguishes retained `state_count` from complete `semantic_state_count`.
+
 Index only a half-open source interval when a long recording needs focused analysis:
 
 ```bash
 termtrace index --session /tmp/example.termtrace \
   --from 00:08:15 --to 00:08:45
+
+# Equivalent bounds using unique canonical markers:
+termtrace index --session /tmp/example.termtrace \
+  --from-marker investigation-start --to-marker investigation-end
 ```
 
-`--from` is inclusive and `--to` is exclusive. Offsets accept bare seconds, `ns`/`us`/`ms`/`s`/`m`/`h` suffixes, `MM:SS.fraction`, or `HH:MM:SS.fraction`. An omitted bound selects the corresponding session endpoint. Termtrace fast-forwards all earlier output and successful resizes through libghostty-vt, emits a complete baseline at `--from`, and then indexes only states in the selected interval. Range artifacts use deterministic `derived-range-FROM_NS-TO_NS/` directories and coexist with `derived/`.
+`--from`/`--from-marker` are inclusive and `--to`/`--to-marker` are exclusive. A marker label must occur exactly once. Offsets accept bare seconds, `ns`/`us`/`ms`/`s`/`m`/`h` suffixes, `MM:SS.fraction`, or `HH:MM:SS.fraction`. An omitted bound selects the corresponding session endpoint. Termtrace fast-forwards all earlier output and successful resizes through libghostty-vt, emits a complete baseline at the start, and then indexes only states in the selected interval. Range artifacts use deterministic `derived-range-FROM_NS-TO_NS/` directories and coexist with `derived/`.
 
 ## Native Ghostty pixels
 
@@ -104,7 +110,7 @@ termtrace index --session /tmp/example.termtrace \
 termtrace capture --session /tmp/example.termtrace --fps 24
 ```
 
-Capture uses the viewport retained by `--viewport`; recordings without one retain the 1280x720 default. Supplying both `--width` and `--height` overrides it. Before event time zero, playback forces the recorded initial grid and verifies Ghostty's live geometry. A fitted recording also verifies the measured text-area pixels and effective configuration hash, failing instead of silently changing wrapping.
+Capture uses the viewport retained by `--viewport`; recordings without one retain the 1280x720 default. Supplying both `--width` and `--height` overrides the viewport, not the terminal text area. Before playback, a separate parent-side Ghostty probe records `geometry-preflight.json` and verifies the actual grid and text pixels. A mismatch reports requested viewport, actual grid, and recorded grid immediately. Playback also writes a structured failure handshake, so child geometry or replay errors are surfaced instead of degrading into a timeout.
 
 Capture launches the installed Ghostty GTK/OpenGL application on a private Xvfb display. Recordings made with fitted geometry or any visual-profile option use the canonical `ghostty-config.txt` saved in the session, so settings such as background, font, palette, padding, and shader choices are evidence rather than assumptions. Older and manual recordings without a saved profile retain the normal user-config behavior. Capture-only command-line overrides isolate the process, disable single-instance behavior, position and expand the window to the capture surface, and prevent persisted window state from changing the result.
 

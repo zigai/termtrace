@@ -25,11 +25,17 @@ Recovery never modifies the source. It copies only the longest hash-checked, sch
 
 Termtrace preserves a `visual-failed-*` owner-only directory. Inspect `ghostty.stderr.log`, `xvfb.log`, and `ffmpeg-video.log`. Common causes are a missing x11grab/libx264rgb FFmpeg build, unavailable software OpenGL, missing fonts referenced by Ghostty config, or desktop portal startup failures.
 
-The capture manifest includes Ghostty and FFmpeg versions, the resolved Ghostty configuration and hash, exact launch overrides, and FFprobe evidence. A successful process exit without valid probe evidence is still a failure.
+The capture manifest includes Ghostty and FFmpeg versions, the resolved Ghostty configuration and hash, exact launch overrides, a parent-side `geometry-preflight.json` report, and FFprobe evidence. A successful process exit without valid probe evidence is still a failure. Playback writes `playback-error.json` before an unsuccessful child exit, and the parent watches that handshake alongside timing so the root cause is reported without waiting for a generic timeout.
 
 Recordings made with fitted geometry or `--ghostty-config`/visual convenience flags contain their canonical effective Ghostty profile, so changing or deleting the original config file does not affect capture. The referenced fonts, shaders, background images, and other external resources must still be installed. Legacy or manual recordings without a saved profile continue to validate the current user config and stop if it changed.
 
 If capture reports a geometry mismatch, the recorded grid does not fit the selected viewport with the available Ghostty font metrics. Prefer recording with `--geometry fit --viewport WIDTHxHEIGHT`. For a fitted recording, confirm that the font and other external profile resources still exist, or make a new recording rather than overriding the viewport until wrapping happens to look close.
+
+`--width` and `--height` describe the whole capture viewport, not the terminal text area. The preflight diagnostic reports both the actual grid/text pixels and the recorded grid. Portal, AT-SPI, and ignored runtime-resize warnings may also appear in successful captures; use the structured preflight/playback error rather than treating those warnings as the cause.
+
+## Index reports an incomplete or stale session
+
+Seeing expected screen text does not complete a recording. Run `termtrace stop --session SESSION --wait` or `termtrace status --session SESSION --wait-complete` before normal indexing. Use `index --live-snapshot` only when an explicitly incomplete prefix is intended; its source-hash suffix prevents it from occupying the final derived directory, and capture refuses incomplete provenance. If capture names a provenance mismatch, remove the named final derived directory and regenerate it from the completed log.
 
 For a ranged capture, create the semantic index with exactly the same `--from` and `--to` values first. Bounds are resolved to absolute nanoseconds and select `[from, to)`; the error names the matching index command and deterministic directory. Do not rename a range directory or reuse an index from different bounds. If fast-forward geometry verification fails, inspect pre-range resize intent/result events rather than increasing delays: capture uses a terminal-query barrier and does not guess that Ghostty caught up.
 
@@ -39,4 +45,4 @@ Without `--cwd`, current Termtrace releases inherit the directory from which `te
 
 ## Video does not show every transient state
 
-At 24 FPS, a frame spans roughly 41.7 ms. This limits the video only. `states.jsonl` remains byte-granular, including mode-2026 suppressed states, and `video-map.jsonl` marks non-presented states with a null frame.
+At 24 FPS, a frame spans roughly 41.7 ms. This limits the video only. `states.jsonl.zst` remains byte-granular, including mode-2026 suppressed states, and `video-map.jsonl` marks non-presented states with a null frame. Use `index --presented-only` when those suppressed derived records are not needed.
