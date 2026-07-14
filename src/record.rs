@@ -53,7 +53,7 @@ use crate::{
         OperationStatus, TerminalColors,
     },
     event_log::{DurabilityPolicy, EventLogWriter, SessionClock},
-    ghostty_vt::{GhosttyVt, NamedKey},
+    ghostty_vt::{GhosttyVt, NamedKey, SemanticState},
     profile::ResolvedGhosttyProfile,
     provenance::{ProvenancePolicy, collect_execution_provenance},
     request_journal::{
@@ -334,6 +334,7 @@ fn mutation_retry_response(
 
 struct LiveTerminal {
     semantic: GhosttyVt,
+    presented: SemanticState,
     query_tracker: QueryTracker,
 }
 
@@ -666,8 +667,10 @@ fn consume_runtime(
         geometry_cell_size(initial_geometry.pixel_width, initial_geometry.cols),
         geometry_cell_size(initial_geometry.pixel_height, initial_geometry.rows),
     )?;
+    let presented = semantic.snapshot()?;
     let mut live_terminal = LiveTerminal {
         semantic,
+        presented,
         query_tracker: QueryTracker::default(),
     };
     let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
@@ -784,6 +787,10 @@ fn process_runtime_message(
                 event_log,
                 &data,
             )?;
+            let latest = live.semantic.snapshot()?;
+            if !latest.modes.synchronized_output {
+                live.presented = latest;
+            }
         }
         RuntimeMessage::OutputClosed => {
             progress.output_closed = true;
@@ -814,6 +821,10 @@ fn process_runtime_message(
         RuntimeMessage::Resize(geometry) => {
             apply_resize(spawned.master.as_mut(), event_log, Uuid::now_v7(), geometry)?;
             resize_semantic(&mut live.semantic, geometry)?;
+            let latest = live.semantic.snapshot()?;
+            if !latest.modes.synchronized_output {
+                live.presented = latest;
+            }
         }
         RuntimeMessage::ResizeFailed(reason) => {
             return Err(terminal_error("read terminal geometry", reason));
@@ -824,7 +835,7 @@ fn process_runtime_message(
             request,
             &response,
             mutation_history,
-            &mut live.semantic,
+            live,
         )?,
         RuntimeMessage::ControlServerFailed(reason) => {
             return Err(terminal_error("serve control socket", reason));
@@ -1249,11 +1260,11 @@ fn handle_control_request(
     request: ControlRequest,
     response_sender: &mpsc::SyncSender<ControlResponse>,
     history: &mut MutationHistory,
-    semantic: &mut GhosttyVt,
+    live: &mut LiveTerminal,
 ) -> Result<()> {
     let read_only = matches!(
         request.command,
-        ControlCommand::Ping | ControlCommand::Status
+        ControlCommand::Ping | ControlCommand::Status | ControlCommand::Snapshot
     );
     let command_hash = if read_only {
         None
@@ -1281,7 +1292,7 @@ fn handle_control_request(
         event_log,
         request.request_id,
         &request.command,
-        semantic,
+        live,
     );
     let response = match &outcome {
         Ok(data) => ControlResponse {
@@ -1319,7 +1330,7 @@ fn execute_control_command(
     event_log: &mut EventLogWriter,
     request_id: Uuid,
     command: &ControlCommand,
-    semantic: &mut GhosttyVt,
+    live: &mut LiveTerminal,
 ) -> Result<ControlData> {
     match command {
         ControlCommand::Ping => {
@@ -1330,6 +1341,23 @@ fn execute_control_command(
         ControlCommand::Status => {
             return Ok(ControlData::Status {
                 pid: spawned.pid,
+                boundaries: actor_boundaries(event_log),
+            });
+        }
+        ControlCommand::Snapshot => {
+            let encoded = serde_json::to_vec(&live.presented).map_err(|error| {
+                return terminal_error("serialize presented state", error.to_string());
+            })?;
+            return Ok(ControlData::Snapshot {
+                viewport_text: semantic_viewport_text(&live.presented),
+                state_hash: blake3::hash(&encoded).to_hex().to_string(),
+                presented: true,
+                cols: live.presented.cols,
+                rows: live.presented.rows,
+                cursor_column: live.presented.cursor.column,
+                cursor_row: live.presented.cursor.row,
+                cursor_visible: live.presented.cursor.visible,
+                modes: live.presented.modes.clone(),
                 boundaries: actor_boundaries(event_log),
             });
         }
@@ -1363,11 +1391,11 @@ fn execute_control_command(
             });
         }
         ControlCommand::Key { key, modifiers } => {
-            let modes = semantic.snapshot()?.modes;
+            let modes = live.semantic.snapshot()?.modes;
             let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
                 return terminal_error("serialize keyboard modes", error.to_string());
             })?;
-            let encoded = semantic.encode_key(*key, *modifiers)?;
+            let encoded = live.semantic.encode_key(*key, *modifiers)?;
             if encoded.data.as_bytes().is_empty() {
                 return Err(control_rejected(
                     "key_has_no_output",
@@ -1404,7 +1432,7 @@ fn execute_control_command(
         }
         ControlCommand::Paste { data } => {
             validate_control_input(data.as_bytes(), Some("paste"))?;
-            let modes = semantic.snapshot()?.modes;
+            let modes = live.semantic.snapshot()?.modes;
             let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
                 return terminal_error("serialize paste modes", error.to_string());
             })?;
@@ -1446,7 +1474,11 @@ fn execute_control_command(
             };
             validate_control_geometry(geometry)?;
             apply_resize(spawned.master.as_mut(), event_log, request_id, geometry)?;
-            resize_semantic(semantic, geometry)?;
+            resize_semantic(&mut live.semantic, geometry)?;
+            let latest = live.semantic.snapshot()?;
+            if !latest.modes.synchronized_output {
+                live.presented = latest;
+            }
             return Ok(ControlData::Acknowledged {
                 boundaries: actor_boundaries(event_log),
             });
@@ -1745,6 +1777,26 @@ fn semantic_key_name(key: NamedKey) -> String {
         NamedKey::Function(number) => format!("f{number}"),
         NamedKey::Letter(letter) => letter.to_ascii_lowercase().to_string(),
     };
+}
+
+fn semantic_viewport_text(state: &SemanticState) -> String {
+    let mut output = String::new();
+    for (index, row) in state.grid.iter().enumerate() {
+        for cell in &row.cells {
+            if cell.grapheme.is_empty() {
+                output.push(' ');
+            } else {
+                output.push_str(&cell.grapheme);
+            }
+        }
+        while output.ends_with(' ') {
+            output.pop();
+        }
+        if index + 1 < state.grid.len() {
+            output.push('\n');
+        }
+    }
+    return output;
 }
 
 fn encode_paste(data: &[u8], bracketed: bool) -> Result<Vec<u8>> {

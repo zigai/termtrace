@@ -38,6 +38,20 @@
         },
         {
           "additionalProperties": false,
+          "description": "Return the latest presentation-eligible semantic viewport.",
+          "properties": {
+            "command": {
+              "const": "snapshot",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Send exact bytes to the child PTY.",
           "properties": {
             "command": {

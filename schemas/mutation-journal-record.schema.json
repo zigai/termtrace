@@ -160,6 +160,86 @@
         },
         {
           "additionalProperties": false,
+          "description": "Observer-only latest presented terminal state.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed source boundaries at observation time."
+            },
+            "cols": {
+              "description": "Terminal columns.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cursor_column": {
+              "description": "Cursor column when it lies in the viewport.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "cursor_row": {
+              "description": "Cursor row when it lies in the viewport.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "cursor_visible": {
+              "description": "Whether the cursor is visible.",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "snapshot",
+              "type": "string"
+            },
+            "modes": {
+              "$ref": "#/$defs/ModeState",
+              "description": "Presentation-eligible terminal modes."
+            },
+            "presented": {
+              "description": "Always true for this presentation-filtered endpoint.",
+              "type": "boolean"
+            },
+            "rows": {
+              "description": "Terminal rows.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state_hash": {
+              "description": "BLAKE3 of canonical JSON for `state`.",
+              "type": "string"
+            },
+            "viewport_text": {
+              "description": "Plain text of the presentation-eligible viewport.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "viewport_text",
+            "state_hash",
+            "presented",
+            "cols",
+            "rows",
+            "cursor_visible",
+            "modes",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Canonical position of an appended marker.",
           "properties": {
             "boundaries": {
@@ -290,6 +370,68 @@
           "type": "string"
         }
       ]
+    },
+    "ModeState": {
+      "description": "Terminal modes relevant to presentation and input.",
+      "properties": {
+        "alternate_screen": {
+          "description": "Any alternate-screen mode.",
+          "type": "boolean"
+        },
+        "bracketed_paste": {
+          "description": "DEC bracketed-paste mode 2004.",
+          "type": "boolean"
+        },
+        "synchronized_output": {
+          "description": "DEC synchronized-output mode 2026.",
+          "type": "boolean"
+        },
+        "values": {
+          "description": "Complete stable inventory of known ANSI and DEC modes.",
+          "items": {
+            "$ref": "#/$defs/TerminalMode"
+          },
+          "type": "array"
+        },
+        "wraparound": {
+          "description": "DEC auto-wrap mode 7.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "synchronized_output",
+        "alternate_screen",
+        "wraparound",
+        "bracketed_paste",
+        "values"
+      ],
+      "type": "object"
+    },
+    "TerminalMode": {
+      "description": "One ANSI or DEC mode value.",
+      "properties": {
+        "ansi": {
+          "description": "`true` for ANSI mode, `false` for DEC-private mode.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "Current set/reset value.",
+          "type": "boolean"
+        },
+        "number": {
+          "description": "Numeric mode identifier.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "number",
+        "ansi",
+        "enabled"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/mutation-journal-record.schema.json",

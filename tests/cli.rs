@@ -24,6 +24,7 @@ use termtrace::{
         OperationStatus,
     },
     event_log::EventLog,
+    inspection::wait_for_output,
     provenance::{
         ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind, ProvenanceSensitivity,
         collect_execution_provenance,
@@ -1237,6 +1238,60 @@ fn semantic_paste_uses_live_bracketed_mode_and_records_wrappers() {
         } if terminal_modes_hash.len() == 64
             && data.as_bytes() == b"\x1b[200~one\ntwo\x1b[201~"
     )));
+}
+
+#[test]
+fn actor_snapshot_excludes_uncommitted_synchronized_output() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("snapshot-session");
+    let child = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,time; os.write(1,b'VISIBLE'); time.sleep(.1); os.write(1,b'\\x1b[?2026hHIDDEN'); time.sleep(.5); os.write(1,b'\\r\\x1b[2KBUSY\\x1b[?2026l'); time.sleep(.2)",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn snapshot fixture");
+    let socket = session.join("control.sock");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !socket.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    wait_for_output(&session, b"HIDDEN", Duration::from_secs(5)).expect("hidden output");
+    let hidden = send_request(&session, &ControlRequest::new(ControlCommand::Snapshot))
+        .expect("hidden snapshot");
+    let hidden_snapshot = match hidden {
+        ControlData::Snapshot {
+            viewport_text,
+            presented,
+            ..
+        } => Some((viewport_text, presented)),
+        _ => None,
+    }
+    .expect("snapshot response");
+    let (viewport_text, presented) = hidden_snapshot;
+    assert!(presented);
+    assert!(viewport_text.contains("VISIBLE"));
+    assert!(!viewport_text.contains("HIDDEN"));
+
+    wait_for_output(&session, b"BUSY", Duration::from_secs(5)).expect("committed output");
+    let committed = send_request(&session, &ControlRequest::new(ControlCommand::Snapshot))
+        .expect("committed snapshot");
+    let viewport_text = match committed {
+        ControlData::Snapshot { viewport_text, .. } => Some(viewport_text),
+        _ => None,
+    }
+    .expect("snapshot response");
+    assert!(viewport_text.contains("BUSY"));
+    let output = child
+        .wait_with_output()
+        .expect("snapshot fixture completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
 }
 
 #[test]

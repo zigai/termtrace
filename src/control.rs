@@ -16,11 +16,11 @@ use crate::{
     Error, Result,
     event::{ByteString, InputKind},
     event_log::CanonicalBoundary,
-    ghostty_vt::{KeyModifiers, NamedKey},
+    ghostty_vt::{KeyModifiers, ModeState, NamedKey},
 };
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 5;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 6;
 /// Relative socket path inside a live session directory.
 pub const CONTROL_SOCKET_NAME: &str = "control.sock";
 /// Maximum encoded request or response size.
@@ -50,6 +50,8 @@ pub enum ControlCommand {
     Ping,
     /// Return current process and event counters.
     Status,
+    /// Return the latest presentation-eligible semantic viewport.
+    Snapshot,
     /// Send exact bytes to the child PTY.
     Input {
         /// Raw bytes encoded as Base64 in JSON.
@@ -150,6 +152,29 @@ pub enum ControlData {
         /// Child process identifier when available.
         pid: Option<u32>,
         /// Durable and observed canonical positions at status evaluation.
+        boundaries: ActorBoundaries,
+    },
+    /// Observer-only latest presented terminal state.
+    Snapshot {
+        /// Plain text of the presentation-eligible viewport.
+        viewport_text: String,
+        /// BLAKE3 of canonical JSON for `state`.
+        state_hash: String,
+        /// Always true for this presentation-filtered endpoint.
+        presented: bool,
+        /// Terminal columns.
+        cols: u16,
+        /// Terminal rows.
+        rows: u16,
+        /// Cursor column when it lies in the viewport.
+        cursor_column: Option<u16>,
+        /// Cursor row when it lies in the viewport.
+        cursor_row: Option<u16>,
+        /// Whether the cursor is visible.
+        cursor_visible: bool,
+        /// Presentation-eligible terminal modes.
+        modes: ModeState,
+        /// Durable and observed source boundaries at observation time.
         boundaries: ActorBoundaries,
     },
     /// Canonical position of an appended marker.
