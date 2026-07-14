@@ -28,17 +28,18 @@ use termtrace::{
         CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, ProcessSignal,
         ScreenPredicate, request, send_request,
     },
-    diff::{SemanticDiff, diff_states},
+    diff::{SemanticDiff, diff_states, inspect_point},
     event::{ByteString, EVENT_LOG_VERSION, Event, EventProjection, InputKind, event_type},
     event_log::{DurabilityMode, DurabilityPolicy, EventLog},
     geometry::{inherited_geometry, run_probe},
-    ghostty_vt::{KeyModifiers, NamedKey, RowState},
+    ghostty_vt::{Format as GhosttyFormat, KeyModifiers, NamedKey, RowState},
     inspection::{
         inspect_session, state_text, wait_for_completion, wait_for_output, wait_for_screen,
     },
     interop::export_asciicast,
     observation::{
-        StatePoint, observe_ansi_stream, observe_one_off_session, observe_session_with_options,
+        StatePoint, format_ansi_stream, observe_ansi_stream, observe_one_off_session,
+        observe_session_with_options,
     },
     playback::{PlaybackOptions, playback},
     profile::{
@@ -50,7 +51,7 @@ use termtrace::{
     record::{RecordOptions, RecordOutcome, record},
     replay::{
         GHOSTTY_REVISION, IndexOptions, STATE_FORMAT_VERSION, StateSelection, StateSelector,
-        index_session_with_options,
+        format_state, index_session_with_options,
     },
     save::{SaveFormat, save},
     schema::write_all as write_schemas,
@@ -332,6 +333,8 @@ enum ShowFormat {
     Text,
     Json,
     JsonCompact,
+    Vt,
+    Html,
 }
 
 #[derive(Debug, Args)]
@@ -545,6 +548,8 @@ enum SaveFormatArg {
     Txt,
     Json,
     DeepJson,
+    Vt,
+    Html,
 }
 
 impl From<SaveFormatArg> for SaveFormat {
@@ -553,6 +558,8 @@ impl From<SaveFormatArg> for SaveFormat {
             SaveFormatArg::Txt => Self::Txt,
             SaveFormatArg::Json => Self::Json,
             SaveFormatArg::DeepJson => Self::DeepJson,
+            SaveFormatArg::Vt => Self::Vt,
+            SaveFormatArg::Html => Self::Html,
         };
     }
 }
@@ -1447,14 +1454,32 @@ fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
         (None, None, None, None) => StatePoint::LatestPresented,
         _ => return Err(miette::miette!("exactly one show selector may be supplied")),
     };
-    let observation = match (
+    let formatter = match arguments.format {
+        ShowFormat::Vt => Some(GhosttyFormat::Vt),
+        ShowFormat::Html => Some(GhosttyFormat::Html),
+        _ => None,
+    };
+    let (observation, formatted) = match (
         arguments.session,
         arguments.input,
         arguments.command.is_empty(),
     ) {
         (Some(session), None, true) => {
             let session = resolve_session_ref(session)?;
-            observe_session_with_options(&session, point, arguments.include_hidden)?
+            let observation =
+                observe_session_with_options(&session, point.clone(), arguments.include_hidden)?;
+            let formatted = match formatter {
+                Some(format) => {
+                    if !session.join("completion.json").is_file() {
+                        return Err(miette::miette!(
+                            "live VT/HTML formatting requires completed evidence"
+                        ));
+                    }
+                    Some(format_completed_state(&session, &point, format)?)
+                }
+                None => None,
+            };
+            (observation, formatted)
         }
         (None, Some(input), true) => {
             if point != StatePoint::LatestPresented || arguments.include_hidden {
@@ -1469,11 +1494,24 @@ fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
             } else {
                 fs_err::read(input).into_diagnostic()?
             };
-            observe_ansi_stream(&bytes, arguments.cols, arguments.rows)?
+            let formatted = formatter
+                .map(|format| {
+                    return format_ansi_stream(&bytes, arguments.cols, arguments.rows, format);
+                })
+                .transpose()?;
+            (
+                observe_ansi_stream(&bytes, arguments.cols, arguments.rows)?,
+                formatted,
+            )
         }
         (None, None, false) => {
             let session = run_one_off_command(&arguments.command, arguments.cols, arguments.rows)?;
-            observe_one_off_session(&session, point, arguments.include_hidden)?
+            let observation =
+                observe_one_off_session(&session, point.clone(), arguments.include_hidden)?;
+            let formatted = formatter
+                .map(|format| return format_completed_state(&session, &point, format))
+                .transpose()?;
+            (observation, formatted)
         }
         _ => return Err(miette::miette!("exactly one show source is required")),
     };
@@ -1484,7 +1522,25 @@ fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
             serde_json::to_string_pretty(&observation).into_diagnostic()?
         )),
         ShowFormat::JsonCompact => write_json_line(&observation),
+        ShowFormat::Vt | ShowFormat::Html => write_stdout(formatted.ok_or_else(|| {
+            return miette::miette!("selected formatter produced no output");
+        })?),
     };
+}
+
+fn format_completed_state(
+    session: &Path,
+    point: &StatePoint,
+    format: GhosttyFormat,
+) -> Result<Vec<u8>> {
+    let log = EventLog::read(session.join("events.jsonl"))?;
+    validate_completed_log(session, &log)?;
+    let inspection = inspect_point(&log, point)?;
+    return Ok(format_state(
+        &log,
+        StateSelector::StateId(inspection.record.state_id),
+        format,
+    )?);
 }
 
 fn run_timeline(arguments: TimelineArgs) -> Result<ExitCode> {

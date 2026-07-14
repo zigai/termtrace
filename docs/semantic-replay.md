@@ -2,6 +2,8 @@
 
 The canonical event log is replayed byte by byte through the exact pinned libghostty-vt engine. A snapshot boundary is distinct when any complete semantic content changes: grid cells, grapheme clusters, styles, resolved colors, palette, cursor, active SGR style, known ANSI/DEC modes, terminal title, working directory, or geometry.
 
+Selected-state formatting retains the warmed engine at each distinct-state callback. VT and HTML are therefore emitted by the pinned Ghostty formatter at the resolved state ID rather than reconstructed from the compact observation frame or silently substituted with final-state artifacts.
+
 Ghostty dirty flags are evidence and optimization hints, not identity. State hashes exclude transient dirty bookkeeping and use a domain-separated BLAKE3 Merkle layout: stable metadata plus one hash per complete row. This permits efficient updates while the final hash still commits to the entire viewport.
 
 Each state records its canonical event sequence and byte offset inside that event. Resize state is applied only after the matching successful resize result. Input, signal, marker, and lifecycle events remain in the execution timeline but do not invent visual changes. State records are stored as compressed JSONL in `states.jsonl.zst`; the lightweight `state-index.jsonl` remains directly streamable.

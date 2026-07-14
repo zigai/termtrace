@@ -1532,6 +1532,25 @@ fn show_labels_ansi_files_and_stdin_as_unchained() {
         .assert()
         .success()
         .stdout(predicate::str::contains("wide:界"));
+
+    let mut vt_show = Command::cargo_bin("termtrace").expect("binary should build");
+    vt_show
+        .args(["show", "--input"])
+        .arg(&ansi)
+        .args(["--format", "vt"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ERROR"))
+        .stdout(predicate::str::contains("\x1b"));
+    let mut html_show = Command::cargo_bin("termtrace").expect("binary should build");
+    html_show
+        .args(["show", "--input"])
+        .arg(&ansi)
+        .args(["--format", "html"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ERROR"))
+        .stdout(predicate::str::contains("<"));
 }
 
 #[test]
@@ -1598,7 +1617,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         .arg(&session)
         .args(["--out"])
         .arg(&destination)
-        .args(["--format", "txt,json,deep-json"])
+        .args(["--format", "txt,json,deep-json,vt,html"])
         .assert()
         .success()
         .stdout(predicate::str::contains("save-manifest.json"));
@@ -1620,10 +1639,20 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         manifest["sensitivity"],
         "terminal_screen_may_contain_secrets"
     );
-    assert_eq!(manifest["files"].as_array().map(Vec::len), Some(3));
+    assert_eq!(manifest["files"].as_array().map(Vec::len), Some(5));
     assert!(
         fs_err::read_to_string(destination.join("screen.txt"))
             .expect("screen text")
+            .contains("SAVED")
+    );
+    assert!(
+        fs_err::read(destination.join("screen.vt"))
+            .expect("saved VT")
+            .contains(&0x1b)
+    );
+    assert!(
+        fs_err::read_to_string(destination.join("screen.html"))
+            .expect("saved HTML")
             .contains("SAVED")
     );
     for file in manifest["files"].as_array().expect("manifested files") {

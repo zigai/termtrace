@@ -11,7 +11,9 @@ use crate::{
     diff::inspect_point,
     event::ByteString,
     event_log::EventLog,
+    ghostty_vt::Format,
     observation::{StatePoint, observe_session_with_options},
+    replay::{StateSelector, format_state},
     session::{read_manifest, validate_completed_log},
 };
 
@@ -25,6 +27,10 @@ pub enum SaveFormat {
     Json,
     /// Complete reconstructed semantic-state JSON.
     DeepJson,
+    /// Pinned Ghostty VT reconstruction.
+    Vt,
+    /// Pinned Ghostty HTML reconstruction.
+    Html,
 }
 
 /// One manifested saved file.
@@ -149,6 +155,24 @@ pub fn save(
                     "semantic-state.json",
                     "application/json",
                     pretty_json(&inspection, "semantic-state.json")?,
+                ),
+                SaveFormat::Vt => (
+                    "screen.vt",
+                    "application/vnd.termtrace.vt",
+                    format_state(
+                        &log,
+                        StateSelector::StateId(inspection.record.state_id),
+                        Format::Vt,
+                    )?,
+                ),
+                SaveFormat::Html => (
+                    "screen.html",
+                    "text/html; charset=utf-8",
+                    format_state(
+                        &log,
+                        StateSelector::StateId(inspection.record.state_id),
+                        Format::Html,
+                    )?,
                 ),
             };
             let target = staging.join(path);

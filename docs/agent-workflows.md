@@ -51,7 +51,7 @@ Use `termtrace output SESSION --raw` only when a byte-exact child-output stream 
 
 Use `termtrace events SESSION --type marker,input_intent,exit` for typed canonical history. Add `--metadata-only` before sharing diagnostic output when exact child/input/query bytes are unnecessary; the projection retains non-byte fields and byte equality evidence without the payload. Screen text and remaining metadata may still be sensitive. `--follow` keeps the same projection/filter contract while advancing only through integrity-validated actor-durable prefixes.
 
-Use `termtrace save SESSION --format txt,json,deep-json --out ARTIFACTS` to hand off several views of exactly one state. Publication is owner-only, atomic, and no-replace; the manifest binds every member to the same resolved state and completed source root. The `json` recipe is the compact observation envelope, while `deep-json` retains the complete reconstructed grid and styles.
+Use `termtrace save SESSION --format txt,json,deep-json,vt,html --out ARTIFACTS` to hand off several views of exactly one state. Publication is owner-only, atomic, and no-replace; the manifest binds every member to the same resolved state and completed source root. The `json` recipe is the compact observation envelope, `deep-json` retains the complete reconstructed grid and styles, and VT/HTML use the pinned formatter at the selected replay boundary.
 
 ## Complete and derive
 

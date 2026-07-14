@@ -257,7 +257,7 @@ struct StateHashMetadata<'state> {
 /// Returns an error when libghostty-vt or state serialization fails.
 pub fn replay(log: &EventLog) -> Result<CollectedReplay> {
     let mut states = Vec::new();
-    let artifacts = replay_with(log, None, |record, _| {
+    let artifacts = replay_with(log, None, |record, _, _| {
         states.push(record);
         return Ok(());
     })?;
@@ -271,7 +271,7 @@ pub fn replay(log: &EventLog) -> Result<CollectedReplay> {
 /// Returns an error when the source cannot replay or no state matches.
 pub fn inspect(log: &EventLog, selector: StateSelector) -> Result<StateInspection> {
     let mut selected = None;
-    replay_with(log, None, |record, state| {
+    replay_with(log, None, |record, state, _| {
         let matches = match selector {
             StateSelector::Final => true,
             StateSelector::LatestPresented => record.presented,
@@ -292,10 +292,35 @@ pub fn inspect(log: &EventLog, selector: StateSelector) -> Result<StateInspectio
     return selected.ok_or_else(|| return invalid_replay("no semantic state matches the selector"));
 }
 
+/// Format one selected state through the pinned Ghostty formatter.
+///
+/// # Errors
+///
+/// Returns an error when replay, selection, or formatter output fails.
+pub fn format_state(log: &EventLog, selector: StateSelector, format: Format) -> Result<Vec<u8>> {
+    let mut selected = None;
+    replay_with(log, None, |record, _, engine| {
+        let matches = match selector {
+            StateSelector::Final => true,
+            StateSelector::LatestPresented => record.presented,
+            StateSelector::StateId(id) => record.state_id == id,
+            StateSelector::EventSeq(seq) => {
+                record.event_seq.is_none_or(|event| return event <= seq)
+            }
+            StateSelector::MonotonicNs(time) => record.monotonic_ns <= time,
+        };
+        if matches {
+            selected = Some(engine.format(format)?);
+        }
+        return Ok(());
+    })?;
+    return selected.ok_or_else(|| return invalid_replay("no semantic state matches the selector"));
+}
+
 fn replay_with(
     log: &EventLog,
     source_range: Option<SourceRange>,
-    mut state_sink: impl FnMut(StateRecord, &SemanticState) -> Result<()>,
+    mut state_sink: impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<()>,
 ) -> Result<ReplayArtifacts> {
     let mut builder = ReplayBuilder::new(log)?;
     let mut resize_intents = HashMap::new();
@@ -421,7 +446,7 @@ impl ReplayBuilder {
         event_seq: Option<u64>,
         event_byte_offset: Option<u64>,
         monotonic_ns: u64,
-        sink: &mut impl FnMut(StateRecord, &SemanticState) -> Result<()>,
+        sink: &mut impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<()>,
     ) -> Result<()> {
         let Some(state) = self.engine.snapshot_if_changed()? else {
             return Ok(());
@@ -432,7 +457,7 @@ impl ReplayBuilder {
     fn capture_baseline(
         &mut self,
         monotonic_ns: u64,
-        sink: &mut impl FnMut(StateRecord, &SemanticState) -> Result<()>,
+        sink: &mut impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<()>,
     ) -> Result<()> {
         let state = self.engine.snapshot()?;
         // Keep the warmed Ghostty engine, but forget emission history. The first
@@ -451,7 +476,7 @@ impl ReplayBuilder {
         event_seq: Option<u64>,
         event_byte_offset: Option<u64>,
         monotonic_ns: u64,
-        sink: &mut impl FnMut(StateRecord, &SemanticState) -> Result<()>,
+        sink: &mut impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<()>,
     ) -> Result<()> {
         let hash = self.hash_state(&state)?;
         if self.previous_hash.as_ref() == Some(&hash) {
@@ -469,7 +494,7 @@ impl ReplayBuilder {
             ghostty_dirty_rows: state.dirty_rows.clone(),
             delta,
         };
-        sink(record, &state)?;
+        sink(record, &state, &self.engine)?;
         self.state_count = self
             .state_count
             .checked_add(1)
@@ -724,7 +749,7 @@ fn write_index(
     let mut retained_state_count = 0_u64;
     let mut final_retained_state_hash = None;
     let mut previous_retained_state = None;
-    let artifacts = replay_with(log, source_range, |mut record, state| {
+    let artifacts = replay_with(log, source_range, |mut record, state, _| {
         if state_selection == StateSelection::Presented && !record.presented {
             return Ok(());
         }

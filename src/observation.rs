@@ -14,7 +14,7 @@ use crate::{
     control::{ControlCommand, ControlData, request},
     event::{ByteString, Event},
     event_log::{CanonicalBoundary, EventLog},
-    ghostty_vt::{GhosttyVt, ModeState, SemanticState},
+    ghostty_vt::{Format, GhosttyVt, ModeState, SemanticState},
     replay::{StateSelector, inspect},
     session::{read_manifest, validate_completed_log},
 };
@@ -338,6 +338,17 @@ pub fn observe_ansi_stream(bytes: &[u8], cols: u16, rows: u16) -> Result<Observa
         frame,
         payload_hash,
     });
+}
+
+/// Format an unchained ANSI stream through the pinned Ghostty formatter.
+///
+/// # Errors
+///
+/// Returns an error when geometry or formatter output is invalid.
+pub fn format_ansi_stream(bytes: &[u8], cols: u16, rows: u16, format: Format) -> Result<Vec<u8>> {
+    let mut terminal = GhosttyVt::new(cols, rows, 0)?;
+    terminal.write(bytes);
+    return terminal.format(format);
 }
 
 /// Observe a completed canonical session created for a one-off command.
