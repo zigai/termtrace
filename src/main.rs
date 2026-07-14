@@ -33,7 +33,9 @@ use termtrace::{
         inspect_session, state_text, wait_for_completion, wait_for_output, wait_for_screen,
     },
     interop::export_asciicast,
-    observation::{StatePoint, observe_ansi_stream, observe_session_with_options},
+    observation::{
+        StatePoint, observe_ansi_stream, observe_one_off_session, observe_session_with_options,
+    },
     playback::{PlaybackOptions, playback},
     profile::{
         ResolvedGhosttyProfile, resolve_ghostty_profile, resolved_terminal_colors,
@@ -284,7 +286,7 @@ enum ShowFormat {
     ArgGroup::new("show_source")
         .required(true)
         .multiple(false)
-        .args(["session", "input"])
+        .args(["session", "input", "command"])
 ))]
 #[command(group(
     ArgGroup::new("show_selector")
@@ -303,6 +305,9 @@ struct ShowArgs {
     /// ANSI stream rows.
     #[arg(long, default_value_t = 24)]
     rows: u16,
+    /// One-off command to record to completion, following `--`.
+    #[arg(last = true, num_args = 1..)]
+    command: Vec<OsString>,
     /// Exact semantic state identifier.
     #[arg(long)]
     state: Option<u64>,
@@ -1112,12 +1117,16 @@ fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
         (None, None, None, None) => StatePoint::LatestPresented,
         _ => return Err(miette::miette!("exactly one show selector may be supplied")),
     };
-    let observation = match (arguments.session, arguments.input) {
-        (Some(session), None) => {
+    let observation = match (
+        arguments.session,
+        arguments.input,
+        arguments.command.is_empty(),
+    ) {
+        (Some(session), None, true) => {
             let session = resolve_session_ref(session)?;
             observe_session_with_options(&session, point, arguments.include_hidden)?
         }
-        (None, Some(input)) => {
+        (None, Some(input), true) => {
             if point != StatePoint::LatestPresented || arguments.include_hidden {
                 return Err(miette::miette!(
                     "ANSI streams support only latest-presented selection"
@@ -1132,6 +1141,10 @@ fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
             };
             observe_ansi_stream(&bytes, arguments.cols, arguments.rows)?
         }
+        (None, None, false) => {
+            let session = run_one_off_command(&arguments.command, arguments.cols, arguments.rows)?;
+            observe_one_off_session(&session, point, arguments.include_hidden)?
+        }
         _ => return Err(miette::miette!("exactly one show source is required")),
     };
     return match arguments.format {
@@ -1142,6 +1155,44 @@ fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
         )),
         ShowFormat::JsonCompact => write_json_line(&observation),
     };
+}
+
+fn run_one_off_command(command: &[OsString], cols: u16, rows: u16) -> Result<PathBuf> {
+    if cols == 0 || rows == 0 {
+        return Err(miette::miette!(
+            "one-off geometry must be greater than zero"
+        ));
+    }
+    let registry = SessionRegistry::open_default()?;
+    let paths = registry.allocate_detached_paths()?;
+    let stdout = open_detached_log(&paths.stdout_log)?;
+    let stderr = open_detached_log(&paths.stderr_log)?;
+    let executable = env::current_exe().into_diagnostic()?;
+    let status = ProcessCommand::new(executable)
+        .arg("record")
+        .arg("--no-input")
+        .arg("--out")
+        .arg(&paths.session)
+        .arg("--cols")
+        .arg(cols.to_string())
+        .arg("--rows")
+        .arg(rows.to_string())
+        .arg("--")
+        .args(command)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .status()
+        .into_diagnostic()?;
+    if !paths.session.join("completion.json").is_file() {
+        return Err(miette::miette!(
+            "one-off recorder exited with {status} before durable completion; recoverable session candidate: {}; stdout log: {}; stderr log: {}",
+            paths.session.display(),
+            paths.stdout_log.display(),
+            paths.stderr_log.display(),
+        ));
+    }
+    return Ok(paths.session);
 }
 
 fn run_wait(arguments: WaitArgs) -> Result<ExitCode> {

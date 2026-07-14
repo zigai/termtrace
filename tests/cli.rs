@@ -1484,6 +1484,53 @@ fn show_labels_ansi_files_and_stdin_as_unchained() {
 }
 
 #[test]
+fn show_records_one_off_commands_as_completed_evidence() {
+    let temporary = TempDir::new().expect("temporary directory");
+    fs_err::set_permissions(temporary.path(), Permissions::from_mode(0o700))
+        .expect("owner-only state directory");
+    let mut show = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = show
+        .env("TERMTRACE_STATE_DIR", temporary.path())
+        .args([
+            "show",
+            "--cols",
+            "30",
+            "--rows",
+            "4",
+            "--format",
+            "json-compact",
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf '\\033[32mONE-OFF\\033[0m'",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let observation: serde_json::Value =
+        serde_json::from_slice(&output).expect("one-off observation JSON");
+    assert_eq!(observation["source_kind"], "one_off_command");
+    assert_eq!(observation["source_completed"], true);
+    assert_eq!(observation["capture_quality"], "completed");
+    assert_eq!(observation["integrity"], "canonical_chained");
+    assert!(observation["session_id"].is_string());
+    assert!(
+        observation
+            .pointer("/frame/viewport_text")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|text| return text.contains("ONE-OFF"))
+    );
+    let sessions = fs_err::read_dir(temporary.path().join("sessions"))
+        .expect("one-off sessions directory")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("one-off session entries");
+    assert_eq!(sessions.len(), 1);
+    assert!(sessions[0].path().join("completion.json").is_file());
+}
+
+#[test]
 fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("live-snapshot");

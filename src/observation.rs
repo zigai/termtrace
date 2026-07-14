@@ -340,6 +340,27 @@ pub fn observe_ansi_stream(bytes: &[u8], cols: u16, rows: u16) -> Result<Observa
     });
 }
 
+/// Observe a completed canonical session created for a one-off command.
+///
+/// # Errors
+///
+/// Returns an error when the session is incomplete, invalid, or the requested
+/// state cannot be resolved.
+pub fn observe_one_off_session(
+    session: &Path,
+    state_point: StatePoint,
+    include_hidden: bool,
+) -> Result<Observation> {
+    let mut observation = observe_session_with_options(session, state_point, include_hidden)?;
+    if !observation.source_completed {
+        return Err(observation_error(
+            "one-off command did not produce completed canonical evidence",
+        ));
+    }
+    observation.source_kind = ObservationSourceKind::OneOffCommand;
+    return Ok(observation);
+}
+
 fn frame_from_state(state: &SemanticState) -> ObservationFrame {
     return ObservationFrame {
         viewport_text: viewport_text(state),
