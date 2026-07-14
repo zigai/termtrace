@@ -41,7 +41,7 @@ use uuid::Uuid;
 
 use crate::{
     Error, Result,
-    artifact::write_secure,
+    artifact::{sync_parent_directory, write_secure},
     control::{
         CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME, ControlCommand, ControlData, ControlRequest,
         ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES, ProcessSignal, validate_frame,
@@ -54,8 +54,10 @@ use crate::{
     ghostty_vt::GhosttyVt,
     profile::ResolvedGhosttyProfile,
     session::{
-        GeometryProvenance, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, SessionCompletion,
-        SessionGeometry, SessionManifest,
+        COMPLETION_VALIDATION_VERSION, GeometryProvenance, SESSION_COMPLETION_FORMAT,
+        SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
+        SessionCompletion, SessionGeometry, SessionManifest, canonical_manifest_bytes,
+        manifest_hash,
     },
     terminal_mode::RawTerminalGuard,
 };
@@ -247,8 +249,16 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     }
     let clock = SessionClock::now()?;
     let session_id = Uuid::now_v7();
+    let session_manifest_hash = write_session_manifest(
+        options,
+        &working_directory,
+        pty_size,
+        session_id,
+        clock.started_unix_ns(),
+    )?;
     let header = EventLogHeader::new(
         session_id,
+        &session_manifest_hash,
         clock.started_unix_ns(),
         options.cols,
         options.rows,
@@ -259,13 +269,6 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     .with_colors(options.colors.clone());
     let event_log_path = options.output_directory.join("events.jsonl");
     let mut event_log = EventLogWriter::create(&event_log_path, &header, clock)?;
-    write_session_manifest(
-        options,
-        &working_directory,
-        pty_size,
-        session_id,
-        header.started_unix_ns,
-    )?;
 
     let mut spawned = spawn_command(options, &working_directory, pty_size)?;
     if let Err(error) = event_log.append(Event::Lifecycle {
@@ -294,20 +297,33 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     };
     let exit_code = i32::try_from(runtime.status.exit_code()).ok();
     let signal_name = runtime.status.signal().map(str::to_owned);
-    event_log.append(Event::Exit {
+    let terminal_event_seq = event_log.append(Event::Exit {
         code: exit_code,
         signal: None,
         signal_name: signal_name.clone(),
     })?;
+    let header_bytes = serde_json::to_vec(&header).map_err(|source| {
+        return Error::InvalidJson {
+            path: event_log_path.clone(),
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
     write_session_completion(
         options,
         &SessionCompletion {
+            format: SESSION_COMPLETION_FORMAT.to_owned(),
+            version: SESSION_COMPLETION_VERSION,
+            validation_version: COMPLETION_VALIDATION_VERSION,
             session_id,
+            session_manifest_hash,
+            event_header_hash: blake3::hash(&header_bytes).to_hex().to_string(),
             exit_code,
             signal_name: signal_name.clone(),
             output_bytes: runtime.output_bytes,
             final_event_hash: event_log.current_hash(),
             event_count: event_log.next_seq(),
+            terminal_event_seq,
         },
     )?;
 
@@ -325,7 +341,7 @@ fn write_session_manifest(
     size: PtySize,
     session_id: Uuid,
     started_unix_ns: u128,
-) -> Result<()> {
+) -> Result<String> {
     let mut child_environment = BTreeMap::new();
     child_environment.insert("COLORTERM".to_owned(), "truecolor".to_owned());
     child_environment.insert("TERM".to_owned(), options.term.clone());
@@ -359,7 +375,10 @@ fn write_session_manifest(
         control_socket: CONTROL_SOCKET_NAME.to_owned(),
         contains_sensitive_terminal_data: true,
     };
-    return write_json_secure(&options.output_directory.join("session.json"), &manifest);
+    let encoded = canonical_manifest_bytes(&manifest)?;
+    let hash = manifest_hash(&encoded);
+    write_secure(&options.output_directory.join("session.json"), &encoded)?;
+    return Ok(hash);
 }
 
 fn write_session_completion(options: &RecordOptions, completion: &SessionCompletion) -> Result<()> {
@@ -1692,6 +1711,7 @@ fn create_session_directory(path: &Path) -> Result<()> {
                     };
                 },
             )?;
+            sync_parent_directory(path)?;
             return Ok(());
         }
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {

@@ -34,7 +34,7 @@ use termtrace::{
     schema::write_all as write_schemas,
     session::{
         CaptureTarget, GeometryProvenance, GeometrySource, GhosttyVisualOverrides, SessionGeometry,
-        read_manifest,
+        VerificationLevel, read_manifest, verify_session,
     },
     timeline::{parse_time_offset_ns, resolve_source_selection},
     visual::{CaptureOptions, capture, probe_ghostty_geometry},
@@ -61,6 +61,8 @@ enum Command {
     Version,
     /// Run a command in a PTY and preserve its byte-exact event stream.
     Record(RecordArgs),
+    /// Verify a completed session's structure and evidence bindings offline.
+    Verify(VerifyArgs),
     /// Verify that a live session control socket is responsive.
     Ping(SessionArgs),
     /// Print machine-readable live session status.
@@ -95,6 +97,37 @@ enum Command {
     Schemas(SchemaArgs),
     /// Export a lossy UTF-8 asciinema v2 interoperability cast.
     ExportAsciicast(ExportArgs),
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum VerifyLevelArg {
+    Structure,
+    Content,
+    DurabilityRecord,
+    Signature,
+}
+
+impl From<VerifyLevelArg> for VerificationLevel {
+    fn from(value: VerifyLevelArg) -> Self {
+        return match value {
+            VerifyLevelArg::Structure => Self::Structure,
+            VerifyLevelArg::Content => Self::Content,
+            VerifyLevelArg::DurabilityRecord => Self::DurabilityRecord,
+            VerifyLevelArg::Signature => Self::Signature,
+        };
+    }
+}
+
+#[derive(Debug, Args)]
+struct VerifyArgs {
+    /// Completed canonical session directory.
+    session: PathBuf,
+    /// Verification depth.
+    #[arg(long, value_enum, default_value_t = VerifyLevelArg::Content)]
+    level: VerifyLevelArg,
+    /// Emit the stable machine-readable report.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -483,6 +516,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
             ));
         }
         Command::Record(arguments) => return run_record(arguments),
+        Command::Verify(arguments) => return run_verify(arguments),
         Command::Ping(arguments) => return run_control(arguments.session, ControlCommand::Ping),
         Command::Status(arguments) => return run_status(arguments),
         Command::Send(arguments) => return run_send(arguments),
@@ -520,6 +554,29 @@ fn dispatch(command: Command) -> Result<ExitCode> {
             return Ok(ExitCode::SUCCESS);
         }
     }
+}
+
+fn run_verify(arguments: VerifyArgs) -> Result<ExitCode> {
+    let report = verify_session(arguments.session, arguments.level.into());
+    let valid = report.valid;
+    if arguments.json {
+        write_json_line(&report)?;
+    } else {
+        let status = if valid { "valid" } else { "invalid" };
+        let mut output = format!(
+            "{status}: {} ({:?})\n",
+            report.session.display(),
+            report.level
+        );
+        for finding in &report.findings {
+            writeln!(output, "{}: {}", finding.code, finding.message).into_diagnostic()?;
+        }
+        write_stdout(output)?;
+    }
+    if valid {
+        return Ok(ExitCode::SUCCESS);
+    }
+    return Ok(ExitCode::FAILURE);
 }
 
 fn run_index(arguments: IndexArgs) -> Result<ExitCode> {

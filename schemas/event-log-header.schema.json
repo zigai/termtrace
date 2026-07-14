@@ -133,6 +133,10 @@
       "format": "uuid",
       "type": "string"
     },
+    "session_manifest_hash": {
+      "description": "BLAKE3 of the exact immutable `session.json` bytes.",
+      "type": "string"
+    },
     "started_unix_ns": {
       "description": "Wall-clock Unix timestamp corresponding to monotonic time zero.",
       "format": "uint128",
@@ -154,6 +158,7 @@
     "format",
     "version",
     "session_id",
+    "session_manifest_hash",
     "started_unix_ns",
     "cols",
     "rows",

@@ -1,6 +1,7 @@
 {
   "$id": "https://github.com/zigai/termtrace/schemas/completion.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Immutable completion facts written after the final event is durable.",
   "properties": {
     "event_count": {
@@ -8,6 +9,10 @@
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "event_header_hash": {
+      "description": "BLAKE3 of the exact event-log header bytes.",
+      "type": "string"
     },
     "exit_code": {
       "description": "Normal exit code when available.",
@@ -21,6 +26,10 @@
       "description": "Hash of the final canonical event.",
       "type": "string"
     },
+    "format": {
+      "description": "Stable format identifier.",
+      "type": "string"
+    },
     "output_bytes": {
       "description": "Total raw output bytes.",
       "format": "uint64",
@@ -32,19 +41,47 @@
       "format": "uuid",
       "type": "string"
     },
+    "session_manifest_hash": {
+      "description": "BLAKE3 of the exact immutable session manifest bytes.",
+      "type": "string"
+    },
     "signal_name": {
       "description": "Signal name when available.",
       "type": [
         "string",
         "null"
       ]
+    },
+    "terminal_event_seq": {
+      "description": "Sequence number of the required terminal `Exit` event.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "validation_version": {
+      "description": "Validation contract applied before publication.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "version": {
+      "description": "Completion schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
     }
   },
   "required": [
+    "format",
+    "version",
+    "validation_version",
     "session_id",
+    "session_manifest_hash",
+    "event_header_hash",
     "output_bytes",
     "final_event_hash",
-    "event_count"
+    "event_count",
+    "terminal_event_seq"
   ],
   "title": "SessionCompletion",
   "type": "object"

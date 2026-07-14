@@ -1,0 +1,115 @@
+{
+  "$defs": {
+    "VerificationFinding": {
+      "additionalProperties": false,
+      "description": "One stable verification diagnostic.",
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable finding code.",
+          "type": "string"
+        },
+        "message": {
+          "description": "Human-readable context that is not intended for programmatic matching.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "VerificationLevel": {
+      "description": "Requested depth for an offline evidence verification.",
+      "oneOf": [
+        {
+          "const": "structure",
+          "description": "Parse all canonical files and enforce their versioned structure.",
+          "type": "string"
+        },
+        {
+          "const": "content",
+          "description": "Verify the manifest binding, event chain, completion, and terminal state.",
+          "type": "string"
+        },
+        {
+          "const": "durability_record",
+          "description": "Verify content plus the chain-bound durability policy and recorded outcomes.",
+          "type": "string"
+        },
+        {
+          "const": "signature",
+          "description": "Verify content plus a detached signature and configured signer trust.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/verification-report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Machine-readable result from offline session verification.",
+  "properties": {
+    "final_event_hash": {
+      "description": "Final canonical event hash, when readable.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "findings": {
+      "description": "Stable findings; empty when verification succeeds.",
+      "items": {
+        "$ref": "#/$defs/VerificationFinding"
+      },
+      "type": "array"
+    },
+    "format": {
+      "description": "Stable report format identifier.",
+      "type": "string"
+    },
+    "level": {
+      "$ref": "#/$defs/VerificationLevel",
+      "description": "Requested verification depth."
+    },
+    "session": {
+      "description": "Canonical session directory checked by the verifier.",
+      "type": "string"
+    },
+    "session_id": {
+      "description": "Immutable session identifier, when readable.",
+      "format": "uuid",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "session_manifest_hash": {
+      "description": "Exact session-manifest hash, when readable.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "valid": {
+      "description": "Whether every invariant at the requested level passed.",
+      "type": "boolean"
+    },
+    "version": {
+      "description": "Report schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "session",
+    "level",
+    "valid",
+    "findings"
+  ],
+  "title": "VerificationReport",
+  "type": "object"
+}

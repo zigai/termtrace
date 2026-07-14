@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use uuid::Uuid;
 
 /// Current on-disk event-log format version.
-pub const EVENT_LOG_VERSION: u32 = 1;
+pub const EVENT_LOG_VERSION: u32 = 2;
 
 /// Stable event-log format identifier.
 pub const EVENT_LOG_FORMAT: &str = "termtrace-events";
@@ -100,6 +100,8 @@ pub struct EventLogHeader {
     pub version: u32,
     /// Globally unique session identifier.
     pub session_id: Uuid,
+    /// BLAKE3 of the exact immutable `session.json` bytes.
+    pub session_manifest_hash: String,
     /// Wall-clock Unix timestamp corresponding to monotonic time zero.
     pub started_unix_ns: u128,
     /// Initial terminal columns.
@@ -149,6 +151,7 @@ impl EventLogHeader {
     /// Construct a header for a new recording.
     pub fn new(
         session_id: Uuid,
+        session_manifest_hash: impl Into<String>,
         started_unix_ns: u128,
         cols: u16,
         rows: u16,
@@ -160,6 +163,7 @@ impl EventLogHeader {
             format: EVENT_LOG_FORMAT.to_owned(),
             version: EVENT_LOG_VERSION,
             session_id,
+            session_manifest_hash: session_manifest_hash.into(),
             started_unix_ns,
             cols,
             rows,

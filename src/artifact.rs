@@ -2,7 +2,7 @@
 
 use std::{
     fs::{DirBuilder, File, OpenOptions, Permissions},
-    io::{BufWriter, Error as IoError, Write as _},
+    io::{BufWriter, Error as IoError, ErrorKind, Write as _},
     os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _},
     path::Path,
 };
@@ -23,12 +23,13 @@ pub(crate) fn create_private_directory(path: &Path) -> Result<()> {
             source,
         };
     })?;
-    return fs_err::set_permissions(path, Permissions::from_mode(0o700)).map_err(|source| {
+    fs_err::set_permissions(path, Permissions::from_mode(0o700)).map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),
             source,
         };
-    });
+    })?;
+    return sync_parent_directory(path);
 }
 
 pub(crate) fn secure_writer(path: &Path) -> Result<BufWriter<File>> {
@@ -50,7 +51,7 @@ pub(crate) fn secure_file(path: &Path) -> Result<File> {
 }
 
 pub(crate) fn finish_writer(mut writer: BufWriter<File>, path: &Path) -> Result<()> {
-    return writer
+    writer
         .flush()
         .and_then(|()| return writer.get_ref().sync_data())
         .map_err(|source| {
@@ -58,12 +59,13 @@ pub(crate) fn finish_writer(mut writer: BufWriter<File>, path: &Path) -> Result<
                 path: path.to_path_buf(),
                 source,
             };
-        });
+        })?;
+    return sync_parent_directory(path);
 }
 
 pub(crate) fn write_secure(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut writer = secure_writer(path)?;
-    return writer
+    writer
         .write_all(bytes)
         .and_then(|()| return writer.flush())
         .and_then(|()| return writer.get_ref().sync_data())
@@ -72,7 +74,8 @@ pub(crate) fn write_secure(path: &Path, bytes: &[u8]) -> Result<()> {
                 path: path.to_path_buf(),
                 source,
             };
-        });
+        })?;
+    return sync_parent_directory(path);
 }
 
 pub(crate) fn sync_directory(path: &Path) -> Result<()> {
@@ -84,6 +87,16 @@ pub(crate) fn sync_directory(path: &Path) -> Result<()> {
                 source,
             };
         });
+}
+
+pub(crate) fn sync_parent_directory(path: &Path) -> Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
+        };
+    })?;
+    return sync_directory(parent);
 }
 
 pub(crate) fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> Result<()> {
@@ -103,7 +116,7 @@ pub(crate) fn commit_directory(session: &Path, staging: &Path, destination: &Pat
             reason: "artifact directory has no basename".to_owned(),
         };
     })?;
-    return renameat2(
+    renameat2(
         &directory,
         staging_name,
         &directory,
@@ -121,5 +134,6 @@ pub(crate) fn commit_directory(session: &Path, staging: &Path, destination: &Pat
                 source: IoError::from_raw_os_error(error as i32),
             };
         }
-    });
+    })?;
+    return sync_directory(session);
 }

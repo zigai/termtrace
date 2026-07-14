@@ -37,9 +37,10 @@ termtrace mark --session SESSION --label settled
 termtrace stop --session SESSION --wait
 termtrace index --session SESSION --from-marker settled
 termtrace capture --session SESSION --from-marker settled
+termtrace verify SESSION --level content --json
 ```
 
-Normal `index` and every `capture` require `completion.json` to agree with the canonical final hash, event count, and output byte count. This prevents a settled-but-live TUI from producing an index that silently becomes stale. `status --wait-complete` waits without stopping the child. If a live prefix is genuinely needed, `index --live-snapshot` writes a hash-addressed, explicitly incomplete directory; create a fresh final index after completion. Existing artifact directories are never replaced.
+Normal `index` and every `capture` require `completion.json` to bind the exact session manifest and event header, agree with the canonical final hash, event count, output byte count, and exit outcome, and identify a final `Exit` with no pending mutation. This prevents a settled-but-live TUI from producing an index that silently becomes stale. `status --wait-complete` waits without stopping the child. If a live prefix is genuinely needed, `index --live-snapshot` writes a hash-addressed, explicitly incomplete directory; create a fresh final index after completion. Existing artifact directories are never replaced.
 
 Use `index --presented-only` (and the same capture flag) when synchronized-output internals are unnecessary. Full indexing remains the default. Marker labels used as `--from-marker` or `--to-marker` must occur exactly once.
 

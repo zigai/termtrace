@@ -15,7 +15,7 @@ use tempfile::TempDir;
 use termtrace::{
     Error,
     control::{ControlCommand, ControlRequest, send_request},
-    event::{Event, InputSource, OperationStatus},
+    event::{EVENT_LOG_VERSION, Event, InputSource, OperationStatus},
     event_log::EventLog,
     replay::{
         GHOSTTY_REVISION, IndexOptions, ReplayManifest, StateRecord, StateSelection,
@@ -41,7 +41,50 @@ fn version_subcommand_reports_package_version() {
             "libghostty-vt {}",
             GHOSTTY_REVISION
         )))
-        .stdout(predicate::str::contains("event-log v1"));
+        .stdout(predicate::str::contains(format!(
+            "event-log v{EVENT_LOG_VERSION}"
+        )));
+}
+
+#[test]
+fn verify_reports_manifest_binding_and_detects_tampering() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("verified-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf verified"])
+        .assert()
+        .success();
+
+    let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
+    verify
+        .arg("verify")
+        .arg(&session)
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""valid":true"#))
+        .stdout(predicate::str::contains(r#""level":"content""#));
+
+    let manifest_path = session.join("session.json");
+    let manifest = fs_err::read_to_string(&manifest_path).expect("session manifest");
+    let tampered = manifest.replace("L2Jpbi9zaA==", "L2Jpbi9ueA==");
+    assert_ne!(manifest, tampered, "fixture command should be replaced");
+    fs_err::write(&manifest_path, tampered).expect("tamper session manifest");
+
+    let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
+    verify
+        .arg("verify")
+        .arg(&session)
+        .arg("--json")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(r#""valid":false"#))
+        .stdout(predicate::str::contains(
+            r#""code":"session_manifest_hash_mismatch""#,
+        ));
 }
 
 #[test]
@@ -1004,6 +1047,7 @@ fn playback_does_not_echo_terminal_query_responses() {
     let clock = SessionClock::now().expect("session clock");
     let header = EventLogHeader::new(
         Uuid::now_v7(),
+        "0000000000000000000000000000000000000000000000000000000000000000",
         clock.started_unix_ns(),
         80,
         24,

@@ -48,7 +48,7 @@ The child inherits the recorder's current working directory by default, so `cd p
 
 The new owner-only session directory contains an integrity-chained `events.jsonl` recording with raw bytes encoded as Base64. Inputs and resizes are represented by durable intent/result pairs. A crash between the pair is reported as uncertain, never silently retried. High-volume output is buffered between durable control boundaries so recording does not add an `fsync` pause to every PTY read. A live pinned-libghostty engine answers terminal queries and audits each generated reply as distinct host input. The header also pins Ghostty's effective foreground, pure-black background, cursor color, and complete palette for deterministic replay.
 
-Termtrace refuses to reuse an existing session directory. This prevents accidental evidence loss and makes every run independently auditable.
+Termtrace refuses to reuse an existing session directory. This prevents accidental evidence loss and makes every run independently auditable. The canonical session manifest is written before the event header, and its exact hash is bound through the event chain and completion manifest. Verify a finished recording with `termtrace verify /tmp/example.termtrace --level content --json`.
 
 Detailed references: [installation](docs/installation.md), [agent workflows](docs/agent-workflows.md), [semantic replay](docs/semantic-replay.md), [formats and schemas](docs/formats.md), and [troubleshooting](docs/troubleshooting.md).
 
@@ -72,7 +72,7 @@ termtrace stop --session /tmp/example.termtrace --wait
 
 Use `termtrace send --file PATH` for arbitrary bytes. The Rust API also exposes `control::send_request`; retain and resend the same request UUID after a transport failure. The session actor returns the cached result and never applies that mutation twice. Reusing a UUID for a different command is rejected.
 
-The socket disappears when the child exits. `stop --wait` does not return until `completion.json` is durable and agrees with the final event hash, count, and output byte count. `status --wait-complete` provides the same completion barrier without sending a signal. Marker responses include their canonical event sequence.
+The socket disappears when the child exits. `stop --wait` does not return until `completion.json` is durable and binds the session manifest, event header, final `Exit`, hash, count, output byte count, and exit outcome. `status --wait-complete` provides the same completion barrier without sending a signal. Marker responses include their canonical event sequence.
 
 ## Semantic replay
 

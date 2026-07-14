@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::{
     Error, Result,
+    artifact::sync_parent_directory,
     event::{
         EVENT_LOG_FORMAT, EVENT_LOG_VERSION, Event, EventBody, EventLogHeader, EventRecord,
         OperationStatus,
@@ -138,6 +139,7 @@ impl EventLogWriter {
                     source,
                 };
             })?;
+        sync_parent_directory(&path)?;
 
         return Ok(Self {
             path,
@@ -856,6 +858,18 @@ fn validate_header(path: &Path, header: &EventLogHeader) -> Result<()> {
     if header.cols == 0 || header.rows == 0 {
         return Err(invalid_log(path, 1, "terminal dimensions must be nonzero"));
     }
+    if header.session_manifest_hash.len() != 64
+        || !header
+            .session_manifest_hash
+            .bytes()
+            .all(|byte| return byte.is_ascii_hexdigit())
+    {
+        return Err(invalid_log(
+            path,
+            1,
+            "session manifest hash must be a 64-character hexadecimal BLAKE3 digest",
+        ));
+    }
     if header.term.is_empty() {
         return Err(invalid_log(path, 1, "terminal identity must not be empty"));
     }
@@ -904,6 +918,7 @@ mod tests {
     fn header(clock: &SessionClock) -> EventLogHeader {
         return EventLogHeader::new(
             Uuid::now_v7(),
+            "0000000000000000000000000000000000000000000000000000000000000000",
             clock.started_unix_ns(),
             120,
             40,
