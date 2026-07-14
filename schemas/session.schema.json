@@ -333,6 +333,10 @@
       "description": "Build target operating system.",
       "type": "string"
     },
+    "request_journal": {
+      "description": "Persistent mutation deduplication journal relative path.",
+      "type": "string"
+    },
     "session_id": {
       "description": "Session identifier shared with the event log.",
       "format": "uuid",
@@ -379,6 +383,7 @@
     "architecture",
     "event_log",
     "control_socket",
+    "request_journal",
     "contains_sensitive_terminal_data",
     "durability_policy"
   ],

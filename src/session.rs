@@ -14,12 +14,13 @@ use crate::{
     artifact::verify_session_artifacts,
     event::{ByteString, Event},
     event_log::{DurabilityPolicy, DurabilityRecord, EventLog},
+    request_journal::{MUTATION_JOURNAL_NAME, validate_mutation_journal},
 };
 
 /// Session manifest format identifier.
 pub const SESSION_MANIFEST_FORMAT: &str = "termtrace-session";
 /// Session manifest schema version.
-pub const SESSION_MANIFEST_VERSION: u32 = 3;
+pub const SESSION_MANIFEST_VERSION: u32 = 4;
 /// Completion manifest format identifier.
 pub const SESSION_COMPLETION_FORMAT: &str = "termtrace-completion";
 /// Completion manifest schema version.
@@ -29,7 +30,7 @@ pub const COMPLETION_VALIDATION_VERSION: u32 = 1;
 /// Verification report format identifier.
 pub const VERIFICATION_REPORT_FORMAT: &str = "termtrace-verification";
 /// Verification report schema version.
-pub const VERIFICATION_REPORT_VERSION: u32 = 2;
+pub const VERIFICATION_REPORT_VERSION: u32 = 3;
 
 /// Requested depth for an offline evidence verification.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -79,8 +80,26 @@ pub struct VerificationReport {
     pub artifact_roots_verified: u64,
     /// Whether artifact authenticity was established from a trusted checkpoint.
     pub artifact_authenticity_established: bool,
+    /// State of the disposable mutation deduplication acceleration journal.
+    pub mutation_journal_status: MutationJournalStatus,
+    /// Number of mutation outcomes verified against canonical ranges.
+    pub mutation_journal_records_verified: u64,
+    /// Journal-only diagnostic when acceleration is invalid.
+    pub mutation_journal_error: Option<String>,
     /// Stable findings; empty when verification succeeds.
     pub findings: Vec<VerificationFinding>,
+}
+
+/// Offline status of the disposable mutation request journal.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MutationJournalStatus {
+    /// The acceleration journal is absent; canonical evidence remains valid.
+    Missing,
+    /// Every journal record agrees with canonical event evidence.
+    Verified,
+    /// Journal acceleration is corrupt or stale and must not be reused.
+    Invalid,
 }
 
 /// Initial PTY geometry.
@@ -207,6 +226,8 @@ pub struct SessionManifest {
     pub event_log: String,
     /// Live control socket relative path.
     pub control_socket: String,
+    /// Persistent mutation deduplication journal relative path.
+    pub request_journal: String,
     /// Explicit sensitivity warning.
     pub contains_sensitive_terminal_data: bool,
     /// Chain-bound output persistence policy.
@@ -282,6 +303,9 @@ pub fn verify_session(
         final_event_hash: None,
         artifact_roots_verified: 0,
         artifact_authenticity_established: false,
+        mutation_journal_status: MutationJournalStatus::Missing,
+        mutation_journal_records_verified: 0,
+        mutation_journal_error: None,
         findings: Vec::new(),
     };
     let manifest_path = session_directory.join("session.json");
@@ -367,6 +391,19 @@ pub fn verify_session(
                 message: error.to_string(),
             });
             return report;
+        }
+    }
+    let journal_path = session_directory.join(MUTATION_JOURNAL_NAME);
+    if journal_path.exists() {
+        match validate_mutation_journal(session_directory, &log) {
+            Ok(count) => {
+                report.mutation_journal_status = MutationJournalStatus::Verified;
+                report.mutation_journal_records_verified = count;
+            }
+            Err(error) => {
+                report.mutation_journal_status = MutationJournalStatus::Invalid;
+                report.mutation_journal_error = Some(error.to_string());
+            }
         }
     }
     match level {
@@ -599,6 +636,11 @@ fn validate_manifest(manifest: &SessionManifest) -> Result<()> {
             reason: format!("unsupported session format version {}", manifest.version),
         });
     }
+    if manifest.request_journal != MUTATION_JOURNAL_NAME {
+        return Err(Error::InvalidReplay {
+            reason: "session manifest names an unsupported mutation journal path".to_owned(),
+        });
+    }
     manifest.durability_policy.validate()?;
     return Ok(());
 }
@@ -703,6 +745,7 @@ mod tests {
             architecture: "test".to_owned(),
             event_log: "events.jsonl".to_owned(),
             control_socket: "control.sock".to_owned(),
+            request_journal: "requests.jsonl".to_owned(),
             contains_sensitive_terminal_data: true,
             durability_policy: DurabilityPolicy::default(),
         };
@@ -756,6 +799,7 @@ mod tests {
     #[test]
     fn completed_validation_requires_terminal_exit() {
         let (temporary, log) = completed_fixture(vec![Event::Marker {
+            operation_id: Uuid::now_v7(),
             label: "not-an-exit".to_owned(),
         }]);
         let error = validate_completed_log(&temporary.path().join("session"), &log)

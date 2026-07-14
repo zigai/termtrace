@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use uuid::Uuid;
 
 /// Current on-disk event-log format version.
-pub const EVENT_LOG_VERSION: u32 = 2;
+pub const EVENT_LOG_VERSION: u32 = 3;
 
 /// Stable event-log format identifier.
 pub const EVENT_LOG_FORMAT: &str = "termtrace-events";
@@ -305,6 +305,8 @@ pub enum Event {
     },
     /// A named point in the session timeline.
     Marker {
+        /// Caller-owned operation identifier used for durable deduplication.
+        operation_id: Uuid,
         /// User-provided marker label.
         label: String,
     },

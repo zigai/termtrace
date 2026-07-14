@@ -6,7 +6,7 @@ Run `termtrace record --no-input --out SESSION -- COMMAND ...` in a supervised b
 
 ## Drive safely
 
-Use `send --text` for UTF-8 and `send --file` for exact bytes. Every mutation has a caller-owned UUID, durable intent, explicit result, byte count, and actor-side deduplication. Library clients should retain a `ControlRequest` and use `send_request` with the same UUID after a transport failure. Never create a new UUID to retry input whose outcome is unknown.
+Use `send --text` for UTF-8 and `send --file` for exact bytes. Every mutation has a caller-owned UUID, durable intent, explicit result, byte count, and actor-side deduplication. Library clients should retain a `ControlRequest` and use `send_request` with the same UUID after a transport failure. Never create a new UUID to retry input whose outcome is unknown. Exact outcomes persist in `requests.jsonl`, so a retry remains safe after the actor's bounded memory cache evicts the request; read-only observations are not retained there.
 
 Signals are allowlisted: interrupt, terminate, hangup, user1, and user2. `SIGKILL` is intentionally absent. `stop` is a graceful `SIGTERM` request. Markers are durable timeline annotations, and a successful `mark` response names the canonical event sequence.
 

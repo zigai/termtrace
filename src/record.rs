@@ -3,6 +3,7 @@
 use std::{
     collections::BTreeMap,
     collections::HashMap,
+    collections::VecDeque,
     env::{
         self,
         consts::{ARCH, OS},
@@ -54,6 +55,9 @@ use crate::{
     event_log::{DurabilityPolicy, EventLogWriter, SessionClock},
     ghostty_vt::GhosttyVt,
     profile::ResolvedGhosttyProfile,
+    request_journal::{
+        MUTATION_JOURNAL_NAME, MutationJournal, MutationJournalRecord, command_hash,
+    },
     session::{
         COMPLETION_VALIDATION_VERSION, GeometryProvenance, SESSION_COMPLETION_FORMAT,
         SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
@@ -67,6 +71,8 @@ const SESSION_DIRECTORY_MODE: u32 = 0o700;
 const READ_BUFFER_BYTES: usize = 16 * 1024;
 const DESCENDANT_GRACE_PERIOD: Duration = Duration::from_millis(250);
 const DESCENDANT_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+const MUTATION_CACHE_CAPACITY: usize = 256;
+const MAX_SESSION_MUTATIONS: u64 = 1_000_000;
 
 /// Configuration for one recorded command.
 #[derive(Clone, Debug)]
@@ -197,6 +203,120 @@ struct RuntimeOutcome {
 struct RuntimeProgress {
     output_closed: bool,
     output_bytes: u64,
+}
+
+#[derive(Clone)]
+struct CachedMutation {
+    command_hash: String,
+    response: ControlResponse,
+}
+
+struct MutationHistory {
+    journal: MutationJournal,
+    cached: HashMap<Uuid, CachedMutation>,
+    order: VecDeque<Uuid>,
+    capacity: usize,
+}
+
+impl MutationHistory {
+    fn new(journal: MutationJournal, capacity: usize) -> Self {
+        return Self {
+            journal,
+            cached: HashMap::new(),
+            order: VecDeque::new(),
+            capacity,
+        };
+    }
+
+    fn lookup(
+        &mut self,
+        request_id: Uuid,
+        command: &ControlCommand,
+    ) -> Result<(String, Option<ControlResponse>)> {
+        let requested_hash = command_hash(command)?;
+        if let Some(cached) = self.cached.get(&request_id) {
+            let response = mutation_retry_response(request_id, &requested_hash, cached);
+            return Ok((requested_hash, Some(response)));
+        }
+        let Some(record) = self.journal.lookup(request_id)? else {
+            return Ok((requested_hash, None));
+        };
+        let cached = CachedMutation {
+            command_hash: record.command_hash,
+            response: record.response,
+        };
+        let response = mutation_retry_response(request_id, &requested_hash, &cached);
+        self.cache(request_id, cached);
+        return Ok((requested_hash, Some(response)));
+    }
+
+    fn is_full(&self) -> bool {
+        return self.journal.len() >= MAX_SESSION_MUTATIONS;
+    }
+
+    fn remember(
+        &mut self,
+        request_id: Uuid,
+        command_hash: String,
+        event_start_seq: u64,
+        event_end_seq: u64,
+        event_hash: String,
+        response: ControlResponse,
+    ) -> Result<()> {
+        let operation_ids = if event_end_seq > event_start_seq {
+            vec![request_id]
+        } else {
+            Vec::new()
+        };
+        let record = self.journal.append(
+            request_id,
+            command_hash,
+            operation_ids,
+            event_start_seq,
+            event_end_seq,
+            event_hash,
+            response,
+        )?;
+        self.cache_record(record);
+        return Ok(());
+    }
+
+    fn cache_record(&mut self, record: MutationJournalRecord) {
+        self.cache(
+            record.request_id,
+            CachedMutation {
+                command_hash: record.command_hash,
+                response: record.response,
+            },
+        );
+    }
+
+    fn cache(&mut self, request_id: Uuid, value: CachedMutation) {
+        if self.cached.insert(request_id, value).is_none() {
+            self.order.push_back(request_id);
+        }
+        while self.cached.len() > self.capacity {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            self.cached.remove(&evicted);
+        }
+    }
+}
+
+fn mutation_retry_response(
+    request_id: Uuid,
+    requested_hash: &str,
+    cached: &CachedMutation,
+) -> ControlResponse {
+    if cached.command_hash == requested_hash {
+        return cached.response.clone();
+    }
+    return control_error_response(
+        request_id,
+        "request_id_collision",
+        "request identifier was already used for a different mutation",
+    );
 }
 
 struct LiveTerminal {
@@ -382,6 +502,7 @@ fn write_session_manifest(
         architecture: ARCH.to_owned(),
         event_log: "events.jsonl".to_owned(),
         control_socket: CONTROL_SOCKET_NAME.to_owned(),
+        request_journal: MUTATION_JOURNAL_NAME.to_owned(),
         contains_sensitive_terminal_data: true,
         durability_policy: options.durability_policy.clone(),
     };
@@ -529,6 +650,8 @@ fn consume_runtime(
         query_tracker: QueryTracker::default(),
     };
     let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
+    let journal = MutationJournal::create(session_directory)?;
+    let mut mutation_history = MutationHistory::new(journal, MUTATION_CACHE_CAPACITY);
     let reader = replace(&mut spawned.reader, Box::new(io::empty()));
     let workers = RuntimeWorkers::start(
         reader,
@@ -546,8 +669,6 @@ fn consume_runtime(
     let mut exit_status = None;
     let mut drain_deadline: Option<Instant> = None;
     let mut process_group_killed = false;
-    let mut control_history: HashMap<Uuid, (ControlCommand, ControlResponse)> = HashMap::new();
-
     let result = (|| {
         while !progress.output_closed || exit_status.is_none() {
             match receiver.recv_timeout(Duration::from_millis(10)) {
@@ -557,7 +678,7 @@ fn consume_runtime(
                     event_log,
                     output,
                     &mut progress,
-                    &mut control_history,
+                    &mut mutation_history,
                     &mut live_terminal,
                 )?,
                 Err(RecvTimeoutError::Disconnected) if !progress.output_closed => {
@@ -615,7 +736,7 @@ fn process_runtime_message(
     event_log: &mut EventLogWriter,
     output: &mut impl Write,
     progress: &mut RuntimeProgress,
-    control_history: &mut HashMap<Uuid, (ControlCommand, ControlResponse)>,
+    mutation_history: &mut MutationHistory,
     live: &mut LiveTerminal,
 ) -> Result<()> {
     match message {
@@ -678,7 +799,7 @@ fn process_runtime_message(
             event_log,
             request,
             &response,
-            control_history,
+            mutation_history,
             &mut live.semantic,
         )?,
         RuntimeMessage::ControlServerFailed(reason) => {
@@ -1103,27 +1224,34 @@ fn handle_control_request(
     event_log: &mut EventLogWriter,
     request: ControlRequest,
     response_sender: &mpsc::SyncSender<ControlResponse>,
-    history: &mut HashMap<Uuid, (ControlCommand, ControlResponse)>,
+    history: &mut MutationHistory,
     semantic: &mut GhosttyVt,
 ) -> Result<()> {
     let read_only = matches!(
         request.command,
         ControlCommand::Ping | ControlCommand::Status
     );
-    if let Some((original, response)) = history.get(&request.request_id) {
-        let response = if original == &request.command {
-            response.clone()
-        } else {
-            control_error_response(
+    let command_hash = if read_only {
+        None
+    } else {
+        let (hash, prior) = history.lookup(request.request_id, &request.command)?;
+        if let Some(response) = prior {
+            let _ = response_sender.send(response);
+            return Ok(());
+        }
+        if history.is_full() {
+            let response = control_error_response(
                 request.request_id,
-                "request_id_collision",
-                "request identifier was already used for a different command",
-            )
-        };
-        let _ = response_sender.send(response);
-        return Ok(());
-    }
+                "mutation_limit_reached",
+                "session mutation operation limit has been reached",
+            );
+            let _ = response_sender.send(response);
+            return Ok(());
+        }
+        Some(hash)
+    };
 
+    let event_start_seq = event_log.next_seq();
     let outcome = execute_control_command(
         spawned,
         event_log,
@@ -1143,8 +1271,15 @@ fn handle_control_request(
             error.to_string(),
         ),
     };
-    if !read_only {
-        history.insert(request.request_id, (request.command, response.clone()));
+    if let Some(command_hash) = command_hash {
+        history.remember(
+            request.request_id,
+            command_hash,
+            event_start_seq,
+            event_log.next_seq(),
+            event_log.current_hash(),
+            response.clone(),
+        )?;
     }
     if response_sender.send(response).is_err() {
         tracing::warn!(request_id = %request.request_id, "control response receiver disconnected");
@@ -1223,6 +1358,7 @@ fn execute_control_command(
                 ));
             }
             let event_seq = event_log.append(Event::Marker {
+                operation_id: request_id,
                 label: label.to_owned(),
             })?;
             return Ok(ControlData::Marked {
@@ -1774,10 +1910,74 @@ mod tests {
 
     use super::*;
     use crate::{
+        control::ControlResult,
         event::Event,
-        event_log::EventLog,
+        event_log::{CanonicalBoundary, EventLog},
         session::{SessionCompletion, SessionManifest},
     };
+
+    fn cached_test_response(request_id: Uuid, next_event_seq: u64) -> ControlResponse {
+        let boundary = CanonicalBoundary {
+            next_event_seq,
+            event_hash: format!("{next_event_seq:064x}"),
+            output_bytes: 0,
+        };
+        return ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id,
+            result: ControlResult::Ok {
+                data: ControlData::Acknowledged {
+                    boundaries: ActorBoundaries {
+                        durable: boundary.clone(),
+                        observed: boundary,
+                    },
+                },
+            },
+        };
+    }
+
+    #[test]
+    fn evicted_mutation_outcomes_are_loaded_from_the_persistent_journal() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let journal = MutationJournal::create(temporary.path()).expect("mutation journal");
+        let mut history = MutationHistory::new(journal, 1);
+        let first_id = Uuid::now_v7();
+        let first_command = ControlCommand::Mark {
+            label: "first".to_owned(),
+        };
+        let first_response = cached_test_response(first_id, 1);
+        history
+            .remember(
+                first_id,
+                command_hash(&first_command).expect("command hash"),
+                0,
+                1,
+                "1".repeat(64),
+                first_response.clone(),
+            )
+            .expect("remember first mutation");
+        let second_id = Uuid::now_v7();
+        let second_command = ControlCommand::Mark {
+            label: "second".to_owned(),
+        };
+        history
+            .remember(
+                second_id,
+                command_hash(&second_command).expect("command hash"),
+                1,
+                2,
+                "2".repeat(64),
+                cached_test_response(second_id, 2),
+            )
+            .expect("remember second mutation");
+        assert!(!history.cached.contains_key(&first_id));
+
+        let (_, retry) = history
+            .lookup(first_id, &first_command)
+            .expect("load evicted mutation");
+        assert_eq!(retry, Some(first_response));
+        assert_eq!(history.journal.len(), 2);
+    }
 
     #[test]
     fn records_exact_output_and_exit_after_output_close() {

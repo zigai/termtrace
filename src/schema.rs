@@ -19,6 +19,7 @@ use crate::{
     inspection::WaitOutcome,
     playback::{PlaybackFailure, PlaybackTiming},
     replay::{ReplayManifest, StateIndexEntry, StateInspection, StateRecord},
+    request_journal::MutationJournalRecord,
     session::{SessionCompletion, SessionManifest, VerificationReport},
     visual::{VideoMapEntry, VisualManifest},
 };
@@ -47,6 +48,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<SessionCompletion>("completion.schema.json")?,
         schema::<VerificationReport>("verification-report.schema.json")?,
         schema::<ArtifactRootRecord>("artifact-root-record.schema.json")?,
+        schema::<MutationJournalRecord>("mutation-journal-record.schema.json")?,
         schema::<StateRecord>("state-record.schema.json")?,
         schema::<StateIndexEntry>("state-index-entry.schema.json")?,
         schema::<StateInspection>("state-inspection.schema.json")?,

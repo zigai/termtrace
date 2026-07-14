@@ -1305,6 +1305,7 @@ mod tests {
 
         writer
             .append(Event::Marker {
+                operation_id: Uuid::now_v7(),
                 label: "flush".to_owned(),
             })
             .expect("durable marker");
@@ -1464,6 +1465,7 @@ mod tests {
             .append_at(
                 1,
                 Event::Marker {
+                    operation_id: Uuid::now_v7(),
                     label: "before".to_owned(),
                 },
             )
@@ -1489,6 +1491,7 @@ mod tests {
             .append_at(
                 1,
                 Event::Marker {
+                    operation_id: Uuid::now_v7(),
                     label: "complete".to_owned(),
                 },
             )

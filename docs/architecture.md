@@ -31,6 +31,8 @@ The proxy forwards bytes unchanged. It owns the target PTY, logs before acknowle
 
 Read-only control operations are observations rather than execution events. Ping, status, wait registration/polling, and live boundary discovery return actor-consistent `observed` and `durable` positions without changing the event count or hash. Mutations and explicit markers remain canonical.
 
+Mutation idempotency uses a bounded in-memory cache backed by the append-only, hash-chained `requests.jsonl` journal. Each record binds the request UUID and command hash to its operation IDs, canonical event range and hash, and exact response. Cache eviction therefore does not permit a duplicate mutation. Read-only observations are excluded, and a per-session mutation limit bounds journal growth. The journal is disposable acceleration: verification cross-checks it against canonical events when present, but missing or invalid journal data cannot invalidate otherwise complete canonical evidence.
+
 Output persistence is explicit provenance. `strict` synchronizes every PTY output event, `bounded` synchronizes when either its configured byte limit or elapsed-time limit is reached, and `throughput` buffers output until a durable mutation/lifecycle/completion boundary. The actor checks bounded elapsed deadlines even while the child is idle. Completion reports measured maxima and final synchronization; this is syscall-level evidence under the recorded host assumptions, not offline proof of power-loss survival.
 
 The target process starts in the recorder's effective current directory unless `--cwd` overrides it. Termtrace resolves that directory once before creating provenance or spawning the PTY child, so the manifest and process cannot disagree.

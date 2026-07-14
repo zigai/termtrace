@@ -135,7 +135,7 @@ fn resolve_marker(log: &EventLog, label: &str) -> Result<u64> {
         .events
         .iter()
         .filter(|record| {
-            return matches!(&record.event, Event::Marker { label: value } if value == label);
+            return matches!(&record.event, Event::Marker { label: value, .. } if value == label);
         })
         .collect::<Vec<_>>();
     match matches.as_slice() {

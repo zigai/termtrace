@@ -21,6 +21,7 @@ use termtrace::{
         GHOSTTY_REVISION, IndexOptions, ReplayManifest, StateRecord, StateSelection,
         derived_directory_name, index_session_range, index_session_with_options, replay,
     },
+    request_journal::read_mutation_journal,
     session::{CaptureTarget, GeometrySource, read_manifest},
     timeline::SourceRange,
 };
@@ -330,7 +331,9 @@ fn live_control_drives_and_audits_a_detached_session() {
     let collision = ControlRequest {
         version: duplicate_request.version,
         request_id: duplicate_request.request_id,
-        command: ControlCommand::Ping,
+        command: ControlCommand::Mark {
+            label: "different".to_owned(),
+        },
     };
     assert!(matches!(
         send_request(&session, &collision),
@@ -396,6 +399,30 @@ fn live_control_drives_and_audits_a_detached_session() {
 
     let recording = EventLog::read(session.join("events.jsonl")).expect("valid event log");
     assert_control_events(&recording, &session);
+    let journal_path = session.join("requests.jsonl");
+    validate_json_lines("mutation-journal-record.schema.json", &journal_path);
+    let mutation_records = read_mutation_journal(&journal_path).expect("mutation journal");
+    assert_eq!(
+        mutation_records
+            .iter()
+            .filter(|record| return record.request_id == duplicate_request.request_id)
+            .count(),
+        1,
+        "retried mutation must have one persistent outcome"
+    );
+    let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
+    verify
+        .arg("verify")
+        .arg(&session)
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            r#""mutation_journal_status":"verified""#,
+        ))
+        .stdout(predicate::str::contains(
+            r#""mutation_journal_records_verified":4"#,
+        ));
 }
 
 #[test]
@@ -517,7 +544,7 @@ fn assert_control_events(recording: &EventLog, session: &Path) {
             .iter()
             .filter(|record| matches!(
                 &record.event,
-                Event::Marker { label } if label == "deduplicated"
+                Event::Marker { label, .. } if label == "deduplicated"
             ))
             .count(),
         1
@@ -532,7 +559,7 @@ fn assert_control_events(recording: &EventLog, session: &Path) {
     )));
     assert!(recording.events.iter().any(|record| matches!(
         &record.event,
-        Event::Marker { label } if label == "before-input"
+        Event::Marker { label, .. } if label == "before-input"
     )));
     assert!(recording.pending_operations.is_empty());
 
@@ -1151,6 +1178,7 @@ fn playback_does_not_echo_terminal_query_responses() {
         architecture: "test".to_owned(),
         event_log: "events.jsonl".to_owned(),
         control_socket: "control.sock".to_owned(),
+        request_journal: "requests.jsonl".to_owned(),
         contains_sensitive_terminal_data: true,
         durability_policy: DurabilityPolicy::default(),
     };

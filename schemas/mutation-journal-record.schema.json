@@ -1,0 +1,292 @@
+{
+  "$defs": {
+    "ActorBoundaries": {
+      "additionalProperties": false,
+      "description": "Durable and latest actor-processed positions returned by live operations.",
+      "properties": {
+        "durable": {
+          "$ref": "#/$defs/CanonicalBoundary",
+          "description": "Latest boundary whose file synchronization completed successfully."
+        },
+        "observed": {
+          "$ref": "#/$defs/CanonicalBoundary",
+          "description": "Latest boundary processed by the session actor, possibly volatile."
+        }
+      },
+      "required": [
+        "durable",
+        "observed"
+      ],
+      "type": "object"
+    },
+    "CanonicalBoundary": {
+      "additionalProperties": false,
+      "description": "Actor-consistent position in the canonical event stream.",
+      "properties": {
+        "event_hash": {
+          "description": "Hash of the preceding event, or the event header at sequence zero.",
+          "type": "string"
+        },
+        "next_event_seq": {
+          "description": "Sequence number that will be assigned to the next event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_bytes": {
+          "description": "PTY output bytes included through this boundary.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "next_event_seq",
+        "event_hash",
+        "output_bytes"
+      ],
+      "type": "object"
+    },
+    "ControlData": {
+      "description": "Successful response payload.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "No additional data is required.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed canonical positions after the operation."
+            },
+            "kind": {
+              "const": "acknowledged",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Live session status.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed canonical positions at status evaluation."
+            },
+            "kind": {
+              "const": "status",
+              "type": "string"
+            },
+            "pid": {
+              "description": "Child process identifier when available.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Canonical position of an appended marker.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed canonical positions after the marker."
+            },
+            "event_seq": {
+              "description": "Canonical event sequence containing the marker.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "marked",
+              "type": "string"
+            },
+            "label": {
+              "description": "Normalized marker label.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "label",
+            "event_seq",
+            "boundaries"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ControlResponse": {
+      "additionalProperties": false,
+      "description": "Response envelope carried as one JSON line.",
+      "properties": {
+        "request_id": {
+          "description": "Identifier copied from the request.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/ControlResult",
+          "description": "Success or structured rejection."
+        },
+        "version": {
+          "description": "Protocol version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "request_id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "ControlResult": {
+      "description": "Successful response or stable rejection.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Command was accepted and completely applied.",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ControlData",
+              "description": "Command-specific data."
+            },
+            "status": {
+              "const": "ok",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Command was rejected or failed.",
+          "properties": {
+            "code": {
+              "description": "Stable machine-readable code.",
+              "type": "string"
+            },
+            "message": {
+              "description": "Human-readable diagnostic.",
+              "type": "string"
+            },
+            "status": {
+              "const": "error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "code",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/mutation-journal-record.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One durable mutation request outcome tied to a canonical event boundary.",
+  "properties": {
+    "command_hash": {
+      "description": "BLAKE3 of the normalized serialized control command.",
+      "type": "string"
+    },
+    "event_end_seq": {
+      "description": "Exclusive next-event boundary after command execution.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "event_hash": {
+      "description": "Canonical event hash at `event_end_seq`.",
+      "type": "string"
+    },
+    "event_start_seq": {
+      "description": "Inclusive next-event boundary before command execution.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "format": {
+      "description": "Stable record format identifier.",
+      "type": "string"
+    },
+    "hash": {
+      "description": "Hash of this record body.",
+      "type": "string"
+    },
+    "operation_ids": {
+      "description": "Canonical operation identifiers created by the request.",
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "prev_hash": {
+      "description": "Prior journal record hash, or 64 zeroes for the first record.",
+      "type": "string"
+    },
+    "request_id": {
+      "description": "Caller-owned mutation request identifier.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "response": {
+      "$ref": "#/$defs/ControlResponse",
+      "description": "Exact actor response returned for safe retry."
+    },
+    "seq": {
+      "description": "Contiguous zero-based journal sequence.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "version": {
+      "description": "Record schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "seq",
+    "prev_hash",
+    "hash",
+    "request_id",
+    "command_hash",
+    "operation_ids",
+    "event_start_seq",
+    "event_end_seq",
+    "event_hash",
+    "response"
+  ],
+  "title": "MutationJournalRecord",
+  "type": "object"
+}

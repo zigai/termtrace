@@ -263,6 +263,11 @@
               "description": "User-provided marker label.",
               "type": "string"
             },
+            "operation_id": {
+              "description": "Caller-owned operation identifier used for durable deduplication.",
+              "format": "uuid",
+              "type": "string"
+            },
             "type": {
               "const": "marker",
               "type": "string"
@@ -270,6 +275,7 @@
           },
           "required": [
             "type",
+            "operation_id",
             "label"
           ],
           "type": "object"
