@@ -3,8 +3,8 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::{
-    fs::Permissions,
-    io::{Read as _, Write as _},
+    fs::{File, Permissions},
+    io::{BufRead as _, BufReader, Read as _, Write as _},
     os::unix::{ffi::OsStrExt as _, fs::PermissionsExt as _},
     path::Path,
     process::{Command as StdCommand, Stdio},
@@ -18,8 +18,8 @@ use termtrace::{
     event::{Event, InputSource, OperationStatus},
     event_log::EventLog,
     replay::{
-        GHOSTTY_REVISION, ReplayManifest, StateRecord, derived_directory_name, index_session_range,
-        replay,
+        GHOSTTY_REVISION, IndexOptions, ReplayManifest, StateRecord, StateSelection,
+        derived_directory_name, index_session_range, index_session_with_options, replay,
     },
     session::{CaptureTarget, GeometrySource, read_manifest},
     timeline::SourceRange,
@@ -327,6 +327,106 @@ fn live_control_drives_and_audits_a_detached_session() {
     assert_control_events(&recording, &session);
 }
 
+#[test]
+fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("live-snapshot");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let child = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; printf READY; while :; do sleep 0.1; done",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn live recorder");
+    wait_for_path(&session.join("control.sock"));
+
+    let mut marker = Command::cargo_bin("termtrace").expect("binary should build");
+    marker
+        .args(["mark", "--session"])
+        .arg(&session)
+        .args(["--label", "settled"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""kind":"marked""#));
+
+    let mut incomplete_index = Command::cargo_bin("termtrace").expect("binary should build");
+    incomplete_index
+        .args(["index", "--session"])
+        .arg(&session)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is not complete"));
+    let mut incomplete_capture = Command::cargo_bin("termtrace").expect("binary should build");
+    incomplete_capture
+        .args(["capture", "--session"])
+        .arg(&session)
+        .args(["--width", "320", "--height", "200"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is not complete"));
+
+    assert!(matches!(
+        index_session_with_options(&session, IndexOptions::default()),
+        Err(Error::SessionIncomplete { .. })
+    ));
+    let snapshot = index_session_with_options(
+        &session,
+        IndexOptions {
+            live_snapshot: true,
+            state_selection: StateSelection::Presented,
+            ..IndexOptions::default()
+        },
+    )
+    .expect("explicit live snapshot");
+    assert!(!snapshot.source_complete);
+    assert!(
+        snapshot
+            .directory
+            .file_name()
+            .expect("snapshot basename")
+            .to_string_lossy()
+            .contains("snapshot-")
+    );
+    let snapshot_manifest: ReplayManifest = serde_json::from_slice(
+        &fs_err::read(snapshot.directory.join("manifest.json")).expect("snapshot manifest"),
+    )
+    .expect("snapshot manifest JSON");
+    assert!(!snapshot_manifest.source_complete);
+    assert_eq!(snapshot_manifest.state_selection, StateSelection::Presented);
+
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.args(["stop", "--wait", "--timeout-ms", "5000", "--session"])
+        .arg(&session)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""kind":"completed""#));
+    let output = child.wait_with_output().expect("wait for live recorder");
+    assert!(output.status.success(), "recorder failed: {output:?}");
+
+    let mut status = Command::cargo_bin("termtrace").expect("binary should build");
+    status
+        .args(["status", "--wait-complete", "--session"])
+        .arg(&session)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""kind":"completed""#));
+
+    let mut marker_range = Command::cargo_bin("termtrace").expect("binary should build");
+    marker_range
+        .args(["index", "--from-marker", "settled", "--session"])
+        .arg(&session)
+        .assert()
+        .success();
+}
+
 #[allow(
     clippy::expect_used,
     reason = "test helper should stop when its recording fixture is invalid"
@@ -392,8 +492,7 @@ fn assert_control_events(recording: &EventLog, session: &Path) {
         .expect("resize result");
     let ranged = index_session_range(session, Some(resize_result_time), None)
         .expect("range crossing resize intent/result");
-    let ranged_states = fs_err::read_to_string(ranged.directory.join("states.jsonl"))
-        .expect("ranged resize states");
+    let ranged_states = read_zstd_text(&ranged.directory.join("states.jsonl.zst"));
     let ranged_states = ranged_states
         .lines()
         .map(|line| return serde_json::from_str::<StateRecord>(line).expect("state JSON"))
@@ -479,6 +578,42 @@ fn index_replays_every_distinct_state_deterministically() {
         .assert()
         .success();
     assert_replay_artifacts(&session, first.artifacts.state_count);
+
+    let mut presented = Command::cargo_bin("termtrace").expect("binary should build");
+    presented
+        .args(["index", "--presented-only", "--session"])
+        .arg(&session)
+        .assert()
+        .success();
+    let presented_directory = session.join("derived-presented");
+    let presented_manifest: ReplayManifest = serde_json::from_slice(
+        &fs_err::read(presented_directory.join("manifest.json")).expect("presented manifest"),
+    )
+    .expect("presented manifest JSON");
+    assert_eq!(
+        presented_manifest.state_selection,
+        StateSelection::Presented
+    );
+    assert!(
+        presented_manifest.state_count < presented_manifest.semantic_state_count,
+        "fixture should suppress synchronized-output internals"
+    );
+    let presented_states = read_zstd_text(&presented_directory.join("states.jsonl.zst"));
+    let presented_states = presented_states
+        .lines()
+        .map(|line| return serde_json::from_str::<StateRecord>(line).expect("presented state"))
+        .collect::<Vec<_>>();
+    assert!(presented_states.iter().all(|state| return state.presented));
+    assert!(presented_states.iter().enumerate().all(|(index, state)| {
+        return state.state_id == u64::try_from(index).unwrap_or(u64::MAX);
+    }));
+    assert_eq!(
+        presented_states
+            .first()
+            .and_then(|state| return state.delta.geometry),
+        Some((160, 40)),
+        "first retained state must be independently reconstructable"
+    );
     let mut inspect_text = Command::cargo_bin("termtrace").expect("binary should build");
     inspect_text
         .args(["inspect", "--session"])
@@ -495,6 +630,15 @@ fn index_replays_every_distinct_state_deterministically() {
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""state_id": 0"#));
+
+    let mut inspect_row = Command::cargo_bin("termtrace").expect("binary should build");
+    inspect_row
+        .args(["inspect", "--session"])
+        .arg(&session)
+        .args(["--state", "0", "--row", "0", "--format", "json-compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""row":0"#));
 
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
@@ -568,13 +712,15 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
         "replay-manifest.schema.json",
         &derived.join("manifest.json"),
     );
-    validate_json_lines("state-record.schema.json", &derived.join("states.jsonl"));
+    validate_json_lines_text(
+        "state-record.schema.json",
+        &read_zstd_text(&derived.join("states.jsonl.zst")),
+    );
     validate_json_lines(
         "state-index-entry.schema.json",
         &derived.join("state-index.jsonl"),
     );
-    let states = fs_err::read_to_string(derived.join("states.jsonl"))
-        .expect("range states")
+    let states = read_zstd_text(&derived.join("states.jsonl.zst"))
         .lines()
         .map(|line| return serde_json::from_str::<StateRecord>(line).expect("state JSON"))
         .collect::<Vec<_>>();
@@ -629,6 +775,41 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
         .stderr(predicate::str::contains("already exists"));
 }
 
+#[test]
+fn inspect_exits_cleanly_when_downstream_closes_the_pipe() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("broken-pipe");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/printf", "pipe-test"])
+        .assert()
+        .success();
+
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let mut inspect = StdCommand::new(binary)
+        .args(["inspect", "--session"])
+        .arg(&session)
+        .args(["--format", "json"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn piped inspection");
+    let stdout = inspect.stdout.take().expect("inspection stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut first_line = String::new();
+    reader.read_line(&mut first_line).expect("first JSON line");
+    assert_eq!(first_line, "{\n");
+    drop(reader);
+    let output = inspect.wait_with_output().expect("wait for inspection");
+    assert!(
+        output.status.success(),
+        "broken pipe should be a successful early consumer exit: {output:?}"
+    );
+    assert!(output.stderr.is_empty(), "unexpected panic: {output:?}");
+}
+
 #[allow(
     clippy::expect_used,
     reason = "test helper should stop when its recording fixture is invalid"
@@ -651,6 +832,18 @@ fn output_timestamp_containing(event_log: &EventLog, needle: &[u8]) -> u64 {
         .expect("fixture output event");
 }
 
+fn wait_for_path(path: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !path.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        path.exists(),
+        "path did not become ready: {}",
+        path.display()
+    );
+}
+
 #[allow(
     clippy::expect_used,
     clippy::unwrap_used,
@@ -669,7 +862,7 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
         0o700
     );
     for file in [
-        "states.jsonl",
+        "states.jsonl.zst",
         "state-index.jsonl",
         "final.txt",
         "final.vt",
@@ -687,10 +880,8 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
             0o600
         );
     }
-    let lines = fs_err::read_to_string(derived.join("states.jsonl"))
-        .expect("states")
-        .lines()
-        .count();
+    let states = read_zstd_text(&derived.join("states.jsonl.zst"));
+    let lines = states.lines().count();
     assert_eq!(u64::try_from(lines).unwrap(), expected_states);
     let text = fs_err::read_to_string(derived.join("final.txt")).expect("final text");
     assert!(text.contains("AB界"));
@@ -708,7 +899,7 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
         "replay-manifest.schema.json",
         &derived.join("manifest.json"),
     );
-    validate_json_lines("state-record.schema.json", &derived.join("states.jsonl"));
+    validate_json_lines_text("state-record.schema.json", &states);
     validate_json_lines(
         "state-index-entry.schema.json",
         &derived.join("state-index.jsonl"),
@@ -746,6 +937,30 @@ fn validate_json_lines(schema: &str, instance: &Path) {
         .expect("JSONL instance")
         .lines()
     {
+        validate_json_value(schema, &serde_json::from_str(line).expect("JSONL value"));
+    }
+}
+
+#[allow(
+    clippy::expect_used,
+    reason = "test helper failures should stop at the invalid compressed artifact"
+)]
+fn read_zstd_text(path: &Path) -> String {
+    let file = File::open(path).expect("compressed JSONL artifact");
+    let mut decoder = zstd::stream::read::Decoder::new(file).expect("zstd decoder");
+    let mut text = String::new();
+    decoder
+        .read_to_string(&mut text)
+        .expect("decompress JSONL artifact");
+    return text;
+}
+
+#[allow(
+    clippy::expect_used,
+    reason = "schema validation is an assertion helper used only by integration tests"
+)]
+fn validate_json_lines_text(schema: &str, text: &str) {
+    for line in text.lines() {
         validate_json_value(schema, &serde_json::from_str(line).expect("JSONL value"));
     }
 }
@@ -851,6 +1066,7 @@ fn playback_does_not_echo_terminal_query_responses() {
         .expect("playback PTY");
     let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_termtrace"));
     let timing_file = temporary.path().join("timing.json");
+    let error_file = temporary.path().join("playback-error.json");
     let ready_file = temporary.path().join("ready");
     command.args([
         "playback",
@@ -858,6 +1074,8 @@ fn playback_does_not_echo_terminal_query_responses() {
         session.to_str().expect("UTF-8 session"),
         "--timing-file",
         timing_file.to_str().expect("UTF-8 timing"),
+        "--error-file",
+        error_file.to_str().expect("UTF-8 playback error"),
         "--ready-file",
         ready_file.to_str().expect("UTF-8 ready"),
         "--start-delay-ms",
