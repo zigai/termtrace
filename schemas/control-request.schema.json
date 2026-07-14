@@ -52,6 +52,39 @@
         },
         {
           "additionalProperties": false,
+          "description": "Wait inside the actor for a stable presentation-eligible predicate.",
+          "properties": {
+            "command": {
+              "const": "wait_screen",
+              "type": "string"
+            },
+            "predicate": {
+              "$ref": "#/$defs/ScreenPredicate",
+              "description": "Exact screen predicate."
+            },
+            "stable_for_ns": {
+              "description": "Required unchanged matching-state interval.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "timeout_ns": {
+              "description": "Server-side monotonic deadline interval.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "command",
+            "predicate",
+            "stable_for_ns",
+            "timeout_ns"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Send exact bytes to the child PTY.",
           "properties": {
             "command": {
@@ -410,6 +443,49 @@
           "const": "user2",
           "description": "Application-defined signal two (`SIGUSR2`).",
           "type": "string"
+        }
+      ]
+    },
+    "ScreenPredicate": {
+      "description": "Exact predicate evaluated against the latest presented viewport.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Viewport text contains an exact UTF-8 substring.",
+          "properties": {
+            "predicate": {
+              "const": "contains",
+              "type": "string"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Viewport text excludes an exact UTF-8 substring.",
+          "properties": {
+            "predicate": {
+              "const": "absent",
+              "type": "string"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "text"
+          ],
+          "type": "object"
         }
       ]
     }

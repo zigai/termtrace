@@ -247,6 +247,77 @@
         },
         {
           "additionalProperties": false,
+          "description": "Successful server-side presented-screen wait.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Actor-consistent canonical source boundaries."
+            },
+            "cols": {
+              "description": "Terminal columns.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "completion_quality": {
+              "description": "`stable` or `matched_unsettled`.",
+              "type": "string"
+            },
+            "first_match_monotonic_ns": {
+              "description": "First matching timestamp for this unchanged state.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "screen_wait",
+              "type": "string"
+            },
+            "predicate": {
+              "$ref": "#/$defs/ScreenPredicate",
+              "description": "Predicate that matched."
+            },
+            "rows": {
+              "description": "Terminal rows.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "stable_for_ns": {
+              "description": "Requested unchanged interval.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "stable_through_monotonic_ns": {
+              "description": "Last timestamp through which the state remained stable.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state_hash": {
+              "description": "Full presentation-eligible semantic state hash.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "predicate",
+            "state_hash",
+            "first_match_monotonic_ns",
+            "stable_through_monotonic_ns",
+            "stable_for_ns",
+            "boundaries",
+            "cols",
+            "rows",
+            "completion_quality"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Canonical position of an appended marker.",
           "properties": {
             "boundaries": {
@@ -386,6 +457,49 @@
         "values"
       ],
       "type": "object"
+    },
+    "ScreenPredicate": {
+      "description": "Exact predicate evaluated against the latest presented viewport.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Viewport text contains an exact UTF-8 substring.",
+          "properties": {
+            "predicate": {
+              "const": "contains",
+              "type": "string"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Viewport text excludes an exact UTF-8 substring.",
+          "properties": {
+            "predicate": {
+              "const": "absent",
+              "type": "string"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "TerminalMode": {
       "description": "One ANSI or DEC mode value.",

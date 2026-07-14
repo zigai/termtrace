@@ -46,7 +46,7 @@ use crate::{
     control::{
         ActorBoundaries, CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME, ControlCommand,
         ControlData, ControlRequest, ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES,
-        ProcessSignal, validate_frame,
+        ProcessSignal, ScreenPredicate, validate_frame,
     },
     event::{
         ByteString, Event, EventLogHeader, InputDescriptor, InputKind, InputSource, LifecycleKind,
@@ -74,6 +74,7 @@ const DESCENDANT_GRACE_PERIOD: Duration = Duration::from_millis(250);
 const DESCENDANT_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 const MUTATION_CACHE_CAPACITY: usize = 256;
 const MAX_SESSION_MUTATIONS: u64 = 1_000_000;
+const MAX_SCREEN_WAITERS: usize = 128;
 
 /// Configuration for one recorded command.
 #[derive(Clone, Debug)]
@@ -336,6 +337,15 @@ struct LiveTerminal {
     semantic: GhosttyVt,
     presented: SemanticState,
     query_tracker: QueryTracker,
+}
+
+struct ScreenWaiter {
+    request_id: Uuid,
+    predicate: ScreenPredicate,
+    stable_for: Duration,
+    deadline: Instant,
+    matching_state: Option<(String, Instant, u64)>,
+    response: mpsc::SyncSender<ControlResponse>,
 }
 
 #[derive(Default)]
@@ -676,6 +686,7 @@ fn consume_runtime(
     let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
     let journal = MutationJournal::create(session_directory)?;
     let mut mutation_history = MutationHistory::new(journal, MUTATION_CACHE_CAPACITY);
+    let mut screen_waiters = Vec::new();
     let reader = replace(&mut spawned.reader, Box::new(io::empty()));
     let workers = RuntimeWorkers::start(
         reader,
@@ -704,6 +715,7 @@ fn consume_runtime(
                     &mut progress,
                     &mut mutation_history,
                     &mut live_terminal,
+                    &mut screen_waiters,
                 )?,
                 Err(RecvTimeoutError::Disconnected) if !progress.output_closed => {
                     return Err(terminal_error(
@@ -714,6 +726,7 @@ fn consume_runtime(
                 Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => {}
             }
             event_log.flush_due()?;
+            evaluate_screen_waiters(event_log, &live_terminal, &mut screen_waiters)?;
 
             if exit_status.is_none() {
                 exit_status = spawned
@@ -738,6 +751,11 @@ fn consume_runtime(
                 drain_deadline = Some(Instant::now() + DESCENDANT_DRAIN_TIMEOUT);
             }
         }
+        fail_screen_waiters(
+            &mut screen_waiters,
+            "child_completed",
+            "child completed before screen predicate matched",
+        );
         return exit_status
             .ok_or_else(|| return terminal_error("wait for child", "missing exit status"));
     })();
@@ -762,6 +780,7 @@ fn process_runtime_message(
     progress: &mut RuntimeProgress,
     mutation_history: &mut MutationHistory,
     live: &mut LiveTerminal,
+    screen_waiters: &mut Vec<ScreenWaiter>,
 ) -> Result<()> {
     match message {
         RuntimeMessage::Output(data) => {
@@ -829,14 +848,17 @@ fn process_runtime_message(
         RuntimeMessage::ResizeFailed(reason) => {
             return Err(terminal_error("read terminal geometry", reason));
         }
-        RuntimeMessage::Control { request, response } => handle_control_request(
-            spawned,
-            event_log,
-            request,
-            &response,
-            mutation_history,
-            live,
-        )?,
+        RuntimeMessage::Control { request, response } => {
+            handle_control_request(
+                spawned,
+                event_log,
+                request,
+                response,
+                mutation_history,
+                live,
+                screen_waiters,
+            )?;
+        }
         RuntimeMessage::ControlServerFailed(reason) => {
             return Err(terminal_error("serve control socket", reason));
         }
@@ -1097,12 +1119,21 @@ fn handle_control_connection(
             },
         );
     }
+    let response_timeout = match &request.command {
+        ControlCommand::WaitScreen { timeout_ns, .. } => {
+            Duration::from_nanos(*timeout_ns).saturating_add(Duration::from_secs(1))
+        }
+        _ => Duration::from_secs(10),
+    };
+    stream
+        .set_write_timeout(Some(response_timeout))
+        .map_err(|error| return terminal_error("configure wait response", error.to_string()))?;
     let (response_sender, response_receiver) = mpsc::sync_channel(1);
     let mut message = RuntimeMessage::Control {
         request,
         response: response_sender,
     };
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + response_timeout;
     loop {
         match sender.try_send(message) {
             Ok(()) => break,
@@ -1258,10 +1289,53 @@ fn handle_control_request(
     spawned: &mut SpawnedCommand,
     event_log: &mut EventLogWriter,
     request: ControlRequest,
-    response_sender: &mpsc::SyncSender<ControlResponse>,
+    response_sender: mpsc::SyncSender<ControlResponse>,
     history: &mut MutationHistory,
     live: &mut LiveTerminal,
+    screen_waiters: &mut Vec<ScreenWaiter>,
 ) -> Result<()> {
+    if let ControlCommand::WaitScreen {
+        predicate,
+        stable_for_ns,
+        timeout_ns,
+    } = &request.command
+    {
+        let text = match predicate {
+            ScreenPredicate::Contains { text } | ScreenPredicate::Absent { text } => text,
+        };
+        if text.is_empty()
+            || text.len() > 16 * 1024
+            || *timeout_ns == 0
+            || *timeout_ns > 3_600_000_000_000
+            || *stable_for_ns > *timeout_ns
+        {
+            let response = control_error_response(
+                request.request_id,
+                "invalid_screen_wait",
+                "screen text must be 1-16384 bytes and durations must satisfy stable <= timeout <= 1h",
+            );
+            let _ = response_sender.send(response);
+            return Ok(());
+        }
+        if screen_waiters.len() >= MAX_SCREEN_WAITERS {
+            let response = control_error_response(
+                request.request_id,
+                "waiter_limit_reached",
+                "session screen waiter limit has been reached",
+            );
+            let _ = response_sender.send(response);
+            return Ok(());
+        }
+        screen_waiters.push(ScreenWaiter {
+            request_id: request.request_id,
+            predicate: predicate.clone(),
+            stable_for: Duration::from_nanos(*stable_for_ns),
+            deadline: Instant::now() + Duration::from_nanos(*timeout_ns),
+            matching_state: None,
+            response: response_sender,
+        });
+        return Ok(());
+    }
     let read_only = matches!(
         request.command,
         ControlCommand::Ping | ControlCommand::Status | ControlCommand::Snapshot
@@ -1361,6 +1435,12 @@ fn execute_control_command(
                 modes: live.presented.modes.clone(),
                 boundaries: actor_boundaries(event_log),
             });
+        }
+        ControlCommand::WaitScreen { .. } => {
+            return Err(control_rejected(
+                "invalid_screen_wait_dispatch",
+                "screen waits must be registered asynchronously",
+            ));
         }
         ControlCommand::Input {
             data,
@@ -1522,6 +1602,97 @@ fn actor_boundaries(event_log: &EventLogWriter) -> ActorBoundaries {
         durable: event_log.durable_boundary(),
         observed: event_log.observed_boundary(),
     };
+}
+
+fn evaluate_screen_waiters(
+    event_log: &EventLogWriter,
+    live: &LiveTerminal,
+    waiters: &mut Vec<ScreenWaiter>,
+) -> Result<()> {
+    if waiters.is_empty() {
+        return Ok(());
+    }
+    let state_bytes = serde_json::to_vec(&live.presented).map_err(|error| {
+        return terminal_error("serialize screen waiter state", error.to_string());
+    })?;
+    let state_hash = blake3::hash(&state_bytes).to_hex().to_string();
+    let viewport_text = semantic_viewport_text(&live.presented);
+    let observed_monotonic_ns = event_log.elapsed_ns();
+    let now = Instant::now();
+    let mut index = 0;
+    while index < waiters.len() {
+        let Some(waiter) = waiters.get_mut(index) else {
+            break;
+        };
+        let matched = match &waiter.predicate {
+            ScreenPredicate::Contains { text } => viewport_text.contains(text),
+            ScreenPredicate::Absent { text } => !viewport_text.contains(text),
+        };
+        if matched {
+            match &waiter.matching_state {
+                Some((prior_hash, _, _)) if prior_hash == &state_hash => {}
+                _ => {
+                    waiter.matching_state = Some((state_hash.clone(), now, observed_monotonic_ns));
+                }
+            }
+        } else {
+            waiter.matching_state = None;
+        }
+        let stable = waiter
+            .matching_state
+            .as_ref()
+            .is_some_and(|(_, since, _)| return since.elapsed() >= waiter.stable_for);
+        if stable {
+            let waiter = waiters.remove(index);
+            let first_match_monotonic_ns = waiter
+                .matching_state
+                .as_ref()
+                .map_or(observed_monotonic_ns, |(_, _, value)| return *value);
+            let response = ControlResponse {
+                version: CONTROL_PROTOCOL_VERSION,
+                request_id: waiter.request_id,
+                result: ControlResult::Ok {
+                    data: ControlData::ScreenWait {
+                        predicate: waiter.predicate,
+                        state_hash: state_hash.clone(),
+                        first_match_monotonic_ns,
+                        stable_through_monotonic_ns: observed_monotonic_ns,
+                        stable_for_ns: u64::try_from(waiter.stable_for.as_nanos())
+                            .unwrap_or(u64::MAX),
+                        boundaries: actor_boundaries(event_log),
+                        cols: live.presented.cols,
+                        rows: live.presented.rows,
+                        completion_quality: if waiter.stable_for.is_zero() {
+                            "matched_unsettled".to_owned()
+                        } else {
+                            "stable".to_owned()
+                        },
+                    },
+                },
+            };
+            let _ = waiter.response.send(response);
+            continue;
+        }
+        if now >= waiter.deadline {
+            let waiter = waiters.remove(index);
+            let response = control_error_response(
+                waiter.request_id,
+                "wait_deadline",
+                "screen predicate did not become stable before its server-side deadline",
+            );
+            let _ = waiter.response.send(response);
+            continue;
+        }
+        index += 1;
+    }
+    return Ok(());
+}
+
+fn fail_screen_waiters(waiters: &mut Vec<ScreenWaiter>, code: &str, message: &str) {
+    for waiter in waiters.drain(..) {
+        let response = control_error_response(waiter.request_id, code, message);
+        let _ = waiter.response.send(response);
+    }
 }
 
 fn validate_control_input(data: &[u8], intent: Option<&str>) -> Result<()> {

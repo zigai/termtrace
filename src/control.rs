@@ -42,6 +42,22 @@ pub enum ProcessSignal {
     User2,
 }
 
+/// Exact predicate evaluated against the latest presented viewport.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "predicate", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ScreenPredicate {
+    /// Viewport text contains an exact UTF-8 substring.
+    Contains {
+        /// Exact UTF-8 substring.
+        text: String,
+    },
+    /// Viewport text excludes an exact UTF-8 substring.
+    Absent {
+        /// Exact UTF-8 substring.
+        text: String,
+    },
+}
+
 /// One command sent to the live session actor.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
@@ -52,6 +68,15 @@ pub enum ControlCommand {
     Status,
     /// Return the latest presentation-eligible semantic viewport.
     Snapshot,
+    /// Wait inside the actor for a stable presentation-eligible predicate.
+    WaitScreen {
+        /// Exact screen predicate.
+        predicate: ScreenPredicate,
+        /// Required unchanged matching-state interval.
+        stable_for_ns: u64,
+        /// Server-side monotonic deadline interval.
+        timeout_ns: u64,
+    },
     /// Send exact bytes to the child PTY.
     Input {
         /// Raw bytes encoded as Base64 in JSON.
@@ -179,6 +204,27 @@ pub enum ControlData {
         /// Durable and observed source boundaries at observation time.
         boundaries: ActorBoundaries,
     },
+    /// Successful server-side presented-screen wait.
+    ScreenWait {
+        /// Predicate that matched.
+        predicate: ScreenPredicate,
+        /// Full presentation-eligible semantic state hash.
+        state_hash: String,
+        /// First matching timestamp for this unchanged state.
+        first_match_monotonic_ns: u64,
+        /// Last timestamp through which the state remained stable.
+        stable_through_monotonic_ns: u64,
+        /// Requested unchanged interval.
+        stable_for_ns: u64,
+        /// Actor-consistent canonical source boundaries.
+        boundaries: ActorBoundaries,
+        /// Terminal columns.
+        cols: u16,
+        /// Terminal rows.
+        rows: u16,
+        /// `stable` or `matched_unsettled`.
+        completion_quality: String,
+    },
     /// Canonical position of an appended marker.
     Marked {
         /// Normalized marker label.
@@ -263,7 +309,12 @@ pub fn send_request(
             source,
         };
     })?;
-    let timeout = Some(Duration::from_secs(10));
+    let timeout = Some(match &request.command {
+        ControlCommand::WaitScreen { timeout_ns, .. } => {
+            Duration::from_nanos(*timeout_ns).saturating_add(Duration::from_secs(2))
+        }
+        _ => Duration::from_secs(10),
+    });
     stream
         .set_read_timeout(timeout)
         .and_then(|()| return stream.set_write_timeout(timeout))

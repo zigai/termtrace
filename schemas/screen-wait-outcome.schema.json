@@ -52,7 +52,7 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "Viewport text contains this exact UTF-8 string.",
+          "description": "Viewport text contains an exact UTF-8 substring.",
           "properties": {
             "predicate": {
               "const": "contains",
@@ -71,7 +71,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Viewport text does not contain this exact UTF-8 string.",
+          "description": "Viewport text excludes an exact UTF-8 substring.",
           "properties": {
             "predicate": {
               "const": "absent",

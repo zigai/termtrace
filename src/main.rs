@@ -23,15 +23,14 @@ use termtrace::{
     Error,
     control::{
         CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, ProcessSignal,
-        request, send_request,
+        ScreenPredicate, request, send_request,
     },
     event::{ByteString, EVENT_LOG_VERSION, InputKind},
     event_log::{DurabilityMode, DurabilityPolicy, EventLog},
     geometry::{inherited_geometry, run_probe},
     ghostty_vt::{KeyModifiers, NamedKey, RowState},
     inspection::{
-        ScreenPredicate, inspect_session, state_text, wait_for_completion, wait_for_output,
-        wait_for_screen,
+        inspect_session, state_text, wait_for_completion, wait_for_output, wait_for_screen,
     },
     interop::export_asciicast,
     playback::{PlaybackOptions, playback},

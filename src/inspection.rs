@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Error, Result,
-    control::{ActorBoundaries, ControlCommand, ControlData, request},
+    control::{ActorBoundaries, ControlCommand, ControlData, ScreenPredicate, request},
     event::Event,
     event_log::EventLog,
     ghostty_vt::SemanticState,
@@ -28,22 +28,6 @@ pub struct WaitOutcome {
     pub output_end_offset: u64,
     /// Monotonic timestamp of the containing event.
     pub monotonic_ns: u64,
-}
-
-/// Exact predicate evaluated against the latest presented viewport.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "predicate", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ScreenPredicate {
-    /// Viewport text contains this exact UTF-8 string.
-    Contains {
-        /// Exact UTF-8 substring.
-        text: String,
-    },
-    /// Viewport text does not contain this exact UTF-8 string.
-    Absent {
-        /// Exact UTF-8 substring.
-        text: String,
-    },
 }
 
 /// Successful presented-screen wait evidence.
@@ -94,75 +78,45 @@ pub fn wait_for_screen(
     if text.is_empty() {
         return Err(wait_error("screen predicate must not be empty"));
     }
-    let session = session_directory.as_ref();
-    let deadline = Instant::now() + timeout;
-    let mut matching_state: Option<(String, Instant, u64)> = None;
-    loop {
-        let snapshot = request(session, ControlCommand::Snapshot)?;
-        let ControlData::Snapshot {
-            viewport_text,
-            state_hash,
-            presented,
-            cols,
-            rows,
-            observed_monotonic_ns,
-            boundaries,
-            ..
-        } = snapshot
-        else {
-            return Err(wait_error("actor returned an unexpected screen snapshot"));
-        };
-        let matched = match &predicate {
-            ScreenPredicate::Contains { text } => viewport_text.contains(text),
-            ScreenPredicate::Absent { text } => !viewport_text.contains(text),
-        };
-        if matched {
-            let (first_instant, first_monotonic_ns) = match &matching_state {
-                Some((prior_hash, instant, monotonic_ns)) if prior_hash == &state_hash => {
-                    (*instant, *monotonic_ns)
-                }
-                _ => {
-                    let now = Instant::now();
-                    matching_state = Some((state_hash.clone(), now, observed_monotonic_ns));
-                    (now, observed_monotonic_ns)
-                }
-            };
-            if first_instant.elapsed() >= stable_for {
-                let completed = session.join("completion.json").is_file();
-                return Ok(ScreenWaitOutcome {
-                    predicate,
-                    scope: "screen".to_owned(),
-                    state_hash,
-                    presented,
-                    first_match_monotonic_ns: first_monotonic_ns,
-                    stable_through_monotonic_ns: observed_monotonic_ns,
-                    stable_for_ns: u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX),
-                    boundaries,
-                    child_completed: completed,
-                    cols,
-                    rows,
-                    completion_quality: if stable_for.is_zero() {
-                        "matched_unsettled".to_owned()
-                    } else {
-                        "stable".to_owned()
-                    },
-                });
-            }
-        } else {
-            matching_state = None;
-            if session.join("completion.json").is_file() {
-                return Err(wait_error(
-                    "child completed before screen predicate matched",
-                ));
-            }
-        }
-        if Instant::now() >= deadline {
-            return Err(wait_error(
-                "timed out before screen predicate became stable",
-            ));
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
+    let stable_for_ns = u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX);
+    let timeout_ns = u64::try_from(timeout.as_nanos()).unwrap_or(u64::MAX);
+    let result = request(
+        session_directory,
+        ControlCommand::WaitScreen {
+            predicate: predicate.clone(),
+            stable_for_ns,
+            timeout_ns,
+        },
+    )?;
+    let ControlData::ScreenWait {
+        state_hash,
+        first_match_monotonic_ns,
+        stable_through_monotonic_ns,
+        boundaries,
+        cols,
+        rows,
+        completion_quality,
+        ..
+    } = result
+    else {
+        return Err(wait_error(
+            "actor returned an unexpected screen-wait response",
+        ));
+    };
+    return Ok(ScreenWaitOutcome {
+        predicate,
+        scope: "screen".to_owned(),
+        state_hash,
+        presented: true,
+        first_match_monotonic_ns,
+        stable_through_monotonic_ns,
+        stable_for_ns,
+        boundaries,
+        child_completed: false,
+        cols,
+        rows,
+        completion_quality,
+    });
 }
 
 /// Reconstruct one complete semantic state from a session.
