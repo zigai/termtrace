@@ -28,6 +28,8 @@ Execution provenance also records the requested and resolved executable paths, r
 
 Control responses carry separate durable and observed event/hash/output boundaries. Read-only control traffic is not an event and cannot change the canonical hash. A marker is the explicit operation for placing an observation in the execution timeline.
 
+Control protocol v7 adds an optional `expected_presented_state_hash` request guard. `stale_observation` errors include `current_presented_state_hash`, actor-consistent boundaries, and the comparison scope. Guarded commands and their guard are hashed together in the durable mutation journal, including rejected attempts whose event range is empty.
+
 `Observation` is the shared state-view envelope for CLI and client layers. It labels source kind, canonical session identity and completion, requested `StatePoint`, state/event/time identity, presentation eligibility, validated or observed boundary, capture quality, integrity relationship, semantic/native truth layer, compact frame, and frame hash. Plain-text rendering may emit only `frame.viewport_text`; structured output retains the complete envelope. ANSI/stdin sources have no canonical identity and are labeled `integrity: unchained`; live and completed sessions are `canonical_chained`.
 
 One-off command observations are completed canonical sessions with `source_kind: one_off_command`. The retained canonical path is the recovery and forensic handle even when the child exits unsuccessfully; a command that fails before completion produces no successful observation.

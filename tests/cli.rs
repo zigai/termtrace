@@ -18,7 +18,10 @@ use std::{
 use tempfile::TempDir;
 use termtrace::{
     Error,
-    control::{ControlCommand, ControlData, ControlRequest, send_request},
+    control::{
+        ControlCommand, ControlData, ControlRequest, ControlResult, send_request,
+        send_request_response,
+    },
     event::{
         ByteString, EVENT_LOG_VERSION, Event, InputDescriptor, InputKind, InputSource,
         OperationStatus,
@@ -1023,6 +1026,7 @@ fn live_control_drives_and_audits_a_detached_session() {
     let collision = ControlRequest {
         version: duplicate_request.version,
         request_id: duplicate_request.request_id,
+        expected_presented_state_hash: None,
         command: ControlCommand::Mark {
             label: "different".to_owned(),
         },
@@ -1147,6 +1151,84 @@ fn live_control_drives_and_audits_a_detached_session() {
         .stdout(predicate::str::contains(
             r#""mutation_journal_records_verified":4"#,
         ));
+}
+
+#[test]
+fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("guarded-input");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let child = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf READY; IFS= read -r line; printf '<%s>' \"$line\"",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn guarded fixture");
+    wait_for_path(&session.join("control.sock"));
+    wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("ready output");
+
+    let snapshot = send_request(&session, &ControlRequest::new(ControlCommand::Snapshot))
+        .expect("presented snapshot");
+    let ControlData::Snapshot { state_hash, .. } = snapshot else {
+        panic!("expected snapshot response");
+    };
+    let stale_request = ControlRequest::new(ControlCommand::Input {
+        data: ByteString::new(b"blocked\n".to_vec()),
+        input_kind: InputKind::Text,
+        intent: Some("must not apply".to_owned()),
+    })
+    .with_expected_presented_state_hash("0".repeat(64));
+    let stale_response =
+        send_request_response(&session, &stale_request).expect("structured stale response");
+    let ControlResult::Error {
+        code,
+        details: Some(details),
+        ..
+    } = &stale_response.result
+    else {
+        panic!("expected structured stale-observation response");
+    };
+    assert_eq!(code, "stale_observation");
+    assert_eq!(details.current_presented_state_hash, state_hash);
+    assert_eq!(details.scope, "actor_processed_presented_output");
+    assert_eq!(
+        send_request_response(&session, &stale_request).expect("idempotent stale retry"),
+        stale_response
+    );
+
+    let guarded_input = ControlRequest::new(ControlCommand::Input {
+        data: ByteString::new(b"accepted\n".to_vec()),
+        input_kind: InputKind::Text,
+        intent: Some("fresh observation".to_owned()),
+    })
+    .with_expected_presented_state_hash(state_hash);
+    send_request(&session, &guarded_input).expect("fresh guarded input");
+    let output = child
+        .wait_with_output()
+        .expect("guarded fixture completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+
+    let recording = EventLog::read(session.join("events.jsonl")).expect("event log");
+    let agent_inputs = recording
+        .events
+        .iter()
+        .filter_map(|record| match &record.event {
+            Event::InputIntent {
+                source: InputSource::Agent,
+                data,
+                ..
+            } => return Some(data.as_bytes()),
+            _ => return None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(agent_inputs, vec![b"accepted\n".as_slice()]);
 }
 
 #[test]

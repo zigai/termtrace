@@ -192,10 +192,23 @@ impl MutationJournal {
     }
 }
 
-/// Hash the normalized command used for request-ID collision detection.
-pub(crate) fn command_hash(command: &ControlCommand) -> Result<String> {
-    let bytes = serde_json::to_vec(command)
-        .map_err(|source| return json_error(PathBuf::from("<control-command>"), source))?;
+#[derive(Serialize)]
+struct GuardedCommand<'command> {
+    command: &'command ControlCommand,
+    expected_presented_state_hash: Option<&'command str>,
+}
+
+/// Hash a mutation and its optimistic guard for request-ID collision detection.
+pub(crate) fn guarded_command_hash(
+    command: &ControlCommand,
+    expected_presented_state_hash: Option<&str>,
+) -> Result<String> {
+    let guarded = GuardedCommand {
+        command,
+        expected_presented_state_hash,
+    };
+    let bytes = serde_json::to_vec(&guarded)
+        .map_err(|source| return json_error(PathBuf::from("<guarded-control-command>"), source))?;
     return Ok(blake3::hash(&bytes).to_hex().to_string());
 }
 

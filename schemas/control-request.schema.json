@@ -499,6 +499,13 @@
       "$ref": "#/$defs/ControlCommand",
       "description": "Requested operation."
     },
+    "expected_presented_state_hash": {
+      "description": "Optional optimistic guard over the actor's latest presented state.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "request_id": {
       "description": "Caller-generated correlation identifier.",
       "format": "uuid",

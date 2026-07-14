@@ -349,6 +349,30 @@
         }
       ]
     },
+    "ControlErrorDetails": {
+      "additionalProperties": false,
+      "description": "Structured context attached to an optimistic-concurrency rejection.",
+      "properties": {
+        "boundaries": {
+          "$ref": "#/$defs/ActorBoundaries",
+          "description": "Durable and observed source positions used for the comparison."
+        },
+        "current_presented_state_hash": {
+          "description": "Latest presented-state hash at the actor ordering point.",
+          "type": "string"
+        },
+        "scope": {
+          "description": "Exact output scope covered by the state comparison.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "current_presented_state_hash",
+        "boundaries",
+        "scope"
+      ],
+      "type": "object"
+    },
     "ControlResponse": {
       "additionalProperties": false,
       "description": "Response envelope carried as one JSON line.",
@@ -405,6 +429,17 @@
             "code": {
               "description": "Stable machine-readable code.",
               "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ControlErrorDetails"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Actor-consistent context for a rejected optimistic guard."
             },
             "message": {
               "description": "Human-readable diagnostic.",

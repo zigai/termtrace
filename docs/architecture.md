@@ -43,6 +43,8 @@ Read-only control operations are observations rather than execution events. Ping
 
 The actor retains the latest presentation-eligible semantic snapshot separately from its newest parser state. Outside synchronized output it advances after output and resize processing; while DEC mode 2026 is active it remains frozen until commit. Its observer-only endpoint returns bounded viewport text, cursor/mode facts, a full-state hash, and canonical source boundaries without serializing the full cell graph over the control socket.
 
+Mutations may carry an optimistic presented-state hash. After earlier actor messages and child output have been processed but before any intent is appended, the actor compares the guard with that same presentation-eligible snapshot. A mismatch is a durable idempotent request outcome with current observed/durable boundaries, but has an empty canonical event range and cannot reach the PTY. The guard is included in request-ID collision detection.
+
 Presented-screen predicates register as bounded actor waiters with server-side monotonic deadlines. Matching-state hashes and stability clocks advance on actor ticks without blocking the event loop, so output, input, status, stop, query responses, and other waiters continue concurrently. Wait registration and completion remain observations and never append canonical events.
 
 The VT framer is a bounded, lossless explanatory sidecar over canonical output. It groups printable runs and C0, C1, ESC, CSI, OSC, DCS, and APC sequences across PTY event boundaries while retaining exact half-open source segments. It does not predict terminal effects; Ghostty replay remains the semantic authority. Malformed and incomplete sequences retain their bytes and labels.

@@ -737,6 +737,9 @@ struct StopArgs {
     /// Maximum completion wait in milliseconds.
     #[arg(long, default_value_t = 30_000)]
     timeout_ms: u64,
+    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
+    #[arg(long = "if-state")]
+    expected_presented_state_hash: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -761,6 +764,9 @@ struct SendArgs {
     /// Human-readable reason retained with the input event.
     #[arg(long)]
     intent: Option<String>,
+    /// Apply every input atom only if the latest presented state has this BLAKE3 hash.
+    #[arg(long = "if-state")]
+    expected_presented_state_hash: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -779,6 +785,9 @@ struct ResizeArgs {
     /// Total pixel height; defaults to rows multiplied by 18.
     #[arg(long)]
     pixel_height: Option<u16>,
+    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
+    #[arg(long = "if-state")]
+    expected_presented_state_hash: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -809,6 +818,9 @@ struct SignalArgs {
     /// Allow-listed signal.
     #[arg(long, value_enum)]
     signal: CliSignal,
+    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
+    #[arg(long = "if-state")]
+    expected_presented_state_hash: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -818,6 +830,9 @@ struct MarkArgs {
     /// Marker label.
     #[arg(long)]
     label: String,
+    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
+    #[arg(long = "if-state")]
+    expected_presented_state_hash: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -1100,19 +1115,21 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Send(arguments) => return run_send(arguments),
         Command::Resize(arguments) => return run_resize(arguments),
         Command::Signal(arguments) => {
-            return run_control(
+            return run_control_guarded(
                 arguments.session,
                 ControlCommand::Signal {
                     signal: arguments.signal.into(),
                 },
+                arguments.expected_presented_state_hash,
             );
         }
         Command::Mark(arguments) => {
-            return run_control(
+            return run_control_guarded(
                 arguments.session,
                 ControlCommand::Mark {
                     label: arguments.label,
                 },
+                arguments.expected_presented_state_hash,
             );
         }
         Command::Stop(arguments) => return run_stop(arguments),
@@ -2199,8 +2216,18 @@ fn run_schemas(arguments: SchemaArgs) -> Result<ExitCode> {
 }
 
 fn run_control(session: PathBuf, command: ControlCommand) -> Result<ExitCode> {
+    return run_control_guarded(session, command, None);
+}
+
+fn run_control_guarded(
+    session: PathBuf,
+    command: ControlCommand,
+    expected_presented_state_hash: Option<String>,
+) -> Result<ExitCode> {
     let session = resolve_session_ref(session)?;
-    let data = request(session, command)?;
+    let mut control_request = ControlRequest::new(command);
+    control_request.expected_presented_state_hash = expected_presented_state_hash;
+    let data = send_request(session, &control_request)?;
     return write_json_line(&data);
 }
 
@@ -2228,7 +2255,9 @@ fn run_stop(arguments: StopArgs) -> Result<ExitCode> {
             "completion": completion,
         }));
     }
-    let acknowledged = request(&session, ControlCommand::Stop)?;
+    let mut control_request = ControlRequest::new(ControlCommand::Stop);
+    control_request.expected_presented_state_hash = arguments.expected_presented_state_hash;
+    let acknowledged = send_request(&session, &control_request)?;
     if !arguments.wait {
         return write_json_line(&acknowledged);
     }
@@ -2346,13 +2375,14 @@ fn run_send(arguments: SendArgs) -> Result<ExitCode> {
     if arguments.stdin {
         let mut data = Vec::new();
         io::stdin().read_to_end(&mut data).into_diagnostic()?;
-        return run_control(
+        return run_control_guarded(
             arguments.session,
             ControlCommand::Input {
                 data: ByteString::new(data),
                 input_kind: InputKind::Raw,
                 intent: arguments.intent,
             },
+            arguments.expected_presented_state_hash,
         );
     }
     let session = resolve_session_ref(arguments.session)?;
@@ -2382,7 +2412,8 @@ fn run_send(arguments: SendArgs) -> Result<ExitCode> {
         if index != 0 && !arguments.pace.is_zero() {
             thread::sleep(arguments.pace);
         }
-        let request = ControlRequest::new(command);
+        let mut request = ControlRequest::new(command);
+        request.expected_presented_state_hash = arguments.expected_presented_state_hash.clone();
         let data = send_request(&session, &request)?;
         outcomes.push(serde_json::json!({
             "atom_id": request.request_id,
@@ -2532,7 +2563,7 @@ fn run_resize(arguments: ResizeArgs) -> Result<ExitCode> {
         .pixel_height
         .or_else(|| return arguments.rows.checked_mul(18))
         .ok_or_else(|| miette::miette!("pixel height overflow; pass --pixel-height explicitly"))?;
-    return run_control(
+    return run_control_guarded(
         arguments.session,
         ControlCommand::Resize {
             cols: arguments.cols,
@@ -2540,6 +2571,7 @@ fn run_resize(arguments: ResizeArgs) -> Result<ExitCode> {
             pixel_width,
             pixel_height,
         },
+        arguments.expected_presented_state_hash,
     );
 }
 

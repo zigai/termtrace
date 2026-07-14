@@ -20,7 +20,7 @@ use crate::{
 };
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 6;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 7;
 /// Relative socket path inside a live session directory.
 pub const CONTROL_SOCKET_NAME: &str = "control.sock";
 /// Maximum encoded request or response size.
@@ -131,6 +131,9 @@ pub struct ControlRequest {
     pub version: u32,
     /// Caller-generated correlation identifier.
     pub request_id: Uuid,
+    /// Optional optimistic guard over the actor's latest presented state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_presented_state_hash: Option<String>,
     /// Requested operation.
     pub command: ControlCommand,
 }
@@ -141,8 +144,16 @@ impl ControlRequest {
         return Self {
             version: CONTROL_PROTOCOL_VERSION,
             request_id: Uuid::now_v7(),
+            expected_presented_state_hash: None,
             command,
         };
+    }
+
+    /// Require the mutation to observe this presented-state hash.
+    #[must_use]
+    pub fn with_expected_presented_state_hash(mut self, hash: impl Into<String>) -> Self {
+        self.expected_presented_state_hash = Some(hash.into());
+        return self;
     }
 }
 
@@ -273,7 +284,22 @@ pub enum ControlResult {
         code: String,
         /// Human-readable diagnostic.
         message: String,
+        /// Actor-consistent context for a rejected optimistic guard.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        details: Option<ControlErrorDetails>,
     },
+}
+
+/// Structured context attached to an optimistic-concurrency rejection.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ControlErrorDetails {
+    /// Latest presented-state hash at the actor ordering point.
+    pub current_presented_state_hash: String,
+    /// Durable and observed source positions used for the comparison.
+    pub boundaries: ActorBoundaries,
+    /// Exact output scope covered by the state comparison.
+    pub scope: String,
 }
 
 /// Send one command to a live session and wait for its correlated response.
@@ -302,6 +328,25 @@ pub fn send_request(
     session_directory: impl AsRef<Path>,
     request: &ControlRequest,
 ) -> Result<ControlData> {
+    let response = send_request_response(session_directory, request)?;
+    match response.result {
+        ControlResult::Ok { data } => return Ok(data),
+        ControlResult::Error { code, message, .. } => {
+            return Err(Error::ControlRejected { code, message });
+        }
+    }
+}
+
+/// Send a caller-owned request and retain structured success or rejection data.
+///
+/// # Errors
+///
+/// Returns an error for connection, timeout, framing, schema, or correlation
+/// failures. Actor rejections are returned in the response envelope.
+pub fn send_request_response(
+    session_directory: impl AsRef<Path>,
+    request: &ControlRequest,
+) -> Result<ControlResponse> {
     let socket = session_directory.as_ref().join(CONTROL_SOCKET_NAME);
     let mut stream = UnixStream::connect(&socket).map_err(|source| {
         return Error::Filesystem {
@@ -367,12 +412,7 @@ pub fn send_request(
             reason: "response version or request identifier does not match".to_owned(),
         });
     }
-    match response.result {
-        ControlResult::Ok { data } => return Ok(data),
-        ControlResult::Error { code, message } => {
-            return Err(Error::ControlRejected { code, message });
-        }
-    }
+    return Ok(response);
 }
 
 pub(crate) fn validate_frame(encoded: &[u8]) -> Result<()> {

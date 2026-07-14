@@ -45,8 +45,8 @@ use crate::{
     artifact::{sync_parent_directory, write_secure},
     control::{
         ActorBoundaries, CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME, ControlCommand,
-        ControlData, ControlRequest, ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES,
-        ProcessSignal, ScreenPredicate, validate_frame,
+        ControlData, ControlErrorDetails, ControlRequest, ControlResponse, ControlResult,
+        MAX_CONTROL_MESSAGE_BYTES, ProcessSignal, ScreenPredicate, validate_frame,
     },
     event::{
         ByteString, Event, EventLogHeader, InputDescriptor, InputKind, InputSource, LifecycleKind,
@@ -57,7 +57,7 @@ use crate::{
     profile::ResolvedGhosttyProfile,
     provenance::{ProvenancePolicy, collect_execution_provenance},
     request_journal::{
-        MUTATION_JOURNAL_NAME, MutationJournal, MutationJournalRecord, command_hash,
+        MUTATION_JOURNAL_NAME, MutationJournal, MutationJournalRecord, guarded_command_hash,
     },
     session::{
         COMPLETION_VALIDATION_VERSION, GeometryProvenance, SESSION_COMPLETION_FORMAT,
@@ -246,8 +246,9 @@ impl MutationHistory {
         &mut self,
         request_id: Uuid,
         command: &ControlCommand,
+        expected_presented_state_hash: Option<&str>,
     ) -> Result<(String, Option<ControlResponse>)> {
-        let requested_hash = command_hash(command)?;
+        let requested_hash = guarded_command_hash(command, expected_presented_state_hash)?;
         if let Some(cached) = self.cached.get(&request_id) {
             let response = mutation_retry_response(request_id, &requested_hash, cached);
             return Ok((requested_hash, Some(response)));
@@ -1115,6 +1116,7 @@ fn handle_control_connection(
                 result: ControlResult::Error {
                     code: "unsupported_version".to_owned(),
                     message: format!("protocol version {} is unsupported", request.version),
+                    details: None,
                 },
             },
         );
@@ -1294,6 +1296,23 @@ fn handle_control_request(
     live: &mut LiveTerminal,
     screen_waiters: &mut Vec<ScreenWaiter>,
 ) -> Result<()> {
+    if request.expected_presented_state_hash.is_some()
+        && matches!(
+            request.command,
+            ControlCommand::Ping
+                | ControlCommand::Status
+                | ControlCommand::Snapshot
+                | ControlCommand::WaitScreen { .. }
+        )
+    {
+        let response = control_error_response(
+            request.request_id,
+            "invalid_observation_guard",
+            "presented-state guards are only valid for mutations",
+        );
+        let _ = response_sender.send(response);
+        return Ok(());
+    }
     if let ControlCommand::WaitScreen {
         predicate,
         stable_for_ns,
@@ -1343,7 +1362,11 @@ fn handle_control_request(
     let command_hash = if read_only {
         None
     } else {
-        let (hash, prior) = history.lookup(request.request_id, &request.command)?;
+        let (hash, prior) = history.lookup(
+            request.request_id,
+            &request.command,
+            request.expected_presented_state_hash.as_deref(),
+        )?;
         if let Some(response) = prior {
             let _ = response_sender.send(response);
             return Ok(());
@@ -1361,20 +1384,50 @@ fn handle_control_request(
     };
 
     let event_start_seq = event_log.next_seq();
-    let outcome = execute_control_command(
-        spawned,
-        event_log,
-        request.request_id,
-        &request.command,
-        live,
-    );
-    let response = match &outcome {
-        Ok(data) => ControlResponse {
+    let current_state_hash = presented_state_hash(live)?;
+    let guard = request.expected_presented_state_hash.as_deref();
+    let stale = guard.is_some_and(|hash| {
+        return valid_blake3_hash(hash) && hash != current_state_hash;
+    });
+    let outcome = if guard.is_some_and(|hash| return !valid_blake3_hash(hash)) {
+        Err(control_rejected(
+            "invalid_observation_guard",
+            "expected presented-state hash must be 64 lowercase hexadecimal characters",
+        ))
+    } else if stale {
+        Err(Error::ControlRejected {
+            code: "stale_observation".to_owned(),
+            message: format!("presented state changed; current state hash is {current_state_hash}"),
+        })
+    } else {
+        execute_control_command(
+            spawned,
+            event_log,
+            request.request_id,
+            &request.command,
+            live,
+        )
+    };
+    let response = match (&outcome, stale) {
+        (Err(Error::ControlRejected { code, message }), true) => ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id: request.request_id,
+            result: ControlResult::Error {
+                code: code.clone(),
+                message: message.clone(),
+                details: Some(ControlErrorDetails {
+                    current_presented_state_hash: current_state_hash,
+                    boundaries: actor_boundaries(event_log),
+                    scope: "actor_processed_presented_output".to_owned(),
+                }),
+            },
+        },
+        (Ok(data), _) => ControlResponse {
             version: CONTROL_PROTOCOL_VERSION,
             request_id: request.request_id,
             result: ControlResult::Ok { data: data.clone() },
         },
-        Err(error) => control_error_response(
+        (Err(error), _) => control_error_response(
             request.request_id,
             control_error_code(error),
             error.to_string(),
@@ -1604,6 +1657,20 @@ fn actor_boundaries(event_log: &EventLogWriter) -> ActorBoundaries {
     };
 }
 
+fn presented_state_hash(live: &LiveTerminal) -> Result<String> {
+    let bytes = serde_json::to_vec(&live.presented)
+        .map_err(|error| return terminal_error("serialize presented state", error.to_string()))?;
+    return Ok(blake3::hash(&bytes).to_hex().to_string());
+}
+
+fn valid_blake3_hash(hash: &str) -> bool {
+    return hash.len() == 64
+        && hash
+            .as_bytes()
+            .iter()
+            .all(|byte| return byte.is_ascii_digit() || (b'a'..=b'f').contains(byte));
+}
+
 fn evaluate_screen_waiters(
     event_log: &EventLogWriter,
     live: &LiveTerminal,
@@ -1789,6 +1856,7 @@ fn control_error_response(
         result: ControlResult::Error {
             code: code.into(),
             message: message.into(),
+            details: None,
         },
     };
 }
@@ -2334,7 +2402,7 @@ mod tests {
         history
             .remember(
                 first_id,
-                command_hash(&first_command).expect("command hash"),
+                guarded_command_hash(&first_command, None).expect("command hash"),
                 0,
                 1,
                 "1".repeat(64),
@@ -2348,7 +2416,7 @@ mod tests {
         history
             .remember(
                 second_id,
-                command_hash(&second_command).expect("command hash"),
+                guarded_command_hash(&second_command, None).expect("command hash"),
                 1,
                 2,
                 "2".repeat(64),
@@ -2358,7 +2426,7 @@ mod tests {
         assert!(!history.cached.contains_key(&first_id));
 
         let (_, retry) = history
-            .lookup(first_id, &first_command)
+            .lookup(first_id, &first_command, None)
             .expect("load evicted mutation");
         assert_eq!(retry, Some(first_response));
         assert_eq!(history.journal.len(), 2);
