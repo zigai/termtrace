@@ -72,6 +72,16 @@ Run `demos/run-all.sh` to generate three owner-only showcases covering visual/se
 
 Every active recording exposes an owner-only `control.sock` inside its session directory. Requests use bounded, newline-framed, versioned JSON and Linux peer credentials must match the recording owner. The CLI is a thin client:
 
+Canonical paths remain evidence identity. For a memorable local handle, register an existing owner-only session and resolve it without rewriting evidence:
+
+```bash
+termtrace register demo --session /tmp/example.termtrace
+termtrace resolve demo
+termtrace resolve demo --json
+```
+
+Registry entries live under an owner-only per-user state root, bind the immutable session ID and exact canonical path, and are created without replacement. `TERMTRACE_STATE_DIR` selects an explicit root; otherwise XDG state conventions are used.
+
 ```bash
 termtrace status --session /tmp/example.termtrace
 termtrace send --session /tmp/example.termtrace \

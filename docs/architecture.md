@@ -13,6 +13,8 @@ The append-only execution log is canonical. The immutable session manifest is pu
 
 Detached receipt signing is a narrow external boundary. Termtrace assembles and domain-separates fixed-order canonical payload bytes, then delegates signing and verification to OpenSSH; it never stores or interprets private keys. Cryptographic validity proves that the embedded signing key covered those bytes. Authenticity additionally requires the caller's allowed-signers policy to bind that key to the asserted identity. The local signing-host timestamp is labeled accordingly and is not described as witnessed time or external anchoring.
 
+Friendly names are resolved through a separate owner-only registry boundary. Entries are no-replace files opened without following symlinks and contain both exact canonical path bytes and the immutable manifest session ID. Every resolution validates ownership, permissions, canonical path stability, supported format/protocol, and manifest identity. Aliases therefore remain mutable navigation metadata rather than provenance roots.
+
 Full-session derivation preserves the original `derived/` and `visual/` layouts. A requested half-open interval receives deterministic range-specific directories. Semantic replay reconstructs the prefix without materializing prefix states. Native playback emits the prefix without source-time sleeps, performs a non-mutating terminal-query barrier, and publishes its capture clock only after Ghostty has processed that prefix. FFmpeg therefore records neither the prefix nor its original elapsed time.
 
 ## Runtime topology

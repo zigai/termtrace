@@ -4,6 +4,7 @@ use std::{
     ffi::OsString,
     fmt::Write as _,
     io::{self, Write as _},
+    os::unix::ffi::OsStringExt as _,
     path::{Path, PathBuf},
     process::ExitCode,
     result::Result as StdResult,
@@ -38,6 +39,7 @@ use termtrace::{
         CaptureTarget, GeometryProvenance, GeometrySource, GhosttyVisualOverrides, SessionGeometry,
         VerificationLevel, read_manifest, verify_session_with_trust,
     },
+    session_registry::SessionRegistry,
     timeline::{parse_time_offset_ns, resolve_source_selection},
     visual::{CaptureOptions, capture, probe_ghostty_geometry},
 };
@@ -67,6 +69,10 @@ enum Command {
     Verify(VerifyArgs),
     /// Create a detached OpenSSH receipt for verified evidence roots.
     Sign(SignArgs),
+    /// Register a friendly name for an existing canonical session.
+    Register(RegisterArgs),
+    /// Resolve a friendly name to its canonical session directory.
+    Resolve(ResolveArgs),
     /// Verify that a live session control socket is responsive.
     Ping(SessionArgs),
     /// Print machine-readable live session status.
@@ -147,6 +153,24 @@ struct SignArgs {
     /// Identity that an allowed-signers policy will bind to this key.
     #[arg(long)]
     signer: String,
+}
+
+#[derive(Debug, Args)]
+struct RegisterArgs {
+    /// Friendly session name.
+    name: String,
+    /// Existing owner-only canonical session directory.
+    #[arg(long)]
+    session: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct ResolveArgs {
+    /// Friendly session name.
+    name: String,
+    /// Emit the complete registry entry as JSON.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -603,6 +627,8 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Record(arguments) => return run_record(arguments),
         Command::Verify(arguments) => return run_verify(arguments),
         Command::Sign(arguments) => return run_sign(arguments),
+        Command::Register(arguments) => return run_register(arguments),
+        Command::Resolve(arguments) => return run_resolve(arguments),
         Command::Ping(arguments) => return run_control(arguments.session, ControlCommand::Ping),
         Command::Status(arguments) => return run_status(arguments),
         Command::Send(arguments) => return run_send(arguments),
@@ -682,6 +708,23 @@ fn run_sign(arguments: SignArgs) -> Result<ExitCode> {
         "scheme": "openssh",
         "signer_key_id": arguments.signer,
     }));
+}
+
+fn run_register(arguments: RegisterArgs) -> Result<ExitCode> {
+    let registry = SessionRegistry::open_default()?;
+    let entry = registry.register(&arguments.name, &arguments.session)?;
+    return write_json_line(&entry);
+}
+
+fn run_resolve(arguments: ResolveArgs) -> Result<ExitCode> {
+    let registry = SessionRegistry::open_default()?;
+    let entry = registry.resolve(&arguments.name)?;
+    if arguments.json {
+        return write_json_line(&entry);
+    }
+    let mut path = entry.session_path().into_os_string().into_vec();
+    path.push(b'\n');
+    return write_stdout(path);
 }
 
 fn run_index(arguments: IndexArgs) -> Result<ExitCode> {

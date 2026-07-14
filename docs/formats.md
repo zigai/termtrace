@@ -32,6 +32,8 @@ A completed session must end in `Exit` and contain no pending mutation intent. R
 
 `verify --level signature` first performs complete content verification, then checks payload roots and detached cryptography. It reports `signature_cryptographic_valid`, `signature_signer_trusted`, and `session_authenticity_established` independently. Trust requires a caller-owned OpenSSH allowed-signers file. Artifact authenticity is true only when a trusted receipt covers the complete currently verified artifact-root catalog.
 
+Named-session registry entries are mutable convenience metadata outside canonical evidence. Each owner-only `registry/NAME.json` binds a validated alias to exact canonical path bytes, the immutable session ID, control-protocol version, publication time, and optional recorder PID/process-start pair. Resolution reopens the manifest and rejects path or identity substitution. Registering an alias never modifies the session and never replaces an existing binding.
+
 ## Semantic derived
 
 - `derived/states.jsonl.zst`: Zstandard-compressed JSONL distinct state deltas.

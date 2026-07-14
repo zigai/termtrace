@@ -19,6 +19,7 @@ pub mod replay;
 pub mod request_journal;
 pub mod schema;
 pub mod session;
+pub mod session_registry;
 mod terminal_mode;
 pub mod timeline;
 pub mod visual;

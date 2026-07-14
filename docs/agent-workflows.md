@@ -4,6 +4,8 @@
 
 Run `termtrace record --no-input --out SESSION -- COMMAND ...` in a supervised background process. The owner-only `SESSION/control.sock` appears when control is ready. `termtrace ping` and `termtrace status` are explicit readiness probes; do not infer readiness from arbitrary screen text.
 
+Register a memorable local name with `termtrace register NAME --session SESSION`; `termtrace resolve NAME` returns the byte-exact canonical path and `--json` returns the bound session ID and protocol metadata. Registration is no-replace. Use canonical paths for evidence handoff until the shared positional session-reference grammar is enabled across commands.
+
 Choose provenance deliberately for the workload. The default `minimal` policy avoids retaining locale/timezone values. Use `--provenance reproducible` when those values are needed to recreate behavior, or `--provenance custom --provenance-env NAME=hash` to retain equality evidence without the value. `not-captured` records an explicit omission; it is different from an unselected variable.
 
 Before handing off a reproducible session, inspect `execution_provenance.executable`, `invoked_file`, and `runtime.recorder.binary`. A `captured` content identity can be compared to candidate files; `unresolved` or `unavailable` is an explicit reproducibility gap rather than permission to infer a match.

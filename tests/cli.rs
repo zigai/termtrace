@@ -337,6 +337,71 @@ fn record_inherits_and_persists_effective_working_directory() {
 }
 
 #[test]
+fn registry_binds_alias_to_canonical_session_identity() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("canonical-session");
+    let state = temporary.path().join("state");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/true"])
+        .assert()
+        .success();
+    let manifest = read_manifest(&session).expect("manifest");
+
+    let mut register = Command::cargo_bin("termtrace").expect("binary should build");
+    register
+        .env("TERMTRACE_STATE_DIR", &state)
+        .arg("register")
+        .arg("demo")
+        .arg("--session")
+        .arg(&session)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(manifest.session_id.to_string()));
+
+    let mut resolve = Command::cargo_bin("termtrace").expect("binary should build");
+    resolve
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["resolve", "demo"])
+        .assert()
+        .success()
+        .stdout(format!(
+            "{}\n",
+            session.canonicalize().expect("canonical").display()
+        ));
+
+    let mut structured = Command::cargo_bin("termtrace").expect("binary should build");
+    structured
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["resolve", "demo", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(manifest.session_id.to_string()))
+        .stdout(predicate::str::contains(r#""alias":"demo""#));
+
+    let entry_path = state.join("registry/demo.json");
+    assert_eq!(
+        fs_err::metadata(&entry_path)
+            .expect("entry metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
+    duplicate
+        .env("TERMTRACE_STATE_DIR", &state)
+        .arg("register")
+        .arg("demo")
+        .arg("--session")
+        .arg(&session)
+        .assert()
+        .failure();
+}
+
+#[test]
 fn fitted_geometry_requires_a_viewport() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("missing-viewport");
