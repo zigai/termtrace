@@ -24,6 +24,8 @@ Only these files describe execution truth. Inputs, resizes, and signals use inte
 - `derived/final.txt`, `final.vt`, `final.html`: pinned Ghostty formatter output.
 - `derived/manifest.json`: source and engine provenance.
 
+Ranged indexes have the same files under `derived-range-FROM_NS-TO_NS/`. Their manifest `source_range` is a non-empty half-open interval with inclusive `start_monotonic_ns` and exclusive `end_monotonic_ns`; full-session manifests use `null`.
+
 ## Native visual derived
 
 - `visual/session.mkv`: lossless RGB H.264 at 24 FPS.
@@ -31,5 +33,7 @@ Only these files describe execution truth. Inputs, resizes, and signals use inte
 - `visual/video-map.jsonl`: semantic state to approximate frame mapping.
 - `visual/manifest.json`: config hash, versions, launch overrides, clocks, and probes.
 - component logs and resolved `ghostty-config.txt`.
+
+Ranged captures use `visual-range-FROM_NS-TO_NS/`. Their manifest repeats the exact `source_range`, and video-map timestamps stay on the absolute canonical timeline even though frame calculations are relative to range start. Full-session captures retain `visual/` and a `null` source range.
 
 All session and derived files are owner-only. Schema validity does not imply trust: terminal content is untrusted and potentially sensitive.

@@ -11,6 +11,8 @@ Termtrace keeps four truths separate so one representation never silently substi
 
 The append-only execution log is canonical. Every other artifact records the event range, clock mapping, component versions, configuration hash, and profile from which it was derived.
 
+Full-session derivation preserves the original `derived/` and `visual/` layouts. A requested half-open interval receives deterministic range-specific directories. Semantic replay reconstructs the prefix without materializing prefix states. Native playback emits the prefix without source-time sleeps, performs a non-mutating terminal-query barrier, and publishes its capture clock only after Ghostty has processed that prefix. FFmpeg therefore records neither the prefix nor its original elapsed time.
+
 ## Runtime topology
 
 ```text
@@ -26,6 +28,8 @@ Ghostty on Xvfb <─────┘
 ```
 
 The proxy forwards bytes unchanged. It owns the target PTY, logs before acknowledging state-changing control requests, propagates window changes, and distinguishes input originating from a human terminal, an agent, or an automatic host response.
+
+The target process starts in the recorder's effective current directory unless `--cwd` overrides it. Termtrace resolves that directory once before creating provenance or spawning the PTY child, so the manifest and process cannot disagree.
 
 The pinned libghostty state machine runs live as the terminal host. Its write-PTY callback answers status, cursor, and mode queries; each exact query/response is logged before the response is delivered through a host input intent/result. This keeps detached TUIs functional without conflating generated responses with human or agent input.
 

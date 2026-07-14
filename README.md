@@ -44,6 +44,8 @@ Use `--geometry inherit` to copy the controlling terminal's rows and columns. Ke
 
 Command output is mirrored unchanged. Standard input is forwarded in raw mode, outer-terminal resizes are propagated, and host terminal settings are restored on every normal and error path. Use `--no-input` for a detached producer. The child receives a real PTY with `TERM=xterm-ghostty` and `COLORTERM=truecolor`; the command's exit status is propagated.
 
+The child inherits the recorder's current working directory by default, so `cd project && termtrace record ... -- cargo test` runs in `project`. `--cwd PATH` is an explicit override; relative paths are resolved from the recorder's current directory. The resolved effective directory is stored in `session.json` as byte-exact provenance.
+
 The new owner-only session directory contains an integrity-chained `events.jsonl` recording with raw bytes encoded as Base64. Inputs and resizes are represented by durable intent/result pairs. A crash between the pair is reported as uncertain, never silently retried. High-volume output is buffered between durable control boundaries so recording does not add an `fsync` pause to every PTY read. A live pinned-libghostty engine answers terminal queries and audits each generated reply as distinct host input. The header also pins Ghostty's effective foreground, pure-black background, cursor color, and complete palette for deterministic replay.
 
 Termtrace refuses to reuse an existing session directory. This prevents accidental evidence loss and makes every run independently auditable.
@@ -87,6 +89,15 @@ Replay validates the event hash chain, feeds each output byte through the pinned
 
 The derived directory is assembled privately and atomically renamed with no-replace semantics. Existing results are never overwritten implicitly.
 
+Index only a half-open source interval when a long recording needs focused analysis:
+
+```bash
+termtrace index --session /tmp/example.termtrace \
+  --from 00:08:15 --to 00:08:45
+```
+
+`--from` is inclusive and `--to` is exclusive. Offsets accept bare seconds, `ns`/`us`/`ms`/`s`/`m`/`h` suffixes, `MM:SS.fraction`, or `HH:MM:SS.fraction`. An omitted bound selects the corresponding session endpoint. Termtrace fast-forwards all earlier output and successful resizes through libghostty-vt, emits a complete baseline at `--from`, and then indexes only states in the selected interval. Range artifacts use deterministic `derived-range-FROM_NS-TO_NS/` directories and coexist with `derived/`.
+
 ## Native Ghostty pixels
 
 ```bash
@@ -98,6 +109,15 @@ Capture uses the viewport retained by `--viewport`; recordings without one retai
 Capture launches the installed Ghostty GTK/OpenGL application on a private Xvfb display. Recordings made with fitted geometry or any visual-profile option use the canonical `ghostty-config.txt` saved in the session, so settings such as background, font, palette, padding, and shader choices are evidence rather than assumptions. Older and manual recordings without a saved profile retain the normal user-config behavior. Capture-only command-line overrides isolate the process, disable single-instance behavior, position and expand the window to the capture surface, and prevent persisted window state from changing the result.
 
 `visual/session.mkv` is lossless RGB H.264 at exactly 24 FPS. `visual/final.png` is a direct X11 frame with the mouse hidden. FFprobe output, process logs, config, provenance, and `video-map.jsonl` are retained beside them. Failed captures preserve their owner-only diagnostic directory instead of deleting the evidence.
+
+Native video is always an offline derived artifact; recording never encodes video continuously. To render only a suspicious interval, first create its matching range index and then capture with the same bounds:
+
+```bash
+termtrace index   --session /tmp/example.termtrace --from 00:08:15 --to 00:08:45
+termtrace capture --session /tmp/example.termtrace --from 00:08:15 --to 00:08:45
+```
+
+Compound unit strings such as `8m15s` are not accepted; use clock notation (`00:08:15`) or one decimal unit (`495s`). During ranged capture, canonical output and successful resizes before `--from` are replayed without source-time sleeps. A terminal-query barrier proves Ghostty processed that prefix before the capture clock and FFmpeg start, then only `[from, to)` is played at native timing. The manifest records the exact source range and `video-map.jsonl` maps absolute source timestamps to range-relative frames. Range captures use `visual-range-FROM_NS-TO_NS/`; omitting both bounds preserves `visual/` and full-session timing.
 
 Run `scripts/native-smoke-test.sh` on a Linux host with Ghostty, Xvfb, FFmpeg/FFprobe, D-Bus, and `jq` to exercise and probe the complete native path.
 

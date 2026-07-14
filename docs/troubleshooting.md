@@ -31,6 +31,12 @@ Recordings made with fitted geometry or `--ghostty-config`/visual convenience fl
 
 If capture reports a geometry mismatch, the recorded grid does not fit the selected viewport with the available Ghostty font metrics. Prefer recording with `--geometry fit --viewport WIDTHxHEIGHT`. For a fitted recording, confirm that the font and other external profile resources still exist, or make a new recording rather than overriding the viewport until wrapping happens to look close.
 
+For a ranged capture, create the semantic index with exactly the same `--from` and `--to` values first. Bounds are resolved to absolute nanoseconds and select `[from, to)`; the error names the matching index command and deterministic directory. Do not rename a range directory or reuse an index from different bounds. If fast-forward geometry verification fails, inspect pre-range resize intent/result events rather than increasing delays: capture uses a terminal-query barrier and does not guess that Ghostty caught up.
+
+## A recorded command starts in the wrong directory
+
+Without `--cwd`, current Termtrace releases inherit the directory from which `termtrace record` was invoked and persist its resolved path in `session.json`. `--cwd` overrides this, with relative paths resolved against that same caller directory. Inspect `working_directory` in `session.json`; it is Base64-backed byte-string JSON so non-UTF-8 paths remain lossless. Older recordings may contain `null` because earlier releases delegated the unset directory to `portable-pty`, which selected the user's home directory.
+
 ## Video does not show every transient state
 
 At 24 FPS, a frame spans roughly 41.7 ms. This limits the video only. `states.jsonl` remains byte-granular, including mode-2026 suppressed states, and `video-map.jsonl` marks non-presented states with a null frame.

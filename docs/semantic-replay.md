@@ -14,6 +14,12 @@ DEC mode 2026 suppresses presentation, not execution. Intermediate changes are i
 
 The first state includes full geometry, metadata, and every cell. Later records include only changed metadata and changed cells grouped by row. Consumers resize their grid when `delta.geometry` appears, then apply cell changes by row and column. `state-index.jsonl` is the lightweight event-to-state lookup table.
 
+## Ranged replay
+
+`termtrace index --from OFFSET --to OFFSET` selects the half-open interval `[from, to)`. Earlier output and applied resizes are replayed without emitting states. At `from`, Termtrace snapshots the fully reconstructed terminal as dense state `0` with no responsible event and a complete delta. Events exactly at `from` are then included; events exactly at `to` are excluded. Resize intents that begin before the boundary remain paired with results inside it. Markers and lifecycle events retain timing but do not invent semantic changes, and synchronized-output presentation flags continue to follow DEC mode 2026.
+
+The range manifest records absolute monotonic nanosecond bounds. State timestamps remain absolute source timestamps, while state identifiers are dense within the derived range. `final.txt`, `final.vt`, and `final.html` describe the terminal at the exclusive end boundary. Invalid, zero-duration, and out-of-session bounds fail rather than being clamped.
+
 ## Determinism
 
 Replay outputs contain no generation timestamps. Given the same validated event log, pinned Ghostty revision, and artifact schema version, state records, hashes, final text, VT, and HTML are byte-for-byte deterministic. Tests replay the same recording twice and compare every output.
