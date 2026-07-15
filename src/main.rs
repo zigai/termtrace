@@ -66,14 +66,14 @@ use termtrace::{
     schema::write_all as write_schemas,
     session::{
         CaptureTarget, GeometryProvenance, GeometrySource, GhosttyVisualOverrides, SessionGeometry,
-        SessionLineage, VerificationLevel, manifest_hash, read_manifest, validate_completed_log,
-        verify_session_with_trust,
+        SessionLineage, SessionManifest, VerificationLevel, manifest_hash, read_manifest,
+        validate_completed_log, verify_session_with_trust,
     },
     session_registry::SessionRegistry,
     timeline::{
         TimelineEntry, TimelineItem, build_timeline, parse_time_offset_ns, resolve_source_selection,
     },
-    visual::{CaptureOptions, capture, probe_ghostty_geometry},
+    visual::{CaptureOptions, capture, probe_ghostty_geometry, solve_ghostty_geometry},
 };
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, registry, util::SubscriberInitExt};
 
@@ -1717,17 +1717,27 @@ fn run_index(arguments: IndexArgs) -> Result<ExitCode> {
 fn run_capture(arguments: CaptureArgs) -> Result<ExitCode> {
     let (start_monotonic_ns, end_monotonic_ns) =
         resolve_cli_range(&arguments.session, &arguments.range)?;
-    let target = match (arguments.width, arguments.height) {
-        (Some(width), Some(height)) => CaptureTarget { width, height },
+    let (target, geometry_solver) = match (arguments.width, arguments.height) {
+        (Some(width), Some(height)) => (CaptureTarget { width, height }, None),
         (None, None) => {
             let manifest = read_manifest(&arguments.session)?;
-            manifest
+            let initial = manifest
                 .geometry_provenance
                 .capture_target
-                .unwrap_or(CaptureTarget {
-                    width: 1280,
-                    height: 720,
-                })
+                .unwrap_or_else(|| {
+                    return CaptureTarget {
+                        width: manifest.geometry.pixel_width.saturating_add(128).max(320),
+                        height: manifest.geometry.pixel_height.saturating_add(128).max(200),
+                    };
+                });
+            let profile = capture_profile(&arguments.session, &manifest)?;
+            let report = solve_ghostty_geometry(
+                manifest.geometry.cols,
+                manifest.geometry.rows,
+                initial,
+                &profile,
+            )?;
+            (report.selected, Some(report))
         }
         _ => {
             return Err(miette::miette!(
@@ -1743,12 +1753,35 @@ fn run_capture(arguments: CaptureArgs) -> Result<ExitCode> {
         start_monotonic_ns,
         end_monotonic_ns,
         state_selection: selection(arguments.presented_only),
+        geometry_solver,
     })?;
     return write_json_line(&serde_json::json!({
         "directory": outcome.directory,
         "video": outcome.video,
         "screenshot": outcome.screenshot,
     }));
+}
+
+fn capture_profile(session: &Path, manifest: &SessionManifest) -> Result<ResolvedGhosttyProfile> {
+    let Some(provenance) = &manifest.ghostty_visual else {
+        return Ok(resolve_ghostty_profile(
+            None,
+            GhosttyVisualOverrides::default(),
+        )?);
+    };
+    let path = session.join(&provenance.effective_config);
+    let effective_config = fs_err::read(&path).into_diagnostic()?;
+    let actual_hash = blake3::hash(&effective_config).to_hex().to_string();
+    if actual_hash != provenance.effective_config_hash {
+        return Err(miette::miette!(
+            "recorded Ghostty profile hash does not match {}",
+            path.display()
+        ));
+    }
+    return Ok(ResolvedGhosttyProfile {
+        effective_config,
+        provenance: provenance.clone(),
+    });
 }
 
 fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> {

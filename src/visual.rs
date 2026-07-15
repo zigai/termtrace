@@ -56,6 +56,8 @@ pub struct CaptureOptions {
     pub end_monotonic_ns: Option<u64>,
     /// Semantic index retention mode to consume.
     pub state_selection: StateSelection,
+    /// Capture-time exact-grid viewport search evidence.
+    pub geometry_solver: Option<GeometrySolveReport>,
 }
 
 /// Completed native capture.
@@ -74,6 +76,30 @@ pub struct CaptureOutcome {
 pub struct FittedGeometry {
     /// Live XTWINOPS geometry report.
     pub report: TerminalGeometryReport,
+}
+
+/// One viewport and measured grid considered by the exact-grid solver.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryProbeAttempt {
+    /// Whole native viewport supplied to Ghostty.
+    pub target: CaptureTarget,
+    /// Grid, cell, and text-area dimensions reported by Ghostty.
+    pub report: TerminalGeometryReport,
+}
+
+/// Bounded capture-time search proving the selected viewport fits the canonical grid.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GeometrySolveReport {
+    /// Required canonical columns.
+    pub required_cols: u16,
+    /// Required canonical rows.
+    pub required_rows: u16,
+    /// Ordered probe decisions, including the independently measured final target.
+    pub attempts: Vec<GeometryProbeAttempt>,
+    /// Exact-grid selected viewport.
+    pub selected: CaptureTarget,
 }
 
 /// State-to-video mapping entry.
@@ -274,6 +300,131 @@ pub fn probe_ghostty_geometry(
     }
 }
 
+/// Find and independently verify a viewport that produces the exact canonical grid.
+///
+/// # Errors
+///
+/// Returns an error when probing fails, the search cycles, dimensions overflow,
+/// or no exact grid is found within eight measured attempts.
+pub fn solve_ghostty_geometry(
+    required_cols: u16,
+    required_rows: u16,
+    initial: CaptureTarget,
+    profile: &ResolvedGhosttyProfile,
+) -> Result<GeometrySolveReport> {
+    return solve_geometry_with(required_cols, required_rows, initial, |target| {
+        return probe_ghostty_geometry(target, profile).map(|fitted| return fitted.report);
+    });
+}
+
+fn solve_geometry_with(
+    required_cols: u16,
+    required_rows: u16,
+    initial: CaptureTarget,
+    mut probe: impl FnMut(CaptureTarget) -> Result<TerminalGeometryReport>,
+) -> Result<GeometrySolveReport> {
+    if required_cols == 0 || required_rows == 0 {
+        return Err(Error::InvalidReplay {
+            reason: "native geometry solver requires a nonzero canonical grid".to_owned(),
+        });
+    }
+    let mut attempts = Vec::new();
+    let mut target = initial;
+    for _attempt in 0..8 {
+        if attempts
+            .iter()
+            .any(|attempt: &GeometryProbeAttempt| return attempt.target == target)
+        {
+            return Err(geometry_solver_error(
+                required_cols,
+                required_rows,
+                &attempts,
+                "search cycled",
+            ));
+        }
+        let report = probe(target)?;
+        attempts.push(GeometryProbeAttempt { target, report });
+        if report.cols == required_cols && report.rows == required_rows {
+            // A second measurement at the chosen target distinguishes a stable
+            // exact fit from a transient geometry report.
+            let verified = probe(target)?;
+            attempts.push(GeometryProbeAttempt {
+                target,
+                report: verified,
+            });
+            if verified.cols == required_cols && verified.rows == required_rows {
+                return Ok(GeometrySolveReport {
+                    required_cols,
+                    required_rows,
+                    attempts,
+                    selected: target,
+                });
+            }
+            continue;
+        }
+        let horizontal_overhead = target.width.saturating_sub(report.text_width);
+        let vertical_overhead = target.height.saturating_sub(report.text_height);
+        let width = required_cols
+            .checked_mul(report.cell_width)
+            .and_then(|text| return text.checked_add(horizontal_overhead))
+            .ok_or_else(|| {
+                return geometry_solver_error(
+                    required_cols,
+                    required_rows,
+                    &attempts,
+                    "width overflowed",
+                );
+            })?;
+        let height = required_rows
+            .checked_mul(report.cell_height)
+            .and_then(|text| return text.checked_add(vertical_overhead))
+            .ok_or_else(|| {
+                return geometry_solver_error(
+                    required_cols,
+                    required_rows,
+                    &attempts,
+                    "height overflowed",
+                );
+            })?;
+        target = CaptureTarget {
+            width: width.max(320),
+            height: height.max(200),
+        };
+    }
+    return Err(geometry_solver_error(
+        required_cols,
+        required_rows,
+        &attempts,
+        "eight-attempt bound exhausted",
+    ));
+}
+
+fn geometry_solver_error(
+    required_cols: u16,
+    required_rows: u16,
+    attempts: &[GeometryProbeAttempt],
+    reason: &str,
+) -> Error {
+    let measured = attempts
+        .iter()
+        .map(|attempt| {
+            return format!(
+                "{}x{}px=>{}x{}",
+                attempt.target.width,
+                attempt.target.height,
+                attempt.report.cols,
+                attempt.report.rows
+            );
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    return Error::InvalidReplay {
+        reason: format!(
+            "could not fit native viewport to {required_cols}x{required_rows} grid ({reason}); probes: {measured}"
+        ),
+    };
+}
+
 fn probe_ghostty_geometry_staged(
     target: CaptureTarget,
     profile: &ResolvedGhosttyProfile,
@@ -344,6 +495,12 @@ fn capture_staged(
     staging: &Path,
 ) -> Result<VisualManifest> {
     let session_manifest = read_manifest(&options.session_directory)?;
+    if let Some(report) = &options.geometry_solver {
+        let encoded = serde_json::to_vec_pretty(report).map_err(|source| {
+            return json_error(staging.join("geometry-solver.json"), source);
+        })?;
+        write_secure(&staging.join("geometry-solver.json"), &encoded)?;
+    }
     let profile_root = if let Some(profile) = &session_manifest.ghostty_visual {
         if profile.effective_config != "ghostty-config.txt" {
             return Err(Error::InvalidReplay {
@@ -1460,6 +1617,67 @@ mod tests {
         assert!(message.contains("renders 230x56 cells"));
         assert!(message.contains("requires 180x50 cells"));
         assert!(message.contains("--geometry fit --viewport 1620x900"));
+    }
+
+    #[test]
+    fn geometry_solver_converges_and_independently_verifies_exact_grid() {
+        let report = solve_geometry_with(
+            100,
+            25,
+            CaptureTarget {
+                width: 1280,
+                height: 720,
+            },
+            |target| {
+                let text_width = target.width.saturating_sub(20);
+                let text_height = target.height.saturating_sub(40);
+                return Ok(TerminalGeometryReport {
+                    cols: text_width / 8,
+                    rows: text_height / 16,
+                    cell_width: 8,
+                    cell_height: 16,
+                    text_width,
+                    text_height,
+                });
+            },
+        )
+        .expect("solve exact grid");
+        assert_eq!(
+            report.selected,
+            CaptureTarget {
+                width: 820,
+                height: 440,
+            }
+        );
+        assert_eq!(report.attempts.len(), 3);
+        assert_eq!(report.attempts.get(1), report.attempts.get(2));
+    }
+
+    #[test]
+    fn geometry_solver_reports_cycles_with_measured_candidates() {
+        let error = solve_geometry_with(
+            100,
+            25,
+            CaptureTarget {
+                width: 800,
+                height: 400,
+            },
+            |target| {
+                let text_width = target.width.saturating_sub(20);
+                let text_height = target.height.saturating_sub(20);
+                return Ok(TerminalGeometryReport {
+                    cols: 99,
+                    rows: 24,
+                    cell_width: 8,
+                    cell_height: 16,
+                    text_width,
+                    text_height,
+                });
+            },
+        )
+        .expect_err("cycle must fail");
+        assert!(error.to_string().contains("search cycled"));
+        assert!(error.to_string().contains("800x400px=>99x24"));
     }
 
     #[test]

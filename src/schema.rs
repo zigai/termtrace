@@ -37,7 +37,7 @@ use crate::{
     session::{SessionCompletion, SessionManifest, VerificationReport},
     session_registry::{RegistryEntry, RegistryListEntry},
     timeline::TimelineEntry,
-    visual::{VideoMapEntry, VisualManifest},
+    visual::{GeometrySolveReport, VideoMapEntry, VisualManifest},
     vt_framer::VtToken,
 };
 
@@ -88,6 +88,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<ReviewSummary>("review-summary.schema.json")?,
         schema::<ReviewerCapabilities>("reviewer-capabilities.schema.json")?,
         schema::<VisualManifest>("visual-manifest.schema.json")?,
+        schema::<GeometrySolveReport>("geometry-solve-report.schema.json")?,
         schema::<VideoMapEntry>("video-map-entry.schema.json")?,
         schema::<RecoveryReport>("recovery-report.schema.json")?,
         schema::<WaitOutcome>("wait-outcome.schema.json")?,

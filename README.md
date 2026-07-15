@@ -66,7 +66,7 @@ Detailed references: [installation](docs/installation.md), [agent workflows](doc
 
 ## Reproducible demos
 
-Run `demos/run-all.sh` to generate three owner-only showcases covering visual/semantic fidelity, live agent control and signals, tmux interoperability, schema generation, tamper rejection, and torn-tail recovery. Each visual demo includes the canonical session, lossless 1080p/24 FPS Ghostty capture, screenshot, agent-readable states, asciicast export, and a broadly playable MP4. See [the demo guide](demos/README.md) for individual commands and artifact layout.
+Run `demos/run-all.sh` to generate one owner-only end-to-end showcase covering visual and semantic fidelity, live control and signals, schema generation, tamper rejection, and torn-tail recovery. The demo includes the canonical session, lossless 1080p/24 FPS native capture, screenshot, agent-readable states, asciicast export, and a broadly playable MP4. See [the demo guide](demos/README.md) for the artifact layout.
 
 ## Live agent control
 

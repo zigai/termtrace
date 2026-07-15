@@ -1,55 +1,35 @@
-# Termtrace demos
+# Termtrace demo
 
-These demos exercise Termtrace through its public CLI and retain owner-only evidence under an ignored output directory. Generated sessions, raw terminal bytes, screenshots, and videos may contain sensitive data; do not publish them without inspection.
+The demo exercises Termtrace through its public CLI and retains owner-only evidence under an ignored output directory. Generated sessions, raw terminal bytes, screenshots, and videos may contain sensitive data; do not publish them without inspection.
 
-## Run everything
+## Run it
 
 ```bash
 demos/run-all.sh
 ```
 
-Pass an empty destination to keep output elsewhere:
+Pass a different destination to keep output elsewhere:
 
 ```bash
-demos/run-all.sh /tmp/my-termtrace-demos
+demos/run-all.sh /tmp/my-termtrace-demo
 ```
 
-Every demo refuses to replace existing output.
+The demo refuses to replace existing output. Its artifacts are written beneath `<destination>/showcase`.
 
-## 1. Visual semantics
+## What it demonstrates
 
-`01-visual-semantics.sh` records an interactive terminal target with true color, Unicode graphemes, synchronized output, alternate-screen transitions, cursor and background queries, exact file input, resize, markers, waits, and `SIGUSR1`. It then produces:
+One recording covers the complete workflow:
 
-- canonical byte and control events;
-- every distinct libghostty state and state index;
-- JSON and text inspection at initial and final states;
-- an asciinema v2 cast;
-- a real Ghostty/Xvfb screenshot;
-- a lossless RGB H.264 video at 24 FPS;
-- a broadly playable H.264 MP4 showcase derived from that lossless source;
-- FFprobe and event-count summaries.
-
-## 2. Control lifecycle
-
-`02-control-lifecycle.sh` demonstrates readiness probes, status, textual input, waits, markers, `SIGUSR2`, `SIGHUP`, `SIGINT`, and graceful `stop`/`SIGTERM`. The target prints each observed transition, and the completed recording receives the same replay, inspection, cast, screenshot, and video derivations.
-
-## 3. tmux, integrity, and recovery
-
-`03-tmux-recovery.sh` records tmux as an ordinary target while Termtrace remains the canonical outer-PTY owner. It then:
-
-- builds semantic and native visual artifacts;
-- exports asciicast interoperability output;
-- appends a torn JSON tail and recovers the exact valid prefix;
-- indexes and inspects the recovered recording;
-- alters canonical output without updating the hash chain and proves indexing rejects it;
-- generates every public JSON Schema.
+- true color, Unicode graphemes, synchronized output, alternate-screen transitions, and terminal queries;
+- readiness probes, status, exact file input, resizing, markers, signals, waits, and graceful stop;
+- semantic state derivation, JSON and text inspection, and asciinema v2 export;
+- a native screenshot, lossless 1920×1080 video at 24 FPS, and a broadly playable MP4;
+- torn-tail recovery, recovered-prefix inspection, tamper rejection, and JSON Schema generation.
 
 ## Artifact layout
 
-Each visual demo places its principal outputs at:
-
 ```text
-demo-artifacts/<demo>/
+demo-artifacts/showcase/
 ├── run/
 │   ├── events.jsonl
 │   ├── derived/states.jsonl.zst
@@ -61,9 +41,7 @@ demo-artifacts/<demo>/
 ├── session.cast
 ├── showcase.mp4
 ├── video-probe.json
-└── event-counts.json
+├── event-counts.json
+├── recovery-report.json
+└── tamper-rejected.log
 ```
-
-## Resolution
-
-All native captures and showcase MP4s are generated at **1920×1080 and 24 FPS**.

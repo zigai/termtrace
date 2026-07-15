@@ -1,0 +1,142 @@
+{
+  "$defs": {
+    "CaptureTarget": {
+      "description": "Pixel viewport intended for native visual capture.",
+      "properties": {
+        "height": {
+          "description": "Viewport height in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "description": "Viewport width in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "type": "object"
+    },
+    "GeometryProbeAttempt": {
+      "additionalProperties": false,
+      "description": "One viewport and measured grid considered by the exact-grid solver.",
+      "properties": {
+        "report": {
+          "$ref": "#/$defs/TerminalGeometryReport",
+          "description": "Grid, cell, and text-area dimensions reported by Ghostty."
+        },
+        "target": {
+          "$ref": "#/$defs/CaptureTarget",
+          "description": "Whole native viewport supplied to Ghostty."
+        }
+      },
+      "required": [
+        "target",
+        "report"
+      ],
+      "type": "object"
+    },
+    "TerminalGeometryReport": {
+      "description": "Geometry reported by a live terminal through XTWINOPS queries.",
+      "properties": {
+        "cell_height": {
+          "description": "Height of one rendered cell in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cell_width": {
+          "description": "Width of one rendered cell in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cols": {
+          "description": "Terminal columns.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "description": "Terminal rows.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text_height": {
+          "description": "Height of the complete text area in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text_width": {
+          "description": "Width of the complete text area in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cols",
+        "rows",
+        "cell_width",
+        "cell_height",
+        "text_width",
+        "text_height"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/geometry-solve-report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Bounded capture-time search proving the selected viewport fits the canonical grid.",
+  "properties": {
+    "attempts": {
+      "description": "Ordered probe decisions, including the independently measured final target.",
+      "items": {
+        "$ref": "#/$defs/GeometryProbeAttempt"
+      },
+      "type": "array"
+    },
+    "required_cols": {
+      "description": "Required canonical columns.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "required_rows": {
+      "description": "Required canonical rows.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "selected": {
+      "$ref": "#/$defs/CaptureTarget",
+      "description": "Exact-grid selected viewport."
+    }
+  },
+  "required": [
+    "required_cols",
+    "required_rows",
+    "attempts",
+    "selected"
+  ],
+  "title": "GeometrySolveReport",
+  "type": "object"
+}
