@@ -32,6 +32,12 @@ pub struct PlaybackTiming {
     pub speed: u32,
     /// Selected half-open source interval, absent for full-session playback.
     pub source_range: Option<SourceRange>,
+    /// Exact endpoint event for single-state playback.
+    pub endpoint_event_seq: Option<u64>,
+    /// Inclusive byte offset applied within the endpoint output event.
+    pub endpoint_event_byte_offset: Option<u64>,
+    /// Whether source-time sleeps were disabled.
+    pub instant: bool,
 }
 
 /// Structured failure handshake written before playback exits unsuccessfully.
@@ -60,6 +66,12 @@ pub struct PlaybackOptions {
     pub start_monotonic_ns: Option<u64>,
     /// Optional exclusive source offset.
     pub end_monotonic_ns: Option<u64>,
+    /// Exact canonical endpoint event for single-state replay.
+    pub endpoint_event_seq: Option<u64>,
+    /// Inclusive byte offset within an endpoint output event.
+    pub endpoint_event_byte_offset: Option<u64>,
+    /// Replay the endpoint without source-time sleeps.
+    pub instant: bool,
 }
 
 /// Replay canonical output and successful resizes to standard output.
@@ -86,6 +98,18 @@ pub fn playback(options: &PlaybackOptions) -> Result<()> {
 }
 
 fn playback_inner(options: &PlaybackOptions) -> Result<()> {
+    if options.endpoint_event_byte_offset.is_some() && options.endpoint_event_seq.is_none() {
+        return Err(Error::InvalidReplay {
+            reason: "playback byte endpoint requires an event endpoint".to_owned(),
+        });
+    }
+    if options.endpoint_event_seq.is_some()
+        && (options.start_monotonic_ns.is_some() || options.end_monotonic_ns.is_some())
+    {
+        return Err(Error::InvalidReplay {
+            reason: "exact playback endpoints cannot be combined with time ranges".to_owned(),
+        });
+    }
     let mut terminal_mode = RawTerminalGuard::enter(true)?;
     if let Err(error) = prepare_terminal_geometry(options) {
         return finish_with_cleanup(Err(error), terminal_mode.restore());
@@ -175,7 +199,12 @@ fn playback_with_raw_input(options: &PlaybackOptions, input_is_terminal: bool) -
     // only afterward so later application queries cannot block timed playback.
     let mut input_drain = TerminalInputDrain::start(input_is_terminal)?;
     let result = timed_playback(options, &log, source_range, &mut resize_intents);
-    return finish_with_cleanup(result, input_drain.stop());
+    let result = finish_with_cleanup(result, input_drain.stop());
+    result?;
+    let _endpoint_barrier = query_terminal()?;
+    write_create_new(&options.ready_file, b"ready\n")?;
+    thread::sleep(options.final_hold);
+    return Ok(());
 }
 
 fn timed_playback(
@@ -196,6 +225,9 @@ fn timed_playback(
         replay_origin_unix_ns,
         speed: 1,
         source_range,
+        endpoint_event_seq: options.endpoint_event_seq,
+        endpoint_event_byte_offset: options.endpoint_event_byte_offset,
+        instant: options.instant,
     };
     write_create_new_json(&options.timing_file, &timing)?;
     sleep_until(monotonic_origin);
@@ -212,8 +244,25 @@ fn timed_playback(
         let relative_ns = source_range.map_or(record.monotonic_ns, |range| {
             return record.monotonic_ns.saturating_sub(range.start_monotonic_ns);
         });
-        let target = monotonic_origin + Duration::from_nanos(relative_ns);
-        sleep_until(target);
+        if !options.instant {
+            let target = monotonic_origin + Duration::from_nanos(relative_ns);
+            sleep_until(target);
+        }
+        if options
+            .endpoint_event_seq
+            .is_some_and(|endpoint| return record.seq > endpoint)
+        {
+            break;
+        }
+        if options.endpoint_event_seq == Some(record.seq) {
+            emit_endpoint_event(
+                &mut output,
+                resize_intents,
+                &record.event,
+                options.endpoint_event_byte_offset,
+            )?;
+            break;
+        }
         emit_event(&mut output, resize_intents, &record.event, None)?;
     }
     if let Some(range) = source_range {
@@ -222,9 +271,51 @@ fn timed_playback(
         // describe the requested interval rather than the last visible mutation.
         sleep_until(monotonic_origin + Duration::from_nanos(range.duration_ns()));
     }
-    write_create_new(&options.ready_file, b"ready\n")?;
-    thread::sleep(options.final_hold);
     return Ok(());
+}
+
+fn emit_endpoint_event(
+    output: &mut impl io::Write,
+    resize_intents: &mut HashMap<uuid::Uuid, (u16, u16)>,
+    event: &Event,
+    byte_offset: Option<u64>,
+) -> Result<()> {
+    if let Event::Output { data } = event {
+        let end = byte_offset
+            .ok_or_else(|| {
+                return Error::InvalidReplay {
+                    reason: "output endpoint requires an inclusive byte offset".to_owned(),
+                };
+            })?
+            .checked_add(1)
+            .and_then(|value| return usize::try_from(value).ok())
+            .ok_or_else(|| {
+                return Error::InvalidReplay {
+                    reason: "output endpoint byte offset overflows".to_owned(),
+                };
+            })?;
+        let prefix = data.as_bytes().get(..end).ok_or_else(|| {
+            return Error::InvalidReplay {
+                reason: "output endpoint byte offset exceeds the canonical event".to_owned(),
+            };
+        })?;
+        output
+            .write_all(prefix)
+            .and_then(|()| return output.flush())
+            .map_err(|source| {
+                return Error::Filesystem {
+                    path: PathBuf::from("<stdout>"),
+                    source,
+                };
+            })?;
+        return Ok(());
+    }
+    if byte_offset.is_some() {
+        return Err(Error::InvalidReplay {
+            reason: "only output endpoints accept a byte offset".to_owned(),
+        });
+    }
+    return emit_event(output, resize_intents, event, None);
 }
 
 fn emit_event(

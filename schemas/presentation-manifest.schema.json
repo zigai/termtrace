@@ -1,5 +1,104 @@
 {
   "$defs": {
+    "AnnotationAnchor": {
+      "description": "Stable annotation anchor vocabulary.",
+      "oneOf": [
+        {
+          "const": "top_left",
+          "description": "Top-left canvas corner.",
+          "type": "string"
+        },
+        {
+          "const": "top_right",
+          "description": "Top-right canvas corner.",
+          "type": "string"
+        },
+        {
+          "const": "bottom_left",
+          "description": "Bottom-left canvas corner.",
+          "type": "string"
+        },
+        {
+          "const": "bottom_right",
+          "description": "Bottom-right canvas corner.",
+          "type": "string"
+        },
+        {
+          "const": "center",
+          "description": "Canvas center.",
+          "type": "string"
+        }
+      ]
+    },
+    "AnnotationPosition": {
+      "additionalProperties": false,
+      "description": "Named anchor plus signed pixel offset.",
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/AnnotationAnchor",
+          "description": "Named canvas anchor."
+        },
+        "x": {
+          "description": "Signed horizontal offset from the anchor.",
+          "format": "int32",
+          "type": "integer"
+        },
+        "y": {
+          "description": "Signed vertical offset from the anchor.",
+          "format": "int32",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "anchor",
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "AnnotationStyle": {
+      "additionalProperties": false,
+      "description": "Deterministic visible text style compiled to ASS.",
+      "properties": {
+        "background": {
+          "description": "`#RRGGBB` background.",
+          "type": "string"
+        },
+        "background_opacity": {
+          "description": "Background opacity from zero through 255.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "border": {
+          "description": "Border width in pixels.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "font_size": {
+          "description": "Font size in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "foreground": {
+          "description": "`#RRGGBB` foreground.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "font_size",
+        "foreground",
+        "background",
+        "background_opacity",
+        "border"
+      ],
+      "type": "object"
+    },
     "ArtifactMember": {
       "additionalProperties": false,
       "description": "Whole-file integrity metadata embedded in a derived manifest.",
@@ -62,6 +161,391 @@
           "type": "string"
         }
       ]
+    },
+    "CaptionLayout": {
+      "description": "Placement of the per-clip caption preset.",
+      "oneOf": [
+        {
+          "const": "footer",
+          "description": "Extend the canvas below the native viewport.",
+          "type": "string"
+        },
+        {
+          "const": "overlay",
+          "description": "Intentionally draw captions over source pixels.",
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "description": "Retain caption metadata without rendering it.",
+          "type": "string"
+        }
+      ]
+    },
+    "ChangeMode": {
+      "description": "Visible change-overlay mode.",
+      "oneOf": [
+        {
+          "const": "outline",
+          "description": "Outline changed cells or pixel regions.",
+          "type": "string"
+        },
+        {
+          "const": "dirty_rows",
+          "description": "Shade rows reported dirty by semantic evidence.",
+          "type": "string"
+        },
+        {
+          "const": "bounding_box",
+          "description": "Draw one minimal enclosing rectangle.",
+          "type": "string"
+        },
+        {
+          "const": "heatmap",
+          "description": "Color changes by frequency or magnitude.",
+          "type": "string"
+        },
+        {
+          "const": "trail",
+          "description": "Fade prior change regions across held frames.",
+          "type": "string"
+        },
+        {
+          "const": "side_diff",
+          "description": "Add a side-by-side difference panel.",
+          "type": "string"
+        }
+      ]
+    },
+    "ChangeRegion": {
+      "additionalProperties": false,
+      "description": "One nominal semantic-change region in source pixels.",
+      "properties": {
+        "height": {
+          "description": "Region height.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "description": "Region width.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "x": {
+          "description": "Left source pixel.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "y": {
+          "description": "Top source pixel.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "type": "object"
+    },
+    "ChangeSource": {
+      "description": "Truth source used by a change overlay.",
+      "oneOf": [
+        {
+          "const": "semantic_cells",
+          "description": "Nominally scheduled complete semantic-cell changes.",
+          "type": "string"
+        },
+        {
+          "const": "encoded_pixels",
+          "description": "Actual decoded adjacent encoded-frame pixels.",
+          "type": "string"
+        }
+      ]
+    },
+    "ChangeVisualization": {
+      "additionalProperties": false,
+      "description": "Explicit source and shape for per-frame change overlays.",
+      "properties": {
+        "hold_frames": {
+          "default": 0,
+          "description": "Number of output frames to retain a fading/held overlay.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode": {
+          "$ref": "#/$defs/ChangeMode",
+          "description": "Visible overlay form."
+        },
+        "pixel_threshold": {
+          "description": "Pixel-difference threshold for encoded input, ignored for semantic input.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/ChangeSource",
+          "description": "Semantic scheduling or actual decoded adjacent pixels."
+        }
+      },
+      "required": [
+        "source",
+        "mode"
+      ],
+      "type": "object"
+    },
+    "CursorMaskFrame": {
+      "additionalProperties": false,
+      "description": "One semantic cursor region masked on a mapped presentation frame.",
+      "properties": {
+        "evidence_level": {
+          "description": "Honest semantic-to-native correlation level.",
+          "type": "string"
+        },
+        "output_frame": {
+          "description": "Presentation frame receiving the mask.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "region": {
+          "$ref": "#/$defs/ChangeRegion",
+          "description": "Nominal cursor pixel region."
+        },
+        "source_frame": {
+          "description": "Native source frame selected by presentation mapping.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state_hash": {
+          "description": "Complete source semantic state hash.",
+          "type": "string"
+        },
+        "state_id": {
+          "description": "Latest presentation-eligible semantic state used for cursor geometry.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "output_frame",
+        "source_frame",
+        "state_id",
+        "state_hash",
+        "region",
+        "evidence_level"
+      ],
+      "type": "object"
+    },
+    "MarkerRecord": {
+      "additionalProperties": false,
+      "description": "Canonical marker with duplicate and nominal-frame context.",
+      "properties": {
+        "event_seq": {
+          "description": "Canonical event sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "label": {
+          "description": "Marker label.",
+          "type": "string"
+        },
+        "monotonic_ns": {
+          "description": "Canonical session offset.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "native_evidence_level": {
+          "description": "Honest native correlation level for the nominal frame.",
+          "type": "string"
+        },
+        "nominal_frame": {
+          "description": "Nominal source frame at the requested rate.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "occurrence_count": {
+          "description": "Total occurrences of this label.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "presentation_eligible": {
+          "description": "Whether an associated presentation-eligible semantic state exists.",
+          "type": "boolean"
+        },
+        "semantic_state_hash": {
+          "description": "Complete hash of the associated semantic state.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "semantic_state_id": {
+          "description": "Latest presentation-eligible semantic state at or before the marker.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "label",
+        "event_seq",
+        "monotonic_ns",
+        "nominal_frame",
+        "occurrence_count",
+        "presentation_eligible",
+        "native_evidence_level"
+      ],
+      "type": "object"
+    },
+    "NormalizedAnnotation": {
+      "additionalProperties": false,
+      "description": "One annotation resolved to a half-open output-frame interval.",
+      "properties": {
+        "annotation_index": {
+          "description": "Stable caller annotation index.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_end_frame": {
+          "description": "Exclusive presentation frame.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_start_frame": {
+          "description": "Inclusive presentation frame.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "position": {
+          "$ref": "#/$defs/AnnotationPosition",
+          "description": "Exact anchored placement."
+        },
+        "style": {
+          "$ref": "#/$defs/AnnotationStyle",
+          "description": "Visible text/background style."
+        },
+        "template": {
+          "description": "Per-frame dynamic text template.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "description": "Literal text, when the track is static.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "z_order": {
+          "description": "Stable overlay ordering.",
+          "format": "int16",
+          "maximum": 32767,
+          "minimum": -32768,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "annotation_index",
+        "output_start_frame",
+        "output_end_frame",
+        "position",
+        "style",
+        "z_order"
+      ],
+      "type": "object"
+    },
+    "NormalizedChangeFrame": {
+      "additionalProperties": false,
+      "description": "Semantic delta nominally scheduled onto presentation frames.",
+      "properties": {
+        "changed_regions": {
+          "description": "Nominal changed-cell pixel regions.",
+          "items": {
+            "$ref": "#/$defs/ChangeRegion"
+          },
+          "type": "array"
+        },
+        "dirty_rows": {
+          "description": "Rows reported dirty by the semantic engine.",
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "evidence_level": {
+          "description": "Honest correlation level for this overlay input.",
+          "type": "string"
+        },
+        "output_frames": {
+          "description": "Output frames mapped to this source frame.",
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "source_frame": {
+          "description": "Nominal native frame selected by clock arithmetic.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state_hash": {
+          "description": "Complete semantic state hash.",
+          "type": "string"
+        },
+        "state_id": {
+          "description": "Semantic state that introduced the delta.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "state_id",
+        "state_hash",
+        "source_frame",
+        "output_frames",
+        "changed_regions",
+        "dirty_rows",
+        "evidence_level"
+      ],
+      "type": "object"
     },
     "NormalizedClip": {
       "additionalProperties": false,
@@ -131,16 +615,266 @@
       ],
       "type": "object"
     },
+    "NormalizedSubtitle": {
+      "additionalProperties": false,
+      "description": "Validated subtitle input with stable content identity.",
+      "properties": {
+        "resource_hash": {
+          "description": "BLAKE3 of the exact imported ASS bytes.",
+          "type": "string"
+        },
+        "source_path": {
+          "description": "Resolved caller resource path used for this export.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_path",
+        "resource_hash"
+      ],
+      "type": "object"
+    },
+    "PixelTransform": {
+      "description": "Explicit presentation-only pixel transform.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Replace cursor pixels during presentation composition.",
+          "properties": {
+            "transform": {
+              "const": "cursor_mask",
+              "type": "string"
+            }
+          },
+          "required": [
+            "transform"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Crop to an exact source rectangle.",
+          "properties": {
+            "height": {
+              "description": "Rectangle height.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "transform": {
+              "const": "crop",
+              "type": "string"
+            },
+            "width": {
+              "description": "Rectangle width.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x": {
+              "description": "Left source pixel.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "y": {
+              "description": "Top source pixel.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "transform",
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Scale by one exact rational factor.",
+          "properties": {
+            "denominator": {
+              "description": "Scale denominator.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "numerator": {
+              "description": "Scale numerator.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "transform": {
+              "const": "zoom",
+              "type": "string"
+            }
+          },
+          "required": [
+            "transform",
+            "numerator",
+            "denominator"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Draw a visibly labeled rectangular callout.",
+          "properties": {
+            "height": {
+              "description": "Callout height.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "label": {
+              "description": "Optional visible label.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "transform": {
+              "const": "callout",
+              "type": "string"
+            },
+            "width": {
+              "description": "Callout width.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x": {
+              "description": "Left callout pixel.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "y": {
+              "description": "Top callout pixel.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "transform",
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PresentationDelivery": {
+      "additionalProperties": false,
+      "description": "Delivery codec and pixel-format contract.",
+      "properties": {
+        "codec": {
+          "description": "Stable delivery codec name.",
+          "type": "string"
+        },
+        "pixel_format": {
+          "description": "Stable output pixel format.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "codec",
+        "pixel_format"
+      ],
+      "type": "object"
+    },
+    "PresentationLayout": {
+      "additionalProperties": false,
+      "description": "Canvas layout for caption presets.",
+      "properties": {
+        "branding": {
+          "description": "Optional caller-owned branding label.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "caption": {
+          "$ref": "#/$defs/CaptionLayout",
+          "description": "Caption placement, with footer preserving terminal pixels."
+        }
+      },
+      "required": [
+        "caption"
+      ],
+      "type": "object"
+    },
     "PresentationPlan": {
       "additionalProperties": false,
       "description": "Dry-run output binding a normalized edit to immutable native evidence.",
       "properties": {
+        "annotations": {
+          "description": "Annotation tracks normalized onto the output frame timeline.",
+          "items": {
+            "$ref": "#/$defs/NormalizedAnnotation"
+          },
+          "type": "array"
+        },
+        "change_algorithm": {
+          "description": "Stable change-overlay implementation and truth description.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "change_frames": {
+          "description": "Semantic deltas scheduled onto mapped presentation frames.",
+          "items": {
+            "$ref": "#/$defs/NormalizedChangeFrame"
+          },
+          "type": "array"
+        },
+        "change_visualization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChangeVisualization"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit per-frame change overlay policy."
+        },
         "clips": {
           "description": "Caller-ordered resolved clips.",
           "items": {
             "$ref": "#/$defs/NormalizedClip"
           },
           "type": "array"
+        },
+        "cursor_masks": {
+          "description": "Cursor regions nominally masked from presentation pixels.",
+          "items": {
+            "$ref": "#/$defs/CursorMaskFrame"
+          },
+          "type": "array"
+        },
+        "delivery": {
+          "$ref": "#/$defs/PresentationDelivery",
+          "description": "Delivery encoding contract."
         },
         "edit_plan_hash": {
           "description": "BLAKE3 of canonical input edit-plan JSON.",
@@ -153,9 +887,45 @@
           "minimum": 0,
           "type": "integer"
         },
+        "layout": {
+          "$ref": "#/$defs/PresentationLayout",
+          "description": "Presentation canvas and caption policy."
+        },
+        "markers": {
+          "description": "Canonical markers mapped onto native source frames.",
+          "items": {
+            "$ref": "#/$defs/MarkerRecord"
+          },
+          "type": "array"
+        },
         "output_frame_count": {
           "description": "Total output frames after retiming and holds.",
           "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_height": {
+          "description": "Final presentation canvas height after footer and transforms.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_width": {
+          "description": "Final presentation canvas width after side panels and transforms.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_geometry": {
+          "$ref": "#/$defs/TerminalGeometryReport",
+          "description": "Measured native source grid and cell geometry."
+        },
+        "source_height": {
+          "description": "Native source height in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
           "minimum": 0,
           "type": "integer"
         },
@@ -166,6 +936,27 @@
         "source_video_hash": {
           "description": "BLAKE3 of the native base video.",
           "type": "string"
+        },
+        "source_width": {
+          "description": "Native source width in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "subtitles": {
+          "description": "Validated caller-authored subtitle resources.",
+          "items": {
+            "$ref": "#/$defs/NormalizedSubtitle"
+          },
+          "type": "array"
+        },
+        "transforms": {
+          "description": "Ordered visibly labeled pixel transforms.",
+          "items": {
+            "$ref": "#/$defs/PixelTransform"
+          },
+          "type": "array"
         },
         "version": {
           "description": "Presentation format version.",
@@ -180,7 +971,20 @@
         "source_video",
         "source_video_hash",
         "fps",
+        "source_width",
+        "source_height",
+        "source_geometry",
+        "output_width",
+        "output_height",
         "clips",
+        "markers",
+        "annotations",
+        "subtitles",
+        "change_frames",
+        "cursor_masks",
+        "layout",
+        "delivery",
+        "transforms",
         "output_frame_count"
       ],
       "type": "object"
@@ -229,6 +1033,62 @@
         "end_monotonic_ns"
       ],
       "type": "object"
+    },
+    "TerminalGeometryReport": {
+      "description": "Geometry reported by a live terminal through XTWINOPS queries.",
+      "properties": {
+        "cell_height": {
+          "description": "Height of one rendered cell in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cell_width": {
+          "description": "Width of one rendered cell in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cols": {
+          "description": "Terminal columns.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "description": "Terminal rows.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text_height": {
+          "description": "Height of the complete text area in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text_width": {
+          "description": "Width of the complete text area in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cols",
+        "rows",
+        "cell_width",
+        "cell_height",
+        "text_width",
+        "text_height"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/presentation-manifest.schema.json",
@@ -236,6 +1096,13 @@
   "additionalProperties": false,
   "description": "Integrity and tool provenance for an edited presentation.",
   "properties": {
+    "ffmpeg_arguments": {
+      "description": "Exact direct-process FFmpeg argument vector.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "ffmpeg_version": {
       "description": "First line of the exact FFmpeg build used.",
       "type": "string"
@@ -247,6 +1114,9 @@
       },
       "type": "array"
     },
+    "output_probe": {
+      "description": "Parsed FFprobe delivery-video evidence."
+    },
     "output_video_hash": {
       "description": "BLAKE3 of the encoded delivery video.",
       "type": "string"
@@ -254,6 +1124,14 @@
     "plan": {
       "$ref": "#/$defs/PresentationPlan",
       "description": "Exact resolved plan."
+    },
+    "source_truth_layer": {
+      "description": "Truth layer used as presentation input.",
+      "type": "string"
+    },
+    "truth_layer": {
+      "description": "Product truth layer, distinct from immutable native evidence.",
+      "type": "string"
     },
     "version": {
       "description": "Presentation format version.",
@@ -266,6 +1144,10 @@
     "version",
     "plan",
     "ffmpeg_version",
+    "ffmpeg_arguments",
+    "output_probe",
+    "truth_layer",
+    "source_truth_layer",
     "output_video_hash",
     "members"
   ],

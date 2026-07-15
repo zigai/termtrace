@@ -130,6 +130,8 @@ pub enum MouseAction {
     Press,
     /// Button release.
     Release,
+    /// Pointer motion while a button remains logically pressed.
+    Motion,
 }
 
 /// Encode one focus transition with the pinned terminal encoder.
@@ -588,6 +590,7 @@ impl GhosttyVt {
         let action = match action {
             MouseAction::Press => sys::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_PRESS,
             MouseAction::Release => sys::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_RELEASE,
+            MouseAction::Motion => sys::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_MOTION,
         };
         let button = match button {
             MouseButton::Left => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_LEFT,
@@ -1552,7 +1555,7 @@ mod tests {
     #[test]
     fn mouse_encoder_uses_live_sgr_modes_and_zero_based_cells() {
         let mut terminal = GhosttyVt::new(80, 24, 100).expect("terminal");
-        terminal.write(b"\x1b[?1000h\x1b[?1006h");
+        terminal.write(b"\x1b[?1002h\x1b[?1006h");
         let press = terminal
             .encode_mouse(
                 MouseAction::Press,
@@ -1577,8 +1580,21 @@ mod tests {
                 480,
             )
             .expect("mouse release");
+        let motion = terminal
+            .encode_mouse(
+                MouseAction::Motion,
+                MouseButton::Left,
+                3,
+                3,
+                80,
+                24,
+                800,
+                480,
+            )
+            .expect("mouse motion");
         assert_eq!(press.as_bytes(), b"\x1b[<0;3;4M");
         assert_eq!(release.as_bytes(), b"\x1b[<0;3;4m");
+        assert_eq!(motion.as_bytes(), b"\x1b[<32;4;4M");
     }
 
     #[test]

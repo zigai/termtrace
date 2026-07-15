@@ -63,6 +63,40 @@
         }
       ]
     },
+    "NativeFrameSample": {
+      "additionalProperties": false,
+      "description": "One directly captured native frame sample.",
+      "properties": {
+        "blake3": {
+          "description": "BLAKE3 of exact PNG bytes.",
+          "type": "string"
+        },
+        "captured_unix_ns": {
+          "description": "Capture wall-clock timestamp.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "same_as_previous": {
+          "description": "Whether this sample equals its immediate predecessor.",
+          "type": "boolean"
+        },
+        "sample": {
+          "description": "Zero-based sample number.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sample",
+        "captured_unix_ns",
+        "blake3",
+        "same_as_previous"
+      ],
+      "type": "object"
+    },
     "SourceRange": {
       "description": "A non-empty half-open interval on the canonical monotonic timeline.",
       "properties": {
@@ -161,15 +195,40 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Provenance and probe evidence for native visual artifacts.",
   "properties": {
+    "capture_kind": {
+      "description": "`video` or `screenshot`.",
+      "type": "string"
+    },
     "capture_started_unix_ns": {
       "description": "Wall-clock time used as approximate video frame zero.",
       "format": "uint128",
       "minimum": 0,
       "type": "integer"
     },
+    "endpoint_event_byte_offset": {
+      "description": "Inclusive endpoint byte offset within an output event.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "endpoint_event_seq": {
+      "description": "Exact endpoint event for direct screenshots.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "ffmpeg_version": {
       "description": "`FFmpeg` version first line.",
-      "type": "string"
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "fps": {
       "description": "Video frame rate.",
@@ -177,6 +236,13 @@
       "maximum": 65535,
       "minimum": 0,
       "type": "integer"
+    },
+    "frame_samples": {
+      "description": "Ordered native frame samples used for stability evidence.",
+      "items": {
+        "$ref": "#/$defs/NativeFrameSample"
+      },
+      "type": "array"
     },
     "geometry_report": {
       "$ref": "#/$defs/TerminalGeometryReport",
@@ -197,6 +263,10 @@
       "description": "Installed Ghostty version report.",
       "type": "string"
     },
+    "guarantee_level": {
+      "description": "Honest native resource guarantee level.",
+      "type": "string"
+    },
     "height": {
       "description": "Capture height.",
       "format": "uint16",
@@ -211,6 +281,10 @@
       },
       "type": "array"
     },
+    "presentation_evidence": {
+      "description": "Parser barrier and native frame-stability guarantee label.",
+      "type": "string"
+    },
     "replay_origin_unix_ns": {
       "description": "Playback event-time origin.",
       "format": "uint128",
@@ -219,6 +293,22 @@
     },
     "screenshot_probe": {
       "description": "Parsed `FFprobe` screenshot evidence."
+    },
+    "selected_state_hash": {
+      "description": "Exact selected semantic state hash for direct screenshots.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "selected_state_id": {
+      "description": "Exact selected state identifier for direct screenshots.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "session_id": {
       "description": "Source session identifier.",
@@ -276,11 +366,13 @@
     "replay_origin_unix_ns",
     "ghostty_config_hash",
     "ghostty_version",
-    "ffmpeg_version",
     "ghostty_overrides",
-    "video_probe",
     "screenshot_probe",
-    "members"
+    "members",
+    "capture_kind",
+    "presentation_evidence",
+    "frame_samples",
+    "guarantee_level"
   ],
   "title": "VisualManifest",
   "type": "object"

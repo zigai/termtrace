@@ -17,6 +17,7 @@ use std::{
     os::unix::fs::{DirBuilderExt as _, PermissionsExt as _},
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
+    result::Result as StdResult,
     slice,
     sync::mpsc::{self, RecvTimeoutError},
     thread,
@@ -39,6 +40,7 @@ use signal_hook::{
     iterator::{Handle, Signals},
 };
 use uuid::Uuid;
+use zstd::stream::encode_all;
 
 use crate::{
     Error, Result,
@@ -46,8 +48,8 @@ use crate::{
     control::{
         ActorBoundaries, CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME, ControlCommand,
         ControlData, ControlErrorDetails, ControlRequest, ControlResponse, ControlResult,
-        MAX_CONTROL_MESSAGE_BYTES, PointerOperation, ProcessSignal, ScreenPredicate,
-        validate_frame,
+        MAX_CONTROL_MESSAGE_BYTES, PointerOperation, ProcessSignal, ScreenMode, ScreenPredicate,
+        ScreenRegion, StateHashComparison, validate_frame,
     },
     event::{
         ByteString, Event, EventLogHeader, InputDescriptor, InputKind, InputSource, LifecycleKind,
@@ -63,10 +65,10 @@ use crate::{
         MUTATION_JOURNAL_NAME, MutationJournal, MutationJournalRecord, guarded_command_hash,
     },
     session::{
-        COMPLETION_VALIDATION_VERSION, GeometryProvenance, SESSION_COMPLETION_FORMAT,
-        SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
-        SessionCompletion, SessionGeometry, SessionLineage, SessionManifest,
-        canonical_manifest_bytes, manifest_hash,
+        COMPLETION_VALIDATION_VERSION, GeometryProvenance, ImportProvenance,
+        SESSION_COMPLETION_FORMAT, SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT,
+        SESSION_MANIFEST_VERSION, SessionCompletion, SessionGeometry, SessionLineage,
+        SessionManifest, canonical_manifest_bytes, manifest_hash,
     },
     terminal_mode::RawTerminalGuard,
 };
@@ -88,6 +90,8 @@ pub struct RecordOptions {
     pub creation_alias: Option<String>,
     /// Immutable predecessor evidence for a restarted successor.
     pub lineage: Option<SessionLineage>,
+    /// Chain-bound provenance for an imported ANSI byte stream.
+    pub import_provenance: Option<ImportProvenance>,
     /// Executable and arguments.
     pub command: Vec<OsString>,
     /// Child working directory.
@@ -509,6 +513,7 @@ fn write_session_manifest(
         session_id,
         creation_alias: options.creation_alias.clone(),
         lineage: options.lineage.clone(),
+        import_provenance: options.import_provenance.clone(),
         started_unix_ns,
         command: options
             .command
@@ -732,7 +737,7 @@ fn consume_runtime(
                 Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => {}
             }
             event_log.flush_due()?;
-            evaluate_screen_waiters(event_log, &live_terminal, &mut screen_waiters)?;
+            evaluate_screen_waiters(event_log, &live_terminal, &mut screen_waiters, false)?;
 
             if exit_status.is_none() {
                 exit_status = spawned
@@ -757,6 +762,7 @@ fn consume_runtime(
                 drain_deadline = Some(Instant::now() + DESCENDANT_DRAIN_TIMEOUT);
             }
         }
+        evaluate_screen_waiters(event_log, &live_terminal, &mut screen_waiters, true)?;
         fail_screen_waiters(
             &mut screen_waiters,
             "child_completed",
@@ -1325,11 +1331,7 @@ fn handle_control_request(
         timeout_ns,
     } = &request.command
     {
-        let text = match predicate {
-            ScreenPredicate::Contains { text } | ScreenPredicate::Absent { text } => text,
-        };
-        if text.is_empty()
-            || text.len() > 16 * 1024
+        if validate_screen_predicate(predicate).is_err()
             || *timeout_ns == 0
             || *timeout_ns > 3_600_000_000_000
             || *stable_for_ns > *timeout_ns
@@ -1337,7 +1339,7 @@ fn handle_control_request(
             let response = control_error_response(
                 request.request_id,
                 "invalid_screen_wait",
-                "screen text must be 1-16384 bytes and durations must satisfy stable <= timeout <= 1h",
+                "screen predicate exceeds its text/regex/region/composition limits or durations do not satisfy stable <= timeout <= 1h",
             );
             let _ = response_sender.send(response);
             return Ok(());
@@ -1481,7 +1483,11 @@ fn execute_control_command(
             let encoded = serde_json::to_vec(&live.presented).map_err(|error| {
                 return terminal_error("serialize presented state", error.to_string());
             })?;
+            let compressed = encode_all(encoded.as_slice(), 3).map_err(|error| {
+                return terminal_error("compress presented state", error.to_string());
+            })?;
             return Ok(ControlData::Snapshot {
+                semantic_state_zstd: ByteString::from(compressed),
                 viewport_text: semantic_viewport_text(&live.presented),
                 state_hash: blake3::hash(&encoded).to_hex().to_string(),
                 presented: true,
@@ -1695,7 +1701,7 @@ fn execute_control_command(
                 });
             }
             let mut encoded = Vec::new();
-            let (operation_name, button_name, lines) = match operation {
+            let (operation_name, button_name, lines, end_cell, click_count) = match operation {
                 PointerOperation::Click { button } => {
                     if matches!(button, MouseButton::WheelUp | MouseButton::WheelDown) {
                         return Err(control_rejected(
@@ -1719,7 +1725,108 @@ fn execute_control_command(
                                 .as_bytes(),
                         );
                     }
-                    ("click", mouse_button_name(*button), 0)
+                    ("click", mouse_button_name(*button), 0, None, 1)
+                }
+                PointerOperation::MultiClick { button, count } => {
+                    if matches!(button, MouseButton::WheelUp | MouseButton::WheelDown)
+                        || !(2..=4).contains(count)
+                    {
+                        return Err(control_rejected(
+                            "invalid_multi_click",
+                            "multi-click requires a non-wheel button and a count from 2 through 4",
+                        ));
+                    }
+                    for _ in 0..*count {
+                        for action in [MouseAction::Press, MouseAction::Release] {
+                            encoded.extend_from_slice(
+                                live.semantic
+                                    .encode_mouse(
+                                        action,
+                                        *button,
+                                        *column,
+                                        *row,
+                                        live.geometry.cols,
+                                        live.geometry.rows,
+                                        live.geometry.pixel_width,
+                                        live.geometry.pixel_height,
+                                    )?
+                                    .as_bytes(),
+                            );
+                        }
+                    }
+                    ("multi_click", mouse_button_name(*button), 0, None, *count)
+                }
+                PointerOperation::Drag {
+                    button,
+                    to_column,
+                    to_row,
+                    steps,
+                } => {
+                    if matches!(button, MouseButton::WheelUp | MouseButton::WheelDown)
+                        || *steps == 0
+                        || *steps > 100
+                        || *to_column >= live.geometry.cols
+                        || *to_row >= live.geometry.rows
+                    {
+                        return Err(control_rejected(
+                            "invalid_pointer_drag",
+                            "drag requires a non-wheel button, an in-bounds destination, and 1 through 100 motion steps",
+                        ));
+                    }
+                    encoded.extend_from_slice(
+                        live.semantic
+                            .encode_mouse(
+                                MouseAction::Press,
+                                *button,
+                                *column,
+                                *row,
+                                live.geometry.cols,
+                                live.geometry.rows,
+                                live.geometry.pixel_width,
+                                live.geometry.pixel_height,
+                            )?
+                            .as_bytes(),
+                    );
+                    let step_count = u32::from(*steps);
+                    for step in 1..=step_count {
+                        let drag_column = interpolate_cell(*column, *to_column, step, step_count);
+                        let drag_row = interpolate_cell(*row, *to_row, step, step_count);
+                        encoded.extend_from_slice(
+                            live.semantic
+                                .encode_mouse(
+                                    MouseAction::Motion,
+                                    *button,
+                                    drag_column,
+                                    drag_row,
+                                    live.geometry.cols,
+                                    live.geometry.rows,
+                                    live.geometry.pixel_width,
+                                    live.geometry.pixel_height,
+                                )?
+                                .as_bytes(),
+                        );
+                    }
+                    encoded.extend_from_slice(
+                        live.semantic
+                            .encode_mouse(
+                                MouseAction::Release,
+                                *button,
+                                *to_column,
+                                *to_row,
+                                live.geometry.cols,
+                                live.geometry.rows,
+                                live.geometry.pixel_width,
+                                live.geometry.pixel_height,
+                            )?
+                            .as_bytes(),
+                    );
+                    (
+                        "drag",
+                        mouse_button_name(*button),
+                        0,
+                        Some((*to_column, *to_row)),
+                        0,
+                    )
                 }
                 PointerOperation::Scroll { lines } => {
                     if *lines == 0 || lines.unsigned_abs() > 100 {
@@ -1749,7 +1856,7 @@ fn execute_control_command(
                                 .as_bytes(),
                         );
                     }
-                    ("scroll", mouse_button_name(button), *lines)
+                    ("scroll", mouse_button_name(button), *lines, None, 0)
                 }
             };
             if encoded.is_empty() {
@@ -1778,6 +1885,9 @@ fn execute_control_command(
                     lines,
                     column: *column,
                     row: *row,
+                    end_column: end_cell.map(|cell| return cell.0),
+                    end_row: end_cell.map(|cell| return cell.1),
+                    click_count,
                     cols: live.geometry.cols,
                     rows: live.geometry.rows,
                     pixel_width: live.geometry.pixel_width,
@@ -2025,6 +2135,7 @@ fn evaluate_screen_waiters(
     event_log: &EventLogWriter,
     live: &LiveTerminal,
     waiters: &mut Vec<ScreenWaiter>,
+    child_completed: bool,
 ) -> Result<()> {
     if waiters.is_empty() {
         return Ok(());
@@ -2041,10 +2152,12 @@ fn evaluate_screen_waiters(
         let Some(waiter) = waiters.get_mut(index) else {
             break;
         };
-        let matched = match &waiter.predicate {
-            ScreenPredicate::Contains { text } => viewport_text.contains(text),
-            ScreenPredicate::Absent { text } => !viewport_text.contains(text),
-        };
+        let matched = evaluate_screen_predicate(
+            &waiter.predicate,
+            &live.presented,
+            &viewport_text,
+            &state_hash,
+        );
         if matched {
             match &waiter.matching_state {
                 Some((prior_hash, _, _)) if prior_hash == &state_hash => {}
@@ -2055,10 +2168,9 @@ fn evaluate_screen_waiters(
         } else {
             waiter.matching_state = None;
         }
-        let stable = waiter
-            .matching_state
-            .as_ref()
-            .is_some_and(|(_, since, _)| return since.elapsed() >= waiter.stable_for);
+        let stable = waiter.matching_state.as_ref().is_some_and(|(_, since, _)| {
+            return child_completed || since.elapsed() >= waiter.stable_for;
+        });
         if stable {
             let waiter = waiters.remove(index);
             let first_match_monotonic_ns = waiter
@@ -2079,11 +2191,12 @@ fn evaluate_screen_waiters(
                         boundaries: actor_boundaries(event_log),
                         cols: live.presented.cols,
                         rows: live.presented.rows,
-                        completion_quality: if waiter.stable_for.is_zero() {
+                        completion_quality: if waiter.stable_for.is_zero() && !child_completed {
                             "matched_unsettled".to_owned()
                         } else {
                             "stable".to_owned()
                         },
+                        child_completed,
                     },
                 },
             };
@@ -2110,6 +2223,187 @@ fn fail_screen_waiters(waiters: &mut Vec<ScreenWaiter>, code: &str, message: &st
         let response = control_error_response(waiter.request_id, code, message);
         let _ = waiter.response.send(response);
     }
+}
+
+fn validate_screen_predicate(predicate: &ScreenPredicate) -> StdResult<(), String> {
+    fn visit(
+        predicate: &ScreenPredicate,
+        depth: usize,
+        nodes: &mut usize,
+    ) -> StdResult<(), String> {
+        *nodes = nodes.saturating_add(1);
+        if depth > 4 || *nodes > 32 {
+            return Err("screen predicate composition is too deep or large".to_owned());
+        }
+        match predicate {
+            ScreenPredicate::Contains { text }
+            | ScreenPredicate::Absent { text }
+            | ScreenPredicate::RowContains { text, .. }
+            | ScreenPredicate::RowAbsent { text, .. } => {
+                if text.is_empty() || text.len() > 16 * 1024 {
+                    return Err("screen predicate text must contain 1-16384 bytes".to_owned());
+                }
+            }
+            ScreenPredicate::MatchesRegex { pattern }
+            | ScreenPredicate::ExcludesRegex { pattern } => {
+                if pattern.is_empty() || pattern.len() > 1024 {
+                    return Err("screen regular expression must contain 1-1024 bytes".to_owned());
+                }
+                regex::RegexBuilder::new(pattern)
+                    .size_limit(1024 * 1024)
+                    .build()
+                    .map_err(|error| return format!("invalid bounded screen regex: {error}"))?;
+            }
+            ScreenPredicate::RegionContains { region, text }
+            | ScreenPredicate::RegionAbsent { region, text } => {
+                if text.is_empty() || text.len() > 16 * 1024 {
+                    return Err("screen predicate text must contain 1-16384 bytes".to_owned());
+                }
+                if region.left >= region.right || region.top >= region.bottom {
+                    return Err("screen region must be non-empty and half-open".to_owned());
+                }
+            }
+            ScreenPredicate::Cursor {
+                column,
+                row,
+                visible,
+                shape,
+            } => {
+                if column.is_none() && row.is_none() && visible.is_none() && shape.is_none() {
+                    return Err("cursor predicate must constrain at least one property".to_owned());
+                }
+            }
+            ScreenPredicate::StateHash { hash, .. } => {
+                if !valid_blake3_hash(hash) {
+                    return Err("state predicate requires a lowercase BLAKE3 hash".to_owned());
+                }
+            }
+            ScreenPredicate::All { predicates } | ScreenPredicate::Any { predicates } => {
+                if predicates.is_empty() || predicates.len() > 16 {
+                    return Err("predicate composition must contain 1-16 children".to_owned());
+                }
+                for child in predicates {
+                    visit(child, depth + 1, nodes)?;
+                }
+            }
+            ScreenPredicate::Mode { .. } => {}
+        }
+        return Ok(());
+    }
+
+    let mut nodes = 0;
+    return visit(predicate, 1, &mut nodes);
+}
+
+fn evaluate_screen_predicate(
+    predicate: &ScreenPredicate,
+    state: &SemanticState,
+    viewport_text: &str,
+    state_hash: &str,
+) -> bool {
+    return match predicate {
+        ScreenPredicate::Contains { text } => viewport_text.contains(text),
+        ScreenPredicate::Absent { text } => !viewport_text.contains(text),
+        ScreenPredicate::MatchesRegex { pattern } => {
+            regex::Regex::new(pattern).is_ok_and(|regex| return regex.is_match(viewport_text))
+        }
+        ScreenPredicate::ExcludesRegex { pattern } => {
+            regex::Regex::new(pattern).is_ok_and(|regex| return !regex.is_match(viewport_text))
+        }
+        ScreenPredicate::RowContains { row, text } => {
+            screen_row_text(state, *row).is_some_and(|value| return value.contains(text))
+        }
+        ScreenPredicate::RowAbsent { row, text } => {
+            screen_row_text(state, *row).is_some_and(|value| return !value.contains(text))
+        }
+        ScreenPredicate::RegionContains { region, text } => {
+            screen_region_text(state, *region).is_some_and(|value| return value.contains(text))
+        }
+        ScreenPredicate::RegionAbsent { region, text } => {
+            screen_region_text(state, *region).is_some_and(|value| return !value.contains(text))
+        }
+        ScreenPredicate::Cursor {
+            column,
+            row,
+            visible,
+            shape,
+        } => {
+            column.is_none_or(|value| return state.cursor.column == Some(value))
+                && row.is_none_or(|value| return state.cursor.row == Some(value))
+                && visible.is_none_or(|value| return state.cursor.visible == value)
+                && shape.is_none_or(|value| return state.cursor.style == value)
+        }
+        ScreenPredicate::Mode { mode, enabled } => screen_mode(state, *mode) == *enabled,
+        ScreenPredicate::StateHash { hash, comparison } => match comparison {
+            StateHashComparison::Unchanged => state_hash == hash,
+            StateHashComparison::Changed => state_hash != hash,
+        },
+        ScreenPredicate::All { predicates } => predicates.iter().all(|child| {
+            return evaluate_screen_predicate(child, state, viewport_text, state_hash);
+        }),
+        ScreenPredicate::Any { predicates } => predicates.iter().any(|child| {
+            return evaluate_screen_predicate(child, state, viewport_text, state_hash);
+        }),
+    };
+}
+
+fn screen_row_text(state: &SemanticState, row: u16) -> Option<String> {
+    let row = state.grid.get(usize::from(row))?;
+    let mut text = String::new();
+    for cell in &row.cells {
+        text.push_str(if cell.grapheme.is_empty() {
+            " "
+        } else {
+            &cell.grapheme
+        });
+    }
+    return Some(text.trim_end().to_owned());
+}
+
+fn screen_region_text(state: &SemanticState, region: ScreenRegion) -> Option<String> {
+    if region.right > state.cols || region.bottom > state.rows {
+        return None;
+    }
+    let mut text = String::new();
+    for row_index in region.top..region.bottom {
+        let row = state.grid.get(usize::from(row_index))?;
+        for column in region.left..region.right {
+            let cell = row.cells.get(usize::from(column))?;
+            text.push_str(if cell.grapheme.is_empty() {
+                " "
+            } else {
+                &cell.grapheme
+            });
+        }
+        while text.ends_with(' ') {
+            text.pop();
+        }
+        if row_index + 1 < region.bottom {
+            text.push('\n');
+        }
+    }
+    return Some(text);
+}
+
+fn screen_mode(state: &SemanticState, mode: ScreenMode) -> bool {
+    return match mode {
+        ScreenMode::AlternateScreen => state.modes.alternate_screen,
+        ScreenMode::BracketedPaste => state.modes.bracketed_paste,
+        ScreenMode::Wraparound => state.modes.wraparound,
+        ScreenMode::SynchronizedOutput => state.modes.synchronized_output,
+        ScreenMode::Ansi { number } => state
+            .modes
+            .values
+            .iter()
+            .find(|mode| return mode.ansi && mode.number == number)
+            .is_some_and(|mode| return mode.enabled),
+        ScreenMode::Dec { number } => state
+            .modes
+            .values
+            .iter()
+            .find(|mode| return !mode.ansi && mode.number == number)
+            .is_some_and(|mode| return mode.enabled),
+    };
 }
 
 fn validate_control_input(data: &[u8], intent: Option<&str>) -> Result<()> {
@@ -2377,6 +2671,13 @@ fn mouse_button_name(button: MouseButton) -> &'static str {
         MouseButton::WheelUp => "wheel-up",
         MouseButton::WheelDown => "wheel-down",
     };
+}
+
+fn interpolate_cell(start: u16, end: u16, step: u32, steps: u32) -> u16 {
+    let start = i64::from(start);
+    let delta = i64::from(end) - start;
+    let rounded = start + (delta * i64::from(step) + i64::from(steps) / 2) / i64::from(steps);
+    return u16::try_from(rounded).unwrap_or(end);
 }
 
 struct TextRegion {
@@ -2843,6 +3144,7 @@ mod tests {
             output_directory: session.clone(),
             creation_alias: None,
             lineage: None,
+            import_provenance: None,
             command: vec![
                 OsString::from("/bin/sh"),
                 OsString::from("-c"),
@@ -2943,6 +3245,7 @@ mod tests {
             output_directory: temporary.path().to_path_buf(),
             creation_alias: None,
             lineage: None,
+            import_provenance: None,
             command: vec![OsString::from("true")],
             working_directory: None,
             cols: 80,
@@ -2969,6 +3272,7 @@ mod tests {
             output_directory: temporary.path().join("recording"),
             creation_alias: None,
             lineage: None,
+            import_provenance: None,
             command: vec![
                 OsString::from("/bin/sh"),
                 OsString::from("-c"),
@@ -3007,6 +3311,7 @@ mod tests {
             output_directory: temporary.path().join("query"),
             creation_alias: None,
             lineage: None,
+            import_provenance: None,
             command: vec![
                 OsString::from("/usr/bin/python3"),
                 OsString::from("-c"),
@@ -3054,6 +3359,7 @@ mod tests {
             output_directory: temporary.path().join("osc-query"),
             creation_alias: None,
             lineage: None,
+            import_provenance: None,
             command: vec![
                 OsString::from("/usr/bin/python3"),
                 OsString::from("-c"),

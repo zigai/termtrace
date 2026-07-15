@@ -169,6 +169,31 @@
         }
       ]
     },
+    "ObservationResolution": {
+      "description": "Service path used to resolve an observation without changing its meaning.",
+      "oneOf": [
+        {
+          "const": "actor_snapshot",
+          "description": "Actor-consistent live snapshot fast path.",
+          "type": "string"
+        },
+        {
+          "const": "canonical_replay",
+          "description": "Independently validated canonical event replay.",
+          "type": "string"
+        },
+        {
+          "const": "validated_checkpoint",
+          "description": "Content-addressed full-state checkpoint validated against exact source bytes.",
+          "type": "string"
+        },
+        {
+          "const": "ansi_interpretation",
+          "description": "Pinned semantic interpretation of an unchained ANSI stream.",
+          "type": "string"
+        }
+      ]
+    },
     "ObservationSourceKind": {
       "description": "Source category for one observation.",
       "oneOf": [
@@ -183,8 +208,18 @@
           "type": "string"
         },
         {
+          "const": "interrupted_session",
+          "description": "Explicitly validated but incomplete canonical event prefix.",
+          "type": "string"
+        },
+        {
           "const": "ansi_stream",
           "description": "Unchained ANSI/VT byte stream.",
+          "type": "string"
+        },
+        {
+          "const": "imported_ansi",
+          "description": "Completed canonical evidence imported from an ANSI/VT byte stream.",
           "type": "string"
         },
         {
@@ -395,6 +430,10 @@
       "description": "Whether this state was presentation eligible.",
       "type": "boolean"
     },
+    "resolution": {
+      "$ref": "#/$defs/ObservationResolution",
+      "description": "Service path used to resolve this state."
+    },
     "session_id": {
       "description": "Canonical session ID when evidence exists.",
       "format": "uuid",
@@ -443,6 +482,7 @@
     "capture_quality",
     "truth_layer",
     "integrity",
+    "resolution",
     "frame",
     "payload_hash"
   ],

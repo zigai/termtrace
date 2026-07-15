@@ -1,6 +1,7 @@
 //! Strict language-neutral scenario contracts and execution reports.
 
 use std::{
+    collections::{BTreeMap, BTreeSet},
     ffi::OsString,
     fs::Permissions,
     os::unix::fs::PermissionsExt as _,
@@ -12,14 +13,20 @@ use std::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use zstd::stream::decode_all;
 
 use crate::{
     Error, Result,
+    analysis::{DiagnosticCheck, diagnose},
     client::{Session, Terminal},
-    control::{ControlCommand, ControlData, ControlRequest, ScreenPredicate},
-    event::{ByteString, InputKind},
-    ghostty_vt::{KeyModifiers, NamedKey},
-    inspection::wait_for_screen,
+    control::{ControlCommand, ControlData, ControlRequest, ScreenPredicate, StateHashComparison},
+    event::{ByteString, Event, InputKind},
+    event_log::EventLog,
+    ghostty_vt::{KeyModifiers, NamedKey, SemanticState},
+    inspection::{state_text, wait_for_screen},
+    replay::{StateSelector, inspect, replay},
+    semantic_image::render_png,
+    timeline::build_timeline,
 };
 
 /// Current scenario document version.
@@ -37,6 +44,9 @@ pub struct Scenario {
     pub launch: ScenarioLaunch,
     /// Sequential operations and assertions.
     pub steps: Vec<ScenarioStep>,
+    /// Optional bounded Cartesian substitutions for `{{key}}` tokens.
+    #[serde(default)]
+    pub matrix: BTreeMap<String, Vec<String>>,
 }
 
 impl Scenario {
@@ -95,9 +105,99 @@ impl Scenario {
             if matches!(step, ScenarioStep::Send(inputs) if inputs.is_empty()) {
                 return Err(scenario_error("send step must contain at least one input"));
             }
+            if let ScenarioStep::MatchScreenSnapshot(snapshot) = step
+                && snapshot.name.trim().is_empty()
+            {
+                return Err(scenario_error("screen snapshot name must not be empty"));
+            }
+            if let ScenarioStep::AssertTimeline(assertion) = step
+                && assertion.between_markers.len() != 2
+            {
+                return Err(scenario_error(
+                    "timeline assertion requires exactly two marker labels",
+                ));
+            }
+        }
+        let mut combinations = 1_usize;
+        for (key, values) in &self.matrix {
+            if key.is_empty()
+                || !key
+                    .bytes()
+                    .all(|byte| return byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+                || values.is_empty()
+                || values.len() > 64
+            {
+                return Err(scenario_error(
+                    "matrix keys must be safe identifiers with 1 through 64 values",
+                ));
+            }
+            combinations = combinations.saturating_mul(values.len());
+            if combinations > 256 {
+                return Err(scenario_error("scenario matrix exceeds 256 variants"));
+            }
         }
         return Ok(());
     }
+
+    /// Expand a bounded Cartesian matrix into independently named scenarios.
+    pub fn expand_matrix(self) -> Result<Vec<(String, Self)>> {
+        self.validate()?;
+        if self.matrix.is_empty() {
+            return Ok(vec![(String::new(), self)]);
+        }
+        let mut variants = vec![BTreeMap::<String, String>::new()];
+        for (key, values) in &self.matrix {
+            let mut expanded = Vec::new();
+            for variant in &variants {
+                for value in values {
+                    let mut next = variant.clone();
+                    next.insert(key.clone(), value.clone());
+                    expanded.push(next);
+                }
+            }
+            variants = expanded;
+        }
+        return variants
+            .into_iter()
+            .map(|values| {
+                let label = values
+                    .iter()
+                    .map(|(key, value)| return format!("{key}={value}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let mut scenario = self.clone();
+                scenario.matrix.clear();
+                scenario.name = format!("{} [{label}]", scenario.name);
+                for argument in &mut scenario.launch.command {
+                    *argument = substitute_matrix(argument, &values)?;
+                }
+                for step in &mut scenario.steps {
+                    if let ScenarioStep::MatchScreenSnapshot(snapshot) = step {
+                        let suffix = blake3::hash(label.as_bytes())
+                            .to_hex()
+                            .chars()
+                            .take(12)
+                            .collect::<String>();
+                        snapshot.name = format!("{}-{suffix}", snapshot.name);
+                    }
+                }
+                return Ok((label, scenario));
+            })
+            .collect();
+    }
+}
+
+fn substitute_matrix(value: &str, matrix: &BTreeMap<String, String>) -> Result<String> {
+    let mut substituted = value.to_owned();
+    for (key, replacement) in matrix {
+        substituted = substituted.replace(&format!("{{{{{key}}}}}"), replacement);
+    }
+    if substituted.contains("{{") || substituted.contains("}}") {
+        return Err(scenario_error(format!(
+            "unresolved matrix token in command argument `{value}`"
+        )));
+    }
+    return Ok(substituted);
 }
 
 /// Fresh canonical session launch configuration.
@@ -142,6 +242,10 @@ pub enum ScenarioStep {
     Send(Vec<ScenarioInput>),
     /// Add a canonical marker.
     Mark(String),
+    /// Compare the latest stable presented frame with a normalized baseline.
+    MatchScreenSnapshot(ScenarioSnapshot),
+    /// Assert temporal semantics and diagnostic findings between two markers.
+    AssertTimeline(ScenarioTimelineAssertion),
     /// Gracefully stop the child and await completion.
     Stop {},
 }
@@ -154,9 +258,56 @@ impl ScenarioStep {
             Self::WaitScreen(_) => "wait_screen",
             Self::Send(_) => "send",
             Self::Mark(_) => "mark",
+            Self::MatchScreenSnapshot(_) => "match_screen_snapshot",
+            Self::AssertTimeline(_) => "assert_timeline",
             Self::Stop {} => "stop",
         };
     }
+}
+
+/// Stable normalized presented-frame snapshot request.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScenarioSnapshot {
+    /// Filesystem-safe logical baseline name.
+    pub name: String,
+    /// Required unchanged-state interval before comparison.
+    #[serde(default)]
+    pub stable_for_ms: u64,
+    /// Per-step deadline overriding the launch default.
+    pub timeout_ms: Option<u64>,
+}
+
+/// Temporal assertions evaluated over states between two canonical markers.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScenarioTimelineAssertion {
+    /// Exactly two unique marker labels defining the inclusive time range.
+    pub between_markers: Vec<String>,
+    /// Text that must not appear in any presentation-eligible state in the range.
+    pub no_presented_screen_contains: Option<String>,
+    /// Stable diagnose finding code that must not overlap the range.
+    pub no_finding: Option<String>,
+}
+
+/// Volatility-free semantic frame baseline.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioFrameSnapshot {
+    /// Snapshot contract version.
+    pub version: u32,
+    /// Presentation-eligible viewport text.
+    pub viewport_text: String,
+    /// Exact viewport geometry.
+    pub cols: u16,
+    /// Exact viewport geometry.
+    pub rows: u16,
+    /// Cursor column when visible in the viewport.
+    pub cursor_column: Option<u16>,
+    /// Cursor row when visible in the viewport.
+    pub cursor_row: Option<u16>,
+    /// Cursor visibility.
+    pub cursor_visible: bool,
 }
 
 /// Presented-screen predicate with an optional stability window.
@@ -260,12 +411,61 @@ pub struct ScenarioReport {
     pub failure_artifacts: Option<PathBuf>,
 }
 
+/// One fresh-session attempt retained within a scenario suite result.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioAttemptReport {
+    /// One-based attempt number.
+    pub attempt: u32,
+    /// Complete fresh-session result.
+    pub report: ScenarioReport,
+}
+
+/// Every attempt for one selected scenario document.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioCaseReport {
+    /// Input scenario document path.
+    pub scenario: PathBuf,
+    /// Ordered fresh-session attempts, including failed attempts before a pass.
+    pub attempts: Vec<ScenarioAttemptReport>,
+}
+
+/// Overall multi-scenario disposition.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScenarioSuiteStatus {
+    /// Every selected scenario eventually passed.
+    Passed,
+    /// At least one selected scenario exhausted its attempts without passing.
+    Failed,
+}
+
+/// Machine-readable sharded, bounded-concurrency scenario suite result.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioSuiteReport {
+    /// Suite result contract version.
+    pub version: u32,
+    /// Overall disposition.
+    pub status: ScenarioSuiteStatus,
+    /// Requested maximum worker count.
+    pub jobs: usize,
+    /// Optional zero-based shard index.
+    pub shard_index: Option<usize>,
+    /// Optional total shard count.
+    pub shard_count: Option<usize>,
+    /// Ordered selected scenarios and their retained attempts.
+    pub cases: Vec<ScenarioCaseReport>,
+}
+
 /// Execute a scenario in a fresh canonical session.
 pub fn run(
     scenario: &Scenario,
     binary: impl Into<PathBuf>,
     evidence_root: impl Into<PathBuf>,
     failure_root: impl Into<PathBuf>,
+    update_snapshots: bool,
 ) -> Result<ScenarioReport> {
     scenario.validate()?;
     let failure_root = failure_root.into();
@@ -282,7 +482,14 @@ pub fn run(
     let mut steps = Vec::new();
     let mut stopped = false;
     for (index, step) in scenario.steps.iter().enumerate() {
-        match execute_step(&mut session, scenario, index, step) {
+        match execute_step(
+            &mut session,
+            scenario,
+            index,
+            step,
+            &failure_root,
+            update_snapshots,
+        ) {
             Ok(result) => {
                 stopped |= matches!(step, ScenarioStep::Stop {});
                 steps.push(result);
@@ -332,6 +539,8 @@ fn execute_step(
     scenario: &Scenario,
     index: usize,
     step: &ScenarioStep,
+    failure_root: &Path,
+    update_snapshots: bool,
 ) -> StdResult<ScenarioStepResult, ScenarioFailure> {
     let mut request_ids = Vec::new();
     let outcome = match step {
@@ -399,6 +608,96 @@ fn execute_step(
                     return step_failure(index, step, request_ids.clone(), error.to_string());
                 })
         }
+        ScenarioStep::MatchScreenSnapshot(snapshot) => {
+            let initial = session.screen().snapshot().map_err(|error| {
+                return step_failure(index, step, Vec::new(), error.to_string());
+            })?;
+            let ControlData::Snapshot { state_hash, .. } = &initial else {
+                return Err(step_failure(
+                    index,
+                    step,
+                    Vec::new(),
+                    "screen endpoint did not return a snapshot",
+                ));
+            };
+            let matched = wait_for_screen(
+                session.path(),
+                ScreenPredicate::StateHash {
+                    hash: state_hash.clone(),
+                    comparison: StateHashComparison::Unchanged,
+                },
+                Duration::from_millis(snapshot.stable_for_ms),
+                Duration::from_millis(snapshot.timeout_ms.unwrap_or(scenario.launch.timeout_ms)),
+            )
+            .map_err(|error| {
+                return step_failure(index, step, Vec::new(), error.to_string());
+            })?;
+            let current = session.screen().snapshot().map_err(|error| {
+                return step_failure(index, step, Vec::new(), error.to_string());
+            })?;
+            let baseline = frame_snapshot(&current).map_err(|error| {
+                return step_failure(index, step, Vec::new(), error.to_string());
+            })?;
+            let path = snapshot_path(failure_root, &snapshot.name).map_err(|error| {
+                return step_failure(index, step, Vec::new(), error.to_string());
+            })?;
+            if update_snapshots {
+                if let Some(parent) = path.parent() {
+                    fs_err::create_dir_all(parent).map_err(|error| {
+                        return step_failure(index, step, Vec::new(), error.to_string());
+                    })?;
+                }
+                write_json(path, &baseline).map_err(|error| {
+                    return step_failure(index, step, Vec::new(), error.to_string());
+                })?;
+            } else {
+                let expected = fs_err::read(&path)
+                    .map_err(|error| {
+                        return step_failure(
+                            index,
+                            step,
+                            Vec::new(),
+                            format!("read snapshot {}: {error}", path.display()),
+                        );
+                    })
+                    .and_then(|bytes| {
+                        return serde_json::from_slice::<ScenarioFrameSnapshot>(&bytes).map_err(
+                            |error| {
+                                return step_failure(
+                                    index,
+                                    step,
+                                    Vec::new(),
+                                    format!("decode snapshot {}: {error}", path.display()),
+                                );
+                            },
+                        );
+                    })?;
+                if expected != baseline {
+                    return Err(step_failure(
+                        index,
+                        step,
+                        Vec::new(),
+                        format!(
+                            "screen snapshot `{}` differs from {}",
+                            snapshot.name,
+                            path.display()
+                        ),
+                    ));
+                }
+            }
+            return Ok(ScenarioStepResult {
+                index,
+                kind: step.kind().to_owned(),
+                request_ids,
+                state_hash: Some(matched.state_hash),
+            });
+        }
+        ScenarioStep::AssertTimeline(assertion) => {
+            assert_timeline(session.path(), assertion).map_err(|error| {
+                return step_failure(index, step, Vec::new(), error.to_string());
+            })?;
+            Ok(None)
+        }
         ScenarioStep::Stop {} => {
             let request = ControlRequest::new(ControlCommand::Stop);
             request_ids.push(request.request_id);
@@ -438,6 +737,120 @@ fn step_failure(
     };
 }
 
+fn frame_snapshot(data: &ControlData) -> Result<ScenarioFrameSnapshot> {
+    let ControlData::Snapshot {
+        viewport_text,
+        cols,
+        rows,
+        cursor_column,
+        cursor_row,
+        cursor_visible,
+        ..
+    } = data
+    else {
+        return Err(scenario_error("screen endpoint did not return a snapshot"));
+    };
+    return Ok(ScenarioFrameSnapshot {
+        version: 1,
+        viewport_text: viewport_text.clone(),
+        cols: *cols,
+        rows: *rows,
+        cursor_column: *cursor_column,
+        cursor_row: *cursor_row,
+        cursor_visible: *cursor_visible,
+    });
+}
+
+fn snapshot_path(failure_root: &Path, name: &str) -> Result<PathBuf> {
+    if name.is_empty()
+        || name.len() > 128
+        || !name
+            .bytes()
+            .all(|byte| return byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(scenario_error(
+            "snapshot names accept 1 through 128 ASCII letters, digits, hyphens, or underscores",
+        ));
+    }
+    let artifact_root = failure_root.parent().ok_or_else(|| {
+        return scenario_error("scenario failure root has no artifact parent");
+    })?;
+    return Ok(artifact_root
+        .join("snapshots")
+        .join(format!("{name}.frame.json")));
+}
+
+fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Result<()> {
+    let [start_label, end_label] = assertion.between_markers.as_slice() else {
+        return Err(scenario_error(
+            "timeline assertion requires exactly two marker labels",
+        ));
+    };
+    let log = EventLog::read(session.join("events.jsonl"))?;
+    let marker_time = |label: &str| -> Result<u64> {
+        let matches = log
+            .events
+            .iter()
+            .filter_map(|record| match &record.event {
+                Event::Marker { label: value, .. } if value == label => {
+                    return Some(record.monotonic_ns);
+                }
+                _ => return None,
+            })
+            .collect::<Vec<_>>();
+        let [time] = matches.as_slice() else {
+            return Err(scenario_error(format!(
+                "timeline marker `{label}` must occur exactly once, found {}",
+                matches.len()
+            )));
+        };
+        return Ok(*time);
+    };
+    let start = marker_time(start_label)?;
+    let end = marker_time(end_label)?;
+    if end < start {
+        return Err(scenario_error("timeline markers are in reverse order"));
+    }
+    let replayed = replay(&log)?;
+    let ranged_states = replayed
+        .states
+        .iter()
+        .filter(|state| return state.monotonic_ns >= start && state.monotonic_ns <= end)
+        .collect::<Vec<_>>();
+    if let Some(text) = &assertion.no_presented_screen_contains {
+        for state in &ranged_states {
+            if state.presented
+                && state_text(&inspect(&log, StateSelector::StateId(state.state_id))?.state)
+                    .contains(text)
+            {
+                return Err(scenario_error(format!(
+                    "a presented state between `{start_label}` and `{end_label}` contained forbidden text"
+                )));
+            }
+        }
+    }
+    if let Some(code) = &assertion.no_finding {
+        let report = diagnose(session, &log, DiagnosticCheck::all(), 50)?;
+        let state_ids = ranged_states
+            .iter()
+            .map(|state| return state.state_id)
+            .collect::<BTreeSet<_>>();
+        if report.findings.iter().any(|finding| {
+            return finding.code == *code
+                && (finding.state_ids.is_empty()
+                    || finding
+                        .state_ids
+                        .iter()
+                        .any(|state_id| return state_ids.contains(state_id)));
+        }) {
+            return Err(scenario_error(format!(
+                "diagnostic finding `{code}` overlapped `{start_label}` through `{end_label}`"
+            )));
+        }
+    }
+    return Ok(());
+}
+
 fn publish_failure(
     destination: &Path,
     scenario: &Scenario,
@@ -468,8 +881,45 @@ fn publish_failure(
     })?;
     write_json(temporary.join("scenario.json"), scenario)?;
     write_json(temporary.join("result.json"), report)?;
+    let mut derivation_errors = Vec::new();
     if let Some(snapshot) = final_snapshot {
         write_json(temporary.join("final-screen.json"), snapshot)?;
+        if let ControlData::Snapshot {
+            semantic_state_zstd,
+            viewport_text,
+            ..
+        } = snapshot
+        {
+            write_bytes(temporary.join("final-screen.txt"), viewport_text.as_bytes())?;
+            match decode_all(semantic_state_zstd.as_bytes())
+                .map_err(|error| return error.to_string())
+                .and_then(|json| {
+                    return serde_json::from_slice::<SemanticState>(&json)
+                        .map_err(|error| return error.to_string());
+                })
+                .and_then(|state| {
+                    return render_png(&state).map_err(|error| return error.to_string());
+                }) {
+                Ok(png) => write_bytes(temporary.join("final-screen.png"), &png)?,
+                Err(error) => derivation_errors.push(format!("semantic image: {error}")),
+            }
+        }
+    }
+    match EventLog::read(report.canonical_session.join("events.jsonl")) {
+        Ok(log) => {
+            match build_timeline(&log, true, true, None) {
+                Ok(timeline) => write_json(temporary.join("timeline.json"), &timeline)?,
+                Err(error) => derivation_errors.push(format!("timeline: {error}")),
+            }
+            match diagnose(&report.canonical_session, &log, DiagnosticCheck::all(), 50) {
+                Ok(diagnosis) => write_json(temporary.join("diagnose.json"), &diagnosis)?,
+                Err(error) => derivation_errors.push(format!("diagnose: {error}")),
+            }
+        }
+        Err(error) => derivation_errors.push(format!("event log: {error}")),
+    }
+    if !derivation_errors.is_empty() {
+        write_json(temporary.join("derivation-errors.json"), &derivation_errors)?;
     }
     fs_err::rename(&temporary, destination).map_err(|source| {
         return Error::Filesystem {
@@ -478,6 +928,12 @@ fn publish_failure(
         };
     })?;
     return Ok(());
+}
+
+fn write_bytes(path: PathBuf, bytes: &[u8]) -> Result<()> {
+    return fs_err::write(&path, bytes).map_err(|source| {
+        return Error::Filesystem { path, source };
+    });
 }
 
 fn write_json(path: PathBuf, value: &impl Serialize) -> Result<()> {
@@ -536,5 +992,34 @@ mod tests {
         }))
         .expect("scenario JSON");
         assert!(scenario.validate().is_err());
+    }
+
+    #[test]
+    fn scenario_matrix_expands_commands_and_isolates_snapshot_names() {
+        let scenario: Scenario = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "name": "matrix",
+            "matrix": { "theme": ["dark", "light"], "width": ["80", "120"] },
+            "launch": { "command": ["/bin/echo", "{{theme}}", "{{width}}"] },
+            "steps": [{ "matchScreenSnapshot": { "name": "matrix-final" } }]
+        }))
+        .expect("scenario JSON");
+        let expanded = scenario.expand_matrix().expect("matrix expansion");
+        assert_eq!(expanded.len(), 4);
+        let first = expanded.first().expect("first matrix variant");
+        assert_eq!(first.1.launch.command.get(1).expect("theme"), "dark");
+        assert_eq!(first.1.launch.command.get(2).expect("width"), "80");
+        let names = expanded
+            .iter()
+            .filter_map(|(_label, scenario)| {
+                return match scenario.steps.first() {
+                    Some(ScenarioStep::MatchScreenSnapshot(snapshot)) => {
+                        Some(snapshot.name.clone())
+                    }
+                    _ => None,
+                };
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(names.len(), 4);
     }
 }

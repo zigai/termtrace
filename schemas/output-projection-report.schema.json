@@ -1,0 +1,124 @@
+{
+  "$defs": {
+    "OutputProjectionQuality": {
+      "description": "Stable quality label for one child-output projection.",
+      "oneOf": [
+        {
+          "const": "exact_bytes",
+          "description": "Exact canonical output bytes without interpretation.",
+          "type": "string"
+        },
+        {
+          "const": "lossy_line_oriented",
+          "description": "Control-stripped bytes from a stream that did not enter alternate screen.",
+          "type": "string"
+        },
+        {
+          "const": "unsuitable_for_full_screen",
+          "description": "Control stripping cannot represent a full-screen application's visible state.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/output-projection-report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Hash-linked metadata for exact or control-stripped output.",
+  "properties": {
+    "alternate_screen_observed": {
+      "description": "Whether a recognized alternate-screen control was observed.",
+      "type": "boolean"
+    },
+    "dropped_byte_count": {
+      "description": "Bytes intentionally removed by the lossy projection.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "final_event_hash": {
+      "description": "Final validated canonical event hash.",
+      "type": "string"
+    },
+    "format": {
+      "description": "Stable report format.",
+      "type": "string"
+    },
+    "from_event_seq": {
+      "description": "Inclusive selected canonical event sequence.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "mode": {
+      "description": "`raw` or `strip_controls`.",
+      "type": "string"
+    },
+    "output_blake3": {
+      "description": "BLAKE3 of emitted bytes.",
+      "type": "string"
+    },
+    "output_byte_count": {
+      "description": "Emitted byte count.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "projection_quality": {
+      "$ref": "#/$defs/OutputProjectionQuality",
+      "description": "Honest projection quality."
+    },
+    "session_id": {
+      "description": "Immutable canonical session identity.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "source_blake3": {
+      "description": "BLAKE3 of exact selected canonical output bytes.",
+      "type": "string"
+    },
+    "source_byte_count": {
+      "description": "Exact selected canonical output byte count.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "to_event_seq": {
+      "description": "Exclusive selected canonical event sequence.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "version": {
+      "description": "Report schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "warning": {
+      "description": "Stable warning explaining the projection boundary.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "session_id",
+    "final_event_hash",
+    "from_event_seq",
+    "to_event_seq",
+    "mode",
+    "projection_quality",
+    "source_byte_count",
+    "source_blake3",
+    "output_byte_count",
+    "output_blake3",
+    "dropped_byte_count",
+    "alternate_screen_observed"
+  ],
+  "title": "OutputProjectionReport",
+  "type": "object"
+}

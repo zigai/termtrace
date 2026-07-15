@@ -14,7 +14,10 @@ use crate::{
     ghostty_vt::Format,
     observation::{StatePoint, observe_session_with_options},
     replay::{StateSelector, format_state},
-    semantic_image::{SEMANTIC_SVG_RENDERER, render_svg},
+    semantic_image::{
+        SEMANTIC_FONT_BYTES, SEMANTIC_FONT_FAMILY, SEMANTIC_FONT_SOURCE, SEMANTIC_PNG_RENDERER,
+        SEMANTIC_SVG_RENDERER, render_png, render_svg, semantic_font_hash,
+    },
     session::{read_manifest, validate_completed_log},
 };
 
@@ -34,6 +37,34 @@ pub enum SaveFormat {
     Html,
     /// Deterministic semantic-state SVG.
     Svg,
+    /// Deterministic semantic-state PNG rasterized from the SVG scene.
+    Png,
+}
+
+/// Exact font and layout resources used by semantic image output.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticImageResource {
+    /// Embedded font family.
+    pub font_family: String,
+    /// Repository-relative font source.
+    pub font_source: String,
+    /// Exact font byte count.
+    pub font_byte_count: u64,
+    /// BLAKE3 of exact font bytes.
+    pub font_blake3: String,
+    /// Deterministic missing-glyph policy.
+    pub fallback_policy: String,
+    /// Font size in semantic SVG units.
+    pub font_size: u16,
+    /// Fixed semantic cell width.
+    pub cell_width: u16,
+    /// Fixed semantic cell height.
+    pub cell_height: u16,
+    /// Fixed outer padding.
+    pub padding: u16,
+    /// Background policy.
+    pub background_policy: String,
 }
 
 /// One manifested saved file.
@@ -78,6 +109,8 @@ pub struct SaveManifest {
     pub sensitivity: String,
     /// Manifested representations.
     pub files: Vec<SavedFile>,
+    /// Exact deterministic resources when semantic images are present.
+    pub semantic_image_resources: Vec<SemanticImageResource>,
 }
 
 /// Atomic save result.
@@ -87,6 +120,32 @@ pub struct SaveOutcome {
     pub directory: PathBuf,
     /// Published manifest.
     pub manifest: SaveManifest,
+}
+
+/// One entry in an atomic multi-state semantic screenshot batch.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenshotBatchEntry {
+    /// Batch-relative artifact directory.
+    pub directory: String,
+    /// Batch-relative image path.
+    pub image: String,
+    /// Complete per-state save manifest.
+    pub manifest: SaveManifest,
+}
+
+/// Manifest for an atomically published multi-state screenshot batch.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenshotBatchManifest {
+    /// Stable batch format.
+    pub format: String,
+    /// Batch format version.
+    pub version: u32,
+    /// Semantic image format shared by every entry.
+    pub image_format: SaveFormat,
+    /// Ordered exact-state entries.
+    pub entries: Vec<ScreenshotBatchEntry>,
 }
 
 /// Resolve one state once and atomically publish selected representations.
@@ -198,6 +257,13 @@ pub fn save(
                     Some("semantic_rendering"),
                     Some(SEMANTIC_SVG_RENDERER),
                 ),
+                SaveFormat::Png => (
+                    "screen.png",
+                    "image/png",
+                    render_png(&inspection.state)?,
+                    Some("semantic_rendering"),
+                    Some(SEMANTIC_PNG_RENDERER),
+                ),
             };
             let target = staging.join(path);
             write_secure(&target, &bytes)?;
@@ -212,7 +278,7 @@ pub fn save(
         }
         let save_manifest = SaveManifest {
             format: "termtrace-save".to_owned(),
-            version: 1,
+            version: 2,
             session_id: manifest.session_id,
             canonical_session: ByteString::from(canonical.as_os_str().as_encoded_bytes()),
             state_point: point,
@@ -221,6 +287,25 @@ pub fn save(
             source_final_event_hash: completion.final_event_hash,
             sensitivity: "terminal_screen_may_contain_secrets".to_owned(),
             files,
+            semantic_image_resources: if formats
+                .iter()
+                .any(|format| matches!(format, SaveFormat::Svg | SaveFormat::Png))
+            {
+                vec![SemanticImageResource {
+                    font_family: SEMANTIC_FONT_FAMILY.to_owned(),
+                    font_source: SEMANTIC_FONT_SOURCE.to_owned(),
+                    font_byte_count: u64::try_from(SEMANTIC_FONT_BYTES.len()).unwrap_or(u64::MAX),
+                    font_blake3: semantic_font_hash(),
+                    fallback_policy: "bundled_font_only_missing_glyph_box".to_owned(),
+                    font_size: 16,
+                    cell_width: 10,
+                    cell_height: 20,
+                    padding: 0,
+                    background_policy: "opaque_terminal_background".to_owned(),
+                }]
+            } else {
+                Vec::new()
+            },
         };
         write_secure(
             &staging.join("save-manifest.json"),
@@ -244,6 +329,87 @@ pub fn save(
         directory: destination.to_path_buf(),
         manifest: save_manifest,
     });
+}
+
+/// Atomically publish several exact semantic states under one batch directory.
+///
+/// # Errors
+///
+/// Returns the same errors as [`save`] and rejects empty or non-image batches.
+pub fn save_screenshot_batch(
+    session: &Path,
+    destination: &Path,
+    points: &[StatePoint],
+    format: SaveFormat,
+    include_hidden: bool,
+) -> Result<ScreenshotBatchManifest> {
+    if points.is_empty() || !matches!(format, SaveFormat::Svg | SaveFormat::Png) {
+        return Err(save_error(
+            "screenshot batches require at least one point and an SVG or PNG format",
+        ));
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| return save_error("batch path has no parent"))?;
+    let name = destination
+        .file_name()
+        .ok_or_else(|| return save_error("batch path has no basename"))?;
+    if !parent.is_dir() {
+        return Err(save_error("batch parent directory does not exist"));
+    }
+    let staging = parent.join(format!(
+        ".{}.{}.tmp",
+        name.to_string_lossy(),
+        Uuid::now_v7()
+    ));
+    create_private_directory(&staging)?;
+    let publish = (|| -> Result<ScreenshotBatchManifest> {
+        let filename = match format {
+            SaveFormat::Svg => "screen.svg",
+            SaveFormat::Png => "screen.png",
+            _ => return Err(save_error("batch format must be SVG or PNG")),
+        };
+        let mut entries = Vec::with_capacity(points.len());
+        for (index, point) in points.iter().enumerate() {
+            let directory = format!("state-{index:04}");
+            let outcome = save(
+                session,
+                &staging.join(&directory),
+                point.clone(),
+                &[format],
+                include_hidden,
+            )?;
+            entries.push(ScreenshotBatchEntry {
+                image: format!("{directory}/{filename}"),
+                directory,
+                manifest: outcome.manifest,
+            });
+        }
+        let manifest = ScreenshotBatchManifest {
+            format: "termtrace-screenshot-batch".to_owned(),
+            version: 1,
+            image_format: format,
+            entries,
+        };
+        write_secure(
+            &staging.join("batch-manifest.json"),
+            &pretty_json(&manifest, "batch-manifest.json")?,
+        )?;
+        sync_directory(&staging)?;
+        return Ok(manifest);
+    })();
+    let manifest = match publish {
+        Ok(value) => value,
+        Err(error) => {
+            let _cleanup = fs_err::remove_dir_all(&staging);
+            return Err(error);
+        }
+    };
+    if let Err(error) = commit_directory(parent, &staging, destination) {
+        let _cleanup = fs_err::remove_dir_all(&staging);
+        return Err(error);
+    }
+    return Ok(manifest);
 }
 
 fn pretty_json(value: &impl Serialize, path: &str) -> Result<Vec<u8>> {

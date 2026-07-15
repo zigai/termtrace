@@ -5,6 +5,50 @@
       "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
       "type": "string"
     },
+    "BundleProfile": {
+      "description": "Fixed bundle content policy.",
+      "oneOf": [
+        {
+          "const": "screen",
+          "description": "Latest screen observation without canonical raw events.",
+          "type": "string"
+        },
+        {
+          "const": "debug",
+          "description": "Screen plus metadata-only canonical event projections and verification.",
+          "type": "string"
+        },
+        {
+          "const": "forensic",
+          "description": "Complete top-level canonical session payload plus verification.",
+          "type": "string"
+        }
+      ]
+    },
+    "CaptureTarget": {
+      "description": "Pixel viewport intended for native visual capture.",
+      "properties": {
+        "height": {
+          "description": "Viewport height in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "description": "Viewport width in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "type": "object"
+    },
     "ControlCommand": {
       "description": "One command sent to the live session actor.",
       "oneOf": [
@@ -350,6 +394,71 @@
         }
       ]
     },
+    "CursorStyle": {
+      "description": "Cursor visual style.",
+      "oneOf": [
+        {
+          "const": "bar",
+          "description": "Vertical bar.",
+          "type": "string"
+        },
+        {
+          "const": "block",
+          "description": "Filled block.",
+          "type": "string"
+        },
+        {
+          "const": "underline",
+          "description": "Underline.",
+          "type": "string"
+        },
+        {
+          "const": "hollow_block",
+          "description": "Hollow block.",
+          "type": "string"
+        }
+      ]
+    },
+    "DiagnosticCheck": {
+      "description": "Stable detector selectable by `diagnose --check`.",
+      "oneOf": [
+        {
+          "const": "full_redraw",
+          "description": "Full-viewport semantic clear controls.",
+          "type": "string"
+        },
+        {
+          "const": "transient",
+          "description": "Ordered presented or hidden transient states.",
+          "type": "string"
+        },
+        {
+          "const": "dirty",
+          "description": "Semantic changes inconsistent with Ghostty dirty evidence.",
+          "type": "string"
+        },
+        {
+          "const": "cursor",
+          "description": "Large cursor movement between semantic boundaries.",
+          "type": "string"
+        },
+        {
+          "const": "modes",
+          "description": "Repeated terminal-mode mutations.",
+          "type": "string"
+        },
+        {
+          "const": "palette",
+          "description": "Repeated palette/default-color mutations.",
+          "type": "string"
+        },
+        {
+          "const": "query_loop",
+          "description": "Repeated equal query/response exchanges.",
+          "type": "string"
+        }
+      ]
+    },
     "DriverMethod": {
       "description": "Supported initial high-level driver methods.",
       "oneOf": [
@@ -549,6 +658,293 @@
         },
         {
           "additionalProperties": false,
+          "description": "Delete completed evidence launched by this driver under explicit policy.",
+          "properties": {
+            "handle": {
+              "description": "Process-local owned session handle.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "method": {
+              "const": "discard_completed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "method",
+            "handle"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Observe one live or completed semantic state point.",
+          "properties": {
+            "handle": {
+              "description": "Process-local session handle.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "include_hidden": {
+              "description": "Permit explicitly selected hidden synchronized-output state.",
+              "type": "boolean"
+            },
+            "method": {
+              "const": "observe",
+              "type": "string"
+            },
+            "point": {
+              "$ref": "#/$defs/StatePoint",
+              "description": "Exact shared state selector."
+            }
+          },
+          "required": [
+            "method",
+            "handle",
+            "point",
+            "include_hidden"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Build the completed canonical/semantic timeline.",
+          "properties": {
+            "all_states": {
+              "description": "Include non-presented semantic states.",
+              "type": "boolean"
+            },
+            "controls": {
+              "description": "Include exact lossless VT frames.",
+              "type": "boolean"
+            },
+            "handle": {
+              "description": "Process-local session handle.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "method": {
+              "const": "timeline",
+              "type": "string"
+            }
+          },
+          "required": [
+            "method",
+            "handle",
+            "all_states",
+            "controls"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Compare two completed semantic endpoints.",
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/StatePoint",
+              "description": "Earlier state point."
+            },
+            "handle": {
+              "description": "Process-local session handle.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "method": {
+              "const": "diff",
+              "type": "string"
+            },
+            "to": {
+              "$ref": "#/$defs/StatePoint",
+              "description": "Later state point."
+            }
+          },
+          "required": [
+            "method",
+            "handle",
+            "from",
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Run conservative completed-session detectors.",
+          "properties": {
+            "broad_change_percent": {
+              "description": "Broad repaint threshold from 1 through 100.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "checks": {
+              "description": "Empty means every detector.",
+              "items": {
+                "$ref": "#/$defs/DiagnosticCheck"
+              },
+              "type": "array"
+            },
+            "handle": {
+              "description": "Process-local session handle.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "method": {
+              "const": "diagnose",
+              "type": "string"
+            }
+          },
+          "required": [
+            "method",
+            "handle",
+            "checks",
+            "broad_change_percent"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Read bounded canonical event projections.",
+          "properties": {
+            "from_event_seq": {
+              "description": "Inclusive first event sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "handle": {
+              "description": "Process-local session handle.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "limit": {
+              "description": "Maximum returned events, bounded by the driver.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata_only": {
+              "description": "Elide exact byte payloads.",
+              "type": "boolean"
+            },
+            "method": {
+              "const": "events",
+              "type": "string"
+            }
+          },
+          "required": [
+            "method",
+            "handle",
+            "from_event_seq",
+            "limit",
+            "metadata_only"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Publish one semantic or native screenshot artifact.",
+          "properties": {
+            "destination": {
+              "description": "No-replace artifact directory.",
+              "type": "string"
+            },
+            "handle": {
+              "description": "Process-local session handle.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "method": {
+              "const": "screenshot",
+              "type": "string"
+            },
+            "point": {
+              "$ref": "#/$defs/StatePoint",
+              "description": "Exact selected state point."
+            },
+            "renderer": {
+              "$ref": "#/$defs/DriverScreenshotRenderer",
+              "description": "Explicit truth renderer."
+            },
+            "viewport": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CaptureTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional strict native viewport; absent runs the solver."
+            }
+          },
+          "required": [
+            "method",
+            "handle",
+            "point",
+            "destination",
+            "renderer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Verify attached completed evidence without mutation.",
+          "properties": {
+            "handle": {
+              "description": "Process-local session handle.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "level": {
+              "$ref": "#/$defs/VerificationLevel",
+              "description": "Requested validation depth."
+            },
+            "method": {
+              "const": "verify",
+              "type": "string"
+            }
+          },
+          "required": [
+            "method",
+            "handle",
+            "level"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Publish one sensitivity-profiled evidence handoff.",
+          "properties": {
+            "destination": {
+              "description": "New no-replace bundle directory.",
+              "type": "string"
+            },
+            "handle": {
+              "description": "Process-local session handle.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "method": {
+              "const": "bundle",
+              "type": "string"
+            },
+            "profile": {
+              "$ref": "#/$defs/BundleProfile",
+              "description": "Explicit sensitivity profile."
+            }
+          },
+          "required": [
+            "method",
+            "handle",
+            "destination",
+            "profile"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Release only the process-local handle.",
           "properties": {
             "handle": {
@@ -566,6 +962,21 @@
             "handle"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "DriverScreenshotRenderer": {
+      "description": "Explicit screenshot truth path; no fallback occurs between variants.",
+      "oneOf": [
+        {
+          "const": "semantic",
+          "description": "Deterministic semantic PNG.",
+          "type": "string"
+        },
+        {
+          "const": "native",
+          "description": "Direct native frame after exact endpoint replay.",
+          "type": "string"
         }
       ]
     },
@@ -792,6 +1203,76 @@
         },
         {
           "additionalProperties": false,
+          "description": "Repeat a complete press/release click a bounded number of times.",
+          "properties": {
+            "button": {
+              "$ref": "#/$defs/MouseButton",
+              "description": "Button to click."
+            },
+            "count": {
+              "description": "Number of complete clicks.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "multi_click",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "button",
+            "count"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Press at the command cell, emit motion samples, and release at an end cell.",
+          "properties": {
+            "button": {
+              "$ref": "#/$defs/MouseButton",
+              "description": "Button held throughout the drag."
+            },
+            "kind": {
+              "const": "drag",
+              "type": "string"
+            },
+            "steps": {
+              "description": "Number of motion samples, including the destination.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "to_column": {
+              "description": "Zero-based destination column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "to_row": {
+              "description": "Zero-based destination row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "button",
+            "to_column",
+            "to_row",
+            "steps"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Emit signed vertical wheel ticks at a cell.",
           "properties": {
             "kind": {
@@ -844,6 +1325,111 @@
         }
       ]
     },
+    "ScreenMode": {
+      "description": "Stable terminal-mode selectors available to screen predicates.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Any alternate-screen mode.",
+          "properties": {
+            "mode": {
+              "const": "alternate_screen",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "DEC bracketed-paste mode 2004.",
+          "properties": {
+            "mode": {
+              "const": "bracketed_paste",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "DEC auto-wrap mode 7.",
+          "properties": {
+            "mode": {
+              "const": "wraparound",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "DEC synchronized-output mode 2026.",
+          "properties": {
+            "mode": {
+              "const": "synchronized_output",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Numeric ANSI mode.",
+          "properties": {
+            "mode": {
+              "const": "ansi",
+              "type": "string"
+            },
+            "number": {
+              "description": "Mode number.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "number"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Numeric DEC-private mode.",
+          "properties": {
+            "mode": {
+              "const": "dec",
+              "type": "string"
+            },
+            "number": {
+              "description": "Mode number.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "number"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ScreenPredicate": {
       "description": "Exact predicate evaluated against the latest presented viewport.",
       "oneOf": [
@@ -884,6 +1470,472 @@
             "text"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Viewport text matches a bounded linear-time regular expression.",
+          "properties": {
+            "pattern": {
+              "description": "Rust-regex pattern, limited by the control service.",
+              "type": "string"
+            },
+            "predicate": {
+              "const": "matches_regex",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "pattern"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Viewport text does not match a bounded linear-time regular expression.",
+          "properties": {
+            "pattern": {
+              "description": "Rust-regex pattern, limited by the control service.",
+              "type": "string"
+            },
+            "predicate": {
+              "const": "excludes_regex",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "pattern"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One zero-based row contains exact UTF-8 text.",
+          "properties": {
+            "predicate": {
+              "const": "row_contains",
+              "type": "string"
+            },
+            "row": {
+              "description": "Zero-based viewport row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "row",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One zero-based row excludes exact UTF-8 text.",
+          "properties": {
+            "predicate": {
+              "const": "row_absent",
+              "type": "string"
+            },
+            "row": {
+              "description": "Zero-based viewport row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "row",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A half-open cell region contains exact UTF-8 text.",
+          "properties": {
+            "predicate": {
+              "const": "region_contains",
+              "type": "string"
+            },
+            "region": {
+              "$ref": "#/$defs/ScreenRegion",
+              "description": "Region bounds in viewport cells."
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "region",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A half-open cell region excludes exact UTF-8 text.",
+          "properties": {
+            "predicate": {
+              "const": "region_absent",
+              "type": "string"
+            },
+            "region": {
+              "$ref": "#/$defs/ScreenRegion",
+              "description": "Region bounds in viewport cells."
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "region",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Cursor properties all equal the supplied values.",
+          "properties": {
+            "column": {
+              "description": "Optional zero-based viewport column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "predicate": {
+              "const": "cursor",
+              "type": "string"
+            },
+            "row": {
+              "description": "Optional zero-based viewport row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "shape": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CursorStyle"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional cursor shape requirement."
+            },
+            "visible": {
+              "description": "Optional cursor visibility requirement.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "predicate"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One stable terminal mode equals the requested value.",
+          "properties": {
+            "enabled": {
+              "description": "Required set/reset value.",
+              "type": "boolean"
+            },
+            "mode": {
+              "$ref": "#/$defs/ScreenMode",
+              "description": "Stable mode selector."
+            },
+            "predicate": {
+              "const": "mode",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "mode",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Presented state hash equals or differs from a supplied BLAKE3 hash.",
+          "properties": {
+            "comparison": {
+              "$ref": "#/$defs/StateHashComparison",
+              "description": "Equality relationship to require."
+            },
+            "hash": {
+              "description": "Lowercase BLAKE3 state hash.",
+              "type": "string"
+            },
+            "predicate": {
+              "const": "state_hash",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "hash",
+            "comparison"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Every nested predicate must match.",
+          "properties": {
+            "predicate": {
+              "const": "all",
+              "type": "string"
+            },
+            "predicates": {
+              "description": "Bounded non-empty predicate list.",
+              "items": {
+                "$ref": "#/$defs/ScreenPredicate"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "predicate",
+            "predicates"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "At least one nested predicate must match.",
+          "properties": {
+            "predicate": {
+              "const": "any",
+              "type": "string"
+            },
+            "predicates": {
+              "description": "Bounded non-empty predicate list.",
+              "items": {
+                "$ref": "#/$defs/ScreenPredicate"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "predicate",
+            "predicates"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ScreenRegion": {
+      "additionalProperties": false,
+      "description": "Half-open viewport region used by structural screen predicates.",
+      "properties": {
+        "bottom": {
+          "description": "Exclusive bottom row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "left": {
+          "description": "Inclusive zero-based left column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "right": {
+          "description": "Exclusive right column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "top": {
+          "description": "Inclusive zero-based top row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "left",
+        "top",
+        "right",
+        "bottom"
+      ],
+      "type": "object"
+    },
+    "StateHashComparison": {
+      "description": "Required relationship between the presented state and a supplied hash.",
+      "oneOf": [
+        {
+          "const": "unchanged",
+          "description": "Current state must equal the supplied hash.",
+          "type": "string"
+        },
+        {
+          "const": "changed",
+          "description": "Current state must differ from the supplied hash.",
+          "type": "string"
+        }
+      ]
+    },
+    "StatePoint": {
+      "description": "Shared state selection vocabulary.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Latest presentation-eligible state.",
+          "properties": {
+            "selector": {
+              "const": "latest_presented",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact semantic state identifier.",
+          "properties": {
+            "selector": {
+              "const": "state_id",
+              "type": "string"
+            },
+            "state_id": {
+              "description": "Exact semantic state identifier.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "selector",
+            "state_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Latest state at or before an event sequence.",
+          "properties": {
+            "event_seq": {
+              "description": "Canonical event sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "selector": {
+              "const": "event_seq",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "event_seq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Latest state at or before a session-monotonic timestamp.",
+          "properties": {
+            "monotonic_ns": {
+              "description": "Session-monotonic nanoseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "selector": {
+              "const": "monotonic_ns",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "monotonic_ns"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "State at a uniquely named marker.",
+          "properties": {
+            "label": {
+              "description": "Unique marker label.",
+              "type": "string"
+            },
+            "selector": {
+              "const": "marker",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "label"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "VerificationLevel": {
+      "description": "Requested depth for an offline evidence verification.",
+      "oneOf": [
+        {
+          "const": "structure",
+          "description": "Parse all canonical files and enforce their versioned structure.",
+          "type": "string"
+        },
+        {
+          "const": "content",
+          "description": "Verify the manifest binding, event chain, completion, and terminal state.",
+          "type": "string"
+        },
+        {
+          "const": "durability_record",
+          "description": "Verify content plus the chain-bound durability policy and recorded outcomes.",
+          "type": "string"
+        },
+        {
+          "const": "signature",
+          "description": "Verify content plus a detached signature and configured signer trust.",
+          "type": "string"
         }
       ]
     }

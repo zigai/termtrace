@@ -1,48 +1,116 @@
 # Troubleshooting
 
-## Build says libghostty-vt is missing
+Start with the capability report and the diagnostic code from the failing command:
 
-Run `scripts/bootstrap.sh` from the repository root. It initializes the Ghostty submodule, provisions the pinned Zig toolchain, and builds libghostty-vt. An external build can be selected with `TERMTRACE_GHOSTTY_PREFIX`, but it must provide compatible `include/ghostty/vt.h` and `lib/libghostty-vt.a`; compatibility is intentionally not shimmed.
+```bash
+termtrace doctor --explain
+```
+
+## Build cannot find the semantic library
+
+Run the bootstrap from the repository root:
+
+```bash
+scripts/bootstrap.sh
+```
+
+It initializes the submodule, installs the pinned Zig toolchain, and builds the required library. Use `TERMTRACE_GHOSTTY_PREFIX` only for an intentionally compatible external build.
 
 ## A control command cannot connect
 
-Confirm `control.sock` exists, inspect the recorder process, then run `termtrace ping`. The socket is removed after child exit. Linux `SO_PEERCRED` rejects a different UID even if filesystem permissions were bypassed.
+Check that the session is still live:
 
-## Wait reports a temporary invalid tail
+```bash
+termtrace ping SESSION
+termtrace status SESSION
+```
 
-Use positional text or `--screen-absent` for the latest presented viewport; these sample the actor's presentation-filtered state and can require `--stable-for`. Use `--output` only for canonical output history. Active buffered writers can expose a short read race during output-history reads; completed invalid logs fail validation and should be recovered explicitly.
+`control.sock` disappears after the child exits. The socket also rejects clients owned by a different user.
 
-## Recover a damaged log
+If a friendly name is involved, inspect all registry states:
+
+```bash
+termtrace list --all --json
+termtrace resolve NAME --json
+```
+
+## A wait times out
+
+Choose the predicate that matches the evidence you need:
+
+```bash
+# Current presented screen
+termtrace wait SESSION 'Ready' --stable-for 250ms
+
+# Any canonical output history
+termtrace wait SESSION --output 'earlier diagnostic'
+```
+
+Screen waits ignore hidden synchronized-output states. Output waits search the event history, including text split across PTY reads.
+
+## The event log has a damaged tail
+
+Recover the longest valid prefix into a new directory:
 
 ```bash
 mkdir -m 700 recovered
-termtrace recover --event-log SESSION/events.jsonl --out recovered/events.jsonl
+termtrace recover \
+  --event-log SESSION/events.jsonl \
+  --out recovered/events.jsonl
 ```
 
-Recovery never modifies the source. It copies only the longest hash-checked, schema-valid, newline-complete prefix and reports the discarded line plus any intent whose delivery remains uncertain.
+Recovery never modifies the source. Its report identifies discarded data and any mutation whose delivery is uncertain.
+
+## Index says the session is incomplete
+
+Visible final text does not mean the recording is complete. Wait for a durable completion manifest:
+
+```bash
+termtrace stop SESSION --wait
+# or, without sending a signal:
+termtrace status SESSION --wait-complete
+```
+
+Then run `index` again. Use `index --live-snapshot` only when an explicitly incomplete prefix is intended. Native capture requires completed evidence.
+
+For ranged capture, first create an index with exactly the same `--from` and `--to` values or marker selectors.
 
 ## Native capture fails
 
-Termtrace preserves a `visual-failed-*` owner-only directory. Inspect `ghostty.stderr.log`, `xvfb.log`, and `ffmpeg-video.log`. Common causes are a missing x11grab/libx264rgb FFmpeg build, unavailable software OpenGL, missing fonts referenced by Ghostty config, or desktop portal startup failures.
+Termtrace preserves a `visual-failed-*` directory. Inspect the structured geometry or playback error first, then the component logs:
 
-The capture manifest includes Ghostty and FFmpeg versions, the resolved Ghostty configuration and hash, exact launch overrides, a parent-side `geometry-preflight.json` report, and FFprobe evidence. A successful process exit without valid probe evidence is still a failure. Playback writes `playback-error.json` before an unsuccessful child exit, and the parent watches that handshake alongside timing so the root cause is reported without waiting for a generic timeout.
+- `geometry-preflight.json`
+- `playback-error.json`
+- `ghostty.stderr.log`
+- `xvfb.log`
+- `ffmpeg-video.log`
 
-Recordings made with fitted geometry or `--ghostty-config`/visual convenience flags contain their canonical effective Ghostty profile, so changing or deleting the original config file does not affect capture. The referenced fonts, shaders, background images, and other external resources must still be installed. Legacy or manual recordings without a saved profile continue to validate the current user config and stop if it changed.
+Common causes are missing fonts, unavailable software OpenGL, a missing codec, or desktop-session startup failure.
 
-If capture reports a geometry mismatch, the recorded grid does not fit the selected viewport with the available Ghostty font metrics. Prefer recording with `--geometry fit --viewport WIDTHxHEIGHT`. For a fitted recording, confirm that the font and other external profile resources still exist, or make a new recording rather than overriding the viewport until wrapping happens to look close.
+If geometry does not match, record with a fitted viewport:
 
-`--width` and `--height` describe the whole capture viewport, not the terminal text area. The preflight diagnostic reports both the actual grid/text pixels and the recorded grid. Portal, AT-SPI, and ignored runtime-resize warnings may also appear in successful captures; use the structured preflight/playback error rather than treating those warnings as the cause.
+```bash
+termtrace record \
+  --out SESSION \
+  --geometry fit \
+  --viewport 1920x1080 \
+  -- COMMAND
+```
 
-## Index reports an incomplete or stale session
+`--width` and `--height` refer to the complete capture viewport, not only the text grid. Fitted recordings preserve their flattened terminal configuration, but external fonts, shaders, and images must still be installed.
 
-Seeing expected screen text does not complete a recording. Run `termtrace stop SESSION --wait` or `termtrace status SESSION --wait-complete` before normal indexing. Use `index --live-snapshot` only when an explicitly incomplete prefix is intended; its source-hash suffix prevents it from occupying the final derived directory, and capture refuses incomplete provenance. If capture names a provenance mismatch, remove the named final derived directory and regenerate it from the completed log.
+## The command starts in the wrong directory
 
-For a ranged capture, create the semantic index with exactly the same `--from` and `--to` values first. Bounds are resolved to absolute nanoseconds and select `[from, to)`; the error names the matching index command and deterministic directory. Do not rename a range directory or reuse an index from different bounds. If fast-forward geometry verification fails, inspect pre-range resize intent/result events rather than increasing delays: capture uses a terminal-query barrier and does not guess that Ghostty caught up.
+Without `--cwd`, the child inherits the directory where `termtrace record` was invoked. Set it explicitly when needed:
 
-## A recorded command starts in the wrong directory
+```bash
+termtrace record --out SESSION --cwd ./project -- COMMAND
+```
 
-Without `--cwd`, current Termtrace releases inherit the directory from which `termtrace record` was invoked and persist its resolved path in `session.json`. `--cwd` overrides this, with relative paths resolved against that same caller directory. Inspect `working_directory` in `session.json`; it is Base64-backed byte-string JSON so non-UTF-8 paths remain lossless. Older recordings may contain `null` because earlier releases delegated the unset directory to `portable-pty`, which selected the user's home directory.
+Inspect `working_directory` in `session.json` to see the resolved value.
 
-## Video does not show every transient state
+## Video misses a brief state
 
-At 24 FPS, a frame spans roughly 41.7 ms. This limits the video only. `states.jsonl.zst` remains byte-granular, including mode-2026 suppressed states, and `video-map.jsonl` marks non-presented states with a null frame. Use `index --presented-only` when those suppressed derived records are not needed.
+Native video runs at 24 FPS, so a frame spans about 41.7 ms. Semantic replay is not frame-limited: brief states remain in `states.jsonl.zst` and can be inspected or rendered separately.
+
+States hidden by synchronized output are retained with `presented: false`. Use `index --presented-only` when they are not needed.

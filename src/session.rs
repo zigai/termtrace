@@ -216,6 +216,20 @@ pub struct SessionLineage {
     pub reason: String,
 }
 
+/// Chain-bound provenance for bytes imported from a noncanonical ANSI stream.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportProvenance {
+    /// Stable source class, currently `ansi_stream`.
+    pub source_kind: String,
+    /// Exact imported byte count.
+    pub byte_count: u64,
+    /// BLAKE3 of the exact imported bytes.
+    pub blake3: String,
+    /// Caller-facing path bytes or `-` for standard input.
+    pub source: ByteString,
+}
+
 /// Immutable provenance written before the child is spawned.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -230,6 +244,9 @@ pub struct SessionManifest {
     pub creation_alias: Option<String>,
     /// Evidence-bound predecessor when this session is an immutable successor.
     pub lineage: Option<SessionLineage>,
+    /// Optional provenance when this session canonically imports a byte stream.
+    #[serde(default)]
+    pub import_provenance: Option<ImportProvenance>,
     /// Unix wall-clock origin in nanoseconds.
     pub started_unix_ns: u128,
     /// Exact executable and argument bytes.
@@ -821,6 +838,7 @@ mod tests {
             session_id,
             creation_alias: None,
             lineage: None,
+            import_provenance: None,
             started_unix_ns: clock.started_unix_ns(),
             command: vec![ByteString::from(&b"true"[..])],
             working_directory: Some(ByteString::from(&b"/tmp"[..])),

@@ -1,101 +1,79 @@
 # Architecture
 
-## Truth layers
+Termtrace separates the original terminal execution from the views derived from it.
 
-Termtrace keeps four truths separate so one representation never silently substitutes for another:
+## Evidence layers
 
-1. **Execution truth:** ordered PTY bytes, input, resize, signal, marker, lifecycle, and exit events.
-2. **Semantic truth:** terminal states reconstructed by the same `libghostty-vt` engine used by Ghostty.
-3. **Native visual truth:** pixels drawn by the installed Ghostty GTK/OpenGL application on a headless display.
-4. **Encoded visual truth:** screenshots and video produced from native visual capture.
+| Layer | Contents | Role |
+| --- | --- | --- |
+| Execution | PTY output, input, resize, signal, marker, lifecycle, and exit events | canonical |
+| Semantic | terminal states reconstructed by the pinned parser | derived |
+| Native visual | pixels drawn by the installed terminal application | derived |
+| Presentation | screenshots, video, captions, and edits | derived |
 
-The append-only execution log is canonical. The immutable session manifest is published first and its exact BLAKE3 is committed by the event header. The completion manifest binds both roots, requires a final `Exit`, rejects pending mutations, and agrees with the final event hash, event count, output count, and exit outcome. New files and directories are synchronized with their parent directory at publication boundaries. This provides tamper detection relative to retained roots, not recorder authentication. Every derived artifact records the event range, clock mapping, component versions, configuration hash, profile, and whole-file member hashes from which it was derived. Completed derivation manifests are chained in `artifact-roots.jsonl`; this post-completion catalog never reopens canonical execution truth and remains locally self-consistent rather than authenticated until bound by a trusted detached checkpoint. Explicit live snapshots are source-hash-addressed and marked incomplete rather than being allowed to masquerade as final artifacts.
+The append-only execution log is the source of truth. A session manifest is published before recording. Each event commits to the previous event, and the completion manifest binds the final event hash, counts, and exit outcome.
 
-Detached receipt signing is a narrow external boundary. Termtrace assembles and domain-separates fixed-order canonical payload bytes, then delegates signing and verification to OpenSSH; it never stores or interprets private keys. Cryptographic validity proves that the embedded signing key covered those bytes. Authenticity additionally requires the caller's allowed-signers policy to bind that key to the asserted identity. The local signing-host timestamp is labeled accordingly and is not described as witnessed time or external anchoring.
+This detects changes relative to retained hashes. It does not identify the recorder. Optional detached receipts add an external signature; signer trust still depends on the reviewer's allowed-signers policy.
 
-Friendly names are resolved through a separate owner-only registry boundary. Entries are no-replace files opened without following symlinks and contain both exact canonical path bytes and the immutable manifest session ID. Every resolution validates ownership, permissions, canonical path stability, supported format/protocol, and manifest identity. Aliases therefore remain mutable navigation metadata rather than provenance roots.
-
-Live registration records socket peer credentials plus process-start ticks, preventing a reused PID from making a stale alias appear healthy. Registry listing derives lifecycle from that pair, socket presence, immutable manifest identity, and completion identity without appending canonical observations. Removing an alias validates and unlinks only its owner-only entry, then synchronizes the registry directory; it has no evidence-deletion path.
-
-Detached start reuses the exact foreground recording option grammar. It allocates a collision-free absent session path, redirects mirrored output and recorder diagnostics to separate owner-only files, launches the recorder with standard input closed, and waits for both immutable manifest publication and a socket-derived recorder PID/start pair. Only then is the alias published. Duplicate aliases fail before allocation; process failure, readiness timeout, or a publication race reports the recoverable orphan and diagnostic paths without deleting evidence.
-
-Restart first drives the current alias owner to validated completion, then creates a separate successor from the predecessor's effective settings. The successor manifest binds the predecessor session ID, exact manifest hash, and final event-chain root. Registry mutation is serialized by an owner-only file lock and uses compare-and-swap on the predecessor ID plus an atomic rename, so readiness failure or a concurrent owner change leaves the previous binding intact. Neither path is reused or truncated.
-
-Full-session derivation preserves the original `derived/` and `visual/` layouts. A requested half-open interval receives deterministic range-specific directories. Semantic replay reconstructs the prefix without materializing prefix states. Native playback emits the prefix without source-time sleeps, performs a non-mutating terminal-query barrier, and publishes its capture clock only after Ghostty has processed that prefix. FFmpeg therefore records neither the prefix nor its original elapsed time.
-
-## Runtime topology
+## Runtime
 
 ```text
-agent control socket ─┐
-human/Ghostty input ──┼─> PTY proxy ─> target process
-                     │      │
-                     │      ├─> owner-only event log
-                     │      └─> live semantic state
-                     │
-Ghostty on Xvfb <─────┘
-       │
-       └─> FFmpeg native-window capture
+human input ────────┐
+control socket ─────┼─> session actor ─> child PTY
+terminal replies ───┘        │
+                             ├─> canonical event log
+                             └─> live semantic state
+
+completed event log ─> semantic replay
+                    └> native capture on a private display
 ```
 
-The proxy forwards bytes unchanged. It owns the target PTY, logs before acknowledging state-changing control requests, propagates window changes, and distinguishes input originating from a human terminal, an agent, or an automatic host response.
+The session actor orders child output, control requests, and terminal-generated replies. State-changing requests are recorded before their effects are acknowledged. Read-only operations such as `ping`, `status`, `show`, and waits do not change the event log.
 
-Read-only control operations are observations rather than execution events. Ping, status, wait registration/polling, and live boundary discovery return actor-consistent `observed` and `durable` positions without changing the event count or hash. Mutations and explicit markers remain canonical.
+## Canonical recording
 
-The actor retains the latest presentation-eligible semantic snapshot separately from its newest parser state. Outside synchronized output it advances after output and resize processing; while DEC mode 2026 is active it remains frozen until commit. Its observer-only endpoint returns bounded viewport text, cursor/mode facts, a full-state hash, and canonical source boundaries without serializing the full cell graph over the control socket.
+`session.json` fixes the command, working directory, geometry, terminal profile, provenance policy, and durability policy. `events.jsonl` contains the integrity-chained execution. `completion.json` closes the recording and rejects pending mutations.
 
-Mutations may carry an optimistic presented-state hash. After earlier actor messages and child output have been processed but before any intent is appended, the actor compares the guard with that same presentation-eligible snapshot. A mismatch is a durable idempotent request outcome with current observed/durable boundaries, but has an empty canonical event range and cannot reach the PTY. The guard is included in request-ID collision detection.
+Input, resize, and signal operations use intent/result pairs. If recording stops between the pair, delivery is uncertain. Termtrace does not retry an uncertain mutation automatically.
 
-Presented-screen predicates register as bounded actor waiters with server-side monotonic deadlines. Matching-state hashes and stability clocks advance on actor ticks without blocking the event loop, so output, input, status, stop, query responses, and other waiters continue concurrently. Wait registration and completion remain observations and never append canonical events.
+A separate request journal makes caller-owned mutation IDs idempotent across retries. It can be reconstructed from canonical events and is not itself an evidence root.
 
-The VT framer is a bounded, lossless explanatory sidecar over canonical output. It groups printable runs and C0, C1, ESC, CSI, OSC, DCS, and APC sequences across PTY event boundaries while retaining exact half-open source segments. It does not predict terminal effects; Ghostty replay remains the semantic authority. Malformed and incomplete sequences retain their bytes and labels.
+## Live semantic state
 
-Live raw-output following advances only to the actor's durable event boundary. Each prefix is integrity-validated before new output events are emitted, and the next-event cursor prevents duplicates across polling and the control-socket/completion handoff. A partially written uncommitted tail remains outside the reported prefix.
+The pinned semantic engine runs while recording. It answers terminal queries and maintains two states:
 
-Live typed-event following uses the identical boundary/resume algorithm before applying event-type and metadata-only projections. Filters do not alter cursor advancement, so reconnect-style polling cannot duplicate a later matching event merely because intervening canonical records were omitted from output.
+- the newest parser state;
+- the newest state eligible for presentation.
 
-Mutation idempotency uses a bounded in-memory cache backed by the append-only, hash-chained `requests.jsonl` journal. Each record binds the request UUID and command hash to its operation IDs, canonical event range and hash, and exact response. Cache eviction therefore does not permit a duplicate mutation. Read-only observations are excluded, and a per-session mutation limit bounds journal growth. The journal is disposable acceleration: verification cross-checks it against canonical events when present, but missing or invalid journal data cannot invalidate otherwise complete canonical evidence.
+They differ during synchronized output. Screen observations and waits use the presented state so hidden intermediate changes do not masquerade as visible UI.
 
-Output persistence is explicit provenance. `strict` synchronizes every PTY output event, `bounded` synchronizes when either its configured byte limit or elapsed-time limit is reached, and `throughput` buffers output until a durable mutation/lifecycle/completion boundary. The actor checks bounded elapsed deadlines even while the child is idle. Completion reports measured maxima and final synchronization; this is syscall-level evidence under the recorded host assumptions, not offline proof of power-loss survival.
+Mutations may carry an expected state hash. The actor checks this immediately before writing to the PTY and rejects stale actions without creating an input intent.
 
-The target process starts in the recorder's effective current directory unless `--cwd` overrides it. Termtrace resolves that directory once before creating provenance or spawning the PTY child, so the manifest and process cannot disagree.
+## Replay and capture
 
-Execution environment collection is policy-driven. `minimal` retains recorder-owned terminal values and inventories common locale/timezone names, `reproducible` retains those effective values and hashes, and `custom` applies explicit per-variable value/hash/name/not-captured rules. The immutable manifest records both the selection policy and the resulting inventory; hashes support later equality checks but are not presented as reproducible values or confidentiality controls.
+Replay validates the canonical log and feeds output bytes through the pinned semantic engine. It emits a new state only when terminal content changes. Video frame rate does not limit semantic state granularity.
 
-Executable resolution happens against the same effective working directory and inherited `PATH` used for the child. Reproducible policy streams complete-file hashes for the resolved executable and recorder binary. A direct script is included only for a recognized interpreter with an unambiguous first file argument; unresolved, unreadable, and unrequested identities remain distinct. Runtime UID/GID, privilege, umask, kernel, build, and semantic-engine facts explain the execution host without using a hostname as identity.
+Native capture launches the installed terminal application on a private display. Fitted recordings retain the measured viewport, grid, cell size, and effective configuration hash. Capture verifies geometry before playback instead of guessing font metrics.
 
-The pinned libghostty state machine runs live as the terminal host. Its write-PTY callback answers status, cursor, and mode queries; each exact query/response is logged before the response is delivered through a host input intent/result. This keeps detached TUIs functional without conflating generated responses with human or agent input.
+Derived manifests bind their source range, component versions, configuration, and member hashes. Completed derivations are cataloged separately; the closed execution log is never reopened.
 
-The event header pins the effective foreground, background, cursor color, and 256-color palette. Recording reads these from `ghostty +show-config` when available and records a configuration hash as provenance; pinned libghostty defaults are an explicit fallback. Replay never substitutes the current machine's theme.
+## Names and restarts
 
-Geometry can be explicit, inherited from the controlling terminal, or fitted to a target capture viewport. Fitting launches the real Ghostty application on Xvfb and uses XTWINOPS reports for grid size, cell pixels, and text-area pixels. The resulting geometry, viewport, source, and effective-config hash are immutable session provenance. Native capture first runs a parent-observed probe on its actual viewport and rejects grid/text mismatch before timed playback. The playback child also publishes a structured failure handshake. Native playback applies and verifies the initial grid before event time zero; it never guesses font metrics from point size.
+Friendly names live in an owner-only registry outside the recording. Each entry binds a canonical path and immutable session ID. Removing or retargeting a name cannot rewrite evidence.
 
-A recording may replace the normal Ghostty user config with `--ghostty-config` and then apply focused font, padding, foreground, and background overrides. Termtrace resolves recursive config files, applies those overrides last, validates the result through Ghostty, strips recursive file controls, and stores a canonical effective profile in the session. Geometry fitting, recorded terminal colors, and native capture all consume that same hashed profile. Referenced resources such as fonts and shaders remain external host dependencies.
-
-Every input, resize, and signal uses a unique intent/result pair. The intent is durably written before the syscall; the result records complete application or a stable failure code. An intent left without a result after interruption is reported as uncertain and is never retried automatically. Input results also carry the exact number of bytes written so partial writes cannot masquerade as successful delivery.
-
-tmux is supported as a target command but is not required. Asciicast is an interoperability export and is never the canonical recording.
-
-## Event and state granularity
-
-PTY reads are persisted without idle coalescing using monotonic high-resolution timestamps and ordered sequence numbers. Offline replay may feed bytes incrementally through `libghostty-vt` and emits a state only when terminal render state changes.
-
-Synchronized output mode is represented explicitly. Intermediate mutations inside a synchronized-output transaction may be retained for protocol diagnosis but are marked as not presented; the committed state is emitted when synchronization ends.
-
-Video sampling does not limit semantic capture. A state that exists between video frames remains inspectable and can be rendered as a derived screenshot.
+Restart creates a new session and records its predecessor identity. The old session remains closed and unchanged.
 
 ## Dependency boundary
 
-`libghostty-vt` is pinned behind a narrow internal adapter. Its unstable upstream API must not leak into Termtrace's public artifact or control schemas. Upgrades require replay fixtures and semantic-diff review.
+The semantic engine is pinned behind an internal adapter. Its unstable API does not appear in public artifact or control schemas. Upgrades require fixture replay and semantic comparison.
 
-The current pin is Ghostty `55a3e33ab26a23d75b274b23c7f76d837db00578`, built with Zig 0.15.2. Checked-in generated bindings remain private and are refreshed only during an intentional Ghostty upgrade; stable serializable Rust structures form the artifact boundary.
-
-The Linux Ghostty GUI currently has no stable headless framebuffer or screenshot API. Native pixels are therefore captured from a real Ghostty process on a virtual display rather than recreated by Termtrace.
+The current Linux native path uses a real GUI process because no stable headless framebuffer API is available. Semantic rendering remains available without native capture dependencies.
 
 ## Failure policy
 
-- Failure to generate a derived artifact never deletes or rewrites the raw recording.
-- Event-log write failures stop further state-changing input rather than creating an unauditable gap.
-- PTY writes are not retried automatically because duplicate input is unsafe.
-- Safe connection and process-readiness probes may use bounded retries.
-- Cleanup failures are reported alongside, but never replace, the primary failure.
-- Public failures carry stable diagnostic codes and structured context.
+- Derived-artifact failure never deletes or rewrites the recording.
+- Event-log failure stops further mutations.
+- Uncertain PTY writes are not retried automatically.
+- Existing evidence and artifact directories are not replaced.
+- Cleanup errors are reported without hiding the primary failure.
+- Public failures use stable diagnostic codes and structured context.

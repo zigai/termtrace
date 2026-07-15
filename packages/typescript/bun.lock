@@ -8,6 +8,10 @@
         "@types/bun": "^1.2.18",
         "typescript": "^5.8.3",
       },
+      "optionalDependencies": {
+        "@termtrace/cli-linux-arm64": "0.1.0",
+        "@termtrace/cli-linux-x64": "0.1.0",
+      },
     },
   },
   "packages": {

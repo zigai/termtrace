@@ -1,0 +1,4 @@
+interface:
+  display_name: "Termtrace"
+  short_description: "Operate terminals with canonical evidence"
+  default_prompt: "Use $termtrace to run and inspect this terminal workflow with retained evidence."

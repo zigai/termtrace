@@ -26,7 +26,7 @@ use crate::{
 const QUERY_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Geometry reported by a live terminal through XTWINOPS queries.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TerminalGeometryReport {
     /// Terminal columns.
     pub cols: u16,

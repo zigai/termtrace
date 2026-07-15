@@ -349,6 +349,10 @@
               "minimum": 0,
               "type": "integer"
             },
+            "semantic_state_zstd": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Zstandard-compressed canonical JSON for the complete semantic state."
+            },
             "state_hash": {
               "description": "BLAKE3 of canonical JSON for `state`.",
               "type": "string"
@@ -360,6 +364,7 @@
           },
           "required": [
             "kind",
+            "semantic_state_zstd",
             "viewport_text",
             "state_hash",
             "presented",
@@ -379,6 +384,10 @@
             "boundaries": {
               "$ref": "#/$defs/ActorBoundaries",
               "description": "Actor-consistent canonical source boundaries."
+            },
+            "child_completed": {
+              "description": "Whether immutable child completion made the final matching state stable.",
+              "type": "boolean"
             },
             "cols": {
               "description": "Terminal columns.",
@@ -439,7 +448,8 @@
             "boundaries",
             "cols",
             "rows",
-            "completion_quality"
+            "completion_quality",
+            "child_completed"
           ],
           "type": "object"
         },
@@ -586,6 +596,31 @@
         }
       ]
     },
+    "CursorStyle": {
+      "description": "Cursor visual style.",
+      "oneOf": [
+        {
+          "const": "bar",
+          "description": "Vertical bar.",
+          "type": "string"
+        },
+        {
+          "const": "block",
+          "description": "Filled block.",
+          "type": "string"
+        },
+        {
+          "const": "underline",
+          "description": "Underline.",
+          "type": "string"
+        },
+        {
+          "const": "hollow_block",
+          "description": "Hollow block.",
+          "type": "string"
+        }
+      ]
+    },
     "InputKind": {
       "description": "User-facing interpretation of an input byte sequence.",
       "oneOf": [
@@ -657,6 +692,111 @@
       ],
       "type": "object"
     },
+    "ScreenMode": {
+      "description": "Stable terminal-mode selectors available to screen predicates.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Any alternate-screen mode.",
+          "properties": {
+            "mode": {
+              "const": "alternate_screen",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "DEC bracketed-paste mode 2004.",
+          "properties": {
+            "mode": {
+              "const": "bracketed_paste",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "DEC auto-wrap mode 7.",
+          "properties": {
+            "mode": {
+              "const": "wraparound",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "DEC synchronized-output mode 2026.",
+          "properties": {
+            "mode": {
+              "const": "synchronized_output",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Numeric ANSI mode.",
+          "properties": {
+            "mode": {
+              "const": "ansi",
+              "type": "string"
+            },
+            "number": {
+              "description": "Mode number.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "number"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Numeric DEC-private mode.",
+          "properties": {
+            "mode": {
+              "const": "dec",
+              "type": "string"
+            },
+            "number": {
+              "description": "Mode number.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "number"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ScreenPredicate": {
       "description": "Exact predicate evaluated against the latest presented viewport.",
       "oneOf": [
@@ -697,6 +837,346 @@
             "text"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Viewport text matches a bounded linear-time regular expression.",
+          "properties": {
+            "pattern": {
+              "description": "Rust-regex pattern, limited by the control service.",
+              "type": "string"
+            },
+            "predicate": {
+              "const": "matches_regex",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "pattern"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Viewport text does not match a bounded linear-time regular expression.",
+          "properties": {
+            "pattern": {
+              "description": "Rust-regex pattern, limited by the control service.",
+              "type": "string"
+            },
+            "predicate": {
+              "const": "excludes_regex",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "pattern"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One zero-based row contains exact UTF-8 text.",
+          "properties": {
+            "predicate": {
+              "const": "row_contains",
+              "type": "string"
+            },
+            "row": {
+              "description": "Zero-based viewport row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "row",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One zero-based row excludes exact UTF-8 text.",
+          "properties": {
+            "predicate": {
+              "const": "row_absent",
+              "type": "string"
+            },
+            "row": {
+              "description": "Zero-based viewport row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "row",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A half-open cell region contains exact UTF-8 text.",
+          "properties": {
+            "predicate": {
+              "const": "region_contains",
+              "type": "string"
+            },
+            "region": {
+              "$ref": "#/$defs/ScreenRegion",
+              "description": "Region bounds in viewport cells."
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "region",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A half-open cell region excludes exact UTF-8 text.",
+          "properties": {
+            "predicate": {
+              "const": "region_absent",
+              "type": "string"
+            },
+            "region": {
+              "$ref": "#/$defs/ScreenRegion",
+              "description": "Region bounds in viewport cells."
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "region",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Cursor properties all equal the supplied values.",
+          "properties": {
+            "column": {
+              "description": "Optional zero-based viewport column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "predicate": {
+              "const": "cursor",
+              "type": "string"
+            },
+            "row": {
+              "description": "Optional zero-based viewport row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "shape": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CursorStyle"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional cursor shape requirement."
+            },
+            "visible": {
+              "description": "Optional cursor visibility requirement.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "predicate"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One stable terminal mode equals the requested value.",
+          "properties": {
+            "enabled": {
+              "description": "Required set/reset value.",
+              "type": "boolean"
+            },
+            "mode": {
+              "$ref": "#/$defs/ScreenMode",
+              "description": "Stable mode selector."
+            },
+            "predicate": {
+              "const": "mode",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "mode",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Presented state hash equals or differs from a supplied BLAKE3 hash.",
+          "properties": {
+            "comparison": {
+              "$ref": "#/$defs/StateHashComparison",
+              "description": "Equality relationship to require."
+            },
+            "hash": {
+              "description": "Lowercase BLAKE3 state hash.",
+              "type": "string"
+            },
+            "predicate": {
+              "const": "state_hash",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "hash",
+            "comparison"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Every nested predicate must match.",
+          "properties": {
+            "predicate": {
+              "const": "all",
+              "type": "string"
+            },
+            "predicates": {
+              "description": "Bounded non-empty predicate list.",
+              "items": {
+                "$ref": "#/$defs/ScreenPredicate"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "predicate",
+            "predicates"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "At least one nested predicate must match.",
+          "properties": {
+            "predicate": {
+              "const": "any",
+              "type": "string"
+            },
+            "predicates": {
+              "description": "Bounded non-empty predicate list.",
+              "items": {
+                "$ref": "#/$defs/ScreenPredicate"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "predicate",
+            "predicates"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ScreenRegion": {
+      "additionalProperties": false,
+      "description": "Half-open viewport region used by structural screen predicates.",
+      "properties": {
+        "bottom": {
+          "description": "Exclusive bottom row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "left": {
+          "description": "Inclusive zero-based left column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "right": {
+          "description": "Exclusive right column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "top": {
+          "description": "Inclusive zero-based top row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "left",
+        "top",
+        "right",
+        "bottom"
+      ],
+      "type": "object"
+    },
+    "StateHashComparison": {
+      "description": "Required relationship between the presented state and a supplied hash.",
+      "oneOf": [
+        {
+          "const": "unchanged",
+          "description": "Current state must equal the supplied hash.",
+          "type": "string"
+        },
+        {
+          "const": "changed",
+          "description": "Current state must differ from the supplied hash.",
+          "type": "string"
         }
       ]
     },

@@ -1,0 +1,173 @@
+{
+  "$defs": {
+    "ArtifactMember": {
+      "additionalProperties": false,
+      "description": "Whole-file integrity metadata embedded in a derived manifest.",
+      "properties": {
+        "blake3": {
+          "description": "BLAKE3 of the complete file.",
+          "type": "string"
+        },
+        "byte_length": {
+          "description": "Exact byte length.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "media_type": {
+          "description": "Stable media type.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Normalized relative path below the artifact directory.",
+          "type": "string"
+        },
+        "relationship": {
+          "description": "Relationship to the derivation.",
+          "type": "string"
+        },
+        "schema_type": {
+          "description": "Public schema identifier, when the file is structured data.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sensitivity": {
+          "$ref": "#/$defs/ArtifactSensitivity",
+          "description": "Sensitivity classification."
+        }
+      },
+      "required": [
+        "path",
+        "byte_length",
+        "blake3",
+        "media_type",
+        "sensitivity",
+        "relationship"
+      ],
+      "type": "object"
+    },
+    "ArtifactSensitivity": {
+      "description": "Sensitivity classification for one derived artifact member.",
+      "oneOf": [
+        {
+          "const": "sensitive_terminal_data",
+          "description": "Member contains or may reveal terminal content.",
+          "type": "string"
+        },
+        {
+          "const": "operational_metadata",
+          "description": "Member contains only non-content operational metadata.",
+          "type": "string"
+        }
+      ]
+    },
+    "PreviewOptions": {
+      "additionalProperties": false,
+      "description": "Bounded storyboard and low-resolution preview policy.",
+      "properties": {
+        "change_only": {
+          "description": "Select only frames carrying the configured change visualization.",
+          "type": "boolean"
+        },
+        "columns": {
+          "description": "Storyboard tile columns.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_frames": {
+          "description": "Maximum selected storyboard frames.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "preview_width": {
+          "description": "Low-resolution preview width.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tile_width": {
+          "description": "Width of each storyboard tile.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "columns",
+        "tile_width",
+        "max_frames",
+        "change_only",
+        "preview_width"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/presentation-preview-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Integrity and selection provenance for one preview artifact.",
+  "properties": {
+    "edit_plan_hash": {
+      "description": "Source edit identity.",
+      "type": "string"
+    },
+    "ffmpeg_version": {
+      "description": "First line of the exact FFmpeg build used.",
+      "type": "string"
+    },
+    "members": {
+      "description": "Whole-file integrity metadata for every non-manifest member.",
+      "items": {
+        "$ref": "#/$defs/ArtifactMember"
+      },
+      "type": "array"
+    },
+    "options": {
+      "$ref": "#/$defs/PreviewOptions",
+      "description": "Applied preview policy."
+    },
+    "selected_frames": {
+      "description": "Exact selected presentation frames.",
+      "items": {
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "source_video_hash": {
+      "description": "Immutable native source-video identity.",
+      "type": "string"
+    },
+    "truth_layer": {
+      "description": "Presentation product truth layer.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Preview format version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "edit_plan_hash",
+    "source_video_hash",
+    "truth_layer",
+    "options",
+    "selected_frames",
+    "ffmpeg_version",
+    "members"
+  ],
+  "title": "PresentationPreviewManifest",
+  "type": "object"
+}

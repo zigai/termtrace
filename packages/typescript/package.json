@@ -22,5 +22,9 @@
   "engines": {
     "node": ">=20"
   },
+  "optionalDependencies": {
+    "@termtrace/cli-linux-arm64": "0.1.0",
+    "@termtrace/cli-linux-x64": "0.1.0"
+  },
   "license": "MIT"
 }

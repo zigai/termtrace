@@ -17,6 +17,8 @@ target/debug/termtrace record --no-input --geometry fit --viewport 640x360 \
 rm -f "$profile"
 target/debug/termtrace index --session "$output"
 target/debug/termtrace capture --session "$output" --fps 24
+target/debug/termtrace screenshot "$output" --renderer native \
+  --at 12.2s --viewport 640x360 --strict --out "$output/native-single"
 
 readonly range_from=11000000000
 readonly range_to=12350000000
@@ -87,6 +89,18 @@ test -s "$output/ghostty-config.txt"
 test -s "$output/visual/session.mkv"
 test -s "$output/visual/final.png"
 test -s "$output/visual/video-map.jsonl"
+test -s "$output/native-single/final.png"
+test ! -e "$output/native-single/session.mkv"
+jq -e '
+  .capture_kind == "screenshot" and
+  .presentation_evidence == "post_endpoint_stable_capture" and
+  .guarantee_level == "native_capture_environment" and
+  .selected_state_hash != null and
+  .endpoint_event_seq != null and
+  (.frame_samples | length) >= 3 and
+  .frame_samples[-1].same_as_previous == true and
+  .video_probe == null
+' "$output/native-single/manifest.json" >/dev/null
 test -s "$range_visual/session.mkv"
 test -s "$range_visual/final.png"
 test -s "$range_visual/video-map.jsonl"

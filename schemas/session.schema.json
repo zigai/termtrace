@@ -367,6 +367,37 @@
       ],
       "type": "object"
     },
+    "ImportProvenance": {
+      "additionalProperties": false,
+      "description": "Chain-bound provenance for bytes imported from a noncanonical ANSI stream.",
+      "properties": {
+        "blake3": {
+          "description": "BLAKE3 of the exact imported bytes.",
+          "type": "string"
+        },
+        "byte_count": {
+          "description": "Exact imported byte count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Caller-facing path bytes or `-` for standard input."
+        },
+        "source_kind": {
+          "description": "Stable source class, currently `ansi_stream`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_kind",
+        "byte_count",
+        "blake3",
+        "source"
+      ],
+      "type": "object"
+    },
     "KernelProvenance": {
       "additionalProperties": false,
       "description": "Runtime kernel identity returned by the host.",
@@ -717,6 +748,18 @@
       ],
       "default": null,
       "description": "Canonical per-recording Ghostty profile, when explicitly resolved."
+    },
+    "import_provenance": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ImportProvenance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional provenance when this session canonically imports a byte stream."
     },
     "lineage": {
       "anyOf": [

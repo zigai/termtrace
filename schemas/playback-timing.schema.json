@@ -27,6 +27,28 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Clock handshake written before playback begins.",
   "properties": {
+    "endpoint_event_byte_offset": {
+      "description": "Inclusive byte offset applied within the endpoint output event.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "endpoint_event_seq": {
+      "description": "Exact endpoint event for single-state playback.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "instant": {
+      "description": "Whether source-time sleeps were disabled.",
+      "type": "boolean"
+    },
     "replay_origin_unix_ns": {
       "description": "Wall-clock time corresponding to source-range start (or event time zero).",
       "format": "uint128",
@@ -53,7 +75,8 @@
   },
   "required": [
     "replay_origin_unix_ns",
-    "speed"
+    "speed",
+    "instant"
   ],
   "title": "PlaybackTiming",
   "type": "object"

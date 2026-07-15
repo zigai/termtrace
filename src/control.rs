@@ -16,11 +16,11 @@ use crate::{
     Error, Result,
     event::{ByteString, InputKind},
     event_log::CanonicalBoundary,
-    ghostty_vt::{KeyModifiers, ModeState, MouseButton, NamedKey},
+    ghostty_vt::{CursorStyle, KeyModifiers, ModeState, MouseButton, NamedKey},
 };
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 10;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 11;
 /// Relative socket path inside a live session directory.
 pub const CONTROL_SOCKET_NAME: &str = "control.sock";
 /// Maximum encoded request or response size.
@@ -51,6 +51,24 @@ pub enum PointerOperation {
         /// Button to click.
         button: MouseButton,
     },
+    /// Repeat a complete press/release click a bounded number of times.
+    MultiClick {
+        /// Button to click.
+        button: MouseButton,
+        /// Number of complete clicks.
+        count: u8,
+    },
+    /// Press at the command cell, emit motion samples, and release at an end cell.
+    Drag {
+        /// Button held throughout the drag.
+        button: MouseButton,
+        /// Zero-based destination column.
+        to_column: u16,
+        /// Zero-based destination row.
+        to_row: u16,
+        /// Number of motion samples, including the destination.
+        steps: u8,
+    },
     /// Emit signed vertical wheel ticks at a cell.
     Scroll {
         /// Negative scrolls up and positive scrolls down; zero is invalid.
@@ -72,6 +90,127 @@ pub enum ScreenPredicate {
         /// Exact UTF-8 substring.
         text: String,
     },
+    /// Viewport text matches a bounded linear-time regular expression.
+    MatchesRegex {
+        /// Rust-regex pattern, limited by the control service.
+        pattern: String,
+    },
+    /// Viewport text does not match a bounded linear-time regular expression.
+    ExcludesRegex {
+        /// Rust-regex pattern, limited by the control service.
+        pattern: String,
+    },
+    /// One zero-based row contains exact UTF-8 text.
+    RowContains {
+        /// Zero-based viewport row.
+        row: u16,
+        /// Exact UTF-8 substring.
+        text: String,
+    },
+    /// One zero-based row excludes exact UTF-8 text.
+    RowAbsent {
+        /// Zero-based viewport row.
+        row: u16,
+        /// Exact UTF-8 substring.
+        text: String,
+    },
+    /// A half-open cell region contains exact UTF-8 text.
+    RegionContains {
+        /// Region bounds in viewport cells.
+        region: ScreenRegion,
+        /// Exact UTF-8 substring.
+        text: String,
+    },
+    /// A half-open cell region excludes exact UTF-8 text.
+    RegionAbsent {
+        /// Region bounds in viewport cells.
+        region: ScreenRegion,
+        /// Exact UTF-8 substring.
+        text: String,
+    },
+    /// Cursor properties all equal the supplied values.
+    Cursor {
+        /// Optional zero-based viewport column.
+        column: Option<u16>,
+        /// Optional zero-based viewport row.
+        row: Option<u16>,
+        /// Optional cursor visibility requirement.
+        visible: Option<bool>,
+        /// Optional cursor shape requirement.
+        shape: Option<CursorStyle>,
+    },
+    /// One stable terminal mode equals the requested value.
+    Mode {
+        /// Stable mode selector.
+        mode: ScreenMode,
+        /// Required set/reset value.
+        enabled: bool,
+    },
+    /// Presented state hash equals or differs from a supplied BLAKE3 hash.
+    StateHash {
+        /// Lowercase BLAKE3 state hash.
+        hash: String,
+        /// Equality relationship to require.
+        comparison: StateHashComparison,
+    },
+    /// Every nested predicate must match.
+    All {
+        /// Bounded non-empty predicate list.
+        predicates: Vec<ScreenPredicate>,
+    },
+    /// At least one nested predicate must match.
+    Any {
+        /// Bounded non-empty predicate list.
+        predicates: Vec<ScreenPredicate>,
+    },
+}
+
+/// Half-open viewport region used by structural screen predicates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenRegion {
+    /// Inclusive zero-based left column.
+    pub left: u16,
+    /// Inclusive zero-based top row.
+    pub top: u16,
+    /// Exclusive right column.
+    pub right: u16,
+    /// Exclusive bottom row.
+    pub bottom: u16,
+}
+
+/// Stable terminal-mode selectors available to screen predicates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ScreenMode {
+    /// Any alternate-screen mode.
+    AlternateScreen,
+    /// DEC bracketed-paste mode 2004.
+    BracketedPaste,
+    /// DEC auto-wrap mode 7.
+    Wraparound,
+    /// DEC synchronized-output mode 2026.
+    SynchronizedOutput,
+    /// Numeric ANSI mode.
+    Ansi {
+        /// Mode number.
+        number: u16,
+    },
+    /// Numeric DEC-private mode.
+    Dec {
+        /// Mode number.
+        number: u16,
+    },
+}
+
+/// Required relationship between the presented state and a supplied hash.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StateHashComparison {
+    /// Current state must equal the supplied hash.
+    Unchanged,
+    /// Current state must differ from the supplied hash.
+    Changed,
 }
 
 /// One command sent to the live session actor.
@@ -273,6 +412,8 @@ pub enum ControlData {
     },
     /// Observer-only latest presented terminal state.
     Snapshot {
+        /// Zstandard-compressed canonical JSON for the complete semantic state.
+        semantic_state_zstd: ByteString,
         /// Plain text of the presentation-eligible viewport.
         viewport_text: String,
         /// BLAKE3 of canonical JSON for `state`.
@@ -316,6 +457,8 @@ pub enum ControlData {
         rows: u16,
         /// `stable` or `matched_unsettled`.
         completion_quality: String,
+        /// Whether immutable child completion made the final matching state stable.
+        child_completed: bool,
     },
     /// Canonical position of an appended marker.
     Marked {

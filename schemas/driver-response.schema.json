@@ -19,10 +19,174 @@
       ],
       "type": "object"
     },
+    "ArtifactMember": {
+      "additionalProperties": false,
+      "description": "Whole-file integrity metadata embedded in a derived manifest.",
+      "properties": {
+        "blake3": {
+          "description": "BLAKE3 of the complete file.",
+          "type": "string"
+        },
+        "byte_length": {
+          "description": "Exact byte length.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "media_type": {
+          "description": "Stable media type.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Normalized relative path below the artifact directory.",
+          "type": "string"
+        },
+        "relationship": {
+          "description": "Relationship to the derivation.",
+          "type": "string"
+        },
+        "schema_type": {
+          "description": "Public schema identifier, when the file is structured data.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sensitivity": {
+          "$ref": "#/$defs/ArtifactSensitivity",
+          "description": "Sensitivity classification."
+        }
+      },
+      "required": [
+        "path",
+        "byte_length",
+        "blake3",
+        "media_type",
+        "sensitivity",
+        "relationship"
+      ],
+      "type": "object"
+    },
+    "ArtifactSensitivity": {
+      "description": "Sensitivity classification for one derived artifact member.",
+      "oneOf": [
+        {
+          "const": "sensitive_terminal_data",
+          "description": "Member contains or may reveal terminal content.",
+          "type": "string"
+        },
+        {
+          "const": "operational_metadata",
+          "description": "Member contains only non-content operational metadata.",
+          "type": "string"
+        }
+      ]
+    },
     "Base64Bytes": {
       "contentEncoding": "base64",
       "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
       "type": "string"
+    },
+    "BundleManifest": {
+      "additionalProperties": false,
+      "description": "Top-level whole-file bundle manifest.",
+      "properties": {
+        "canonical_session": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact source session path bytes."
+        },
+        "format": {
+          "description": "Stable manifest format.",
+          "type": "string"
+        },
+        "includes_canonical_evidence": {
+          "description": "Whether canonical raw evidence is included.",
+          "type": "boolean"
+        },
+        "members": {
+          "description": "Whole-file inventory; unmanifested payloads are invalid.",
+          "items": {
+            "$ref": "#/$defs/ArtifactMember"
+          },
+          "type": "array"
+        },
+        "profile": {
+          "$ref": "#/$defs/BundleProfile",
+          "description": "Selected policy."
+        },
+        "session_id": {
+          "description": "Immutable canonical session identity.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "source_final_event_hash": {
+          "description": "Final canonical event hash.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Manifest schema version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "version",
+        "profile",
+        "session_id",
+        "canonical_session",
+        "source_final_event_hash",
+        "includes_canonical_evidence",
+        "members"
+      ],
+      "type": "object"
+    },
+    "BundleProfile": {
+      "description": "Fixed bundle content policy.",
+      "oneOf": [
+        {
+          "const": "screen",
+          "description": "Latest screen observation without canonical raw events.",
+          "type": "string"
+        },
+        {
+          "const": "debug",
+          "description": "Screen plus metadata-only canonical event projections and verification.",
+          "type": "string"
+        },
+        {
+          "const": "forensic",
+          "description": "Complete top-level canonical session payload plus verification.",
+          "type": "string"
+        }
+      ]
+    },
+    "BytePayloadSummary": {
+      "additionalProperties": false,
+      "description": "Hash-and-length summary for one elided canonical byte field.",
+      "properties": {
+        "blake3": {
+          "description": "BLAKE3 of the exact bytes.",
+          "type": "string"
+        },
+        "byte_count": {
+          "description": "Exact byte count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "field": {
+          "description": "Event field name (`data`, `query`, or `response`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "byte_count",
+        "blake3"
+      ],
+      "type": "object"
     },
     "CanonicalBoundary": {
       "additionalProperties": false,
@@ -49,6 +213,284 @@
         "next_event_seq",
         "event_hash",
         "output_bytes"
+      ],
+      "type": "object"
+    },
+    "CaptureQuality": {
+      "description": "How settled the observed state is.",
+      "oneOf": [
+        {
+          "const": "live",
+          "description": "Immediate state from a responsive live actor.",
+          "type": "string"
+        },
+        {
+          "const": "stable",
+          "description": "Live state proven unchanged for a requested interval.",
+          "type": "string"
+        },
+        {
+          "const": "completed",
+          "description": "State from validated completed evidence.",
+          "type": "string"
+        },
+        {
+          "const": "incomplete",
+          "description": "Explicitly incomplete validated prefix.",
+          "type": "string"
+        }
+      ]
+    },
+    "CellChange": {
+      "additionalProperties": false,
+      "description": "One changed viewport cell.",
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CellState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Complete later cell, absent outside later geometry."
+        },
+        "before": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CellState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Complete earlier cell, absent outside earlier geometry."
+        },
+        "column": {
+          "description": "Zero-based column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "column"
+      ],
+      "type": "object"
+    },
+    "CellState": {
+      "description": "One visible cell in a semantic snapshot.",
+      "properties": {
+        "column": {
+          "description": "Zero-based column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "grapheme": {
+          "description": "Full UTF-8 grapheme cluster; empty for a blank cell.",
+          "type": "string"
+        },
+        "resolved_background": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rgb"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Resolved explicit background, before terminal-default fallback."
+        },
+        "resolved_foreground": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rgb"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Resolved explicit foreground, before terminal-default fallback."
+        },
+        "selected": {
+          "description": "Whether the cell is selected.",
+          "type": "boolean"
+        },
+        "style": {
+          "$ref": "#/$defs/CellStyle",
+          "description": "Visual style."
+        }
+      },
+      "required": [
+        "column",
+        "grapheme",
+        "style",
+        "selected"
+      ],
+      "type": "object"
+    },
+    "CellStyle": {
+      "description": "Complete style attached to one terminal cell.",
+      "properties": {
+        "background": {
+          "$ref": "#/$defs/ColorSpec",
+          "description": "Background color source."
+        },
+        "blink": {
+          "description": "Blink attribute.",
+          "type": "boolean"
+        },
+        "bold": {
+          "description": "Bold attribute.",
+          "type": "boolean"
+        },
+        "faint": {
+          "description": "Faint attribute.",
+          "type": "boolean"
+        },
+        "foreground": {
+          "$ref": "#/$defs/ColorSpec",
+          "description": "Foreground color source."
+        },
+        "inverse": {
+          "description": "Inverse-video attribute.",
+          "type": "boolean"
+        },
+        "invisible": {
+          "description": "Invisible attribute.",
+          "type": "boolean"
+        },
+        "italic": {
+          "description": "Italic attribute.",
+          "type": "boolean"
+        },
+        "overline": {
+          "description": "Overline attribute.",
+          "type": "boolean"
+        },
+        "strikethrough": {
+          "description": "Strikethrough attribute.",
+          "type": "boolean"
+        },
+        "underline": {
+          "description": "Upstream SGR underline value (`0` through `5`).",
+          "format": "int32",
+          "type": "integer"
+        },
+        "underline_color": {
+          "$ref": "#/$defs/ColorSpec",
+          "description": "Underline color source."
+        }
+      },
+      "required": [
+        "foreground",
+        "background",
+        "underline_color",
+        "bold",
+        "italic",
+        "faint",
+        "blink",
+        "inverse",
+        "invisible",
+        "strikethrough",
+        "overline",
+        "underline"
+      ],
+      "type": "object"
+    },
+    "ColorSpec": {
+      "description": "Cell color source before default-color fallback.",
+      "oneOf": [
+        {
+          "description": "No explicit color.",
+          "properties": {
+            "kind": {
+              "const": "none",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Index into the active 256-color palette.",
+          "properties": {
+            "kind": {
+              "const": "palette",
+              "type": "string"
+            },
+            "value": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Explicit true color.",
+          "properties": {
+            "kind": {
+              "const": "rgb",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Rgb"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ColorState": {
+      "description": "Active terminal colors.",
+      "properties": {
+        "background": {
+          "$ref": "#/$defs/Rgb",
+          "description": "Default/current background."
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rgb"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit cursor color."
+        },
+        "foreground": {
+          "$ref": "#/$defs/Rgb",
+          "description": "Default/current foreground."
+        },
+        "palette": {
+          "description": "Active 256-color palette.",
+          "items": {
+            "$ref": "#/$defs/Rgb"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "background",
+        "foreground",
+        "palette"
       ],
       "type": "object"
     },
@@ -349,6 +791,10 @@
               "minimum": 0,
               "type": "integer"
             },
+            "semantic_state_zstd": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Zstandard-compressed canonical JSON for the complete semantic state."
+            },
             "state_hash": {
               "description": "BLAKE3 of canonical JSON for `state`.",
               "type": "string"
@@ -360,6 +806,7 @@
           },
           "required": [
             "kind",
+            "semantic_state_zstd",
             "viewport_text",
             "state_hash",
             "presented",
@@ -379,6 +826,10 @@
             "boundaries": {
               "$ref": "#/$defs/ActorBoundaries",
               "description": "Actor-consistent canonical source boundaries."
+            },
+            "child_completed": {
+              "description": "Whether immutable child completion made the final matching state stable.",
+              "type": "boolean"
             },
             "cols": {
               "description": "Terminal columns.",
@@ -439,7 +890,8 @@
             "boundaries",
             "cols",
             "rows",
-            "completion_quality"
+            "completion_quality",
+            "child_completed"
           ],
           "type": "object"
         },
@@ -473,6 +925,324 @@
             "boundaries"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "CursorState": {
+      "description": "Cursor state at one semantic boundary.",
+      "properties": {
+        "blinking": {
+          "description": "Blink mode.",
+          "type": "boolean"
+        },
+        "column": {
+          "description": "Viewport column when available.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "in_viewport": {
+          "description": "Whether the cursor lies in the viewport.",
+          "type": "boolean"
+        },
+        "row": {
+          "description": "Viewport row when available.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "style": {
+          "$ref": "#/$defs/CursorStyle",
+          "description": "Visual shape."
+        },
+        "visible": {
+          "description": "Visibility mode.",
+          "type": "boolean"
+        },
+        "wide_tail": {
+          "description": "Whether the cursor is on a wide-character tail.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "visible",
+        "blinking",
+        "in_viewport",
+        "style"
+      ],
+      "type": "object"
+    },
+    "CursorStyle": {
+      "description": "Cursor visual style.",
+      "oneOf": [
+        {
+          "const": "bar",
+          "description": "Vertical bar.",
+          "type": "string"
+        },
+        {
+          "const": "block",
+          "description": "Filled block.",
+          "type": "string"
+        },
+        {
+          "const": "underline",
+          "description": "Underline.",
+          "type": "string"
+        },
+        {
+          "const": "hollow_block",
+          "description": "Hollow block.",
+          "type": "string"
+        }
+      ]
+    },
+    "DiagnoseReport": {
+      "additionalProperties": false,
+      "description": "Deterministic report from conservative session-wide detectors.",
+      "properties": {
+        "broad_change_fraction": {
+          "description": "Minimum changed-cell fraction used for broad redraw findings.",
+          "type": "string"
+        },
+        "checks": {
+          "description": "Ordered detector selection.",
+          "items": {
+            "$ref": "#/$defs/DiagnosticCheck"
+          },
+          "type": "array"
+        },
+        "findings": {
+          "description": "Deterministic findings.",
+          "items": {
+            "$ref": "#/$defs/DiagnosticFinding"
+          },
+          "type": "array"
+        },
+        "format": {
+          "description": "Stable report format.",
+          "type": "string"
+        },
+        "session_id": {
+          "description": "Canonical session identity.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "source_event_count": {
+          "description": "Canonical event count anchoring the report.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_final_event_hash": {
+          "description": "Final canonical event hash anchoring the report.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Report schema version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "version",
+        "session_id",
+        "source_final_event_hash",
+        "source_event_count",
+        "checks",
+        "broad_change_fraction",
+        "findings"
+      ],
+      "type": "object"
+    },
+    "DiagnosticCheck": {
+      "description": "Stable detector selectable by `diagnose --check`.",
+      "oneOf": [
+        {
+          "const": "full_redraw",
+          "description": "Full-viewport semantic clear controls.",
+          "type": "string"
+        },
+        {
+          "const": "transient",
+          "description": "Ordered presented or hidden transient states.",
+          "type": "string"
+        },
+        {
+          "const": "dirty",
+          "description": "Semantic changes inconsistent with Ghostty dirty evidence.",
+          "type": "string"
+        },
+        {
+          "const": "cursor",
+          "description": "Large cursor movement between semantic boundaries.",
+          "type": "string"
+        },
+        {
+          "const": "modes",
+          "description": "Repeated terminal-mode mutations.",
+          "type": "string"
+        },
+        {
+          "const": "palette",
+          "description": "Repeated palette/default-color mutations.",
+          "type": "string"
+        },
+        {
+          "const": "query_loop",
+          "description": "Repeated equal query/response exchanges.",
+          "type": "string"
+        }
+      ]
+    },
+    "DiagnosticFinding": {
+      "additionalProperties": false,
+      "description": "One conservative session-wide diagnostic finding.",
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable finding code.",
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "#/$defs/FindingConfidence",
+          "description": "Conservative confidence label."
+        },
+        "facts": {
+          "description": "Exact neutral facts and limitations.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "native_correlations": {
+          "description": "Native relationships, if independently available.",
+          "items": {
+            "$ref": "#/$defs/NativeCorrelation"
+          },
+          "type": "array"
+        },
+        "state_ids": {
+          "description": "Supporting semantic state IDs.",
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "token_ids": {
+          "description": "Supporting VT token IDs.",
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "confidence",
+        "state_ids",
+        "token_ids",
+        "facts",
+        "native_correlations"
+      ],
+      "type": "object"
+    },
+    "DiffEndpoint": {
+      "additionalProperties": false,
+      "description": "Stable identity for one semantic diff endpoint.",
+      "properties": {
+        "event_seq": {
+          "description": "Responsible event sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ghostty_dirty": {
+          "$ref": "#/$defs/DirtyState",
+          "description": "Ghostty dirty classification at this endpoint."
+        },
+        "ghostty_dirty_rows": {
+          "description": "Rows Ghostty marked dirty at this endpoint.",
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "monotonic_ns": {
+          "description": "Session-monotonic timestamp.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "point": {
+          "$ref": "#/$defs/StatePoint",
+          "description": "Requested endpoint selector."
+        },
+        "presented": {
+          "description": "Whether the state was presentation eligible.",
+          "type": "boolean"
+        },
+        "state_hash": {
+          "description": "Complete semantic state hash.",
+          "type": "string"
+        },
+        "state_id": {
+          "description": "Dense semantic state identifier.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "point",
+        "state_id",
+        "state_hash",
+        "monotonic_ns",
+        "presented",
+        "ghostty_dirty",
+        "ghostty_dirty_rows"
+      ],
+      "type": "object"
+    },
+    "DirtyState": {
+      "description": "Global render dirtiness reported by Ghostty.",
+      "oneOf": [
+        {
+          "const": "clean",
+          "description": "No visual change.",
+          "type": "string"
+        },
+        {
+          "const": "partial",
+          "description": "One or more rows changed.",
+          "type": "string"
+        },
+        {
+          "const": "full",
+          "description": "Full redraw required.",
+          "type": "string"
         }
       ]
     },
@@ -631,6 +1401,196 @@
         },
         {
           "additionalProperties": false,
+          "description": "Truth-labeled semantic observation.",
+          "properties": {
+            "kind": {
+              "const": "observation",
+              "type": "string"
+            },
+            "observation": {
+              "$ref": "#/$defs/Observation",
+              "description": "Shared observation envelope."
+            }
+          },
+          "required": [
+            "kind",
+            "observation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Ordered timeline projection.",
+          "properties": {
+            "entries": {
+              "description": "Complete requested entries.",
+              "items": {
+                "$ref": "#/$defs/TimelineEntry"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "timeline",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "entries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Complete semantic endpoint diff.",
+          "properties": {
+            "difference": {
+              "$ref": "#/$defs/SemanticDiff",
+              "description": "Source-bound semantic difference."
+            },
+            "kind": {
+              "const": "diff",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "difference"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Conservative diagnostic report.",
+          "properties": {
+            "kind": {
+              "const": "diagnose",
+              "type": "string"
+            },
+            "report": {
+              "$ref": "#/$defs/DiagnoseReport",
+              "description": "Source-bound findings."
+            }
+          },
+          "required": [
+            "kind",
+            "report"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Bounded canonical event projection page.",
+          "properties": {
+            "events": {
+              "description": "Ordered event projections.",
+              "items": {
+                "$ref": "#/$defs/EventProjection"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "events",
+              "type": "string"
+            },
+            "next_event_seq": {
+              "description": "Next event sequence when more source may exist.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "events",
+            "next_event_seq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Published screenshot artifact handle.",
+          "properties": {
+            "artifact_type": {
+              "description": "`semantic_screenshot` or `native_screenshot`.",
+              "type": "string"
+            },
+            "directory": {
+              "description": "Atomically committed artifact directory.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "artifact",
+              "type": "string"
+            },
+            "manifest": {
+              "description": "Manifest path.",
+              "type": "string"
+            },
+            "primary": {
+              "description": "Primary PNG member.",
+              "type": "string"
+            },
+            "truth_layer": {
+              "description": "Exact truth-layer label.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "artifact_type",
+            "directory",
+            "primary",
+            "manifest",
+            "truth_layer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Offline canonical verification report.",
+          "properties": {
+            "kind": {
+              "const": "verification",
+              "type": "string"
+            },
+            "report": {
+              "$ref": "#/$defs/VerificationReport",
+              "description": "Stable complete report, including invalid findings."
+            }
+          },
+          "required": [
+            "kind",
+            "report"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Published sensitivity-profiled bundle.",
+          "properties": {
+            "directory": {
+              "description": "Atomically committed directory.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "bundle",
+              "type": "string"
+            },
+            "manifest": {
+              "$ref": "#/$defs/BundleManifest",
+              "description": "Complete bundle manifest."
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "manifest"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Process-local handle release acknowledgement.",
           "properties": {
             "kind": {
@@ -640,6 +1600,25 @@
           },
           "required": [
             "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Explicit completed-evidence deletion acknowledgement.",
+          "properties": {
+            "evidence_removed": {
+              "description": "Confirms that the canonical directory was removed.",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "discarded",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "evidence_removed"
           ],
           "type": "object"
         }
@@ -802,6 +1781,816 @@
       ],
       "type": "object"
     },
+    "Event": {
+      "description": "One ordered session event.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Bytes read from the child PTY.",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Exact bytes, including control sequences and invalid UTF-8."
+            },
+            "type": {
+              "const": "output",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Durable intent to send bytes to the child PTY.",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Exact emitted bytes."
+            },
+            "descriptor": {
+              "$ref": "#/$defs/InputDescriptor",
+              "description": "Structured semantic source of the exact emitted bytes."
+            },
+            "input_kind": {
+              "$ref": "#/$defs/InputKind",
+              "description": "High-level input category."
+            },
+            "intent": {
+              "description": "Optional symbolic intent such as `ctrl-c` or `paste`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Identifier paired with the corresponding result.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/InputSource",
+              "description": "Input origin."
+            },
+            "type": {
+              "const": "input_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "source",
+            "input_kind",
+            "descriptor",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Result of one input intent.",
+          "properties": {
+            "bytes_written": {
+              "description": "Bytes written before success or failure.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "error_code": {
+              "description": "Stable diagnostic code on failure.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Identifier from the corresponding intent.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/OperationStatus",
+              "description": "Whether the entire byte sequence was applied."
+            },
+            "type": {
+              "const": "input_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "status",
+            "bytes_written"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Durable intent to change terminal geometry.",
+          "properties": {
+            "cols": {
+              "description": "Columns after the resize.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "operation_id": {
+              "description": "Identifier paired with the corresponding result.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "pixel_height": {
+              "description": "Total pixel height reported to the child.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pixel_width": {
+              "description": "Total pixel width reported to the child.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "description": "Rows after the resize.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "resize_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "cols",
+            "rows",
+            "pixel_width",
+            "pixel_height"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Result of one resize intent.",
+          "properties": {
+            "error_code": {
+              "description": "Stable diagnostic code on failure.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Identifier from the corresponding intent.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/OperationStatus",
+              "description": "Whether the new geometry was applied."
+            },
+            "type": {
+              "const": "resize_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Durable intent to signal the child process group.",
+          "properties": {
+            "name": {
+              "description": "Stable display name such as `SIGINT`.",
+              "type": "string"
+            },
+            "number": {
+              "description": "Platform signal number.",
+              "format": "int32",
+              "type": "integer"
+            },
+            "operation_id": {
+              "description": "Identifier paired with the corresponding result.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": {
+              "const": "signal_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "number",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Result of one signal intent.",
+          "properties": {
+            "error_code": {
+              "description": "Stable diagnostic code on failure.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Identifier from the corresponding intent.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/OperationStatus",
+              "description": "Whether the signal syscall succeeded."
+            },
+            "type": {
+              "const": "signal_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A named point in the session timeline.",
+          "properties": {
+            "label": {
+              "description": "User-provided marker label.",
+              "type": "string"
+            },
+            "operation_id": {
+              "description": "Caller-owned operation identifier used for durable deduplication.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": {
+              "const": "marker",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "label"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A terminal capability query and corresponding response.",
+          "properties": {
+            "query": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Query bytes emitted by the child."
+            },
+            "responder": {
+              "description": "Component that generated the response.",
+              "type": "string"
+            },
+            "response": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Response bytes sent back to the child."
+            },
+            "type": {
+              "const": "query_response",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "query",
+            "response",
+            "responder"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A process or host lifecycle transition.",
+          "properties": {
+            "lifecycle_kind": {
+              "$ref": "#/$defs/LifecycleKind",
+              "description": "Transition kind."
+            },
+            "pid": {
+              "description": "Child process ID when available.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "lifecycle",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "lifecycle_kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Child process termination.",
+          "properties": {
+            "code": {
+              "description": "Exit status when the process exited normally.",
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "signal": {
+              "description": "Signal number when signal termination occurred.",
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "signal_name": {
+              "description": "Platform signal description when available.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "exit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A host failure retained in the canonical timeline.",
+          "properties": {
+            "code": {
+              "description": "Stable diagnostic code.",
+              "type": "string"
+            },
+            "message": {
+              "description": "Redacted human-readable message.",
+              "type": "string"
+            },
+            "type": {
+              "const": "host_error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "code",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EventProjection": {
+      "additionalProperties": false,
+      "description": "Stable JSONL projection of one canonical event record.",
+      "properties": {
+        "byte_payloads": {
+          "description": "Hash-and-length summaries when byte fields were elided.",
+          "items": {
+            "$ref": "#/$defs/BytePayloadSummary"
+          },
+          "type": "array"
+        },
+        "event": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Event"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact typed event when byte payloads were retained."
+        },
+        "event_type": {
+          "description": "Stable event variant name.",
+          "type": "string"
+        },
+        "hash": {
+          "description": "Canonical event hash.",
+          "type": "string"
+        },
+        "metadata": {
+          "description": "Non-byte event fields when exact payloads were elided."
+        },
+        "metadata_only": {
+          "description": "Whether exact byte fields were elided.",
+          "type": "boolean"
+        },
+        "monotonic_ns": {
+          "description": "Session-monotonic event timestamp.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "seq": {
+          "description": "Canonical event sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seq",
+        "monotonic_ns",
+        "hash",
+        "event_type",
+        "metadata_only",
+        "byte_payloads"
+      ],
+      "type": "object"
+    },
+    "FindingConfidence": {
+      "description": "Conservative confidence label for a derived finding.",
+      "oneOf": [
+        {
+          "const": "high",
+          "description": "Directly encoded control and semantic outcome agree.",
+          "type": "string"
+        },
+        {
+          "const": "medium",
+          "description": "Ordered facts support a candidate but do not prove user perception.",
+          "type": "string"
+        }
+      ]
+    },
+    "InputDescriptor": {
+      "description": "Structured semantic provenance for exact input bytes.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Uninterpreted caller or host bytes.",
+          "properties": {
+            "kind": {
+              "const": "raw",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "UTF-8 text intentionally entered as textual content.",
+          "properties": {
+            "kind": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One semantic key encoded against a live terminal-mode snapshot.",
+          "properties": {
+            "alt": {
+              "description": "Alt modifier.",
+              "type": "boolean"
+            },
+            "control": {
+              "description": "Control modifier.",
+              "type": "boolean"
+            },
+            "encoder": {
+              "description": "Pinned encoder identity.",
+              "type": "string"
+            },
+            "key": {
+              "description": "Stable symbolic key spelling.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "key",
+              "type": "string"
+            },
+            "shift": {
+              "description": "Shift modifier.",
+              "type": "boolean"
+            },
+            "super_key": {
+              "description": "Super modifier.",
+              "type": "boolean"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "key",
+            "shift",
+            "control",
+            "alt",
+            "super_key",
+            "encoder",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Paste content encoded against live bracketed-paste mode.",
+          "properties": {
+            "bracketed": {
+              "description": "Whether the actor applied bracketed-paste wrappers.",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "paste",
+              "type": "string"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "bracketed",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Focus transition encoded while DEC focus reporting was enabled.",
+          "properties": {
+            "encoder": {
+              "description": "Pinned encoder identity.",
+              "type": "string"
+            },
+            "focused": {
+              "description": "Whether the terminal gained (`true`) or lost (`false`) focus.",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "focus",
+              "type": "string"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "focused",
+            "encoder",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Pointer operation encoded against live mouse modes and geometry.",
+          "properties": {
+            "button": {
+              "description": "Button name for clicks, otherwise wheel direction.",
+              "type": "string"
+            },
+            "click_count": {
+              "description": "Complete click count, or zero for non-click operations.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cols": {
+              "description": "Terminal columns at encoding time.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "column": {
+              "description": "Zero-based viewport column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "encoder": {
+              "description": "Pinned encoder identity.",
+              "type": "string"
+            },
+            "end_column": {
+              "description": "Optional zero-based destination column for a drag.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "end_row": {
+              "description": "Optional zero-based destination row for a drag.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "pointer",
+              "type": "string"
+            },
+            "lines": {
+              "description": "Signed requested wheel lines, or zero for clicks.",
+              "format": "int16",
+              "maximum": 32767,
+              "minimum": -32768,
+              "type": "integer"
+            },
+            "operation": {
+              "description": "`click`, `multi_click`, `drag`, or `scroll`.",
+              "type": "string"
+            },
+            "pixel_height": {
+              "description": "Total terminal surface height in pixels.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pixel_width": {
+              "description": "Total terminal surface width in pixels.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "row": {
+              "description": "Zero-based viewport row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "description": "Terminal rows at encoding time.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "operation",
+            "button",
+            "lines",
+            "column",
+            "row",
+            "click_count",
+            "cols",
+            "rows",
+            "pixel_width",
+            "pixel_height",
+            "encoder",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Semantic visible-text resolution followed by a mode-aware click.",
+          "properties": {
+            "cols": {
+              "description": "Current grid columns.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "encoder": {
+              "description": "Pinned encoder identity.",
+              "type": "string"
+            },
+            "end_column": {
+              "description": "Zero-based exclusive matched column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "activate",
+              "type": "string"
+            },
+            "presented_state_hash": {
+              "description": "Presented-state hash used for resolution and encoding.",
+              "type": "string"
+            },
+            "row": {
+              "description": "Zero-based matched row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "description": "Current grid rows.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "start_column": {
+              "description": "Zero-based first matched column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "target_column": {
+              "description": "Cell chosen for the click.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            },
+            "text": {
+              "description": "Exact matched text.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text",
+            "start_column",
+            "end_column",
+            "row",
+            "target_column",
+            "presented_state_hash",
+            "cols",
+            "rows",
+            "encoder",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "InputKind": {
       "description": "User-facing interpretation of an input byte sequence.",
       "oneOf": [
@@ -833,6 +2622,46 @@
         {
           "const": "pointer",
           "description": "Cell-addressed mouse or wheel operation.",
+          "type": "string"
+        }
+      ]
+    },
+    "InputSource": {
+      "description": "Origin of bytes sent to the child process.",
+      "oneOf": [
+        {
+          "const": "human",
+          "description": "Input received from the attached native terminal.",
+          "type": "string"
+        },
+        {
+          "const": "agent",
+          "description": "Input requested through the agent control protocol.",
+          "type": "string"
+        },
+        {
+          "const": "host",
+          "description": "Automatic terminal-host response or internal control input.",
+          "type": "string"
+        }
+      ]
+    },
+    "LifecycleKind": {
+      "description": "Why a process lifecycle transition occurred.",
+      "oneOf": [
+        {
+          "const": "spawned",
+          "description": "The PTY and child process were created.",
+          "type": "string"
+        },
+        {
+          "const": "output_closed",
+          "description": "The child output stream reached end-of-file.",
+          "type": "string"
+        },
+        {
+          "const": "stopping",
+          "description": "The session host began orderly shutdown.",
           "type": "string"
         }
       ]
@@ -872,6 +2701,518 @@
         "values"
       ],
       "type": "object"
+    },
+    "MutationJournalStatus": {
+      "description": "Offline status of the disposable mutation request journal.",
+      "oneOf": [
+        {
+          "const": "missing",
+          "description": "The acceleration journal is absent; canonical evidence remains valid.",
+          "type": "string"
+        },
+        {
+          "const": "verified",
+          "description": "Every journal record agrees with canonical event evidence.",
+          "type": "string"
+        },
+        {
+          "const": "invalid",
+          "description": "Journal acceleration is corrupt or stale and must not be reused.",
+          "type": "string"
+        }
+      ]
+    },
+    "NativeCorrelation": {
+      "additionalProperties": false,
+      "description": "One source-bound relationship to a native artifact.",
+      "properties": {
+        "frame": {
+          "description": "Nominal encoded frame when clock mapping supplied one.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "level": {
+          "$ref": "#/$defs/NativeEvidenceLevel",
+          "description": "Honest evidence level."
+        },
+        "limitation": {
+          "description": "Exact limitation on the relationship.",
+          "type": "string"
+        },
+        "manifest": {
+          "description": "Relative native manifest path.",
+          "type": "string"
+        },
+        "state_id": {
+          "description": "Related semantic state.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "level",
+        "manifest",
+        "state_id",
+        "limitation"
+      ],
+      "type": "object"
+    },
+    "NativeEvidenceLevel": {
+      "description": "Strength of evidence relating a semantic finding to native presentation.",
+      "oneOf": [
+        {
+          "const": "presentation_eligible",
+          "description": "The semantic state was eligible for terminal presentation.",
+          "type": "string"
+        },
+        {
+          "const": "scheduled_for_frame",
+          "description": "Clock-map arithmetic assigned the state a nominal video frame.",
+          "type": "string"
+        },
+        {
+          "const": "post_endpoint_stable_capture",
+          "description": "A stable native frame was captured after replay reached this endpoint.",
+          "type": "string"
+        },
+        {
+          "const": "frame_observed",
+          "description": "A causal presentation mechanism verified actual captured output.",
+          "type": "string"
+        }
+      ]
+    },
+    "Observation": {
+      "additionalProperties": false,
+      "description": "Truth-labeled observation of one terminal state.",
+      "properties": {
+        "boundary": {
+          "$ref": "#/$defs/CanonicalBoundary",
+          "description": "Source boundary observed or validated."
+        },
+        "canonical_session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Base64Bytes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact canonical session path bytes when evidence exists."
+        },
+        "capture_quality": {
+          "$ref": "#/$defs/CaptureQuality",
+          "description": "Settlement quality."
+        },
+        "event_seq": {
+          "description": "Responsible canonical event sequence when known.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "frame": {
+          "$ref": "#/$defs/ObservationFrame",
+          "description": "Compact stable frame."
+        },
+        "integrity": {
+          "$ref": "#/$defs/ObservationIntegrity",
+          "description": "Integrity relationship to canonical execution evidence."
+        },
+        "monotonic_ns": {
+          "description": "Session-monotonic timestamp when known.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "payload_hash": {
+          "description": "BLAKE3 of canonical JSON for `frame`.",
+          "type": "string"
+        },
+        "presented": {
+          "description": "Whether this state was presentation eligible.",
+          "type": "boolean"
+        },
+        "resolution": {
+          "$ref": "#/$defs/ObservationResolution",
+          "description": "Service path used to resolve this state."
+        },
+        "session_id": {
+          "description": "Canonical session ID when evidence exists.",
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_completed": {
+          "description": "Whether canonical execution evidence was durably completed.",
+          "type": "boolean"
+        },
+        "source_kind": {
+          "$ref": "#/$defs/ObservationSourceKind",
+          "description": "Source category."
+        },
+        "state_hash": {
+          "description": "BLAKE3 of the complete semantic state.",
+          "type": "string"
+        },
+        "state_id": {
+          "description": "Semantic state ID when replay assigned one.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state_point": {
+          "$ref": "#/$defs/StatePoint",
+          "description": "Requested state point."
+        },
+        "truth_layer": {
+          "$ref": "#/$defs/TruthLayer",
+          "description": "Rendering truth layer."
+        }
+      },
+      "required": [
+        "source_kind",
+        "source_completed",
+        "state_point",
+        "state_hash",
+        "presented",
+        "boundary",
+        "capture_quality",
+        "truth_layer",
+        "integrity",
+        "resolution",
+        "frame",
+        "payload_hash"
+      ],
+      "type": "object"
+    },
+    "ObservationFrame": {
+      "additionalProperties": false,
+      "description": "Compact stable frame shared by CLI and clients.",
+      "properties": {
+        "cols": {
+          "description": "Terminal columns.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cursor_column": {
+          "description": "Cursor column when it lies in the viewport.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cursor_row": {
+          "description": "Cursor row when it lies in the viewport.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cursor_visible": {
+          "description": "Whether the cursor is visible.",
+          "type": "boolean"
+        },
+        "modes": {
+          "$ref": "#/$defs/ModeState",
+          "description": "Stable terminal-mode facts."
+        },
+        "rows": {
+          "description": "Terminal rows.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "viewport_text": {
+          "description": "Plain text for the complete viewport.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "viewport_text",
+        "cols",
+        "rows",
+        "cursor_visible",
+        "modes"
+      ],
+      "type": "object"
+    },
+    "ObservationIntegrity": {
+      "description": "Integrity relationship between an observation and canonical evidence.",
+      "oneOf": [
+        {
+          "const": "canonical_chained",
+          "description": "State derives from a validated canonical hash chain or live actor boundary.",
+          "type": "string"
+        },
+        {
+          "const": "unchained",
+          "description": "State derives from an unchained byte stream.",
+          "type": "string"
+        }
+      ]
+    },
+    "ObservationResolution": {
+      "description": "Service path used to resolve an observation without changing its meaning.",
+      "oneOf": [
+        {
+          "const": "actor_snapshot",
+          "description": "Actor-consistent live snapshot fast path.",
+          "type": "string"
+        },
+        {
+          "const": "canonical_replay",
+          "description": "Independently validated canonical event replay.",
+          "type": "string"
+        },
+        {
+          "const": "validated_checkpoint",
+          "description": "Content-addressed full-state checkpoint validated against exact source bytes.",
+          "type": "string"
+        },
+        {
+          "const": "ansi_interpretation",
+          "description": "Pinned semantic interpretation of an unchained ANSI stream.",
+          "type": "string"
+        }
+      ]
+    },
+    "ObservationSourceKind": {
+      "description": "Source category for one observation.",
+      "oneOf": [
+        {
+          "const": "live_session",
+          "description": "Responsive canonical recording actor.",
+          "type": "string"
+        },
+        {
+          "const": "completed_session",
+          "description": "Validated completed canonical recording.",
+          "type": "string"
+        },
+        {
+          "const": "interrupted_session",
+          "description": "Explicitly validated but incomplete canonical event prefix.",
+          "type": "string"
+        },
+        {
+          "const": "ansi_stream",
+          "description": "Unchained ANSI/VT byte stream.",
+          "type": "string"
+        },
+        {
+          "const": "imported_ansi",
+          "description": "Completed canonical evidence imported from an ANSI/VT byte stream.",
+          "type": "string"
+        },
+        {
+          "const": "one_off_command",
+          "description": "Canonical recording allocated for a one-off command.",
+          "type": "string"
+        }
+      ]
+    },
+    "OperationStatus": {
+      "description": "Result of a state-changing operation.",
+      "oneOf": [
+        {
+          "const": "applied",
+          "description": "The complete operation was applied once.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "The operation failed without a complete application.",
+          "type": "string"
+        }
+      ]
+    },
+    "Rgb": {
+      "description": "RGB color independent of libghostty's unstable ABI.",
+      "properties": {
+        "b": {
+          "description": "Blue channel.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "g": {
+          "description": "Green channel.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "r": {
+          "description": "Red channel.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "r",
+        "g",
+        "b"
+      ],
+      "type": "object"
+    },
+    "RowChange": {
+      "additionalProperties": false,
+      "description": "Changed cells for one viewport row.",
+      "properties": {
+        "cells": {
+          "description": "Complete semantic cell changes.",
+          "items": {
+            "$ref": "#/$defs/CellChange"
+          },
+          "type": "array"
+        },
+        "row": {
+          "description": "Zero-based row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "row",
+        "cells"
+      ],
+      "type": "object"
+    },
+    "ScreenMode": {
+      "description": "Stable terminal-mode selectors available to screen predicates.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Any alternate-screen mode.",
+          "properties": {
+            "mode": {
+              "const": "alternate_screen",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "DEC bracketed-paste mode 2004.",
+          "properties": {
+            "mode": {
+              "const": "bracketed_paste",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "DEC auto-wrap mode 7.",
+          "properties": {
+            "mode": {
+              "const": "wraparound",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "DEC synchronized-output mode 2026.",
+          "properties": {
+            "mode": {
+              "const": "synchronized_output",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Numeric ANSI mode.",
+          "properties": {
+            "mode": {
+              "const": "ansi",
+              "type": "string"
+            },
+            "number": {
+              "description": "Mode number.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "number"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Numeric DEC-private mode.",
+          "properties": {
+            "mode": {
+              "const": "dec",
+              "type": "string"
+            },
+            "number": {
+              "description": "Mode number.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "number"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "ScreenPredicate": {
       "description": "Exact predicate evaluated against the latest presented viewport.",
@@ -913,8 +3254,442 @@
             "text"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Viewport text matches a bounded linear-time regular expression.",
+          "properties": {
+            "pattern": {
+              "description": "Rust-regex pattern, limited by the control service.",
+              "type": "string"
+            },
+            "predicate": {
+              "const": "matches_regex",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "pattern"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Viewport text does not match a bounded linear-time regular expression.",
+          "properties": {
+            "pattern": {
+              "description": "Rust-regex pattern, limited by the control service.",
+              "type": "string"
+            },
+            "predicate": {
+              "const": "excludes_regex",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "pattern"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One zero-based row contains exact UTF-8 text.",
+          "properties": {
+            "predicate": {
+              "const": "row_contains",
+              "type": "string"
+            },
+            "row": {
+              "description": "Zero-based viewport row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "row",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One zero-based row excludes exact UTF-8 text.",
+          "properties": {
+            "predicate": {
+              "const": "row_absent",
+              "type": "string"
+            },
+            "row": {
+              "description": "Zero-based viewport row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "row",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A half-open cell region contains exact UTF-8 text.",
+          "properties": {
+            "predicate": {
+              "const": "region_contains",
+              "type": "string"
+            },
+            "region": {
+              "$ref": "#/$defs/ScreenRegion",
+              "description": "Region bounds in viewport cells."
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "region",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A half-open cell region excludes exact UTF-8 text.",
+          "properties": {
+            "predicate": {
+              "const": "region_absent",
+              "type": "string"
+            },
+            "region": {
+              "$ref": "#/$defs/ScreenRegion",
+              "description": "Region bounds in viewport cells."
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "region",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Cursor properties all equal the supplied values.",
+          "properties": {
+            "column": {
+              "description": "Optional zero-based viewport column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "predicate": {
+              "const": "cursor",
+              "type": "string"
+            },
+            "row": {
+              "description": "Optional zero-based viewport row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "shape": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CursorStyle"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional cursor shape requirement."
+            },
+            "visible": {
+              "description": "Optional cursor visibility requirement.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "predicate"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One stable terminal mode equals the requested value.",
+          "properties": {
+            "enabled": {
+              "description": "Required set/reset value.",
+              "type": "boolean"
+            },
+            "mode": {
+              "$ref": "#/$defs/ScreenMode",
+              "description": "Stable mode selector."
+            },
+            "predicate": {
+              "const": "mode",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "mode",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Presented state hash equals or differs from a supplied BLAKE3 hash.",
+          "properties": {
+            "comparison": {
+              "$ref": "#/$defs/StateHashComparison",
+              "description": "Equality relationship to require."
+            },
+            "hash": {
+              "description": "Lowercase BLAKE3 state hash.",
+              "type": "string"
+            },
+            "predicate": {
+              "const": "state_hash",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "hash",
+            "comparison"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Every nested predicate must match.",
+          "properties": {
+            "predicate": {
+              "const": "all",
+              "type": "string"
+            },
+            "predicates": {
+              "description": "Bounded non-empty predicate list.",
+              "items": {
+                "$ref": "#/$defs/ScreenPredicate"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "predicate",
+            "predicates"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "At least one nested predicate must match.",
+          "properties": {
+            "predicate": {
+              "const": "any",
+              "type": "string"
+            },
+            "predicates": {
+              "description": "Bounded non-empty predicate list.",
+              "items": {
+                "$ref": "#/$defs/ScreenPredicate"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "predicate",
+            "predicates"
+          ],
+          "type": "object"
         }
       ]
+    },
+    "ScreenRegion": {
+      "additionalProperties": false,
+      "description": "Half-open viewport region used by structural screen predicates.",
+      "properties": {
+        "bottom": {
+          "description": "Exclusive bottom row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "left": {
+          "description": "Inclusive zero-based left column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "right": {
+          "description": "Exclusive right column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "top": {
+          "description": "Inclusive zero-based top row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "left",
+        "top",
+        "right",
+        "bottom"
+      ],
+      "type": "object"
+    },
+    "SemanticDiff": {
+      "additionalProperties": false,
+      "description": "Complete semantic difference between two canonical state points.",
+      "properties": {
+        "active_style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueChange5"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Active SGR style change."
+        },
+        "changed": {
+          "description": "Whether any normalized semantic or presentation value changed.",
+          "type": "boolean"
+        },
+        "colors": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueChange4"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Palette/default-color change."
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueChange2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Cursor change."
+        },
+        "from": {
+          "$ref": "#/$defs/DiffEndpoint",
+          "description": "Earlier endpoint identity and provenance."
+        },
+        "geometry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueChange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Geometry change."
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueChange6"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "OSC metadata change."
+        },
+        "modes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueChange3"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Terminal mode change."
+        },
+        "presented": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueChange7"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Presentation-eligibility change."
+        },
+        "rows": {
+          "description": "Minimal changed semantic cells grouped by row.",
+          "items": {
+            "$ref": "#/$defs/RowChange"
+          },
+          "type": "array"
+        },
+        "to": {
+          "$ref": "#/$defs/DiffEndpoint",
+          "description": "Later endpoint identity and provenance."
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "changed",
+        "rows"
+      ],
+      "type": "object"
     },
     "SessionCompletion": {
       "additionalProperties": false,
@@ -1006,6 +3781,140 @@
       ],
       "type": "object"
     },
+    "StateHashComparison": {
+      "description": "Required relationship between the presented state and a supplied hash.",
+      "oneOf": [
+        {
+          "const": "unchanged",
+          "description": "Current state must equal the supplied hash.",
+          "type": "string"
+        },
+        {
+          "const": "changed",
+          "description": "Current state must differ from the supplied hash.",
+          "type": "string"
+        }
+      ]
+    },
+    "StatePoint": {
+      "description": "Shared state selection vocabulary.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Latest presentation-eligible state.",
+          "properties": {
+            "selector": {
+              "const": "latest_presented",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact semantic state identifier.",
+          "properties": {
+            "selector": {
+              "const": "state_id",
+              "type": "string"
+            },
+            "state_id": {
+              "description": "Exact semantic state identifier.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "selector",
+            "state_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Latest state at or before an event sequence.",
+          "properties": {
+            "event_seq": {
+              "description": "Canonical event sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "selector": {
+              "const": "event_seq",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "event_seq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Latest state at or before a session-monotonic timestamp.",
+          "properties": {
+            "monotonic_ns": {
+              "description": "Session-monotonic nanoseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "selector": {
+              "const": "monotonic_ns",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "monotonic_ns"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "State at a uniquely named marker.",
+          "properties": {
+            "label": {
+              "description": "Unique marker label.",
+              "type": "string"
+            },
+            "selector": {
+              "const": "marker",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "label"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TerminalMetadata": {
+      "description": "Terminal metadata controlled by OSC sequences.",
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Raw title bytes."
+        },
+        "working_directory": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Raw working-directory bytes."
+        }
+      },
+      "required": [
+        "title",
+        "working_directory"
+      ],
+      "type": "object"
+    },
     "TerminalMode": {
       "description": "One ANSI or DEC mode value.",
       "properties": {
@@ -1031,6 +3940,641 @@
         "enabled"
       ],
       "type": "object"
+    },
+    "TimelineEntry": {
+      "additionalProperties": false,
+      "description": "One ordered, source-bound timeline item.",
+      "properties": {
+        "event_seq": {
+          "description": "Responsible canonical event, absent for the initial semantic state.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "item": {
+          "$ref": "#/$defs/TimelineItem",
+          "description": "Timeline item payload."
+        },
+        "monotonic_ns": {
+          "description": "Canonical session offset.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "monotonic_ns",
+        "item"
+      ],
+      "type": "object"
+    },
+    "TimelineItem": {
+      "description": "Concise canonical or semantic item in a diagnostic timeline.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A distinct Ghostty semantic state transition.",
+          "properties": {
+            "changed_cells": {
+              "description": "Number of complete semantic cell values changed.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "changed_rows": {
+              "description": "Rows whose semantic cells changed.",
+              "items": {
+                "format": "uint16",
+                "maximum": 65535,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "cursor_changed": {
+              "description": "Whether cursor state changed.",
+              "type": "boolean"
+            },
+            "event_byte_offset": {
+              "description": "Byte offset within the responsible output event.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "ghostty_dirty": {
+              "$ref": "#/$defs/DirtyState",
+              "description": "Ghostty's dirty classification."
+            },
+            "kind": {
+              "const": "semantic_state",
+              "type": "string"
+            },
+            "metadata_changed": {
+              "description": "Whether terminal metadata changed.",
+              "type": "boolean"
+            },
+            "modes_changed": {
+              "description": "Whether terminal modes changed.",
+              "type": "boolean"
+            },
+            "presented": {
+              "description": "Whether the state was eligible for presentation.",
+              "type": "boolean"
+            },
+            "state_hash": {
+              "description": "Complete normalized semantic state hash.",
+              "type": "string"
+            },
+            "state_id": {
+              "description": "Dense semantic state identifier.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "state_id",
+            "state_hash",
+            "presented",
+            "ghostty_dirty",
+            "changed_rows",
+            "changed_cells",
+            "cursor_changed",
+            "modes_changed",
+            "metadata_changed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A non-output canonical event retained verbatim.",
+          "properties": {
+            "event": {
+              "$ref": "#/$defs/Event",
+              "description": "Exact typed canonical event."
+            },
+            "kind": {
+              "const": "canonical_event",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "event"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One lossless explanatory VT frame.",
+          "properties": {
+            "kind": {
+              "const": "vt_token",
+              "type": "string"
+            },
+            "token": {
+              "$ref": "#/$defs/VtToken",
+              "description": "Exact token and canonical source segments."
+            }
+          },
+          "required": [
+            "kind",
+            "token"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TruthLayer": {
+      "description": "Rendering truth represented by an observation.",
+      "oneOf": [
+        {
+          "const": "semantic",
+          "description": "Pinned semantic-engine state.",
+          "type": "string"
+        },
+        {
+          "const": "native",
+          "description": "Pixels captured from the native terminal renderer.",
+          "type": "string"
+        }
+      ]
+    },
+    "ValueChange": {
+      "additionalProperties": false,
+      "description": "Before/after values for one changed semantic property.",
+      "properties": {
+        "after": {
+          "description": "Value at the later endpoint.",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          ],
+          "type": "array"
+        },
+        "before": {
+          "description": "Value at the earlier endpoint.",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          ],
+          "type": "array"
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "type": "object"
+    },
+    "ValueChange2": {
+      "additionalProperties": false,
+      "description": "Before/after values for one changed semantic property.",
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/CursorState",
+          "description": "Value at the later endpoint."
+        },
+        "before": {
+          "$ref": "#/$defs/CursorState",
+          "description": "Value at the earlier endpoint."
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "type": "object"
+    },
+    "ValueChange3": {
+      "additionalProperties": false,
+      "description": "Before/after values for one changed semantic property.",
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/ModeState",
+          "description": "Value at the later endpoint."
+        },
+        "before": {
+          "$ref": "#/$defs/ModeState",
+          "description": "Value at the earlier endpoint."
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "type": "object"
+    },
+    "ValueChange4": {
+      "additionalProperties": false,
+      "description": "Before/after values for one changed semantic property.",
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/ColorState",
+          "description": "Value at the later endpoint."
+        },
+        "before": {
+          "$ref": "#/$defs/ColorState",
+          "description": "Value at the earlier endpoint."
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "type": "object"
+    },
+    "ValueChange5": {
+      "additionalProperties": false,
+      "description": "Before/after values for one changed semantic property.",
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/CellStyle",
+          "description": "Value at the later endpoint."
+        },
+        "before": {
+          "$ref": "#/$defs/CellStyle",
+          "description": "Value at the earlier endpoint."
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "type": "object"
+    },
+    "ValueChange6": {
+      "additionalProperties": false,
+      "description": "Before/after values for one changed semantic property.",
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/TerminalMetadata",
+          "description": "Value at the later endpoint."
+        },
+        "before": {
+          "$ref": "#/$defs/TerminalMetadata",
+          "description": "Value at the earlier endpoint."
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "type": "object"
+    },
+    "ValueChange7": {
+      "additionalProperties": false,
+      "description": "Before/after values for one changed semantic property.",
+      "properties": {
+        "after": {
+          "description": "Value at the later endpoint.",
+          "type": "boolean"
+        },
+        "before": {
+          "description": "Value at the earlier endpoint.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "type": "object"
+    },
+    "VerificationFinding": {
+      "additionalProperties": false,
+      "description": "One stable verification diagnostic.",
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable finding code.",
+          "type": "string"
+        },
+        "message": {
+          "description": "Human-readable context that is not intended for programmatic matching.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "VerificationLevel": {
+      "description": "Requested depth for an offline evidence verification.",
+      "oneOf": [
+        {
+          "const": "structure",
+          "description": "Parse all canonical files and enforce their versioned structure.",
+          "type": "string"
+        },
+        {
+          "const": "content",
+          "description": "Verify the manifest binding, event chain, completion, and terminal state.",
+          "type": "string"
+        },
+        {
+          "const": "durability_record",
+          "description": "Verify content plus the chain-bound durability policy and recorded outcomes.",
+          "type": "string"
+        },
+        {
+          "const": "signature",
+          "description": "Verify content plus a detached signature and configured signer trust.",
+          "type": "string"
+        }
+      ]
+    },
+    "VerificationReport": {
+      "additionalProperties": false,
+      "description": "Machine-readable result from offline session verification.",
+      "properties": {
+        "artifact_authenticity_established": {
+          "description": "Whether artifact authenticity was established from a trusted checkpoint.",
+          "type": "boolean"
+        },
+        "artifact_roots_verified": {
+          "description": "Number of locally cataloged artifact roots verified at content level.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "final_event_hash": {
+          "description": "Final canonical event hash, when readable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "findings": {
+          "description": "Stable findings; empty when verification succeeds.",
+          "items": {
+            "$ref": "#/$defs/VerificationFinding"
+          },
+          "type": "array"
+        },
+        "format": {
+          "description": "Stable report format identifier.",
+          "type": "string"
+        },
+        "level": {
+          "$ref": "#/$defs/VerificationLevel",
+          "description": "Requested verification depth."
+        },
+        "mutation_journal_error": {
+          "description": "Journal-only diagnostic when acceleration is invalid.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mutation_journal_records_verified": {
+          "description": "Number of mutation outcomes verified against canonical ranges.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mutation_journal_status": {
+          "$ref": "#/$defs/MutationJournalStatus",
+          "description": "State of the disposable mutation deduplication acceleration journal."
+        },
+        "session": {
+          "description": "Canonical session directory checked by the verifier.",
+          "type": "string"
+        },
+        "session_authenticity_established": {
+          "description": "Whether canonical session authenticity was established from a trusted receipt.",
+          "type": "boolean"
+        },
+        "session_id": {
+          "description": "Immutable session identifier, when readable.",
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_manifest_hash": {
+          "description": "Exact session-manifest hash, when readable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signature_cryptographic_valid": {
+          "description": "Whether the detached signature matches the exact receipt payload.",
+          "type": "boolean"
+        },
+        "signature_receipt_present": {
+          "description": "Whether a detached evidence receipt was present.",
+          "type": "boolean"
+        },
+        "signature_signer_key_id": {
+          "description": "Signer identity asserted by the detached receipt.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signature_signer_trusted": {
+          "description": "Whether the configured trust policy accepts the signer identity/key.",
+          "type": "boolean"
+        },
+        "valid": {
+          "description": "Whether every invariant at the requested level passed.",
+          "type": "boolean"
+        },
+        "version": {
+          "description": "Report schema version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "version",
+        "session",
+        "level",
+        "valid",
+        "artifact_roots_verified",
+        "artifact_authenticity_established",
+        "session_authenticity_established",
+        "mutation_journal_status",
+        "mutation_journal_records_verified",
+        "signature_receipt_present",
+        "signature_cryptographic_valid",
+        "signature_signer_trusted",
+        "findings"
+      ],
+      "type": "object"
+    },
+    "VtSourceSegment": {
+      "additionalProperties": false,
+      "description": "Half-open byte range within one canonical output event.",
+      "properties": {
+        "end_byte_offset": {
+          "description": "Exclusive byte offset within the event payload.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "event_seq": {
+          "description": "Canonical output event sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "monotonic_ns": {
+          "description": "Session-monotonic event timestamp.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_byte_offset": {
+          "description": "Inclusive byte offset within the event payload.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "event_seq",
+        "start_byte_offset",
+        "end_byte_offset",
+        "monotonic_ns"
+      ],
+      "type": "object"
+    },
+    "VtToken": {
+      "additionalProperties": false,
+      "description": "One lossless VT frame with exact canonical source ranges.",
+      "properties": {
+        "description": {
+          "description": "Stable neutral description for common controls.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/VtTokenKind",
+          "description": "Framed sequence family."
+        },
+        "raw": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact bytes, including introducer and terminator."
+        },
+        "source": {
+          "description": "Ordered exact source segments; concatenating them reproduces `raw`.",
+          "items": {
+            "$ref": "#/$defs/VtSourceSegment"
+          },
+          "type": "array"
+        },
+        "timing_resolution": {
+          "description": "Timing resolution; current recordings timestamp complete PTY reads.",
+          "type": "string"
+        },
+        "token_id": {
+          "description": "Dense token identifier.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "token_id",
+        "kind",
+        "raw",
+        "source",
+        "description",
+        "timing_resolution"
+      ],
+      "type": "object"
+    },
+    "VtTokenKind": {
+      "description": "Stable VT token family. This is framing, not terminal interpretation.",
+      "oneOf": [
+        {
+          "const": "printable",
+          "description": "Printable bytes, including valid UTF-8 continuation bytes.",
+          "type": "string"
+        },
+        {
+          "const": "c0",
+          "description": "One C0 control byte.",
+          "type": "string"
+        },
+        {
+          "const": "c1",
+          "description": "One 8-bit C1 control byte.",
+          "type": "string"
+        },
+        {
+          "const": "esc",
+          "description": "ESC sequence.",
+          "type": "string"
+        },
+        {
+          "const": "csi",
+          "description": "Control Sequence Introducer sequence.",
+          "type": "string"
+        },
+        {
+          "const": "osc",
+          "description": "Operating System Command string.",
+          "type": "string"
+        },
+        {
+          "const": "dcs",
+          "description": "Device Control String.",
+          "type": "string"
+        },
+        {
+          "const": "apc",
+          "description": "Application Program Command string.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Syntactically malformed or unrecognized sequence.",
+          "type": "string"
+        },
+        {
+          "const": "incomplete",
+          "description": "Sequence still open at end of canonical output.",
+          "type": "string"
+        }
+      ]
     },
     "WaitOutcome": {
       "description": "Successful raw-output wait evidence.",

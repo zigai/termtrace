@@ -234,6 +234,36 @@
       },
       "type": "object"
     },
+    "ScenarioSnapshot": {
+      "additionalProperties": false,
+      "description": "Stable normalized presented-frame snapshot request.",
+      "properties": {
+        "name": {
+          "description": "Filesystem-safe logical baseline name.",
+          "type": "string"
+        },
+        "stableForMs": {
+          "default": 0,
+          "description": "Required unchanged-state interval before comparison.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeoutMs": {
+          "description": "Per-step deadline overriding the launch default.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "ScenarioStep": {
       "description": "One sequential scenario operation or assertion.",
       "oneOf": [
@@ -281,6 +311,32 @@
         },
         {
           "additionalProperties": false,
+          "description": "Compare the latest stable presented frame with a normalized baseline.",
+          "properties": {
+            "matchScreenSnapshot": {
+              "$ref": "#/$defs/ScenarioSnapshot"
+            }
+          },
+          "required": [
+            "matchScreenSnapshot"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Assert temporal semantics and diagnostic findings between two markers.",
+          "properties": {
+            "assertTimeline": {
+              "$ref": "#/$defs/ScenarioTimelineAssertion"
+            }
+          },
+          "required": [
+            "assertTimeline"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Gracefully stop the child and await completion.",
           "properties": {
             "stop": {
@@ -307,6 +363,37 @@
         "text"
       ],
       "type": "object"
+    },
+    "ScenarioTimelineAssertion": {
+      "additionalProperties": false,
+      "description": "Temporal assertions evaluated over states between two canonical markers.",
+      "properties": {
+        "betweenMarkers": {
+          "description": "Exactly two unique marker labels defining the inclusive time range.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "noFinding": {
+          "description": "Stable diagnose finding code that must not overlap the range.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "noPresentedScreenContains": {
+          "description": "Text that must not appear in any presentation-eligible state in the range.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "betweenMarkers"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/scenario.schema.json",
@@ -317,6 +404,17 @@
     "launch": {
       "$ref": "#/$defs/ScenarioLaunch",
       "description": "Fresh canonical session configuration."
+    },
+    "matrix": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "default": {},
+      "description": "Optional bounded Cartesian substitutions for `{{key}}` tokens.",
+      "type": "object"
     },
     "name": {
       "description": "Stable human-readable scenario name.",

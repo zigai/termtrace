@@ -1,5 +1,296 @@
 {
   "$defs": {
+    "AnnotationAnchor": {
+      "description": "Stable annotation anchor vocabulary.",
+      "oneOf": [
+        {
+          "const": "top_left",
+          "description": "Top-left canvas corner.",
+          "type": "string"
+        },
+        {
+          "const": "top_right",
+          "description": "Top-right canvas corner.",
+          "type": "string"
+        },
+        {
+          "const": "bottom_left",
+          "description": "Bottom-left canvas corner.",
+          "type": "string"
+        },
+        {
+          "const": "bottom_right",
+          "description": "Bottom-right canvas corner.",
+          "type": "string"
+        },
+        {
+          "const": "center",
+          "description": "Canvas center.",
+          "type": "string"
+        }
+      ]
+    },
+    "AnnotationPosition": {
+      "additionalProperties": false,
+      "description": "Named anchor plus signed pixel offset.",
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/AnnotationAnchor",
+          "description": "Named canvas anchor."
+        },
+        "x": {
+          "description": "Signed horizontal offset from the anchor.",
+          "format": "int32",
+          "type": "integer"
+        },
+        "y": {
+          "description": "Signed vertical offset from the anchor.",
+          "format": "int32",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "anchor",
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "AnnotationScope": {
+      "description": "Annotation lifetime on the normalized presentation timeline.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Every output frame.",
+          "properties": {
+            "scope": {
+              "const": "whole_video",
+              "type": "string"
+            }
+          },
+          "required": [
+            "scope"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One normalized clip.",
+          "properties": {
+            "clip_index": {
+              "description": "Zero-based caller clip index.",
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scope": {
+              "const": "clip",
+              "type": "string"
+            }
+          },
+          "required": [
+            "scope",
+            "clip_index"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One exact output frame.",
+          "properties": {
+            "output_frame": {
+              "description": "Zero-based presentation frame.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scope": {
+              "const": "output_frame",
+              "type": "string"
+            }
+          },
+          "required": [
+            "scope",
+            "output_frame"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A source-selector-bounded half-open interval.",
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/EditSelector",
+              "description": "Inclusive source endpoint."
+            },
+            "scope": {
+              "const": "range",
+              "type": "string"
+            },
+            "to": {
+              "$ref": "#/$defs/EditSelector",
+              "description": "Exclusive source endpoint."
+            }
+          },
+          "required": [
+            "scope",
+            "from",
+            "to"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AnnotationStyle": {
+      "additionalProperties": false,
+      "description": "Deterministic visible text style compiled to ASS.",
+      "properties": {
+        "background": {
+          "description": "`#RRGGBB` background.",
+          "type": "string"
+        },
+        "background_opacity": {
+          "description": "Background opacity from zero through 255.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "border": {
+          "description": "Border width in pixels.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "font_size": {
+          "description": "Font size in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "foreground": {
+          "description": "`#RRGGBB` foreground.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "font_size",
+        "foreground",
+        "background",
+        "background_opacity",
+        "border"
+      ],
+      "type": "object"
+    },
+    "CaptionLayout": {
+      "description": "Placement of the per-clip caption preset.",
+      "oneOf": [
+        {
+          "const": "footer",
+          "description": "Extend the canvas below the native viewport.",
+          "type": "string"
+        },
+        {
+          "const": "overlay",
+          "description": "Intentionally draw captions over source pixels.",
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "description": "Retain caption metadata without rendering it.",
+          "type": "string"
+        }
+      ]
+    },
+    "ChangeMode": {
+      "description": "Visible change-overlay mode.",
+      "oneOf": [
+        {
+          "const": "outline",
+          "description": "Outline changed cells or pixel regions.",
+          "type": "string"
+        },
+        {
+          "const": "dirty_rows",
+          "description": "Shade rows reported dirty by semantic evidence.",
+          "type": "string"
+        },
+        {
+          "const": "bounding_box",
+          "description": "Draw one minimal enclosing rectangle.",
+          "type": "string"
+        },
+        {
+          "const": "heatmap",
+          "description": "Color changes by frequency or magnitude.",
+          "type": "string"
+        },
+        {
+          "const": "trail",
+          "description": "Fade prior change regions across held frames.",
+          "type": "string"
+        },
+        {
+          "const": "side_diff",
+          "description": "Add a side-by-side difference panel.",
+          "type": "string"
+        }
+      ]
+    },
+    "ChangeSource": {
+      "description": "Truth source used by a change overlay.",
+      "oneOf": [
+        {
+          "const": "semantic_cells",
+          "description": "Nominally scheduled complete semantic-cell changes.",
+          "type": "string"
+        },
+        {
+          "const": "encoded_pixels",
+          "description": "Actual decoded adjacent encoded-frame pixels.",
+          "type": "string"
+        }
+      ]
+    },
+    "ChangeVisualization": {
+      "additionalProperties": false,
+      "description": "Explicit source and shape for per-frame change overlays.",
+      "properties": {
+        "hold_frames": {
+          "default": 0,
+          "description": "Number of output frames to retain a fading/held overlay.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode": {
+          "$ref": "#/$defs/ChangeMode",
+          "description": "Visible overlay form."
+        },
+        "pixel_threshold": {
+          "description": "Pixel-difference threshold for encoded input, ignored for semantic input.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/ChangeSource",
+          "description": "Semantic scheduling or actual decoded adjacent pixels."
+        }
+      },
+      "required": [
+        "source",
+        "mode"
+      ],
+      "type": "object"
+    },
     "EditClip": {
       "additionalProperties": false,
       "description": "One source interval with rational speed and a generated final hold.",
@@ -45,6 +336,15 @@
       "additionalProperties": false,
       "description": "Unique marker or exact canonical monotonic timestamp.",
       "properties": {
+        "eventSeq": {
+          "description": "Latest semantic state at or before this canonical event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "marker": {
           "description": "Unique canonical marker label.",
           "type": [
@@ -60,8 +360,214 @@
             "integer",
             "null"
           ]
+        },
+        "nativeFrame": {
+          "description": "Exact native source frame.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stateId": {
+          "description": "Exact semantic state identifier.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
+      "type": "object"
+    },
+    "PixelTransform": {
+      "description": "Explicit presentation-only pixel transform.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Replace cursor pixels during presentation composition.",
+          "properties": {
+            "transform": {
+              "const": "cursor_mask",
+              "type": "string"
+            }
+          },
+          "required": [
+            "transform"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Crop to an exact source rectangle.",
+          "properties": {
+            "height": {
+              "description": "Rectangle height.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "transform": {
+              "const": "crop",
+              "type": "string"
+            },
+            "width": {
+              "description": "Rectangle width.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x": {
+              "description": "Left source pixel.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "y": {
+              "description": "Top source pixel.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "transform",
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Scale by one exact rational factor.",
+          "properties": {
+            "denominator": {
+              "description": "Scale denominator.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "numerator": {
+              "description": "Scale numerator.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "transform": {
+              "const": "zoom",
+              "type": "string"
+            }
+          },
+          "required": [
+            "transform",
+            "numerator",
+            "denominator"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Draw a visibly labeled rectangular callout.",
+          "properties": {
+            "height": {
+              "description": "Callout height.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "label": {
+              "description": "Optional visible label.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "transform": {
+              "const": "callout",
+              "type": "string"
+            },
+            "width": {
+              "description": "Callout width.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x": {
+              "description": "Left callout pixel.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "y": {
+              "description": "Top callout pixel.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "transform",
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PresentationDelivery": {
+      "additionalProperties": false,
+      "description": "Delivery codec and pixel-format contract.",
+      "properties": {
+        "codec": {
+          "description": "Stable delivery codec name.",
+          "type": "string"
+        },
+        "pixel_format": {
+          "description": "Stable output pixel format.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "codec",
+        "pixel_format"
+      ],
+      "type": "object"
+    },
+    "PresentationLayout": {
+      "additionalProperties": false,
+      "description": "Canvas layout for caption presets.",
+      "properties": {
+        "branding": {
+          "description": "Optional caller-owned branding label.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "caption": {
+          "$ref": "#/$defs/CaptionLayout",
+          "description": "Caption placement, with footer preserving terminal pixels."
+        }
+      },
+      "required": [
+        "caption"
+      ],
       "type": "object"
     },
     "RationalSpeed": {
@@ -86,6 +592,76 @@
         "denominator"
       ],
       "type": "object"
+    },
+    "SubtitleTrack": {
+      "additionalProperties": false,
+      "description": "Caller-authored ASS resource copied and hash-manifested before rendering.",
+      "properties": {
+        "ass": {
+          "description": "ASS subtitle document.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ass"
+      ],
+      "type": "object"
+    },
+    "TextAnnotation": {
+      "additionalProperties": false,
+      "description": "One text annotation with an exact scope, position, and visible style.",
+      "properties": {
+        "position": {
+          "$ref": "#/$defs/AnnotationPosition",
+          "default": {
+            "anchor": "top_left",
+            "x": 16,
+            "y": 16
+          },
+          "description": "Exact anchored placement."
+        },
+        "scope": {
+          "$ref": "#/$defs/AnnotationScope",
+          "description": "Output/source selection scope."
+        },
+        "style": {
+          "$ref": "#/$defs/AnnotationStyle",
+          "default": {
+            "background": "#000000",
+            "background_opacity": 160,
+            "border": 1,
+            "font_size": 20,
+            "foreground": "#ffffff"
+          },
+          "description": "Visible text/background style."
+        },
+        "template": {
+          "description": "Dynamic template expanded per output frame.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "description": "Literal text; mutually exclusive with `template`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "z_order": {
+          "default": 0,
+          "description": "Stable overlay ordering.",
+          "format": "int16",
+          "maximum": 32767,
+          "minimum": -32768,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/edit-plan.schema.json",
@@ -93,10 +669,61 @@
   "additionalProperties": false,
   "description": "One immutable presentation edit plan.",
   "properties": {
+    "annotations": {
+      "default": [],
+      "description": "Arbitrary normalized text annotation tracks.",
+      "items": {
+        "$ref": "#/$defs/TextAnnotation"
+      },
+      "type": "array"
+    },
+    "change_visualization": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChangeVisualization"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Optional per-frame change overlay policy."
+    },
     "clips": {
       "description": "Caller-ordered source clips.",
       "items": {
         "$ref": "#/$defs/EditClip"
+      },
+      "type": "array"
+    },
+    "delivery": {
+      "$ref": "#/$defs/PresentationDelivery",
+      "default": {
+        "codec": "h264",
+        "pixel_format": "yuv420p"
+      },
+      "description": "Delivery encoding contract."
+    },
+    "layout": {
+      "$ref": "#/$defs/PresentationLayout",
+      "default": {
+        "branding": null,
+        "caption": "footer"
+      },
+      "description": "Presentation canvas and caption policy."
+    },
+    "subtitles": {
+      "default": [],
+      "description": "Caller-authored ASS subtitle resources.",
+      "items": {
+        "$ref": "#/$defs/SubtitleTrack"
+      },
+      "type": "array"
+    },
+    "transforms": {
+      "default": [],
+      "description": "Explicit visibly labeled pixel transforms.",
+      "items": {
+        "$ref": "#/$defs/PixelTransform"
       },
       "type": "array"
     },

@@ -1,0 +1,51 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/review-export-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Manifest for one explicit reviewer state export.",
+  "properties": {
+    "canonical_session": {
+      "description": "Immutable source session.",
+      "type": "string"
+    },
+    "screen_text_blake3": {
+      "description": "BLAKE3 of `screen.txt`.",
+      "type": "string"
+    },
+    "source_final_event_hash": {
+      "description": "Canonical source head anchoring the export.",
+      "type": "string"
+    },
+    "state_hash": {
+      "description": "Exact semantic state hash.",
+      "type": "string"
+    },
+    "state_id": {
+      "description": "Exact exported semantic state identifier.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "state_json_blake3": {
+      "description": "BLAKE3 of `state.json`.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Reviewer export contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "canonical_session",
+    "state_id",
+    "state_hash",
+    "source_final_event_hash",
+    "state_json_blake3",
+    "screen_text_blake3"
+  ],
+  "title": "ReviewExportManifest",
+  "type": "object"
+}

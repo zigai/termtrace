@@ -18,17 +18,20 @@ use std::{
 use tempfile::TempDir;
 use termtrace::{
     Error,
+    analysis::DiagnosticCheck,
     client::Terminal as ClientTerminal,
     control::{
-        ControlCommand, ControlData, ControlRequest, ControlResult, send_request,
-        send_request_response,
+        ControlCommand, ControlData, ControlRequest, ControlResult, ScreenMode, ScreenPredicate,
+        ScreenRegion, StateHashComparison, send_request, send_request_response,
     },
     event::{
         ByteString, EVENT_LOG_VERSION, Event, InputDescriptor, InputKind, InputSource,
         OperationStatus,
     },
     event_log::EventLog,
-    inspection::{inspect_session, wait_for_output},
+    ghostty_vt::{KeyModifiers, NamedKey},
+    inspection::{inspect_session, wait_for_output, wait_for_screen},
+    observation::StatePoint,
     provenance::{
         ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind, ProvenanceSensitivity,
         collect_execution_provenance,
@@ -177,19 +180,50 @@ fn python_sync_and_async_clients_parse_driver_completion_contract() {
     let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/python/src");
     let binary = env!("CARGO_BIN_EXE_termtrace");
     let sync_code = r#"import sys
-from termtrace import Terminal
+from pathlib import Path
+from termtrace import Terminal, assert_screen_text, assert_terminal_snapshot
 with Terminal(binary_path=sys.argv[1]) as terminal:
+    Path(sys.argv[3]).mkdir(parents=True, exist_ok=True)
     session = terminal.attach(sys.argv[2])
     assert session.evidence.completion()["kind"] == "completion"
+    assert session.evidence.verify()["report"]["valid"] is True
+    assert session.evidence.bundle(Path(sys.argv[3]) / "python-screen-bundle")["kind"] == "bundle"
+    assert isinstance(session.session_id, str)
+    assert session.semantic.inspect()["kind"] == "observation"
+    assert session.semantic.timeline()["kind"] == "timeline"
+    assert session.semantic.diff({"selector": "state_id", "state_id": 0}, {"selector": "latest_presented"})["kind"] == "diff"
+    assert session.semantic.diagnose()["kind"] == "diagnose"
+    assert session.events.page(metadata_only=True)["kind"] == "events"
+    semantic_image = session.screen.screenshot(Path(sys.argv[3]) / "python-semantic-image")
+    assert semantic_image["kind"] == "artifact"
+    assert Path(semantic_image["primary"]).is_file()
+    assert_screen_text(session, "PYTHON")
+    snapshot = Path(sys.argv[3]) / "completed.snapshot.json"
+    assert_terminal_snapshot(session, snapshot, update=True)
+    assert_terminal_snapshot(session, snapshot)
     session.close()
     launched = terminal.launch(["/bin/sh", "-c", "printf PY_LAUNCH; sleep 30"], evidence_root=sys.argv[3])
     assert launched.canonical_session.is_dir()
     assert launched.screen.wait_for_text("PY_LAUNCH")["kind"] == "control"
+    assert launched.screen.wait_for_regex("PY_[A-Z]+")["kind"] == "control"
     assert "PY_LAUNCH" in launched.screen.text()
+    assert launched.screen.frame()["viewport_text"].startswith("PY_LAUNCH")
     assert launched.output.wait_for_text("PY_LAUNCH")["kind"] == "output_wait"
     launched.stop()
     assert launched.evidence.complete()["kind"] == "completion"
     launched.close()
+    with terminal.launch(["/bin/sh", "-c", "printf DISPOSABLE; sleep 30"], evidence_root=sys.argv[3], evidence="on-failure") as disposable:
+        disposable_path = disposable.canonical_session
+        disposable.screen.wait_for_text("DISPOSABLE")
+    assert not disposable_path.exists()
+    try:
+        with terminal.launch(["/bin/sh", "-c", "printf RETAINED; sleep 30"], evidence_root=sys.argv[3], evidence="on-failure") as retained:
+            retained_path = retained.canonical_session
+            retained.screen.wait_for_text("RETAINED")
+            raise RuntimeError("fixture failure")
+    except RuntimeError:
+        pass
+    assert retained_path.joinpath("completion.json").is_file()
 "#;
     let sync = StdCommand::new("python3")
         .env("PYTHONPATH", &package)
@@ -203,21 +237,41 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
     assert!(sync.success());
 
     let async_code = r#"import asyncio, sys
+from pathlib import Path
 from termtrace import AsyncTerminal
 async def main():
+    Path(sys.argv[3]).mkdir(parents=True, exist_ok=True)
     terminal = await AsyncTerminal.create(binary_path=sys.argv[1])
     async with terminal:
         session = await terminal.attach(sys.argv[2])
         assert (await session.completion())["kind"] == "completion"
+        assert (await session.evidence.verify())["report"]["valid"] is True
+        assert (await session.evidence.bundle(Path(sys.argv[3]) / "async-screen-bundle"))["kind"] == "bundle"
+        assert isinstance(session.session_id, str)
+        assert (await session.semantic.inspect())["kind"] == "observation"
+        assert (await session.semantic.timeline())["kind"] == "timeline"
+        assert (await session.semantic.diff({"selector": "state_id", "state_id": 0}, {"selector": "latest_presented"}))["kind"] == "diff"
+        assert (await session.semantic.diagnose())["kind"] == "diagnose"
+        assert (await session.events.page(metadata_only=True))["kind"] == "events"
+        semantic_image = await session.screen.screenshot(Path(sys.argv[3]) / "async-semantic-image")
+        assert semantic_image["kind"] == "artifact"
+        assert Path(semantic_image["primary"]).is_file()
         await session.close()
         launched = await terminal.launch(["/bin/sh", "-c", "printf ASYNC_LAUNCH; sleep 30"], evidence_root=sys.argv[3])
         assert launched.canonical_session.is_dir()
         assert (await launched.screen.wait_for_text("ASYNC_LAUNCH"))["kind"] == "control"
+        assert (await launched.screen.wait_for_regex("ASYNC_[A-Z]+"))["kind"] == "control"
         assert "ASYNC_LAUNCH" in await launched.screen.text()
+        assert (await launched.screen.frame())["viewport_text"].startswith("ASYNC_LAUNCH")
         assert (await launched.output.wait_for_text("ASYNC_LAUNCH"))["kind"] == "output_wait"
         await launched.stop()
         assert (await launched.evidence.complete())["kind"] == "completion"
         await launched.close()
+        disposable = await terminal.launch(["/bin/sh", "-c", "printf ASYNC_DISPOSABLE; sleep 30"], evidence_root=sys.argv[3], evidence="on-failure")
+        disposable_path = disposable.canonical_session
+        async with disposable:
+            await disposable.screen.wait_for_text("ASYNC_DISPOSABLE")
+        assert not disposable_path.exists()
 asyncio.run(main())
 "#;
     let asynchronous = StdCommand::new("python3")
@@ -244,19 +298,44 @@ fn typescript_client_attaches_and_reads_completion_contract() {
         .assert()
         .success();
     let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/typescript/src/index.ts");
-    let code = r#"const { Termtrace } = await import(process.argv[1])
+    let code = r#"const { existsSync, mkdirSync } = await import("node:fs")
+const { Termtrace, assertScreenText, stableTerminalSnapshot } = await import(process.argv[1])
+mkdirSync(process.argv[4], { recursive: true })
 await using terminal = await Termtrace.create({ binaryPath: process.argv[2] })
 await using attached = await terminal.attach(process.argv[3])
 const completion = await attached.evidence.complete()
 if (completion.kind !== "completion") throw new Error("missing completion")
+if ((await attached.evidence.verify()).report.valid !== true) throw new Error("invalid evidence")
+if ((await attached.evidence.bundle(`${process.argv[4]}/typescript-screen-bundle`)).kind !== "bundle") throw new Error("missing bundle")
 if (typeof attached.sessionId !== "string") throw new Error("missing session identity")
+if ((await attached.semantic.inspect()).kind !== "observation") throw new Error("missing observation")
+if ((await attached.semantic.timeline()).kind !== "timeline") throw new Error("missing timeline")
+if ((await attached.semantic.diff({ selector: "state_id", state_id: 0 }, { selector: "latest_presented" })).kind !== "diff") throw new Error("missing diff")
+if ((await attached.semantic.diagnose()).kind !== "diagnose") throw new Error("missing diagnosis")
+if ((await attached.events.page({ metadataOnly: true })).kind !== "events") throw new Error("missing events")
+const semanticImage = await attached.screen.screenshot(`${process.argv[4]}/typescript-semantic-image`)
+if (semanticImage.kind !== "artifact" || !existsSync(String(semanticImage.primary))) throw new Error("missing semantic screenshot")
+await assertScreenText(attached, "TYPESCRIPT")
+if ((await stableTerminalSnapshot(attached)).version !== 1) throw new Error("missing stable snapshot")
 await using launched = await terminal.launch({ command: ["/bin/sh", "-c", "printf TS_LAUNCH; sleep 30"], evidenceRoot: process.argv[4] })
 if (typeof launched.sessionId !== "string") throw new Error("missing launched identity")
-if ((await launched.screen.waitForText(/TS_LAUNCH/)).kind !== "screen_wait") throw new Error("missing screen wait")
+if ((await launched.screen.waitForText(/TS_LAUNCH/)).kind !== "control") throw new Error("missing screen wait")
+if ((await launched.screen.waitForPredicate({ predicate: "row_contains", row: 0, text: "TS_LAUNCH" })).kind !== "control") throw new Error("missing structural wait")
 if (!await launched.screen.text().then((text) => text.includes("TS_LAUNCH"))) throw new Error("missing screen text")
+if (!String((await launched.screen.frame()).viewport_text).includes("TS_LAUNCH")) throw new Error("missing frame")
 if ((await launched.output.waitForText("TS_LAUNCH")).kind !== "output_wait") throw new Error("missing output wait")
 await launched.stop()
 if ((await launched.evidence.complete()).kind !== "completion") throw new Error("missing launched completion")
+const disposable = await terminal.launch({ command: ["/bin/sh", "-c", "printf TS_DISPOSABLE; sleep 30"], evidenceRoot: process.argv[4], evidence: "on-failure" })
+const disposablePath = disposable.canonicalSession
+await disposable.screen.waitForText("TS_DISPOSABLE")
+await disposable.finish(true)
+if (existsSync(disposablePath)) throw new Error("successful disposable evidence remained")
+const retained = await terminal.launch({ command: ["/bin/sh", "-c", "printf TS_RETAINED; sleep 30"], evidenceRoot: process.argv[4], evidence: "on-failure" })
+const retainedPath = retained.canonicalSession
+await retained.screen.waitForText("TS_RETAINED")
+await retained.finish(false)
+if (!existsSync(`${retainedPath}/completion.json`)) throw new Error("failed-run evidence was not retained")
 "#;
     let status = StdCommand::new("bun")
         .arg("-e")
@@ -287,29 +366,85 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
             },
             "steps": [
                 { "waitScreen": { "contains": "Ready" } },
+                { "mark": "ready-visible" },
                 { "send": [{ "text": "go" }, { "key": "enter" }] },
                 { "waitScreen": { "contains": "Done" } },
                 { "mark": "done-visible" },
+                { "assertTimeline": {
+                    "betweenMarkers": ["ready-visible", "done-visible"],
+                    "noPresentedScreenContains": "Missing"
+                } },
+                { "matchScreenSnapshot": {
+                    "name": "ready-workflow-final",
+                    "stableForMs": 10
+                } },
                 { "stop": {} }
             ]
         }))
         .expect("scenario JSON"),
     )
     .expect("write scenario");
+    let second = temporary.path().join("simple.termtrace.json");
+    fs_err::write(
+        &second,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "version": 1,
+            "name": "simple workflow",
+            "launch": {
+                "command": ["/bin/sh", "-c", "printf SIMPLE; sleep 30"],
+                "timeoutMs": 3000
+            },
+            "steps": [
+                { "waitScreen": { "contains": "SIMPLE" } },
+                { "stop": {} }
+            ]
+        }))
+        .expect("second scenario JSON"),
+    )
+    .expect("write second scenario");
+
+    let junit = temporary.path().join("junit.xml");
+    let mut update = Command::cargo_bin("termtrace").expect("binary should build");
+    update
+        .arg("test")
+        .arg(&scenario)
+        .arg(&second)
+        .arg("--artifacts")
+        .arg(&artifacts)
+        .arg("--update-snapshots")
+        .args(["--jobs", "2"])
+        .arg("--junit")
+        .arg(&junit)
+        .assert()
+        .success();
+    assert!(
+        artifacts
+            .join("snapshots/ready-workflow-final.frame.json")
+            .is_file()
+    );
+    assert!(
+        fs_err::read_to_string(&junit)
+            .expect("JUnit XML")
+            .contains("failures=\"0\"")
+    );
 
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
     let assertion = command
         .arg("test")
         .arg(&scenario)
+        .arg(&second)
         .arg("--artifacts")
         .arg(&artifacts)
+        .args(["--jobs", "2"])
         .assert()
         .success();
     let report: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("scenario report");
     assert_eq!(report["status"], "passed");
-    assert_eq!(report["steps"].as_array().expect("steps").len(), 5);
-    assert!(Path::new(report["canonical_session"].as_str().expect("path")).is_dir());
+    assert_eq!(report["cases"].as_array().expect("cases").len(), 2);
+    let attempt = &report["cases"][0]["attempts"][0]["report"];
+    assert_eq!(attempt["steps"].as_array().expect("steps").len(), 8);
+    assert!(Path::new(attempt["canonical_session"].as_str().expect("path")).is_dir());
 }
 
 #[test]
@@ -338,16 +473,29 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
         .arg(&scenario)
         .arg("--artifacts")
         .arg(&artifacts)
+        .args(["--reruns", "1"])
         .assert()
         .failure();
     let report: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("failure report");
     assert_eq!(report["status"], "failed");
-    assert_eq!(report["failure"]["step_index"], 0);
-    let failure = Path::new(report["failure_artifacts"].as_str().expect("failure path"));
+    assert_eq!(
+        report["cases"][0]["attempts"]
+            .as_array()
+            .expect("attempts")
+            .len(),
+        2
+    );
+    let attempt = &report["cases"][0]["attempts"][1]["report"];
+    assert_eq!(attempt["failure"]["step_index"], 0);
+    let failure = Path::new(attempt["failure_artifacts"].as_str().expect("failure path"));
     assert!(failure.join("scenario.json").is_file());
     assert!(failure.join("result.json").is_file());
     assert!(failure.join("final-screen.json").is_file());
+    assert!(failure.join("final-screen.txt").is_file());
+    assert!(failure.join("final-screen.png").is_file());
+    assert!(failure.join("timeline.json").is_file());
+    assert!(failure.join("diagnose.json").is_file());
 }
 
 #[test]
@@ -390,6 +538,39 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
             .windows("hostile-payload".len())
             .any(|window| return window == b"hostile-payload")
     );
+    let mut search = Command::cargo_bin("termtrace").expect("binary should build");
+    let searched = search
+        .arg("review")
+        .arg(&session)
+        .args(["--json", "--search", "SAFE"])
+        .assert()
+        .success();
+    let result: serde_json::Value =
+        serde_json::from_slice(&searched.get_output().stdout).expect("review search");
+    assert_eq!(result["query"], "SAFE");
+    assert!(!result["matches"].as_array().expect("matches").is_empty());
+    assert!(
+        result["matches"][0]["selector"]
+            .as_str()
+            .is_some_and(|selector| return selector.starts_with("--state "))
+    );
+    let state_id = result["matches"][0]["state_id"]
+        .as_u64()
+        .expect("matched state ID");
+    let exported = temporary.path().join("review-export");
+    let mut export = Command::cargo_bin("termtrace").expect("binary should build");
+    export
+        .arg("review")
+        .arg(&session)
+        .arg("--export-state")
+        .arg(&exported)
+        .arg("--state")
+        .arg(state_id.to_string())
+        .assert()
+        .success();
+    assert!(exported.join("manifest.json").is_file());
+    assert!(exported.join("state.json").is_file());
+    assert!(exported.join("screen.txt").is_file());
     assert_eq!(
         fs_err::read(event_path).expect("event log after review"),
         before
@@ -406,7 +587,196 @@ fn reviewer_exposes_scriptable_commands_without_a_session() {
         .stdout(predicate::str::contains(
             "semantic_cells_only_no_raw_replay",
         ))
-        .stdout(predicate::str::contains("next_state"));
+        .stdout(predicate::str::contains("next_state"))
+        .stdout(predicate::str::contains("next_marker"));
+}
+
+#[test]
+fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/terminal");
+    let terminal = ClientTerminal::new(
+        env!("CARGO_BIN_EXE_termtrace"),
+        temporary.path().join("fixture-evidence"),
+    );
+
+    let mut line = terminal
+        .launch([fixtures.join("line-command.sh").into_os_string()])
+        .start()
+        .expect("launch line fixture");
+    wait_for_screen(
+        line.path(),
+        ScreenPredicate::Contains {
+            text: "LINE_READY".to_owned(),
+        },
+        Duration::ZERO,
+        Duration::from_secs(5),
+    )
+    .expect("line fixture ready");
+    wait_for_screen(
+        line.path(),
+        ScreenPredicate::All {
+            predicates: vec![
+                ScreenPredicate::MatchesRegex {
+                    pattern: "LINE_R[A-Z]+".to_owned(),
+                },
+                ScreenPredicate::RowContains {
+                    row: 0,
+                    text: "LINE_READY".to_owned(),
+                },
+                ScreenPredicate::RegionContains {
+                    region: ScreenRegion {
+                        left: 0,
+                        top: 0,
+                        right: 10,
+                        bottom: 1,
+                    },
+                    text: "LINE_READY".to_owned(),
+                },
+                ScreenPredicate::Cursor {
+                    column: None,
+                    row: None,
+                    visible: Some(true),
+                    shape: None,
+                },
+                ScreenPredicate::Mode {
+                    mode: ScreenMode::Wraparound,
+                    enabled: true,
+                },
+                ScreenPredicate::StateHash {
+                    hash: "0".repeat(64),
+                    comparison: StateHashComparison::Changed,
+                },
+                ScreenPredicate::Any {
+                    predicates: vec![
+                        ScreenPredicate::Contains {
+                            text: "missing".to_owned(),
+                        },
+                        ScreenPredicate::ExcludesRegex {
+                            pattern: "BUSY$".to_owned(),
+                        },
+                    ],
+                },
+            ],
+        },
+        Duration::ZERO,
+        Duration::from_secs(5),
+    )
+    .expect("structural screen predicate");
+    let state_hash = match send_request(line.path(), &ControlRequest::new(ControlCommand::Snapshot))
+        .expect("line snapshot")
+    {
+        ControlData::Snapshot { state_hash, .. } => state_hash,
+        other => panic!("unexpected snapshot response: {other:?}"),
+    };
+    wait_for_screen(
+        line.path(),
+        ScreenPredicate::StateHash {
+            hash: state_hash,
+            comparison: StateHashComparison::Unchanged,
+        },
+        Duration::ZERO,
+        Duration::from_secs(5),
+    )
+    .expect("unchanged screen predicate");
+    line.keyboard().text("fixture-value\n").expect("line input");
+    wait_for_output(
+        line.path(),
+        b"LINE_VALUE=fixture-value",
+        Duration::from_secs(5),
+    )
+    .expect("line fixture output");
+    line.complete(Duration::from_secs(5))
+        .expect("line completion");
+
+    let mut alternate = terminal
+        .launch([fixtures.join("alternate-screen.py").into_os_string()])
+        .start()
+        .expect("launch alternate-screen fixture");
+    wait_for_screen(
+        alternate.path(),
+        ScreenPredicate::Contains {
+            text: "ALTERNATE_READY".to_owned(),
+        },
+        Duration::ZERO,
+        Duration::from_secs(5),
+    )
+    .expect("alternate fixture ready");
+    alternate
+        .keyboard()
+        .press(NamedKey::ArrowRight, KeyModifiers::default())
+        .expect("mode-aware arrow");
+    wait_for_output(alternate.path(), b"INPUT_HEX=", Duration::from_secs(5))
+        .expect("alternate fixture input evidence");
+    alternate
+        .complete(Duration::from_secs(5))
+        .expect("alternate completion");
+
+    let mut final_state = terminal
+        .launch([
+            OsString::from("/bin/sh"),
+            OsString::from("-c"),
+            OsString::from("printf FINAL_READY; sleep .2"),
+        ])
+        .start()
+        .expect("launch final-state fixture");
+    let final_wait = wait_for_screen(
+        final_state.path(),
+        ScreenPredicate::Contains {
+            text: "FINAL_READY".to_owned(),
+        },
+        Duration::from_secs(5),
+        Duration::from_secs(5),
+    )
+    .expect("completed final state is stable");
+    assert!(final_wait.child_completed);
+    assert_eq!(final_wait.completion_quality, "stable");
+    final_state
+        .complete(Duration::from_secs(5))
+        .expect("final-state completion");
+
+    let query_session = temporary.path().join("query-heavy");
+    let mut query = Command::cargo_bin("termtrace").expect("binary should build");
+    query
+        .args(["record", "--no-input", "--out"])
+        .arg(&query_session)
+        .arg("--")
+        .arg(fixtures.join("query-heavy.py"))
+        .assert()
+        .success();
+    wait_for_output(
+        &query_session,
+        b"QUERY_RESPONSES_OK",
+        Duration::from_secs(1),
+    )
+    .expect("query response fixture output");
+    let log = EventLog::read(query_session.join("events.jsonl")).expect("query event log");
+    assert!(log.events.iter().any(|record| {
+        return matches!(record.event, Event::QueryResponse { .. });
+    }));
+}
+
+#[test]
+fn agent_skill_command_reference_matches_the_tested_cli_graph() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let skill = root.join("skills/termtrace");
+    let temporary = TempDir::new().expect("temporary directory");
+    let generated = temporary.path().join("commands.md");
+    let status = StdCommand::new("python3")
+        .arg(skill.join("scripts/generate-command-reference.py"))
+        .arg("--binary")
+        .arg(env!("CARGO_BIN_EXE_termtrace"))
+        .arg("--out")
+        .arg(&generated)
+        .status()
+        .expect("generate skill command reference");
+    assert!(status.success());
+    assert_eq!(
+        fs_err::read(generated).expect("generated command reference"),
+        fs_err::read(skill.join("references/commands.md")).expect("checked command reference")
+    );
+    let instructions = fs_err::read_to_string(skill.join("SKILL.md")).expect("skill instructions");
+    assert!(!instructions.contains("TODO"));
 }
 
 #[test]
@@ -434,6 +804,25 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
             ..
         }
     ));
+    assert!(
+        session
+            .screen()
+            .observation()
+            .expect("screen observation")
+            .frame
+            .viewport_text
+            .contains("READY")
+    );
+    session
+        .screen()
+        .wait(
+            ScreenPredicate::Contains {
+                text: "READY".to_owned(),
+            },
+            Duration::ZERO,
+            Duration::from_secs(5),
+        )
+        .expect("facade screen wait");
     session
         .keyboard()
         .text("client\n")
@@ -443,6 +832,42 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
         .complete(Duration::from_secs(5))
         .expect("completed client evidence");
     assert_eq!(completion.session_id, session.session_id());
+    assert!(
+        session
+            .semantic()
+            .inspect(StatePoint::LatestPresented, false)
+            .expect("semantic inspection")
+            .source_completed
+    );
+    assert!(
+        !session
+            .semantic()
+            .timeline(false, true)
+            .expect("timeline")
+            .is_empty()
+    );
+    assert!(
+        session
+            .semantic()
+            .diff(
+                StatePoint::StateId { state_id: 0 },
+                StatePoint::LatestPresented
+            )
+            .expect("semantic diff")
+            .changed
+    );
+    session
+        .semantic()
+        .diagnose(vec![DiagnosticCheck::Dirty], 50)
+        .expect("semantic diagnosis");
+    assert!(
+        !session
+            .events()
+            .page(0, 32, true)
+            .expect("event page")
+            .0
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1743,6 +2168,9 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
                     lines,
                     column,
                     row,
+                    end_column,
+                    end_row,
+                    click_count,
                     cols,
                     rows,
                     pixel_width,
@@ -1759,6 +2187,9 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
                 *lines,
                 *column,
                 *row,
+                *end_column,
+                *end_row,
+                *click_count,
                 *cols,
                 *rows,
                 *pixel_width,
@@ -1776,6 +2207,9 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
         lines,
         column,
         row,
+        end_column,
+        end_row,
+        click_count,
         cols,
         rows,
         pixel_width,
@@ -1790,6 +2224,7 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
     assert_eq!(operation, "click");
     assert_eq!(button, "left");
     assert_eq!((lines, column, row), (0, 2, 3));
+    assert_eq!((end_column, end_row, click_count), (None, None, 1));
     assert_eq!((cols, rows, pixel_width, pixel_height), (80, 24, 800, 480));
     assert_eq!(encoder, "libghostty-mouse-encoder-v1");
     assert_eq!(modes_hash.len(), 64);
@@ -2082,6 +2517,22 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         ])
         .assert()
         .success();
+    for arguments in [
+        ["--screen-regex", "B.SY"],
+        ["--row-contains", "0:BUSY"],
+        ["--region-contains", "0,0,4,1:BUSY"],
+        ["--cursor-at", "4,0"],
+        ["--mode", "wraparound"],
+    ] {
+        let mut structural_wait = Command::cargo_bin("termtrace").expect("binary should build");
+        structural_wait
+            .arg("wait")
+            .arg(&session)
+            .args(arguments)
+            .args(["--timeout-ms", "1000"])
+            .assert()
+            .success();
+    }
     let output = child
         .wait_with_output()
         .expect("snapshot fixture completion");
@@ -2130,6 +2581,32 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
             .and_then(serde_json::Value::as_str),
         Some("live_session")
     );
+    assert_eq!(live["resolution"], "actor_snapshot");
+    let mut stable_frame = Command::cargo_bin("termtrace").expect("binary should build");
+    let stable = stable_frame
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "show",
+            "demo",
+            "--stable-for",
+            "20ms",
+            "--format",
+            "frame-json",
+            "--metadata",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("resolution=ActorSnapshot"));
+    let frame: serde_json::Value =
+        serde_json::from_slice(&stable.get_output().stdout).expect("stable frame JSON");
+    assert_eq!(frame["version"], 1);
+    assert_eq!(frame["capture_quality"], "stable");
+    assert!(
+        frame["frame"]["viewport_text"]
+            .as_str()
+            .is_some_and(|text| return text.contains("SHOWME"))
+    );
+    assert_eq!(frame["frame_hash"].as_str().map(str::len), Some(64));
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
     stop.env("TERMTRACE_STATE_DIR", &state)
         .args(["stop", "demo", "--wait"])
@@ -2145,7 +2622,40 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
             r#""source_kind":"completed_session""#,
         ))
         .stdout(predicate::str::contains(r#""capture_quality":"completed""#))
-        .stdout(predicate::str::contains(r#""source_completed":true"#));
+        .stdout(predicate::str::contains(r#""source_completed":true"#))
+        .stdout(predicate::str::contains(
+            r#""resolution":"canonical_replay""#,
+        ));
+    let mut warm = Command::cargo_bin("termtrace").expect("binary should build");
+    warm.env("TERMTRACE_STATE_DIR", &state)
+        .args(["show", "demo", "--format", "json-compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            r#""resolution":"validated_checkpoint""#,
+        ));
+    let session_path = fs_err::read_dir(state.join("sessions"))
+        .expect("session store")
+        .next()
+        .expect("stored session")
+        .expect("stored session entry")
+        .path();
+    let cache = fs_err::read_dir(session_path.join("derived-cache"))
+        .expect("checkpoint directory")
+        .next()
+        .expect("checkpoint entry")
+        .expect("checkpoint path")
+        .path();
+    fs_err::write(&cache, b"{}\n").expect("tamper disposable checkpoint");
+    let mut fallback = Command::cargo_bin("termtrace").expect("binary should build");
+    fallback
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["show", "demo", "--format", "json-compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            r#""resolution":"canonical_replay""#,
+        ));
 }
 
 #[test]
@@ -2191,6 +2701,53 @@ fn show_requires_explicit_permission_for_hidden_states() {
         .success()
         .stdout(predicate::str::contains(r#""presented":false"#))
         .stdout(predicate::str::contains("HIDDEN"));
+    let mut native = Command::cargo_bin("termtrace").expect("binary should build");
+    native
+        .arg("screenshot")
+        .arg(&session)
+        .args([
+            "--renderer",
+            "native",
+            "--state",
+            &hidden.record.state_id.to_string(),
+            "--out",
+        ])
+        .arg(temporary.path().join("rejected-native"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("presentation eligible"));
+}
+
+#[test]
+fn show_requires_explicit_prefix_recovery_for_incomplete_evidence() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("interrupted-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf PREFIX_ONLY"])
+        .assert()
+        .success();
+    fs_err::remove_file(session.join("completion.json")).expect("remove completion fixture");
+
+    let mut implicit = Command::cargo_bin("termtrace").expect("binary should build");
+    implicit.arg("show").arg(&session).assert().failure();
+
+    let mut recovered = Command::cargo_bin("termtrace").expect("binary should build");
+    recovered
+        .arg("show")
+        .arg(&session)
+        .args(["--recover-prefix", "--format", "json-compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            r#""source_kind":"interrupted_session""#,
+        ))
+        .stdout(predicate::str::contains(
+            r#""capture_quality":"incomplete""#,
+        ))
+        .stdout(predicate::str::contains("PREFIX_ONLY"));
 }
 
 #[test]
@@ -2218,6 +2775,48 @@ fn show_labels_ansi_files_and_stdin_as_unchained() {
         .success()
         .stdout(predicate::str::contains("wide:界"));
 
+    let imported = temporary.path().join("imported-ansi");
+    let mut import_show = Command::cargo_bin("termtrace").expect("binary should build");
+    import_show
+        .args(["show", "--input"])
+        .arg(&ansi)
+        .args(["--record-out"])
+        .arg(&imported)
+        .args(["--format", "json-compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""source_kind":"imported_ansi""#))
+        .stdout(predicate::str::contains(
+            r#""integrity":"canonical_chained""#,
+        ));
+    let imported_manifest = read_manifest(&imported).expect("import manifest");
+    let provenance = imported_manifest
+        .import_provenance
+        .expect("chain-bound import provenance");
+    let ansi_bytes = fs_err::read(&ansi).expect("ANSI source bytes");
+    assert_eq!(provenance.source_kind, "ansi_stream");
+    assert_eq!(provenance.byte_count, ansi_bytes.len() as u64);
+    assert_eq!(
+        provenance.blake3,
+        blake3::hash(&ansi_bytes).to_hex().to_string()
+    );
+    let imported_log = EventLog::read(imported.join("events.jsonl")).expect("import event log");
+    assert_eq!(
+        imported_log
+            .events
+            .iter()
+            .filter_map(|record| {
+                return match &record.event {
+                    Event::Output { data } => Some(data.as_bytes()),
+                    _ => None,
+                };
+            })
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>(),
+        ansi_bytes
+    );
+
     let mut vt_show = Command::cargo_bin("termtrace").expect("binary should build");
     vt_show
         .args(["show", "--input"])
@@ -2236,6 +2835,34 @@ fn show_labels_ansi_files_and_stdin_as_unchained() {
         .success()
         .stdout(predicate::str::contains("ERROR"))
         .stdout(predicate::str::contains("<"));
+
+    let image_manifest = temporary.path().join("show-image.json");
+    let mut png_show = Command::cargo_bin("termtrace").expect("binary should build");
+    let png = png_show
+        .args(["show", "--input"])
+        .arg(&ansi)
+        .args(["--format", "png", "--manifest"])
+        .arg(&image_manifest)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs_err::read(&image_manifest).expect("show image manifest"))
+            .expect("show image manifest JSON");
+    assert_eq!(manifest["truth_layer"], "semantic_rendering");
+    assert_eq!(manifest["blake3"], blake3::hash(&png).to_hex().to_string());
+
+    let mut native = Command::cargo_bin("termtrace").expect("binary should build");
+    native
+        .args(["show", "--input"])
+        .arg(&ansi)
+        .args(["--format", "png", "--renderer", "native"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("fallback is disabled"));
 }
 
 #[test]
@@ -2283,6 +2910,120 @@ fn show_records_one_off_commands_as_completed_evidence() {
         .expect("one-off session entries");
     assert_eq!(sessions.len(), 1);
     assert!(sessions[0].path().join("completion.json").is_file());
+
+    let explicit = temporary.path().join("explicit-one-off");
+    let mut explicit_show = Command::cargo_bin("termtrace").expect("binary should build");
+    explicit_show
+        .env("TERMTRACE_STATE_DIR", temporary.path())
+        .args(["show", "--out"])
+        .arg(&explicit)
+        .args(["--", "/bin/sh", "-c", "printf EXPLICIT"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("EXPLICIT"));
+    assert!(explicit.join("completion.json").is_file());
+
+    let sessions_before_discard = fs_err::read_dir(temporary.path().join("sessions"))
+        .expect("sessions before discard")
+        .count();
+    let mut discard = Command::cargo_bin("termtrace").expect("binary should build");
+    discard
+        .env("TERMTRACE_STATE_DIR", temporary.path())
+        .args([
+            "show",
+            "--discard-evidence",
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf DISPOSABLE",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("DISPOSABLE"))
+        .stderr(predicate::str::contains(
+            "no longer independently replayable",
+        ));
+    assert_eq!(
+        fs_err::read_dir(temporary.path().join("sessions"))
+            .expect("sessions after discard")
+            .count(),
+        sessions_before_discard
+    );
+}
+
+#[test]
+fn show_one_off_waits_stop_durably_and_detach_is_explicit() {
+    let temporary = TempDir::new().expect("temporary directory");
+    fs_err::set_permissions(temporary.path(), Permissions::from_mode(0o700))
+        .expect("owner-only state directory");
+
+    let mut waited = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = waited
+        .env("TERMTRACE_STATE_DIR", temporary.path())
+        .args([
+            "show",
+            "--format",
+            "json-compact",
+            "--wait-regex",
+            "READY-[0-9]+",
+            "--stable-for",
+            "20ms",
+            "--timeout-ms",
+            "5000",
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; printf READY-42; while :; do sleep .1; done",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let observation: serde_json::Value =
+        serde_json::from_slice(&output).expect("waited one-off observation");
+    assert_eq!(observation["source_kind"], "one_off_command");
+    assert_eq!(observation["source_completed"], true);
+    assert!(
+        observation
+            .pointer("/frame/viewport_text")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|text| return text.contains("READY-42"))
+    );
+
+    let mut detached = Command::cargo_bin("termtrace").expect("binary should build");
+    let detached_output = detached
+        .env("TERMTRACE_STATE_DIR", temporary.path())
+        .args([
+            "show",
+            "--detach",
+            "--timeout-ms",
+            "5000",
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; printf DETACHED; while :; do sleep .1; done",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let detached: serde_json::Value =
+        serde_json::from_slice(&detached_output).expect("detached one-off result");
+    assert_eq!(detached["detached"], true);
+    assert_eq!(detached["source_completed"], false);
+    let session_bytes: ByteString = serde_json::from_value(detached["canonical_session"].clone())
+        .expect("canonical detached session bytes");
+    let session = PathBuf::from(OsString::from_vec(session_bytes.into_bytes()));
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.env("TERMTRACE_STATE_DIR", temporary.path())
+        .arg("stop")
+        .arg(&session)
+        .arg("--wait")
+        .assert()
+        .success();
+    assert!(session.join("completion.json").is_file());
 }
 
 #[test]
@@ -2302,7 +3043,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         .arg(&session)
         .args(["--out"])
         .arg(&destination)
-        .args(["--format", "txt,json,deep-json,vt,html,svg"])
+        .args(["--format", "txt,json,deep-json,vt,html,svg,png"])
         .assert()
         .success()
         .stdout(predicate::str::contains("save-manifest.json"));
@@ -2324,7 +3065,18 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         manifest["sensitivity"],
         "terminal_screen_may_contain_secrets"
     );
-    assert_eq!(manifest["files"].as_array().map(Vec::len), Some(6));
+    assert_eq!(manifest["version"], 2);
+    assert_eq!(manifest["files"].as_array().map(Vec::len), Some(7));
+    assert_eq!(
+        manifest["semantic_image_resources"][0]["font_family"],
+        "Termtrace Fira Code"
+    );
+    assert_eq!(
+        manifest["semantic_image_resources"][0]["font_blake3"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
     assert!(
         fs_err::read_to_string(destination.join("screen.txt"))
             .expect("screen text")
@@ -2342,7 +3094,13 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
     );
     let svg = fs_err::read_to_string(destination.join("screen.svg")).expect("saved SVG");
     assert!(svg.contains("data-truth-layer=\"semantic_rendering\""));
+    assert!(svg.contains("data:font/ttf;base64,"));
     assert!(svg.contains(">S</text>") && svg.contains(">D</text>"));
+    assert!(
+        fs_err::read(destination.join("screen.png"))
+            .expect("saved PNG")
+            .starts_with(b"\x89PNG\r\n\x1a\n")
+    );
     for file in manifest["files"].as_array().expect("manifested files") {
         let path = destination.join(file["path"].as_str().expect("relative path"));
         let bytes = fs_err::read(path).expect("saved member");
@@ -2361,7 +3119,30 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         .stdout(predicate::str::contains(
             r#""truth_layer":"semantic_rendering""#,
         ));
-    assert!(screenshot.join("screen.svg").is_file());
+    assert!(screenshot.join("screen.png").is_file());
+
+    let final_state = inspect_session(&session, StateSelector::Final)
+        .expect("final screenshot state")
+        .record
+        .state_id;
+    let batch = temporary.path().join("semantic-screenshot-batch");
+    let mut batch_command = Command::cargo_bin("termtrace").expect("binary should build");
+    batch_command
+        .arg("screenshot")
+        .arg(&session)
+        .args(["--out"])
+        .arg(&batch)
+        .args(["--state", "0", "--state", &final_state.to_string()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("semantic_screenshot_batch"));
+    let batch_manifest: serde_json::Value = serde_json::from_slice(
+        &fs_err::read(batch.join("batch-manifest.json")).expect("batch manifest"),
+    )
+    .expect("batch manifest JSON");
+    assert_eq!(batch_manifest["entries"].as_array().map(Vec::len), Some(2));
+    assert!(batch.join("state-0000/screen.png").is_file());
+    assert!(batch.join("state-0001/screen.png").is_file());
 
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
@@ -2427,6 +3208,53 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""valid":true"#));
+
+    let archive = temporary.path().join("forensic.termtrace-bundle.tar.zst");
+    let archive_copy = temporary
+        .path()
+        .join("forensic-copy.termtrace-bundle.tar.zst");
+    for destination in [&archive, &archive_copy] {
+        let mut create_archive = Command::cargo_bin("termtrace").expect("binary should build");
+        create_archive
+            .arg("bundle")
+            .arg(&session)
+            .args(["--profile", "forensic", "--archive", "--out"])
+            .arg(destination)
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(r#""kind":"bundle_archive""#));
+    }
+    assert_eq!(
+        fs_err::read(&archive).expect("archive bytes"),
+        fs_err::read(&archive_copy).expect("repeat archive bytes")
+    );
+    assert_eq!(
+        fs_err::metadata(&archive)
+            .expect("archive metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    let mut verify_archive = Command::cargo_bin("termtrace").expect("binary should build");
+    verify_archive
+        .arg("bundle-verify")
+        .arg(&archive)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""valid":true"#));
+    let mut corrupted = fs_err::read(&archive_copy).expect("corruptible archive");
+    let middle = corrupted.len() / 2;
+    if let Some(byte) = corrupted.get_mut(middle) {
+        *byte ^= 0x80;
+    }
+    fs_err::write(&archive_copy, corrupted).expect("write corrupted archive");
+    let mut reject_archive = Command::cargo_bin("termtrace").expect("binary should build");
+    reject_archive
+        .arg("bundle-verify")
+        .arg(&archive_copy)
+        .assert()
+        .failure();
 
     fs_err::write(bundle.join("screen.txt"), b"tampered").expect("tamper bundle");
     let mut tampered = Command::cargo_bin("termtrace").expect("binary should build");
@@ -2539,6 +3367,41 @@ fn diff_reports_complete_cell_changes_and_enforces_expectations() {
         .stdout(predicate::str::contains(r#""grapheme":"A""#))
         .stdout(predicate::str::contains("界"));
 
+    let mut visual = Command::cargo_bin("termtrace").expect("binary should build");
+    let png = visual
+        .arg("diff")
+        .arg(&session)
+        .args([
+            "--from-state",
+            "0",
+            "--to-state",
+            &final_state.to_string(),
+            "--format",
+            "png",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+    let mut visual_svg = Command::cargo_bin("termtrace").expect("binary should build");
+    visual_svg
+        .arg("diff")
+        .arg(&session)
+        .args([
+            "--from-state",
+            "0",
+            "--to-state",
+            &final_state.to_string(),
+            "--format",
+            "svg",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("termtrace-semantic-diff-svg-v1"))
+        .stdout(predicate::str::contains("#ff3b30"));
+
     let mut rejected = Command::cargo_bin("termtrace").expect("binary should build");
     rejected
         .arg("diff")
@@ -2613,6 +3476,47 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         .stdout(predicate::str::contains(
             "this does not establish that pixels flickered",
         ));
+
+    let diagnostic_session = temporary.path().join("diagnostic-session");
+    let mut diagnostic_record = Command::cargo_bin("termtrace").expect("binary should build");
+    diagnostic_record
+        .args(["record", "--no-input", "--out"])
+        .arg(&diagnostic_session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf '\\033[2J\\033[H'; printf '%*s' 1200 '' | tr ' ' X; printf '\\033[3J'",
+        ])
+        .assert()
+        .success();
+    let mut diagnose = Command::cargo_bin("termtrace").expect("binary should build");
+    diagnose
+        .arg("diagnose")
+        .arg(&diagnostic_session)
+        .args([
+            "--check",
+            "full-redraw,flicker,stale-cells",
+            "--broad-change-percent",
+            "1",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""format":"termtrace-diagnose""#))
+        .stdout(predicate::str::contains(r#""code":"full_viewport_clear""#))
+        .stdout(predicate::str::contains(r#""code":"clear_then_repaint""#))
+        .stdout(predicate::str::contains(
+            "semantic evidence does not by itself prove a visible pixel clear",
+        ));
+
+    let mut gate = Command::cargo_bin("termtrace").expect("binary should build");
+    gate.arg("diagnose")
+        .arg(&diagnostic_session)
+        .args(["--check", "full-redraw", "--fail-on-finding"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("finding: full_viewport_clear"));
 }
 
 #[test]
@@ -2623,7 +3527,12 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
     record
         .args(["record", "--no-input", "--out"])
         .arg(&session)
-        .args(["--", "/bin/sh", "-c", "printf 'A\\033[31mB\\033[0m\\377C'"])
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf 'A\\033[?1049h\\033[31mB\\033[0m\\377C'",
+        ])
         .assert()
         .success();
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
@@ -2670,6 +3579,23 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
         .assert()
         .success()
         .stdout(predicate::eq(expected));
+
+    let projection_manifest = temporary.path().join("output-projection.json");
+    let mut stripped = Command::cargo_bin("termtrace").expect("binary should build");
+    stripped
+        .arg("output")
+        .arg(&session)
+        .args(["--strip-controls", "--manifest"])
+        .arg(&projection_manifest)
+        .assert()
+        .success()
+        .stdout(predicate::eq(b"AB\xffC".as_slice()))
+        .stderr(predicate::str::contains(
+            "projection_quality=unsuitable_for_full_screen",
+        ));
+    let projection = fs_err::read_to_string(projection_manifest).expect("projection report");
+    assert!(projection.contains(r#""projection_quality": "unsuitable_for_full_screen""#));
+    assert!(projection.contains(r#""alternate_screen_observed": true"#));
 }
 
 #[test]
@@ -2686,7 +3612,7 @@ fn output_follow_emits_each_durable_prefix_once_until_completion() {
             "--",
             "/bin/sh",
             "-c",
-            "printf A; sleep 0.15; printf '\\033[31mB\\377'",
+            "printf A; sleep 0.10; printf '\\033['; sleep 0.10; printf '31mB\\377'",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -2720,6 +3646,15 @@ fn output_follow_emits_each_durable_prefix_once_until_completion() {
         .copied()
         .collect::<Vec<_>>();
     assert_eq!(followed.stdout, expected);
+    let stripped = StdCommand::new(binary)
+        .arg("output")
+        .arg(&session)
+        .args(["--strip-controls", "--follow"])
+        .output()
+        .expect("follow completed stripped output");
+    assert!(stripped.status.success(), "{stripped:?}");
+    assert_eq!(stripped.stdout, b"AB\xff");
+    assert!(String::from_utf8_lossy(&stripped.stderr).contains("lossy_line_oriented"));
 }
 
 #[test]
@@ -3564,6 +4499,7 @@ fn playback_does_not_echo_terminal_query_responses() {
         session_id: header.session_id,
         creation_alias: None,
         lineage: None,
+        import_provenance: None,
         started_unix_ns: header.started_unix_ns,
         command: Vec::new(),
         working_directory: None,

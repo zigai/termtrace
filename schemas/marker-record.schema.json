@@ -20,6 +20,10 @@
       "minimum": 0,
       "type": "integer"
     },
+    "native_evidence_level": {
+      "description": "Honest native correlation level for the nominal frame.",
+      "type": "string"
+    },
     "nominal_frame": {
       "description": "Nominal source frame at the requested rate.",
       "format": "uint64",
@@ -31,6 +35,26 @@
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "presentation_eligible": {
+      "description": "Whether an associated presentation-eligible semantic state exists.",
+      "type": "boolean"
+    },
+    "semantic_state_hash": {
+      "description": "Complete hash of the associated semantic state.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "semantic_state_id": {
+      "description": "Latest presentation-eligible semantic state at or before the marker.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     }
   },
   "required": [
@@ -38,7 +62,9 @@
     "event_seq",
     "monotonic_ns",
     "nominal_frame",
-    "occurrence_count"
+    "occurrence_count",
+    "presentation_eligible",
+    "native_evidence_level"
   ],
   "title": "MarkerRecord",
   "type": "object"

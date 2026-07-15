@@ -1,0 +1,72 @@
+{
+  "$defs": {
+    "ReviewSearchMatch": {
+      "additionalProperties": false,
+      "description": "One semantic viewport text match with a copyable canonical selector.",
+      "properties": {
+        "event_seq": {
+          "description": "Canonical event sequence associated with the state.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "presented": {
+          "description": "Whether the state was presentation-eligible.",
+          "type": "boolean"
+        },
+        "selector": {
+          "description": "Ready-to-run selector arguments.",
+          "type": "string"
+        },
+        "state_hash": {
+          "description": "Exact semantic state hash.",
+          "type": "string"
+        },
+        "state_id": {
+          "description": "Exact semantic state identifier.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "state_id",
+        "presented",
+        "state_hash",
+        "selector"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/review-search-result.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Stable noninteractive reviewer text-search result.",
+  "properties": {
+    "canonical_session": {
+      "description": "Immutable completed session directory.",
+      "type": "string"
+    },
+    "matches": {
+      "description": "Ordered semantic state matches.",
+      "items": {
+        "$ref": "#/$defs/ReviewSearchMatch"
+      },
+      "type": "array"
+    },
+    "query": {
+      "description": "Exact viewport substring query.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "canonical_session",
+    "query",
+    "matches"
+  ],
+  "title": "ReviewSearchResult",
+  "type": "object"
+}

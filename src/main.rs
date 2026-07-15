@@ -1,6 +1,7 @@
 //! Command-line entry point for Termtrace.
 
 use std::{
+    collections::VecDeque,
     env,
     ffi::OsString,
     fmt::Write as _,
@@ -13,6 +14,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, ExitCode, Stdio},
     result::Result as StdResult,
+    sync::{Arc, Mutex, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -22,32 +24,42 @@ use clap_complete::{Shell, generate};
 use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
     Error,
-    analysis::{ExplainReport, explain},
+    analysis::{DiagnoseReport, DiagnosticCheck, ExplainReport, diagnose, explain},
+    artifact::write_secure,
     bundle::{
-        BundleProfile, create as create_bundle, plan as plan_bundle, verify as verify_bundle,
+        BundleProfile, archive as archive_bundle, create as create_bundle, plan as plan_bundle,
+        verify as verify_bundle, verify_archive as verify_bundle_archive,
     },
     capability::{CapabilityReport, CapabilityStatus, probe_capabilities},
     control::{
         CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, PointerOperation,
-        ProcessSignal, ScreenPredicate, request, send_request,
+        ProcessSignal, ScreenMode, ScreenPredicate, ScreenRegion, StateHashComparison, request,
+        send_request,
     },
     diff::{SemanticDiff, diff_states, inspect_point},
     driver::serve as serve_driver,
     event::{ByteString, EVENT_LOG_VERSION, Event, EventProjection, InputKind, event_type},
     event_log::{DurabilityMode, DurabilityPolicy, EventLog},
     geometry::{inherited_geometry, run_probe},
-    ghostty_vt::{Format as GhosttyFormat, KeyModifiers, MouseButton, NamedKey, RowState},
+    ghostty_vt::{
+        CursorStyle, Format as GhosttyFormat, KeyModifiers, MouseButton, NamedKey, RowState,
+        SemanticState,
+    },
     inspection::{
         inspect_session, state_text, wait_for_completion, wait_for_output, wait_for_screen,
     },
     interop::export_asciicast,
     observation::{
-        StatePoint, format_ansi_stream, observe_ansi_stream, observe_one_off_session,
-        observe_session_with_options,
+        CaptureQuality, Observation, ObservationSourceKind, StatePoint, TruthLayer,
+        format_ansi_stream, observe_ansi_stream, observe_one_off_session,
+        observe_session_with_options, observe_validated_prefix, semantic_state_for_session,
+        semantic_state_from_ansi,
     },
+    output_projection::{ControlStripper, OutputProjectionQuality, OutputProjectionReport},
     playback::{PlaybackOptions, playback},
     presentation::{
-        EditPlan, export as export_presentation, markers as list_markers, plan as plan_presentation,
+        EditPlan, PreviewOptions, export as export_presentation, markers as list_markers,
+        plan as plan_presentation, preview as preview_presentation,
     },
     profile::{
         ResolvedGhosttyProfile, resolve_ghostty_profile, resolved_terminal_colors,
@@ -60,20 +72,33 @@ use termtrace::{
         GHOSTTY_REVISION, IndexOptions, STATE_FORMAT_VERSION, StateSelection, StateSelector,
         format_state, index_session_with_options,
     },
-    reviewer::{ReviewerCapabilities, run as run_reviewer, summarize as summarize_review},
-    save::{SaveFormat, save},
-    scenario::{Scenario, ScenarioStatus, run as run_scenario},
-    schema::write_all as write_schemas,
-    session::{
-        CaptureTarget, GeometryProvenance, GeometrySource, GhosttyVisualOverrides, SessionGeometry,
-        SessionLineage, SessionManifest, VerificationLevel, manifest_hash, read_manifest,
-        validate_completed_log, verify_session_with_trust,
+    reviewer::{
+        ReviewerCapabilities, export_state as export_review_state, run as run_reviewer,
+        search as search_review, summarize as summarize_review,
     },
-    session_registry::SessionRegistry,
+    save::{SaveFormat, save, save_screenshot_batch},
+    scenario::{
+        Scenario, ScenarioAttemptReport, ScenarioCaseReport, ScenarioStatus, ScenarioSuiteReport,
+        ScenarioSuiteStatus, run as run_scenario,
+    },
+    schema::write_all as write_schemas,
+    semantic_image::{
+        SEMANTIC_PNG_RENDERER, SEMANTIC_SVG_RENDERER, render_diff_png, render_diff_svg, render_png,
+        render_svg,
+    },
+    session::{
+        CaptureTarget, GeometryProvenance, GeometrySource, GhosttyVisualOverrides,
+        ImportProvenance, SessionGeometry, SessionLineage, SessionManifest, VerificationLevel,
+        manifest_hash, read_manifest, validate_completed_log, verify_session_with_trust,
+    },
+    session_registry::{DetachedSessionPaths, SessionRegistry},
     timeline::{
         TimelineEntry, TimelineItem, build_timeline, parse_time_offset_ns, resolve_source_selection,
     },
-    visual::{CaptureOptions, capture, probe_ghostty_geometry, solve_ghostty_geometry},
+    visual::{
+        CaptureKind, CaptureOptions, GeometrySolveReport, capture, probe_ghostty_geometry,
+        solve_ghostty_geometry,
+    },
 };
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, registry, util::SubscriberInitExt};
 
@@ -163,6 +188,8 @@ enum Command {
     Diff(DiffArgs),
     /// Explain exact VT and semantic evidence around one state point.
     Explain(ExplainArgs),
+    /// Run conservative evidence-backed rendering diagnostics.
+    Diagnose(DiagnoseArgs),
     /// Navigate validated evidence in a read-only semantic terminal UI.
     Review(ReviewArgs),
     /// Write exact canonical child PTY output bytes.
@@ -208,11 +235,30 @@ struct VersionArgs {
 
 #[derive(Debug, Args)]
 struct TestArgs {
-    /// Strict versioned scenario JSON document.
-    scenario: PathBuf,
+    /// One or more strict versioned scenario JSON documents.
+    #[arg(num_args = 1..)]
+    scenario: Vec<PathBuf>,
     /// Owner-only result, failure, and canonical evidence root.
     #[arg(long, default_value = "termtrace-results")]
     artifacts: PathBuf,
+    /// Explicitly replace normalized semantic frame baselines.
+    #[arg(long)]
+    update_snapshots: bool,
+    /// New JUnit XML result path.
+    #[arg(long)]
+    junit: Option<PathBuf>,
+    /// Maximum concurrent fresh-session workers.
+    #[arg(long, default_value_t = 1, value_parser = parse_scenario_jobs)]
+    jobs: usize,
+    /// Zero-based deterministic shard index.
+    #[arg(long, requires = "shard_count")]
+    shard_index: Option<usize>,
+    /// Total deterministic shard count.
+    #[arg(long, requires = "shard_index", value_parser = parse_positive_usize)]
+    shard_count: Option<usize>,
+    /// Fresh-session reruns after a failed attempt.
+    #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=10))]
+    reruns: u8,
 }
 
 #[derive(Debug, Args)]
@@ -265,6 +311,9 @@ struct BundleArgs {
     /// Print the selected paths and sensitivities without writing.
     #[arg(long)]
     dry_run: bool,
+    /// Publish a deterministic compressed archive instead of a directory.
+    #[arg(long)]
+    archive: bool,
 }
 
 #[derive(Debug, Args)]
@@ -406,13 +455,22 @@ struct InspectArgs {
     row: Option<u16>,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum ShowFormat {
     Text,
     Json,
     JsonCompact,
+    FrameJson,
     Vt,
     Html,
+    Svg,
+    Png,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum ShowRenderer {
+    Semantic,
+    Native,
 }
 
 #[derive(Debug, Args)]
@@ -433,6 +491,9 @@ struct ShowArgs {
     /// ANSI/VT byte stream path, or `-` for standard input.
     #[arg(long)]
     input: Option<PathBuf>,
+    /// Promote an ANSI input stream into a new canonical import session.
+    #[arg(long)]
+    record_out: Option<PathBuf>,
     /// ANSI stream columns.
     #[arg(long, default_value_t = 80)]
     cols: u16,
@@ -442,6 +503,12 @@ struct ShowArgs {
     /// One-off command to record to completion, following `--`.
     #[arg(last = true, num_args = 1..)]
     command: Vec<OsString>,
+    /// New canonical evidence path for a one-off command.
+    #[arg(long)]
+    out: Option<PathBuf>,
+    /// Remove auto-allocated one-off evidence only after successful output.
+    #[arg(long, conflicts_with = "out")]
+    discard_evidence: bool,
     /// Exact semantic state identifier.
     #[arg(long)]
     state: Option<u64>,
@@ -457,6 +524,33 @@ struct ShowArgs {
     /// Permit an explicitly selected synchronized-output hidden state.
     #[arg(long)]
     include_hidden: bool,
+    /// Require an unchanged live presented state for this duration.
+    #[arg(long, value_parser = parse_pace_duration, default_value = "0ms")]
+    stable_for: Duration,
+    /// Server-side deadline for a live stability request.
+    #[arg(long, default_value_t = 30_000)]
+    timeout_ms: u64,
+    /// Write a concise provenance header to standard error.
+    #[arg(long)]
+    metadata: bool,
+    /// Renderer used by image formats; native never falls back to semantic.
+    #[arg(long, value_enum, default_value_t = ShowRenderer::Semantic)]
+    renderer: ShowRenderer,
+    /// Optional no-replace sidecar manifest for binary image output.
+    #[arg(long)]
+    manifest: Option<PathBuf>,
+    /// Explicitly observe an integrity-checked incomplete event prefix offline.
+    #[arg(long)]
+    recover_prefix: bool,
+    /// For one-off commands, capture when exact presented text appears, then stop.
+    #[arg(long, conflicts_with = "wait_regex")]
+    wait: Option<String>,
+    /// For one-off commands, capture when a bounded presented regex matches, then stop.
+    #[arg(long, conflicts_with = "wait")]
+    wait_regex: Option<String>,
+    /// Explicitly leave a one-off recorder running and return its canonical path.
+    #[arg(long)]
+    detach: bool,
     /// Output representation.
     #[arg(long, value_enum, default_value_t = ShowFormat::Text)]
     format: ShowFormat,
@@ -484,6 +578,8 @@ enum DiffFormat {
     Text,
     Json,
     JsonCompact,
+    Svg,
+    Png,
 }
 
 #[derive(Debug, Args)]
@@ -572,12 +668,39 @@ struct ExplainArgs {
 }
 
 #[derive(Debug, Args)]
+struct DiagnoseArgs {
+    /// Completed session name or canonical path.
+    session: PathBuf,
+    /// Comma-separated detector groups; omit to run every detector.
+    #[arg(long, value_delimiter = ',', value_parser = parse_diagnostic_check)]
+    check: Vec<DiagnosticCheck>,
+    /// Minimum changed-cell percentage for a broad repaint.
+    #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u8).range(1..=100))]
+    broad_change_percent: u8,
+    /// Emit one stable structured report.
+    #[arg(long)]
+    json: bool,
+    /// Exit unsuccessfully when at least one finding is emitted.
+    #[arg(long)]
+    fail_on_finding: bool,
+}
+
+#[derive(Debug, Args)]
 struct ReviewArgs {
     /// Completed canonical session or registered name.
     session: Option<PathBuf>,
     /// Start at the first semantic state at or after this unique marker.
     #[arg(long)]
     around_marker: Option<String>,
+    /// Exact semantic viewport substring to find and navigate with n/N.
+    #[arg(long)]
+    search: Option<String>,
+    /// Export one exact semantic state to a new owner-only directory.
+    #[arg(long, requires = "state")]
+    export_state: Option<PathBuf>,
+    /// Exact state identifier for `--export-state`.
+    #[arg(long, requires = "export_state")]
+    state: Option<u64>,
     /// Print scriptable reviewer commands and safety policy.
     #[arg(long, conflicts_with = "json")]
     commands: bool,
@@ -587,12 +710,23 @@ struct ReviewArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("output_representation")
+        .required(true)
+        .args(["raw", "strip_controls"])
+))]
 struct OutputArgs {
     /// Completed session name or canonical path.
     session: PathBuf,
     /// Write exact concatenated child PTY bytes without decoding.
-    #[arg(long, required = true)]
+    #[arg(long)]
     raw: bool,
+    /// Emit a named lossy projection retaining printable bytes and line controls.
+    #[arg(long)]
+    strip_controls: bool,
+    /// New no-replace JSON report path; unavailable while following.
+    #[arg(long)]
+    manifest: Option<PathBuf>,
     /// Continue emitting newly durable output until the session completes.
     #[arg(long)]
     follow: bool,
@@ -644,6 +778,7 @@ enum SaveFormatArg {
     Vt,
     Html,
     Svg,
+    Png,
 }
 
 impl From<SaveFormatArg> for SaveFormat {
@@ -655,6 +790,7 @@ impl From<SaveFormatArg> for SaveFormat {
             SaveFormatArg::Vt => Self::Vt,
             SaveFormatArg::Html => Self::Html,
             SaveFormatArg::Svg => Self::Svg,
+            SaveFormatArg::Png => Self::Png,
         };
     }
 }
@@ -705,19 +841,40 @@ struct ScreenshotArgs {
     out: PathBuf,
     /// Exact semantic state identifier.
     #[arg(long)]
-    state: Option<u64>,
+    state: Vec<u64>,
     /// Latest state at or before this event sequence.
     #[arg(long)]
-    event_seq: Option<u64>,
+    event_seq: Vec<u64>,
     /// Latest state at or before this session offset.
     #[arg(long, value_parser = parse_time_offset_ns)]
-    at: Option<u64>,
+    at: Vec<u64>,
     /// State at a unique marker.
     #[arg(long)]
-    at_marker: Option<String>,
+    at_marker: Vec<String>,
     /// Permit an explicitly selected synchronized-output hidden state.
     #[arg(long)]
     include_hidden: bool,
+    /// Semantic image representation.
+    #[arg(long, value_enum, default_value_t = ScreenshotFormat::Png)]
+    format: ScreenshotFormat,
+    /// Semantic state renderer or actual Ghostty native frame.
+    #[arg(long, value_enum, default_value_t = ShowRenderer::Semantic)]
+    renderer: ShowRenderer,
+    /// Strict whole native viewport as `WIDTHxHEIGHT`.
+    #[arg(long, value_parser = parse_capture_target, conflicts_with = "fit_viewport")]
+    viewport: Option<CaptureTarget>,
+    /// Explicitly request the default exact-grid viewport solver.
+    #[arg(long, conflicts_with = "viewport")]
+    fit_viewport: bool,
+    /// Emphasize that a supplied viewport is an exact evidentiary assertion.
+    #[arg(long, requires = "viewport")]
+    strict: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum ScreenshotFormat {
+    Svg,
+    Png,
 }
 
 #[derive(Debug, Args)]
@@ -725,7 +882,21 @@ struct ScreenshotArgs {
     ArgGroup::new("predicate")
         .required(true)
         .multiple(false)
-        .args(["screen", "output", "screen_absent"])
+        .args([
+            "screen",
+            "output",
+            "screen_absent",
+            "screen_regex",
+            "row_contains",
+            "region_contains",
+            "cursor_at",
+            "cursor_visible",
+            "cursor_shape",
+            "mode",
+            "mode_disabled",
+            "state_changed",
+            "state_unchanged"
+        ])
 ))]
 struct WaitArgs {
     /// Live session name or canonical path.
@@ -738,12 +909,80 @@ struct WaitArgs {
     /// Exact UTF-8 text required to be absent from the presented viewport.
     #[arg(long)]
     screen_absent: Option<String>,
+    /// Bounded linear-time regular expression required in the viewport.
+    #[arg(long)]
+    screen_regex: Option<String>,
+    /// Required row substring as `ROW:TEXT`, with a zero-based row.
+    #[arg(long)]
+    row_contains: Option<String>,
+    /// Required region substring as `LEFT,TOP,RIGHT,BOTTOM:TEXT` with half-open bounds.
+    #[arg(long)]
+    region_contains: Option<String>,
+    /// Require the cursor at zero-based `COLUMN,ROW`.
+    #[arg(long)]
+    cursor_at: Option<String>,
+    /// Require visible (`true`) or hidden (`false`) cursor state.
+    #[arg(long)]
+    cursor_visible: Option<bool>,
+    /// Require one cursor shape.
+    #[arg(long, value_enum)]
+    cursor_shape: Option<CursorShapeArg>,
+    /// Require one stable terminal mode to be enabled.
+    #[arg(long, value_enum)]
+    mode: Option<ScreenModeArg>,
+    /// Require one stable terminal mode to be disabled.
+    #[arg(long, value_enum)]
+    mode_disabled: Option<ScreenModeArg>,
+    /// Require the presented state to differ from this BLAKE3 hash.
+    #[arg(long)]
+    state_changed: Option<String>,
+    /// Require the presented state to equal this BLAKE3 hash.
+    #[arg(long)]
+    state_unchanged: Option<String>,
     /// Require an unchanged matching presented state for this duration.
     #[arg(long, value_parser = parse_pace_duration, default_value = "0ms")]
     stable_for: Duration,
     /// Maximum wait duration in milliseconds.
     #[arg(long, default_value_t = 30_000)]
     timeout_ms: u64,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CursorShapeArg {
+    Bar,
+    Block,
+    Underline,
+    HollowBlock,
+}
+
+impl From<CursorShapeArg> for CursorStyle {
+    fn from(value: CursorShapeArg) -> Self {
+        return match value {
+            CursorShapeArg::Bar => Self::Bar,
+            CursorShapeArg::Block => Self::Block,
+            CursorShapeArg::Underline => Self::Underline,
+            CursorShapeArg::HollowBlock => Self::HollowBlock,
+        };
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ScreenModeArg {
+    AlternateScreen,
+    BracketedPaste,
+    Wraparound,
+    SynchronizedOutput,
+}
+
+impl From<ScreenModeArg> for ScreenMode {
+    fn from(value: ScreenModeArg) -> Self {
+        return match value {
+            ScreenModeArg::AlternateScreen => Self::AlternateScreen,
+            ScreenModeArg::BracketedPaste => Self::BracketedPaste,
+            ScreenModeArg::Wraparound => Self::Wraparound,
+            ScreenModeArg::SynchronizedOutput => Self::SynchronizedOutput,
+        };
+    }
 }
 
 #[derive(Debug, Args)]
@@ -831,6 +1070,15 @@ struct PlaybackArgs {
     /// Exclusive source offset used by ranged native capture.
     #[arg(long)]
     to_ns: Option<u64>,
+    /// Exact endpoint event used by native single-state capture.
+    #[arg(long)]
+    endpoint_event_seq: Option<u64>,
+    /// Inclusive byte offset within the endpoint output event.
+    #[arg(long)]
+    endpoint_event_byte_offset: Option<u64>,
+    /// Disable source-time sleeps while replaying an exact endpoint.
+    #[arg(long)]
+    instant: bool,
 }
 
 #[derive(Debug, Args)]
@@ -964,6 +1212,10 @@ struct PointerArgs {
 enum PointerCommand {
     /// Press and release one button at a zero-based cell.
     Click(PointerClickArgs),
+    /// Repeat a complete click two through four times.
+    MultiClick(PointerMultiClickArgs),
+    /// Press, emit bounded motion samples, and release at a destination cell.
+    Drag(PointerDragArgs),
     /// Emit signed vertical wheel ticks at a zero-based cell.
     Scroll(PointerScrollArgs),
 }
@@ -982,6 +1234,53 @@ struct PointerClickArgs {
     /// Apply only if the actor's latest presented state has this BLAKE3 hash.
     #[arg(long = "if-state")]
     expected_presented_state_hash: Option<String>,
+    #[command(flatten)]
+    postcondition: PointerPostconditionArgs,
+}
+
+#[derive(Debug, Args)]
+struct PointerMultiClickArgs {
+    /// Zero-based COLUMN,ROW cell.
+    #[arg(long, value_parser = parse_cell)]
+    cell: (u16, u16),
+    /// Button to click.
+    #[arg(long, value_enum, default_value_t = CliPointerButton::Left)]
+    button: CliPointerButton,
+    /// Number of complete clicks.
+    #[arg(long, value_parser = clap::value_parser!(u8).range(2..=4))]
+    count: u8,
+    /// Reject when tracking suppresses output instead of returning a no-op.
+    #[arg(long)]
+    strict: bool,
+    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
+    #[arg(long = "if-state")]
+    expected_presented_state_hash: Option<String>,
+    #[command(flatten)]
+    postcondition: PointerPostconditionArgs,
+}
+
+#[derive(Debug, Args)]
+struct PointerDragArgs {
+    /// Zero-based COLUMN,ROW press cell.
+    #[arg(long, value_parser = parse_cell)]
+    from: (u16, u16),
+    /// Zero-based COLUMN,ROW release cell.
+    #[arg(long, value_parser = parse_cell)]
+    to: (u16, u16),
+    /// Button held throughout the drag.
+    #[arg(long, value_enum, default_value_t = CliPointerButton::Left)]
+    button: CliPointerButton,
+    /// Number of motion samples, including the destination.
+    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u8).range(1..=100))]
+    steps: u8,
+    /// Reject when tracking suppresses output instead of returning a no-op.
+    #[arg(long)]
+    strict: bool,
+    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
+    #[arg(long = "if-state")]
+    expected_presented_state_hash: Option<String>,
+    #[command(flatten)]
+    postcondition: PointerPostconditionArgs,
 }
 
 #[derive(Debug, Args)]
@@ -998,6 +1297,24 @@ struct PointerScrollArgs {
     /// Apply only if the actor's latest presented state has this BLAKE3 hash.
     #[arg(long = "if-state")]
     expected_presented_state_hash: Option<String>,
+    #[command(flatten)]
+    postcondition: PointerPostconditionArgs,
+}
+
+#[derive(Debug, Args)]
+struct PointerPostconditionArgs {
+    /// After applying input, wait until the presented screen contains this text.
+    #[arg(long, conflicts_with = "wait_screen_absent")]
+    wait_screen: Option<String>,
+    /// After applying input, wait until the presented screen excludes this text.
+    #[arg(long, conflicts_with = "wait_screen")]
+    wait_screen_absent: Option<String>,
+    /// Require one unchanged matching presented state for this duration.
+    #[arg(long, default_value = "0ms", value_parser = parse_pace_duration)]
+    stable_for: Duration,
+    /// Bounded postcondition deadline.
+    #[arg(long, default_value_t = 10_000)]
+    timeout_ms: u64,
 }
 
 #[derive(Debug, Args)]
@@ -1082,8 +1399,37 @@ struct VideoArgs {
 enum VideoCommand {
     /// Resolve clips, speeds, and holds without rendering.
     Plan(VideoPlanArgs),
+    /// Render an atomic contact sheet and low-resolution review video.
+    Preview(VideoPreviewArgs),
     /// Export an H.264 MP4 and frame provenance into a new directory.
     Export(VideoExportArgs),
+}
+
+#[derive(Debug, Args)]
+struct VideoPreviewArgs {
+    /// Completed session containing a verified full native capture.
+    session: PathBuf,
+    /// Strict versioned edit-plan JSON.
+    #[arg(long)]
+    edit: PathBuf,
+    /// New no-replace preview artifact directory.
+    #[arg(long)]
+    out: PathBuf,
+    /// Storyboard tile columns.
+    #[arg(long, default_value_t = 4)]
+    columns: u8,
+    /// Width of each storyboard tile.
+    #[arg(long, default_value_t = 320)]
+    tile_width: u16,
+    /// Maximum storyboard frames.
+    #[arg(long, default_value_t = 12)]
+    max_frames: u16,
+    /// Retain only frames carrying configured change visualization.
+    #[arg(long)]
+    change_only: bool,
+    /// Low-resolution preview width.
+    #[arg(long, default_value_t = 640)]
+    preview_width: u16,
 }
 
 #[derive(Debug, Args)]
@@ -1128,6 +1474,19 @@ struct RecordArgs {
     /// Base64-safe JSON restart override descriptor supplied by the supervisor.
     #[arg(long, hide = true)]
     restart_overrides: Option<String>,
+
+    /// Internal source kind for a chain-bound ANSI import.
+    #[arg(long, hide = true)]
+    import_source_kind: Option<String>,
+    /// Internal exact byte count for a chain-bound ANSI import.
+    #[arg(long, hide = true)]
+    import_source_byte_count: Option<u64>,
+    /// Internal exact BLAKE3 for a chain-bound ANSI import.
+    #[arg(long, hide = true)]
+    import_source_blake3: Option<String>,
+    /// Internal original source path bytes for a chain-bound ANSI import.
+    #[arg(long, hide = true)]
+    import_source: Option<OsString>,
 
     #[command(flatten)]
     recording: RecordingArgs,
@@ -1442,6 +1801,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Timeline(arguments) => return run_timeline(arguments),
         Command::Diff(arguments) => return run_diff(arguments),
         Command::Explain(arguments) => return run_explain(arguments),
+        Command::Diagnose(arguments) => return run_diagnose(arguments),
         Command::Review(arguments) => return run_review(arguments),
         Command::Output(arguments) => return run_output(arguments),
         Command::Events(arguments) => return run_events(arguments),
@@ -1474,13 +1834,23 @@ fn run_review(arguments: ReviewArgs) -> Result<ExitCode> {
         return miette::miette!("review requires SESSION unless --commands is used");
     })?;
     let session = resolve_session_ref(session)?;
+    if let (Some(destination), Some(state_id)) = (&arguments.export_state, arguments.state) {
+        return write_json_line(&export_review_state(session, state_id, destination)?);
+    }
     if arguments.json {
+        if let Some(query) = &arguments.search {
+            return write_json_line(&search_review(session, query)?);
+        }
         return write_json_line(&summarize_review(
             session,
             arguments.around_marker.as_deref(),
         )?);
     }
-    run_reviewer(session, arguments.around_marker.as_deref())?;
+    run_reviewer(
+        session,
+        arguments.around_marker.as_deref(),
+        arguments.search.as_deref(),
+    )?;
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -1490,6 +1860,29 @@ fn run_video(arguments: VideoArgs) -> Result<ExitCode> {
             let session = resolve_session_ref(arguments.session)?;
             let edit = EditPlan::read(arguments.edit)?;
             write_json_line(&plan_presentation(session, &edit)?)
+        }
+        VideoCommand::Preview(arguments) => {
+            let session = resolve_session_ref(arguments.session)?;
+            let edit = EditPlan::read(arguments.edit)?;
+            let plan = plan_presentation(session, &edit)?;
+            let outcome = preview_presentation(
+                &plan,
+                arguments.out,
+                PreviewOptions {
+                    columns: arguments.columns,
+                    tile_width: arguments.tile_width,
+                    max_frames: arguments.max_frames,
+                    change_only: arguments.change_only,
+                    preview_width: arguments.preview_width,
+                },
+            )?;
+            write_json_line(&serde_json::json!({
+                "kind": "presentation_preview",
+                "directory": outcome.directory,
+                "contact_sheet": outcome.contact_sheet,
+                "video": outcome.video,
+                "edit_plan_hash": plan.edit_plan_hash,
+            }))
         }
         VideoCommand::Export(arguments) => {
             let session = resolve_session_ref(arguments.session)?;
@@ -1508,21 +1901,212 @@ fn run_video(arguments: VideoArgs) -> Result<ExitCode> {
 }
 
 fn run_test(arguments: TestArgs) -> Result<ExitCode> {
-    let scenario = Scenario::read(&arguments.scenario)?;
+    let shard = match (arguments.shard_index, arguments.shard_count) {
+        (Some(index), Some(count)) if index < count => Some((index, count)),
+        (Some(index), Some(count)) => {
+            return Err(miette::miette!(
+                "scenario shard index {index} must be less than shard count {count}"
+            ));
+        }
+        (None, None) => None,
+        _ => {
+            return Err(miette::miette!(
+                "scenario sharding requires index and count"
+            ));
+        }
+    };
+    let mut paths = arguments.scenario;
+    paths.sort();
+    paths.dedup();
+    let tasks = paths
+        .into_iter()
+        .map(|path| {
+            let scenario = Scenario::read(&path)?;
+            return scenario
+                .expand_matrix()?
+                .into_iter()
+                .map(|(label, scenario)| {
+                    let identity = if label.is_empty() {
+                        path.clone()
+                    } else {
+                        PathBuf::from(format!("{}#{label}", path.display()))
+                    };
+                    return Ok((identity, scenario));
+                })
+                .collect::<Result<Vec<_>>>();
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter(|(index, _task)| {
+            return shard.is_none_or(|(shard_index, shard_count)| {
+                return index % shard_count == shard_index;
+            });
+        })
+        .map(|(_index, task)| return task)
+        .collect::<Vec<_>>();
+    if tasks.is_empty() {
+        return Err(miette::miette!(
+            "scenario selection produced an empty shard"
+        ));
+    }
     let binary = env::current_exe().into_diagnostic()?;
-    let report = run_scenario(
-        &scenario,
-        binary,
-        arguments.artifacts.join("sessions"),
-        arguments.artifacts.join("failures"),
-    )?;
-    let status = report.status;
+    let task_count = tasks.len();
+    let queue = Arc::new(Mutex::new(VecDeque::from(tasks)));
+    let (sender, receiver) = mpsc::channel();
+    let mut cases = vec![None; task_count];
+    thread::scope(|scope| -> Result<()> {
+        for _worker in 0..arguments.jobs.min(task_count) {
+            let queue = Arc::clone(&queue);
+            let sender = sender.clone();
+            let binary = binary.clone();
+            let artifacts = arguments.artifacts.clone();
+            scope.spawn(move || {
+                loop {
+                    let task = {
+                        let mut queue = match queue.lock() {
+                            Ok(queue) => queue,
+                            Err(poisoned) => poisoned.into_inner(),
+                        };
+                        queue.pop_front()
+                    };
+                    let Some((path, scenario)) = task else {
+                        return;
+                    };
+                    let result = run_scenario_case(
+                        path,
+                        scenario,
+                        &binary,
+                        &artifacts,
+                        arguments.update_snapshots,
+                        arguments.reruns,
+                    )
+                    .map_err(|error| return error.to_string());
+                    if sender.send(result).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+        drop(sender);
+        for slot in &mut cases {
+            let case = receiver
+                .recv()
+                .into_diagnostic()?
+                .map_err(|message| return miette::miette!(message))?;
+            *slot = Some(case);
+        }
+        return Ok(());
+    })?;
+    let mut cases = cases.into_iter().flatten().collect::<Vec<_>>();
+    cases.sort_by(|left, right| return left.scenario.cmp(&right.scenario));
+    let status = if cases.iter().all(|case| {
+        return case
+            .attempts
+            .last()
+            .is_some_and(|attempt| return attempt.report.status == ScenarioStatus::Passed);
+    }) {
+        ScenarioSuiteStatus::Passed
+    } else {
+        ScenarioSuiteStatus::Failed
+    };
+    let report = ScenarioSuiteReport {
+        version: 1,
+        status,
+        jobs: arguments.jobs,
+        shard_index: shard.map(|value| return value.0),
+        shard_count: shard.map(|value| return value.1),
+        cases,
+    };
+    if let Some(path) = &arguments.junit {
+        write_scenario_junit(path, &report)?;
+    }
     write_json_line(&report)?;
-    return Ok(if status == ScenarioStatus::Passed {
+    return Ok(if status == ScenarioSuiteStatus::Passed {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
     });
+}
+
+fn run_scenario_case(
+    path: PathBuf,
+    scenario: Scenario,
+    binary: &Path,
+    artifacts: &Path,
+    update_snapshots: bool,
+    reruns: u8,
+) -> Result<ScenarioCaseReport> {
+    let mut attempts = Vec::new();
+    for attempt in 1..=u32::from(reruns).saturating_add(1) {
+        let report = run_scenario(
+            &scenario,
+            binary,
+            artifacts.join("sessions"),
+            artifacts.join("failures"),
+            update_snapshots,
+        )?;
+        let passed = report.status == ScenarioStatus::Passed;
+        attempts.push(ScenarioAttemptReport { attempt, report });
+        if passed {
+            break;
+        }
+    }
+    return Ok(ScenarioCaseReport {
+        scenario: path,
+        attempts,
+    });
+}
+
+fn write_scenario_junit(path: &Path, report: &ScenarioSuiteReport) -> Result<()> {
+    let failure_count = report
+        .cases
+        .iter()
+        .filter(|case| {
+            return case
+                .attempts
+                .last()
+                .is_none_or(|attempt| return attempt.report.status == ScenarioStatus::Failed);
+        })
+        .count();
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"termtrace\" tests=\"{}\" failures=\"{failure_count}\">",
+        report.cases.len()
+    );
+    for case in &report.cases {
+        let final_attempt = case.attempts.last();
+        let name = final_attempt.map_or_else(
+            || return case.scenario.display().to_string(),
+            |attempt| return attempt.report.name.clone(),
+        );
+        write!(xml, "\n  <testcase name=\"{}\">", xml_escape(&name)).into_diagnostic()?;
+        if let Some(failure) =
+            final_attempt.and_then(|attempt| return attempt.report.failure.as_ref())
+        {
+            write!(
+                xml,
+                "\n    <failure message=\"{}\">step {} ({})</failure>\n  ",
+                xml_escape(&failure.message),
+                failure.step_index,
+                xml_escape(&failure.step_kind)
+            )
+            .into_diagnostic()?;
+        }
+        write!(xml, "</testcase>").into_diagnostic()?;
+    }
+    writeln!(xml, "\n</testsuite>").into_diagnostic()?;
+    write_secure(path, xml.as_bytes())?;
+    return Ok(());
+}
+
+fn xml_escape(value: &str) -> String {
+    return value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;");
 }
 
 fn run_version(arguments: VersionArgs) -> Result<ExitCode> {
@@ -1754,6 +2338,8 @@ fn run_capture(arguments: CaptureArgs) -> Result<ExitCode> {
         end_monotonic_ns,
         state_selection: selection(arguments.presented_only),
         geometry_solver,
+        kind: CaptureKind::Video,
+        destination: None,
     })?;
     return write_json_line(&serde_json::json!({
         "directory": outcome.directory,
@@ -1794,6 +2380,9 @@ fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> {
         final_hold: Duration::from_millis(arguments.final_hold_ms),
         start_monotonic_ns: arguments.from_ns,
         end_monotonic_ns: arguments.to_ns,
+        endpoint_event_seq: arguments.endpoint_event_seq,
+        endpoint_event_byte_offset: arguments.endpoint_event_byte_offset,
+        instant: arguments.instant,
     })?;
     return Ok(ExitCode::SUCCESS);
 }
@@ -1857,6 +2446,17 @@ fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
 }
 
 fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
+    let image_format = matches!(arguments.format, ShowFormat::Svg | ShowFormat::Png);
+    if !image_format && arguments.renderer == ShowRenderer::Native {
+        return Err(miette::miette!(
+            "--renderer applies only to SVG and PNG show formats"
+        ));
+    }
+    if arguments.renderer == ShowRenderer::Native && arguments.format != ShowFormat::Png {
+        return Err(miette::miette!(
+            "native show output is PNG; semantic SVG fallback is disabled"
+        ));
+    }
     let point = match (
         arguments.state,
         arguments.event_seq,
@@ -1870,20 +2470,146 @@ fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
         (None, None, None, None) => StatePoint::LatestPresented,
         _ => return Err(miette::miette!("exactly one show selector may be supplied")),
     };
+    let one_off_wait = match (&arguments.wait, &arguments.wait_regex) {
+        (Some(text), None) => Some(ScreenPredicate::Contains { text: text.clone() }),
+        (None, Some(pattern)) => Some(ScreenPredicate::MatchesRegex {
+            pattern: pattern.clone(),
+        }),
+        (None, None) => None,
+        _ => return Err(miette::miette!("exactly one one-off wait may be supplied")),
+    };
+    if arguments.record_out.is_some() && arguments.input.is_none() {
+        return Err(miette::miette!("--record-out requires --input"));
+    }
+    if (arguments.out.is_some() || arguments.discard_evidence) && arguments.command.is_empty() {
+        return Err(miette::miette!(
+            "--out and --discard-evidence require a one-off command after --"
+        ));
+    }
+    if arguments.discard_evidence && arguments.detach {
+        return Err(miette::miette!(
+            "--discard-evidence cannot remove a detached live one-off command"
+        ));
+    }
+    if (one_off_wait.is_some() || arguments.detach) && arguments.command.is_empty() {
+        return Err(miette::miette!(
+            "--wait, --wait-regex, and --detach require a one-off command after --"
+        ));
+    }
+    if arguments.detach {
+        if arguments.session.is_some()
+            || arguments.input.is_some()
+            || point != StatePoint::LatestPresented
+            || one_off_wait.is_some()
+        {
+            return Err(miette::miette!(
+                "detached one-off show accepts only geometry and a command"
+            ));
+        }
+        let outcome = run_one_off_command(
+            &arguments.command,
+            arguments.cols,
+            arguments.rows,
+            None,
+            Duration::ZERO,
+            Duration::from_millis(arguments.timeout_ms),
+            true,
+            arguments.out.as_deref(),
+        )?;
+        let source_completed = outcome
+            .observation
+            .as_ref()
+            .is_some_and(|observation| return observation.source_completed);
+        return write_json_line(&serde_json::json!({
+            "kind": "detached_one_off",
+            "canonical_session": ByteString::from(outcome.session.as_os_str().as_bytes()),
+            "detached": outcome.detached,
+            "source_completed": source_completed,
+        }));
+    }
+    if arguments.recover_prefix {
+        let session = arguments.session.as_ref().ok_or_else(|| {
+            return miette::miette!("--recover-prefix requires a session source");
+        })?;
+        if arguments.input.is_some()
+            || !arguments.command.is_empty()
+            || !arguments.stable_for.is_zero()
+            || image_format
+            || matches!(arguments.format, ShowFormat::Vt | ShowFormat::Html)
+            || arguments.manifest.is_some()
+        {
+            return Err(miette::miette!(
+                "prefix recovery supports session text, JSON, compact JSON, or frame JSON without live stability"
+            ));
+        }
+        let session = resolve_session_ref(session.clone())?;
+        let observation = observe_validated_prefix(&session, point, arguments.include_hidden)?;
+        if arguments.metadata {
+            writeln!(
+                io::stderr(),
+                "source={:?} resolution={:?} state_hash={} presented={} quality={:?} truth={:?}",
+                observation.source_kind,
+                observation.resolution,
+                observation.state_hash,
+                observation.presented,
+                observation.capture_quality,
+                observation.truth_layer,
+            )
+            .into_diagnostic()?;
+        }
+        return match arguments.format {
+            ShowFormat::Text => write_stdout(format!("{}\n", observation.frame.viewport_text)),
+            ShowFormat::Json => write_stdout(format!(
+                "{}\n",
+                serde_json::to_string_pretty(&observation).into_diagnostic()?
+            )),
+            ShowFormat::JsonCompact => write_json_line(&observation),
+            ShowFormat::FrameJson => write_json_line(&observation.frame_envelope()),
+            _ => Err(miette::miette!("unsupported prefix observation format")),
+        };
+    }
     let formatter = match arguments.format {
         ShowFormat::Vt => Some(GhosttyFormat::Vt),
         ShowFormat::Html => Some(GhosttyFormat::Html),
         _ => None,
     };
-    let (observation, formatted) = match (
+    let (observation, formatted, image, discard_session) = match (
         arguments.session,
         arguments.input,
         arguments.command.is_empty(),
     ) {
         (Some(session), None, true) => {
             let session = resolve_session_ref(session)?;
-            let observation =
+            let mut stable_hash = None;
+            if !arguments.stable_for.is_zero() && !session.join("completion.json").is_file() {
+                if point != StatePoint::LatestPresented || arguments.include_hidden {
+                    return Err(miette::miette!(
+                        "live stability is valid only for latest-presented observations"
+                    ));
+                }
+                stable_hash = Some(
+                    wait_for_screen(
+                        &session,
+                        ScreenPredicate::StateHash {
+                            hash: "0".repeat(64),
+                            comparison: StateHashComparison::Changed,
+                        },
+                        arguments.stable_for,
+                        Duration::from_millis(arguments.timeout_ms),
+                    )?
+                    .state_hash,
+                );
+            }
+            let mut observation =
                 observe_session_with_options(&session, point.clone(), arguments.include_hidden)?;
+            if let Some(state_hash) = stable_hash {
+                if observation.state_hash != state_hash {
+                    return Err(miette::miette!(
+                        "presented state changed between stability proof and observation; retry show"
+                    ));
+                }
+                observation.capture_quality = CaptureQuality::Stable;
+            }
             let formatted = match formatter {
                 Some(format) => {
                     if !session.join("completion.json").is_file() {
@@ -1895,9 +2621,29 @@ fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
                 }
                 None => None,
             };
-            (observation, formatted)
+            let image = if image_format && arguments.renderer == ShowRenderer::Native {
+                observation.truth_layer = TruthLayer::Native;
+                Some(render_native_show(&session, &point)?)
+            } else if image_format {
+                let state = semantic_state_for_session(&session, &point, arguments.include_hidden)?;
+                ensure_observation_state(&observation, &state)?;
+                Some(render_show_image(&state, arguments.format)?)
+            } else {
+                None
+            };
+            (observation, formatted, image, None)
         }
         (None, Some(input), true) => {
+            if arguments.renderer == ShowRenderer::Native {
+                return Err(miette::miette!(
+                    "native show rendering requires canonical session evidence; semantic fallback is disabled"
+                ));
+            }
+            if !arguments.stable_for.is_zero() {
+                return Err(miette::miette!(
+                    "--stable-for requires a live session source"
+                ));
+            }
             if point != StatePoint::LatestPresented || arguments.include_hidden {
                 return Err(miette::miette!(
                     "ANSI streams support only latest-presented selection"
@@ -1908,40 +2654,235 @@ fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
                 io::stdin().read_to_end(&mut bytes).into_diagnostic()?;
                 bytes
             } else {
-                fs_err::read(input).into_diagnostic()?
+                fs_err::read(&input).into_diagnostic()?
             };
-            let formatted = formatter
-                .map(|format| {
-                    return format_ansi_stream(&bytes, arguments.cols, arguments.rows, format);
-                })
-                .transpose()?;
-            (
-                observe_ansi_stream(&bytes, arguments.cols, arguments.rows)?,
-                formatted,
-            )
+            if let Some(destination) = &arguments.record_out {
+                record_ansi_import(&bytes, &input, destination, arguments.cols, arguments.rows)?;
+                let mut observation =
+                    observe_one_off_session(destination, StatePoint::LatestPresented, false)?;
+                observation.source_kind = ObservationSourceKind::ImportedAnsi;
+                let formatted = formatter
+                    .map(|format| {
+                        return format_completed_state(
+                            destination,
+                            &StatePoint::LatestPresented,
+                            format,
+                        );
+                    })
+                    .transpose()?;
+                let image = if image_format {
+                    let state = semantic_state_for_session(
+                        destination,
+                        &StatePoint::LatestPresented,
+                        false,
+                    )?;
+                    ensure_observation_state(&observation, &state)?;
+                    Some(render_show_image(&state, arguments.format)?)
+                } else {
+                    None
+                };
+                (observation, formatted, image, None)
+            } else {
+                let formatted = formatter
+                    .map(|format| {
+                        return format_ansi_stream(&bytes, arguments.cols, arguments.rows, format);
+                    })
+                    .transpose()?;
+                let observation = observe_ansi_stream(&bytes, arguments.cols, arguments.rows)?;
+                let image = if image_format {
+                    let state = semantic_state_from_ansi(&bytes, arguments.cols, arguments.rows)?;
+                    ensure_observation_state(&observation, &state)?;
+                    Some(render_show_image(&state, arguments.format)?)
+                } else {
+                    None
+                };
+                (observation, formatted, image, None)
+            }
         }
         (None, None, false) => {
-            let session = run_one_off_command(&arguments.command, arguments.cols, arguments.rows)?;
-            let observation =
-                observe_one_off_session(&session, point.clone(), arguments.include_hidden)?;
+            if !arguments.stable_for.is_zero() && one_off_wait.is_none() {
+                return Err(miette::miette!(
+                    "one-off --stable-for requires --wait or --wait-regex"
+                ));
+            }
+            if one_off_wait.is_some()
+                && (point != StatePoint::LatestPresented
+                    || arguments.include_hidden
+                    || formatter.is_some()
+                    || image_format)
+            {
+                return Err(miette::miette!(
+                    "one-off waits return their exact compact/text/JSON observation and do not accept selectors, hidden states, or rendered formats"
+                ));
+            }
+            let outcome = run_one_off_command(
+                &arguments.command,
+                arguments.cols,
+                arguments.rows,
+                one_off_wait,
+                arguments.stable_for,
+                Duration::from_millis(arguments.timeout_ms),
+                false,
+                arguments.out.as_deref(),
+            )?;
+            let diagnostic_logs = outcome.diagnostic_logs;
+            let session = outcome.session;
+            let mut observation = match outcome.observation {
+                Some(observation) => observation,
+                None => observe_one_off_session(&session, point.clone(), arguments.include_hidden)?,
+            };
             let formatted = formatter
                 .map(|format| return format_completed_state(&session, &point, format))
                 .transpose()?;
-            (observation, formatted)
+            let image = if image_format && arguments.renderer == ShowRenderer::Native {
+                observation.truth_layer = TruthLayer::Native;
+                Some(render_native_show(&session, &point)?)
+            } else if image_format {
+                let state = semantic_state_for_session(&session, &point, arguments.include_hidden)?;
+                ensure_observation_state(&observation, &state)?;
+                Some(render_show_image(&state, arguments.format)?)
+            } else {
+                None
+            };
+            let discard_session = arguments
+                .discard_evidence
+                .then_some((session, diagnostic_logs));
+            (observation, formatted, image, discard_session)
         }
         _ => return Err(miette::miette!("exactly one show source is required")),
     };
-    return match arguments.format {
+    if arguments.metadata {
+        writeln!(
+            io::stderr(),
+            "source={:?} resolution={:?} state_hash={} presented={} quality={:?} truth={:?}",
+            observation.source_kind,
+            observation.resolution,
+            observation.state_hash,
+            observation.presented,
+            observation.capture_quality,
+            observation.truth_layer,
+        )
+        .into_diagnostic()?;
+    }
+    if let (Some(path), Some(bytes)) = (&arguments.manifest, &image) {
+        let renderer = match (arguments.format, arguments.renderer) {
+            (ShowFormat::Svg, ShowRenderer::Semantic) => SEMANTIC_SVG_RENDERER,
+            (ShowFormat::Png, ShowRenderer::Semantic) => SEMANTIC_PNG_RENDERER,
+            (ShowFormat::Png, ShowRenderer::Native) => "ghostty-native-post-endpoint-v1",
+            _ => return Err(miette::miette!("show manifest requires an image format")),
+        };
+        let manifest = serde_json::to_vec_pretty(&serde_json::json!({
+            "format": "termtrace-show-image",
+            "version": 1,
+            "renderer": renderer,
+            "truth_layer": if arguments.renderer == ShowRenderer::Native { "native" } else { "semantic_rendering" },
+            "media_type": if matches!(arguments.format, ShowFormat::Svg) { "image/svg+xml" } else { "image/png" },
+            "byte_count": bytes.len(),
+            "blake3": blake3::hash(bytes).to_hex().to_string(),
+            "observation": observation,
+        }))
+        .into_diagnostic()?;
+        write_secure(path, &manifest)?;
+    } else if arguments.manifest.is_some() {
+        return Err(miette::miette!(
+            "--manifest is valid only for SVG or PNG output"
+        ));
+    }
+    let result = match arguments.format {
         ShowFormat::Text => write_stdout(format!("{}\n", observation.frame.viewport_text)),
         ShowFormat::Json => write_stdout(format!(
             "{}\n",
             serde_json::to_string_pretty(&observation).into_diagnostic()?
         )),
         ShowFormat::JsonCompact => write_json_line(&observation),
+        ShowFormat::FrameJson => write_json_line(&observation.frame_envelope()),
         ShowFormat::Vt | ShowFormat::Html => write_stdout(formatted.ok_or_else(|| {
             return miette::miette!("selected formatter produced no output");
         })?),
+        ShowFormat::Svg | ShowFormat::Png => write_stdout(image.ok_or_else(|| {
+            return miette::miette!("selected image renderer produced no output");
+        })?),
     };
+    if result.is_ok()
+        && let Some((session, diagnostic_logs)) = discard_session
+    {
+        fs_err::remove_dir_all(&session).into_diagnostic()?;
+        for log in diagnostic_logs {
+            if log.exists() {
+                fs_err::remove_file(log).into_diagnostic()?;
+            }
+        }
+        writeln!(
+            io::stderr(),
+            "termtrace: discarded one-off evidence {}; the returned observation is no longer independently replayable",
+            session.display()
+        )
+        .into_diagnostic()?;
+    }
+    return result;
+}
+
+fn render_show_image(state: &SemanticState, format: ShowFormat) -> Result<Vec<u8>> {
+    return match format {
+        ShowFormat::Svg => Ok(render_svg(state)),
+        ShowFormat::Png => render_png(state).into_diagnostic(),
+        _ => Err(miette::miette!("show image renderer requires SVG or PNG")),
+    };
+}
+
+fn ensure_observation_state(observation: &Observation, state: &SemanticState) -> Result<()> {
+    let bytes = serde_json::to_vec(state).into_diagnostic()?;
+    let state_hash = blake3::hash(&bytes).to_hex().to_string();
+    if observation.state_hash != state_hash {
+        return Err(miette::miette!(
+            "semantic image state changed after observation; retry show"
+        ));
+    }
+    return Ok(());
+}
+
+fn render_native_show(session: &Path, point: &StatePoint) -> Result<Vec<u8>> {
+    if !session.join("completion.json").is_file() {
+        return Err(miette::miette!(
+            "native show rendering requires completed canonical evidence"
+        ));
+    }
+    let log = EventLog::read(session.join("events.jsonl"))?;
+    validate_completed_log(session, &log)?;
+    let inspection = inspect_point(&log, point)?;
+    if !inspection.record.presented {
+        return Err(miette::miette!(
+            "native show rendering rejects hidden semantic states"
+        ));
+    }
+    let event_seq = inspection
+        .record
+        .event_seq
+        .ok_or_else(|| return miette::miette!("the initial state has no native replay endpoint"))?;
+    let (target, geometry_solver) = native_capture_target(session, None)?;
+    let destination =
+        env::temp_dir().join(format!(".termtrace-native-show-{}", uuid::Uuid::now_v7()));
+    let outcome = capture(&CaptureOptions {
+        session_directory: session.to_path_buf(),
+        width: target.width,
+        height: target.height,
+        fps: 24,
+        start_monotonic_ns: None,
+        end_monotonic_ns: None,
+        state_selection: StateSelection::Presented,
+        geometry_solver,
+        kind: CaptureKind::Screenshot {
+            state_id: inspection.record.state_id,
+            state_hash: inspection.record.state_hash,
+            event_seq,
+            event_byte_offset: inspection.record.event_byte_offset,
+        },
+        destination: Some(destination.clone()),
+    })?;
+    let image = fs_err::read(outcome.screenshot).into_diagnostic()?;
+    fs_err::remove_dir_all(&destination)
+        .map_err(|error| return miette::miette!("remove native show staging artifact: {error}"))?;
+    return Ok(image);
 }
 
 fn format_completed_state(
@@ -2000,6 +2941,14 @@ fn run_diff(arguments: DiffArgs) -> Result<ExitCode> {
         arguments.to_at,
         arguments.to_marker,
     )?;
+    let image_states = if matches!(arguments.format, DiffFormat::Svg | DiffFormat::Png) {
+        Some((
+            inspect_point(&log, &from)?.state,
+            inspect_point(&log, &to)?.state,
+        ))
+    } else {
+        None
+    };
     let difference = diff_states(&log, from, to)?;
     let changed = difference.changed;
     let _output_status = match arguments.format {
@@ -2009,6 +2958,18 @@ fn run_diff(arguments: DiffArgs) -> Result<ExitCode> {
             serde_json::to_string_pretty(&difference).into_diagnostic()?
         ))?,
         DiffFormat::JsonCompact => write_json_line(&difference)?,
+        DiffFormat::Svg => {
+            let (before, after) = image_states
+                .as_ref()
+                .ok_or_else(|| return miette::miette!("missing visual diff states"))?;
+            write_stdout(render_diff_svg(before, after, &difference))?
+        }
+        DiffFormat::Png => {
+            let (before, after) = image_states
+                .as_ref()
+                .ok_or_else(|| return miette::miette!("missing visual diff states"))?;
+            write_stdout(render_diff_png(before, after, &difference)?)?
+        }
     };
     if arguments.expect_no_change && changed {
         return Ok(ExitCode::FAILURE);
@@ -2037,9 +2998,36 @@ fn run_explain(arguments: ExplainArgs) -> Result<ExitCode> {
     };
 }
 
+fn run_diagnose(arguments: DiagnoseArgs) -> Result<ExitCode> {
+    let session = resolve_session_ref(arguments.session)?;
+    let log = EventLog::read(session.join("events.jsonl"))?;
+    validate_completed_log(&session, &log)?;
+    let report = diagnose(
+        &session,
+        &log,
+        arguments.check,
+        arguments.broad_change_percent,
+    )?;
+    let has_findings = !report.findings.is_empty();
+    if arguments.json {
+        write_json_line(&report)?;
+    } else {
+        write_stdout(diagnose_text(&report)?)?;
+    }
+    if arguments.fail_on_finding && has_findings {
+        return Ok(ExitCode::FAILURE);
+    }
+    return Ok(ExitCode::SUCCESS);
+}
+
 fn run_output(arguments: OutputArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
     if arguments.follow {
+        if arguments.manifest.is_some() {
+            return Err(miette::miette!(
+                "--manifest is available only for completed non-follow output"
+            ));
+        }
         if arguments.range.from_marker.is_some()
             || arguments.range.to_marker.is_some()
             || arguments.range.start_monotonic_ns.is_some()
@@ -2053,10 +3041,11 @@ fn run_output(arguments: OutputArgs) -> Result<ExitCode> {
             &session,
             arguments.from_event_seq.unwrap_or(0),
             arguments.to_event_seq,
+            arguments.strip_controls,
         );
     }
     let log = EventLog::read(session.join("events.jsonl"))?;
-    validate_completed_log(&session, &log)?;
+    let completion = validate_completed_log(&session, &log)?;
     let time_range = resolve_source_selection(
         &log,
         arguments.range.start_monotonic_ns,
@@ -2084,6 +3073,63 @@ fn run_output(arguments: OutputArgs) -> Result<ExitCode> {
             output.extend_from_slice(data.as_bytes());
         }
     }
+    let source = output;
+    let (output, quality, dropped, alternate_screen) = if arguments.strip_controls {
+        let mut stripper = ControlStripper::default();
+        let output = stripper.feed(&source);
+        let alternate_screen = stripper.alternate_screen_observed();
+        let quality = if alternate_screen {
+            OutputProjectionQuality::UnsuitableForFullScreen
+        } else {
+            OutputProjectionQuality::LossyLineOriented
+        };
+        (
+            output,
+            quality,
+            stripper
+                .source_byte_count()
+                .saturating_sub(stripper.output_byte_count()),
+            alternate_screen,
+        )
+    } else {
+        (
+            source.clone(),
+            OutputProjectionQuality::ExactBytes,
+            0,
+            false,
+        )
+    };
+    let warning = projection_warning(quality);
+    if let Some(path) = &arguments.manifest {
+        let report = OutputProjectionReport {
+            format: "termtrace-output-projection".to_owned(),
+            version: 1,
+            session_id: log.header.session_id,
+            final_event_hash: completion.final_event_hash,
+            from_event_seq: from_event,
+            to_event_seq: to_event,
+            mode: if arguments.raw {
+                "raw"
+            } else {
+                "strip_controls"
+            }
+            .to_owned(),
+            projection_quality: quality,
+            source_byte_count: u64::try_from(source.len()).unwrap_or(u64::MAX),
+            source_blake3: blake3::hash(&source).to_hex().to_string(),
+            output_byte_count: u64::try_from(output.len()).unwrap_or(u64::MAX),
+            output_blake3: blake3::hash(&output).to_hex().to_string(),
+            dropped_byte_count: dropped,
+            alternate_screen_observed: alternate_screen,
+            warning: warning.map(str::to_owned),
+        };
+        let mut bytes = serde_json::to_vec_pretty(&report).into_diagnostic()?;
+        bytes.push(b'\n');
+        write_secure(path, &bytes)?;
+    }
+    if arguments.strip_controls {
+        write_projection_warning(warning.unwrap_or("control-stripped output is lossy"))?;
+    }
     return write_stdout(output);
 }
 
@@ -2091,8 +3137,10 @@ fn follow_output(
     session: &Path,
     mut next_event_seq: u64,
     end_event_seq: Option<u64>,
+    strip_controls: bool,
 ) -> Result<ExitCode> {
     let mut control_failure_since = None;
+    let mut stripper = ControlStripper::default();
     loop {
         let completion_exists = session.join("completion.json").is_file();
         let log = if completion_exists {
@@ -2141,7 +3189,12 @@ fn follow_output(
                 bytes.extend_from_slice(data.as_bytes());
             }
         }
-        if !bytes.is_empty() && !write_follow_stdout(&bytes)? {
+        let emitted = if strip_controls {
+            stripper.feed(&bytes)
+        } else {
+            bytes
+        };
+        if !emitted.is_empty() && !write_follow_stdout(&emitted)? {
             return Ok(ExitCode::SUCCESS);
         }
         next_event_seq = emit_end;
@@ -2153,10 +3206,39 @@ fn follow_output(
         if end_event_seq.is_some_and(|end| return next_event_seq >= end)
             || (completion_exists && next_event_seq >= available)
         {
+            if strip_controls {
+                let quality = if stripper.alternate_screen_observed() {
+                    OutputProjectionQuality::UnsuitableForFullScreen
+                } else {
+                    OutputProjectionQuality::LossyLineOriented
+                };
+                write_projection_warning(
+                    projection_warning(quality).unwrap_or("control-stripped output is lossy"),
+                )?;
+            }
             return Ok(ExitCode::SUCCESS);
         }
         thread::sleep(Duration::from_millis(20));
     }
+}
+
+fn projection_warning(quality: OutputProjectionQuality) -> Option<&'static str> {
+    return match quality {
+        OutputProjectionQuality::ExactBytes => None,
+        OutputProjectionQuality::LossyLineOriented => Some(
+            "projection_quality=lossy_line_oriented; controls were removed; use show/timeline for viewport state",
+        ),
+        OutputProjectionQuality::UnsuitableForFullScreen => Some(
+            "projection_quality=unsuitable_for_full_screen; alternate-screen controls were observed; use show/timeline for viewport state",
+        ),
+    };
+}
+
+fn write_projection_warning(message: &str) -> Result<()> {
+    let stderr = io::stderr();
+    let mut stderr = stderr.lock();
+    writeln!(stderr, "termtrace: {message}").into_diagnostic()?;
+    return Ok(());
 }
 
 fn write_follow_stdout(output: &[u8]) -> Result<bool> {
@@ -2367,38 +3449,166 @@ fn run_save(arguments: SaveArgs) -> Result<ExitCode> {
 
 fn run_screenshot(arguments: ScreenshotArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
-    let point = match (
-        arguments.state,
-        arguments.event_seq,
-        arguments.at,
-        arguments.at_marker,
-    ) {
-        (Some(state_id), None, None, None) => StatePoint::StateId { state_id },
-        (None, Some(event_seq), None, None) => StatePoint::EventSeq { event_seq },
-        (None, None, Some(monotonic_ns), None) => StatePoint::MonotonicNs { monotonic_ns },
-        (None, None, None, Some(label)) => StatePoint::Marker { label },
-        (None, None, None, None) => StatePoint::LatestPresented,
-        _ => {
+    let mut points = Vec::new();
+    points.extend(
+        arguments
+            .state
+            .into_iter()
+            .map(|state_id| return StatePoint::StateId { state_id }),
+    );
+    points.extend(
+        arguments
+            .event_seq
+            .into_iter()
+            .map(|event_seq| return StatePoint::EventSeq { event_seq }),
+    );
+    points.extend(
+        arguments
+            .at
+            .into_iter()
+            .map(|monotonic_ns| return StatePoint::MonotonicNs { monotonic_ns }),
+    );
+    points.extend(
+        arguments
+            .at_marker
+            .into_iter()
+            .map(|label| return StatePoint::Marker { label }),
+    );
+    if points.is_empty() {
+        points.push(StatePoint::LatestPresented);
+    }
+    if arguments.renderer == ShowRenderer::Native {
+        if arguments.format != ScreenshotFormat::Png {
             return Err(miette::miette!(
-                "exactly one screenshot selector may be supplied"
+                "native screenshots are PNG; semantic SVG fallback is disabled"
             ));
         }
+        if arguments.include_hidden {
+            return Err(miette::miette!(
+                "native screenshots cannot render hidden synchronized-output states"
+            ));
+        }
+        if points.len() != 1 {
+            return Err(miette::miette!(
+                "native screenshot batches are not yet a single-process operation; select one state"
+            ));
+        }
+        let point = points
+            .first()
+            .ok_or_else(|| return miette::miette!("missing native screenshot point"))?;
+        let log = EventLog::read(session.join("events.jsonl"))?;
+        validate_completed_log(&session, &log)?;
+        let inspection = inspect_point(&log, point)?;
+        if !inspection.record.presented {
+            return Err(miette::miette!(
+                "native screenshots reject states that were not presentation eligible"
+            ));
+        }
+        let event_seq = inspection.record.event_seq.ok_or_else(|| {
+            return miette::miette!("the initial blank state has no native replay endpoint");
+        })?;
+        let (target, geometry_solver) = native_capture_target(&session, arguments.viewport)?;
+        let outcome = capture(&CaptureOptions {
+            session_directory: session,
+            width: target.width,
+            height: target.height,
+            fps: 24,
+            start_monotonic_ns: None,
+            end_monotonic_ns: None,
+            state_selection: StateSelection::Presented,
+            geometry_solver,
+            kind: CaptureKind::Screenshot {
+                state_id: inspection.record.state_id,
+                state_hash: inspection.record.state_hash,
+                event_seq,
+                event_byte_offset: inspection.record.event_byte_offset,
+            },
+            destination: Some(arguments.out),
+        })?;
+        return write_json_line(&serde_json::json!({
+            "kind": "native_screenshot",
+            "truth_layer": "native",
+            "directory": outcome.directory,
+            "image": outcome.screenshot,
+            "manifest": outcome.directory.join("manifest.json"),
+            "presentation_evidence": "post_endpoint_stable_capture",
+        }));
+    }
+    if arguments.viewport.is_some() || arguments.fit_viewport || arguments.strict {
+        return Err(miette::miette!(
+            "native viewport options require --renderer native"
+        ));
+    }
+    let format = match arguments.format {
+        ScreenshotFormat::Svg => SaveFormat::Svg,
+        ScreenshotFormat::Png => SaveFormat::Png,
     };
+    let filename = match arguments.format {
+        ScreenshotFormat::Svg => "screen.svg",
+        ScreenshotFormat::Png => "screen.png",
+    };
+    if points.len() > 1 {
+        let manifest = save_screenshot_batch(
+            &session,
+            &arguments.out,
+            &points,
+            format,
+            arguments.include_hidden,
+        )?;
+        return write_json_line(&serde_json::json!({
+            "kind": "semantic_screenshot_batch",
+            "truth_layer": "semantic_rendering",
+            "directory": arguments.out,
+            "manifest": arguments.out.join("batch-manifest.json"),
+            "entries": manifest.entries,
+        }));
+    }
+    let point = points
+        .into_iter()
+        .next()
+        .ok_or_else(|| return miette::miette!("missing screenshot point"))?;
     let outcome = save(
         &session,
         &arguments.out,
         point,
-        &[SaveFormat::Svg],
+        &[format],
         arguments.include_hidden,
     )?;
     return write_json_line(&serde_json::json!({
         "kind": "semantic_screenshot",
         "truth_layer": "semantic_rendering",
         "directory": outcome.directory,
-        "image": outcome.directory.join("screen.svg"),
+        "image": outcome.directory.join(filename),
         "manifest": outcome.directory.join("save-manifest.json"),
         "state_hash": outcome.manifest.state_hash,
     }));
+}
+
+fn native_capture_target(
+    session: &Path,
+    viewport: Option<CaptureTarget>,
+) -> Result<(CaptureTarget, Option<GeometrySolveReport>)> {
+    if let Some(target) = viewport {
+        return Ok((target, None));
+    }
+    let manifest = read_manifest(session)?;
+    let initial = manifest
+        .geometry_provenance
+        .capture_target
+        .unwrap_or_else(|| {
+            return CaptureTarget {
+                width: manifest.geometry.pixel_width.saturating_add(128).max(320),
+                height: manifest.geometry.pixel_height.saturating_add(128).max(200),
+            };
+        });
+    let profile = capture_profile(session, &manifest)?;
+    let report = solve_ghostty_geometry(
+        manifest.geometry.cols,
+        manifest.geometry.rows,
+        initial,
+        &profile,
+    )?;
+    return Ok((report.selected, Some(report)));
 }
 
 fn run_bundle(arguments: BundleArgs) -> Result<ExitCode> {
@@ -2407,6 +3617,30 @@ fn run_bundle(arguments: BundleArgs) -> Result<ExitCode> {
         return write_json_line(&plan_bundle(profile));
     }
     let session = resolve_session_ref(arguments.session)?;
+    if arguments.archive {
+        if arguments.out.exists() {
+            return Err(Error::ArtifactExists {
+                path: arguments.out,
+            }
+            .into());
+        }
+        let parent = arguments
+            .out
+            .parent()
+            .ok_or_else(|| return miette::miette!("bundle archive path has no parent"))?;
+        let staging = parent.join(format!(".bundle-source-{}.tmp", uuid::Uuid::now_v7()));
+        let manifest = create_bundle(&session, &staging, profile)?;
+        let result = archive_bundle(&staging, &arguments.out);
+        let _cleanup = fs_err::remove_dir_all(&staging);
+        result?;
+        return write_json_line(&serde_json::json!({
+            "kind": "bundle_archive",
+            "profile": manifest.profile,
+            "archive": arguments.out,
+            "member_count": manifest.members.len(),
+            "includes_canonical_evidence": manifest.includes_canonical_evidence,
+        }));
+    }
     let manifest = create_bundle(&session, &arguments.out, profile)?;
     return write_json_line(&serde_json::json!({
         "kind": "bundle",
@@ -2416,7 +3650,11 @@ fn run_bundle(arguments: BundleArgs) -> Result<ExitCode> {
 }
 
 fn run_bundle_verify(arguments: BundleVerifyArgs) -> Result<ExitCode> {
-    let manifest = verify_bundle(&arguments.bundle)?;
+    let manifest = if arguments.bundle.is_dir() {
+        verify_bundle(&arguments.bundle)?
+    } else {
+        verify_bundle_archive(&arguments.bundle)?
+    };
     return write_json_line(&serde_json::json!({
         "kind": "bundle_verification",
         "valid": true,
@@ -2460,6 +3698,36 @@ fn explain_text(report: &ExplainReport) -> Result<String> {
             finding.facts.join("; ")
         )
         .into_diagnostic()?;
+    }
+    return Ok(output);
+}
+
+fn diagnose_text(report: &DiagnoseReport) -> Result<String> {
+    let mut output = format!(
+        "session {} checks={} findings={} source={}\n",
+        report.session_id,
+        report.checks.len(),
+        report.findings.len(),
+        report.source_final_event_hash,
+    );
+    for finding in &report.findings {
+        writeln!(
+            output,
+            "finding: {} [{:?}] states={:?} tokens={:?}",
+            finding.code, finding.confidence, finding.state_ids, finding.token_ids,
+        )
+        .into_diagnostic()?;
+        for fact in &finding.facts {
+            writeln!(output, "  fact: {fact}").into_diagnostic()?;
+        }
+        for correlation in &finding.native_correlations {
+            writeln!(
+                output,
+                "  native: {:?} state={} frame={:?} {}",
+                correlation.level, correlation.state_id, correlation.frame, correlation.limitation,
+            )
+            .into_diagnostic()?;
+        }
     }
     return Ok(output);
 }
@@ -2603,18 +3871,143 @@ fn canonical_event_text(event: &Event) -> String {
     };
 }
 
-fn run_one_off_command(command: &[OsString], cols: u16, rows: u16) -> Result<PathBuf> {
+struct OneOffCommandOutcome {
+    session: PathBuf,
+    observation: Option<Observation>,
+    detached: bool,
+    diagnostic_logs: Vec<PathBuf>,
+}
+
+fn record_ansi_import(
+    bytes: &[u8],
+    source: &Path,
+    destination: &Path,
+    cols: u16,
+    rows: u16,
+) -> Result<()> {
+    if destination.exists() {
+        return Err(Error::ArtifactExists {
+            path: destination.to_path_buf(),
+        }
+        .into());
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| return miette::miette!("ANSI import destination has no parent"))?;
+    fs_err::create_dir_all(parent).into_diagnostic()?;
+    let input = parent.join(format!(".ansi-import-{}.tmp", uuid::Uuid::now_v7()));
+    write_secure(&input, bytes)?;
+    let hash = blake3::hash(bytes).to_hex().to_string();
+    let process = ProcessCommand::new(env::current_exe().into_diagnostic()?)
+        .args(["record", "--no-input", "--out"])
+        .arg(destination)
+        .args(["--cols", &cols.to_string(), "--rows", &rows.to_string()])
+        .args(["--import-source-kind", "ansi_stream"])
+        .args(["--import-source-byte-count", &bytes.len().to_string()])
+        .args(["--import-source-blake3", &hash])
+        .arg("--import-source")
+        .arg(source.as_os_str())
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "stty raw -echo < /dev/tty; exec /bin/cat -- \"$1\"",
+            "termtrace-ansi-import",
+        ])
+        .arg(&input)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output();
+    let cleanup = fs_err::remove_file(&input);
+    let process = process.into_diagnostic()?;
+    cleanup.into_diagnostic()?;
+    if !process.status.success() {
+        return Err(miette::miette!(
+            "ANSI import recorder failed with {}: {}",
+            process.status,
+            String::from_utf8_lossy(&process.stderr)
+        ));
+    }
+    let log = EventLog::read(destination.join("events.jsonl"))?;
+    validate_completed_log(destination, &log)?;
+    let imported = log
+        .events
+        .iter()
+        .filter_map(|record| {
+            return match &record.event {
+                Event::Output { data } => Some(data.as_bytes()),
+                _ => None,
+            };
+        })
+        .flatten()
+        .copied()
+        .collect::<Vec<_>>();
+    if imported != bytes {
+        return Err(miette::miette!(
+            "ANSI import canonical output does not match the exact source bytes"
+        ));
+    }
+    let manifest = read_manifest(destination)?;
+    if manifest
+        .import_provenance
+        .as_ref()
+        .is_none_or(|provenance| {
+            return provenance.source_kind != "ansi_stream"
+                || provenance.byte_count != u64::try_from(bytes.len()).unwrap_or(u64::MAX)
+                || provenance.blake3 != hash;
+        })
+    {
+        return Err(miette::miette!(
+            "ANSI import session did not bind its source provenance"
+        ));
+    }
+    return Ok(());
+}
+
+fn run_one_off_command(
+    command: &[OsString],
+    cols: u16,
+    rows: u16,
+    wait_predicate: Option<ScreenPredicate>,
+    stable_for: Duration,
+    timeout: Duration,
+    detach: bool,
+    requested_out: Option<&Path>,
+) -> Result<OneOffCommandOutcome> {
     if cols == 0 || rows == 0 {
         return Err(miette::miette!(
             "one-off geometry must be greater than zero"
         ));
     }
-    let registry = SessionRegistry::open_default()?;
-    let paths = registry.allocate_detached_paths()?;
+    let paths = if let Some(session) = requested_out {
+        if session.exists() {
+            return Err(Error::ArtifactExists {
+                path: session.to_path_buf(),
+            }
+            .into());
+        }
+        let parent = session
+            .parent()
+            .ok_or_else(|| return miette::miette!("one-off --out path has no parent"))?;
+        fs_err::create_dir_all(parent).into_diagnostic()?;
+        let name = session
+            .file_name()
+            .ok_or_else(|| return miette::miette!("one-off --out path has no basename"))?
+            .to_string_lossy();
+        let identity = uuid::Uuid::now_v7();
+        DetachedSessionPaths {
+            session: session.to_path_buf(),
+            stdout_log: parent.join(format!(".{name}.{identity}.stdout.log")),
+            stderr_log: parent.join(format!(".{name}.{identity}.stderr.log")),
+        }
+    } else {
+        SessionRegistry::open_default()?.allocate_detached_paths()?
+    };
     let stdout = open_detached_log(&paths.stdout_log)?;
     let stderr = open_detached_log(&paths.stderr_log)?;
     let executable = env::current_exe().into_diagnostic()?;
-    let status = ProcessCommand::new(executable)
+    let mut child = ProcessCommand::new(executable)
         .arg("record")
         .arg("--no-input")
         .arg("--out")
@@ -2628,8 +4021,132 @@ fn run_one_off_command(command: &[OsString], cols: u16, rows: u16) -> Result<Pat
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
-        .status()
+        .spawn()
         .into_diagnostic()?;
+    let socket = paths.session.join("control.sock");
+    let started = Instant::now();
+    let deadline = started + timeout;
+    while !socket.exists() {
+        if let Some(status) = child.try_wait().into_diagnostic()? {
+            if paths.session.join("completion.json").is_file() {
+                let mut observation =
+                    observe_one_off_session(&paths.session, StatePoint::LatestPresented, false)?;
+                if let Some(predicate) = &wait_predicate {
+                    let matched = match predicate {
+                        ScreenPredicate::Contains { text } => {
+                            observation.frame.viewport_text.contains(text)
+                        }
+                        ScreenPredicate::MatchesRegex { pattern } => regex::Regex::new(pattern)
+                            .into_diagnostic()?
+                            .is_match(&observation.frame.viewport_text),
+                        _ => false,
+                    };
+                    if !matched {
+                        return Err(miette::miette!(
+                            "one-off command completed before its screen predicate matched; completed evidence: {}",
+                            paths.session.display(),
+                        ));
+                    }
+                }
+                observation.source_kind = ObservationSourceKind::OneOffCommand;
+                observation.source_completed = true;
+                return Ok(OneOffCommandOutcome {
+                    session: paths.session,
+                    observation: Some(observation),
+                    detached: false,
+                    diagnostic_logs: vec![paths.stdout_log, paths.stderr_log],
+                });
+            }
+            return Err(miette::miette!(
+                "one-off recorder exited with {status} before control readiness; recoverable session candidate: {}; stdout log: {}; stderr log: {}",
+                paths.session.display(),
+                paths.stdout_log.display(),
+                paths.stderr_log.display(),
+            ));
+        }
+        if Instant::now() >= deadline {
+            return Err(miette::miette!(
+                "one-off recorder did not become ready before the deadline; recoverable session candidate: {}",
+                paths.session.display(),
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    if detach {
+        return Ok(OneOffCommandOutcome {
+            session: paths.session,
+            observation: None,
+            detached: true,
+            diagnostic_logs: vec![paths.stdout_log, paths.stderr_log],
+        });
+    }
+    let mut observation = if let Some(predicate) = wait_predicate {
+        let waited = match wait_for_screen(
+            &paths.session,
+            predicate,
+            stable_for,
+            timeout.saturating_sub(started.elapsed()),
+        ) {
+            Ok(waited) => waited,
+            Err(error) => {
+                let stop_result = request(&paths.session, ControlCommand::Stop);
+                if stop_result.is_ok() {
+                    let _ = child.wait();
+                }
+                let stop_description = match &stop_result {
+                    Ok(_) => "accepted".to_owned(),
+                    Err(stop_error) => stop_error.to_string(),
+                };
+                return Err(miette::miette!(
+                    "one-off wait failed: {error}; evidence preserved at {}; stop request: {}",
+                    paths.session.display(),
+                    stop_description,
+                ));
+            }
+        };
+        let observation = match observe_session_with_options(
+            &paths.session,
+            StatePoint::LatestPresented,
+            false,
+        ) {
+            Ok(observation) => observation,
+            Err(error) => {
+                let stop_result = request(&paths.session, ControlCommand::Stop);
+                if stop_result.is_ok() {
+                    let _ = child.wait();
+                }
+                let stop_description = match &stop_result {
+                    Ok(_) => "accepted".to_owned(),
+                    Err(stop_error) => stop_error.to_string(),
+                };
+                return Err(miette::miette!(
+                    "one-off observation failed after its wait proof: {error}; evidence preserved at {}; stop request: {}",
+                    paths.session.display(),
+                    stop_description,
+                ));
+            }
+        };
+        if observation.state_hash != waited.state_hash {
+            let stop_result = request(&paths.session, ControlCommand::Stop);
+            if stop_result.is_ok() {
+                let _ = child.wait();
+            }
+            let stop_description = match &stop_result {
+                Ok(_) => "accepted".to_owned(),
+                Err(stop_error) => stop_error.to_string(),
+            };
+            return Err(miette::miette!(
+                "one-off presented state changed after its wait proof; evidence preserved at {}; stop request: {}",
+                paths.session.display(),
+                stop_description,
+            ));
+        }
+        request(&paths.session, ControlCommand::Stop)?;
+        Some(observation)
+    } else {
+        None
+    };
+    let status = child.wait().into_diagnostic()?;
     if !paths.session.join("completion.json").is_file() {
         return Err(miette::miette!(
             "one-off recorder exited with {status} before durable completion; recoverable session candidate: {}; stdout log: {}; stderr log: {}",
@@ -2638,7 +4155,16 @@ fn run_one_off_command(command: &[OsString], cols: u16, rows: u16) -> Result<Pat
             paths.stderr_log.display(),
         ));
     }
-    return Ok(paths.session);
+    if let Some(observation) = &mut observation {
+        observation.source_kind = ObservationSourceKind::OneOffCommand;
+        observation.source_completed = true;
+    }
+    return Ok(OneOffCommandOutcome {
+        session: paths.session,
+        observation,
+        detached: false,
+        diagnostic_logs: vec![paths.stdout_log, paths.stderr_log],
+    });
 }
 
 fn run_wait(arguments: WaitArgs) -> Result<ExitCode> {
@@ -2652,9 +4178,86 @@ fn run_wait(arguments: WaitArgs) -> Result<ExitCode> {
         }
         return write_json_line(&wait_for_output(session, output.as_bytes(), timeout)?);
     }
-    let predicate = match (arguments.screen, arguments.screen_absent) {
-        (Some(text), None) => ScreenPredicate::Contains { text },
-        (None, Some(text)) => ScreenPredicate::Absent { text },
+    let predicate = match (
+        arguments.screen,
+        arguments.screen_absent,
+        arguments.screen_regex,
+        arguments.row_contains,
+        arguments.region_contains,
+        arguments.cursor_at,
+        arguments.cursor_visible,
+        arguments.cursor_shape,
+        arguments.mode,
+        arguments.mode_disabled,
+        arguments.state_changed,
+        arguments.state_unchanged,
+    ) {
+        (Some(text), None, None, None, None, None, None, None, None, None, None, None) => {
+            ScreenPredicate::Contains { text }
+        }
+        (None, Some(text), None, None, None, None, None, None, None, None, None, None) => {
+            ScreenPredicate::Absent { text }
+        }
+        (None, None, Some(pattern), None, None, None, None, None, None, None, None, None) => {
+            ScreenPredicate::MatchesRegex { pattern }
+        }
+        (None, None, None, Some(value), None, None, None, None, None, None, None, None) => {
+            let (row, text) = parse_row_predicate(&value)?;
+            ScreenPredicate::RowContains { row, text }
+        }
+        (None, None, None, None, Some(value), None, None, None, None, None, None, None) => {
+            let (region, text) = parse_region_predicate(&value)?;
+            ScreenPredicate::RegionContains { region, text }
+        }
+        (None, None, None, None, None, Some(value), None, None, None, None, None, None) => {
+            let (column, row) = parse_cursor_position(&value)?;
+            ScreenPredicate::Cursor {
+                column: Some(column),
+                row: Some(row),
+                visible: None,
+                shape: None,
+            }
+        }
+        (None, None, None, None, None, None, Some(visible), None, None, None, None, None) => {
+            ScreenPredicate::Cursor {
+                column: None,
+                row: None,
+                visible: Some(visible),
+                shape: None,
+            }
+        }
+        (None, None, None, None, None, None, None, Some(shape), None, None, None, None) => {
+            ScreenPredicate::Cursor {
+                column: None,
+                row: None,
+                visible: None,
+                shape: Some(shape.into()),
+            }
+        }
+        (None, None, None, None, None, None, None, None, Some(mode), None, None, None) => {
+            ScreenPredicate::Mode {
+                mode: mode.into(),
+                enabled: true,
+            }
+        }
+        (None, None, None, None, None, None, None, None, None, Some(mode), None, None) => {
+            ScreenPredicate::Mode {
+                mode: mode.into(),
+                enabled: false,
+            }
+        }
+        (None, None, None, None, None, None, None, None, None, None, Some(hash), None) => {
+            ScreenPredicate::StateHash {
+                hash,
+                comparison: StateHashComparison::Changed,
+            }
+        }
+        (None, None, None, None, None, None, None, None, None, None, None, Some(hash)) => {
+            ScreenPredicate::StateHash {
+                hash,
+                comparison: StateHashComparison::Unchanged,
+            }
+        }
         _ => return Err(miette::miette!("exactly one wait predicate is required")),
     };
     return write_json_line(&wait_for_screen(
@@ -2663,6 +4266,57 @@ fn run_wait(arguments: WaitArgs) -> Result<ExitCode> {
         arguments.stable_for,
         timeout,
     )?);
+}
+
+fn parse_row_predicate(value: &str) -> Result<(u16, String)> {
+    let (row, text) = value
+        .split_once(':')
+        .ok_or_else(|| return miette::miette!("row predicate must use ROW:TEXT"))?;
+    let row = row
+        .parse::<u16>()
+        .map_err(|_| return miette::miette!("row predicate ROW must be a zero-based integer"))?;
+    return Ok((row, text.to_owned()));
+}
+
+fn parse_region_predicate(value: &str) -> Result<(ScreenRegion, String)> {
+    let (bounds, text) = value.split_once(':').ok_or_else(|| {
+        return miette::miette!("region predicate must use LEFT,TOP,RIGHT,BOTTOM:TEXT");
+    })?;
+    let values = bounds
+        .split(',')
+        .map(|item| {
+            return item.parse::<u16>().map_err(|_| {
+                return miette::miette!("region bounds must be zero-based integers");
+            });
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let [left, top, right, bottom] = values.as_slice() else {
+        return Err(miette::miette!(
+            "region predicate requires exactly four bounds"
+        ));
+    };
+    return Ok((
+        ScreenRegion {
+            left: *left,
+            top: *top,
+            right: *right,
+            bottom: *bottom,
+        },
+        text.to_owned(),
+    ));
+}
+
+fn parse_cursor_position(value: &str) -> Result<(u16, u16)> {
+    let (column, row) = value
+        .split_once(',')
+        .ok_or_else(|| return miette::miette!("cursor position must use COLUMN,ROW"))?;
+    let column = column
+        .parse::<u16>()
+        .map_err(|_| return miette::miette!("cursor COLUMN must be a zero-based integer"))?;
+    let row = row
+        .parse::<u16>()
+        .map_err(|_| return miette::miette!("cursor ROW must be a zero-based integer"))?;
+    return Ok((column, row));
 }
 
 fn run_recover(arguments: RecoverArgs) -> Result<ExitCode> {
@@ -2952,6 +4606,7 @@ fn parse_capability_id(value: &str) -> StdResult<String, String> {
         "semantic",
         "native-screenshot",
         "native-video",
+        "presentation",
         "receipt-signing",
     ];
     if CAPABILITIES.contains(&value) {
@@ -2963,12 +4618,45 @@ fn parse_capability_id(value: &str) -> StdResult<String, String> {
     ));
 }
 
+fn parse_diagnostic_check(value: &str) -> StdResult<DiagnosticCheck, String> {
+    return match value {
+        "full-redraw" => Ok(DiagnosticCheck::FullRedraw),
+        "transient" | "flicker" => Ok(DiagnosticCheck::Transient),
+        "dirty" | "stale-cells" => Ok(DiagnosticCheck::Dirty),
+        "cursor" => Ok(DiagnosticCheck::Cursor),
+        "modes" => Ok(DiagnosticCheck::Modes),
+        "palette" => Ok(DiagnosticCheck::Palette),
+        "query-loop" => Ok(DiagnosticCheck::QueryLoop),
+        _ => Err(format!(
+            "unknown diagnostic check `{value}`; expected full-redraw, transient, dirty, cursor, modes, palette, or query-loop"
+        )),
+    };
+}
+
 fn parse_pace_duration(value: &str) -> StdResult<Duration, String> {
     let nanoseconds = parse_time_offset_ns(value)?;
     if nanoseconds > 60_000_000_000 {
         return Err("pace must not exceed 60s".to_owned());
     }
     return Ok(Duration::from_nanos(nanoseconds));
+}
+
+fn parse_scenario_jobs(value: &str) -> StdResult<usize, String> {
+    let jobs = parse_positive_usize(value)?;
+    if jobs > 64 {
+        return Err("scenario jobs must be between 1 and 64".to_owned());
+    }
+    return Ok(jobs);
+}
+
+fn parse_positive_usize(value: &str) -> StdResult<usize, String> {
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|_error| return "value must be a positive integer".to_owned())?;
+    if parsed == 0 {
+        return Err("value must be greater than zero".to_owned());
+    }
+    return Ok(parsed);
 }
 
 fn parse_cell(value: &str) -> StdResult<(u16, u16), String> {
@@ -3055,37 +4743,86 @@ fn run_resize(arguments: ResizeArgs) -> Result<ExitCode> {
 }
 
 fn run_pointer(arguments: PointerArgs) -> Result<ExitCode> {
-    let (column, row, operation, strict, expected_presented_state_hash) = match arguments.operation
-    {
-        PointerCommand::Click(click) => (
-            click.cell.0,
-            click.cell.1,
-            PointerOperation::Click {
-                button: click.button.into(),
-            },
-            click.strict,
-            click.expected_presented_state_hash,
-        ),
-        PointerCommand::Scroll(scroll) => (
-            scroll.cell.0,
-            scroll.cell.1,
-            PointerOperation::Scroll {
-                lines: scroll.lines,
-            },
-            scroll.strict,
-            scroll.expected_presented_state_hash,
-        ),
+    let (column, row, operation, strict, expected_presented_state_hash, postcondition) =
+        match arguments.operation {
+            PointerCommand::Click(click) => (
+                click.cell.0,
+                click.cell.1,
+                PointerOperation::Click {
+                    button: click.button.into(),
+                },
+                click.strict,
+                click.expected_presented_state_hash,
+                click.postcondition,
+            ),
+            PointerCommand::MultiClick(click) => (
+                click.cell.0,
+                click.cell.1,
+                PointerOperation::MultiClick {
+                    button: click.button.into(),
+                    count: click.count,
+                },
+                click.strict,
+                click.expected_presented_state_hash,
+                click.postcondition,
+            ),
+            PointerCommand::Drag(drag) => (
+                drag.from.0,
+                drag.from.1,
+                PointerOperation::Drag {
+                    button: drag.button.into(),
+                    to_column: drag.to.0,
+                    to_row: drag.to.1,
+                    steps: drag.steps,
+                },
+                drag.strict,
+                drag.expected_presented_state_hash,
+                drag.postcondition,
+            ),
+            PointerCommand::Scroll(scroll) => (
+                scroll.cell.0,
+                scroll.cell.1,
+                PointerOperation::Scroll {
+                    lines: scroll.lines,
+                },
+                scroll.strict,
+                scroll.expected_presented_state_hash,
+                scroll.postcondition,
+            ),
+        };
+    let session = resolve_session_ref(arguments.session)?;
+    let mut request = ControlRequest::new(ControlCommand::Pointer {
+        column,
+        row,
+        operation,
+        strict,
+    });
+    request.expected_presented_state_hash = expected_presented_state_hash;
+    let input = send_request(&session, &request)?;
+    let predicate = match (postcondition.wait_screen, postcondition.wait_screen_absent) {
+        (Some(text), None) => Some(ScreenPredicate::Contains { text }),
+        (None, Some(text)) => Some(ScreenPredicate::Absent { text }),
+        (None, None) => None,
+        (Some(_), Some(_)) => {
+            return Err(miette::miette!(
+                "pointer postcondition requires exactly one screen predicate"
+            ));
+        }
     };
-    return run_control_guarded(
-        arguments.session,
-        ControlCommand::Pointer {
-            column,
-            row,
-            operation,
-            strict,
-        },
-        expected_presented_state_hash,
-    );
+    let Some(predicate) = predicate else {
+        return write_json_line(&input);
+    };
+    let matched = wait_for_screen(
+        &session,
+        predicate,
+        postcondition.stable_for,
+        Duration::from_millis(postcondition.timeout_ms),
+    )?;
+    return write_json_line(&serde_json::json!({
+        "kind": "pointer_with_postcondition",
+        "input": input,
+        "postcondition": matched,
+    }));
 }
 
 fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
@@ -3095,9 +4832,42 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         session_alias,
         restart_source,
         restart_overrides,
+        import_source_kind,
+        import_source_byte_count,
+        import_source_blake3,
+        import_source,
         recording: arguments,
     } = arguments;
+    let import_provenance = match (
+        import_source_kind,
+        import_source_byte_count,
+        import_source_blake3,
+        import_source,
+    ) {
+        (Some(source_kind), Some(byte_count), Some(blake3), Some(source)) => {
+            if source_kind != "ansi_stream" || blake3.len() != 64 {
+                return Err(miette::miette!("invalid internal ANSI import provenance"));
+            }
+            Some(ImportProvenance {
+                source_kind,
+                byte_count,
+                blake3,
+                source: ByteString::from(source.as_os_str().as_bytes()),
+            })
+        }
+        (None, None, None, None) => None,
+        _ => {
+            return Err(miette::miette!(
+                "incomplete internal ANSI import provenance"
+            ));
+        }
+    };
     if let Some(predecessor) = restart_source {
+        if import_provenance.is_some() {
+            return Err(miette::miette!(
+                "restart cannot carry ANSI import provenance"
+            ));
+        }
         let overrides = restart_overrides
             .as_deref()
             .map(serde_json::from_str)
@@ -3167,6 +4937,7 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         output_directory: out,
         creation_alias: session_alias,
         lineage: None,
+        import_provenance,
         command: arguments.command,
         working_directory: arguments.cwd,
         cols: geometry.cols,
@@ -3440,6 +5211,7 @@ fn restarted_record_options(
             predecessor_final_event_hash: completion.final_event_hash,
             reason: "restart".to_owned(),
         }),
+        import_provenance: None,
         command: manifest
             .command
             .iter()

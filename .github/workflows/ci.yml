@@ -24,3 +24,23 @@ jobs:
       - run: python3 -m py_compile demos/apps/terminal_showcase.py
       - run: cargo fmt --all -- --check
       - run: cargo metadata --no-deps --format-version 1 >/dev/null
+
+  clients:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: astral-sh/setup-uv@v7
+      - run: bun install --frozen-lockfile
+        working-directory: packages/typescript
+      - run: bun test
+        working-directory: packages/typescript
+      - run: bunx tsc -p tsconfig.json --noEmit
+        working-directory: packages/typescript
+      - run: bunx tsc -p tsconfig.test.json --noEmit
+        working-directory: packages/typescript
+      - run: uv run --project packages/python --with pytest pytest -q packages/python/tests
+      - run: uv run --project packages/python --with ruff ruff check packages/python/src/termtrace/client.py packages/python/src/termtrace/async_client.py packages/python/src/termtrace/models.py packages/python/src/termtrace/errors.py

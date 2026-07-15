@@ -17,6 +17,7 @@ pub mod ghostty_vt;
 pub mod inspection;
 pub mod interop;
 pub mod observation;
+pub mod output_projection;
 pub mod playback;
 pub mod presentation;
 pub mod profile;

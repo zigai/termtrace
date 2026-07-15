@@ -572,6 +572,13 @@
               "description": "Button name for clicks, otherwise wheel direction.",
               "type": "string"
             },
+            "click_count": {
+              "description": "Complete click count, or zero for non-click operations.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
             "cols": {
               "description": "Terminal columns at encoding time.",
               "format": "uint16",
@@ -590,6 +597,26 @@
               "description": "Pinned encoder identity.",
               "type": "string"
             },
+            "end_column": {
+              "description": "Optional zero-based destination column for a drag.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "end_row": {
+              "description": "Optional zero-based destination row for a drag.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "kind": {
               "const": "pointer",
               "type": "string"
@@ -602,7 +629,7 @@
               "type": "integer"
             },
             "operation": {
-              "description": "`click` or `scroll`.",
+              "description": "`click`, `multi_click`, `drag`, or `scroll`.",
               "type": "string"
             },
             "pixel_height": {
@@ -645,6 +672,7 @@
             "lines",
             "column",
             "row",
+            "click_count",
             "cols",
             "rows",
             "pixel_width",

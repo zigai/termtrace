@@ -1,0 +1,193 @@
+{
+  "$defs": {
+    "CaptureQuality": {
+      "description": "How settled the observed state is.",
+      "oneOf": [
+        {
+          "const": "live",
+          "description": "Immediate state from a responsive live actor.",
+          "type": "string"
+        },
+        {
+          "const": "stable",
+          "description": "Live state proven unchanged for a requested interval.",
+          "type": "string"
+        },
+        {
+          "const": "completed",
+          "description": "State from validated completed evidence.",
+          "type": "string"
+        },
+        {
+          "const": "incomplete",
+          "description": "Explicitly incomplete validated prefix.",
+          "type": "string"
+        }
+      ]
+    },
+    "ModeState": {
+      "description": "Terminal modes relevant to presentation and input.",
+      "properties": {
+        "alternate_screen": {
+          "description": "Any alternate-screen mode.",
+          "type": "boolean"
+        },
+        "bracketed_paste": {
+          "description": "DEC bracketed-paste mode 2004.",
+          "type": "boolean"
+        },
+        "synchronized_output": {
+          "description": "DEC synchronized-output mode 2026.",
+          "type": "boolean"
+        },
+        "values": {
+          "description": "Complete stable inventory of known ANSI and DEC modes.",
+          "items": {
+            "$ref": "#/$defs/TerminalMode"
+          },
+          "type": "array"
+        },
+        "wraparound": {
+          "description": "DEC auto-wrap mode 7.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "synchronized_output",
+        "alternate_screen",
+        "wraparound",
+        "bracketed_paste",
+        "values"
+      ],
+      "type": "object"
+    },
+    "ObservationFrame": {
+      "additionalProperties": false,
+      "description": "Compact stable frame shared by CLI and clients.",
+      "properties": {
+        "cols": {
+          "description": "Terminal columns.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cursor_column": {
+          "description": "Cursor column when it lies in the viewport.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cursor_row": {
+          "description": "Cursor row when it lies in the viewport.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cursor_visible": {
+          "description": "Whether the cursor is visible.",
+          "type": "boolean"
+        },
+        "modes": {
+          "$ref": "#/$defs/ModeState",
+          "description": "Stable terminal-mode facts."
+        },
+        "rows": {
+          "description": "Terminal rows.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "viewport_text": {
+          "description": "Plain text for the complete viewport.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "viewport_text",
+        "cols",
+        "rows",
+        "cursor_visible",
+        "modes"
+      ],
+      "type": "object"
+    },
+    "TerminalMode": {
+      "description": "One ANSI or DEC mode value.",
+      "properties": {
+        "ansi": {
+          "description": "`true` for ANSI mode, `false` for DEC-private mode.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "Current set/reset value.",
+          "type": "boolean"
+        },
+        "number": {
+          "description": "Numeric mode identifier.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "number",
+        "ansi",
+        "enabled"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/frame-envelope.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Compact versioned frame JSON optimized for test clients.",
+  "properties": {
+    "capture_quality": {
+      "$ref": "#/$defs/CaptureQuality",
+      "description": "Settlement quality of the source observation."
+    },
+    "frame": {
+      "$ref": "#/$defs/ObservationFrame",
+      "description": "Compact frame payload."
+    },
+    "frame_hash": {
+      "description": "BLAKE3 of canonical JSON for `frame`.",
+      "type": "string"
+    },
+    "presented": {
+      "description": "Whether this state was eligible for terminal presentation.",
+      "type": "boolean"
+    },
+    "state_hash": {
+      "description": "Semantic state hash linked to the full observation.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Stable frame format version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "state_hash",
+    "presented",
+    "capture_quality",
+    "frame",
+    "frame_hash"
+  ],
+  "title": "FrameEnvelope",
+  "type": "object"
+}

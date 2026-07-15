@@ -1,0 +1,240 @@
+{
+  "$defs": {
+    "DiagnosticCheck": {
+      "description": "Stable detector selectable by `diagnose --check`.",
+      "oneOf": [
+        {
+          "const": "full_redraw",
+          "description": "Full-viewport semantic clear controls.",
+          "type": "string"
+        },
+        {
+          "const": "transient",
+          "description": "Ordered presented or hidden transient states.",
+          "type": "string"
+        },
+        {
+          "const": "dirty",
+          "description": "Semantic changes inconsistent with Ghostty dirty evidence.",
+          "type": "string"
+        },
+        {
+          "const": "cursor",
+          "description": "Large cursor movement between semantic boundaries.",
+          "type": "string"
+        },
+        {
+          "const": "modes",
+          "description": "Repeated terminal-mode mutations.",
+          "type": "string"
+        },
+        {
+          "const": "palette",
+          "description": "Repeated palette/default-color mutations.",
+          "type": "string"
+        },
+        {
+          "const": "query_loop",
+          "description": "Repeated equal query/response exchanges.",
+          "type": "string"
+        }
+      ]
+    },
+    "DiagnosticFinding": {
+      "additionalProperties": false,
+      "description": "One conservative session-wide diagnostic finding.",
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable finding code.",
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "#/$defs/FindingConfidence",
+          "description": "Conservative confidence label."
+        },
+        "facts": {
+          "description": "Exact neutral facts and limitations.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "native_correlations": {
+          "description": "Native relationships, if independently available.",
+          "items": {
+            "$ref": "#/$defs/NativeCorrelation"
+          },
+          "type": "array"
+        },
+        "state_ids": {
+          "description": "Supporting semantic state IDs.",
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "token_ids": {
+          "description": "Supporting VT token IDs.",
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "confidence",
+        "state_ids",
+        "token_ids",
+        "facts",
+        "native_correlations"
+      ],
+      "type": "object"
+    },
+    "FindingConfidence": {
+      "description": "Conservative confidence label for a derived finding.",
+      "oneOf": [
+        {
+          "const": "high",
+          "description": "Directly encoded control and semantic outcome agree.",
+          "type": "string"
+        },
+        {
+          "const": "medium",
+          "description": "Ordered facts support a candidate but do not prove user perception.",
+          "type": "string"
+        }
+      ]
+    },
+    "NativeCorrelation": {
+      "additionalProperties": false,
+      "description": "One source-bound relationship to a native artifact.",
+      "properties": {
+        "frame": {
+          "description": "Nominal encoded frame when clock mapping supplied one.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "level": {
+          "$ref": "#/$defs/NativeEvidenceLevel",
+          "description": "Honest evidence level."
+        },
+        "limitation": {
+          "description": "Exact limitation on the relationship.",
+          "type": "string"
+        },
+        "manifest": {
+          "description": "Relative native manifest path.",
+          "type": "string"
+        },
+        "state_id": {
+          "description": "Related semantic state.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "level",
+        "manifest",
+        "state_id",
+        "limitation"
+      ],
+      "type": "object"
+    },
+    "NativeEvidenceLevel": {
+      "description": "Strength of evidence relating a semantic finding to native presentation.",
+      "oneOf": [
+        {
+          "const": "presentation_eligible",
+          "description": "The semantic state was eligible for terminal presentation.",
+          "type": "string"
+        },
+        {
+          "const": "scheduled_for_frame",
+          "description": "Clock-map arithmetic assigned the state a nominal video frame.",
+          "type": "string"
+        },
+        {
+          "const": "post_endpoint_stable_capture",
+          "description": "A stable native frame was captured after replay reached this endpoint.",
+          "type": "string"
+        },
+        {
+          "const": "frame_observed",
+          "description": "A causal presentation mechanism verified actual captured output.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/diagnose-report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Deterministic report from conservative session-wide detectors.",
+  "properties": {
+    "broad_change_fraction": {
+      "description": "Minimum changed-cell fraction used for broad redraw findings.",
+      "type": "string"
+    },
+    "checks": {
+      "description": "Ordered detector selection.",
+      "items": {
+        "$ref": "#/$defs/DiagnosticCheck"
+      },
+      "type": "array"
+    },
+    "findings": {
+      "description": "Deterministic findings.",
+      "items": {
+        "$ref": "#/$defs/DiagnosticFinding"
+      },
+      "type": "array"
+    },
+    "format": {
+      "description": "Stable report format.",
+      "type": "string"
+    },
+    "session_id": {
+      "description": "Canonical session identity.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "source_event_count": {
+      "description": "Canonical event count anchoring the report.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "source_final_event_hash": {
+      "description": "Final canonical event hash anchoring the report.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Report schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "session_id",
+    "source_final_event_hash",
+    "source_event_count",
+    "checks",
+    "broad_change_fraction",
+    "findings"
+  ],
+  "title": "DiagnoseReport",
+  "type": "object"
+}

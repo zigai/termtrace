@@ -18,6 +18,12 @@
       "minimum": 0,
       "type": "integer"
     },
+    "native_correlation_count": {
+      "description": "Number of honest direct or scheduled native correlations.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
     "presented_state_count": {
       "description": "Number of presentation-eligible states.",
       "format": "uint64",
@@ -40,6 +46,7 @@
     "state_count",
     "presented_state_count",
     "marker_count",
+    "native_correlation_count",
     "final_state_hash",
     "rendering_policy"
   ],

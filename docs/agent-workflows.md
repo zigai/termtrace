@@ -1,112 +1,165 @@
-# Agent workflows
+# Live control and inspection
 
-## Start and discover
+Every active recording exposes an owner-only control socket. Use it to observe the terminal, send input, resize the PTY, add markers, or stop the child.
 
-Use `termtrace start NAME -- COMMAND ...` for the short detached workflow. It returns only after the owner-only manifest and control identity are ready and includes the canonical path/session ID plus diagnostic log paths. `termtrace record --no-input --out SESSION -- COMMAND ...` remains the explicit foreground/evidence-path primitive. `termtrace ping NAME` and `termtrace status NAME` are readiness probes; do not infer readiness from arbitrary screen text.
+## Start a detached session
 
-Register a memorable local name with `termtrace register NAME --session SESSION`; `termtrace resolve NAME` returns the byte-exact canonical path and `--json` returns the bound session ID and protocol metadata. Registration is no-replace. Live commands accept one positional target: a registered name, a path containing `/`, or an explicit `name:`/`path:` reference when the spelling would be ambiguous.
-
-Use `termtrace list` for live aliases and `termtrace list --all --json` when diagnosing completed, stale, missing, or incompatible bindings. `termtrace remove NAME` removes only navigation metadata and reports `evidence_preserved: true`; evidence deletion is intentionally not part of that command.
-
-Use `termtrace show NAME` for the latest presented viewport. The live fast path does not replay the event log; after completion the same command validates and replays canonical evidence. Add `--format json-compact` when automation needs source identity, state hash, presentation status, boundary, capture quality, cursor/modes, and payload hash.
-
-Use `termtrace show --input trace.ansi` or pipe bytes to `--input -` only for an immediate semantic rendering of an ANSI/VT stream. Choose `--cols` and `--rows` when the default 80×24 geometry is unsuitable. This source is explicitly unchained and incomplete; do not treat it as session evidence.
-
-Use `termtrace show --cols 100 --rows 30 -- COMMAND ...` for a disposable invocation whose final viewport and execution evidence are both needed. The command runs synchronously to durable completion; its canonical session is retained under the owner-only state root and identified in structured output. This form never detaches the command.
-
-Choose provenance deliberately for the workload. The default `minimal` policy avoids retaining locale/timezone values. Use `--provenance reproducible` when those values are needed to recreate behavior, or `--provenance custom --provenance-env NAME=hash` to retain equality evidence without the value. `not-captured` records an explicit omission; it is different from an unselected variable.
-
-Before handing off a reproducible session, inspect `execution_provenance.executable`, `invoked_file`, and `runtime.recorder.binary`. A `captured` content identity can be compared to candidate files; `unresolved` or `unavailable` is an explicit reproducibility gap rather than permission to infer a match.
-
-## Drive safely
-
-Use `send SESSION text:VALUE enter` for UTF-8 plus semantic keys, and `raw:`, `raw-file:`, or `--stdin` for exact bytes. `--pace DURATION` schedules client-side gaps while the actor remains available for output and host-query handling; paced text uses Unicode scalar boundaries. Named keys are resolved by the session actor against live keyboard modes, not guessed by the client. Every mutation has a caller-owned UUID, durable intent, explicit result, byte count, and actor-side deduplication. Library clients should retain a `ControlRequest` and use `send_request` with the same UUID after a transport failure. Never create a new UUID to retry input whose outcome is unknown. Exact outcomes persist in `requests.jsonl`, so a retry remains safe after the actor's bounded memory cache evicts the request; read-only observations are not retained there.
-
-When reasoning from a snapshot, pass its `state_hash` back as `--if-state HASH` on `send`, `resize`, `signal`, `mark`, or `stop`. A `stale_observation` rejection means output processed before the mutation changed the presented state; inspect again instead of blindly retrying with a new UUID. The rejection includes the current hash plus actor-observed and durable boundaries and records no canonical intent. Each atom in a paced or multi-atom send is guarded separately.
-
-Use `focus SESSION in|out` for an application that enabled DEC focus reporting. The actor evaluates mode 1004 at its ordering point and records focus as its own semantic input kind with the mode hash, pinned encoder, and exact bytes. Disabled reporting is an honest event-free no-op by default; add `--strict` when the test requires the application to have opted in.
-
-Use `pointer SESSION click --cell COLUMN,ROW` or `pointer SESSION scroll --cell COLUMN,ROW --lines N` for applications that enabled mouse tracking. Cells are always zero-based. The actor bounds-checks against current geometry and passes cell-center pixels plus live tracking/encoding modes to the pinned mouse encoder. The canonical descriptor retains the requested operation, cell, grid/pixel geometry, mode hash, encoder, and exact combined bytes; it proves input emission, not that the application activated a UI control.
-
-Use `activate SESSION --text VALUE --unique --strict` only when visible semantic text is the intended geometric target. Resolution and mouse encoding occur in one actor operation over the same presented state. Matches are exact, row-contained, and unconcealed; ambiguity is rejected with candidate regions. The returned region/state hash proves what was resolved and which bytes were emitted, but a postcondition screen wait is still required to prove application behavior.
-
-Signals are allowlisted: interrupt, terminate, hangup, user1, and user2. `SIGKILL` is intentionally absent. `stop` is a graceful `SIGTERM` request. Markers are durable timeline annotations, and a successful `mark` response names the canonical event sequence.
-
-Terminal-generated replies are marked `source: host`. A `query_response` event preserves the triggering control sequence and exact response before the corresponding input intent/result. Agents should not synthesize a second response.
-
-## Wait and inspect
+`start` creates a recording under the per-user state directory and publishes its name only after the control socket is ready:
 
 ```bash
-termtrace wait SESSION 'ready>' --stable-for 250ms --timeout-ms 30000
-termtrace inspect --session SESSION --format text
+termtrace start demo --cols 120 --rows 36 -- your-command
+termtrace ping demo
+termtrace status demo
+```
+
+Use `record --no-input --out SESSION` when the evidence path must be chosen explicitly.
+
+## Inspect the screen
+
+`show` is the simplest view of the latest presented terminal state:
+
+```bash
+termtrace show demo
+termtrace show demo --format json-compact
+```
+
+For completed sessions, select a specific point:
+
+```bash
+termtrace show SESSION --state 42
+termtrace show SESSION --event-seq 120
+termtrace show SESSION --at-marker before-build
+```
+
+`inspect` returns the complete reconstructed state, including cells, styles, colors, cursor, modes, and source boundaries:
+
+```bash
 termtrace inspect --session SESSION --state 42 --format json
-termtrace inspect --session SESSION --event-seq 120 --format json
-termtrace inspect --session SESSION --monotonic-ns 500000000 --format json
 termtrace inspect --session SESSION --state 42 --row 16 --format json-compact
 ```
 
-`wait` searches exact canonical output bytes, including matches spanning PTY reads. Ping, status, wait polling, and live-snapshot boundary discovery do not append events. Every live response distinguishes the latest actor-observed boundary from the file-synchronized durable boundary; forensic readers consume the durable prefix unless explicitly labeled volatile. It fails explicitly on timeout or child exit.
+Use `output SESSION --raw` only for the original child-output byte stream. Output history is not the same thing as the visible viewport.
 
-`inspect` replays from canonical events and returns a complete state, not a delta. JSON includes graphemes, styles, resolved colors, cursor, all known modes, OSC metadata, dirty evidence, and provenance. Text is a compact viewport view. `--row N` emits only one complete row plus bounded record provenance, and `json-compact` avoids pretty-print overhead. Output commands treat a downstream broken pipe as a normal early consumer exit.
+## Wait for state
 
-Start rendering diagnosis with `termtrace timeline SESSION`. The default text view lists canonical operations and presented semantic transitions with their event/byte positions and changed row/cell counts. Add `--jsonl` for streaming automation, `--all-states` when synchronized-output internals matter, or `--controls` for exact lossless VT frames and neutral common-control descriptions. Timeline ranges use the same half-open time and unique-marker selectors as indexing and capture.
-
-Use `termtrace diff SESSION --from-marker BEFORE --to-marker AFTER` after locating endpoints. Structured output preserves complete grapheme/style/color cell values and separates minimal semantic changes from each endpoint's Ghostty dirty evidence. Add `--expect-no-change` in tests; it still prints the reviewable diff before returning a failing status when a change exists.
-
-Use `termtrace explain SESSION --event-seq N --context 8` to attribute a suspicious region to exact output frames and nearby semantic states. Findings have stable codes, conservative confidence, token IDs, and explicit facts. Treat `clear_then_repaint_candidate` as semantic evidence only; it deliberately states that native pixel flicker was not established.
-
-Use `termtrace output SESSION --raw` only when a byte-exact child-output stream is required. It is output history, not the visible viewport; use `show` for the latter. The command validates completion and the event chain before emitting bytes, preserves invalid UTF-8 and controls, and treats a downstream closed pipe as normal completion. With `--follow`, only actor-durable complete records are emitted; the follower retries the completion/socket handoff and never emits a partial JSONL tail.
-
-Before handing evidence to another system, run `bundle SESSION --profile PROFILE --out DIRECTORY --dry-run` and review every sensitivity. Use `screen` for the smallest state handoff, `debug` for redacted event metadata and validation context, and `forensic` only when raw canonical input/output evidence is explicitly intended. Bundles remain owner-only and are never uploaded automatically; validate them with `bundle-verify` after copying.
-
-Language clients should keep one `termtrace driver` process and begin with `hello`. Attach returns a process-local handle distinct from the immutable session ID/path. Retain every caller request UUID until its correlated outcome is known; identical retries are cached by the driver and mutations also retain actor-side deduplication. Clean stdin EOF shuts down only the driver. A later process can attach the same canonical path and inspect completion or reconnect to a still-live actor.
-
-Native Rust integrations may use `client::Terminal` and its blocking `SessionBuilder` instead of managing the driver process. Launch always uses argument vectors rather than shell quoting and waits for the owner-only actor socket. Screen and keyboard namespaces preserve the same typed control contracts; use `Session::send` when the caller must retain a request object across transport failure. Choose `stop`, `complete`, or `detach` explicitly during cleanup.
-
-Use `termtrace events SESSION --type marker,input_intent,exit` for typed canonical history. Add `--metadata-only` before sharing diagnostic output when exact child/input/query bytes are unnecessary; the projection retains non-byte fields and byte equality evidence without the payload. Screen text and remaining metadata may still be sensitive. `--follow` keeps the same projection/filter contract while advancing only through integrity-validated actor-durable prefixes.
-
-Use `termtrace save SESSION --format txt,json,deep-json,vt,html --out ARTIFACTS` to hand off several views of exactly one state. Publication is owner-only, atomic, and no-replace; the manifest binds every member to the same resolved state and completed source root. The `json` recipe is the compact observation envelope, `deep-json` retains the complete reconstructed grid and styles, and VT/HTML use the pinned formatter at the selected replay boundary.
-
-## Complete and derive
-
-Use an explicit completion barrier before post-processing:
+Wait for presented screen text:
 
 ```bash
-termtrace wait SESSION --output READY
-termtrace mark SESSION --label settled
-termtrace stop SESSION --wait
-termtrace index --session SESSION --from-marker settled
-termtrace capture --session SESSION --from-marker settled
-termtrace verify SESSION --level content --json
+termtrace wait demo 'Ready' --stable-for 250ms --timeout-ms 30000
 ```
 
-For authenticated handoff, verify content before signing, retain the trust policy separately, and check it at review time:
+Use `--output TEXT` when you need historical output rather than the current screen. Other predicates can test rows, regions, cursor properties, terminal modes, and state changes. See `termtrace wait --help` for the full predicate grammar.
+
+Waits are observations. They do not append events to the recording.
+
+## Send input
+
+`send` accepts text, paste, named keys, raw bytes, and files:
 
 ```bash
-termtrace sign SESSION --key SSH_KEY --signer BUILD_IDENTITY
-termtrace verify SESSION --level signature --allowed-signers ALLOWED_SIGNERS --json
+termtrace send demo text:'build' enter
+termtrace send demo up up enter
+termtrace send demo paste:'multiple lines'
+termtrace send demo raw-file:input.bin
 ```
 
-Do not treat a successful cryptographic check without an allowed-signers policy as trusted identity. Create the no-replace receipt after publishing the final derivations. It checkpoints only the artifact-root prefix that existed when it was created; additional derivations remain locally verifiable but unauthenticated by that receipt.
+Use `--pace 35ms` to delay between atoms. Named keys are encoded from the application's live terminal modes. Paste input respects bracketed-paste mode and rejects unsafe delimiter injection.
 
-Normal `index` and every `capture` require `completion.json` to bind the exact session manifest and event header, agree with the canonical final hash, event count, output byte count, and exit outcome, and identify a final `Exit` with no pending mutation. This prevents a settled-but-live TUI from producing an index that silently becomes stale. `status --wait-complete` waits without stopping the child. If a live prefix is genuinely needed, `index --live-snapshot` writes a hash-addressed, explicitly incomplete directory; create a fresh final index after completion. Existing artifact directories are never replaced.
+Every mutation has a request ID and a durable outcome. If a client loses the response, retry with the same ID; creating a new ID may apply the input twice. Library clients expose request objects for this purpose.
 
-Use `index --presented-only` (and the same capture flag) when synchronized-output internals are unnecessary. Full indexing remains the default. Marker labels used as `--from-marker` or `--to-marker` must occur exactly once.
+## Guard a mutation
 
-## tmux
-
-tmux is an ordinary target, not a source of truth:
+Structured observations include a presented `state_hash`. Pass it back with `--if-state` when an action is valid only for that state:
 
 ```bash
-termtrace record --out SESSION -- tmux new-session -A -s agent
+termtrace send demo enter --if-state HASH
 ```
 
-PTY bytes, input, resize, and signals remain canonical. tmux capture-pane may be useful for comparison, but it loses transient states and is not used for replay.
+If the screen changed first, Termtrace returns `stale_observation` without sending input. Inspect again before deciding what to do.
 
-## asciinema
+## Focus and pointer input
+
+Focus reports work only when the application enabled focus reporting:
 
 ```bash
-termtrace export-asciicast --session SESSION --out session.cast
+termtrace focus demo in --strict
 ```
 
-Asciicast v2 is UTF-8-only. Invalid bytes become replacement characters, timing becomes floating-point seconds, and advanced semantic state is absent. The cast is interoperability output, never canonical evidence.
+Pointer operations use zero-based terminal cells and the application's live mouse mode:
+
+```bash
+termtrace pointer demo click --cell 24,8 --button left
+termtrace pointer demo drag --from 10,5 --to 40,5 --button left
+termtrace pointer demo scroll --cell 70,20 --lines -3
+```
+
+To click visible text, let Termtrace resolve the text and geometry from one state:
+
+```bash
+termtrace activate demo --text 'Save changes' --unique --strict
+```
+
+These commands prove which bytes were emitted. Add a screen wait to prove how the application responded.
+
+## Mark, signal, and stop
+
+Markers create durable timeline anchors:
+
+```bash
+termtrace mark demo --label before-build
+termtrace signal demo --signal interrupt
+termtrace stop demo --wait
+```
+
+Allowed signals are `interrupt`, `terminate`, `hangup`, `user1`, and `user2`. `stop` sends a graceful termination request. `--wait` returns only after `completion.json` is durable.
+
+## Review changes
+
+Start with a timeline, then narrow the interesting range:
+
+```bash
+termtrace timeline SESSION
+termtrace diff SESSION --from-marker before-build --to-marker after-build
+termtrace explain SESSION --event-seq 120 --context 8
+termtrace diagnose SESSION --check full-redraw,flicker,stale-cells
+```
+
+The timeline combines canonical operations with semantic state changes. `diff` compares complete cell values. `explain` associates VT tokens with nearby states. Diagnostics are conservative findings, not guesses about pixels that were never observed.
+
+## Friendly names
+
+Names are navigation metadata, not evidence identity:
+
+```bash
+termtrace register demo --session /tmp/example.termtrace
+termtrace resolve demo
+termtrace list
+termtrace list --all --json
+termtrace remove demo
+```
+
+Removing a name never removes evidence. A positional target containing `/` is treated as a path; other values are treated as names. Prefix ambiguous values with `path:` or `name:`.
+
+## Automate repeated tests
+
+`termtrace test` runs versioned JSON scenarios in fresh sessions. Scenarios can send input, wait for screen state, add markers, compare snapshots, run temporal assertions, and retain failure evidence.
+
+```bash
+termtrace test tests/scenarios/login.json --jobs 4 --reruns 1
+```
+
+Snapshot files change only with `--update-snapshots`. Each rerun receives a new session; failed attempts are retained.
+
+For language integrations, keep one `termtrace driver` process and begin with `hello`. Typed Python, TypeScript, and Rust clients wrap the same screen, keyboard, pointer, event, completion, and evidence contracts. Driver handles are process-local; canonical session IDs and paths remain stable across driver restarts.
+
+## Hand off evidence
+
+Preview the files and sensitivity labels before creating a bundle:
+
+```bash
+termtrace bundle SESSION --profile screen --out BUNDLE --dry-run
+termtrace bundle SESSION --profile screen --out BUNDLE
+termtrace bundle-verify BUNDLE
+```
+
+Use `screen` for a small state handoff, `debug` for redacted event metadata, and `forensic` only when raw input and output are explicitly required. Bundles are never uploaded automatically.

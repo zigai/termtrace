@@ -774,6 +774,7 @@ mod tests {
             output_directory: output_directory.clone(),
             creation_alias: None,
             lineage: None,
+            import_provenance: None,
             command: vec![OsString::from("/bin/true")],
             working_directory: None,
             cols: 80,

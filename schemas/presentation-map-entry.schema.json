@@ -4,15 +4,46 @@
   "additionalProperties": false,
   "description": "One output-frame provenance decision.",
   "properties": {
+    "annotation_indices": {
+      "description": "Stable annotation indices rendered on this frame.",
+      "items": {
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
     "captioned": {
       "description": "Whether a caller caption alters this presentation frame.",
       "type": "boolean"
+    },
+    "change_state_ids": {
+      "description": "Semantic states nominally scheduled into a change overlay on this frame.",
+      "items": {
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
     },
     "clip_index": {
       "description": "Caller-ordered clip index.",
       "format": "uint",
       "minimum": 0,
       "type": "integer"
+    },
+    "cursor_mask_state_id": {
+      "description": "Semantic state used when a cursor mask affected this frame.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "encoded_pixel_change": {
+      "description": "Whether this frame uses actual adjacent decoded encoded-pixel comparison.",
+      "type": "boolean"
     },
     "operation": {
       "description": "`source` for retimed frames or `hold` for generated duplicates.",
@@ -29,6 +60,13 @@
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "transforms": {
+      "description": "Presentation-only transforms applied to this frame.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -36,7 +74,11 @@
     "clip_index",
     "source_frame",
     "operation",
-    "captioned"
+    "captioned",
+    "annotation_indices",
+    "transforms",
+    "change_state_ids",
+    "encoded_pixel_change"
   ],
   "title": "PresentationMapEntry",
   "type": "object"

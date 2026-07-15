@@ -1,0 +1,402 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "SaveFormat": {
+      "description": "Semantic file recipe supported by `save`.",
+      "oneOf": [
+        {
+          "const": "txt",
+          "description": "Plain viewport text.",
+          "type": "string"
+        },
+        {
+          "const": "json",
+          "description": "Compact truth-labeled observation JSON.",
+          "type": "string"
+        },
+        {
+          "const": "deep-json",
+          "description": "Complete reconstructed semantic-state JSON.",
+          "type": "string"
+        },
+        {
+          "const": "vt",
+          "description": "Pinned Ghostty VT reconstruction.",
+          "type": "string"
+        },
+        {
+          "const": "html",
+          "description": "Pinned Ghostty HTML reconstruction.",
+          "type": "string"
+        },
+        {
+          "const": "svg",
+          "description": "Deterministic semantic-state SVG.",
+          "type": "string"
+        },
+        {
+          "const": "png",
+          "description": "Deterministic semantic-state PNG rasterized from the SVG scene.",
+          "type": "string"
+        }
+      ]
+    },
+    "SaveManifest": {
+      "additionalProperties": false,
+      "description": "Manifest binding every saved representation to one source state.",
+      "properties": {
+        "canonical_session": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact canonical session path bytes."
+        },
+        "files": {
+          "description": "Manifested representations.",
+          "items": {
+            "$ref": "#/$defs/SavedFile"
+          },
+          "type": "array"
+        },
+        "format": {
+          "description": "Stable manifest format.",
+          "type": "string"
+        },
+        "semantic_image_resources": {
+          "description": "Exact deterministic resources when semantic images are present.",
+          "items": {
+            "$ref": "#/$defs/SemanticImageResource"
+          },
+          "type": "array"
+        },
+        "sensitivity": {
+          "description": "Explicit sensitivity classification.",
+          "type": "string"
+        },
+        "session_id": {
+          "description": "Canonical session identity.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "source_final_event_hash": {
+          "description": "Final canonical event hash.",
+          "type": "string"
+        },
+        "state_hash": {
+          "description": "Resolved complete semantic state hash.",
+          "type": "string"
+        },
+        "state_id": {
+          "description": "Resolved state identifier.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state_point": {
+          "$ref": "#/$defs/StatePoint",
+          "description": "Requested semantic point."
+        },
+        "version": {
+          "description": "Manifest version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "version",
+        "session_id",
+        "canonical_session",
+        "state_point",
+        "state_id",
+        "state_hash",
+        "source_final_event_hash",
+        "sensitivity",
+        "files",
+        "semantic_image_resources"
+      ],
+      "type": "object"
+    },
+    "SavedFile": {
+      "additionalProperties": false,
+      "description": "One manifested saved file.",
+      "properties": {
+        "blake3": {
+          "description": "BLAKE3 of exact file bytes.",
+          "type": "string"
+        },
+        "byte_count": {
+          "description": "Exact byte count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "media_type": {
+          "description": "Media type.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Relative filename.",
+          "type": "string"
+        },
+        "renderer": {
+          "description": "Stable renderer identity, when applicable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truth_layer": {
+          "description": "Rendering truth layer, when this member is a rendering.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "media_type",
+        "byte_count",
+        "blake3"
+      ],
+      "type": "object"
+    },
+    "ScreenshotBatchEntry": {
+      "additionalProperties": false,
+      "description": "One entry in an atomic multi-state semantic screenshot batch.",
+      "properties": {
+        "directory": {
+          "description": "Batch-relative artifact directory.",
+          "type": "string"
+        },
+        "image": {
+          "description": "Batch-relative image path.",
+          "type": "string"
+        },
+        "manifest": {
+          "$ref": "#/$defs/SaveManifest",
+          "description": "Complete per-state save manifest."
+        }
+      },
+      "required": [
+        "directory",
+        "image",
+        "manifest"
+      ],
+      "type": "object"
+    },
+    "SemanticImageResource": {
+      "additionalProperties": false,
+      "description": "Exact font and layout resources used by semantic image output.",
+      "properties": {
+        "background_policy": {
+          "description": "Background policy.",
+          "type": "string"
+        },
+        "cell_height": {
+          "description": "Fixed semantic cell height.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cell_width": {
+          "description": "Fixed semantic cell width.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fallback_policy": {
+          "description": "Deterministic missing-glyph policy.",
+          "type": "string"
+        },
+        "font_blake3": {
+          "description": "BLAKE3 of exact font bytes.",
+          "type": "string"
+        },
+        "font_byte_count": {
+          "description": "Exact font byte count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "font_family": {
+          "description": "Embedded font family.",
+          "type": "string"
+        },
+        "font_size": {
+          "description": "Font size in semantic SVG units.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "font_source": {
+          "description": "Repository-relative font source.",
+          "type": "string"
+        },
+        "padding": {
+          "description": "Fixed outer padding.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "font_family",
+        "font_source",
+        "font_byte_count",
+        "font_blake3",
+        "fallback_policy",
+        "font_size",
+        "cell_width",
+        "cell_height",
+        "padding",
+        "background_policy"
+      ],
+      "type": "object"
+    },
+    "StatePoint": {
+      "description": "Shared state selection vocabulary.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Latest presentation-eligible state.",
+          "properties": {
+            "selector": {
+              "const": "latest_presented",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact semantic state identifier.",
+          "properties": {
+            "selector": {
+              "const": "state_id",
+              "type": "string"
+            },
+            "state_id": {
+              "description": "Exact semantic state identifier.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "selector",
+            "state_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Latest state at or before an event sequence.",
+          "properties": {
+            "event_seq": {
+              "description": "Canonical event sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "selector": {
+              "const": "event_seq",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "event_seq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Latest state at or before a session-monotonic timestamp.",
+          "properties": {
+            "monotonic_ns": {
+              "description": "Session-monotonic nanoseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "selector": {
+              "const": "monotonic_ns",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "monotonic_ns"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "State at a uniquely named marker.",
+          "properties": {
+            "label": {
+              "description": "Unique marker label.",
+              "type": "string"
+            },
+            "selector": {
+              "const": "marker",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "label"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/screenshot-batch-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Manifest for an atomically published multi-state screenshot batch.",
+  "properties": {
+    "entries": {
+      "description": "Ordered exact-state entries.",
+      "items": {
+        "$ref": "#/$defs/ScreenshotBatchEntry"
+      },
+      "type": "array"
+    },
+    "format": {
+      "description": "Stable batch format.",
+      "type": "string"
+    },
+    "image_format": {
+      "$ref": "#/$defs/SaveFormat",
+      "description": "Semantic image format shared by every entry."
+    },
+    "version": {
+      "description": "Batch format version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "image_format",
+    "entries"
+  ],
+  "title": "ScreenshotBatchManifest",
+  "type": "object"
+}

@@ -92,19 +92,19 @@ pub fn probe_capabilities() -> CapabilityReport {
             "run on Linux and install util-linux",
         )
     };
-    let missing_native = missing(&["ghostty", "Xvfb", "dbus-run-session"]);
+    let missing_native = missing(&["ghostty", "Xvfb", "dbus-run-session", "import", "ffprobe"]);
     let native_screenshot = if cfg!(target_os = "linux") && missing_native.is_empty() {
         ready(
             "native-screenshot",
             "native_host_tools_found",
-            "Ghostty, Xvfb, and D-Bus launcher were found; capture performs the exact-grid runtime probe",
+            "Ghostty, Xvfb, D-Bus launcher, direct X11 PNG import, and FFprobe were found; capture performs the exact-grid runtime probe",
         )
     } else {
         blocked(
             "native-screenshot",
             "native_host_tools_missing",
             format!("missing host tools: {}", missing_native.join(", ")),
-            "install Ghostty GTK, Xvfb, and dbus-run-session on Linux",
+            "install Ghostty GTK, Xvfb, dbus-run-session, ImageMagick import, and FFprobe on Linux",
         )
     };
     let missing_video = missing(&["ffmpeg", "ffprobe"]);
@@ -128,6 +128,35 @@ pub fn probe_capabilities() -> CapabilityReport {
                 if encoder { "available" } else { "unavailable" }
             ),
             "install FFmpeg/FFprobe with libx264rgb plus the native screenshot dependencies",
+        )
+    };
+    let presentation_encoder = ffmpeg_has_encoder("libx264");
+    let presentation_ass = ffmpeg_has_filter("ass");
+    let presentation = if missing_video.is_empty() && presentation_encoder && presentation_ass {
+        ready(
+            "presentation",
+            "presentation_tools_ready",
+            "FFmpeg/FFprobe, H.264 delivery encoding, and the ASS/libass filter were found",
+        )
+    } else {
+        blocked(
+            "presentation",
+            "presentation_dependency_missing",
+            format!(
+                "missing tools: {}; libx264 encoder: {}; ASS/libass filter: {}",
+                missing_video.join(", "),
+                if presentation_encoder {
+                    "available"
+                } else {
+                    "unavailable"
+                },
+                if presentation_ass {
+                    "available"
+                } else {
+                    "unavailable"
+                },
+            ),
+            "install FFmpeg/FFprobe with libx264 and libass support",
         )
     };
     let receipt = if executable("ssh-keygen").is_some() {
@@ -155,6 +184,7 @@ pub fn probe_capabilities() -> CapabilityReport {
             semantic_capability,
             native_screenshot,
             native_video,
+            presentation,
             receipt,
         ],
     };
@@ -212,5 +242,21 @@ fn ffmpeg_has_encoder(encoder: &str) -> bool {
         .is_some_and(|output| {
             return output.status.success()
                 && String::from_utf8_lossy(&output.stdout).contains(encoder);
+        });
+}
+
+fn ffmpeg_has_filter(filter: &str) -> bool {
+    let Some(ffmpeg) = executable("ffmpeg") else {
+        return false;
+    };
+    return Command::new(ffmpeg)
+        .args(["-hide_banner", "-filters"])
+        .output()
+        .ok()
+        .is_some_and(|output| {
+            return output.status.success()
+                && String::from_utf8_lossy(&output.stdout).lines().any(|line| {
+                    return line.split_whitespace().any(|field| return field == filter);
+                });
         });
 }

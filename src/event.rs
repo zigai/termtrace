@@ -255,7 +255,7 @@ pub enum InputDescriptor {
     },
     /// Pointer operation encoded against live mouse modes and geometry.
     Pointer {
-        /// `click` or `scroll`.
+        /// `click`, `multi_click`, `drag`, or `scroll`.
         operation: String,
         /// Button name for clicks, otherwise wheel direction.
         button: String,
@@ -265,6 +265,12 @@ pub enum InputDescriptor {
         column: u16,
         /// Zero-based viewport row.
         row: u16,
+        /// Optional zero-based destination column for a drag.
+        end_column: Option<u16>,
+        /// Optional zero-based destination row for a drag.
+        end_row: Option<u16>,
+        /// Complete click count, or zero for non-click operations.
+        click_count: u8,
         /// Terminal columns at encoding time.
         cols: u16,
         /// Terminal rows at encoding time.

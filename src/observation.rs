@@ -3,20 +3,25 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use zstd::stream::decode_all;
 
 use std::{
+    fs::File,
+    io::{BufReader, ErrorKind, Read as _},
     os::unix::ffi::OsStrExt as _,
+    os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
 };
 
 use crate::{
     Error, Result,
+    artifact::{create_private_directory, sync_directory, write_secure},
     control::{ControlCommand, ControlData, request},
     event::{ByteString, Event},
     event_log::{CanonicalBoundary, EventLog},
     ghostty_vt::{Format, GhosttyVt, ModeState, SemanticState},
-    replay::{StateSelector, inspect},
-    session::{read_manifest, validate_completed_log},
+    replay::{GHOSTTY_REVISION, STATE_FORMAT_VERSION, StateInspection, StateSelector, inspect},
+    session::{SessionCompletion, read_completion, read_manifest, validate_completed_log},
 };
 
 /// Source category for one observation.
@@ -27,8 +32,12 @@ pub enum ObservationSourceKind {
     LiveSession,
     /// Validated completed canonical recording.
     CompletedSession,
+    /// Explicitly validated but incomplete canonical event prefix.
+    InterruptedSession,
     /// Unchained ANSI/VT byte stream.
     AnsiStream,
+    /// Completed canonical evidence imported from an ANSI/VT byte stream.
+    ImportedAnsi,
     /// Canonical recording allocated for a one-off command.
     OneOffCommand,
 }
@@ -65,6 +74,46 @@ pub enum ObservationIntegrity {
     CanonicalChained,
     /// State derives from an unchained byte stream.
     Unchained,
+}
+
+/// Service path used to resolve an observation without changing its meaning.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationResolution {
+    /// Actor-consistent live snapshot fast path.
+    ActorSnapshot,
+    /// Independently validated canonical event replay.
+    CanonicalReplay,
+    /// Content-addressed full-state checkpoint validated against exact source bytes.
+    ValidatedCheckpoint,
+    /// Pinned semantic interpretation of an unchained ANSI stream.
+    AnsiInterpretation,
+}
+
+/// Disposable full-state checkpoint bound to exact canonical source files.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayCheckpoint {
+    /// Checkpoint format version.
+    pub version: u32,
+    /// Pinned semantic state format.
+    pub state_format_version: u32,
+    /// Pinned semantic engine revision.
+    pub ghostty_revision: String,
+    /// Exact requested state point.
+    pub state_point: StatePoint,
+    /// Exact canonical event-log byte count.
+    pub event_log_byte_count: u64,
+    /// BLAKE3 of the complete canonical event-log file.
+    pub event_log_blake3: String,
+    /// BLAKE3 of exact completion JSON bytes.
+    pub completion_blake3: String,
+    /// Completion-bound final canonical event hash.
+    pub final_event_hash: String,
+    /// Complete reconstructed state and provenance.
+    pub inspection: StateInspection,
+    /// BLAKE3 of canonical JSON for the complete cached semantic state.
+    pub inspection_state_blake3: String,
 }
 
 /// Shared state selection vocabulary.
@@ -115,6 +164,24 @@ pub struct ObservationFrame {
     pub modes: ModeState,
 }
 
+/// Compact versioned frame JSON optimized for test clients.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FrameEnvelope {
+    /// Stable frame format version.
+    pub version: u32,
+    /// Semantic state hash linked to the full observation.
+    pub state_hash: String,
+    /// Whether this state was eligible for terminal presentation.
+    pub presented: bool,
+    /// Settlement quality of the source observation.
+    pub capture_quality: CaptureQuality,
+    /// Compact frame payload.
+    pub frame: ObservationFrame,
+    /// BLAKE3 of canonical JSON for `frame`.
+    pub frame_hash: String,
+}
+
 /// Truth-labeled observation of one terminal state.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -147,6 +214,8 @@ pub struct Observation {
     pub truth_layer: TruthLayer,
     /// Integrity relationship to canonical execution evidence.
     pub integrity: ObservationIntegrity,
+    /// Service path used to resolve this state.
+    pub resolution: ObservationResolution,
     /// Compact stable frame.
     pub frame: ObservationFrame,
     /// BLAKE3 of canonical JSON for `frame`.
@@ -191,6 +260,7 @@ pub fn observe_session_with_options(
     }
     let snapshot = request(&canonical, ControlCommand::Snapshot)?;
     let ControlData::Snapshot {
+        semantic_state_zstd: _,
         viewport_text,
         state_hash,
         presented,
@@ -233,6 +303,83 @@ pub fn observe_session_with_options(
         capture_quality: CaptureQuality::Live,
         truth_layer: TruthLayer::Semantic,
         integrity: ObservationIntegrity::CanonicalChained,
+        resolution: ObservationResolution::ActorSnapshot,
+        frame,
+        payload_hash,
+    });
+}
+
+/// Observe an explicitly requested validated incomplete canonical prefix.
+///
+/// # Errors
+///
+/// Returns an error when completion exists, the event prefix is invalid, the
+/// selector cannot resolve, or a hidden state was not explicitly permitted.
+pub fn observe_validated_prefix(
+    session: &Path,
+    point: StatePoint,
+    include_hidden: bool,
+) -> Result<Observation> {
+    let canonical = session.canonicalize().map_err(|source| {
+        return Error::Filesystem {
+            path: session.to_path_buf(),
+            source,
+        };
+    })?;
+    if canonical.join("completion.json").exists() {
+        return Err(observation_error(
+            "validated-prefix observation requires incomplete evidence",
+        ));
+    }
+    let manifest = read_manifest(&canonical)?;
+    let log = EventLog::read(canonical.join("events.jsonl"))?;
+    let inspection = inspect(&log, state_selector(&log, &point)?)?;
+    if !inspection.record.presented && !include_hidden {
+        return Err(observation_error(
+            "selected semantic state is hidden; pass explicit hidden-state permission",
+        ));
+    }
+    let frame = frame_from_state(&inspection.state);
+    let payload_hash = frame_hash(&frame)?;
+    let output_bytes = log.events.iter().fold(0_u64, |total, record| {
+        return total.saturating_add(match &record.event {
+            Event::Output { data } => u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX),
+            _ => 0,
+        });
+    });
+    let event_hash = match log.events.last() {
+        Some(record) => record.hash.clone(),
+        None => {
+            let bytes = serde_json::to_vec(&log.header).map_err(|source| {
+                return Error::InvalidJson {
+                    path: PathBuf::from("<event-header>"),
+                    json_path: "$".to_owned(),
+                    source,
+                };
+            })?;
+            blake3::hash(&bytes).to_hex().to_string()
+        }
+    };
+    return Ok(Observation {
+        source_kind: ObservationSourceKind::InterruptedSession,
+        session_id: Some(manifest.session_id),
+        canonical_session: Some(ByteString::from(canonical.as_os_str().as_bytes())),
+        source_completed: false,
+        state_point: point,
+        state_id: Some(inspection.record.state_id),
+        state_hash: inspection.record.state_hash,
+        event_seq: inspection.record.event_seq,
+        monotonic_ns: Some(inspection.record.monotonic_ns),
+        presented: inspection.record.presented,
+        boundary: CanonicalBoundary {
+            next_event_seq: u64::try_from(log.events.len()).unwrap_or(u64::MAX),
+            event_hash,
+            output_bytes,
+        },
+        capture_quality: CaptureQuality::Incomplete,
+        truth_layer: TruthLayer::Semantic,
+        integrity: ObservationIntegrity::CanonicalChained,
+        resolution: ObservationResolution::CanonicalReplay,
         frame,
         payload_hash,
     });
@@ -244,9 +391,81 @@ fn observe_completed(
     point: StatePoint,
     include_hidden: bool,
 ) -> Result<Observation> {
+    let completion = read_completion(session)?;
+    if let Some(inspection) = load_checkpoint(session, &point, &completion)? {
+        if !inspection.record.presented && !include_hidden {
+            return Err(observation_error(
+                "selected semantic state is hidden; pass explicit hidden-state permission",
+            ));
+        }
+        return completed_observation(
+            session,
+            session_id,
+            point,
+            &completion,
+            inspection,
+            ObservationResolution::ValidatedCheckpoint,
+        );
+    }
     let log = EventLog::read(session.join("events.jsonl"))?;
     let completion = validate_completed_log(session, &log)?;
-    let selector = match &point {
+    let selector = state_selector(&log, &point)?;
+    let inspection = inspect(&log, selector)?;
+    if !inspection.record.presented && !include_hidden {
+        return Err(observation_error(
+            "selected semantic state is hidden; pass explicit hidden-state permission",
+        ));
+    }
+    if let Err(error) = publish_checkpoint(session, &point, &completion, &inspection) {
+        tracing::warn!(%error, "could not publish disposable replay checkpoint");
+    }
+    return completed_observation(
+        session,
+        session_id,
+        point,
+        &completion,
+        inspection,
+        ObservationResolution::CanonicalReplay,
+    );
+}
+
+fn completed_observation(
+    session: &Path,
+    session_id: Uuid,
+    point: StatePoint,
+    completion: &SessionCompletion,
+    inspection: StateInspection,
+    resolution: ObservationResolution,
+) -> Result<Observation> {
+    let frame = frame_from_state(&inspection.state);
+    let payload_hash = frame_hash(&frame)?;
+    return Ok(Observation {
+        source_kind: ObservationSourceKind::CompletedSession,
+        session_id: Some(session_id),
+        canonical_session: Some(ByteString::from(session.as_os_str().as_bytes())),
+        source_completed: true,
+        state_point: point,
+        state_id: Some(inspection.record.state_id),
+        state_hash: inspection.record.state_hash,
+        event_seq: inspection.record.event_seq,
+        monotonic_ns: Some(inspection.record.monotonic_ns),
+        presented: inspection.record.presented,
+        boundary: CanonicalBoundary {
+            next_event_seq: completion.event_count,
+            event_hash: completion.final_event_hash.clone(),
+            output_bytes: completion.output_bytes,
+        },
+        capture_quality: CaptureQuality::Completed,
+        truth_layer: TruthLayer::Semantic,
+        integrity: ObservationIntegrity::CanonicalChained,
+        resolution,
+        frame,
+        payload_hash,
+    });
+}
+
+fn state_selector(log: &EventLog, point: &StatePoint) -> Result<StateSelector> {
+    let selector = match point {
         StatePoint::LatestPresented => StateSelector::LatestPresented,
         StatePoint::StateId { state_id } => StateSelector::StateId(*state_id),
         StatePoint::EventSeq { event_seq } => StateSelector::EventSeq(*event_seq),
@@ -265,36 +484,200 @@ fn observe_completed(
             StateSelector::EventSeq(event_seq)
         }
     };
-    let inspection = inspect(&log, selector)?;
-    if !inspection.record.presented && !include_hidden {
-        return Err(observation_error(
-            "selected semantic state is hidden; pass explicit hidden-state permission",
-        ));
+    return Ok(selector);
+}
+
+fn load_checkpoint(
+    session: &Path,
+    point: &StatePoint,
+    completion: &SessionCompletion,
+) -> Result<Option<StateInspection>> {
+    let path = checkpoint_path(session, point, completion)?;
+    if !path.is_file() {
+        return Ok(None);
     }
-    let frame = frame_from_state(&inspection.state);
-    let payload_hash = frame_hash(&frame)?;
-    return Ok(Observation {
-        source_kind: ObservationSourceKind::CompletedSession,
-        session_id: Some(session_id),
-        canonical_session: Some(ByteString::from(session.as_os_str().as_bytes())),
-        source_completed: true,
-        state_point: point,
-        state_id: Some(inspection.record.state_id),
-        state_hash: inspection.record.state_hash,
-        event_seq: inspection.record.event_seq,
-        monotonic_ns: Some(inspection.record.monotonic_ns),
-        presented: inspection.record.presented,
-        boundary: CanonicalBoundary {
-            next_event_seq: completion.event_count,
-            event_hash: completion.final_event_hash,
-            output_bytes: completion.output_bytes,
-        },
-        capture_quality: CaptureQuality::Completed,
-        truth_layer: TruthLayer::Semantic,
-        integrity: ObservationIntegrity::CanonicalChained,
-        frame,
-        payload_hash,
-    });
+    let validate = (|| -> Result<StateInspection> {
+        let bytes = fs_err::read(&path).map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+        let checkpoint: ReplayCheckpoint = serde_json::from_slice(&bytes).map_err(|source| {
+            return Error::InvalidJson {
+                path: path.clone(),
+                json_path: "$".to_owned(),
+                source,
+            };
+        })?;
+        let completion_bytes = fs_err::read(session.join("completion.json")).map_err(|source| {
+            return Error::Filesystem {
+                path: session.join("completion.json"),
+                source,
+            };
+        })?;
+        let event_path = session.join("events.jsonl");
+        let (event_log_byte_count, event_log_blake3) = hash_file(&event_path)?;
+        let state_bytes = serde_json::to_vec(&checkpoint.inspection.state).map_err(|source| {
+            return Error::InvalidJson {
+                path: PathBuf::from("<checkpoint-state>"),
+                json_path: "$".to_owned(),
+                source,
+            };
+        })?;
+        let state_hash = blake3::hash(&state_bytes).to_hex().to_string();
+        if checkpoint.version != 1
+            || checkpoint.state_format_version != STATE_FORMAT_VERSION
+            || checkpoint.ghostty_revision != GHOSTTY_REVISION
+            || checkpoint.state_point != *point
+            || checkpoint.final_event_hash != completion.final_event_hash
+            || checkpoint.completion_blake3 != blake3::hash(&completion_bytes).to_hex().to_string()
+            || checkpoint.event_log_byte_count != event_log_byte_count
+            || checkpoint.event_log_blake3 != event_log_blake3
+            || checkpoint.inspection_state_blake3 != state_hash
+        {
+            return Err(observation_error(
+                "replay checkpoint does not match exact canonical source bytes",
+            ));
+        }
+        return Ok(checkpoint.inspection);
+    })();
+    return match validate {
+        Ok(inspection) => Ok(Some(inspection)),
+        Err(error) => {
+            tracing::warn!(path = %path.display(), %error, "rejected replay checkpoint");
+            Ok(None)
+        }
+    };
+}
+
+fn publish_checkpoint(
+    session: &Path,
+    point: &StatePoint,
+    completion: &SessionCompletion,
+    inspection: &StateInspection,
+) -> Result<()> {
+    let path = checkpoint_path(session, point, completion)?;
+    if path.exists() {
+        return Ok(());
+    }
+    let directory = path.parent().ok_or_else(|| {
+        return observation_error("checkpoint path has no parent directory");
+    })?;
+    ensure_private_cache_directory(&session.join("derived-cache"))?;
+    ensure_private_cache_directory(directory)?;
+    let completion_bytes = fs_err::read(session.join("completion.json")).map_err(|source| {
+        return Error::Filesystem {
+            path: session.join("completion.json"),
+            source,
+        };
+    })?;
+    let (event_log_byte_count, event_log_blake3) = hash_file(&session.join("events.jsonl"))?;
+    let state_bytes = serde_json::to_vec(&inspection.state).map_err(|source| {
+        return Error::InvalidJson {
+            path: PathBuf::from("<checkpoint-state>"),
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
+    let checkpoint = ReplayCheckpoint {
+        version: 1,
+        state_format_version: STATE_FORMAT_VERSION,
+        ghostty_revision: GHOSTTY_REVISION.to_owned(),
+        state_point: point.clone(),
+        event_log_byte_count,
+        event_log_blake3,
+        completion_blake3: blake3::hash(&completion_bytes).to_hex().to_string(),
+        final_event_hash: completion.final_event_hash.clone(),
+        inspection: inspection.clone(),
+        inspection_state_blake3: blake3::hash(&state_bytes).to_hex().to_string(),
+    };
+    let mut bytes = serde_json::to_vec_pretty(&checkpoint).map_err(|source| {
+        return Error::InvalidJson {
+            path: path.clone(),
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
+    bytes.push(b'\n');
+    write_secure(&path, &bytes)?;
+    return sync_directory(directory);
+}
+
+fn checkpoint_path(
+    session: &Path,
+    point: &StatePoint,
+    completion: &SessionCompletion,
+) -> Result<PathBuf> {
+    let encoded = serde_json::to_vec(point).map_err(|source| {
+        return Error::InvalidJson {
+            path: PathBuf::from("<state-point>"),
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
+    let key = blake3::hash(&encoded).to_hex().to_string();
+    return Ok(session.join("derived-cache").join(format!(
+        "checkpoint-{}-{key}.json",
+        completion.final_event_hash
+    )));
+}
+
+fn ensure_private_cache_directory(path: &Path) -> Result<()> {
+    match fs_err::symlink_metadata(path) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                return Err(observation_error(
+                    "replay checkpoint directory must be a real directory",
+                ));
+            }
+            if metadata.permissions().mode() & 0o077 != 0 {
+                return Err(observation_error(
+                    "replay checkpoint directory must be owner-only",
+                ));
+            }
+            return Ok(());
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return create_private_directory(path);
+        }
+        Err(source) => {
+            return Err(Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    }
+}
+
+fn hash_file(path: &Path) -> Result<(u64, String)> {
+    let file = File::open(path).map_err(|source| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        };
+    })?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = blake3::Hasher::new();
+    let mut byte_count = 0_u64;
+    let mut buffer = vec![0_u8; 128 * 1024].into_boxed_slice();
+    loop {
+        let read = reader.read(&mut buffer).map_err(|source| {
+            return Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            };
+        })?;
+        if read == 0 {
+            break;
+        }
+        let bytes = buffer.get(..read).ok_or_else(|| {
+            return observation_error("checkpoint hash buffer bounds are invalid");
+        })?;
+        hasher.update(bytes);
+        byte_count = byte_count.saturating_add(u64::try_from(read).unwrap_or(u64::MAX));
+    }
+    return Ok((byte_count, hasher.finalize().to_hex().to_string()));
 }
 
 /// Render an unchained ANSI/VT stream into a truth-labeled observation.
@@ -335,9 +718,96 @@ pub fn observe_ansi_stream(bytes: &[u8], cols: u16, rows: u16) -> Result<Observa
         capture_quality: CaptureQuality::Incomplete,
         truth_layer: TruthLayer::Semantic,
         integrity: ObservationIntegrity::Unchained,
+        resolution: ObservationResolution::AnsiInterpretation,
         frame,
         payload_hash,
     });
+}
+
+/// Resolve the complete semantic state behind a session observation.
+///
+/// # Errors
+///
+/// Returns an error when the source is invalid, the selector is unsupported for
+/// a live actor, or hidden-state permission is absent.
+pub fn semantic_state_for_session(
+    session: &Path,
+    point: &StatePoint,
+    include_hidden: bool,
+) -> Result<SemanticState> {
+    let canonical = session.canonicalize().map_err(|source| {
+        return Error::Filesystem {
+            path: session.to_path_buf(),
+            source,
+        };
+    })?;
+    if canonical.join("completion.json").is_file() {
+        let log = EventLog::read(canonical.join("events.jsonl"))?;
+        validate_completed_log(&canonical, &log)?;
+        let selector = state_selector(&log, point)?;
+        let inspection = inspect(&log, selector)?;
+        if !inspection.record.presented && !include_hidden {
+            return Err(observation_error(
+                "selected semantic state is hidden; pass explicit hidden-state permission",
+            ));
+        }
+        return Ok(inspection.state);
+    }
+    if point != &StatePoint::LatestPresented || include_hidden {
+        return Err(observation_error(
+            "live semantic images support only latest-presented selection",
+        ));
+    }
+    let ControlData::Snapshot {
+        semantic_state_zstd,
+        ..
+    } = request(&canonical, ControlCommand::Snapshot)?
+    else {
+        return Err(observation_error(
+            "actor returned an unexpected semantic snapshot",
+        ));
+    };
+    let decoded = decode_all(semantic_state_zstd.as_bytes()).map_err(|error| {
+        return observation_error(format!("decompress live semantic snapshot: {error}"));
+    })?;
+    if decoded.len() > 32 * 1024 * 1024 {
+        return Err(observation_error(
+            "live semantic snapshot exceeds the 32 MiB decoded limit",
+        ));
+    }
+    return serde_json::from_slice(&decoded).map_err(|source| {
+        return Error::InvalidJson {
+            path: PathBuf::from("<live-semantic-snapshot>"),
+            json_path: "$".to_owned(),
+            source,
+        };
+    });
+}
+
+/// Interpret an ANSI/VT stream into one complete semantic state.
+///
+/// # Errors
+///
+/// Returns an error when terminal geometry or semantic capture is invalid.
+pub fn semantic_state_from_ansi(bytes: &[u8], cols: u16, rows: u16) -> Result<SemanticState> {
+    let mut terminal = GhosttyVt::new(cols, rows, 0)?;
+    terminal.write(bytes);
+    return terminal.snapshot();
+}
+
+impl Observation {
+    /// Return the compact stable frame contract linked to this observation.
+    #[must_use]
+    pub fn frame_envelope(&self) -> FrameEnvelope {
+        return FrameEnvelope {
+            version: 1,
+            state_hash: self.state_hash.clone(),
+            presented: self.presented,
+            capture_quality: self.capture_quality,
+            frame: self.frame.clone(),
+            frame_hash: self.payload_hash.clone(),
+        };
+    }
 }
 
 /// Format an unchained ANSI stream through the pinned Ghostty formatter.

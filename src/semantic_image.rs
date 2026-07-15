@@ -2,10 +2,29 @@
 
 use std::{fmt::Write as _, mem};
 
-use crate::ghostty_vt::{CellStyle, ColorSpec, CursorStyle, Rgb, SemanticState};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use resvg::{
+    tiny_skia::{Pixmap, Transform},
+    usvg::{Options, Tree},
+};
+
+use crate::{
+    Error, Result,
+    diff::SemanticDiff,
+    ghostty_vt::{CellStyle, ColorSpec, CursorStyle, Rgb, SemanticState},
+};
 
 /// Stable semantic SVG renderer identity.
 pub const SEMANTIC_SVG_RENDERER: &str = "termtrace-semantic-svg-v1";
+/// Stable semantic PNG rasterizer identity.
+pub const SEMANTIC_PNG_RENDERER: &str = "termtrace-semantic-png-resvg-v1";
+/// Bundled deterministic font family.
+pub const SEMANTIC_FONT_FAMILY: &str = "Termtrace Fira Code";
+/// Repository-relative source of the bundled font.
+pub const SEMANTIC_FONT_SOURCE: &str = "vendor/ghostty/pkg/freetype/res/FiraCode-Regular.ttf";
+/// Exact bundled font bytes used by SVG and PNG output.
+pub const SEMANTIC_FONT_BYTES: &[u8] =
+    include_bytes!("../vendor/ghostty/pkg/freetype/res/FiraCode-Regular.ttf");
 
 /// Render a complete semantic state as a deterministic SVG scene.
 #[must_use]
@@ -17,6 +36,11 @@ pub fn render_svg(state: &SemanticState) -> Vec<u8> {
     let height = u32::from(state.rows).saturating_mul(CELL_HEIGHT);
     let mut svg = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" role=\"img\" data-truth-layer=\"semantic_rendering\" data-renderer=\"{SEMANTIC_SVG_RENDERER}\">\n"
+    );
+    let font = STANDARD.encode(SEMANTIC_FONT_BYTES);
+    let _ = writeln!(
+        svg,
+        "<style>@font-face{{font-family:'{SEMANTIC_FONT_FAMILY}';src:url(data:font/ttf;base64,{font}) format('truetype');font-weight:normal;font-style:normal}}text{{font-family:'{SEMANTIC_FONT_FAMILY}'}}</style>"
     );
     let _ = writeln!(
         svg,
@@ -62,7 +86,7 @@ pub fn render_svg(state: &SemanticState) -> Vec<u8> {
             let text_y = y.saturating_add(BASELINE);
             let _ = writeln!(
                 svg,
-                "<text x=\"{x}\" y=\"{text_y}\" fill=\"{}\" font-family=\"monospace\" font-size=\"16\" font-weight=\"{weight}\" font-style=\"{font_style}\" opacity=\"{opacity}\" text-decoration=\"{decoration}\" xml:space=\"preserve\">{escaped}</text>",
+                "<text x=\"{x}\" y=\"{text_y}\" fill=\"{}\" font-family=\"{SEMANTIC_FONT_FAMILY}\" font-size=\"16\" font-weight=\"{weight}\" font-style=\"{font_style}\" opacity=\"{opacity}\" text-decoration=\"{decoration}\" xml:space=\"preserve\">{escaped}</text>",
                 color_hex(foreground)
             );
         }
@@ -109,6 +133,89 @@ pub fn render_svg(state: &SemanticState) -> Vec<u8> {
     return svg.into_bytes();
 }
 
+/// Rasterize the exact deterministic SVG scene with only the bundled font.
+///
+/// # Errors
+///
+/// Returns an error when the SVG cannot be parsed or the PNG cannot be encoded.
+pub fn render_png(state: &SemanticState) -> Result<Vec<u8>> {
+    let svg = render_svg(state);
+    return rasterize_svg(&svg);
+}
+
+/// Compose before/after semantic scenes and outline every changed later cell.
+#[must_use]
+pub fn render_diff_svg(
+    before: &SemanticState,
+    after: &SemanticState,
+    difference: &SemanticDiff,
+) -> Vec<u8> {
+    const CELL_WIDTH: u32 = 10;
+    const CELL_HEIGHT: u32 = 20;
+    const HEADER: u32 = 30;
+    let before_width = u32::from(before.cols).saturating_mul(CELL_WIDTH);
+    let after_width = u32::from(after.cols).saturating_mul(CELL_WIDTH);
+    let height = u32::from(before.rows.max(after.rows))
+        .saturating_mul(CELL_HEIGHT)
+        .saturating_add(HEADER);
+    let width = before_width.saturating_add(after_width);
+    let before_svg = STANDARD.encode(render_svg(before));
+    let after_svg = STANDARD.encode(render_svg(after));
+    let font = STANDARD.encode(SEMANTIC_FONT_BYTES);
+    let mut svg = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" data-truth-layer=\"semantic_rendering\" data-renderer=\"termtrace-semantic-diff-svg-v1\">\n<style>@font-face{{font-family:'{SEMANTIC_FONT_FAMILY}';src:url(data:font/ttf;base64,{font}) format('truetype');font-weight:normal;font-style:normal}}text{{font-family:'{SEMANTIC_FONT_FAMILY}'}}</style>\n<rect width=\"100%\" height=\"100%\" fill=\"#202020\"/>\n<text x=\"4\" y=\"20\" fill=\"white\" font-size=\"14\">before</text>\n<text x=\"{}\" y=\"20\" fill=\"white\" font-size=\"14\">after</text>\n<image x=\"0\" y=\"{HEADER}\" width=\"{before_width}\" href=\"data:image/svg+xml;base64,{before_svg}\"/>\n<image x=\"{before_width}\" y=\"{HEADER}\" width=\"{after_width}\" href=\"data:image/svg+xml;base64,{after_svg}\"/>\n",
+        before_width.saturating_add(4),
+    );
+    for row in &difference.rows {
+        for cell in &row.cells {
+            let x = before_width.saturating_add(u32::from(cell.column).saturating_mul(CELL_WIDTH));
+            let y = HEADER.saturating_add(u32::from(row.row).saturating_mul(CELL_HEIGHT));
+            let _ = writeln!(
+                svg,
+                "<rect x=\"{x}\" y=\"{y}\" width=\"{CELL_WIDTH}\" height=\"{CELL_HEIGHT}\" fill=\"none\" stroke=\"#ff3b30\" stroke-width=\"2\"/>"
+            );
+        }
+    }
+    svg.push_str("</svg>\n");
+    return svg.into_bytes();
+}
+
+/// Rasterize the semantic visual-diff composition.
+///
+/// # Errors
+///
+/// Returns an error when SVG parsing or PNG encoding fails.
+pub fn render_diff_png(
+    before: &SemanticState,
+    after: &SemanticState,
+    difference: &SemanticDiff,
+) -> Result<Vec<u8>> {
+    return rasterize_svg(&render_diff_svg(before, after, difference));
+}
+
+fn rasterize_svg(svg: &[u8]) -> Result<Vec<u8>> {
+    let mut options = Options::default();
+    options
+        .fontdb_mut()
+        .load_font_data(SEMANTIC_FONT_BYTES.to_vec());
+    let tree = Tree::from_data(svg, &options).map_err(|error| {
+        return image_error(format!("parse deterministic SVG: {error}"));
+    })?;
+    let size = tree.size().to_int_size();
+    let mut pixmap = Pixmap::new(size.width(), size.height())
+        .ok_or_else(|| return image_error("allocate semantic PNG surface"))?;
+    resvg::render(&tree, Transform::default(), &mut pixmap.as_mut());
+    return pixmap
+        .encode_png()
+        .map_err(|error| return image_error(format!("encode semantic PNG: {error}")));
+}
+
+/// BLAKE3 identity of the exact bundled semantic font.
+#[must_use]
+pub fn semantic_font_hash() -> String {
+    return blake3::hash(SEMANTIC_FONT_BYTES).to_hex().to_string();
+}
+
 fn resolve_color(spec: ColorSpec, default: Rgb, palette: &[Rgb]) -> Rgb {
     return match spec {
         ColorSpec::None => default,
@@ -141,4 +248,10 @@ fn escape_xml(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;");
+}
+
+fn image_error(reason: impl Into<String>) -> Error {
+    return Error::InvalidReplay {
+        reason: reason.into(),
+    };
 }

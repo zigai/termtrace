@@ -50,6 +50,79 @@
       ],
       "type": "object"
     },
+    "SemanticImageResource": {
+      "additionalProperties": false,
+      "description": "Exact font and layout resources used by semantic image output.",
+      "properties": {
+        "background_policy": {
+          "description": "Background policy.",
+          "type": "string"
+        },
+        "cell_height": {
+          "description": "Fixed semantic cell height.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cell_width": {
+          "description": "Fixed semantic cell width.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fallback_policy": {
+          "description": "Deterministic missing-glyph policy.",
+          "type": "string"
+        },
+        "font_blake3": {
+          "description": "BLAKE3 of exact font bytes.",
+          "type": "string"
+        },
+        "font_byte_count": {
+          "description": "Exact font byte count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "font_family": {
+          "description": "Embedded font family.",
+          "type": "string"
+        },
+        "font_size": {
+          "description": "Font size in semantic SVG units.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "font_source": {
+          "description": "Repository-relative font source.",
+          "type": "string"
+        },
+        "padding": {
+          "description": "Fixed outer padding.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "font_family",
+        "font_source",
+        "font_byte_count",
+        "font_blake3",
+        "fallback_policy",
+        "font_size",
+        "cell_width",
+        "cell_height",
+        "padding",
+        "background_policy"
+      ],
+      "type": "object"
+    },
     "StatePoint": {
       "description": "Shared state selection vocabulary.",
       "oneOf": [
@@ -172,6 +245,13 @@
       "description": "Stable manifest format.",
       "type": "string"
     },
+    "semantic_image_resources": {
+      "description": "Exact deterministic resources when semantic images are present.",
+      "items": {
+        "$ref": "#/$defs/SemanticImageResource"
+      },
+      "type": "array"
+    },
     "sensitivity": {
       "description": "Explicit sensitivity classification.",
       "type": "string"
@@ -216,7 +296,8 @@
     "state_hash",
     "source_final_event_hash",
     "sensitivity",
-    "files"
+    "files",
+    "semantic_image_resources"
   ],
   "title": "SaveManifest",
   "type": "object"

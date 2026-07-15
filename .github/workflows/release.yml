@@ -1,0 +1,104 @@
+name: Release artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@1.91.1
+        with:
+          components: clippy,rustfmt
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: sudo apt-get update && sudo apt-get install --yes b3sum zstd
+      - run: scripts/bootstrap.sh
+      - run: cargo test --locked --all-features
+      - run: cargo build --locked --release --all-features --target "${{ matrix.target }}"
+        env:
+          TERMTRACE_BUILD_REVISION: ${{ github.sha }}
+      - name: Package deterministic archive
+        run: |
+          root="termtrace-${{ matrix.target }}"
+          mkdir -p "dist/$root"
+          install -m 0555 "target/${{ matrix.target }}/release/termtrace" "dist/$root/termtrace"
+          install -m 0444 LICENSE README.md "dist/$root/"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -C dist -cf - "$root" | zstd -19 -T1 -o "dist/$root.tar.zst"
+          sha256sum "dist/$root.tar.zst" > "dist/$root.tar.zst.sha256"
+          b3sum "dist/$root.tar.zst" > "dist/$root.tar.zst.blake3"
+      - run: scripts/validate-release-archive.sh "dist/termtrace-${{ matrix.target }}.tar.zst"
+      - name: Build platform client packages
+        run: |
+          binary="target/${{ matrix.target }}/release/termtrace"
+          case "${{ matrix.target }}" in
+            x86_64-*) wheel=manylinux_2_31_x86_64; npm_arch=x64 ;;
+            aarch64-*) wheel=manylinux_2_31_aarch64; npm_arch=arm64 ;;
+            *) exit 2 ;;
+          esac
+          scripts/build-python-wheel.sh "$binary" "$wheel"
+          scripts/build-npm-platform-package.sh "$binary" linux "$npm_arch"
+      - name: Build TypeScript client package
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        working-directory: packages/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          npm pack --pack-destination ../../dist/npm
+      - name: Checksum client packages
+        run: find dist/python dist/npm -type f -print0 | sort -z | xargs -0 sha256sum > "dist/termtrace-${{ matrix.target }}-packages.sha256"
+      - name: Generate CycloneDX SBOM
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --format json --override-filename "termtrace-${{ matrix.target }}.cdx"
+          mv "termtrace-${{ matrix.target }}.cdx.json" dist/
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: dist/termtrace-${{ matrix.target }}.tar.zst
+      - uses: actions/upload-artifact@v4
+        with:
+          name: termtrace-${{ matrix.target }}
+          path: |
+            dist/termtrace-${{ matrix.target }}*
+            dist/python/*
+            dist/npm/*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: termtrace-*
+          path: dist
+          merge-multiple: true
+      - name: Create immutable tag release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag --generate-notes

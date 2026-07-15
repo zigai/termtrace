@@ -72,12 +72,6 @@ pub fn wait_for_screen(
     stable_for: Duration,
     timeout: Duration,
 ) -> Result<ScreenWaitOutcome> {
-    let text = match &predicate {
-        ScreenPredicate::Contains { text } | ScreenPredicate::Absent { text } => text,
-    };
-    if text.is_empty() {
-        return Err(wait_error("screen predicate must not be empty"));
-    }
     let stable_for_ns = u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX);
     let timeout_ns = u64::try_from(timeout.as_nanos()).unwrap_or(u64::MAX);
     let result = request(
@@ -96,6 +90,7 @@ pub fn wait_for_screen(
         cols,
         rows,
         completion_quality,
+        child_completed,
         ..
     } = result
     else {
@@ -112,7 +107,7 @@ pub fn wait_for_screen(
         stable_through_monotonic_ns,
         stable_for_ns,
         boundaries,
-        child_completed: false,
+        child_completed,
         cols,
         rows,
         completion_quality,

@@ -9,8 +9,15 @@ description = "Typed sync and async clients for the Termtrace JSONL driver"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 
+[project.optional-dependencies]
+pytest = ["pytest>=8"]
+
+[project.entry-points.pytest11]
+termtrace = "termtrace.pytest_plugin"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/termtrace"]
+artifacts = ["src/termtrace/bin/termtrace"]
 
 [tool.pyright]
 typeCheckingMode = "strict"

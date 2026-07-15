@@ -1,0 +1,65 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/scenario-frame-snapshot.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Volatility-free semantic frame baseline.",
+  "properties": {
+    "cols": {
+      "description": "Exact viewport geometry.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "cursor_column": {
+      "description": "Cursor column when visible in the viewport.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "cursor_row": {
+      "description": "Cursor row when visible in the viewport.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "cursor_visible": {
+      "description": "Cursor visibility.",
+      "type": "boolean"
+    },
+    "rows": {
+      "description": "Exact viewport geometry.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "version": {
+      "description": "Snapshot contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "viewport_text": {
+      "description": "Presentation-eligible viewport text.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "version",
+    "viewport_text",
+    "cols",
+    "rows",
+    "cursor_visible"
+  ],
+  "title": "ScenarioFrameSnapshot",
+  "type": "object"
+}

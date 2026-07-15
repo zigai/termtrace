@@ -25,13 +25,14 @@ use crate::{
     event_log::EventLog,
     geometry::TerminalGeometryReport,
     playback::{PlaybackFailure, PlaybackTiming},
-    profile::{ResolvedGhosttyProfile, materialize_profile},
+    profile::{ResolvedGhosttyProfile, materialize_profile, resolve_ghostty_profile},
     replay::{
         GHOSTTY_REVISION, ReplayManifest, STATE_FORMAT_VERSION, StateIndexEntry, StateSelection,
-        derived_directory_name_for,
+        StateSelector, derived_directory_name_for, inspect,
     },
     session::{
-        CaptureTarget, GeometrySource, SessionGeometry, read_manifest, validate_completed_log,
+        CaptureTarget, GeometrySource, GhosttyVisualOverrides, SessionGeometry, SessionManifest,
+        read_manifest, validate_completed_log,
     },
     timeline::{SourceRange, resolve_source_range},
 };
@@ -58,6 +59,28 @@ pub struct CaptureOptions {
     pub state_selection: StateSelection,
     /// Capture-time exact-grid viewport search evidence.
     pub geometry_solver: Option<GeometrySolveReport>,
+    /// Video or exact-state screenshot capture mode.
+    pub kind: CaptureKind,
+    /// Optional caller-selected artifact directory.
+    pub destination: Option<PathBuf>,
+}
+
+/// Native capture product and exact endpoint when applicable.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CaptureKind {
+    /// Timed native video plus final frame.
+    Video,
+    /// Direct native frame after exact-state replay.
+    Screenshot {
+        /// Selected semantic state identifier.
+        state_id: u64,
+        /// Selected complete semantic state hash.
+        state_hash: String,
+        /// Canonical endpoint event.
+        event_seq: u64,
+        /// Inclusive byte offset for output-event endpoints.
+        event_byte_offset: Option<u64>,
+    },
 }
 
 /// Completed native capture.
@@ -66,7 +89,7 @@ pub struct CaptureOutcome {
     /// Atomically committed visual directory.
     pub directory: PathBuf,
     /// Video path.
-    pub video: PathBuf,
+    pub video: Option<PathBuf>,
     /// Final native screenshot path.
     pub screenshot: PathBuf,
 }
@@ -76,6 +99,68 @@ pub struct CaptureOutcome {
 pub struct FittedGeometry {
     /// Live XTWINOPS geometry report.
     pub report: TerminalGeometryReport,
+}
+
+/// Resolve the recorded native profile and solve an exact-grid capture target.
+///
+/// A caller-supplied viewport is returned as a strict assertion and is still
+/// independently checked by capture. An absent viewport runs the bounded
+/// geometry solver against the exact recorded grid.
+///
+/// # Errors
+///
+/// Returns an error for tampered profile provenance or failed native probes.
+pub fn native_capture_target(
+    session: &Path,
+    viewport: Option<CaptureTarget>,
+) -> Result<(CaptureTarget, Option<GeometrySolveReport>)> {
+    if let Some(target) = viewport {
+        return Ok((target, None));
+    }
+    let manifest = read_manifest(session)?;
+    let initial = manifest
+        .geometry_provenance
+        .capture_target
+        .unwrap_or_else(|| {
+            return CaptureTarget {
+                width: manifest.geometry.pixel_width.saturating_add(128).max(320),
+                height: manifest.geometry.pixel_height.saturating_add(128).max(200),
+            };
+        });
+    let profile = capture_profile(session, &manifest)?;
+    let report = solve_ghostty_geometry(
+        manifest.geometry.cols,
+        manifest.geometry.rows,
+        initial,
+        &profile,
+    )?;
+    return Ok((report.selected, Some(report)));
+}
+
+fn capture_profile(session: &Path, manifest: &SessionManifest) -> Result<ResolvedGhosttyProfile> {
+    let Some(provenance) = &manifest.ghostty_visual else {
+        return resolve_ghostty_profile(None, GhosttyVisualOverrides::default());
+    };
+    let path = session.join(&provenance.effective_config);
+    let effective_config = fs_err::read(&path).map_err(|source| {
+        return Error::Filesystem {
+            path: path.clone(),
+            source,
+        };
+    })?;
+    let actual_hash = blake3::hash(&effective_config).to_hex().to_string();
+    if actual_hash != provenance.effective_config_hash {
+        return Err(Error::InvalidReplay {
+            reason: format!(
+                "recorded Ghostty profile hash does not match {}",
+                path.display()
+            ),
+        });
+    }
+    return Ok(ResolvedGhosttyProfile {
+        effective_config,
+        provenance: provenance.clone(),
+    });
 }
 
 /// One viewport and measured grid considered by the exact-grid solver.
@@ -147,15 +232,45 @@ pub struct VisualManifest {
     /// Installed Ghostty version report.
     pub ghostty_version: String,
     /// `FFmpeg` version first line.
-    pub ffmpeg_version: String,
+    pub ffmpeg_version: Option<String>,
     /// Exact headless launch overrides.
     pub ghostty_overrides: Vec<String>,
     /// Parsed `FFprobe` video evidence.
-    pub video_probe: serde_json::Value,
+    pub video_probe: Option<serde_json::Value>,
     /// Parsed `FFprobe` screenshot evidence.
     pub screenshot_probe: serde_json::Value,
     /// Whole-file integrity and classification for every payload member.
     pub members: Vec<ArtifactMember>,
+    /// `video` or `screenshot`.
+    pub capture_kind: String,
+    /// Exact selected state identifier for direct screenshots.
+    pub selected_state_id: Option<u64>,
+    /// Exact selected semantic state hash for direct screenshots.
+    pub selected_state_hash: Option<String>,
+    /// Exact endpoint event for direct screenshots.
+    pub endpoint_event_seq: Option<u64>,
+    /// Inclusive endpoint byte offset within an output event.
+    pub endpoint_event_byte_offset: Option<u64>,
+    /// Parser barrier and native frame-stability guarantee label.
+    pub presentation_evidence: String,
+    /// Ordered native frame samples used for stability evidence.
+    pub frame_samples: Vec<NativeFrameSample>,
+    /// Honest native resource guarantee level.
+    pub guarantee_level: String,
+}
+
+/// One directly captured native frame sample.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NativeFrameSample {
+    /// Zero-based sample number.
+    pub sample: u16,
+    /// Capture wall-clock timestamp.
+    pub captured_unix_ns: u128,
+    /// BLAKE3 of exact PNG bytes.
+    pub blake3: String,
+    /// Whether this sample equals its immediate predecessor.
+    pub same_as_previous: bool,
 }
 
 struct ManagedChild {
@@ -195,38 +310,86 @@ pub fn capture(options: &CaptureOptions) -> Result<CaptureOutcome> {
     // A range-specific directory name is not sufficient provenance. Verify the
     // semantic index against the canonical log before using its hashes to build
     // a video map, or renamed/stale artifacts could appear internally consistent.
-    let state_index = read_state_index(
-        &options.session_directory,
-        source_range,
-        options.state_selection,
-    )?;
-    validate_replay_manifest(
-        &options.session_directory,
-        &event_log,
-        &state_index,
-        source_range,
-        options.state_selection,
-    )?;
-    let destination = options.session_directory.join(visual_directory_name_for(
-        source_range,
-        options.state_selection,
-    ));
+    let state_index = match &options.kind {
+        CaptureKind::Video => {
+            let state_index = read_state_index(
+                &options.session_directory,
+                source_range,
+                options.state_selection,
+            )?;
+            validate_replay_manifest(
+                &options.session_directory,
+                &event_log,
+                &state_index,
+                source_range,
+                options.state_selection,
+            )?;
+            state_index
+        }
+        CaptureKind::Screenshot {
+            state_id,
+            state_hash,
+            event_seq,
+            event_byte_offset,
+        } => {
+            if source_range.is_some() {
+                return Err(Error::InvalidReplay {
+                    reason: "native screenshot endpoints cannot use a time range".to_owned(),
+                });
+            }
+            let selected = inspect(&event_log, StateSelector::StateId(*state_id))?;
+            if !selected.record.presented
+                || selected.record.state_hash != *state_hash
+                || selected.record.event_seq != Some(*event_seq)
+                || selected.record.event_byte_offset != *event_byte_offset
+            {
+                return Err(Error::InvalidReplay {
+                    reason:
+                        "native screenshot endpoint does not match one presented semantic state"
+                            .to_owned(),
+                });
+            }
+            vec![StateIndexEntry {
+                state_id: *state_id,
+                state_hash: state_hash.clone(),
+                event_seq: Some(*event_seq),
+                event_byte_offset: *event_byte_offset,
+                monotonic_ns: selected.record.monotonic_ns,
+                presented: true,
+            }]
+        }
+    };
+    let destination = options.destination.clone().unwrap_or_else(|| {
+        return match &options.kind {
+            CaptureKind::Video => options.session_directory.join(visual_directory_name_for(
+                source_range,
+                options.state_selection,
+            )),
+            CaptureKind::Screenshot { state_id, .. } => options
+                .session_directory
+                .join(format!("native-screenshot-state-{state_id}")),
+        };
+    });
     if destination.exists() {
         return Err(Error::ArtifactExists { path: destination });
     }
-    let staging = options
-        .session_directory
-        .join(format!(".visual.{}.tmp", Uuid::now_v7()));
+    let parent = destination.parent().ok_or_else(|| {
+        return Error::InvalidReplay {
+            reason: "native capture destination has no parent".to_owned(),
+        };
+    })?;
+    if !parent.is_dir() {
+        return Err(Error::InvalidReplay {
+            reason: "native capture destination parent does not exist".to_owned(),
+        });
+    }
+    let staging = parent.join(format!(".visual.{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
     if let Err(error) = capture_staged(options, &event_log, &state_index, source_range, &staging) {
-        return Err(preserve_failed_capture(
-            &options.session_directory,
-            &staging,
-            error,
-        ));
+        return Err(preserve_failed_capture(parent, &staging, error));
     }
-    let commit = commit_directory(&options.session_directory, &staging, &destination)
-        .and_then(|()| return sync_directory(&options.session_directory));
+    let commit = commit_directory(parent, &staging, &destination)
+        .and_then(|()| return sync_directory(parent));
     if let Err(error) = commit {
         let cleanup = fs_err::remove_dir_all(&staging).map_err(|source| {
             return Error::Filesystem {
@@ -243,24 +406,41 @@ pub fn capture(options: &CaptureOptions) -> Result<CaptureOutcome> {
             source,
         };
     })?;
-    append_artifact_root(
-        &options.session_directory,
-        &destination,
-        "native_capture",
-        &manifest_bytes,
-        &event_log.header.session_manifest_hash,
-        event_log
-            .events
-            .last()
-            .map(|record| return record.hash.as_str()),
-        source_range.map(|range| {
-            return ArtifactSourceRange {
-                start_monotonic_ns: range.start_monotonic_ns,
-                end_monotonic_ns: range.end_monotonic_ns,
-            };
-        }),
-    )?;
-    return Ok(outcome(destination));
+    let canonical_session = options.session_directory.canonicalize().map_err(|source| {
+        return Error::Filesystem {
+            path: options.session_directory.clone(),
+            source,
+        };
+    })?;
+    let canonical_destination = destination.canonicalize().map_err(|source| {
+        return Error::Filesystem {
+            path: destination.clone(),
+            source,
+        };
+    })?;
+    if canonical_destination.starts_with(&canonical_session) {
+        append_artifact_root(
+            &canonical_session,
+            &canonical_destination,
+            match options.kind {
+                CaptureKind::Video => "native_capture",
+                CaptureKind::Screenshot { .. } => "native_screenshot",
+            },
+            &manifest_bytes,
+            &event_log.header.session_manifest_hash,
+            event_log
+                .events
+                .last()
+                .map(|record| return record.hash.as_str()),
+            source_range.map(|range| {
+                return ArtifactSourceRange {
+                    start_monotonic_ns: range.start_monotonic_ns,
+                    end_monotonic_ns: range.end_monotonic_ns,
+                };
+            }),
+        )?;
+    }
+    return Ok(outcome(destination, &options.kind));
 }
 
 /// Measure Ghostty's real grid and cell dimensions at a capture viewport.
@@ -454,15 +634,10 @@ fn probe_ghostty_geometry_staged(
         wait_for_json(&report_path, &mut ghostty, Duration::from_secs(20))?;
     wait_for_success(&mut ghostty, Duration::from_secs(5), staging)?;
     xvfb.terminate();
-    let geometry = report.session_geometry()?;
-    if geometry.pixel_width > target.width || geometry.pixel_height > target.height {
-        return Err(Error::InvalidReplay {
-            reason: format!(
-                "Ghostty text area {}x{} exceeds requested viewport {}x{}",
-                geometry.pixel_width, geometry.pixel_height, target.width, target.height
-            ),
-        });
-    }
+    // Ghostty may enforce a minimum window and report a text area larger than
+    // the requested Xvfb target. Preserve that measurement for the solver; it
+    // is a search signal, not a reason to discard the probe.
+    let _geometry = report.session_geometry()?;
     drop(lease);
     return Ok(FittedGeometry { report });
 }
@@ -568,12 +743,18 @@ fn capture_staged(
     };
     let ghostty_version =
         String::from_utf8_lossy(&command_output("ghostty", &["+version"])?).into();
-    let ffmpeg_version_output = command_output("ffmpeg", &["-version"])?;
-    let ffmpeg_version = String::from_utf8_lossy(&ffmpeg_version_output)
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .to_owned();
+    let ffmpeg_version = if matches!(options.kind, CaptureKind::Video) {
+        let output = command_output("ffmpeg", &["-version"])?;
+        Some(
+            String::from_utf8_lossy(&output)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_owned(),
+        )
+    } else {
+        None
+    };
 
     let lease = DisplayLease::acquire()?;
     let display = format!(":{}", lease.number);
@@ -623,48 +804,79 @@ fn capture_staged(
             reason: "playback timing source range does not match the capture request".to_owned(),
         });
     }
-    // The query barrier proves terminal parsing is caught up, but GTK still has
-    // to present the surface to X11. This 200 ms startup margin is empirical; it
-    // is not part of the canonical replay clock or the selected source interval.
-    thread::sleep(Duration::from_millis(200));
-
+    let expected_endpoint = match &options.kind {
+        CaptureKind::Video => (None, None, false),
+        CaptureKind::Screenshot {
+            event_seq,
+            event_byte_offset,
+            ..
+        } => (Some(*event_seq), *event_byte_offset, true),
+    };
+    if (
+        timing.endpoint_event_seq,
+        timing.endpoint_event_byte_offset,
+        timing.instant,
+    ) != expected_endpoint
+    {
+        return Err(Error::InvalidReplay {
+            reason: "playback timing endpoint does not match capture request".to_owned(),
+        });
+    }
     let capture_started_unix_ns = unix_now_ns()?;
-    let video_path = staging.join("session.mkv");
-    let mut ffmpeg = spawn_video_ffmpeg(options, staging, &display, &video_path)?;
-    // Bound readiness by the interval played at native speed. Using full-session
-    // duration here would reintroduce pre-roll latency as a timeout even though
-    // playback already fast-forwarded it.
-    let recording_duration = source_range.map_or_else(
-        || {
-            return event_log.events.last().map_or(Duration::ZERO, |event| {
-                return Duration::from_nanos(event.monotonic_ns);
-            });
-        },
-        |range| return Duration::from_nanos(range.duration_ns()),
-    );
-    wait_for_file(
-        &ready_file,
-        &mut ghostty,
-        Duration::from_secs(25) + recording_duration,
-    )?;
     let screenshot_path = staging.join("final.png");
-    capture_screenshot(options, staging, &display, &screenshot_path)?;
-    wait_for_success(&mut ghostty, Duration::from_secs(10), staging)?;
-    stop_ffmpeg(&mut ffmpeg, Duration::from_secs(10), staging)?;
+    let (video_probe, frame_samples) = match &options.kind {
+        CaptureKind::Video => {
+            // The query barrier proves terminal parsing is caught up, but GTK still has
+            // to present the surface to X11. This margin is not presentation proof.
+            thread::sleep(Duration::from_millis(200));
+            let video_path = staging.join("session.mkv");
+            let mut ffmpeg = spawn_video_ffmpeg(options, staging, &display, &video_path)?;
+            let recording_duration = source_range.map_or_else(
+                || {
+                    return event_log.events.last().map_or(Duration::ZERO, |event| {
+                        return Duration::from_nanos(event.monotonic_ns);
+                    });
+                },
+                |range| return Duration::from_nanos(range.duration_ns()),
+            );
+            wait_for_file(
+                &ready_file,
+                &mut ghostty,
+                Duration::from_secs(25) + recording_duration,
+            )?;
+            capture_screenshot(options, staging, &display, &screenshot_path)?;
+            wait_for_success(&mut ghostty, Duration::from_secs(10), staging)?;
+            stop_ffmpeg(&mut ffmpeg, Duration::from_secs(10), staging)?;
+            secure_permissions(&video_path)?;
+            write_video_map(
+                &staging.join("video-map.jsonl"),
+                state_index,
+                options.fps,
+                capture_started_unix_ns,
+                timing.replay_origin_unix_ns,
+                source_range,
+            )?;
+            (
+                Some(probe_video(
+                    &video_path,
+                    options.fps,
+                    options.width,
+                    options.height,
+                )?),
+                Vec::new(),
+            )
+        }
+        CaptureKind::Screenshot { .. } => {
+            wait_for_file(&ready_file, &mut ghostty, Duration::from_secs(25))?;
+            let samples = capture_stable_x11_frame(staging, &display, &screenshot_path)?;
+            wait_for_success(&mut ghostty, Duration::from_secs(10), staging)?;
+            (None, samples)
+        }
+    };
     xvfb.terminate();
 
-    secure_permissions(&video_path)?;
     secure_permissions(&screenshot_path)?;
-    let video_probe = probe_video(&video_path, options.fps, options.width, options.height)?;
     let screenshot_probe = probe_screenshot(&screenshot_path, options.width, options.height)?;
-    write_video_map(
-        &staging.join("video-map.jsonl"),
-        state_index,
-        options.fps,
-        capture_started_unix_ns,
-        timing.replay_origin_unix_ns,
-        source_range,
-    )?;
     for transient in [&timing_file, &ready_file] {
         fs_err::remove_file(transient).map_err(|source| {
             return Error::Filesystem {
@@ -680,8 +892,38 @@ fn capture_staged(
         };
     })?;
     let members = collect_artifact_members(staging)?;
+    let (
+        capture_kind,
+        selected_state_id,
+        selected_state_hash,
+        endpoint_event_seq,
+        endpoint_event_byte_offset,
+        presentation_evidence,
+    ) = match &options.kind {
+        CaptureKind::Video => (
+            "video".to_owned(),
+            None,
+            None,
+            None,
+            None,
+            "post_playback_capture_unproven".to_owned(),
+        ),
+        CaptureKind::Screenshot {
+            state_id,
+            state_hash,
+            event_seq,
+            event_byte_offset,
+        } => (
+            "screenshot".to_owned(),
+            Some(*state_id),
+            Some(state_hash.clone()),
+            Some(*event_seq),
+            *event_byte_offset,
+            "post_endpoint_stable_capture".to_owned(),
+        ),
+    };
     let manifest = VisualManifest {
-        version: 3,
+        version: 4,
         session_id: event_log.header.session_id,
         source_event_hash: event_log
             .events
@@ -702,6 +944,14 @@ fn capture_staged(
         video_probe,
         screenshot_probe,
         members,
+        capture_kind,
+        selected_state_id,
+        selected_state_hash,
+        endpoint_event_seq,
+        endpoint_event_byte_offset,
+        presentation_evidence,
+        frame_samples,
+        guarantee_level: "native_capture_environment".to_owned(),
     };
     let encoded = serde_json::to_vec_pretty(&manifest)
         .map_err(|source| return json_error(staging.join("manifest.json"), source))?;
@@ -890,7 +1140,11 @@ fn spawn_ghostty(
         .arg("--ready-file")
         .arg(ready_file)
         .arg("--start-delay-ms")
-        .arg("1500")
+        .arg(if matches!(options.kind, CaptureKind::Video) {
+            "1500"
+        } else {
+            "0"
+        })
         .arg("--final-hold-ms")
         .arg("1500");
     if let Some(start) = options.start_monotonic_ns {
@@ -898,6 +1152,22 @@ fn spawn_ghostty(
     }
     if let Some(end) = options.end_monotonic_ns {
         command.arg("--to-ns").arg(end.to_string());
+    }
+    if let CaptureKind::Screenshot {
+        event_seq,
+        event_byte_offset,
+        ..
+    } = &options.kind
+    {
+        command
+            .arg("--endpoint-event-seq")
+            .arg(event_seq.to_string())
+            .arg("--instant");
+        if let Some(offset) = event_byte_offset {
+            command
+                .arg("--endpoint-event-byte-offset")
+                .arg(offset.to_string());
+        }
     }
     command
         .env("DISPLAY", display)
@@ -999,6 +1269,68 @@ fn capture_screenshot(
         return Err(status_error("ffmpeg screenshot", output.status));
     }
     return write_secure(&staging.join("ffmpeg-screenshot.log"), &output.stderr);
+}
+
+fn capture_stable_x11_frame(
+    staging: &Path,
+    display: &str,
+    screenshot: &Path,
+) -> Result<Vec<NativeFrameSample>> {
+    let mut samples = Vec::new();
+    let mut previous_hash = None;
+    let mut stable_run = 0_u8;
+    let mut log = Vec::new();
+    for sample in 0_u16..20 {
+        let path = staging.join(format!(".native-sample-{sample:04}.png"));
+        let output = Command::new("import")
+            .args(["-silent", "-window", "root"])
+            .arg(format!("png:{}", path.display()))
+            .env("DISPLAY", display)
+            .output()
+            .map_err(|error| return external_error("X11 frame import", &error))?;
+        log.extend_from_slice(&output.stderr);
+        if !output.status.success() {
+            write_secure(&staging.join("x11-screenshot.log"), &log)?;
+            return Err(status_error("X11 frame import", output.status));
+        }
+        let bytes = fs_err::read(&path).map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+        fs_err::remove_file(&path).map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+        let hash = blake3::hash(&bytes).to_hex().to_string();
+        let same_as_previous = previous_hash.as_ref() == Some(&hash);
+        stable_run = if same_as_previous {
+            stable_run.saturating_add(1)
+        } else {
+            1
+        };
+        samples.push(NativeFrameSample {
+            sample,
+            captured_unix_ns: unix_now_ns()?,
+            blake3: hash.clone(),
+            same_as_previous,
+        });
+        previous_hash = Some(hash);
+        if stable_run >= 3 {
+            write_secure(screenshot, &bytes)?;
+            write_secure(&staging.join("x11-screenshot.log"), &log)?;
+            return Ok(samples);
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    write_secure(&staging.join("x11-screenshot.log"), &log)?;
+    return Err(Error::ExternalCommand {
+        program: "X11 frame import".to_owned(),
+        reason: "native frame did not produce three consecutive identical samples".to_owned(),
+    });
 }
 
 fn probe_video(path: &Path, fps: u16, width: u16, height: u16) -> Result<serde_json::Value> {
@@ -1526,9 +1858,9 @@ fn unix_now_ns() -> Result<u128> {
         .map_err(|_| return Error::ClockBeforeEpoch);
 }
 
-fn outcome(directory: PathBuf) -> CaptureOutcome {
+fn outcome(directory: PathBuf, kind: &CaptureKind) -> CaptureOutcome {
     return CaptureOutcome {
-        video: directory.join("session.mkv"),
+        video: matches!(kind, CaptureKind::Video).then(|| return directory.join("session.mkv")),
         screenshot: directory.join("final.png"),
         directory,
     };

@@ -1,27 +1,63 @@
 # Semantic replay
 
-The canonical event log is replayed byte by byte through the exact pinned libghostty-vt engine. A snapshot boundary is distinct when any complete semantic content changes: grid cells, grapheme clusters, styles, resolved colors, palette, cursor, active SGR style, known ANSI/DEC modes, terminal title, working directory, or geometry.
+Semantic replay turns canonical PTY output into inspectable terminal states.
 
-Selected-state formatting retains the warmed engine at each distinct-state callback. VT and HTML are therefore emitted by the pinned Ghostty formatter at the resolved state ID rather than reconstructed from the compact observation frame or silently substituted with final-state artifacts.
+```bash
+termtrace index --session SESSION
+termtrace inspect --session SESSION --format text
+```
 
-Ghostty dirty flags are evidence and optimization hints, not identity. State hashes exclude transient dirty bookkeeping and use a domain-separated BLAKE3 Merkle layout: stable metadata plus one hash per complete row. This permits efficient updates while the final hash still commits to the entire viewport.
+Replay validates the event chain and uses the exact pinned semantic engine. The same recording therefore produces byte-for-byte deterministic state artifacts when the engine and schema versions are unchanged.
 
-Each state records its canonical event sequence and byte offset inside that event. Resize state is applied only after the matching successful resize result. Input, signal, marker, and lifecycle events remain in the execution timeline but do not invent visual changes. State records are stored as compressed JSONL in `states.jsonl.zst`; the lightweight `state-index.jsonl` remains directly streamable.
+## State boundaries
+
+A state is emitted when visible or semantic terminal content changes, including:
+
+- cells, graphemes, styles, and resolved colors;
+- cursor position and shape;
+- terminal modes and active style;
+- title, working directory, palette, or geometry.
+
+Each state records its event sequence and byte offset. Input, signals, markers, and lifecycle events remain in the timeline but do not invent visual changes.
+
+The first record contains a complete grid. Later records contain changed metadata and cells grouped by row. `state-index.jsonl` provides a lightweight event and time lookup without expanding every delta.
+
+State hashes commit to the complete viewport but exclude transient dirty bookkeeping. Dirty rows remain available as diagnostic evidence.
 
 ## Synchronized output
 
-DEC mode 2026 suppresses presentation, not execution. Intermediate changes are indexed with `presented: false`. The state that disables synchronized output is indexed as presented. This keeps transient debugging evidence without claiming native Ghostty displayed it. `index --presented-only` is a derived storage mode that omits suppressed records; it never removes bytes from canonical execution truth or changes the default full-fidelity index.
+DEC mode 2026 groups terminal changes into one presented update. Termtrace retains intermediate parser states with `presented: false` and marks the committed state as presented.
 
-## Delta reconstruction
+This distinction lets protocol debugging inspect hidden work without claiming that a user saw it. Use `index --presented-only` when those intermediate states are unnecessary.
 
-The first state includes full geometry, metadata, and every cell. Later records include only changed metadata and changed cells grouped by row. Consumers resize their grid when `delta.geometry` appears, then apply cell changes by row and column. `state-index.jsonl` is the lightweight event-to-state lookup table.
+## Select a range
 
-## Ranged replay
+Use time offsets or unique markers to replay part of a session:
 
-`termtrace index --from OFFSET --to OFFSET` selects the half-open interval `[from, to)`. Unique marker labels can select the same boundaries with `--from-marker` and `--to-marker`. Earlier output and applied resizes are replayed without emitting states. At the inclusive start, Termtrace snapshots the fully reconstructed terminal as dense state `0` with no responsible event and a complete delta. Events exactly at the start are then included; events exactly at the end are excluded. Resize intents that begin before the boundary remain paired with results inside it. Markers and lifecycle events retain timing but do not invent semantic changes, and synchronized-output presentation flags continue to follow DEC mode 2026.
+```bash
+termtrace index --session SESSION --from 30s --to 45s
+termtrace index --session SESSION --from-marker start --to-marker finish
+```
 
-The range manifest records absolute monotonic nanosecond bounds. State timestamps remain absolute source timestamps, while state identifiers are dense within the derived range. `final.txt`, `final.vt`, and `final.html` describe the terminal at the exclusive end boundary. Invalid, zero-duration, and out-of-session bounds fail rather than being clamped.
+Ranges are half-open: the start is included and the end is excluded. Replay processes the earlier prefix to reconstruct the correct starting state but does not emit prefix states. The range begins with a complete state at its inclusive boundary.
 
-## Determinism
+Ranged manifests retain absolute source times and the exact selected bounds. Invalid, empty, or out-of-session ranges fail instead of being silently adjusted.
 
-Replay outputs contain no generation timestamps. Given the same validated event log, pinned Ghostty revision, and artifact schema version, state records, hashes, final text, VT, and HTML are byte-for-byte deterministic. Tests replay the same recording twice and compare every output.
+## Inspect a point
+
+Completed sessions can resolve a state, event, time, or marker:
+
+```bash
+termtrace show SESSION --state 42
+termtrace show SESSION --event-seq 120
+termtrace show SESSION --at 12.5s
+termtrace show SESSION --at-marker ready
+```
+
+The default selects the latest presented state. Explicit hidden states require `--include-hidden`.
+
+## Semantic and native views
+
+Semantic state is independent of video sampling. A state that lasts less than one video frame remains inspectable.
+
+Semantic PNG and SVG rendering are deterministic derived views. Native PNG explicitly launches the installed terminal application and never falls back to semantic rendering. Structured output labels the source and capture quality so consumers can distinguish them.
