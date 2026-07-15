@@ -18,6 +18,7 @@ pub mod inspection;
 pub mod interop;
 pub mod observation;
 pub mod playback;
+pub mod presentation;
 pub mod profile;
 pub mod provenance;
 pub mod receipt;

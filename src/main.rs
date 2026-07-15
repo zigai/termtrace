@@ -46,6 +46,9 @@ use termtrace::{
         observe_session_with_options,
     },
     playback::{PlaybackOptions, playback},
+    presentation::{
+        EditPlan, export as export_presentation, markers as list_markers, plan as plan_presentation,
+    },
     profile::{
         ResolvedGhosttyProfile, resolve_ghostty_profile, resolved_terminal_colors,
         terminal_colors_for_profile,
@@ -133,6 +136,10 @@ enum Command {
     Signal(SignalArgs),
     /// Add a marker to a live session timeline.
     Mark(MarkArgs),
+    /// List canonical marker positions and nominal source frames.
+    Markers(MarkersArgs),
+    /// Plan or export presentation edits over immutable native evidence.
+    Video(VideoArgs),
     /// Request graceful termination of a live session child.
     Stop(StopArgs),
     /// Replay canonical events and build semantic state artifacts.
@@ -1039,6 +1046,50 @@ struct MarkArgs {
 }
 
 #[derive(Debug, Args)]
+struct MarkersArgs {
+    /// Completed canonical session.
+    session: PathBuf,
+    /// Nominal frame rate used only for source-time mapping.
+    #[arg(long, default_value_t = 24)]
+    fps: u16,
+}
+
+#[derive(Debug, Args)]
+struct VideoArgs {
+    #[command(subcommand)]
+    command: VideoCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum VideoCommand {
+    /// Resolve clips, speeds, and holds without rendering.
+    Plan(VideoPlanArgs),
+    /// Export an H.264 MP4 and frame provenance into a new directory.
+    Export(VideoExportArgs),
+}
+
+#[derive(Debug, Args)]
+struct VideoPlanArgs {
+    /// Completed session containing a verified full native capture.
+    session: PathBuf,
+    /// Strict versioned edit-plan JSON.
+    #[arg(long)]
+    edit: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct VideoExportArgs {
+    /// Completed session containing a verified full native capture.
+    session: PathBuf,
+    /// Strict versioned edit-plan JSON.
+    #[arg(long)]
+    edit: PathBuf,
+    /// New no-replace presentation artifact directory.
+    #[arg(long)]
+    out: PathBuf,
+}
+
+#[derive(Debug, Args)]
 struct RecordArgs {
     /// New owner-only session directory.
     #[arg(long)]
@@ -1358,6 +1409,8 @@ fn dispatch(command: Command) -> Result<ExitCode> {
                 arguments.expected_presented_state_hash,
             );
         }
+        Command::Markers(arguments) => return run_markers(arguments),
+        Command::Video(arguments) => return run_video(arguments),
         Command::Stop(arguments) => return run_stop(arguments),
         Command::Index(arguments) => return run_index(arguments),
         Command::Capture(arguments) => return run_capture(arguments),
@@ -1387,6 +1440,34 @@ fn dispatch(command: Command) -> Result<ExitCode> {
             return Ok(ExitCode::SUCCESS);
         }
     }
+}
+
+fn run_markers(arguments: MarkersArgs) -> Result<ExitCode> {
+    let session = resolve_session_ref(arguments.session)?;
+    return write_json_line(&list_markers(session, arguments.fps)?);
+}
+
+fn run_video(arguments: VideoArgs) -> Result<ExitCode> {
+    return match arguments.command {
+        VideoCommand::Plan(arguments) => {
+            let session = resolve_session_ref(arguments.session)?;
+            let edit = EditPlan::read(arguments.edit)?;
+            write_json_line(&plan_presentation(session, &edit)?)
+        }
+        VideoCommand::Export(arguments) => {
+            let session = resolve_session_ref(arguments.session)?;
+            let edit = EditPlan::read(arguments.edit)?;
+            let plan = plan_presentation(session, &edit)?;
+            let outcome = export_presentation(&plan, arguments.out)?;
+            write_json_line(&serde_json::json!({
+                "kind": "presentation",
+                "directory": outcome.directory,
+                "video": outcome.video,
+                "edit_plan_hash": plan.edit_plan_hash,
+                "output_frame_count": plan.output_frame_count,
+            }))
+        }
+    };
 }
 
 fn run_test(arguments: TestArgs) -> Result<ExitCode> {

@@ -1,0 +1,116 @@
+{
+  "$defs": {
+    "EditClip": {
+      "additionalProperties": false,
+      "description": "One source interval with rational speed and a generated final hold.",
+      "properties": {
+        "caption": {
+          "description": "Optional human presentation caption.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from": {
+          "$ref": "#/$defs/EditSelector",
+          "description": "Inclusive source selector."
+        },
+        "hold_ms": {
+          "default": 0,
+          "description": "Generated hold duration after the final retimed source frame.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "speed": {
+          "$ref": "#/$defs/RationalSpeed",
+          "default": {
+            "denominator": 1,
+            "numerator": 1
+          },
+          "description": "Playback speed as an exact rational."
+        },
+        "to": {
+          "$ref": "#/$defs/EditSelector",
+          "description": "Exclusive source selector."
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "EditSelector": {
+      "additionalProperties": false,
+      "description": "Unique marker or exact canonical monotonic timestamp.",
+      "properties": {
+        "marker": {
+          "description": "Unique canonical marker label.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "monotonicNs": {
+          "description": "Exact canonical session offset in nanoseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RationalSpeed": {
+      "additionalProperties": false,
+      "description": "Exact positive playback speed numerator/denominator.",
+      "properties": {
+        "denominator": {
+          "description": "Source-time multiplier denominator.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "numerator": {
+          "description": "Source-time multiplier numerator.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "numerator",
+        "denominator"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/edit-plan.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One immutable presentation edit plan.",
+  "properties": {
+    "clips": {
+      "description": "Caller-ordered source clips.",
+      "items": {
+        "$ref": "#/$defs/EditClip"
+      },
+      "type": "array"
+    },
+    "version": {
+      "description": "Edit-plan format version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "clips"
+  ],
+  "title": "EditPlan",
+  "type": "object"
+}

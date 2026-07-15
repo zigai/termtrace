@@ -24,6 +24,9 @@ use crate::{
     inspection::{ScreenWaitOutcome, WaitOutcome},
     observation::Observation,
     playback::{PlaybackFailure, PlaybackTiming},
+    presentation::{
+        EditPlan, MarkerRecord, PresentationManifest, PresentationMapEntry, PresentationPlan,
+    },
     provenance::{EnvironmentProvenance, ExecutionProvenance, ProvenancePolicy},
     receipt::EvidenceReceipt,
     replay::{ReplayManifest, StateIndexEntry, StateInspection, StateRecord},
@@ -93,6 +96,11 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<ExplainReport>("explain-report.schema.json")?,
         schema::<PlaybackTiming>("playback-timing.schema.json")?,
         schema::<PlaybackFailure>("playback-failure.schema.json")?,
+        schema::<EditPlan>("edit-plan.schema.json")?,
+        schema::<PresentationPlan>("presentation-plan.schema.json")?,
+        schema::<PresentationManifest>("presentation-manifest.schema.json")?,
+        schema::<PresentationMapEntry>("presentation-map-entry.schema.json")?,
+        schema::<MarkerRecord>("marker-record.schema.json")?,
     ]);
 }
 

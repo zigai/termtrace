@@ -1,0 +1,172 @@
+{
+  "$defs": {
+    "NormalizedClip": {
+      "additionalProperties": false,
+      "description": "Resolved clip and exact source/output frame decisions.",
+      "properties": {
+        "caption": {
+          "description": "Optional caption retained as presentation content.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hold_frame_count": {
+          "description": "Generated hold frame count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_end_frame": {
+          "description": "Exclusive output frame after retiming and hold.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_start_frame": {
+          "description": "First output frame for this clip.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retimed_frame_count": {
+          "description": "Retimed source-derived frame count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_end_frame": {
+          "description": "Exclusive source video frame.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_range": {
+          "$ref": "#/$defs/SourceRange",
+          "description": "Canonical half-open source interval."
+        },
+        "source_start_frame": {
+          "description": "Inclusive source video frame.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "speed": {
+          "$ref": "#/$defs/RationalSpeed",
+          "description": "Exact playback speed."
+        }
+      },
+      "required": [
+        "source_range",
+        "source_start_frame",
+        "source_end_frame",
+        "output_start_frame",
+        "output_end_frame",
+        "retimed_frame_count",
+        "hold_frame_count",
+        "speed"
+      ],
+      "type": "object"
+    },
+    "RationalSpeed": {
+      "additionalProperties": false,
+      "description": "Exact positive playback speed numerator/denominator.",
+      "properties": {
+        "denominator": {
+          "description": "Source-time multiplier denominator.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "numerator": {
+          "description": "Source-time multiplier numerator.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "numerator",
+        "denominator"
+      ],
+      "type": "object"
+    },
+    "SourceRange": {
+      "description": "A non-empty half-open interval on the canonical monotonic timeline.",
+      "properties": {
+        "end_monotonic_ns": {
+          "description": "Exclusive source timestamp in nanoseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_monotonic_ns": {
+          "description": "Inclusive source timestamp in nanoseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_monotonic_ns",
+        "end_monotonic_ns"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/presentation-plan.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Dry-run output binding a normalized edit to immutable native evidence.",
+  "properties": {
+    "clips": {
+      "description": "Caller-ordered resolved clips.",
+      "items": {
+        "$ref": "#/$defs/NormalizedClip"
+      },
+      "type": "array"
+    },
+    "edit_plan_hash": {
+      "description": "BLAKE3 of canonical input edit-plan JSON.",
+      "type": "string"
+    },
+    "fps": {
+      "description": "Native capture frame rate.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "output_frame_count": {
+      "description": "Total output frames after retiming and holds.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "source_video": {
+      "description": "Immutable native base video.",
+      "type": "string"
+    },
+    "source_video_hash": {
+      "description": "BLAKE3 of the native base video.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Presentation format version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "edit_plan_hash",
+    "source_video",
+    "source_video_hash",
+    "fps",
+    "clips",
+    "output_frame_count"
+  ],
+  "title": "PresentationPlan",
+  "type": "object"
+}

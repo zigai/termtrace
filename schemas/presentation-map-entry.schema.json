@@ -1,0 +1,43 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/presentation-map-entry.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One output-frame provenance decision.",
+  "properties": {
+    "captioned": {
+      "description": "Whether a caller caption alters this presentation frame.",
+      "type": "boolean"
+    },
+    "clip_index": {
+      "description": "Caller-ordered clip index.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "operation": {
+      "description": "`source` for retimed frames or `hold` for generated duplicates.",
+      "type": "string"
+    },
+    "output_frame": {
+      "description": "Zero-based presentation output frame.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "source_frame": {
+      "description": "Native base source frame used for this output.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "output_frame",
+    "clip_index",
+    "source_frame",
+    "operation",
+    "captioned"
+  ],
+  "title": "PresentationMapEntry",
+  "type": "object"
+}

@@ -1,0 +1,45 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/marker-record.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Canonical marker with duplicate and nominal-frame context.",
+  "properties": {
+    "event_seq": {
+      "description": "Canonical event sequence.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "label": {
+      "description": "Marker label.",
+      "type": "string"
+    },
+    "monotonic_ns": {
+      "description": "Canonical session offset.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "nominal_frame": {
+      "description": "Nominal source frame at the requested rate.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "occurrence_count": {
+      "description": "Total occurrences of this label.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "label",
+    "event_seq",
+    "monotonic_ns",
+    "nominal_frame",
+    "occurrence_count"
+  ],
+  "title": "MarkerRecord",
+  "type": "object"
+}
