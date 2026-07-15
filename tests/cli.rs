@@ -125,7 +125,7 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
     record
         .args(["record", "--no-input", "--out"])
         .arg(&session)
-        .args(["--", "/bin/sh", "-c", "printf DRIVER"])
+        .args(["/bin/sh", "-c", "printf DRIVER"])
         .assert()
         .success();
     let hello_id = "019f0000-0000-7000-8000-000000000001";
@@ -1273,7 +1273,6 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
             "90",
             "--rows",
             "25",
-            "--",
             "/bin/sh",
             "-c",
             "trap 'exit 0' TERM; printf READY; while :; do sleep 0.1; done",
@@ -1401,7 +1400,6 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
             "strict",
             "--provenance",
             "reproducible",
-            "--",
             "/bin/sh",
             "-c",
             "trap 'exit 0' TERM; while :; do sleep 0.1; done",
@@ -1542,7 +1540,6 @@ fn restart_applies_only_explicit_successor_overrides() {
             "4096",
             "--provenance",
             "minimal",
-            "--",
             "/bin/sh",
             "-c",
             "trap 'exit 0' TERM; while :; do sleep 0.2; done",

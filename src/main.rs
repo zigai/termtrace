@@ -1547,8 +1547,8 @@ struct RestartArgs {
     /// Override custom environment rules.
     #[arg(long = "provenance-env", value_parser = parse_provenance_rule)]
     provenance_environment: Vec<(String, ProvenanceCapture)>,
-    /// Override the executable and arguments, following `--`.
-    #[arg(last = true)]
+    /// Override the executable and arguments; options must precede the executable.
+    #[arg(num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<OsString>,
 }
 
@@ -1651,8 +1651,13 @@ struct RecordingArgs {
     #[arg(long = "provenance-env", value_parser = parse_provenance_rule)]
     provenance_environment: Vec<(String, ProvenanceCapture)>,
 
-    /// Executable and arguments, following `--`.
-    #[arg(last = true, required = true)]
+    /// Executable and arguments; options must precede the executable.
+    #[arg(
+        required = true,
+        num_args = 1..,
+        trailing_var_arg = true,
+        allow_hyphen_values = true
+    )]
     command: Vec<OsString>,
 }
 

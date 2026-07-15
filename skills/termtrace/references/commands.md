@@ -7,11 +7,11 @@ Generated from the current tested command graph. Prefer `termtrace COMMAND --hel
 ```text
 Start a detached recording and publish a name after readiness
 
-Usage: termtrace start [OPTIONS] <NAME> -- <COMMAND>...
+Usage: termtrace start [OPTIONS] <NAME> <COMMAND>...
 
 Arguments:
   <NAME>        New friendly session name
-  <COMMAND>...  Executable and arguments, following `--`
+  <COMMAND>...  Executable and arguments; options must precede the executable
 
 Options:
       --log <LOG>

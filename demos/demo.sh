@@ -19,7 +19,7 @@ trap 'stop_recorder_on_error "$SESSION"' EXIT
   --out "$SESSION" \
   --geometry fit \
   --viewport 1920x1080 \
-  -- python3 "$DEMO_REPO_ROOT/demos/apps/terminal_showcase.py" \
+  python3 "$DEMO_REPO_ROOT/demos/apps/terminal_showcase.py" \
   >"$DEMO_DIRECTORY/live-output.ansi" \
   2>"$STDERR_LOG" &
 RECORDER_PID=$!

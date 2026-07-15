@@ -10,7 +10,7 @@ Use the shortest workflow that preserves enough evidence for the task. Keep cano
 ## Safe default loop
 
 1. Check `termtrace doctor --json` when the workflow needs optional native capabilities.
-2. Start a fresh named session with explicit geometry: `termtrace start NAME --cols 120 --rows 40 -- COMMAND...`.
+2. Start a fresh named session with explicit geometry: `termtrace start NAME --cols 120 --rows 40 COMMAND...`.
 3. Wait on the presented viewport with `termtrace wait NAME TEXT`. Use `--output TEXT` only when the requirement is that the child emitted bytes at any time. Use structural predicates such as `--screen-regex`, `--row-contains`, `--region-contains`, `--cursor-at`, or `--mode` when text alone is ambiguous.
 4. Send semantic input with `termtrace send NAME text:VALUE key:enter`. Retain caller-owned request IDs when using the driver or a client library.
 5. Observe with `termtrace show NAME`; mark important boundaries before and after an interaction.

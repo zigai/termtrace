@@ -3,13 +3,10 @@
 `termtrace record` runs a command in a PTY and writes a new owner-only session directory.
 
 ```bash
-termtrace record \
-  --out /tmp/example.termtrace \
-  --geometry inherit \
-  -- your-command --argument
+termtrace record --out ./example.termtrace --geometry inherit your-command --argument
 ```
 
-The command after `--` is passed as an argument vector, not through a shell. Output is mirrored to the current terminal and standard input is forwarded unless `--no-input` is set.
+The executable and its arguments follow the recording options. They are passed as an argument vector, not through a shell. Output is mirrored to the current terminal and standard input is forwarded unless `--no-input` is set.
 
 Termtrace refuses to reuse an existing output path.
 
@@ -22,7 +19,7 @@ Geometry affects line wrapping and every derived terminal state.
 Use this for interactive recordings:
 
 ```bash
-termtrace record --out SESSION --geometry inherit -- COMMAND
+termtrace record --out SESSION --geometry inherit COMMAND
 ```
 
 ### Set a fixed grid
@@ -30,12 +27,7 @@ termtrace record --out SESSION --geometry inherit -- COMMAND
 Use manual geometry for deterministic semantic replay without native capture:
 
 ```bash
-termtrace record \
-  --out SESSION \
-  --geometry manual \
-  --cols 120 --rows 36 \
-  --cell-width 9 --cell-height 18 \
-  -- COMMAND
+termtrace record --out SESSION --geometry manual --cols 120 --rows 36 --cell-width 9 --cell-height 18 COMMAND
 ```
 
 ### Fit a capture viewport
@@ -43,11 +35,7 @@ termtrace record \
 Use fitted geometry when the recording will become a native screenshot or video:
 
 ```bash
-termtrace record \
-  --out SESSION \
-  --geometry fit \
-  --viewport 1920x1080 \
-  -- COMMAND
+termtrace record --out SESSION --geometry fit --viewport 1920x1080 COMMAND
 ```
 
 This probes the installed terminal application and records the measured grid, cell size, viewport, and effective configuration hash. It requires the native capture dependencies reported by `termtrace doctor`.
@@ -59,7 +47,7 @@ Use `--ghostty-config` to select a configuration file. Font, padding, foreground
 The child starts in the caller's current directory. Override it with `--cwd`; relative paths are resolved from the caller's directory.
 
 ```bash
-termtrace record --out SESSION --cwd ./project -- cargo test
+termtrace record --out SESSION --cwd ./project cargo test
 ```
 
 The resolved directory is stored in `session.json`.

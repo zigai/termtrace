@@ -90,11 +90,7 @@ Common causes are missing fonts, unavailable software OpenGL, a missing codec, o
 If geometry does not match, record with a fitted viewport:
 
 ```bash
-termtrace record \
-  --out SESSION \
-  --geometry fit \
-  --viewport 1920x1080 \
-  -- COMMAND
+termtrace record --out SESSION --geometry fit --viewport 1920x1080 COMMAND
 ```
 
 `--width` and `--height` refer to the complete capture viewport, not only the text grid. Fitted recordings preserve their flattened terminal configuration, but external fonts, shaders, and images must still be installed.
@@ -104,7 +100,7 @@ termtrace record \
 Without `--cwd`, the child inherits the directory where `termtrace record` was invoked. Set it explicitly when needed:
 
 ```bash
-termtrace record --out SESSION --cwd ./project -- COMMAND
+termtrace record --out SESSION --cwd ./project COMMAND
 ```
 
 Inspect `working_directory` in `session.json` to see the resolved value.

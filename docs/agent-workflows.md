@@ -7,7 +7,7 @@ Every active recording exposes an owner-only control socket. Use it to observe t
 `start` creates a recording under the per-user state directory and publishes its name only after the control socket is ready:
 
 ```bash
-termtrace start demo --cols 120 --rows 36 -- your-command
+termtrace start demo --cols 120 --rows 36 your-command
 termtrace ping demo
 termtrace status demo
 ```

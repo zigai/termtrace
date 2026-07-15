@@ -22,10 +22,10 @@ cargo build --release
 target/release/termtrace doctor --explain
 ```
 
-Record any command by placing it after `--`:
+Record any command directly after the recording options:
 
 ```bash
-termtrace record --out ./example.termtrace --geometry inherit -- your-command
+termtrace record --out ./example.termtrace --geometry inherit your-command
 ```
 
 The command runs in a real PTY. Its output stays visible and input is forwarded normally. When it exits, you can inspect the final screen, browse the timeline, or verify the recording:
@@ -43,7 +43,7 @@ Every recording needs a new output path. Existing session directories are never 
 Use a name when you want to start a command in the background and control it from another process:
 
 ```bash
-termtrace start demo --cols 120 --rows 36 -- your-command
+termtrace start demo --cols 120 --rows 36 your-command
 termtrace wait demo 'Ready' --stable-for 250ms
 termtrace send demo text:'help' enter
 termtrace show demo
