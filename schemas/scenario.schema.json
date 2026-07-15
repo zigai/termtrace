@@ -1,0 +1,347 @@
+{
+  "$defs": {
+    "NamedKey": {
+      "description": "Layout-independent key accepted by the pinned terminal key encoder.",
+      "oneOf": [
+        {
+          "const": "enter",
+          "description": "Enter/Return terminal key (distinct from raw line feed).",
+          "type": "string"
+        },
+        {
+          "const": "escape",
+          "description": "Escape key.",
+          "type": "string"
+        },
+        {
+          "const": "tab",
+          "description": "Horizontal tab key.",
+          "type": "string"
+        },
+        {
+          "const": "backspace",
+          "description": "Backspace key.",
+          "type": "string"
+        },
+        {
+          "const": "delete",
+          "description": "Forward delete key.",
+          "type": "string"
+        },
+        {
+          "const": "insert",
+          "description": "Insert key.",
+          "type": "string"
+        },
+        {
+          "const": "home",
+          "description": "Home key.",
+          "type": "string"
+        },
+        {
+          "const": "end",
+          "description": "End key.",
+          "type": "string"
+        },
+        {
+          "const": "page_up",
+          "description": "Page-up key.",
+          "type": "string"
+        },
+        {
+          "const": "page_down",
+          "description": "Page-down key.",
+          "type": "string"
+        },
+        {
+          "const": "arrow_up",
+          "description": "Up arrow.",
+          "type": "string"
+        },
+        {
+          "const": "arrow_down",
+          "description": "Down arrow.",
+          "type": "string"
+        },
+        {
+          "const": "arrow_left",
+          "description": "Left arrow.",
+          "type": "string"
+        },
+        {
+          "const": "arrow_right",
+          "description": "Right arrow.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Function key numbered 1 through 24.",
+          "properties": {
+            "function": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "ASCII letter used for Ctrl+A through Ctrl+Z.",
+          "properties": {
+            "letter": {
+              "maxLength": 1,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "letter"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ScenarioGeometry": {
+      "additionalProperties": false,
+      "description": "Initial scenario terminal grid.",
+      "properties": {
+        "cols": {
+          "description": "Terminal columns.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "description": "Terminal rows.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cols",
+        "rows"
+      ],
+      "type": "object"
+    },
+    "ScenarioInput": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScenarioTextInput",
+          "description": "Exact UTF-8 text."
+        },
+        {
+          "$ref": "#/$defs/ScenarioKeyInput",
+          "description": "One mode-aware named key."
+        }
+      ],
+      "description": "One semantic input atom."
+    },
+    "ScenarioKeyInput": {
+      "additionalProperties": false,
+      "description": "Mode-aware scenario key input.",
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/NamedKey",
+          "description": "Named key encoded against the actor's live modes."
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "ScenarioLaunch": {
+      "additionalProperties": false,
+      "description": "Fresh canonical session launch configuration.",
+      "properties": {
+        "command": {
+          "description": "Executable followed by exact argument strings.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "geometry": {
+          "$ref": "#/$defs/ScenarioGeometry",
+          "default": {
+            "cols": 80,
+            "rows": 24
+          },
+          "description": "Initial terminal grid."
+        },
+        "timeoutMs": {
+          "default": 10000,
+          "description": "Default deadline for waits and completion.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "workingDirectory": {
+          "description": "Optional child working directory.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "ScenarioScreenWait": {
+      "additionalProperties": false,
+      "description": "Presented-screen predicate with an optional stability window.",
+      "properties": {
+        "absent": {
+          "description": "Exact substring that must be absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "contains": {
+          "description": "Required exact visible substring.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stableForMs": {
+          "default": 0,
+          "description": "Required duration for one unchanged matching state.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeoutMs": {
+          "description": "Per-step deadline overriding the launch default.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ScenarioStep": {
+      "description": "One sequential scenario operation or assertion.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Wait on the latest presentation-eligible viewport.",
+          "properties": {
+            "waitScreen": {
+              "$ref": "#/$defs/ScenarioScreenWait"
+            }
+          },
+          "required": [
+            "waitScreen"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Apply one or more typed input atoms in order.",
+          "properties": {
+            "send": {
+              "items": {
+                "$ref": "#/$defs/ScenarioInput"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "send"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Add a canonical marker.",
+          "properties": {
+            "mark": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "mark"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Gracefully stop the child and await completion.",
+          "properties": {
+            "stop": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "stop"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ScenarioTextInput": {
+      "additionalProperties": false,
+      "description": "Exact UTF-8 scenario input.",
+      "properties": {
+        "text": {
+          "description": "Text bytes to apply.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/scenario.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One fresh-session terminal scenario.",
+  "properties": {
+    "launch": {
+      "$ref": "#/$defs/ScenarioLaunch",
+      "description": "Fresh canonical session configuration."
+    },
+    "name": {
+      "description": "Stable human-readable scenario name.",
+      "type": "string"
+    },
+    "steps": {
+      "description": "Sequential operations and assertions.",
+      "items": {
+        "$ref": "#/$defs/ScenarioStep"
+      },
+      "type": "array"
+    },
+    "version": {
+      "description": "Scenario schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "name",
+    "launch",
+    "steps"
+  ],
+  "title": "Scenario",
+  "type": "object"
+}

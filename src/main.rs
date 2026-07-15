@@ -58,6 +58,7 @@ use termtrace::{
         format_state, index_session_with_options,
     },
     save::{SaveFormat, save},
+    scenario::{Scenario, ScenarioStatus, run as run_scenario},
     schema::write_all as write_schemas,
     session::{
         CaptureTarget, GeometryProvenance, GeometrySource, GhosttyVisualOverrides, SessionGeometry,
@@ -96,6 +97,8 @@ enum Command {
     Capabilities(CapabilitiesArgs),
     /// Run a command in a PTY and preserve its byte-exact event stream.
     Record(RecordArgs),
+    /// Execute one strict evidence-native terminal scenario.
+    Test(TestArgs),
     /// Start a detached recording and publish a name after readiness.
     Start(StartArgs),
     /// Stop a named session and atomically publish an immutable successor.
@@ -191,6 +194,15 @@ struct VersionArgs {
     /// Emit stable structured component/build metadata.
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Debug, Args)]
+struct TestArgs {
+    /// Strict versioned scenario JSON document.
+    scenario: PathBuf,
+    /// Owner-only result, failure, and canonical evidence root.
+    #[arg(long, default_value = "termtrace-results")]
+    artifacts: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -1293,6 +1305,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Doctor(arguments) => return run_doctor(arguments),
         Command::Capabilities(arguments) => return run_capabilities(arguments),
         Command::Record(arguments) => return run_record(arguments),
+        Command::Test(arguments) => return run_test(arguments),
         Command::Start(arguments) => return run_start(arguments),
         Command::Restart(arguments) => return run_restart(arguments),
         Command::Verify(arguments) => return run_verify(arguments),
@@ -1374,6 +1387,24 @@ fn dispatch(command: Command) -> Result<ExitCode> {
             return Ok(ExitCode::SUCCESS);
         }
     }
+}
+
+fn run_test(arguments: TestArgs) -> Result<ExitCode> {
+    let scenario = Scenario::read(&arguments.scenario)?;
+    let binary = env::current_exe().into_diagnostic()?;
+    let report = run_scenario(
+        &scenario,
+        binary,
+        arguments.artifacts.join("sessions"),
+        arguments.artifacts.join("failures"),
+    )?;
+    let status = report.status;
+    write_json_line(&report)?;
+    return Ok(if status == ScenarioStatus::Passed {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    });
 }
 
 fn run_version(arguments: VersionArgs) -> Result<ExitCode> {

@@ -1,0 +1,155 @@
+{
+  "$defs": {
+    "ScenarioFailure": {
+      "additionalProperties": false,
+      "description": "Stable failure context for one scenario step.",
+      "properties": {
+        "message": {
+          "description": "Safe diagnostic without child environment values.",
+          "type": "string"
+        },
+        "request_ids": {
+          "description": "Caller-owned mutation identifiers allocated before the failure.",
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "step_index": {
+          "description": "Zero-based failed step index.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "step_kind": {
+          "description": "Stable scenario step kind.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step_index",
+        "step_kind",
+        "request_ids",
+        "message"
+      ],
+      "type": "object"
+    },
+    "ScenarioStatus": {
+      "description": "Overall scenario disposition.",
+      "oneOf": [
+        {
+          "const": "passed",
+          "description": "Every step completed successfully.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "One step failed and later steps did not run.",
+          "type": "string"
+        }
+      ]
+    },
+    "ScenarioStepResult": {
+      "additionalProperties": false,
+      "description": "One executed step and its canonical provenance.",
+      "properties": {
+        "index": {
+          "description": "Zero-based step index.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "description": "Stable scenario step kind.",
+          "type": "string"
+        },
+        "request_ids": {
+          "description": "Caller-owned mutation request identifiers used by this step.",
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "state_hash": {
+          "description": "Matched presented state hash when applicable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "index",
+        "kind",
+        "request_ids"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/scenario-report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Machine-readable scenario outcome.",
+  "properties": {
+    "canonical_session": {
+      "description": "Owner-only canonical evidence path.",
+      "type": "string"
+    },
+    "failure": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScenarioFailure"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "First failure, if any."
+    },
+    "failure_artifacts": {
+      "description": "Atomic failure evidence directory, if the scenario failed.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Scenario name.",
+      "type": "string"
+    },
+    "session_id": {
+      "description": "Immutable canonical session identity.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/ScenarioStatus",
+      "description": "Overall disposition."
+    },
+    "steps": {
+      "description": "Successfully completed steps.",
+      "items": {
+        "$ref": "#/$defs/ScenarioStepResult"
+      },
+      "type": "array"
+    },
+    "version": {
+      "description": "Scenario format version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "name",
+    "status",
+    "session_id",
+    "canonical_session",
+    "steps"
+  ],
+  "title": "ScenarioReport",
+  "type": "object"
+}

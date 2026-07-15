@@ -271,6 +271,86 @@ if ((await launched.evidence.complete()).kind !== "completion") throw new Error(
 }
 
 #[test]
+fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let scenario = temporary.path().join("ready.termtrace.json");
+    let artifacts = temporary.path().join("artifacts");
+    fs_err::write(
+        &scenario,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "version": 1,
+            "name": "ready workflow",
+            "launch": {
+                "command": ["/bin/sh", "-c", "printf Ready; IFS= read -r line; printf Done; sleep 30"],
+                "geometry": { "cols": 90, "rows": 25 },
+                "timeoutMs": 3000
+            },
+            "steps": [
+                { "waitScreen": { "contains": "Ready" } },
+                { "send": [{ "text": "go" }, { "key": "enter" }] },
+                { "waitScreen": { "contains": "Done" } },
+                { "mark": "done-visible" },
+                { "stop": {} }
+            ]
+        }))
+        .expect("scenario JSON"),
+    )
+    .expect("write scenario");
+
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+    let assertion = command
+        .arg("test")
+        .arg(&scenario)
+        .arg("--artifacts")
+        .arg(&artifacts)
+        .assert()
+        .success();
+    let report: serde_json::Value =
+        serde_json::from_slice(&assertion.get_output().stdout).expect("scenario report");
+    assert_eq!(report["status"], "passed");
+    assert_eq!(report["steps"].as_array().expect("steps").len(), 5);
+    assert!(Path::new(report["canonical_session"].as_str().expect("path")).is_dir());
+}
+
+#[test]
+fn scenario_failure_publishes_atomic_diagnostic_directory() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let scenario = temporary.path().join("failure.termtrace.json");
+    let artifacts = temporary.path().join("artifacts");
+    fs_err::write(
+        &scenario,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "version": 1,
+            "name": "missing screen",
+            "launch": {
+                "command": ["/bin/sh", "-c", "printf Ready; sleep 30"],
+                "timeoutMs": 1000
+            },
+            "steps": [{ "waitScreen": { "contains": "Missing", "timeoutMs": 50 } }]
+        }))
+        .expect("scenario JSON"),
+    )
+    .expect("write scenario");
+
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+    let assertion = command
+        .arg("test")
+        .arg(&scenario)
+        .arg("--artifacts")
+        .arg(&artifacts)
+        .assert()
+        .failure();
+    let report: serde_json::Value =
+        serde_json::from_slice(&assertion.get_output().stdout).expect("failure report");
+    assert_eq!(report["status"], "failed");
+    assert_eq!(report["failure"]["step_index"], 0);
+    let failure = Path::new(report["failure_artifacts"].as_str().expect("failure path"));
+    assert!(failure.join("scenario.json").is_file());
+    assert!(failure.join("result.json").is_file());
+    assert!(failure.join("final-screen.json").is_file());
+}
+
+#[test]
 fn blocking_rust_facade_launches_drives_and_completes_evidence() {
     let temporary = TempDir::new().expect("temporary directory");
     let terminal = ClientTerminal::new(

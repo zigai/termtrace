@@ -25,6 +25,7 @@ pub mod record;
 pub mod replay;
 pub mod request_journal;
 pub mod save;
+pub mod scenario;
 pub mod schema;
 pub mod semantic_image;
 pub mod session;
