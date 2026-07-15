@@ -23,6 +23,11 @@ __pycache__/
 dist/
 *.egg-info/
 
+# JavaScript and TypeScript package outputs
+node_modules/
+/packages/typescript/lib/
+*.tsbuildinfo
+
 # Coverage, profiling, and crash outputs
 /coverage/
 *.profraw

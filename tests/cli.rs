@@ -182,6 +182,14 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
     session = terminal.attach(sys.argv[2])
     assert session.evidence.completion()["kind"] == "completion"
     session.close()
+    launched = terminal.launch(["/bin/sh", "-c", "printf PY_LAUNCH; sleep 30"], evidence_root=sys.argv[3])
+    assert launched.canonical_session.is_dir()
+    assert launched.screen.wait_for_text("PY_LAUNCH")["kind"] == "control"
+    assert "PY_LAUNCH" in launched.screen.text()
+    assert launched.output.wait_for_text("PY_LAUNCH")["kind"] == "output_wait"
+    launched.stop()
+    assert launched.evidence.complete()["kind"] == "completion"
+    launched.close()
 "#;
     let sync = StdCommand::new("python3")
         .env("PYTHONPATH", &package)
@@ -189,6 +197,7 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
         .arg(sync_code)
         .arg(binary)
         .arg(&session)
+        .arg(temporary.path().join("python-sync-evidence"))
         .status()
         .expect("run sync Python client");
     assert!(sync.success());
@@ -201,6 +210,14 @@ async def main():
         session = await terminal.attach(sys.argv[2])
         assert (await session.completion())["kind"] == "completion"
         await session.close()
+        launched = await terminal.launch(["/bin/sh", "-c", "printf ASYNC_LAUNCH; sleep 30"], evidence_root=sys.argv[3])
+        assert launched.canonical_session.is_dir()
+        assert (await launched.screen.wait_for_text("ASYNC_LAUNCH"))["kind"] == "control"
+        assert "ASYNC_LAUNCH" in await launched.screen.text()
+        assert (await launched.output.wait_for_text("ASYNC_LAUNCH"))["kind"] == "output_wait"
+        await launched.stop()
+        assert (await launched.evidence.complete())["kind"] == "completion"
+        await launched.close()
 asyncio.run(main())
 "#;
     let asynchronous = StdCommand::new("python3")
@@ -209,9 +226,48 @@ asyncio.run(main())
         .arg(async_code)
         .arg(binary)
         .arg(&session)
+        .arg(temporary.path().join("python-async-evidence"))
         .status()
         .expect("run async Python client");
     assert!(asynchronous.success());
+}
+
+#[test]
+fn typescript_client_attaches_and_reads_completion_contract() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("typescript-client-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf TYPESCRIPT"])
+        .assert()
+        .success();
+    let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/typescript/src/index.ts");
+    let code = r#"const { Termtrace } = await import(process.argv[1])
+await using terminal = await Termtrace.create({ binaryPath: process.argv[2] })
+await using attached = await terminal.attach(process.argv[3])
+const completion = await attached.evidence.complete()
+if (completion.kind !== "completion") throw new Error("missing completion")
+if (typeof attached.sessionId !== "string") throw new Error("missing session identity")
+await using launched = await terminal.launch({ command: ["/bin/sh", "-c", "printf TS_LAUNCH; sleep 30"], evidenceRoot: process.argv[4] })
+if (typeof launched.sessionId !== "string") throw new Error("missing launched identity")
+if ((await launched.screen.waitForText(/TS_LAUNCH/)).kind !== "screen_wait") throw new Error("missing screen wait")
+if (!await launched.screen.text().then((text) => text.includes("TS_LAUNCH"))) throw new Error("missing screen text")
+if ((await launched.output.waitForText("TS_LAUNCH")).kind !== "output_wait") throw new Error("missing output wait")
+await launched.stop()
+if ((await launched.evidence.complete()).kind !== "completion") throw new Error("missing launched completion")
+"#;
+    let status = StdCommand::new("bun")
+        .arg("-e")
+        .arg(code)
+        .arg(package)
+        .arg(env!("CARGO_BIN_EXE_termtrace"))
+        .arg(&session)
+        .arg(temporary.path().join("typescript-evidence"))
+        .status()
+        .expect("run TypeScript client");
+    assert!(status.success());
 }
 
 #[test]
