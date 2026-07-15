@@ -60,6 +60,7 @@ use termtrace::{
         GHOSTTY_REVISION, IndexOptions, STATE_FORMAT_VERSION, StateSelection, StateSelector,
         format_state, index_session_with_options,
     },
+    reviewer::{ReviewerCapabilities, run as run_reviewer, summarize as summarize_review},
     save::{SaveFormat, save},
     scenario::{Scenario, ScenarioStatus, run as run_scenario},
     schema::write_all as write_schemas,
@@ -162,6 +163,8 @@ enum Command {
     Diff(DiffArgs),
     /// Explain exact VT and semantic evidence around one state point.
     Explain(ExplainArgs),
+    /// Navigate validated evidence in a read-only semantic terminal UI.
+    Review(ReviewArgs),
     /// Write exact canonical child PTY output bytes.
     Output(OutputArgs),
     /// Stream filtered canonical event projections as JSONL.
@@ -566,6 +569,21 @@ struct ExplainArgs {
     /// Output representation.
     #[arg(long, value_enum, default_value_t = ExplainFormat::Text)]
     format: ExplainFormat,
+}
+
+#[derive(Debug, Args)]
+struct ReviewArgs {
+    /// Completed canonical session or registered name.
+    session: Option<PathBuf>,
+    /// Start at the first semantic state at or after this unique marker.
+    #[arg(long)]
+    around_marker: Option<String>,
+    /// Print scriptable reviewer commands and safety policy.
+    #[arg(long, conflicts_with = "json")]
+    commands: bool,
+    /// Print a validated read-only source summary without opening a TUI.
+    #[arg(long, conflicts_with = "commands")]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1424,6 +1442,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Timeline(arguments) => return run_timeline(arguments),
         Command::Diff(arguments) => return run_diff(arguments),
         Command::Explain(arguments) => return run_explain(arguments),
+        Command::Review(arguments) => return run_review(arguments),
         Command::Output(arguments) => return run_output(arguments),
         Command::Events(arguments) => return run_events(arguments),
         Command::Completions(arguments) => return run_completions(arguments),
@@ -1445,6 +1464,24 @@ fn dispatch(command: Command) -> Result<ExitCode> {
 fn run_markers(arguments: MarkersArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
     return write_json_line(&list_markers(session, arguments.fps)?);
+}
+
+fn run_review(arguments: ReviewArgs) -> Result<ExitCode> {
+    if arguments.commands {
+        return write_json_line(&ReviewerCapabilities::default());
+    }
+    let session = arguments.session.ok_or_else(|| {
+        return miette::miette!("review requires SESSION unless --commands is used");
+    })?;
+    let session = resolve_session_ref(session)?;
+    if arguments.json {
+        return write_json_line(&summarize_review(
+            session,
+            arguments.around_marker.as_deref(),
+        )?);
+    }
+    run_reviewer(session, arguments.around_marker.as_deref())?;
+    return Ok(ExitCode::SUCCESS);
 }
 
 fn run_video(arguments: VideoArgs) -> Result<ExitCode> {

@@ -1,0 +1,32 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/reviewer-capabilities.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Stable scriptable reviewer command inventory.",
+  "properties": {
+    "commands": {
+      "description": "Interactive command identifiers.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "rendering_policy": {
+      "description": "Safety boundary for recorded terminal content.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Reviewer contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "commands",
+    "rendering_policy"
+  ],
+  "title": "ReviewerCapabilities",
+  "type": "object"
+}

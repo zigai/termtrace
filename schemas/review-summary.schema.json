@@ -1,0 +1,48 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/review-summary.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Noninteractive reviewer source summary.",
+  "properties": {
+    "canonical_session": {
+      "description": "Immutable completed session directory.",
+      "type": "string"
+    },
+    "final_state_hash": {
+      "description": "Final semantic state hash.",
+      "type": "string"
+    },
+    "marker_count": {
+      "description": "Number of canonical markers.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "presented_state_count": {
+      "description": "Number of presentation-eligible states.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "rendering_policy": {
+      "description": "Safety boundary used for viewport rendering.",
+      "type": "string"
+    },
+    "state_count": {
+      "description": "Number of distinct semantic states.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "canonical_session",
+    "state_count",
+    "presented_state_count",
+    "marker_count",
+    "final_state_hash",
+    "rendering_policy"
+  ],
+  "title": "ReviewSummary",
+  "type": "object"
+}

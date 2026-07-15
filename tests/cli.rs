@@ -351,6 +351,65 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
 }
 
 #[test]
+fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("review-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            r"printf '\033]52;c;hostile-payload\007SAFE'",
+        ])
+        .assert()
+        .success();
+    let event_path = session.join("events.jsonl");
+    let before = fs_err::read(&event_path).expect("event log before review");
+
+    let mut review = Command::cargo_bin("termtrace").expect("binary should build");
+    let assertion = review
+        .arg("review")
+        .arg(&session)
+        .arg("--json")
+        .assert()
+        .success();
+    let summary: serde_json::Value =
+        serde_json::from_slice(&assertion.get_output().stdout).expect("review summary");
+    assert_eq!(
+        summary["rendering_policy"],
+        "semantic_cells_only_no_raw_replay"
+    );
+    assert!(summary["state_count"].as_u64().expect("state count") > 0);
+    assert!(
+        !assertion
+            .get_output()
+            .stdout
+            .windows("hostile-payload".len())
+            .any(|window| return window == b"hostile-payload")
+    );
+    assert_eq!(
+        fs_err::read(event_path).expect("event log after review"),
+        before
+    );
+}
+
+#[test]
+fn reviewer_exposes_scriptable_commands_without_a_session() {
+    let mut review = Command::cargo_bin("termtrace").expect("binary should build");
+    review
+        .args(["review", "--commands"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "semantic_cells_only_no_raw_replay",
+        ))
+        .stdout(predicate::str::contains("next_state"));
+}
+
+#[test]
 fn blocking_rust_facade_launches_drives_and_completes_evidence() {
     let temporary = TempDir::new().expect("temporary directory");
     let terminal = ClientTerminal::new(
