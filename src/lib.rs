@@ -4,6 +4,7 @@ pub mod analysis;
 pub mod artifact;
 pub mod bundle;
 pub mod capability;
+pub mod client;
 
 pub mod control;
 pub mod diff;

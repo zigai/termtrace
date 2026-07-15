@@ -18,6 +18,7 @@ use std::{
 use tempfile::TempDir;
 use termtrace::{
     Error,
+    client::Terminal as ClientTerminal,
     control::{
         ControlCommand, ControlData, ControlRequest, ControlResult, send_request,
         send_request_response,
@@ -160,6 +161,42 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
     assert_eq!(third["result"]["data"]["kind"], "attached");
     assert_eq!(third["result"]["data"]["completed"], true);
     assert!(third["result"]["data"]["handle"].is_string());
+}
+
+#[test]
+fn blocking_rust_facade_launches_drives_and_completes_evidence() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let terminal = ClientTerminal::new(
+        env!("CARGO_BIN_EXE_termtrace"),
+        temporary.path().join("client-evidence"),
+    );
+    let mut session = terminal
+        .launch([
+            OsString::from("/bin/sh"),
+            OsString::from("-c"),
+            OsString::from("printf READY; IFS= read -r line; printf '<%s>' \"$line\""),
+        ])
+        .geometry(90, 25)
+        .start()
+        .expect("launch through Rust facade");
+    wait_for_output(session.path(), b"READY", Duration::from_secs(5)).expect("ready output");
+    assert!(matches!(
+        session.screen().snapshot().expect("screen snapshot"),
+        ControlData::Snapshot {
+            cols: 90,
+            rows: 25,
+            ..
+        }
+    ));
+    session
+        .keyboard()
+        .text("client\n")
+        .expect("typed client input");
+    wait_for_output(session.path(), b"<client>", Duration::from_secs(5)).expect("client output");
+    let completion = session
+        .complete(Duration::from_secs(5))
+        .expect("completed client evidence");
+    assert_eq!(completion.session_id, session.session_id());
 }
 
 #[test]
