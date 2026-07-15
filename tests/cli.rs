@@ -1465,6 +1465,100 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
 }
 
 #[test]
+fn activate_resolves_visible_text_rejects_ambiguity_and_records_region() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("activate-session");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let child = StdCommand::new(binary)
+        .args(["record", "--no-input", "--cols", "80", "--rows", "24", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,tty\ntty.setraw(0)\nos.write(1,b'\\x1b[?1000h\\x1b[?1006hSave changes Save changes')\nd=b''\nwhile len(d)<18: d+=os.read(0,18-len(d))\nos.write(1,b'ACTIVATED:'+d.hex().encode())",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn activation fixture");
+    wait_for_path(&session.join("control.sock"));
+    wait_for_output(
+        &session,
+        b"Save changes Save changes",
+        Duration::from_secs(5),
+    )
+    .expect("activation text ready");
+
+    let mut ambiguous = Command::cargo_bin("termtrace").expect("binary should build");
+    ambiguous
+        .arg("activate")
+        .arg(&session)
+        .args(["--text", "Save changes", "--unique", "--strict"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("activation_text_ambiguous"));
+    let mut activate = Command::cargo_bin("termtrace").expect("binary should build");
+    activate
+        .arg("activate")
+        .arg(&session)
+        .args(["--text", "Save changes", "--strict"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""kind":"activated""#));
+    let output = child
+        .wait_with_output()
+        .expect("activation fixture completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+
+    let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+    let activations = log
+        .events
+        .iter()
+        .filter_map(|record| match &record.event {
+            Event::InputIntent {
+                descriptor:
+                    InputDescriptor::Activate {
+                        text,
+                        start_column,
+                        end_column,
+                        row,
+                        target_column,
+                        presented_state_hash,
+                        encoder,
+                        terminal_modes_hash,
+                        ..
+                    },
+                data,
+                ..
+            } => {
+                return Some((
+                    text,
+                    *start_column,
+                    *end_column,
+                    *row,
+                    *target_column,
+                    presented_state_hash,
+                    encoder,
+                    terminal_modes_hash,
+                    data.as_bytes(),
+                ));
+            }
+            _ => return None,
+        })
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        activations.as_slice(),
+        [(text, 0, 12, 0, 5, state_hash, encoder, modes_hash, data)]
+            if text.as_str() == "Save changes"
+                && encoder.as_str() == "libghostty-mouse-encoder-v1"
+                && state_hash.len() == 64
+                && modes_hash.len() == 64
+                && *data == b"\x1b[<0;6;1M\x1b[<0;6;1m"
+    ));
+}
+
+#[test]
 fn paced_unicode_text_splits_only_at_scalar_boundaries() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("paced-session");

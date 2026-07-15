@@ -1798,6 +1798,151 @@ fn execute_control_command(
                 boundaries: actor_boundaries(event_log),
             });
         }
+        ControlCommand::Activate {
+            text,
+            unique,
+            strict,
+        } => {
+            if text.is_empty() || text.len() > 4096 || text.contains('\n') {
+                return Err(control_rejected(
+                    "invalid_activation_text",
+                    "activation text must contain 1 to 4096 bytes on one row",
+                ));
+            }
+            let semantic_state = live.semantic.snapshot()?;
+            if semantic_state.modes.synchronized_output {
+                return Err(control_rejected(
+                    "presentation_transaction_active",
+                    "text activation is unavailable during synchronized output",
+                ));
+            }
+            let state_hash = presented_state_hash(live)?;
+            let matches = find_text_regions(&live.presented, text);
+            let visible = matches
+                .iter()
+                .filter(|region| return !region.concealed)
+                .collect::<Vec<_>>();
+            if visible.is_empty() {
+                let code = if matches.is_empty() {
+                    "activation_text_not_found"
+                } else {
+                    "activation_text_concealed"
+                };
+                return Err(control_rejected(
+                    code,
+                    "activation requires a visible row-contained text match",
+                ));
+            }
+            if *unique && visible.len() != 1 {
+                let candidates = visible
+                    .iter()
+                    .map(|region| {
+                        return format!(
+                            "{}:{}-{}",
+                            region.row, region.start_column, region.end_column
+                        );
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                return Err(control_rejected(
+                    "activation_text_ambiguous",
+                    &format!("activation text matched multiple regions: {candidates}"),
+                ));
+            }
+            let region = visible
+                .first()
+                .ok_or_else(|| return control_rejected("activation_text_not_found", "no match"))?;
+            let target_column = region
+                .start_column
+                .saturating_add(region.end_column.saturating_sub(region.start_column + 1) / 2);
+            let mode_bytes = serde_json::to_vec(&semantic_state.modes).map_err(|error| {
+                return terminal_error("serialize activation modes", error.to_string());
+            })?;
+            let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
+            let reporting_enabled = semantic_state.modes.values.iter().any(|mode| {
+                return !mode.ansi && matches!(mode.number, 9 | 1000 | 1002 | 1003) && mode.enabled;
+            });
+            if !reporting_enabled {
+                if *strict {
+                    return Err(control_rejected(
+                        "pointer_reporting_disabled",
+                        "the application has not enabled a DEC mouse tracking mode",
+                    ));
+                }
+                return Ok(ControlData::InputNoop {
+                    input_kind: InputKind::Pointer,
+                    reason: "pointer_reporting_disabled".to_owned(),
+                    terminal_modes_hash,
+                    boundaries: actor_boundaries(event_log),
+                });
+            }
+            let mut encoded = Vec::new();
+            for action in [MouseAction::Press, MouseAction::Release] {
+                encoded.extend_from_slice(
+                    live.semantic
+                        .encode_mouse(
+                            action,
+                            MouseButton::Left,
+                            target_column,
+                            region.row,
+                            live.geometry.cols,
+                            live.geometry.rows,
+                            live.geometry.pixel_width,
+                            live.geometry.pixel_height,
+                        )?
+                        .as_bytes(),
+                );
+            }
+            if encoded.is_empty() {
+                if *strict {
+                    return Err(control_rejected(
+                        "pointer_has_no_output",
+                        "the current tracking mode suppressed the activation click",
+                    ));
+                }
+                return Ok(ControlData::InputNoop {
+                    input_kind: InputKind::Pointer,
+                    reason: "pointer_has_no_output".to_owned(),
+                    terminal_modes_hash,
+                    boundaries: actor_boundaries(event_log),
+                });
+            }
+            let applied = apply_input(
+                spawned.writer.as_mut(),
+                event_log,
+                request_id,
+                InputSource::Agent,
+                InputKind::Pointer,
+                InputDescriptor::Activate {
+                    text: text.clone(),
+                    start_column: region.start_column,
+                    end_column: region.end_column,
+                    row: region.row,
+                    target_column,
+                    presented_state_hash: state_hash.clone(),
+                    cols: live.geometry.cols,
+                    rows: live.geometry.rows,
+                    encoder: "libghostty-mouse-encoder-v1".to_owned(),
+                    terminal_modes_hash,
+                },
+                Some("activate-visible-text".to_owned()),
+                &encoded,
+            )?;
+            return Ok(ControlData::Activated {
+                operation_id: request_id,
+                text: text.clone(),
+                start_column: region.start_column,
+                end_column: region.end_column,
+                row: region.row,
+                target_column,
+                presented_state_hash: state_hash,
+                data: ByteString::new(encoded),
+                bytes_written: applied.bytes_written,
+                intent_event_seq: applied.intent_event_seq,
+                result_event_seq: applied.result_event_seq,
+                boundaries: actor_boundaries(event_log),
+            });
+        }
         ControlCommand::Resize {
             cols,
             rows,
@@ -2232,6 +2377,49 @@ fn mouse_button_name(button: MouseButton) -> &'static str {
         MouseButton::WheelUp => "wheel-up",
         MouseButton::WheelDown => "wheel-down",
     };
+}
+
+struct TextRegion {
+    start_column: u16,
+    end_column: u16,
+    row: u16,
+    concealed: bool,
+}
+
+fn find_text_regions(state: &SemanticState, needle: &str) -> Vec<TextRegion> {
+    let mut regions = Vec::new();
+    for row in &state.grid {
+        let mut text = String::new();
+        let mut cells = Vec::with_capacity(row.cells.len());
+        for cell in &row.cells {
+            let start = text.len();
+            if cell.grapheme.is_empty() {
+                text.push(' ');
+            } else {
+                text.push_str(&cell.grapheme);
+            }
+            cells.push((start, text.len(), cell.column, cell.style.invisible));
+        }
+        for (start, _) in text.match_indices(needle) {
+            let end = start.saturating_add(needle.len());
+            let matching = cells
+                .iter()
+                .filter(|(cell_start, cell_end, _, _)| {
+                    return *cell_start < end && *cell_end > start;
+                })
+                .collect::<Vec<_>>();
+            let (Some(first), Some(last)) = (matching.first(), matching.last()) else {
+                continue;
+            };
+            regions.push(TextRegion {
+                start_column: first.2,
+                end_column: last.2.saturating_add(1),
+                row: row.row,
+                concealed: matching.iter().any(|cell| return cell.3),
+            });
+        }
+    }
+    return regions;
 }
 
 fn semantic_viewport_text(state: &SemanticState) -> String {

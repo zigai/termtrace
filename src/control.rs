@@ -20,7 +20,7 @@ use crate::{
 };
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 9;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 10;
 /// Relative socket path inside a live session directory.
 pub const CONTROL_SOCKET_NAME: &str = "control.sock";
 /// Maximum encoded request or response size.
@@ -132,6 +132,15 @@ pub enum ControlCommand {
         /// Reject instead of returning a semantic no-op when reporting is disabled.
         strict: bool,
     },
+    /// Resolve visible text and click its center from one actor-ordered state.
+    Activate {
+        /// Exact row-contained visible text to resolve.
+        text: String,
+        /// Require exactly one match instead of choosing the first.
+        unique: bool,
+        /// Reject instead of returning a semantic no-op when reporting is disabled.
+        strict: bool,
+    },
     /// Change the child PTY geometry.
     Resize {
         /// Terminal columns.
@@ -226,6 +235,33 @@ pub enum ControlData {
         /// BLAKE3 of canonical JSON for the terminal mode snapshot.
         terminal_modes_hash: String,
         /// Durable and observed positions at evaluation.
+        boundaries: ActorBoundaries,
+    },
+    /// Exact result of one semantic text activation.
+    Activated {
+        /// Canonical operation identifier.
+        operation_id: Uuid,
+        /// Exact matched text.
+        text: String,
+        /// Zero-based first matched column.
+        start_column: u16,
+        /// Zero-based exclusive matched column.
+        end_column: u16,
+        /// Zero-based matched row.
+        row: u16,
+        /// Cell chosen for the click.
+        target_column: u16,
+        /// Presented-state hash used for resolution and encoding.
+        presented_state_hash: String,
+        /// Exact bytes emitted by the actor.
+        data: ByteString,
+        /// Number of bytes written completely.
+        bytes_written: u64,
+        /// Canonical intent event sequence.
+        intent_event_seq: u64,
+        /// Canonical result event sequence.
+        result_event_seq: u64,
+        /// Durable and observed positions after application.
         boundaries: ActorBoundaries,
     },
     /// Live session status.

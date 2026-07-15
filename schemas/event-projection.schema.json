@@ -653,6 +653,88 @@
             "terminal_modes_hash"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Semantic visible-text resolution followed by a mode-aware click.",
+          "properties": {
+            "cols": {
+              "description": "Current grid columns.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "encoder": {
+              "description": "Pinned encoder identity.",
+              "type": "string"
+            },
+            "end_column": {
+              "description": "Zero-based exclusive matched column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "activate",
+              "type": "string"
+            },
+            "presented_state_hash": {
+              "description": "Presented-state hash used for resolution and encoding.",
+              "type": "string"
+            },
+            "row": {
+              "description": "Zero-based matched row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "description": "Current grid rows.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "start_column": {
+              "description": "Zero-based first matched column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "target_column": {
+              "description": "Cell chosen for the click.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            },
+            "text": {
+              "description": "Exact matched text.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text",
+            "start_column",
+            "end_column",
+            "row",
+            "target_column",
+            "presented_state_hash",
+            "cols",
+            "rows",
+            "encoder",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
         }
       ]
     },

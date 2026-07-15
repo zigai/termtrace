@@ -223,6 +223,35 @@
         },
         {
           "additionalProperties": false,
+          "description": "Resolve visible text and click its center from one actor-ordered state.",
+          "properties": {
+            "command": {
+              "const": "activate",
+              "type": "string"
+            },
+            "strict": {
+              "description": "Reject instead of returning a semantic no-op when reporting is disabled.",
+              "type": "boolean"
+            },
+            "text": {
+              "description": "Exact row-contained visible text to resolve.",
+              "type": "string"
+            },
+            "unique": {
+              "description": "Require exactly one match instead of choosing the first.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "command",
+            "text",
+            "unique",
+            "strict"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Change the child PTY geometry.",
           "properties": {
             "cols": {

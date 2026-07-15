@@ -118,6 +118,8 @@ enum Command {
     Focus(FocusArgs),
     /// Send cell-addressed mouse input using live tracking modes.
     Pointer(PointerArgs),
+    /// Resolve visible text and click its center from one actor state.
+    Activate(ActivateArgs),
     /// Resize a live child PTY.
     Resize(ResizeArgs),
     /// Signal a live child process group.
@@ -880,6 +882,24 @@ struct PointerScrollArgs {
     expected_presented_state_hash: Option<String>,
 }
 
+#[derive(Debug, Args)]
+struct ActivateArgs {
+    /// Live session name or canonical path.
+    session: PathBuf,
+    /// Exact visible row-contained text to resolve.
+    #[arg(long)]
+    text: String,
+    /// Require exactly one visible match.
+    #[arg(long)]
+    unique: bool,
+    /// Reject when mouse reporting suppresses output instead of returning a no-op.
+    #[arg(long)]
+    strict: bool,
+    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
+    #[arg(long = "if-state")]
+    expected_presented_state_hash: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum CliSignal {
     Interrupt,
@@ -1214,6 +1234,17 @@ fn dispatch(command: Command) -> Result<ExitCode> {
             );
         }
         Command::Pointer(arguments) => return run_pointer(arguments),
+        Command::Activate(arguments) => {
+            return run_control_guarded(
+                arguments.session,
+                ControlCommand::Activate {
+                    text: arguments.text,
+                    unique: arguments.unique,
+                    strict: arguments.strict,
+                },
+                arguments.expected_presented_state_hash,
+            );
+        }
         Command::Resize(arguments) => return run_resize(arguments),
         Command::Signal(arguments) => {
             return run_control_guarded(

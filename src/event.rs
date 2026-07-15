@@ -278,6 +278,29 @@ pub enum InputDescriptor {
         /// BLAKE3 of canonical JSON for the terminal mode snapshot.
         terminal_modes_hash: String,
     },
+    /// Semantic visible-text resolution followed by a mode-aware click.
+    Activate {
+        /// Exact matched text.
+        text: String,
+        /// Zero-based first matched column.
+        start_column: u16,
+        /// Zero-based exclusive matched column.
+        end_column: u16,
+        /// Zero-based matched row.
+        row: u16,
+        /// Cell chosen for the click.
+        target_column: u16,
+        /// Presented-state hash used for resolution and encoding.
+        presented_state_hash: String,
+        /// Current grid columns.
+        cols: u16,
+        /// Current grid rows.
+        rows: u16,
+        /// Pinned encoder identity.
+        encoder: String,
+        /// BLAKE3 of canonical JSON for the terminal mode snapshot.
+        terminal_modes_hash: String,
+    },
 }
 
 /// Why a process lifecycle transition occurred.

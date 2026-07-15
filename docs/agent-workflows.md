@@ -28,6 +28,8 @@ Use `focus SESSION in|out` for an application that enabled DEC focus reporting. 
 
 Use `pointer SESSION click --cell COLUMN,ROW` or `pointer SESSION scroll --cell COLUMN,ROW --lines N` for applications that enabled mouse tracking. Cells are always zero-based. The actor bounds-checks against current geometry and passes cell-center pixels plus live tracking/encoding modes to the pinned mouse encoder. The canonical descriptor retains the requested operation, cell, grid/pixel geometry, mode hash, encoder, and exact combined bytes; it proves input emission, not that the application activated a UI control.
 
+Use `activate SESSION --text VALUE --unique --strict` only when visible semantic text is the intended geometric target. Resolution and mouse encoding occur in one actor operation over the same presented state. Matches are exact, row-contained, and unconcealed; ambiguity is rejected with candidate regions. The returned region/state hash proves what was resolved and which bytes were emitted, but a postcondition screen wait is still required to prove application behavior.
+
 Signals are allowlisted: interrupt, terminate, hangup, user1, and user2. `SIGKILL` is intentionally absent. `stop` is a graceful `SIGTERM` request. Markers are durable timeline annotations, and a successful `mark` response names the canonical event sequence.
 
 Terminal-generated replies are marked `source: host`. A `query_response` event preserves the triggering control sequence and exact response before the corresponding input intent/result. Agents should not synthesize a second response.
