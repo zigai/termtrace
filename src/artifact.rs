@@ -618,7 +618,12 @@ pub(crate) fn finish_writer(mut writer: BufWriter<File>, path: &Path) -> Result<
     return sync_parent_directory(path);
 }
 
-pub(crate) fn write_secure(path: &Path, bytes: &[u8]) -> Result<()> {
+/// Create, flush, and parent-sync one owner-only no-replace artifact file.
+///
+/// # Errors
+///
+/// Returns an error when the destination exists or any write/sync operation fails.
+pub fn write_secure(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut writer = secure_writer(path)?;
     writer
         .write_all(bytes)

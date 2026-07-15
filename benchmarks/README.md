@@ -15,9 +15,18 @@ Validate the manifest syntax with:
 jq -e . benchmarks/acceptance-v1.json
 ```
 
-The large-fixture generator and executable benchmark harness are roadmap
-deliverables. Until they exist, their gate results are explicitly unavailable,
-not passing.
+Generate the exact million-event, one-GiB completed fixture with:
+
+```sh
+cargo run --release --bin termtrace-fixture -- large \
+  --events 1000000 \
+  --output-bytes 1073741824
+```
+
+The destination is owner-only and no-replace. Its completion is validated
+before the generator reports success. Large-gate measurements remain
+unavailable, not passing, until this fixture has been generated on the pinned
+host and the relevant operation results have been recorded.
 
 Run the durability comparison with the manifest's default 30 repetitions:
 
