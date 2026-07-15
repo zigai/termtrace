@@ -12,9 +12,16 @@
 /demo-artifacts/
 /benchmarks/results/
 
-# Python bytecode produced by demo validation
+# Python build, test, type-check, and virtual-environment outputs
 __pycache__/
 *.py[cod]
+.mypy_cache/
+.pytest_cache/
+.pyright/
+.ruff_cache/
+.venv/
+dist/
+*.egg-info/
 
 # Coverage, profiling, and crash outputs
 /coverage/

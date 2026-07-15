@@ -164,6 +164,57 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
 }
 
 #[test]
+fn python_sync_and_async_clients_parse_driver_completion_contract() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("python-client-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf PYTHON"])
+        .assert()
+        .success();
+    let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/python/src");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let sync_code = r#"import sys
+from termtrace import Terminal
+with Terminal(binary_path=sys.argv[1]) as terminal:
+    session = terminal.attach(sys.argv[2])
+    assert session.evidence.completion()["kind"] == "completion"
+    session.close()
+"#;
+    let sync = StdCommand::new("python3")
+        .env("PYTHONPATH", &package)
+        .arg("-c")
+        .arg(sync_code)
+        .arg(binary)
+        .arg(&session)
+        .status()
+        .expect("run sync Python client");
+    assert!(sync.success());
+
+    let async_code = r#"import asyncio, sys
+from termtrace import AsyncTerminal
+async def main():
+    terminal = await AsyncTerminal.create(binary_path=sys.argv[1])
+    async with terminal:
+        session = await terminal.attach(sys.argv[2])
+        assert (await session.completion())["kind"] == "completion"
+        await session.close()
+asyncio.run(main())
+"#;
+    let asynchronous = StdCommand::new("python3")
+        .env("PYTHONPATH", package)
+        .arg("-c")
+        .arg(async_code)
+        .arg(binary)
+        .arg(&session)
+        .status()
+        .expect("run async Python client");
+    assert!(asynchronous.success());
+}
+
+#[test]
 fn blocking_rust_facade_launches_drives_and_completes_evidence() {
     let temporary = TempDir::new().expect("temporary directory");
     let terminal = ClientTerminal::new(

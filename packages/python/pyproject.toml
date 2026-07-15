@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "termtrace"
+version = "0.1.0"
+description = "Typed sync and async clients for the Termtrace JSONL driver"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/termtrace"]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+include = ["src", "tests"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
