@@ -23,6 +23,9 @@ use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
     Error,
     analysis::{ExplainReport, explain},
+    bundle::{
+        BundleProfile, create as create_bundle, plan as plan_bundle, verify as verify_bundle,
+    },
     capability::{CapabilityReport, CapabilityStatus, probe_capabilities},
     control::{
         CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, PointerOperation,
@@ -156,6 +159,10 @@ enum Command {
     Completions(CompletionsArgs),
     /// Atomically publish representations of one semantic state.
     Save(SaveArgs),
+    /// Publish a deterministic sensitivity-labeled handoff directory.
+    Bundle(BundleArgs),
+    /// Verify every manifested bundle member and included evidence.
+    BundleVerify(BundleVerifyArgs),
     /// Wait for exact UTF-8 text in canonical PTY output.
     Wait(WaitArgs),
     /// Copy the longest integrity-checked event prefix without modifying source.
@@ -199,6 +206,44 @@ struct CapabilitiesArgs {
     /// Emit the stable structured capability report.
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum BundleProfileArg {
+    Screen,
+    Debug,
+    Forensic,
+}
+
+impl From<BundleProfileArg> for BundleProfile {
+    fn from(profile: BundleProfileArg) -> Self {
+        return match profile {
+            BundleProfileArg::Screen => Self::Screen,
+            BundleProfileArg::Debug => Self::Debug,
+            BundleProfileArg::Forensic => Self::Forensic,
+        };
+    }
+}
+
+#[derive(Debug, Args)]
+struct BundleArgs {
+    /// Completed canonical session.
+    session: PathBuf,
+    /// Fixed content and sensitivity policy.
+    #[arg(long, value_enum, default_value_t = BundleProfileArg::Screen)]
+    profile: BundleProfileArg,
+    /// New owner-only destination directory.
+    #[arg(long)]
+    out: PathBuf,
+    /// Print the selected paths and sensitivities without writing.
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct BundleVerifyArgs {
+    /// Published bundle directory.
+    bundle: PathBuf,
 }
 
 impl From<VerifyLevelArg> for VerificationLevel {
@@ -1281,6 +1326,8 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Events(arguments) => return run_events(arguments),
         Command::Completions(arguments) => return run_completions(arguments),
         Command::Save(arguments) => return run_save(arguments),
+        Command::Bundle(arguments) => return run_bundle(arguments),
+        Command::BundleVerify(arguments) => return run_bundle_verify(arguments),
         Command::Wait(arguments) => return run_wait(arguments),
         Command::Recover(arguments) => return run_recover(arguments),
         Command::Schemas(arguments) => return run_schemas(arguments),
@@ -2088,6 +2135,30 @@ fn run_save(arguments: SaveArgs) -> Result<ExitCode> {
         "state_hash": outcome.manifest.state_hash,
         "files": outcome.manifest.files,
         "manifest": outcome.directory.join("save-manifest.json"),
+    }));
+}
+
+fn run_bundle(arguments: BundleArgs) -> Result<ExitCode> {
+    let profile = arguments.profile.into();
+    if arguments.dry_run {
+        return write_json_line(&plan_bundle(profile));
+    }
+    let session = resolve_session_ref(arguments.session)?;
+    let manifest = create_bundle(&session, &arguments.out, profile)?;
+    return write_json_line(&serde_json::json!({
+        "kind": "bundle",
+        "directory": arguments.out,
+        "manifest": manifest,
+    }));
+}
+
+fn run_bundle_verify(arguments: BundleVerifyArgs) -> Result<ExitCode> {
+    let manifest = verify_bundle(&arguments.bundle)?;
+    return write_json_line(&serde_json::json!({
+        "kind": "bundle_verification",
+        "valid": true,
+        "bundle": arguments.bundle,
+        "manifest": manifest,
     }));
 }
 

@@ -139,6 +139,8 @@ Run `termtrace doctor` for bounded local capability probes or `termtrace capabil
 
 `save SESSION --format txt,json,deep-json,vt,html --out NEW_DIRECTORY` resolves one presented semantic state and publishes all requested representations atomically. State/event/time/marker selectors match `show`; hidden states require explicit permission. VT and HTML come from the pinned formatter at that exact state, not the final-state convenience artifacts. `save-manifest.json` binds every member's path, media type, byte count, and BLAKE3 to one canonical session/final-event root and semantic state hash, and labels terminal screen content as potentially secret. Existing destinations are never replaced.
 
+`bundle SESSION --profile screen|debug|forensic --out NEW_DIRECTORY` publishes a deterministic owner-only handoff directory. `--dry-run` inventories paths and sensitivity before writing. `screen` contains only the selected screen/observation; `debug` adds content verification and metadata-only event projections without raw payloads; `forensic` includes a complete independently verifiable top-level canonical session. Every payload is whole-file hashed in `manifest.json`, existing destinations are never replaced, and `bundle-verify DIRECTORY` rejects missing, changed, or extra members and validates included canonical evidence.
+
 ## Semantic replay
 
 ```bash

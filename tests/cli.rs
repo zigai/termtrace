@@ -2027,6 +2027,69 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
 }
 
 #[test]
+fn bundles_publish_sensitivity_profiles_and_verify_offline() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("bundle-session");
+    let bundle = temporary.path().join("forensic-bundle");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf 'BUNDLE'"])
+        .assert()
+        .success();
+
+    let mut dry_run = Command::cargo_bin("termtrace").expect("binary should build");
+    dry_run
+        .arg("bundle")
+        .arg(&session)
+        .args(["--profile", "debug", "--out"])
+        .arg(temporary.path().join("unused"))
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("events-metadata.jsonl"))
+        .stdout(predicate::str::contains("operational_metadata"))
+        .stdout(predicate::str::contains(
+            r#""includes_canonical_evidence":false"#,
+        ));
+
+    let mut create = Command::cargo_bin("termtrace").expect("binary should build");
+    create
+        .arg("bundle")
+        .arg(&session)
+        .args(["--profile", "forensic", "--out"])
+        .arg(&bundle)
+        .assert()
+        .success();
+    assert_eq!(
+        fs_err::metadata(&bundle)
+            .expect("bundle metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert!(bundle.join("canonical/completion.json").is_file());
+    let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
+    verify
+        .arg("bundle-verify")
+        .arg(&bundle)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""valid":true"#));
+
+    fs_err::write(bundle.join("screen.txt"), b"tampered").expect("tamper bundle");
+    let mut tampered = Command::cargo_bin("termtrace").expect("binary should build");
+    tampered
+        .arg("bundle-verify")
+        .arg(&bundle)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("payload members do not match"));
+}
+
+#[test]
 fn timeline_streams_presented_states_and_canonical_operations() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("timeline-session");

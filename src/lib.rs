@@ -2,6 +2,7 @@
 
 pub mod analysis;
 pub mod artifact;
+pub mod bundle;
 pub mod capability;
 
 pub mod control;
