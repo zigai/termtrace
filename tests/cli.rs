@@ -114,6 +114,55 @@ fn completions_are_generated_from_the_current_command_graph() {
 }
 
 #[test]
+fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("driver-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf DRIVER"])
+        .assert()
+        .success();
+    let hello_id = "019f0000-0000-7000-8000-000000000001";
+    let attach_id = "019f0000-0000-7000-8000-000000000002";
+    let hello = serde_json::json!({
+        "version": 1,
+        "request_id": hello_id,
+        "method": { "method": "hello" }
+    });
+    let attach = serde_json::json!({
+        "version": 1,
+        "request_id": attach_id,
+        "method": { "method": "attach", "session": session }
+    });
+    let input = format!("{hello}\n{hello}\n{attach}\n");
+    let mut driver = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = driver
+        .arg("driver")
+        .write_stdin(input)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let responses = output
+        .split(|byte| return *byte == b'\n')
+        .filter(|line| return !line.is_empty())
+        .map(|line| return serde_json::from_slice::<serde_json::Value>(line).expect("driver JSON"))
+        .collect::<Vec<_>>();
+    let [first, second, third] = responses.as_slice() else {
+        panic!("expected three driver responses");
+    };
+    assert_eq!(first, second);
+    assert_eq!(first["result"]["data"]["kind"], "hello");
+    assert_eq!(first["result"]["data"]["driver_protocol_version"], 1);
+    assert_eq!(third["result"]["data"]["kind"], "attached");
+    assert_eq!(third["result"]["data"]["completed"], true);
+    assert!(third["result"]["data"]["handle"].is_string());
+}
+
+#[test]
 fn verify_reports_manifest_binding_and_detects_tampering() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("verified-session");

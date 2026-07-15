@@ -5,7 +5,7 @@ use std::{
     ffi::OsString,
     fmt::Write as _,
     fs::{File, OpenOptions},
-    io::{self, Read as _, Write as _},
+    io::{self, BufReader, Read as _, Write as _},
     os::unix::{
         ffi::{OsStrExt as _, OsStringExt as _},
         fs::OpenOptionsExt as _,
@@ -32,6 +32,7 @@ use termtrace::{
         ProcessSignal, ScreenPredicate, request, send_request,
     },
     diff::{SemanticDiff, diff_states, inspect_point},
+    driver::serve as serve_driver,
     event::{ByteString, EVENT_LOG_VERSION, Event, EventProjection, InputKind, event_type},
     event_log::{DurabilityMode, DurabilityPolicy, EventLog},
     geometry::{inherited_geometry, run_probe},
@@ -157,6 +158,8 @@ enum Command {
     Events(EventsArgs),
     /// Generate a shell completion script from the current command graph.
     Completions(CompletionsArgs),
+    /// Serve the versioned language-neutral JSONL process protocol.
+    Driver,
     /// Atomically publish representations of one semantic state.
     Save(SaveArgs),
     /// Render one deterministic semantic screenshot artifact directory.
@@ -1358,6 +1361,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Output(arguments) => return run_output(arguments),
         Command::Events(arguments) => return run_events(arguments),
         Command::Completions(arguments) => return run_completions(arguments),
+        Command::Driver => return run_driver(),
         Command::Save(arguments) => return run_save(arguments),
         Command::Screenshot(arguments) => return run_screenshot(arguments),
         Command::Bundle(arguments) => return run_bundle(arguments),
@@ -2133,6 +2137,13 @@ fn run_completions(arguments: CompletionsArgs) -> Result<ExitCode> {
         "termtrace",
         &mut io::stdout(),
     );
+    return Ok(ExitCode::SUCCESS);
+}
+
+fn run_driver() -> Result<ExitCode> {
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    serve_driver(BufReader::new(stdin.lock()), stdout.lock())?;
     return Ok(ExitCode::SUCCESS);
 }
 

@@ -1,0 +1,1093 @@
+{
+  "$defs": {
+    "ActorBoundaries": {
+      "additionalProperties": false,
+      "description": "Durable and latest actor-processed positions returned by live operations.",
+      "properties": {
+        "durable": {
+          "$ref": "#/$defs/CanonicalBoundary",
+          "description": "Latest boundary whose file synchronization completed successfully."
+        },
+        "observed": {
+          "$ref": "#/$defs/CanonicalBoundary",
+          "description": "Latest boundary processed by the session actor, possibly volatile."
+        }
+      },
+      "required": [
+        "durable",
+        "observed"
+      ],
+      "type": "object"
+    },
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "CanonicalBoundary": {
+      "additionalProperties": false,
+      "description": "Actor-consistent position in the canonical event stream.",
+      "properties": {
+        "event_hash": {
+          "description": "Hash of the preceding event, or the event header at sequence zero.",
+          "type": "string"
+        },
+        "next_event_seq": {
+          "description": "Sequence number that will be assigned to the next event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_bytes": {
+          "description": "PTY output bytes included through this boundary.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "next_event_seq",
+        "event_hash",
+        "output_bytes"
+      ],
+      "type": "object"
+    },
+    "ControlData": {
+      "description": "Successful response payload.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "No additional data is required.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed canonical positions after the operation."
+            },
+            "kind": {
+              "const": "acknowledged",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact result of one applied input operation.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed positions after application."
+            },
+            "bytes_written": {
+              "description": "Number of bytes written completely.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "data": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Exact bytes emitted by the actor."
+            },
+            "input_kind": {
+              "$ref": "#/$defs/InputKind",
+              "description": "Semantic input category."
+            },
+            "intent_event_seq": {
+              "description": "Canonical intent event sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "input_applied",
+              "type": "string"
+            },
+            "operation_id": {
+              "description": "Canonical operation identifier (the caller request ID).",
+              "format": "uuid",
+              "type": "string"
+            },
+            "result_event_seq": {
+              "description": "Canonical result event sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "operation_id",
+            "input_kind",
+            "data",
+            "bytes_written",
+            "intent_event_seq",
+            "result_event_seq",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Successful semantic input request that correctly emitted no bytes.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed positions at evaluation."
+            },
+            "input_kind": {
+              "$ref": "#/$defs/InputKind",
+              "description": "Semantic input category."
+            },
+            "kind": {
+              "const": "input_noop",
+              "type": "string"
+            },
+            "reason": {
+              "description": "Stable explanation for the no-op.",
+              "type": "string"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "input_kind",
+            "reason",
+            "terminal_modes_hash",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact result of one semantic text activation.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed positions after application."
+            },
+            "bytes_written": {
+              "description": "Number of bytes written completely.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "data": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Exact bytes emitted by the actor."
+            },
+            "end_column": {
+              "description": "Zero-based exclusive matched column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "intent_event_seq": {
+              "description": "Canonical intent event sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "activated",
+              "type": "string"
+            },
+            "operation_id": {
+              "description": "Canonical operation identifier.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "presented_state_hash": {
+              "description": "Presented-state hash used for resolution and encoding.",
+              "type": "string"
+            },
+            "result_event_seq": {
+              "description": "Canonical result event sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "row": {
+              "description": "Zero-based matched row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "start_column": {
+              "description": "Zero-based first matched column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "target_column": {
+              "description": "Cell chosen for the click.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "text": {
+              "description": "Exact matched text.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "operation_id",
+            "text",
+            "start_column",
+            "end_column",
+            "row",
+            "target_column",
+            "presented_state_hash",
+            "data",
+            "bytes_written",
+            "intent_event_seq",
+            "result_event_seq",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Live session status.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed canonical positions at status evaluation."
+            },
+            "kind": {
+              "const": "status",
+              "type": "string"
+            },
+            "pid": {
+              "description": "Child process identifier when available.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Observer-only latest presented terminal state.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed source boundaries at observation time."
+            },
+            "cols": {
+              "description": "Terminal columns.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cursor_column": {
+              "description": "Cursor column when it lies in the viewport.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "cursor_row": {
+              "description": "Cursor row when it lies in the viewport.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "cursor_visible": {
+              "description": "Whether the cursor is visible.",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "snapshot",
+              "type": "string"
+            },
+            "modes": {
+              "$ref": "#/$defs/ModeState",
+              "description": "Presentation-eligible terminal modes."
+            },
+            "observed_monotonic_ns": {
+              "description": "Session-monotonic observation timestamp.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "presented": {
+              "description": "Always true for this presentation-filtered endpoint.",
+              "type": "boolean"
+            },
+            "rows": {
+              "description": "Terminal rows.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state_hash": {
+              "description": "BLAKE3 of canonical JSON for `state`.",
+              "type": "string"
+            },
+            "viewport_text": {
+              "description": "Plain text of the presentation-eligible viewport.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "viewport_text",
+            "state_hash",
+            "presented",
+            "cols",
+            "rows",
+            "cursor_visible",
+            "observed_monotonic_ns",
+            "modes",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Successful server-side presented-screen wait.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Actor-consistent canonical source boundaries."
+            },
+            "cols": {
+              "description": "Terminal columns.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "completion_quality": {
+              "description": "`stable` or `matched_unsettled`.",
+              "type": "string"
+            },
+            "first_match_monotonic_ns": {
+              "description": "First matching timestamp for this unchanged state.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "screen_wait",
+              "type": "string"
+            },
+            "predicate": {
+              "$ref": "#/$defs/ScreenPredicate",
+              "description": "Predicate that matched."
+            },
+            "rows": {
+              "description": "Terminal rows.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "stable_for_ns": {
+              "description": "Requested unchanged interval.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "stable_through_monotonic_ns": {
+              "description": "Last timestamp through which the state remained stable.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state_hash": {
+              "description": "Full presentation-eligible semantic state hash.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "predicate",
+            "state_hash",
+            "first_match_monotonic_ns",
+            "stable_through_monotonic_ns",
+            "stable_for_ns",
+            "boundaries",
+            "cols",
+            "rows",
+            "completion_quality"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Canonical position of an appended marker.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed canonical positions after the marker."
+            },
+            "event_seq": {
+              "description": "Canonical event sequence containing the marker.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "marked",
+              "type": "string"
+            },
+            "label": {
+              "description": "Normalized marker label.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "label",
+            "event_seq",
+            "boundaries"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DriverData": {
+      "description": "Typed driver result payload.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Protocol/version handshake.",
+          "properties": {
+            "control_protocol_version": {
+              "description": "Live actor protocol version.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "driver_protocol_version": {
+              "description": "Driver protocol version.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "event_log_version": {
+              "description": "Canonical event format version.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "hello",
+              "type": "string"
+            },
+            "max_message_bytes": {
+              "description": "Maximum newline-framed request bytes.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "methods": {
+              "description": "Stable supported methods.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "state_format_version": {
+              "description": "Semantic state format version.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "driver_protocol_version",
+            "control_protocol_version",
+            "event_log_version",
+            "state_format_version",
+            "methods",
+            "max_message_bytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Attached process-local handle and immutable identity.",
+          "properties": {
+            "canonical_session": {
+              "description": "Canonical path.",
+              "type": "string"
+            },
+            "completed": {
+              "description": "Whether completion evidence already exists.",
+              "type": "boolean"
+            },
+            "handle": {
+              "description": "Process-local handle.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "kind": {
+              "const": "attached",
+              "type": "string"
+            },
+            "session_id": {
+              "description": "Immutable canonical session identity.",
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "handle",
+            "session_id",
+            "canonical_session",
+            "completed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Result forwarded from the live actor.",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ControlData",
+              "description": "Exact actor result data."
+            },
+            "kind": {
+              "const": "control",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact canonical output wait result.",
+          "properties": {
+            "kind": {
+              "const": "output_wait",
+              "type": "string"
+            },
+            "outcome": {
+              "$ref": "#/$defs/WaitOutcome",
+              "description": "First match and its canonical position."
+            }
+          },
+          "required": [
+            "kind",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Immutable completion evidence.",
+          "properties": {
+            "completion": {
+              "$ref": "#/$defs/SessionCompletion",
+              "description": "Validated completion envelope."
+            },
+            "kind": {
+              "const": "completion",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "completion"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Process-local handle release acknowledgement.",
+          "properties": {
+            "kind": {
+              "const": "detached",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DriverResult": {
+      "description": "Driver success or failure envelope.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Successful method result.",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/DriverData",
+              "description": "Method-specific data."
+            },
+            "status": {
+              "const": "ok",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Stable structured failure.",
+          "properties": {
+            "code": {
+              "description": "Machine-readable code.",
+              "type": "string"
+            },
+            "evidence": {
+              "description": "Canonical evidence path when known.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message": {
+              "description": "Human-readable diagnostic.",
+              "type": "string"
+            },
+            "retry_safety": {
+              "description": "`safe_same_request_id`, `safe_new_request`, or `unknown`.",
+              "type": "string"
+            },
+            "status": {
+              "const": "error",
+              "type": "string"
+            },
+            "uncertain": {
+              "description": "Whether mutation application may be uncertain.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "status",
+            "code",
+            "message",
+            "retry_safety",
+            "uncertain"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DurabilityMode": {
+      "description": "Output persistence behavior selected for one canonical recording.",
+      "oneOf": [
+        {
+          "const": "strict",
+          "description": "Synchronize every PTY output event before processing continues.",
+          "type": "string"
+        },
+        {
+          "const": "bounded",
+          "description": "Synchronize after a configured output-byte or elapsed-time threshold.",
+          "type": "string"
+        },
+        {
+          "const": "throughput",
+          "description": "Buffer PTY output until a mutation, lifecycle, or completion boundary.",
+          "type": "string"
+        }
+      ]
+    },
+    "DurabilityPolicy": {
+      "additionalProperties": false,
+      "description": "Chain-bound configuration for canonical output persistence.",
+      "properties": {
+        "maximum_interval_ms": {
+          "description": "Maximum uncommitted interval for bounded mode.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maximum_uncommitted_bytes": {
+          "description": "Maximum uncommitted PTY bytes for bounded mode.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mode": {
+          "$ref": "#/$defs/DurabilityMode",
+          "description": "Selected persistence behavior."
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "DurabilityRecord": {
+      "additionalProperties": false,
+      "description": "Recorder-observed durability outcomes bound into completion evidence.",
+      "properties": {
+        "final_sync_completed": {
+          "description": "Whether the final event boundary completed file synchronization.",
+          "type": "boolean"
+        },
+        "maximum_observed_uncommitted_bytes": {
+          "description": "Largest PTY byte count pending synchronization.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maximum_observed_uncommitted_ns": {
+          "description": "Largest measured interval with output pending synchronization.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "policy": {
+          "$ref": "#/$defs/DurabilityPolicy",
+          "description": "Chain-bound configured policy."
+        },
+        "sync_count": {
+          "description": "Number of successful event-log data synchronizations after header creation.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "policy",
+        "maximum_observed_uncommitted_bytes",
+        "maximum_observed_uncommitted_ns",
+        "sync_count",
+        "final_sync_completed"
+      ],
+      "type": "object"
+    },
+    "InputKind": {
+      "description": "User-facing interpretation of an input byte sequence.",
+      "oneOf": [
+        {
+          "const": "raw",
+          "description": "Uninterpreted bytes.",
+          "type": "string"
+        },
+        {
+          "const": "text",
+          "description": "Typed textual content.",
+          "type": "string"
+        },
+        {
+          "const": "keys",
+          "description": "One or more symbolic keyboard keys.",
+          "type": "string"
+        },
+        {
+          "const": "paste",
+          "description": "Pasted content.",
+          "type": "string"
+        },
+        {
+          "const": "focus",
+          "description": "Terminal-window focus transition.",
+          "type": "string"
+        },
+        {
+          "const": "pointer",
+          "description": "Cell-addressed mouse or wheel operation.",
+          "type": "string"
+        }
+      ]
+    },
+    "ModeState": {
+      "description": "Terminal modes relevant to presentation and input.",
+      "properties": {
+        "alternate_screen": {
+          "description": "Any alternate-screen mode.",
+          "type": "boolean"
+        },
+        "bracketed_paste": {
+          "description": "DEC bracketed-paste mode 2004.",
+          "type": "boolean"
+        },
+        "synchronized_output": {
+          "description": "DEC synchronized-output mode 2026.",
+          "type": "boolean"
+        },
+        "values": {
+          "description": "Complete stable inventory of known ANSI and DEC modes.",
+          "items": {
+            "$ref": "#/$defs/TerminalMode"
+          },
+          "type": "array"
+        },
+        "wraparound": {
+          "description": "DEC auto-wrap mode 7.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "synchronized_output",
+        "alternate_screen",
+        "wraparound",
+        "bracketed_paste",
+        "values"
+      ],
+      "type": "object"
+    },
+    "ScreenPredicate": {
+      "description": "Exact predicate evaluated against the latest presented viewport.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Viewport text contains an exact UTF-8 substring.",
+          "properties": {
+            "predicate": {
+              "const": "contains",
+              "type": "string"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Viewport text excludes an exact UTF-8 substring.",
+          "properties": {
+            "predicate": {
+              "const": "absent",
+              "type": "string"
+            },
+            "text": {
+              "description": "Exact UTF-8 substring.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SessionCompletion": {
+      "additionalProperties": false,
+      "description": "Immutable completion facts written after the final event is durable.",
+      "properties": {
+        "durability": {
+          "$ref": "#/$defs/DurabilityRecord",
+          "description": "Recorder-observed persistence behavior and final sync result."
+        },
+        "event_count": {
+          "description": "Number of canonical events.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "event_header_hash": {
+          "description": "BLAKE3 of the exact event-log header bytes.",
+          "type": "string"
+        },
+        "exit_code": {
+          "description": "Normal exit code when available.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "final_event_hash": {
+          "description": "Hash of the final canonical event.",
+          "type": "string"
+        },
+        "format": {
+          "description": "Stable format identifier.",
+          "type": "string"
+        },
+        "output_bytes": {
+          "description": "Total raw output bytes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "description": "Session identifier.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "session_manifest_hash": {
+          "description": "BLAKE3 of the exact immutable session manifest bytes.",
+          "type": "string"
+        },
+        "signal_name": {
+          "description": "Signal name when available.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminal_event_seq": {
+          "description": "Sequence number of the required terminal `Exit` event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "validation_version": {
+          "description": "Validation contract applied before publication.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "description": "Completion schema version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "version",
+        "validation_version",
+        "session_id",
+        "session_manifest_hash",
+        "event_header_hash",
+        "output_bytes",
+        "final_event_hash",
+        "event_count",
+        "terminal_event_seq",
+        "durability"
+      ],
+      "type": "object"
+    },
+    "TerminalMode": {
+      "description": "One ANSI or DEC mode value.",
+      "properties": {
+        "ansi": {
+          "description": "`true` for ANSI mode, `false` for DEC-private mode.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "Current set/reset value.",
+          "type": "boolean"
+        },
+        "number": {
+          "description": "Numeric mode identifier.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "number",
+        "ansi",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "WaitOutcome": {
+      "description": "Successful raw-output wait evidence.",
+      "properties": {
+        "event_seq": {
+          "description": "Event containing the end of the first observed match.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "monotonic_ns": {
+          "description": "Monotonic timestamp of the containing event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_end_offset": {
+          "description": "End offset in the concatenated output stream.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "event_seq",
+        "output_end_offset",
+        "monotonic_ns"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/driver-response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Exactly one correlated driver response.",
+  "properties": {
+    "request_id": {
+      "description": "Identifier copied from the request.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "result": {
+      "$ref": "#/$defs/DriverResult",
+      "description": "Typed success or stable error."
+    },
+    "version": {
+      "description": "Driver protocol version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "request_id",
+    "result"
+  ],
+  "title": "DriverResponse",
+  "type": "object"
+}

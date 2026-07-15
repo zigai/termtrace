@@ -7,6 +7,7 @@ pub mod capability;
 
 pub mod control;
 pub mod diff;
+pub mod driver;
 pub mod error;
 pub mod event;
 pub mod event_log;
