@@ -26,6 +26,20 @@
         "path": {
           "description": "Relative filename.",
           "type": "string"
+        },
+        "renderer": {
+          "description": "Stable renderer identity, when applicable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truth_layer": {
+          "description": "Rendering truth layer, when this member is a rendering.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

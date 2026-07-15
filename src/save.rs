@@ -14,6 +14,7 @@ use crate::{
     ghostty_vt::Format,
     observation::{StatePoint, observe_session_with_options},
     replay::{StateSelector, format_state},
+    semantic_image::{SEMANTIC_SVG_RENDERER, render_svg},
     session::{read_manifest, validate_completed_log},
 };
 
@@ -31,6 +32,8 @@ pub enum SaveFormat {
     Vt,
     /// Pinned Ghostty HTML reconstruction.
     Html,
+    /// Deterministic semantic-state SVG.
+    Svg,
 }
 
 /// One manifested saved file.
@@ -45,6 +48,10 @@ pub struct SavedFile {
     pub byte_count: u64,
     /// BLAKE3 of exact file bytes.
     pub blake3: String,
+    /// Rendering truth layer, when this member is a rendering.
+    pub truth_layer: Option<String>,
+    /// Stable renderer identity, when applicable.
+    pub renderer: Option<String>,
 }
 
 /// Manifest binding every saved representation to one source state.
@@ -140,21 +147,27 @@ pub fn save(
     let publish = (|| -> Result<SaveManifest> {
         let mut files = Vec::new();
         for format in formats {
-            let (path, media_type, bytes) = match format {
+            let (path, media_type, bytes, truth_layer, renderer) = match format {
                 SaveFormat::Txt => (
                     "screen.txt",
                     "text/plain; charset=utf-8",
                     observation.frame.viewport_text.as_bytes().to_vec(),
+                    None,
+                    None,
                 ),
                 SaveFormat::Json => (
                     "observation.json",
                     "application/json",
                     pretty_json(&observation, "observation.json")?,
+                    None,
+                    None,
                 ),
                 SaveFormat::DeepJson => (
                     "semantic-state.json",
                     "application/json",
                     pretty_json(&inspection, "semantic-state.json")?,
+                    None,
+                    None,
                 ),
                 SaveFormat::Vt => (
                     "screen.vt",
@@ -164,6 +177,8 @@ pub fn save(
                         StateSelector::StateId(inspection.record.state_id),
                         Format::Vt,
                     )?,
+                    Some("semantic"),
+                    Some("pinned-libghostty-vt-formatter"),
                 ),
                 SaveFormat::Html => (
                     "screen.html",
@@ -173,6 +188,15 @@ pub fn save(
                         StateSelector::StateId(inspection.record.state_id),
                         Format::Html,
                     )?,
+                    Some("semantic"),
+                    Some("pinned-libghostty-vt-formatter"),
+                ),
+                SaveFormat::Svg => (
+                    "screen.svg",
+                    "image/svg+xml",
+                    render_svg(&inspection.state),
+                    Some("semantic_rendering"),
+                    Some(SEMANTIC_SVG_RENDERER),
                 ),
             };
             let target = staging.join(path);
@@ -182,6 +206,8 @@ pub fn save(
                 media_type: media_type.to_owned(),
                 byte_count: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
                 blake3: blake3::hash(&bytes).to_hex().to_string(),
+                truth_layer: truth_layer.map(str::to_owned),
+                renderer: renderer.map(str::to_owned),
             });
         }
         let save_manifest = SaveManifest {

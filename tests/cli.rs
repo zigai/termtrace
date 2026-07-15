@@ -1970,7 +1970,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         .arg(&session)
         .args(["--out"])
         .arg(&destination)
-        .args(["--format", "txt,json,deep-json,vt,html"])
+        .args(["--format", "txt,json,deep-json,vt,html,svg"])
         .assert()
         .success()
         .stdout(predicate::str::contains("save-manifest.json"));
@@ -1992,7 +1992,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         manifest["sensitivity"],
         "terminal_screen_may_contain_secrets"
     );
-    assert_eq!(manifest["files"].as_array().map(Vec::len), Some(5));
+    assert_eq!(manifest["files"].as_array().map(Vec::len), Some(6));
     assert!(
         fs_err::read_to_string(destination.join("screen.txt"))
             .expect("screen text")
@@ -2008,11 +2008,28 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
             .expect("saved HTML")
             .contains("SAVED")
     );
+    let svg = fs_err::read_to_string(destination.join("screen.svg")).expect("saved SVG");
+    assert!(svg.contains("data-truth-layer=\"semantic_rendering\""));
+    assert!(svg.contains(">S</text>") && svg.contains(">D</text>"));
     for file in manifest["files"].as_array().expect("manifested files") {
         let path = destination.join(file["path"].as_str().expect("relative path"));
         let bytes = fs_err::read(path).expect("saved member");
         assert_eq!(file["blake3"], blake3::hash(&bytes).to_hex().to_string());
     }
+
+    let screenshot = temporary.path().join("semantic-screenshot");
+    let mut screenshot_command = Command::cargo_bin("termtrace").expect("binary should build");
+    screenshot_command
+        .arg("screenshot")
+        .arg(&session)
+        .args(["--out"])
+        .arg(&screenshot)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            r#""truth_layer":"semantic_rendering""#,
+        ));
+    assert!(screenshot.join("screen.svg").is_file());
 
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate

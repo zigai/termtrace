@@ -24,6 +24,7 @@ pub mod replay;
 pub mod request_journal;
 pub mod save;
 pub mod schema;
+pub mod semantic_image;
 pub mod session;
 pub mod session_registry;
 mod terminal_mode;

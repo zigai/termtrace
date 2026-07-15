@@ -159,6 +159,8 @@ enum Command {
     Completions(CompletionsArgs),
     /// Atomically publish representations of one semantic state.
     Save(SaveArgs),
+    /// Render one deterministic semantic screenshot artifact directory.
+    Screenshot(ScreenshotArgs),
     /// Publish a deterministic sensitivity-labeled handoff directory.
     Bundle(BundleArgs),
     /// Verify every manifested bundle member and included evidence.
@@ -601,6 +603,7 @@ enum SaveFormatArg {
     DeepJson,
     Vt,
     Html,
+    Svg,
 }
 
 impl From<SaveFormatArg> for SaveFormat {
@@ -611,6 +614,7 @@ impl From<SaveFormatArg> for SaveFormat {
             SaveFormatArg::DeepJson => Self::DeepJson,
             SaveFormatArg::Vt => Self::Vt,
             SaveFormatArg::Html => Self::Html,
+            SaveFormatArg::Svg => Self::Svg,
         };
     }
 }
@@ -630,6 +634,35 @@ struct SaveArgs {
     /// One or more comma-separated representations.
     #[arg(long, value_enum, value_delimiter = ',', required = true)]
     format: Vec<SaveFormatArg>,
+    /// Exact semantic state identifier.
+    #[arg(long)]
+    state: Option<u64>,
+    /// Latest state at or before this event sequence.
+    #[arg(long)]
+    event_seq: Option<u64>,
+    /// Latest state at or before this session offset.
+    #[arg(long, value_parser = parse_time_offset_ns)]
+    at: Option<u64>,
+    /// State at a unique marker.
+    #[arg(long)]
+    at_marker: Option<String>,
+    /// Permit an explicitly selected synchronized-output hidden state.
+    #[arg(long)]
+    include_hidden: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("screenshot_selector")
+        .multiple(false)
+        .args(["state", "event_seq", "at", "at_marker"])
+))]
+struct ScreenshotArgs {
+    /// Completed session name or canonical path.
+    session: PathBuf,
+    /// New artifact directory containing `screen.svg` and its manifest.
+    #[arg(long)]
+    out: PathBuf,
     /// Exact semantic state identifier.
     #[arg(long)]
     state: Option<u64>,
@@ -1326,6 +1359,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Events(arguments) => return run_events(arguments),
         Command::Completions(arguments) => return run_completions(arguments),
         Command::Save(arguments) => return run_save(arguments),
+        Command::Screenshot(arguments) => return run_screenshot(arguments),
         Command::Bundle(arguments) => return run_bundle(arguments),
         Command::BundleVerify(arguments) => return run_bundle_verify(arguments),
         Command::Wait(arguments) => return run_wait(arguments),
@@ -2135,6 +2169,42 @@ fn run_save(arguments: SaveArgs) -> Result<ExitCode> {
         "state_hash": outcome.manifest.state_hash,
         "files": outcome.manifest.files,
         "manifest": outcome.directory.join("save-manifest.json"),
+    }));
+}
+
+fn run_screenshot(arguments: ScreenshotArgs) -> Result<ExitCode> {
+    let session = resolve_session_ref(arguments.session)?;
+    let point = match (
+        arguments.state,
+        arguments.event_seq,
+        arguments.at,
+        arguments.at_marker,
+    ) {
+        (Some(state_id), None, None, None) => StatePoint::StateId { state_id },
+        (None, Some(event_seq), None, None) => StatePoint::EventSeq { event_seq },
+        (None, None, Some(monotonic_ns), None) => StatePoint::MonotonicNs { monotonic_ns },
+        (None, None, None, Some(label)) => StatePoint::Marker { label },
+        (None, None, None, None) => StatePoint::LatestPresented,
+        _ => {
+            return Err(miette::miette!(
+                "exactly one screenshot selector may be supplied"
+            ));
+        }
+    };
+    let outcome = save(
+        &session,
+        &arguments.out,
+        point,
+        &[SaveFormat::Svg],
+        arguments.include_hidden,
+    )?;
+    return write_json_line(&serde_json::json!({
+        "kind": "semantic_screenshot",
+        "truth_layer": "semantic_rendering",
+        "directory": outcome.directory,
+        "image": outcome.directory.join("screen.svg"),
+        "manifest": outcome.directory.join("save-manifest.json"),
+        "state_hash": outcome.manifest.state_hash,
     }));
 }
 
