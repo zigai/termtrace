@@ -3060,7 +3060,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
             "--",
             "/usr/bin/python3",
             "-c",
-            "import os,time; os.write(1,b'VISIBLE'); time.sleep(.1); os.write(1,b'\\x1b[?2026hHIDDEN'); time.sleep(.5); os.write(1,b'\\r\\x1b[2KBUSY\\x1b[?2026l'); time.sleep(2)",
+            "import os,signal,sys,time; signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); os.write(1,b'VISIBLE'); time.sleep(.1); os.write(1,b'\\x1b[?2026hHIDDEN'); time.sleep(.5); os.write(1,b'\\r\\x1b[2KBUSY\\x1b[?2026l'); time.sleep(30)",
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -3136,6 +3136,12 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
             .assert()
             .success();
     }
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.arg("stop")
+        .arg(&session)
+        .arg("--wait")
+        .assert()
+        .success();
     let output = child
         .wait_with_output()
         .expect("snapshot fixture completion");
