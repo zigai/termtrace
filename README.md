@@ -8,7 +8,7 @@ Termtrace records terminal and TUI sessions so you can review what happened with
 - **Live control** — view the screen, wait for changes, and send input
 - **Replay** — inspect every terminal state, including brief changes
 - **Review** — browse timelines, compare states, and diagnose rendering issues
-- **Capture** — create text, JSON, HTML, screenshots, video, and asciinema exports
+- **Capture** — create text, JSON, HTML, screenshots, native or semantic video, and asciinema exports
 - **Verification** — check integrity, recover damaged recordings, and detect changes
 - **Automation** — run terminal tests from the CLI, Python, TypeScript, or Rust
 
@@ -79,6 +79,17 @@ termtrace capture --session ./example.termtrace
 ```
 
 Native capture is an optional capability. `termtrace doctor --explain` reports any missing display or media dependencies.
+
+When native display dependencies are unavailable, explicitly render the same presentation from deterministic semantic state instead:
+
+```bash
+termtrace video export ./example.termtrace \
+  --source semantic \
+  --edit ./edit.json \
+  --out ./semantic-presentation
+```
+
+Native Ghostty pixels remain the default and the correct source for visual fidelity or renderer diagnostics. Semantic video is a portable generated visualization and never silently replaces native capture.
 
 ## See it in action
 

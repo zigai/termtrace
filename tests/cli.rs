@@ -4,7 +4,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::{
     ffi::OsString,
-    fs::{File, Permissions},
+    fs::{self, File, Permissions},
     io::{BufRead as _, BufReader, Read as _, Write as _},
     os::unix::{
         ffi::{OsStrExt as _, OsStringExt as _},
@@ -94,6 +94,70 @@ fn doctor_reports_capability_boundaries_and_enforces_requirements() {
         .stdout(predicate::str::contains("native-video"))
         .stdout(predicate::str::contains("blocked"))
         .stdout(predicate::str::contains("fix:"));
+}
+
+#[test]
+fn semantic_video_is_explicit_and_native_remains_the_default() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("semantic-video-session");
+    let edit = temporary.path().join("edit.json");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["/bin/sh", "-c", "printf SEMANTIC"])
+        .assert()
+        .success();
+    let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+    let end = log.events.last().expect("final event").monotonic_ns;
+    fs::write(
+        &edit,
+        serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "clips": [{
+                "from": { "monotonicNs": 0 },
+                "to": { "monotonicNs": end },
+                "caption": null
+            }],
+            "change_visualization": null
+        }))
+        .expect("edit JSON"),
+    )
+    .expect("write edit plan");
+
+    let mut semantic = Command::cargo_bin("termtrace").expect("binary should build");
+    semantic
+        .args(["video", "plan"])
+        .arg(&session)
+        .args(["--source", "semantic", "--fps", "60", "--edit"])
+        .arg(&edit)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""version":2"#))
+        .stdout(predicate::str::contains(r#""kind":"semantic""#))
+        .stdout(predicate::str::contains(r#""fps":60"#));
+
+    let mut native_default = Command::cargo_bin("termtrace").expect("binary should build");
+    native_default
+        .args(["video", "plan"])
+        .arg(&session)
+        .arg("--edit")
+        .arg(&edit)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("visual/manifest.json"));
+
+    let mut invalid_native_fps = Command::cargo_bin("termtrace").expect("binary should build");
+    invalid_native_fps
+        .args(["video", "plan"])
+        .arg(&session)
+        .args(["--source", "native", "--fps", "60", "--edit"])
+        .arg(&edit)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--fps configures semantic video only",
+        ));
 }
 
 #[test]

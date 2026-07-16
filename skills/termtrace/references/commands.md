@@ -539,7 +539,7 @@ Options:
 ## `video`
 
 ```text
-Plan or export presentation edits over immutable native evidence
+Plan or export presentation edits; native Ghostty pixels are the default source
 
 Usage: termtrace video [OPTIONS] <COMMAND>
 
@@ -552,4 +552,138 @@ Commands:
 Options:
       --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
   -h, --help       Print help
+```
+
+## `video plan`
+
+```text
+Resolve clips, speeds, and holds without rendering
+
+Usage: termtrace video plan [OPTIONS] --edit <EDIT> <SESSION>
+
+Arguments:
+  <SESSION>
+          Completed session; native source additionally requires a verified capture
+
+Options:
+      --log <LOG>
+          [env: TERMTRACE_LOG=]
+          [default: warn]
+
+      --source <SOURCE>
+          Presentation source; native Ghostty pixels remain the default
+
+          Possible values:
+          - native:   Verified pixels captured from the real Ghostty renderer
+          - semantic: Deterministic pixels generated from canonical semantic replay
+
+          [default: native]
+
+      --fps <FPS>
+          Semantic source frame rate; invalid for native capture
+
+      --edit <EDIT>
+          Strict versioned edit-plan JSON
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `video preview`
+
+```text
+Render an atomic contact sheet and low-resolution review video
+
+Usage: termtrace video preview [OPTIONS] --edit <EDIT> --out <OUT> <SESSION>
+
+Arguments:
+  <SESSION>
+          Completed session; native source additionally requires a verified capture
+
+Options:
+      --log <LOG>
+          [env: TERMTRACE_LOG=]
+          [default: warn]
+
+      --source <SOURCE>
+          Presentation source; native Ghostty pixels remain the default
+
+          Possible values:
+          - native:   Verified pixels captured from the real Ghostty renderer
+          - semantic: Deterministic pixels generated from canonical semantic replay
+
+          [default: native]
+
+      --fps <FPS>
+          Semantic source frame rate; invalid for native capture
+
+      --edit <EDIT>
+          Strict versioned edit-plan JSON
+
+      --out <OUT>
+          New no-replace preview artifact directory
+
+      --columns <COLUMNS>
+          Storyboard tile columns
+
+          [default: 4]
+
+      --tile-width <TILE_WIDTH>
+          Width of each storyboard tile
+
+          [default: 320]
+
+      --max-frames <MAX_FRAMES>
+          Maximum storyboard frames
+
+          [default: 12]
+
+      --change-only
+          Retain only frames carrying configured change visualization
+
+      --preview-width <PREVIEW_WIDTH>
+          Low-resolution preview width
+
+          [default: 640]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `video export`
+
+```text
+Export an H.264 MP4 and frame provenance into a new directory
+
+Usage: termtrace video export [OPTIONS] --edit <EDIT> --out <OUT> <SESSION>
+
+Arguments:
+  <SESSION>
+          Completed session; native source additionally requires a verified capture
+
+Options:
+      --log <LOG>
+          [env: TERMTRACE_LOG=]
+          [default: warn]
+
+      --source <SOURCE>
+          Presentation source; native Ghostty pixels remain the default
+
+          Possible values:
+          - native:   Verified pixels captured from the real Ghostty renderer
+          - semantic: Deterministic pixels generated from canonical semantic replay
+
+          [default: native]
+
+      --fps <FPS>
+          Semantic source frame rate; invalid for native capture
+
+      --edit <EDIT>
+          Strict versioned edit-plan JSON
+
+      --out <OUT>
+          New no-replace presentation artifact directory
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```

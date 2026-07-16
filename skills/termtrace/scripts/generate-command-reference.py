@@ -29,6 +29,9 @@ COMMANDS = (
     "review",
     "markers",
     "video",
+    "video plan",
+    "video preview",
+    "video export",
 )
 
 
@@ -41,13 +44,13 @@ def parse_args() -> argparse.Namespace:
 
 def command_help(binary: Path, command: str) -> str:
     completed = subprocess.run(
-        (str(binary), command, "--help"),
+        (str(binary), *command.split(), "--help"),
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
-    return completed.stdout.rstrip()
+    return "\n".join(line.rstrip() for line in completed.stdout.rstrip().splitlines())
 
 
 def main() -> None:

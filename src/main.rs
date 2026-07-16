@@ -58,8 +58,9 @@ use termtrace::{
     output_projection::{ControlStripper, OutputProjectionQuality, OutputProjectionReport},
     playback::{PlaybackOptions, playback},
     presentation::{
-        EditPlan, PreviewOptions, export as export_presentation, markers as list_markers,
-        plan as plan_presentation, preview as preview_presentation,
+        EditPlan, PresentationSource, PresentationSourceRequest, PreviewOptions,
+        export as export_presentation, markers as list_markers,
+        plan_with_source as plan_presentation, preview as preview_presentation,
     },
     profile::{
         ResolvedGhosttyProfile, resolve_ghostty_profile, resolved_terminal_colors,
@@ -164,7 +165,7 @@ enum Command {
     Mark(MarkArgs),
     /// List canonical marker positions and nominal source frames.
     Markers(MarkersArgs),
-    /// Plan or export presentation edits over immutable native evidence.
+    /// Plan or export presentation edits; native Ghostty pixels are the default source.
     Video(VideoArgs),
     /// Request graceful termination of a live session child.
     Stop(StopArgs),
@@ -1405,10 +1406,30 @@ enum VideoCommand {
     Export(VideoExportArgs),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum VideoSourceArg {
+    /// Verified pixels captured from the real Ghostty renderer.
+    Native,
+    /// Deterministic pixels generated from canonical semantic replay.
+    Semantic,
+}
+
+#[derive(Debug, Args)]
+struct VideoSourceArgs {
+    /// Presentation source; native Ghostty pixels remain the default.
+    #[arg(long, value_enum, default_value_t = VideoSourceArg::Native)]
+    source: VideoSourceArg,
+    /// Semantic source frame rate; invalid for native capture.
+    #[arg(long)]
+    fps: Option<u16>,
+}
+
 #[derive(Debug, Args)]
 struct VideoPreviewArgs {
-    /// Completed session containing a verified full native capture.
+    /// Completed session; native source additionally requires a verified capture.
     session: PathBuf,
+    #[command(flatten)]
+    source: VideoSourceArgs,
     /// Strict versioned edit-plan JSON.
     #[arg(long)]
     edit: PathBuf,
@@ -1434,8 +1455,10 @@ struct VideoPreviewArgs {
 
 #[derive(Debug, Args)]
 struct VideoPlanArgs {
-    /// Completed session containing a verified full native capture.
+    /// Completed session; native source additionally requires a verified capture.
     session: PathBuf,
+    #[command(flatten)]
+    source: VideoSourceArgs,
     /// Strict versioned edit-plan JSON.
     #[arg(long)]
     edit: PathBuf,
@@ -1443,8 +1466,10 @@ struct VideoPlanArgs {
 
 #[derive(Debug, Args)]
 struct VideoExportArgs {
-    /// Completed session containing a verified full native capture.
+    /// Completed session; native source additionally requires a verified capture.
     session: PathBuf,
+    #[command(flatten)]
+    source: VideoSourceArgs,
     /// Strict versioned edit-plan JSON.
     #[arg(long)]
     edit: PathBuf,
@@ -1864,12 +1889,14 @@ fn run_video(arguments: VideoArgs) -> Result<ExitCode> {
         VideoCommand::Plan(arguments) => {
             let session = resolve_session_ref(arguments.session)?;
             let edit = EditPlan::read(arguments.edit)?;
-            write_json_line(&plan_presentation(session, &edit)?)
+            let source = video_source_request(arguments.source)?;
+            write_json_line(&plan_presentation(session, &edit, source)?)
         }
         VideoCommand::Preview(arguments) => {
             let session = resolve_session_ref(arguments.session)?;
             let edit = EditPlan::read(arguments.edit)?;
-            let plan = plan_presentation(session, &edit)?;
+            let source = video_source_request(arguments.source)?;
+            let plan = plan_presentation(session, &edit, source)?;
             let outcome = preview_presentation(
                 &plan,
                 arguments.out,
@@ -1887,12 +1914,14 @@ fn run_video(arguments: VideoArgs) -> Result<ExitCode> {
                 "contact_sheet": outcome.contact_sheet,
                 "video": outcome.video,
                 "edit_plan_hash": plan.edit_plan_hash,
+                "source": match &plan.source { PresentationSource::Native { .. } => "native", PresentationSource::Semantic { .. } => "semantic" },
             }))
         }
         VideoCommand::Export(arguments) => {
             let session = resolve_session_ref(arguments.session)?;
             let edit = EditPlan::read(arguments.edit)?;
-            let plan = plan_presentation(session, &edit)?;
+            let source = video_source_request(arguments.source)?;
+            let plan = plan_presentation(session, &edit, source)?;
             let outcome = export_presentation(&plan, arguments.out)?;
             write_json_line(&serde_json::json!({
                 "kind": "presentation",
@@ -1900,7 +1929,26 @@ fn run_video(arguments: VideoArgs) -> Result<ExitCode> {
                 "video": outcome.video,
                 "edit_plan_hash": plan.edit_plan_hash,
                 "output_frame_count": plan.output_frame_count,
+                "source": match &plan.source { PresentationSource::Native { .. } => "native", PresentationSource::Semantic { .. } => "semantic" },
             }))
+        }
+    };
+}
+
+fn video_source_request(arguments: VideoSourceArgs) -> Result<PresentationSourceRequest> {
+    return match arguments.source {
+        VideoSourceArg::Native if arguments.fps.is_some() => Err(miette::miette!(
+            "--fps configures semantic video only; native FPS comes from the capture manifest"
+        )),
+        VideoSourceArg::Native => Ok(PresentationSourceRequest::Native),
+        VideoSourceArg::Semantic => {
+            let fps = arguments.fps.unwrap_or(24);
+            if !(1..=120).contains(&fps) {
+                return Err(miette::miette!(
+                    "semantic video FPS must be between 1 and 120"
+                ));
+            }
+            Ok(PresentationSourceRequest::Semantic { fps })
         }
     };
 }

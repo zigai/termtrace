@@ -130,6 +130,32 @@ pub fn probe_capabilities() -> CapabilityReport {
             "install FFmpeg/FFprobe with libx264rgb plus the native screenshot dependencies",
         )
     };
+    let semantic_video = if semantic_capability.status == CapabilityStatus::Ready
+        && missing_video.is_empty()
+        && encoder
+    {
+        ready(
+            "semantic-video",
+            "semantic_video_tools_ready",
+            "the semantic engine, FFmpeg/FFprobe, and libx264rgb are ready; native display tools are not required",
+        )
+    } else {
+        blocked(
+            "semantic-video",
+            "semantic_video_dependency_missing",
+            format!(
+                "semantic engine: {}; missing tools: {}; libx264rgb encoder: {}",
+                if semantic_capability.status == CapabilityStatus::Ready {
+                    "ready"
+                } else {
+                    "blocked"
+                },
+                missing_video.join(", "),
+                if encoder { "available" } else { "unavailable" }
+            ),
+            "install FFmpeg/FFprobe with libx264rgb and use a build containing the pinned semantic engine",
+        )
+    };
     let presentation_encoder = ffmpeg_has_encoder("libx264");
     let presentation_ass = ffmpeg_has_filter("ass");
     let presentation = if missing_video.is_empty() && presentation_encoder && presentation_ass {
@@ -184,6 +210,7 @@ pub fn probe_capabilities() -> CapabilityReport {
             semantic_capability,
             native_screenshot,
             native_video,
+            semantic_video,
             presentation,
             receipt,
         ],

@@ -70,6 +70,21 @@ Running `termtrace capture --session SESSION` creates:
 
 Native capture is a separate capability. It never silently falls back to semantic rendering.
 
+## Presentation artifacts
+
+`termtrace video export` publishes `presentation.mp4`, a normalized plan, an output probe, a per-frame presentation map, and a manifest. Native Ghostty capture is the default presentation source.
+
+With `--source semantic`, the same directory also retains:
+
+| File | Contents |
+| --- | --- |
+| `semantic-source.mkv` | lossless deterministic semantic-rendering source |
+| `semantic-source-map.jsonl` | compact exact frame spans bound to semantic state IDs and hashes |
+| `semantic-source-manifest.json` | canonical source, renderer, font, schedule, pixel-stream, FFmpeg, and probe identities |
+| `semantic-source-ffmpeg.log` | source encoder diagnostics |
+
+The final presentation map includes exact source semantic state identity when semantic rendering was selected. Manifests label the source as `native_encoded_evidence` or `semantic_rendering`; these truth layers are not interchangeable.
+
 ## Derived artifact catalog
 
 Completed derivations append a root to `artifact-roots.jsonl`. Each entry binds the derived manifest to the session and final event hash. This catalog is locally integrity-checked but unauthenticated until covered by a trusted receipt.

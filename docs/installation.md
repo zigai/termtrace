@@ -57,7 +57,10 @@ Use `--require` in CI:
 ```bash
 termtrace doctor --require core,semantic
 termtrace doctor --require native-screenshot,presentation
+termtrace doctor --require semantic-video,presentation
 ```
+
+`semantic-video` requires the pinned semantic engine plus FFmpeg/FFprobe with `libx264rgb`; it does not require Ghostty GTK, Xvfb, D-Bus, ImageMagick, or OpenGL. Native video remains the default presentation source.
 
 ## Manual release archive
 

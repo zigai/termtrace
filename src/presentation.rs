@@ -1,4 +1,4 @@
-//! Marker-resolved presentation edit plans over immutable native captures.
+//! Marker-resolved presentation edit plans over native or semantic sources.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -24,6 +24,10 @@ use crate::{
     ghostty_vt::{CursorState, CursorStyle},
     replay::{StateSelection, StateSelector, inspect, replay},
     semantic_image::SEMANTIC_FONT_BYTES,
+    semantic_video::{
+        SemanticFrameSpan, SemanticVideoSourcePlan, materialize as materialize_semantic_video,
+        plan as plan_semantic_video,
+    },
     session::validate_completed_log,
     timeline::{SourceRange, resolve_source_selection},
     visual::{VisualManifest, visual_directory_name_for},
@@ -31,6 +35,8 @@ use crate::{
 
 /// Current edit-plan format version.
 pub const EDIT_PLAN_VERSION: u32 = 1;
+/// Current normalized presentation plan and manifest format version.
+pub const PRESENTATION_FORMAT_VERSION: u32 = 2;
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 /// One immutable presentation edit plan.
@@ -695,7 +701,91 @@ pub struct NormalizedAnnotation {
     pub z_order: i16,
 }
 
-/// Dry-run output binding a normalized edit to immutable native evidence.
+/// Caller-selected visual source used while resolving a presentation plan.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PresentationSourceRequest {
+    /// Use an existing verified native Ghostty capture.
+    Native,
+    /// Deterministically render canonical semantic states at the requested FPS.
+    Semantic {
+        /// Constant semantic source frame rate.
+        fps: u16,
+    },
+}
+
+impl Default for PresentationSourceRequest {
+    fn default() -> Self {
+        return Self::Native;
+    }
+}
+
+/// Immutable visual source selected for one presentation plan.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PresentationSource {
+    /// Actual pixels from a verified native Ghostty capture.
+    Native {
+        /// Lossless native source video.
+        video: PathBuf,
+        /// BLAKE3 of the native source video.
+        video_hash: String,
+    },
+    /// Deterministic generated pixels from canonical semantic replay.
+    Semantic {
+        /// Complete semantic source plan.
+        plan: SemanticVideoSourcePlan,
+    },
+}
+
+impl Default for PresentationSource {
+    fn default() -> Self {
+        return Self::Native {
+            video: PathBuf::new(),
+            video_hash: String::new(),
+        };
+    }
+}
+
+impl PresentationSource {
+    fn identity_hash(&self) -> Result<String> {
+        return match self {
+            Self::Native { video_hash, .. } => Ok(video_hash.clone()),
+            Self::Semantic { plan } => {
+                let identity = serde_json::json!({
+                    "version": plan.version,
+                    "session_id": plan.session_id,
+                    "source_event_hash": &plan.source_event_hash,
+                    "start_monotonic_ns": plan.start_monotonic_ns,
+                    "end_monotonic_ns": plan.end_monotonic_ns,
+                    "fps": plan.fps,
+                    "frame_count": plan.frame_count,
+                    "canvas": &plan.canvas,
+                    "renderer": &plan.renderer,
+                    "font_family": &plan.font_family,
+                    "font_hash": &plan.font_hash,
+                    "scheduling_policy": &plan.scheduling_policy,
+                });
+                let bytes = serde_json::to_vec(&identity).map_err(|source| {
+                    return Error::InvalidJson {
+                        path: PathBuf::from("<semantic-source-plan>"),
+                        json_path: "$".to_owned(),
+                        source,
+                    };
+                })?;
+                Ok(blake3::hash(&bytes).to_hex().to_string())
+            }
+        };
+    }
+
+    fn truth_layer(&self) -> &'static str {
+        return match self {
+            Self::Native { .. } => "native_encoded_evidence",
+            Self::Semantic { .. } => "semantic_rendering",
+        };
+    }
+}
+
+/// Dry-run output binding a normalized edit to immutable visual evidence.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PresentationPlan {
@@ -703,17 +793,15 @@ pub struct PresentationPlan {
     pub version: u32,
     /// BLAKE3 of canonical input edit-plan JSON.
     pub edit_plan_hash: String,
-    /// Immutable native base video.
-    pub source_video: PathBuf,
-    /// BLAKE3 of the native base video.
-    pub source_video_hash: String,
-    /// Native capture frame rate.
+    /// Explicit immutable visual source; native remains the default request.
+    pub source: PresentationSource,
+    /// Native capture or generated semantic source frame rate.
     pub fps: u16,
-    /// Native source width in pixels.
+    /// Visual source width in pixels.
     pub source_width: u16,
-    /// Native source height in pixels.
+    /// Visual source height in pixels.
     pub source_height: u16,
-    /// Measured native source grid and cell geometry.
+    /// Measured native or deterministic semantic grid and cell geometry.
     pub source_geometry: TerminalGeometryReport,
     /// Final presentation canvas width after side panels and transforms.
     pub output_width: u16,
@@ -753,8 +841,14 @@ pub struct PresentationMapEntry {
     pub output_frame: u64,
     /// Caller-ordered clip index.
     pub clip_index: usize,
-    /// Native base source frame used for this output.
+    /// Base source frame used for this output.
     pub source_frame: u64,
+    /// Exact semantic source state, present only for semantic-rendered input.
+    pub source_state_id: Option<u64>,
+    /// Exact semantic source state hash, present only for semantic-rendered input.
+    pub source_state_hash: Option<String>,
+    /// Exact semantic source timestamp, present only for semantic-rendered input.
+    pub source_state_monotonic_ns: Option<u64>,
     /// `source` for retimed frames or `hold` for generated duplicates.
     pub operation: String,
     /// Whether a caller caption alters this presentation frame.
@@ -856,8 +950,8 @@ pub struct PresentationPreviewManifest {
     pub version: u32,
     /// Source edit identity.
     pub edit_plan_hash: String,
-    /// Immutable native source-video identity.
-    pub source_video_hash: String,
+    /// Immutable native-video or canonical semantic-source identity.
+    pub source_identity_hash: String,
     /// Presentation product truth layer.
     pub truth_layer: String,
     /// Applied preview policy.
@@ -955,35 +1049,117 @@ fn marker_records(log: &EventLog, fps: u16, capture_start_ns: u64) -> Result<Vec
     return Ok(records);
 }
 
-/// Resolve a strict edit plan against a verified completed native capture.
+/// Resolve a strict edit plan against the default verified native capture.
 pub fn plan(session: impl AsRef<Path>, edit: &EditPlan) -> Result<PresentationPlan> {
+    return plan_with_source(session, edit, PresentationSourceRequest::Native);
+}
+
+/// Resolve a strict edit plan against an explicit native or semantic source.
+///
+/// # Errors
+///
+/// Returns an error when canonical evidence, the selected source, or any edit
+/// selector or transform is invalid.
+pub fn plan_with_source(
+    session: impl AsRef<Path>,
+    edit: &EditPlan,
+    source_request: PresentationSourceRequest,
+) -> Result<PresentationPlan> {
     edit.validate()?;
     let session = session.as_ref();
     let log = EventLog::read(session.join("events.jsonl"))?;
     validate_completed_log(session, &log)?;
-    let visual = session.join(visual_directory_name_for(None, StateSelection::All));
-    let manifest_path = visual.join("manifest.json");
-    let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
-        return Error::Filesystem {
-            path: manifest_path.clone(),
-            source,
-        };
-    })?;
-    let manifest: VisualManifest = serde_json::from_slice(&manifest_bytes).map_err(|source| {
-        return Error::InvalidJson {
-            path: manifest_path.clone(),
-            json_path: "$".to_owned(),
-            source,
-        };
-    })?;
-    verify_artifact_members(&visual, &manifest.members)?;
-    if manifest.session_id != log.header.session_id {
-        return Err(plan_error(
-            "native capture session identity does not match canonical evidence",
-        ));
-    }
-    let source_video = visual.join("session.mkv");
-    let source_video_hash = hash_file(&source_video)?;
+    let (
+        source,
+        fps,
+        source_width,
+        source_height,
+        source_geometry,
+        capture_start,
+        capture_range,
+        semantic_final_frame,
+    ) = match source_request {
+        PresentationSourceRequest::Native => {
+            let visual = session.join(visual_directory_name_for(None, StateSelection::All));
+            let manifest_path = visual.join("manifest.json");
+            let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
+                return Error::Filesystem {
+                    path: manifest_path.clone(),
+                    source,
+                };
+            })?;
+            let manifest: VisualManifest =
+                serde_json::from_slice(&manifest_bytes).map_err(|source| {
+                    return Error::InvalidJson {
+                        path: manifest_path.clone(),
+                        json_path: "$".to_owned(),
+                        source,
+                    };
+                })?;
+            verify_artifact_members(&visual, &manifest.members)?;
+            if manifest.session_id != log.header.session_id {
+                return Err(plan_error(
+                    "native capture session identity does not match canonical evidence",
+                ));
+            }
+            let source_video = visual.join("session.mkv");
+            let source_video_hash = hash_file(&source_video)?;
+            let capture_start = manifest
+                .source_range
+                .map_or(0, |capture| return capture.start_monotonic_ns);
+            (
+                PresentationSource::Native {
+                    video: source_video,
+                    video_hash: source_video_hash,
+                },
+                manifest.fps,
+                manifest.width,
+                manifest.height,
+                manifest.geometry_report,
+                capture_start,
+                manifest.source_range,
+                None,
+            )
+        }
+        PresentationSourceRequest::Semantic { fps } => {
+            if edit.clips.iter().any(|clip| {
+                return clip.from.native_frame.is_some() || clip.to.native_frame.is_some();
+            }) {
+                return Err(plan_error(
+                    "nativeFrame edit selectors are invalid for a semantic video source",
+                ));
+            }
+            let mut semantic_start = u64::MAX;
+            let mut semantic_end = 0_u64;
+            for clip in &edit.clips {
+                let range = resolve_clip(&log, clip, 0, fps)?;
+                semantic_start = semantic_start.min(range.start_monotonic_ns);
+                semantic_end = semantic_end.max(range.end_monotonic_ns);
+            }
+            let semantic = plan_semantic_video(session, &log, fps, semantic_start, semantic_end)?;
+            let geometry = TerminalGeometryReport {
+                cols: semantic.canvas.cols,
+                rows: semantic.canvas.rows,
+                cell_width: semantic.canvas.cell_width,
+                cell_height: semantic.canvas.cell_height,
+                text_width: semantic.canvas.width,
+                text_height: semantic.canvas.height,
+            };
+            let final_frame = (semantic.end_monotonic_ns, semantic.frame_count);
+            (
+                PresentationSource::Semantic {
+                    plan: semantic.clone(),
+                },
+                semantic.fps,
+                semantic.canvas.width,
+                semantic.canvas.height,
+                geometry,
+                semantic.start_monotonic_ns,
+                None,
+                Some(final_frame),
+            )
+        }
+    };
     let mut hashed_edit = edit.clone();
     let mut subtitle_hashes = Vec::new();
     for (index, subtitle) in hashed_edit.subtitles.iter_mut().enumerate() {
@@ -1005,17 +1181,14 @@ pub fn plan(session: impl AsRef<Path>, edit: &EditPlan) -> Result<PresentationPl
     .to_string();
     let mut output_start_frame = 0_u64;
     let mut clips = Vec::new();
-    let capture_start = manifest
-        .source_range
-        .map_or(0, |capture| return capture.start_monotonic_ns);
     for clip in &edit.clips {
-        let range = resolve_clip(&log, clip, capture_start, manifest.fps)?;
+        let range = resolve_clip(&log, clip, capture_start, fps)?;
         if clips.iter().any(|existing: &NormalizedClip| {
             return ranges_overlap(range, existing.source_range);
         }) {
             return Err(plan_error("edit clips must not overlap in source time"));
         }
-        if manifest.source_range.is_some_and(|capture| {
+        if capture_range.is_some_and(|capture| {
             return range.start_monotonic_ns < capture.start_monotonic_ns
                 || range.end_monotonic_ns > capture.end_monotonic_ns;
         }) {
@@ -1023,16 +1196,23 @@ pub fn plan(session: impl AsRef<Path>, edit: &EditPlan) -> Result<PresentationPl
                 "edit clip lies outside the native capture range",
             ));
         }
-        let source_start_frame =
-            frame_floor(range.start_monotonic_ns - capture_start, manifest.fps);
-        let source_end_frame = frame_ceil(range.end_monotonic_ns - capture_start, manifest.fps);
+        let source_start_frame = frame_floor(range.start_monotonic_ns - capture_start, fps);
+        let source_end_frame = semantic_final_frame.map_or_else(
+            || return frame_ceil(range.end_monotonic_ns - capture_start, fps),
+            |(semantic_end, final_frame)| {
+                return if range.end_monotonic_ns == semantic_end {
+                    final_frame
+                } else {
+                    frame_ceil(range.end_monotonic_ns - capture_start, fps)
+                };
+            },
+        );
         let source_frames = source_end_frame.saturating_sub(source_start_frame);
         let retimed_frame_count = ceil_ratio(
             source_frames.saturating_mul(u64::from(clip.speed.denominator)),
             u64::from(clip.speed.numerator),
         );
-        let hold_frame_count =
-            ceil_ratio(clip.hold_ms.saturating_mul(u64::from(manifest.fps)), 1000);
+        let hold_frame_count = ceil_ratio(clip.hold_ms.saturating_mul(u64::from(fps)), 1000);
         let output_end_frame = output_start_frame
             .saturating_add(retimed_frame_count)
             .saturating_add(hold_frame_count);
@@ -1049,58 +1229,51 @@ pub fn plan(session: impl AsRef<Path>, edit: &EditPlan) -> Result<PresentationPl
         });
         output_start_frame = output_end_frame;
     }
-    if output_start_frame == 0 || output_start_frame > u64::from(manifest.fps) * 60 * 60 * 24 {
+    if output_start_frame == 0 || output_start_frame > u64::from(fps) * 60 * 60 * 24 {
         return Err(plan_error(
             "presentation duration must contain between one frame and 24 hours",
         ));
     }
-    let annotations = normalize_annotations(
-        &log,
-        edit,
-        &clips,
-        output_start_frame,
-        capture_start,
-        manifest.fps,
-    )?;
+    let annotations =
+        normalize_annotations(&log, edit, &clips, output_start_frame, capture_start, fps)?;
     let change_frames = normalize_semantic_changes(
         &log,
         edit.change_visualization.as_ref(),
         &clips,
         capture_start,
-        manifest.fps,
-        manifest.width,
-        manifest.height,
-        manifest.geometry_report,
+        fps,
+        source_width,
+        source_height,
+        source_geometry,
     )?;
     let cursor_masks = normalize_cursor_masks(
         &log,
         &edit.transforms,
         &clips,
         capture_start,
-        manifest.fps,
-        manifest.width,
-        manifest.height,
-        manifest.geometry_report,
+        fps,
+        source_width,
+        source_height,
+        source_geometry,
     )?;
     let (output_width, output_height) = validate_transform_geometry(
         edit,
-        manifest.width,
-        manifest.height,
+        source_width,
+        source_height,
         edit.clips.iter().any(|clip| return clip.caption.is_some()),
     )?;
     return Ok(PresentationPlan {
-        version: EDIT_PLAN_VERSION,
+        version: PRESENTATION_FORMAT_VERSION,
         edit_plan_hash,
-        source_video,
-        source_video_hash,
-        fps: manifest.fps,
-        source_width: manifest.width,
-        source_height: manifest.height,
-        source_geometry: manifest.geometry_report,
+        source,
+        fps,
+        source_width,
+        source_height,
+        source_geometry,
         output_width,
         output_height,
         clips,
-        markers: marker_records(&log, manifest.fps, capture_start)?,
+        markers: marker_records(&log, fps, capture_start)?,
         annotations,
         subtitles: edit
             .subtitles
@@ -1116,7 +1289,7 @@ pub fn plan(session: impl AsRef<Path>, edit: &EditPlan) -> Result<PresentationPl
         change_frames,
         change_algorithm: edit.change_visualization.as_ref().map(|change| {
             return match change.source {
-                ChangeSource::SemanticCells => "semantic-state-delta-to-nominal-native-frame-v1",
+                ChangeSource::SemanticCells => "semantic-state-delta-to-source-frame-v1",
                 ChangeSource::EncodedPixels => "ffmpeg-adjacent-decoded-rgb-difference-v1",
             }
             .to_owned();
@@ -1129,7 +1302,50 @@ pub fn plan(session: impl AsRef<Path>, edit: &EditPlan) -> Result<PresentationPl
     });
 }
 
-/// Export a normalized plan without modifying its immutable source capture.
+fn validate_planned_source(source: &PresentationSource) -> Result<()> {
+    return match source {
+        PresentationSource::Native { video, video_hash } => {
+            if hash_file(video)? != *video_hash {
+                return Err(plan_error(
+                    "native source video changed after edit planning",
+                ));
+            }
+            Ok(())
+        }
+        PresentationSource::Semantic { plan } => {
+            let log = EventLog::read(plan.session.join("events.jsonl"))?;
+            validate_completed_log(&plan.session, &log)?;
+            let final_event = log.events.last().ok_or_else(|| {
+                return plan_error("semantic source event log is empty after planning");
+            })?;
+            if log.header.session_id != plan.session_id
+                || final_event.hash != plan.source_event_hash
+            {
+                return Err(plan_error(
+                    "semantic canonical source changed after edit planning",
+                ));
+            }
+            Ok(())
+        }
+    };
+}
+
+fn materialize_planned_source(plan: &PresentationPlan, staging: &Path) -> Result<PathBuf> {
+    return match &plan.source {
+        PresentationSource::Native { video, .. } => video.canonicalize().map_err(|source| {
+            return Error::Filesystem {
+                path: video.clone(),
+                source,
+            };
+        }),
+        PresentationSource::Semantic { plan } => {
+            let (video, _manifest) = materialize_semantic_video(plan, staging)?;
+            Ok(video)
+        }
+    };
+}
+
+/// Export a normalized plan without modifying its immutable source evidence.
 pub fn export(
     plan: &PresentationPlan,
     destination: impl AsRef<Path>,
@@ -1137,11 +1353,7 @@ pub fn export(
     if plan.clips.is_empty() || plan.output_frame_count == 0 {
         return Err(plan_error("presentation plan has no output frames"));
     }
-    if hash_file(&plan.source_video)? != plan.source_video_hash {
-        return Err(plan_error(
-            "native source video changed after edit planning",
-        ));
-    }
+    validate_planned_source(&plan.source)?;
     let destination = destination.as_ref();
     if destination.exists() {
         return Err(Error::ArtifactExists {
@@ -1179,11 +1391,7 @@ pub fn preview(
             "change-only preview requires change_visualization in the edit plan",
         ));
     }
-    if hash_file(&plan.source_video)? != plan.source_video_hash {
-        return Err(plan_error(
-            "native source video changed after edit planning",
-        ));
-    }
+    validate_planned_source(&plan.source)?;
     let destination = destination.as_ref();
     if destination.exists() {
         return Err(Error::ArtifactExists {
@@ -1238,9 +1446,9 @@ pub fn preview(
     render_low_resolution_preview(&rendered.video, &staging, options.preview_width)?;
     let members = collect_artifact_members(&staging)?;
     let manifest = PresentationPreviewManifest {
-        version: EDIT_PLAN_VERSION,
+        version: PRESENTATION_FORMAT_VERSION,
         edit_plan_hash: plan.edit_plan_hash.clone(),
-        source_video_hash: plan.source_video_hash.clone(),
+        source_identity_hash: plan.source.identity_hash()?,
         truth_layer: "presentation_preview".to_owned(),
         options,
         selected_frames,
@@ -1413,6 +1621,7 @@ fn render_low_resolution_preview(source: &Path, staging: &Path, width: u16) -> R
 }
 
 fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<PresentationManifest> {
+    let source_video = materialize_planned_source(plan, staging)?;
     let filter_path = staging.join("filter.txt");
     let mut filters = Vec::new();
     let captioned = plan.layout.caption != CaptionLayout::None
@@ -1482,15 +1691,9 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
     if plan.change_visualization.as_ref().is_some_and(|change| {
         return change.source == ChangeSource::EncodedPixels;
     }) {
-        write_source_frame_hashes(plan, staging)?;
+        write_source_frame_hashes(plan, &source_video, staging)?;
     }
     let output = staging.join("presentation.mp4");
-    let source_video = plan.source_video.canonicalize().map_err(|source| {
-        return Error::Filesystem {
-            path: plan.source_video.clone(),
-            source,
-        };
-    })?;
     let ffmpeg_arguments = vec![
         "-hide_banner".to_owned(),
         "-nostdin".to_owned(),
@@ -1544,7 +1747,16 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
             };
         })?,
     )?;
-    write_presentation_map(&staging.join("presentation-map.jsonl"), plan)?;
+    let semantic_spans = if matches!(plan.source, PresentationSource::Semantic { .. }) {
+        read_semantic_frame_spans(&staging.join("semantic-source-map.jsonl"))?
+    } else {
+        Vec::new()
+    };
+    write_presentation_map(
+        &staging.join("presentation-map.jsonl"),
+        plan,
+        &semantic_spans,
+    )?;
     let normalized = serde_json::to_vec_pretty(plan).map_err(|source| {
         return Error::InvalidJson {
             path: staging.join("normalized-plan.json"),
@@ -1557,13 +1769,13 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
     let ffmpeg_version = command_version("ffmpeg")?;
     let members = collect_artifact_members(staging)?;
     let manifest = PresentationManifest {
-        version: EDIT_PLAN_VERSION,
+        version: PRESENTATION_FORMAT_VERSION,
         plan: plan.clone(),
         ffmpeg_version,
         ffmpeg_arguments,
         output_probe,
         truth_layer: "presentation_output".to_owned(),
-        source_truth_layer: "native_encoded_evidence".to_owned(),
+        source_truth_layer: plan.source.truth_layer().to_owned(),
         output_video_hash,
         members,
     };
@@ -1579,15 +1791,26 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
     return Ok(manifest);
 }
 
-fn write_presentation_map(path: &Path, plan: &PresentationPlan) -> Result<()> {
+fn write_presentation_map(
+    path: &Path,
+    plan: &PresentationPlan,
+    semantic_spans: &[SemanticFrameSpan],
+) -> Result<()> {
     let mut writer = secure_writer(path)?;
     for (clip_index, clip) in plan.clips.iter().enumerate() {
         for output_frame in clip.output_start_frame..clip.output_end_frame {
             let (source_frame, operation) = mapped_source_frame(clip, output_frame);
+            let semantic_state = semantic_spans.iter().find(|span| {
+                return span.start_frame <= source_frame && source_frame < span.end_frame;
+            });
             let entry = PresentationMapEntry {
                 output_frame,
                 clip_index,
                 source_frame,
+                source_state_id: semantic_state.map(|span| return span.state_id),
+                source_state_hash: semantic_state.map(|span| return span.state_hash.clone()),
+                source_state_monotonic_ns: semantic_state
+                    .map(|span| return span.state_monotonic_ns),
                 operation: operation.to_owned(),
                 captioned: clip.caption.is_some(),
                 annotation_indices: plan
@@ -1626,6 +1849,28 @@ fn write_presentation_map(path: &Path, plan: &PresentationPlan) -> Result<()> {
         }
     }
     return finish_writer(writer, path);
+}
+
+fn read_semantic_frame_spans(path: &Path) -> Result<Vec<SemanticFrameSpan>> {
+    let contents = fs_err::read_to_string(path).map_err(|source| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        };
+    })?;
+    return contents
+        .lines()
+        .enumerate()
+        .map(|(index, line)| {
+            return serde_json::from_str(line).map_err(|source| {
+                return Error::InvalidJson {
+                    path: path.to_path_buf(),
+                    json_path: format!("line {}", index.saturating_add(1)),
+                    source,
+                };
+            });
+        })
+        .collect();
 }
 
 fn semantic_change_states_at(plan: &PresentationPlan, output_frame: u64) -> Vec<u64> {
@@ -2341,14 +2586,18 @@ fn probe_delivery_video(staging: &Path) -> Result<serde_json::Value> {
     return Ok(value);
 }
 
-fn write_source_frame_hashes(plan: &PresentationPlan, staging: &Path) -> Result<()> {
+fn write_source_frame_hashes(
+    _plan: &PresentationPlan,
+    source_video: &Path,
+    staging: &Path,
+) -> Result<()> {
     let hashes_path = staging.join("source-frame-hashes.framemd5");
     let log_path = staging.join("source-frame-hashes.log");
     let hashes = secure_file(&hashes_path)?;
     let log = secure_file(&log_path)?;
     let status = Command::new("ffmpeg")
         .args(["-hide_banner", "-nostdin", "-i"])
-        .arg(&plan.source_video)
+        .arg(source_video)
         .args(["-map", "0:v:0", "-f", "framemd5", "-"])
         .stdout(Stdio::from(hashes))
         .stderr(Stdio::from(log))
@@ -2974,8 +3223,10 @@ mod tests {
         let plan = PresentationPlan {
             version: 1,
             edit_plan_hash: "a".repeat(64),
-            source_video: PathBuf::from("source.mkv"),
-            source_video_hash: "b".repeat(64),
+            source: PresentationSource::Native {
+                video: PathBuf::from("source.mkv"),
+                video_hash: "b".repeat(64),
+            },
             fps: 24,
             clips: vec![NormalizedClip {
                 source_range: SourceRange {
@@ -2997,7 +3248,7 @@ mod tests {
             output_frame_count: 8,
             ..PresentationPlan::default()
         };
-        write_presentation_map(&path, &plan).expect("write frame map");
+        write_presentation_map(&path, &plan, &[]).expect("write frame map");
         let entries = fs_err::read_to_string(path)
             .expect("read map")
             .lines()
@@ -3035,8 +3286,10 @@ mod tests {
         let plan = PresentationPlan {
             version: 1,
             edit_plan_hash: "a".repeat(64),
-            source_video_hash: hash_file(&source).expect("source hash"),
-            source_video: source,
+            source: PresentationSource::Native {
+                video_hash: hash_file(&source).expect("source hash"),
+                video: source,
+            },
             fps: 24,
             clips: vec![NormalizedClip {
                 source_range: SourceRange {
