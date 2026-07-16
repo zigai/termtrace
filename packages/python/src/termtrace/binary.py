@@ -2,7 +2,9 @@
 
 import os
 import shutil
+import sys
 from pathlib import Path
+from typing import NoReturn
 
 
 def resolve_binary(explicit: str | Path | None = None) -> Path:
@@ -24,3 +26,18 @@ def resolve_binary(explicit: str | Path | None = None) -> Path:
         "termtrace binary not found; install a platform wheel, set TERMTRACE_BINARY, "
         "or pass binary_path"
     )
+
+
+def main() -> NoReturn:
+    """Replace the Python launcher with the packaged Termtrace binary."""
+    try:
+        binary = resolve_binary()
+        launcher = Path(sys.argv[0]).resolve()
+        if binary == launcher:
+            raise FileNotFoundError(
+                "packaged termtrace binary not found; install a platform wheel"
+            )
+    except FileNotFoundError as e:
+        print(f"termtrace: {e}", file=sys.stderr)
+        raise SystemExit(127) from None
+    os.execv(binary, [str(binary), *sys.argv[1:]])

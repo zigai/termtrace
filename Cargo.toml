@@ -9,9 +9,9 @@ repository = "https://github.com/zigai/termtrace"
 license = "MIT"
 
 [package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/termtrace-{ target }.tar.zst"
+pkg-url = "{ repo }/releases/download/v{ version }/termtrace-{ target }.tar.gz"
 bin-dir = "termtrace-{ target }/{ bin }{ binary-ext }"
-pkg-fmt = "tzstd"
+pkg-fmt = "tgz"
 
 [dependencies]
 base64 = "0.22.1"

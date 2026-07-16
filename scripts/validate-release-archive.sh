@@ -2,14 +2,18 @@
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
-    echo "usage: $0 RELEASE_ARCHIVE.tar.zst" >&2
+    echo "usage: $0 RELEASE_ARCHIVE.tar.gz|RELEASE_ARCHIVE.tar.zst" >&2
     exit 2
 fi
 
 archive=$(realpath "$1")
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-tar --zstd -xf "$archive" -C "$work"
+case "$archive" in
+    *.tar.gz|*.tgz) tar -xzf "$archive" -C "$work" ;;
+    *.tar.zst) tar --zstd -xf "$archive" -C "$work" ;;
+    *) echo "unsupported release archive: $archive" >&2; exit 2 ;;
+esac
 binary=$(find "$work" -type f -name termtrace -perm -u+x -print -quit)
 if [[ -z "$binary" ]]; then
     echo "release archive contains no executable termtrace binary" >&2

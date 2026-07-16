@@ -9,7 +9,10 @@
       "import": "./lib/index.js"
     }
   },
-  "files": ["lib"],
+  "bin": {
+    "termtrace": "bin/termtrace.js"
+  },
+  "files": ["bin", "lib"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",

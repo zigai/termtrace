@@ -23,3 +23,9 @@ if [[ -z "$wheel" ]]; then
     exit 1
 fi
 uvx --from wheel wheel tags --platform-tag "$platform" --remove "$wheel"
+wheel=$(find dist/python -maxdepth 1 -name "*-${platform}.whl" -print -quit)
+if [[ -z "$wheel" ]]; then
+    echo "retagged wheel was not found for $platform" >&2
+    exit 1
+fi
+uvx --from auditwheel auditwheel show "$wheel"

@@ -12,6 +12,9 @@ license = { text = "MIT" }
 [project.optional-dependencies]
 pytest = ["pytest>=8"]
 
+[project.scripts]
+termtrace = "termtrace.binary:main"
+
 [project.entry-points.pytest11]
 termtrace = "termtrace.pytest_plugin"
 
