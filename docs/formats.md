@@ -22,7 +22,7 @@ Only the first three files are required canonical evidence. Other entries appear
 
 ### `session.json`
 
-The immutable session manifest records the command, working directory, initial geometry, terminal profile, build identity, provenance policy, and durability policy. It is published before the event log.
+The immutable session manifest records the command, working directory, initial geometry, terminal profile, build identity, value-free child-environment policy and effective digest, sensitivity-aware provenance, durability policy, and resource limits. It is published before the event log. The current session-manifest version is 9.
 
 ### `events.jsonl`
 
@@ -32,7 +32,11 @@ Input, resize, and signal mutations have intent/result pairs. A missing result m
 
 ### `completion.json`
 
-The completion manifest binds the session and event roots, final exit event, event and output counts, exit outcome, and durability record. A complete session ends in `Exit` and has no pending mutation.
+The completion manifest binds the session and event roots, final exit event, event and output counts, exit outcome, durability record, and optional resource-limit trigger. A complete session ends in `Exit` and has no pending mutation. The current completion version is 4.
+
+## API contract versions
+
+Environment and resource launch fields use JSONL driver protocol version 2. Atomic stable capture uses control protocol version 12. Scenario files that use the isolation launch contract have scenario version 2; legacy version 1 files remain accepted when they do not use those fields. Checked-in JSON Schemas are authoritative for each shape.
 
 ## Supporting canonical data
 

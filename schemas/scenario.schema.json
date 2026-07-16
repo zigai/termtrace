@@ -1,5 +1,88 @@
 {
   "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "ColorPolicy": {
+      "description": "Deterministic common color-variable policy applied after caller overrides.",
+      "oneOf": [
+        {
+          "const": "auto",
+          "description": "Preserve inherited color variables and add none to a clear environment.",
+          "type": "string"
+        },
+        {
+          "const": "always",
+          "description": "Request colored output through common de-facto variables.",
+          "type": "string"
+        },
+        {
+          "const": "never",
+          "description": "Request plain output through common de-facto variables.",
+          "type": "string"
+        }
+      ]
+    },
+    "EnvironmentBase": {
+      "description": "Source environment used before explicit child overrides are applied.",
+      "oneOf": [
+        {
+          "const": "inherit",
+          "description": "Snapshot and inherit the recorder process environment.",
+          "type": "string"
+        },
+        {
+          "const": "clear",
+          "description": "Begin with an empty environment.",
+          "type": "string"
+        }
+      ]
+    },
+    "EnvironmentSpec": {
+      "additionalProperties": false,
+      "description": "Caller-owned child-environment configuration.",
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/EnvironmentBase",
+          "default": "inherit",
+          "description": "Whether resolution begins with the recorder's ambient environment."
+        },
+        "color": {
+          "$ref": "#/$defs/ColorPolicy",
+          "default": "auto",
+          "description": "Deterministic color-variable behavior."
+        },
+        "copy": {
+          "default": [],
+          "description": "Names copied from the recorder environment without placing values in arguments.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "set": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Base64Bytes"
+          },
+          "default": {},
+          "description": "Exact UTF-8-named values supplied by the caller.",
+          "type": "object"
+        },
+        "unset": {
+          "default": [],
+          "description": "Names removed from an inherited environment.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "type": "object"
+    },
     "NamedKey": {
       "description": "Layout-independent key accepted by the pinned terminal key encoder.",
       "oneOf": [
@@ -169,6 +252,17 @@
           },
           "type": "array"
         },
+        "environment": {
+          "$ref": "#/$defs/EnvironmentSpec",
+          "default": {
+            "base": "inherit",
+            "color": "auto",
+            "copy": [],
+            "set": {},
+            "unset": []
+          },
+          "description": "Deterministic child environment; values are redacted from failure artifacts."
+        },
         "geometry": {
           "$ref": "#/$defs/ScenarioGeometry",
           "default": {
@@ -176,6 +270,15 @@
             "rows": 24
           },
           "description": "Initial terminal grid."
+        },
+        "outputByteBudget": {
+          "description": "Soft output budget; all observed bytes remain canonical evidence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "timeoutMs": {
           "default": 10000,

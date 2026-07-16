@@ -379,6 +379,112 @@
         },
         {
           "additionalProperties": false,
+          "description": "Atomic stable-screen wait result and the exact state that satisfied or ended the wait.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Actor-consistent canonical source boundaries for this exact state."
+            },
+            "cols": {
+              "description": "Terminal columns.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cursor_column": {
+              "description": "Cursor column when it lies in the viewport.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "cursor_row": {
+              "description": "Cursor row when it lies in the viewport.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "cursor_visible": {
+              "description": "Whether the cursor is visible.",
+              "type": "boolean"
+            },
+            "first_observed_monotonic_ns": {
+              "description": "First actor timestamp at which this exact state was observed.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "stable_snapshot",
+              "type": "string"
+            },
+            "modes": {
+              "$ref": "#/$defs/ModeState",
+              "description": "Presentation-eligible terminal modes from this exact state."
+            },
+            "observed_monotonic_ns": {
+              "description": "Actor timestamp of the returned snapshot.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "quality": {
+              "$ref": "#/$defs/StableCaptureQuality",
+              "description": "Typed reason the operation returned."
+            },
+            "rows": {
+              "description": "Terminal rows.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "semantic_state_zstd": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Zstandard-compressed canonical JSON for the exact semantic state."
+            },
+            "stable_for_ns": {
+              "description": "Requested unchanged interval.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state_hash": {
+              "description": "BLAKE3 of canonical JSON for this exact state.",
+              "type": "string"
+            },
+            "viewport_text": {
+              "description": "Plain text for the exact presentation-eligible viewport.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "semantic_state_zstd",
+            "viewport_text",
+            "state_hash",
+            "cols",
+            "rows",
+            "cursor_visible",
+            "first_observed_monotonic_ns",
+            "observed_monotonic_ns",
+            "stable_for_ns",
+            "quality",
+            "modes",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Successful server-side presented-screen wait.",
           "properties": {
             "boundaries": {
@@ -1164,6 +1270,31 @@
         "bottom"
       ],
       "type": "object"
+    },
+    "StableCaptureQuality": {
+      "description": "Why an atomic stable-screen capture returned.",
+      "oneOf": [
+        {
+          "const": "stable",
+          "description": "The exact presented state remained unchanged for the requested interval.",
+          "type": "string"
+        },
+        {
+          "const": "child_completed",
+          "description": "The child completed before the requested stable interval elapsed.",
+          "type": "string"
+        },
+        {
+          "const": "output_closed",
+          "description": "The PTY output stream closed before the requested stable interval elapsed.",
+          "type": "string"
+        },
+        {
+          "const": "deadline",
+          "description": "The server-side deadline elapsed before the requested stable interval.",
+          "type": "string"
+        }
+      ]
     },
     "StateHashComparison": {
       "description": "Required relationship between the presented state and a supplied hash.",

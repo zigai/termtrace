@@ -5,14 +5,26 @@ import os
 import subprocess
 import threading
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import IO, Literal, Self
 
 from termtrace.binary import resolve_binary
 from termtrace.errors import TermtraceOperationError, TermtraceProtocolError
 from termtrace.models import DriverResponse, JsonValue, parse_error
+
+
+@dataclass(frozen=True, slots=True)
+class EnvironmentOptions:
+    """Deterministic child-environment policy transported only through driver stdin."""
+
+    inherit_env: bool = True
+    set: Mapping[str, str | bytes] = field(default_factory=dict)
+    copy: Sequence[str] = ()
+    unset: Sequence[str] = ()
+    color: Literal["auto", "always", "never"] = "auto"
 
 
 class DriverTransport:
@@ -40,7 +52,7 @@ class DriverTransport:
     ) -> dict[str, JsonValue]:
         correlation_id = request_id or str(uuid.uuid4())
         payload: dict[str, JsonValue] = {
-            "version": 1,
+            "version": 2,
             "request_id": correlation_id,
             "method": method,
         }
@@ -100,6 +112,8 @@ class Terminal:
         rows: int = 24,
         working_directory: str | Path | None = None,
         evidence: Literal["always", "on-failure", "manual"] = "always",
+        environment: EnvironmentOptions | None = None,
+        output_byte_budget: int | None = None,
     ) -> "Session":
         import base64
 
@@ -119,6 +133,10 @@ class Terminal:
                 "working_directory": None
                 if working_directory is None
                 else str(working_directory),
+                "environment": _encode_environment(environment),
+                "resource_limits": {
+                    "output_bytes": output_byte_budget,
+                },
             }
         )
         return Session(
@@ -376,6 +394,33 @@ class Screen:
             stable_for=stable_for,
             timeout=timeout,
         )
+
+    def wait_for_idle(
+        self,
+        *,
+        stable_for: float = 0.1,
+        timeout: float = 10.0,
+        allow_incomplete: bool = False,
+    ) -> dict[str, JsonValue]:
+        """Atomically return the exact state that satisfied or ended the idle wait."""
+        response = self._session.control(
+            {
+                "command": "capture_stable",
+                "stable_for_ns": _seconds_to_ns(stable_for),
+                "timeout_ns": _seconds_to_ns(timeout),
+            }
+        )
+        if _required_str(response, "kind") != "control":
+            raise TermtraceProtocolError("stable capture response has an invalid wrapper")
+        data = _required_mapping(response, "data")
+        if _required_str(data, "kind") != "stable_snapshot":
+            raise TermtraceProtocolError("stable capture response has an invalid kind")
+        quality = _required_str(data, "quality")
+        if quality != "stable" and not allow_incomplete:
+            raise TermtraceProtocolError(
+                f"stable capture ended with {quality}; set allow_incomplete to inspect it"
+            )
+        return data
 
     def screenshot(
         self,
@@ -707,6 +752,23 @@ class Output:
         self, text: str, *, timeout: float = 10.0
     ) -> dict[str, JsonValue]:
         return self.wait_for_bytes(text.encode(), timeout=timeout)
+
+
+def _encode_environment(options: EnvironmentOptions | None) -> dict[str, JsonValue]:
+    import base64
+
+    selected = options or EnvironmentOptions()
+    encoded: dict[str, JsonValue] = {}
+    for name, value in selected.set.items():
+        raw = value.encode() if isinstance(value, str) else value
+        encoded[name] = base64.b64encode(raw).decode()
+    return {
+        "base": "inherit" if selected.inherit_env else "clear",
+        "set": encoded,
+        "copy": list(selected.copy),
+        "unset": list(selected.unset),
+        "color": selected.color,
+    }
 
 
 def _seconds_to_ns(value: float) -> int:

@@ -16,7 +16,7 @@ use rustix::system::uname;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{event::ByteString, replay::GHOSTTY_REVISION};
+use crate::{environment::EffectiveEnvironment, event::ByteString, replay::GHOSTTY_REVISION};
 
 /// Built-in execution-provenance collection policy.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -175,24 +175,20 @@ pub struct RuntimeProvenance {
     pub recorder: RecorderProvenance,
 }
 
-/// Collect environment provenance after applying recorder-owned child overrides.
+/// Collect provenance from the exact immutable environment passed to the child.
 pub fn collect_execution_provenance(
     policy: &ProvenancePolicy,
-    child_overrides: &BTreeMap<String, String>,
+    child_environment: &EffectiveEnvironment,
     command: &[OsString],
     working_directory: &Path,
 ) -> ExecutionProvenance {
-    let rules = effective_rules(policy);
+    let rules = effective_rules(policy, child_environment);
     let environment = rules
         .into_iter()
         .map(|(name, capture)| {
-            let value = child_overrides
+            let value = child_environment
                 .get(&name)
-                .map(|value| return value.as_bytes().to_vec())
-                .or_else(|| {
-                    return env::var_os(&name)
-                        .map(|value| return value.as_os_str().as_bytes().to_vec());
-                });
+                .map(|value| return value.as_bytes().to_vec());
             let sensitivity = if is_public_configuration(&name) {
                 ProvenanceSensitivity::PublicConfiguration
             } else {
@@ -209,7 +205,7 @@ pub fn collect_execution_provenance(
         |requested| {
             return collect_file_provenance(
                 requested.as_os_str(),
-                resolve_executable(requested, working_directory),
+                resolve_executable(requested, working_directory, child_environment),
                 should_hash_files(policy.kind),
             );
         },
@@ -302,7 +298,11 @@ fn should_hash_files(policy: ProvenancePolicyKind) -> bool {
     return matches!(policy, ProvenancePolicyKind::Reproducible);
 }
 
-fn resolve_executable(requested: &OsStr, working_directory: &Path) -> Option<PathBuf> {
+fn resolve_executable(
+    requested: &OsStr,
+    working_directory: &Path,
+    child_environment: &EffectiveEnvironment,
+) -> Option<PathBuf> {
     let requested_path = Path::new(requested);
     if requested.as_bytes().contains(&b'/') {
         let candidate = if requested_path.is_absolute() {
@@ -312,7 +312,7 @@ fn resolve_executable(requested: &OsStr, working_directory: &Path) -> Option<Pat
         };
         return canonical_executable(candidate);
     }
-    let search = env::var_os("PATH")?;
+    let search = child_environment.get("PATH")?;
     for directory in env::split_paths(&search) {
         let directory = if directory.as_os_str().is_empty() {
             working_directory.to_path_buf()
@@ -396,7 +396,10 @@ fn read_process_umask() -> Option<u32> {
     return u32::from_str_radix(value, 8).ok();
 }
 
-fn effective_rules(policy: &ProvenancePolicy) -> BTreeMap<String, ProvenanceCapture> {
+fn effective_rules(
+    policy: &ProvenancePolicy,
+    child_environment: &EffectiveEnvironment,
+) -> BTreeMap<String, ProvenanceCapture> {
     match policy.kind {
         ProvenancePolicyKind::Minimal => {
             return BTreeMap::from([
@@ -415,10 +418,8 @@ fn effective_rules(policy: &ProvenancePolicy) -> BTreeMap<String, ProvenanceCapt
                 ("TERM".to_owned(), ProvenanceCapture::Value),
                 ("TZ".to_owned(), ProvenanceCapture::Value),
             ]);
-            for (name, _) in env::vars_os() {
-                if let Some(name) = name.to_str()
-                    && name.starts_with("LC_")
-                {
+            for name in child_environment.utf8_names() {
+                if name.starts_with("LC_") {
                     rules.insert(name.to_owned(), ProvenanceCapture::Value);
                 }
             }
@@ -429,10 +430,17 @@ fn effective_rules(policy: &ProvenancePolicy) -> BTreeMap<String, ProvenanceCapt
 }
 
 fn represent_environment_value(
-    capture: ProvenanceCapture,
+    requested_capture: ProvenanceCapture,
     value: Option<&[u8]>,
     sensitivity: ProvenanceSensitivity,
 ) -> EnvironmentProvenance {
+    let capture = if sensitivity == ProvenanceSensitivity::PotentiallySensitive
+        && requested_capture == ProvenanceCapture::Value
+    {
+        ProvenanceCapture::Hash
+    } else {
+        requested_capture
+    };
     let present = value.is_some();
     let value_hash = match capture {
         ProvenanceCapture::Value | ProvenanceCapture::Hash => {
@@ -465,18 +473,23 @@ fn is_public_configuration(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::{fs::Permissions, os::unix::fs::PermissionsExt as _};
+
     use super::*;
+    use crate::environment::{EnvironmentBase, EnvironmentSpec};
 
     #[test]
     fn minimal_policy_records_terminal_values_without_locale_values() {
         let policy = ProvenancePolicy::default();
-        let overrides = BTreeMap::from([
-            ("COLORTERM".to_owned(), "truecolor".to_owned()),
-            ("TERM".to_owned(), "xterm-test".to_owned()),
-        ]);
+        let environment = EnvironmentSpec {
+            base: EnvironmentBase::Clear,
+            ..EnvironmentSpec::default()
+        }
+        .resolve("xterm-test")
+        .expect("environment");
         let collected = collect_execution_provenance(
             &policy,
-            &overrides,
+            &environment,
             &[OsString::from("/bin/true")],
             Path::new("/"),
         );
@@ -507,10 +520,19 @@ mod tests {
             kind: ProvenancePolicyKind::Custom,
             environment: BTreeMap::from([("PRIVATE_TOKEN".to_owned(), ProvenanceCapture::Hash)]),
         };
-        let overrides = BTreeMap::from([("PRIVATE_TOKEN".to_owned(), "secret".to_owned())]);
+        let environment = EnvironmentSpec {
+            base: EnvironmentBase::Clear,
+            set: BTreeMap::from([(
+                "PRIVATE_TOKEN".to_owned(),
+                ByteString::from(b"secret".as_slice()),
+            )]),
+            ..EnvironmentSpec::default()
+        }
+        .resolve("xterm-test")
+        .expect("environment");
         let collected = collect_execution_provenance(
             &policy,
-            &overrides,
+            &environment,
             &[OsString::from("/bin/true")],
             Path::new("/"),
         );
@@ -528,6 +550,34 @@ mod tests {
     }
 
     #[test]
+    fn sensitive_value_capture_is_forced_to_a_hash() {
+        let policy = ProvenancePolicy {
+            kind: ProvenancePolicyKind::Custom,
+            environment: BTreeMap::from([("PRIVATE_TOKEN".to_owned(), ProvenanceCapture::Value)]),
+        };
+        let environment = EnvironmentSpec {
+            base: EnvironmentBase::Clear,
+            set: BTreeMap::from([(
+                "PRIVATE_TOKEN".to_owned(),
+                ByteString::from(b"secret".as_slice()),
+            )]),
+            ..EnvironmentSpec::default()
+        }
+        .resolve("xterm-test")
+        .expect("environment");
+        let collected = collect_execution_provenance(
+            &policy,
+            &environment,
+            &[OsString::from("/bin/true")],
+            Path::new("/"),
+        );
+        let item = collected.environment.get("PRIVATE_TOKEN").expect("item");
+        assert_eq!(item.capture, ProvenanceCapture::Hash);
+        assert!(item.value.is_none());
+        assert!(item.value_hash.is_some());
+    }
+
+    #[test]
     fn reproducible_policy_hashes_resolved_executable_and_script() {
         let temporary = tempfile::tempdir().expect("temporary directory");
         let script = temporary.path().join("fixture.sh");
@@ -536,9 +586,12 @@ mod tests {
             kind: ProvenancePolicyKind::Reproducible,
             environment: BTreeMap::new(),
         };
+        let environment = EnvironmentSpec::default()
+            .resolve("xterm-test")
+            .expect("environment");
         let collected = collect_execution_provenance(
             &policy,
-            &BTreeMap::new(),
+            &environment,
             &[OsString::from("/bin/sh"), OsString::from("fixture.sh")],
             temporary.path(),
         );
@@ -551,6 +604,38 @@ mod tests {
         assert_eq!(
             invoked.content_hash.as_deref(),
             Some(blake3::hash(b"exit 0\n").to_hex().as_str())
+        );
+    }
+
+    #[test]
+    fn executable_resolution_uses_only_the_effective_child_path() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let executable = temporary.path().join("child-only-command");
+        fs_err::write(&executable, b"#!/bin/sh\nexit 0\n").expect("fixture executable");
+        fs_err::set_permissions(&executable, Permissions::from_mode(0o700)).expect("fixture mode");
+        let environment = EnvironmentSpec {
+            base: EnvironmentBase::Clear,
+            set: BTreeMap::from([(
+                "PATH".to_owned(),
+                ByteString::from(temporary.path().as_os_str().as_bytes()),
+            )]),
+            ..EnvironmentSpec::default()
+        }
+        .resolve("xterm-test")
+        .expect("environment");
+        let collected = collect_execution_provenance(
+            &ProvenancePolicy::default(),
+            &environment,
+            &[OsString::from("child-only-command")],
+            Path::new("/"),
+        );
+        assert_eq!(
+            collected
+                .executable
+                .resolved
+                .as_ref()
+                .map(ByteString::as_bytes),
+            Some(executable.as_os_str().as_bytes())
         );
     }
 }

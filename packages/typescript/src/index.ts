@@ -29,6 +29,20 @@ export type LaunchOptions = {
   readonly viewport?: { readonly cols: number; readonly rows: number };
   readonly workingDirectory?: string;
   readonly evidence?: "always" | "on-failure" | "manual";
+  readonly environment?: EnvironmentOptions;
+  readonly outputByteBudget?: number;
+};
+
+export type EnvironmentOptions = {
+  readonly inheritEnv?: boolean;
+  readonly set?: Readonly<Record<string, string | Uint8Array>>;
+  readonly copy?: ReadonlyArray<string>;
+  readonly unset?: ReadonlyArray<string>;
+  readonly color?: "auto" | "always" | "never";
+};
+
+export type IdleWaitOptions = WaitOptions & {
+  readonly allowIncomplete?: boolean;
 };
 
 export type MutationOptions = {
@@ -86,6 +100,10 @@ export class Termtrace implements AsyncDisposable {
           cols: viewport.cols,
           rows: viewport.rows,
           working_directory: options.workingDirectory ?? null,
+          environment: encodeEnvironment(options.environment),
+          resource_limits: {
+            output_bytes: options.outputByteBudget ?? null,
+          },
         }),
       ),
     );
@@ -321,6 +339,30 @@ export class Screen {
     return this.waitForPredicate({ predicate: "absent", text }, options);
   }
 
+  async waitForIdle(options: IdleWaitOptions = {}): Promise<JsonObject> {
+    if (options.signal !== undefined) {
+      throw new TypeError("signal cancellation is not supported for actor-atomic idle waits");
+    }
+    const timeoutMs = nonnegativeDuration(options.timeoutMs ?? 10_000, "timeoutMs");
+    const stableForMs = nonnegativeDuration(options.stableForMs ?? 100, "stableForMs");
+    const data = controlData(
+      await this.session.control({
+        command: "capture_stable",
+        stable_for_ns: stableForMs * 1_000_000,
+        timeout_ns: timeoutMs * 1_000_000,
+      }),
+    );
+    if (data.kind !== "stable_snapshot" || typeof data.quality !== "string") {
+      throw new TermtraceProtocolError("stable capture response has an invalid shape");
+    }
+    if (data.quality !== "stable" && options.allowIncomplete !== true) {
+      throw new TermtraceProtocolError(
+        `stable capture ended with ${data.quality}; set allowIncomplete to inspect it`,
+      );
+    }
+    return data;
+  }
+
   screenshot(destination: string, point: StatePoint = { selector: "latest_presented" }): Promise<JsonObject> {
     return this.session.request({
       method: "screenshot",
@@ -515,6 +557,21 @@ function controlData(value: JsonObject): JsonObject {
     throw new TermtraceProtocolError("driver control response has an invalid shape");
   }
   return value.data as JsonObject;
+}
+
+function encodeEnvironment(options: EnvironmentOptions | undefined): JsonObject {
+  const set: Record<string, JsonValue> = {};
+  for (const [name, value] of Object.entries(options?.set ?? {})) {
+    const bytes = typeof value === "string" ? Buffer.from(value) : Buffer.from(value);
+    set[name] = bytes.toString("base64");
+  }
+  return {
+    base: options?.inheritEnv === false ? "clear" : "inherit",
+    set,
+    copy: [...(options?.copy ?? [])],
+    unset: [...(options?.unset ?? [])],
+    color: options?.color ?? "auto",
+  };
 }
 
 function nonnegativeDuration(value: number, field: string): number {

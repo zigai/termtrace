@@ -9,7 +9,7 @@ from termtrace.models import DriverResponse, JsonValue, parse_error
 class DriverResponseTests(unittest.TestCase):
     def test_parses_correlated_success(self) -> None:
         response: JsonValue = {
-            "version": 1,
+            "version": 2,
             "request_id": "request-1",
             "result": {"status": "ok", "data": {"kind": "hello"}},
         }
@@ -20,7 +20,7 @@ class DriverResponseTests(unittest.TestCase):
 
     def test_rejects_uncorrelated_response(self) -> None:
         response: JsonValue = {
-            "version": 1,
+            "version": 2,
             "request_id": "other-request",
             "result": {"status": "ok", "data": {}},
         }
@@ -30,7 +30,7 @@ class DriverResponseTests(unittest.TestCase):
 
     def test_preserves_structured_operation_error(self) -> None:
         response: JsonValue = {
-            "version": 1,
+            "version": 2,
             "request_id": "request-1",
             "result": {
                 "status": "error",

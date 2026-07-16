@@ -2,6 +2,7 @@
 
 from termtrace.client import (
     DriverTransport,
+    EnvironmentOptions,
     Evidence,
     Events,
     Keyboard,
@@ -42,6 +43,7 @@ from termtrace.assertions import (
 
 __all__ = [
     "DriverTransport",
+    "EnvironmentOptions",
     "CursorSnapshot",
     "AsyncEvidence",
     "AsyncEvents",

@@ -15,6 +15,7 @@ For a working example, run the [end-to-end demo](../demos/README.md).
 | Topic | Use it when you want to |
 | --- | --- |
 | [Recording](recording.md) | choose geometry, provenance, and durability settings |
+| [Test isolation](test-isolation.md) | control child environment, limits, and atomic idle capture |
 | [Live control](agent-workflows.md) | send input, wait for state, inspect changes, or automate a session |
 | [Semantic replay](semantic-replay.md) | understand states, synchronized output, and ranged replay |
 | [Troubleshooting](troubleshooting.md) | diagnose build, control, replay, or capture failures |

@@ -33,11 +33,15 @@ use termtrace::{
     capability::{CapabilityReport, CapabilityStatus, probe_capabilities},
     control::{
         CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, PointerOperation,
-        ProcessSignal, ScreenMode, ScreenPredicate, ScreenRegion, StateHashComparison, request,
-        send_request,
+        ProcessSignal, ScreenMode, ScreenPredicate, ScreenRegion, StableCaptureQuality,
+        StateHashComparison, request, send_request,
     },
     diff::{SemanticDiff, diff_states, inspect_point},
     driver::serve as serve_driver,
+    environment::{
+        ColorPolicy, EnvironmentBase, EnvironmentSpec, parse_environment_spec,
+        read_environment_spec,
+    },
     event::{ByteString, EVENT_LOG_VERSION, Event, EventProjection, InputKind, event_type},
     event_log::{DurabilityMode, DurabilityPolicy, EventLog},
     geometry::{inherited_geometry, run_probe},
@@ -89,8 +93,9 @@ use termtrace::{
     },
     session::{
         CaptureTarget, GeometryProvenance, GeometrySource, GhosttyVisualOverrides,
-        ImportProvenance, SessionGeometry, SessionLineage, SessionManifest, VerificationLevel,
-        manifest_hash, read_manifest, validate_completed_log, verify_session_with_trust,
+        ImportProvenance, ResourceLimits, SessionGeometry, SessionLineage, SessionManifest,
+        VerificationLevel, manifest_hash, read_manifest, validate_completed_log,
+        verify_session_with_trust,
     },
     session_registry::{DetachedSessionPaths, SessionRegistry},
     timeline::{
@@ -211,6 +216,8 @@ enum Command {
     BundleVerify(BundleVerifyArgs),
     /// Wait for exact UTF-8 text in canonical PTY output.
     Wait(WaitArgs),
+    /// Atomically wait for a stable presented screen and return that exact snapshot.
+    WaitIdle(WaitIdleArgs),
     /// Copy the longest integrity-checked event prefix without modifying source.
     Recover(RecoverArgs),
     /// Generate JSON Schemas for public events, controls, and artifacts.
@@ -948,6 +955,21 @@ struct WaitArgs {
     timeout_ms: u64,
 }
 
+#[derive(Debug, Args)]
+struct WaitIdleArgs {
+    /// Live session name or canonical path.
+    session: PathBuf,
+    /// Required unchanged presented-state interval.
+    #[arg(long, value_parser = parse_pace_duration, default_value = "100ms")]
+    stable_for: Duration,
+    /// Maximum server-side wait duration in milliseconds.
+    #[arg(long, default_value_t = 30_000)]
+    timeout_ms: u64,
+    /// Return typed completed/output-closed/deadline snapshots instead of rejecting them.
+    #[arg(long)]
+    allow_incomplete: bool,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum CursorShapeArg {
     Bar,
@@ -1572,6 +1594,19 @@ struct RestartArgs {
     /// Override custom environment rules.
     #[arg(long = "provenance-env", value_parser = parse_provenance_rule)]
     provenance_environment: Vec<(String, ProvenanceCapture)>,
+    /// Owner-only JSON child-environment override; values never enter recorder arguments.
+    #[arg(long)]
+    environment_spec: Option<PathBuf>,
+    /// Permit a supplied environment specification to differ from the predecessor commitment.
+    #[arg(long, requires = "environment_spec")]
+    allow_environment_change: bool,
+
+    /// Override the soft non-truncating output budget.
+    #[arg(long, conflicts_with = "clear_output_byte_budget")]
+    output_byte_budget: Option<u64>,
+    /// Remove the predecessor's output budget.
+    #[arg(long)]
+    clear_output_byte_budget: bool,
     /// Override the executable and arguments; options must precede the executable.
     #[arg(num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<OsString>,
@@ -1591,6 +1626,9 @@ struct RestartOverrides {
     durability_max_uncommitted_bytes: Option<u64>,
     provenance: Option<ProvenancePolicyArg>,
     provenance_environment: Vec<(String, ProvenanceCapture)>,
+    output_byte_budget: Option<u64>,
+    clear_output_byte_budget: bool,
+    allow_environment_change: bool,
     command: Option<Vec<ByteString>>,
 }
 
@@ -1656,6 +1694,47 @@ struct RecordingArgs {
     #[arg(long, default_value = "xterm-ghostty")]
     term: String,
 
+    /// Owner-only JSON child-environment specification; values never enter recorder arguments.
+    #[arg(long)]
+    environment_spec: Option<PathBuf>,
+
+    /// Read the JSON environment specification from stdin (requires --no-input for record).
+    #[arg(long, conflicts_with = "environment_spec")]
+    environment_spec_stdin: bool,
+
+    /// Begin with an empty child environment (combine with --copy-env as needed).
+    #[arg(
+        long,
+        conflicts_with_all = ["environment_spec", "environment_spec_stdin"]
+    )]
+    clear_env: bool,
+
+    /// Copy one named recorder variable into the child environment.
+    #[arg(
+        long,
+        conflicts_with_all = ["environment_spec", "environment_spec_stdin"]
+    )]
+    copy_env: Vec<String>,
+
+    /// Remove one named variable from an inherited child environment.
+    #[arg(
+        long,
+        conflicts_with_all = ["environment_spec", "environment_spec_stdin"]
+    )]
+    unset_env: Vec<String>,
+
+    /// Apply deterministic common color-environment behavior.
+    #[arg(
+        long,
+        value_enum,
+        conflicts_with_all = ["environment_spec", "environment_spec_stdin"]
+    )]
+    color_policy: Option<ColorPolicyArg>,
+
+    /// Soft PTY output budget in bytes; all observed bytes remain canonical evidence.
+    #[arg(long)]
+    output_byte_budget: Option<u64>,
+
     /// Canonical output persistence policy.
     #[arg(long, value_enum, default_value_t = DurabilityModeArg::Bounded)]
     durability: DurabilityModeArg,
@@ -1705,6 +1784,23 @@ enum ProvenancePolicyArg {
     Minimal,
     Reproducible,
     Custom,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ColorPolicyArg {
+    Auto,
+    Always,
+    Never,
+}
+
+impl From<ColorPolicyArg> for ColorPolicy {
+    fn from(value: ColorPolicyArg) -> Self {
+        return match value {
+            ColorPolicyArg::Auto => Self::Auto,
+            ColorPolicyArg::Always => Self::Always,
+            ColorPolicyArg::Never => Self::Never,
+        };
+    }
 }
 
 impl From<ProvenancePolicyArg> for ProvenancePolicyKind {
@@ -1842,6 +1938,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Bundle(arguments) => return run_bundle(arguments),
         Command::BundleVerify(arguments) => return run_bundle_verify(arguments),
         Command::Wait(arguments) => return run_wait(arguments),
+        Command::WaitIdle(arguments) => return run_wait_idle(arguments),
         Command::Recover(arguments) => return run_recover(arguments),
         Command::Schemas(arguments) => return run_schemas(arguments),
         Command::ExportAsciicast(arguments) => {
@@ -4321,6 +4418,29 @@ fn run_wait(arguments: WaitArgs) -> Result<ExitCode> {
     )?);
 }
 
+fn run_wait_idle(arguments: WaitIdleArgs) -> Result<ExitCode> {
+    let session = resolve_session_ref(arguments.session)?;
+    let data = send_request(
+        session,
+        &ControlRequest::new(ControlCommand::CaptureStable {
+            stable_for_ns: u64::try_from(arguments.stable_for.as_nanos()).unwrap_or(u64::MAX),
+            timeout_ns: arguments.timeout_ms.saturating_mul(1_000_000),
+        }),
+    )?;
+    let ControlData::StableSnapshot { quality, .. } = &data else {
+        return Err(miette::miette!(
+            "recording actor returned an unexpected stable-capture payload"
+        ));
+    };
+    if !arguments.allow_incomplete && *quality != StableCaptureQuality::Stable {
+        return Err(miette::miette!(
+            "stable capture ended with {}; pass --allow-incomplete to receive the typed snapshot",
+            quality.as_str()
+        ));
+    }
+    return write_json_line(&data);
+}
+
 fn parse_row_predicate(value: &str) -> Result<(u16, String)> {
     let (row, text) = value
         .split_once(':')
@@ -4915,6 +5035,42 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
             ));
         }
     };
+    let supplied_environment = if arguments.environment_spec_stdin {
+        if !no_input {
+            return Err(miette::miette!(
+                "--environment-spec-stdin requires --no-input so stdin cannot be consumed twice"
+            ));
+        }
+        let mut bytes = Vec::new();
+        io::stdin()
+            .take(4 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .into_diagnostic()?;
+        Some(parse_environment_spec(
+            &bytes,
+            Path::new("<environment-spec-stdin>"),
+        )?)
+    } else if let Some(path) = arguments.environment_spec.as_deref() {
+        Some(read_environment_spec(path)?)
+    } else if arguments.clear_env
+        || !arguments.copy_env.is_empty()
+        || !arguments.unset_env.is_empty()
+        || arguments.color_policy.is_some()
+    {
+        Some(EnvironmentSpec {
+            base: if arguments.clear_env {
+                EnvironmentBase::Clear
+            } else {
+                EnvironmentBase::Inherit
+            },
+            copy: arguments.copy_env.iter().cloned().collect(),
+            unset: arguments.unset_env.iter().cloned().collect(),
+            color: arguments.color_policy.map_or(ColorPolicy::Auto, Into::into),
+            ..EnvironmentSpec::default()
+        })
+    } else {
+        None
+    };
     if let Some(predecessor) = restart_source {
         if import_provenance.is_some() {
             return Err(miette::miette!(
@@ -4927,7 +5083,13 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
             .transpose()
             .into_diagnostic()?
             .unwrap_or_else(empty_restart_overrides);
-        let options = restarted_record_options(out, session_alias, &predecessor, &overrides)?;
+        let options = restarted_record_options(
+            out,
+            session_alias,
+            &predecessor,
+            &overrides,
+            supplied_environment,
+        )?;
         return report_record_outcome(record(&options)?);
     }
     if matches!(arguments.durability, DurabilityModeArg::Bounded)
@@ -4953,6 +5115,7 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         kind: arguments.provenance.into(),
         environment: arguments.provenance_environment.iter().cloned().collect(),
     };
+    let environment = supplied_environment.unwrap_or_default();
     let overrides = GhosttyVisualOverrides {
         font_family: arguments.font_family.clone(),
         font_size: arguments.font_size.clone(),
@@ -5000,10 +5163,14 @@ fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         geometry_provenance,
         ghostty_profile,
         term: arguments.term,
+        environment,
         colors,
         forward_stdin: !no_input,
         durability_policy,
         provenance_policy,
+        resource_limits: ResourceLimits {
+            output_bytes: arguments.output_byte_budget,
+        },
     })?;
     return report_record_outcome(outcome);
 }
@@ -5020,7 +5187,7 @@ fn run_start(arguments: StartArgs) -> Result<ExitCode> {
     let StartArgs {
         name,
         startup_timeout_ms,
-        recording: _recording,
+        recording,
     } = arguments;
     if startup_timeout_ms == 0 {
         return Err(miette::miette!(
@@ -5034,14 +5201,36 @@ fn run_start(arguments: StartArgs) -> Result<ExitCode> {
     let stderr = open_detached_log(&paths.stderr_log)?;
     let executable = env::current_exe().into_diagnostic()?;
     let record_arguments = detached_record_arguments(&name, &paths.session)?;
-    let mut recorder = ProcessCommand::new("setsid")
+    let environment_stdin = if recording.environment_spec_stdin {
+        let mut bytes = Vec::new();
+        io::stdin()
+            .take(4 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .into_diagnostic()?;
+        Some(bytes)
+    } else {
+        None
+    };
+    let mut command = ProcessCommand::new("setsid");
+    command
         .arg(executable)
         .args(record_arguments)
-        .stdin(Stdio::null())
+        .stdin(if environment_stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
-        .spawn()
-        .into_diagnostic()?;
+        .stderr(Stdio::from(stderr));
+    let mut recorder = command.spawn().into_diagnostic()?;
+    if let Some(bytes) = environment_stdin {
+        let mut stdin = recorder
+            .stdin
+            .take()
+            .ok_or_else(|| miette::miette!("detached environment pipe was not created"))?;
+        stdin.write_all(&bytes).into_diagnostic()?;
+        drop(stdin);
+    }
     let deadline = Instant::now() + Duration::from_millis(startup_timeout_ms);
     loop {
         if paths.session.join("session.json").is_file()
@@ -5120,6 +5309,7 @@ fn run_restart(arguments: RestartArgs) -> Result<ExitCode> {
             &paths.session,
             &predecessor,
             &encoded_overrides,
+            arguments.environment_spec.as_deref(),
         ))
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
@@ -5195,8 +5385,9 @@ fn restart_record_arguments(
     session: &Path,
     predecessor: &Path,
     overrides: &str,
+    environment_spec: Option<&Path>,
 ) -> Vec<OsString> {
-    return vec![
+    let mut arguments = vec![
         OsString::from("record"),
         OsString::from("--no-input"),
         OsString::from("--out"),
@@ -5207,9 +5398,14 @@ fn restart_record_arguments(
         predecessor.as_os_str().to_os_string(),
         OsString::from("--restart-overrides"),
         OsString::from(overrides),
-        OsString::from("--"),
-        OsString::from("/bin/true"),
     ];
+    if let Some(path) = environment_spec {
+        arguments.push(OsString::from("--environment-spec"));
+        arguments.push(path.as_os_str().to_os_string());
+    }
+    arguments.push(OsString::from("--"));
+    arguments.push(OsString::from("/bin/true"));
+    return arguments;
 }
 
 fn restarted_record_options(
@@ -5217,6 +5413,7 @@ fn restarted_record_options(
     creation_alias: Option<String>,
     predecessor: &Path,
     overrides: &RestartOverrides,
+    environment_override: Option<EnvironmentSpec>,
 ) -> Result<RecordOptions> {
     let manifest_bytes = fs_err::read(predecessor.join("session.json")).into_diagnostic()?;
     let manifest = read_manifest(predecessor)?;
@@ -5250,11 +5447,20 @@ fn restarted_record_options(
                 .into_diagnostic();
         })
         .transpose()?;
-    let term = manifest
-        .child_environment
-        .get("TERM")
-        .cloned()
-        .ok_or_else(|| miette::miette!("predecessor manifest has no TERM value"))?;
+    let term = event_log.header.term.clone();
+    let environment = if let Some(environment) = environment_override {
+        let effective = environment.resolve(&term)?;
+        if !overrides.allow_environment_change
+            && effective.policy().effective_digest != manifest.child_environment.effective_digest
+        {
+            return Err(miette::miette!(
+                "supplied environment does not match the predecessor commitment; pass --allow-environment-change for an intentional successor override"
+            ));
+        }
+        environment
+    } else {
+        restart_environment(&manifest, &term)?
+    };
     let mut options = RecordOptions {
         output_directory,
         creation_alias,
@@ -5280,13 +5486,51 @@ fn restarted_record_options(
         geometry_provenance: manifest.geometry_provenance,
         ghostty_profile,
         term,
+        environment,
         colors: event_log.header.colors,
         forward_stdin: false,
         durability_policy: manifest.durability_policy,
         provenance_policy: manifest.execution_provenance.policy,
+        resource_limits: ResourceLimits {
+            output_bytes: if overrides.clear_output_byte_budget {
+                None
+            } else {
+                overrides
+                    .output_byte_budget
+                    .or(manifest.resource_limits.output_bytes)
+            },
+        },
     };
     apply_restart_overrides(&mut options, overrides)?;
     return Ok(options);
+}
+
+fn restart_environment(manifest: &SessionManifest, term: &str) -> Result<EnvironmentSpec> {
+    let policy = &manifest.child_environment;
+    let mut environment = EnvironmentSpec {
+        base: policy.base,
+        copy: policy.copied_names.clone(),
+        unset: policy.unset_names.clone(),
+        color: policy.color,
+        ..EnvironmentSpec::default()
+    };
+    for name in &policy.explicit_names {
+        let value = env::var_os(name).ok_or_else(|| {
+            return miette::miette!(
+                "exact restart requires environment variable `{name}` to be supplied again"
+            );
+        })?;
+        environment
+            .set
+            .insert(name.clone(), ByteString::from(value.as_os_str().as_bytes()));
+    }
+    let effective = environment.resolve(term)?;
+    if effective.policy().effective_digest != policy.effective_digest {
+        return Err(miette::miette!(
+            "current environment does not match the predecessor's committed effective environment; exact restart refused"
+        ));
+    }
+    return Ok(environment);
 }
 
 fn empty_restart_overrides() -> RestartOverrides {
@@ -5302,6 +5546,9 @@ fn empty_restart_overrides() -> RestartOverrides {
         durability_max_uncommitted_bytes: None,
         provenance: None,
         provenance_environment: Vec::new(),
+        output_byte_budget: None,
+        clear_output_byte_budget: false,
+        allow_environment_change: false,
         command: None,
     };
 }
@@ -5329,6 +5576,9 @@ fn restart_overrides_from_args(arguments: &RestartArgs) -> Result<RestartOverrid
         durability_max_uncommitted_bytes: arguments.durability_max_uncommitted_bytes,
         provenance: arguments.provenance,
         provenance_environment: arguments.provenance_environment.clone(),
+        output_byte_budget: arguments.output_byte_budget,
+        clear_output_byte_budget: arguments.clear_output_byte_budget,
+        allow_environment_change: arguments.allow_environment_change,
         command: (!arguments.command.is_empty()).then(|| {
             return arguments
                 .command

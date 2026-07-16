@@ -49,6 +49,26 @@
       ],
       "type": "object"
     },
+    "ColorPolicy": {
+      "description": "Deterministic common color-variable policy applied after caller overrides.",
+      "oneOf": [
+        {
+          "const": "auto",
+          "description": "Preserve inherited color variables and add none to a clear environment.",
+          "type": "string"
+        },
+        {
+          "const": "always",
+          "description": "Request colored output through common de-facto variables.",
+          "type": "string"
+        },
+        {
+          "const": "never",
+          "description": "Request plain output through common de-facto variables.",
+          "type": "string"
+        }
+      ]
+    },
     "ControlCommand": {
       "description": "One command sent to the live session actor.",
       "oneOf": [
@@ -122,6 +142,34 @@
           "required": [
             "command",
             "predicate",
+            "stable_for_ns",
+            "timeout_ns"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Atomically wait for a stable presented state and return that exact actor snapshot.",
+          "properties": {
+            "command": {
+              "const": "capture_stable",
+              "type": "string"
+            },
+            "stable_for_ns": {
+              "description": "Required unchanged presented-state interval.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "timeout_ns": {
+              "description": "Server-side monotonic deadline interval.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "command",
             "stable_for_ns",
             "timeout_ns"
           ],
@@ -494,6 +542,17 @@
               },
               "type": "array"
             },
+            "environment": {
+              "$ref": "#/$defs/EnvironmentSpec",
+              "default": {
+                "base": "inherit",
+                "color": "auto",
+                "copy": [],
+                "set": {},
+                "unset": []
+              },
+              "description": "Deterministic child-environment policy; values travel only in driver stdin."
+            },
             "evidence_root": {
               "description": "Owner-only root receiving collision-free evidence.",
               "type": "string"
@@ -501,6 +560,13 @@
             "method": {
               "const": "launch",
               "type": "string"
+            },
+            "resource_limits": {
+              "$ref": "#/$defs/ResourceLimits",
+              "default": {
+                "output_bytes": null
+              },
+              "description": "Non-truncating runtime resource limits."
             },
             "rows": {
               "description": "Initial terminal rows.",
@@ -980,6 +1046,64 @@
         }
       ]
     },
+    "EnvironmentBase": {
+      "description": "Source environment used before explicit child overrides are applied.",
+      "oneOf": [
+        {
+          "const": "inherit",
+          "description": "Snapshot and inherit the recorder process environment.",
+          "type": "string"
+        },
+        {
+          "const": "clear",
+          "description": "Begin with an empty environment.",
+          "type": "string"
+        }
+      ]
+    },
+    "EnvironmentSpec": {
+      "additionalProperties": false,
+      "description": "Caller-owned child-environment configuration.",
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/EnvironmentBase",
+          "default": "inherit",
+          "description": "Whether resolution begins with the recorder's ambient environment."
+        },
+        "color": {
+          "$ref": "#/$defs/ColorPolicy",
+          "default": "auto",
+          "description": "Deterministic color-variable behavior."
+        },
+        "copy": {
+          "default": [],
+          "description": "Names copied from the recorder environment without placing values in arguments.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "set": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Base64Bytes"
+          },
+          "default": {},
+          "description": "Exact UTF-8-named values supplied by the caller.",
+          "type": "object"
+        },
+        "unset": {
+          "default": [],
+          "description": "Names removed from an inherited environment.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "type": "object"
+    },
     "InputKind": {
       "description": "User-facing interpretation of an input byte sequence.",
       "oneOf": [
@@ -1324,6 +1448,22 @@
           "type": "string"
         }
       ]
+    },
+    "ResourceLimits": {
+      "additionalProperties": false,
+      "description": "Canonical runtime resource limits for one recording.",
+      "properties": {
+        "output_bytes": {
+          "description": "Soft output budget that triggers termination after all observed bytes are retained.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     },
     "ScreenMode": {
       "description": "Stable terminal-mode selectors available to screen predicates.",

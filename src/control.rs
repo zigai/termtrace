@@ -20,7 +20,7 @@ use crate::{
 };
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 11;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 12;
 /// Relative socket path inside a live session directory.
 pub const CONTROL_SOCKET_NAME: &str = "control.sock";
 /// Maximum encoded request or response size.
@@ -213,6 +213,33 @@ pub enum StateHashComparison {
     Changed,
 }
 
+/// Why an atomic stable-screen capture returned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StableCaptureQuality {
+    /// The exact presented state remained unchanged for the requested interval.
+    Stable,
+    /// The child completed before the requested stable interval elapsed.
+    ChildCompleted,
+    /// The PTY output stream closed before the requested stable interval elapsed.
+    OutputClosed,
+    /// The server-side deadline elapsed before the requested stable interval.
+    Deadline,
+}
+
+impl StableCaptureQuality {
+    /// Stable serialized spelling for diagnostics and APIs.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        return match self {
+            Self::Stable => "stable",
+            Self::ChildCompleted => "child_completed",
+            Self::OutputClosed => "output_closed",
+            Self::Deadline => "deadline",
+        };
+    }
+}
+
 /// One command sent to the live session actor.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
@@ -228,6 +255,13 @@ pub enum ControlCommand {
         /// Exact screen predicate.
         predicate: ScreenPredicate,
         /// Required unchanged matching-state interval.
+        stable_for_ns: u64,
+        /// Server-side monotonic deadline interval.
+        timeout_ns: u64,
+    },
+    /// Atomically wait for a stable presented state and return that exact actor snapshot.
+    CaptureStable {
+        /// Required unchanged presented-state interval.
         stable_for_ns: u64,
         /// Server-side monotonic deadline interval.
         timeout_ns: u64,
@@ -435,6 +469,37 @@ pub enum ControlData {
         /// Presentation-eligible terminal modes.
         modes: ModeState,
         /// Durable and observed source boundaries at observation time.
+        boundaries: ActorBoundaries,
+    },
+    /// Atomic stable-screen wait result and the exact state that satisfied or ended the wait.
+    StableSnapshot {
+        /// Zstandard-compressed canonical JSON for the exact semantic state.
+        semantic_state_zstd: ByteString,
+        /// Plain text for the exact presentation-eligible viewport.
+        viewport_text: String,
+        /// BLAKE3 of canonical JSON for this exact state.
+        state_hash: String,
+        /// Terminal columns.
+        cols: u16,
+        /// Terminal rows.
+        rows: u16,
+        /// Cursor column when it lies in the viewport.
+        cursor_column: Option<u16>,
+        /// Cursor row when it lies in the viewport.
+        cursor_row: Option<u16>,
+        /// Whether the cursor is visible.
+        cursor_visible: bool,
+        /// First actor timestamp at which this exact state was observed.
+        first_observed_monotonic_ns: u64,
+        /// Actor timestamp of the returned snapshot.
+        observed_monotonic_ns: u64,
+        /// Requested unchanged interval.
+        stable_for_ns: u64,
+        /// Typed reason the operation returned.
+        quality: StableCaptureQuality,
+        /// Presentation-eligible terminal modes from this exact state.
+        modes: ModeState,
+        /// Actor-consistent canonical source boundaries for this exact state.
         boundaries: ActorBoundaries,
     },
     /// Successful server-side presented-screen wait.

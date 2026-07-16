@@ -17,7 +17,7 @@ class DriverResponse:
     @classmethod
     def parse(cls, value: JsonValue, expected_request_id: str) -> "DriverResponse":
         root = _require_mapping(value, "response")
-        if root.get("version") != 1 or root.get("request_id") != expected_request_id:
+        if root.get("version") != 2 or root.get("request_id") != expected_request_id:
             raise TermtraceProtocolError("driver response version or request ID does not match")
         result = _require_mapping(root.get("result"), "response.result")
         status = result.get("status")
@@ -28,7 +28,7 @@ class DriverResponse:
 
 def parse_error(value: JsonValue, expected_request_id: str) -> dict[str, JsonValue] | None:
     root = _require_mapping(value, "response")
-    if root.get("version") != 1 or root.get("request_id") != expected_request_id:
+    if root.get("version") != 2 or root.get("request_id") != expected_request_id:
         raise TermtraceProtocolError("driver response version or request ID does not match")
     result = _require_mapping(root.get("result"), "response.result")
     if result.get("status") == "ok":

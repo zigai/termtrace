@@ -48,6 +48,20 @@ Options:
           Manual cell height, or inherited-geometry fallback, in pixels [default: 18]
       --term <TERM>
           Terminal identity exposed to the child [default: xterm-ghostty]
+      --environment-spec <ENVIRONMENT_SPEC>
+          Owner-only JSON child-environment specification; values never enter recorder arguments
+      --environment-spec-stdin
+          Read the JSON environment specification from stdin (requires --no-input for record)
+      --clear-env
+          Begin with an empty child environment (combine with --copy-env as needed)
+      --copy-env <COPY_ENV>
+          Copy one named recorder variable into the child environment
+      --unset-env <UNSET_ENV>
+          Remove one named variable from an inherited child environment
+      --color-policy <COLOR_POLICY>
+          Apply deterministic common color-environment behavior [possible values: auto, always, never]
+      --output-byte-budget <OUTPUT_BYTE_BUDGET>
+          Soft PTY output budget in bytes; all observed bytes remain canonical evidence
       --durability <DURABILITY>
           Canonical output persistence policy [default: bounded] [possible values: strict, bounded, throughput]
       --durability-max-interval-ms <DURABILITY_MAX_INTERVAL_MS>
@@ -58,6 +72,56 @@ Options:
           Execution provenance collection policy [default: minimal] [possible values: minimal, reproducible, custom]
       --provenance-env <PROVENANCE_ENVIRONMENT>
           Custom environment rule as NAME=value|hash|name|not-captured
+  -h, --help
+          Print help
+```
+
+## `restart`
+
+```text
+Stop a named session and atomically publish an immutable successor
+
+Usage: termtrace restart [OPTIONS] <NAME> [COMMAND]...
+
+Arguments:
+  <NAME>        Existing friendly session name
+  [COMMAND]...  Override the executable and arguments; options must precede the executable
+
+Options:
+      --log <LOG>
+          [env: TERMTRACE_LOG=] [default: warn]
+      --timeout-ms <TIMEOUT_MS>
+          Maximum time for predecessor completion and successor readiness [default: 10000]
+      --cwd <CWD>
+          Override the successor working directory
+      --cols <COLS>
+          Override terminal columns while retaining the predecessor when omitted
+      --rows <ROWS>
+          Override terminal rows while retaining the predecessor when omitted
+      --cell-width <CELL_WIDTH>
+          Override cell width in pixels
+      --cell-height <CELL_HEIGHT>
+          Override cell height in pixels
+      --term <TERM>
+          Override the terminal identity exposed to the child
+      --durability <DURABILITY>
+          Override the canonical output persistence policy [possible values: strict, bounded, throughput]
+      --durability-max-interval-ms <DURABILITY_MAX_INTERVAL_MS>
+          Override the bounded maximum unsynchronized interval
+      --durability-max-uncommitted-bytes <DURABILITY_MAX_UNCOMMITTED_BYTES>
+          Override the bounded maximum unsynchronized byte count
+      --provenance <PROVENANCE>
+          Override the execution provenance policy [possible values: minimal, reproducible, custom]
+      --provenance-env <PROVENANCE_ENVIRONMENT>
+          Override custom environment rules
+      --environment-spec <ENVIRONMENT_SPEC>
+          Owner-only JSON child-environment override; values never enter recorder arguments
+      --allow-environment-change
+          Permit a supplied environment specification to differ from the predecessor commitment
+      --output-byte-budget <OUTPUT_BYTE_BUDGET>
+          Override the soft non-truncating output budget
+      --clear-output-byte-budget
+          Remove the predecessor's output budget
   -h, --help
           Print help
 ```
@@ -149,6 +213,24 @@ Options:
           Maximum wait duration in milliseconds [default: 30000]
   -h, --help
           Print help
+```
+
+## `wait-idle`
+
+```text
+Atomically wait for a stable presented screen and return that exact snapshot
+
+Usage: termtrace wait-idle [OPTIONS] <SESSION>
+
+Arguments:
+  <SESSION>  Live session name or canonical path
+
+Options:
+      --log <LOG>                [env: TERMTRACE_LOG=] [default: warn]
+      --stable-for <STABLE_FOR>  Required unchanged presented-state interval [default: 100ms]
+      --timeout-ms <TIMEOUT_MS>  Maximum server-side wait duration in milliseconds [default: 30000]
+      --allow-incomplete         Return typed completed/output-closed/deadline snapshots instead of rejecting them
+  -h, --help                     Print help
 ```
 
 ## `show`

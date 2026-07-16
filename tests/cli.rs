@@ -3,6 +3,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::{
+    collections::{BTreeMap, BTreeSet},
     ffi::OsString,
     fs::{self, File, Permissions},
     io::{BufRead as _, BufReader, Read as _, Write as _},
@@ -22,8 +23,10 @@ use termtrace::{
     client::Terminal as ClientTerminal,
     control::{
         ControlCommand, ControlData, ControlRequest, ControlResult, ScreenMode, ScreenPredicate,
-        ScreenRegion, StateHashComparison, send_request, send_request_response,
+        ScreenRegion, StableCaptureQuality, StateHashComparison, send_request,
+        send_request_response,
     },
+    environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},
     event::{
         ByteString, EVENT_LOG_VERSION, Event, InputDescriptor, InputKind, InputSource,
         OperationStatus,
@@ -41,9 +44,10 @@ use termtrace::{
         derived_directory_name, index_session_range, index_session_with_options, replay,
     },
     request_journal::read_mutation_journal,
-    session::{CaptureTarget, GeometrySource, SessionCompletion, read_manifest},
+    session::{CaptureTarget, GeometrySource, SessionCompletion, SessionManifest, read_manifest},
     timeline::SourceRange,
 };
+use zstd::stream::{decode_all, read::Decoder};
 
 #[test]
 fn version_subcommand_reports_package_version() {
@@ -195,12 +199,12 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
     let hello_id = "019f0000-0000-7000-8000-000000000001";
     let attach_id = "019f0000-0000-7000-8000-000000000002";
     let hello = serde_json::json!({
-        "version": 1,
+        "version": 2,
         "request_id": hello_id,
         "method": { "method": "hello" }
     });
     let attach = serde_json::json!({
-        "version": 1,
+        "version": 2,
         "request_id": attach_id,
         "method": { "method": "attach", "session": session }
     });
@@ -224,7 +228,7 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
     };
     assert_eq!(first, second);
     assert_eq!(first["result"]["data"]["kind"], "hello");
-    assert_eq!(first["result"]["data"]["driver_protocol_version"], 1);
+    assert_eq!(first["result"]["data"]["driver_protocol_version"], 2);
     assert_eq!(third["result"]["data"]["kind"], "attached");
     assert_eq!(third["result"]["data"]["completed"], true);
     assert!(third["result"]["data"]["handle"].is_string());
@@ -243,9 +247,9 @@ fn python_sync_and_async_clients_parse_driver_completion_contract() {
         .success();
     let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/python/src");
     let binary = env!("CARGO_BIN_EXE_termtrace");
-    let sync_code = r#"import sys
+    let sync_code = r#"import json, sys
 from pathlib import Path
-from termtrace import Terminal, assert_screen_text, assert_terminal_snapshot
+from termtrace import EnvironmentOptions, Terminal, assert_screen_text, assert_terminal_snapshot
 with Terminal(binary_path=sys.argv[1]) as terminal:
     Path(sys.argv[3]).mkdir(parents=True, exist_ok=True)
     session = terminal.attach(sys.argv[2])
@@ -266,10 +270,18 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
     assert_terminal_snapshot(session, snapshot, update=True)
     assert_terminal_snapshot(session, snapshot)
     session.close()
-    launched = terminal.launch(["/bin/sh", "-c", "printf PY_LAUNCH; sleep 30"], evidence_root=sys.argv[3])
+    launched = terminal.launch(
+        ["/bin/sh", "-c", "test \"${#CLIENT_SECRET}\" -eq 20; test -z \"${HOME+x}\"; printf PY_LAUNCH; sleep 30"],
+        evidence_root=sys.argv[3],
+        environment=EnvironmentOptions(inherit_env=False, set={"CLIENT_SECRET": "python-private-value"}, copy=["PATH"], color="never"),
+        output_byte_budget=1000000,
+    )
     assert launched.canonical_session.is_dir()
     assert launched.screen.wait_for_text("PY_LAUNCH")["kind"] == "control"
     assert launched.screen.wait_for_regex("PY_[A-Z]+")["kind"] == "control"
+    assert launched.screen.wait_for_idle()["kind"] == "stable_snapshot"
+    assert b"python-private-value" not in launched.canonical_session.joinpath("session.json").read_bytes()
+    assert json.loads(launched.canonical_session.joinpath("session.json").read_text())["resource_limits"]["output_bytes"] == 1000000
     assert "PY_LAUNCH" in launched.screen.text()
     assert launched.screen.frame()["viewport_text"].startswith("PY_LAUNCH")
     assert launched.output.wait_for_text("PY_LAUNCH")["kind"] == "output_wait"
@@ -300,9 +312,9 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
         .expect("run sync Python client");
     assert!(sync.success());
 
-    let async_code = r#"import asyncio, sys
+    let async_code = r#"import asyncio, json, sys
 from pathlib import Path
-from termtrace import AsyncTerminal
+from termtrace import AsyncTerminal, EnvironmentOptions
 async def main():
     Path(sys.argv[3]).mkdir(parents=True, exist_ok=True)
     terminal = await AsyncTerminal.create(binary_path=sys.argv[1])
@@ -321,10 +333,18 @@ async def main():
         assert semantic_image["kind"] == "artifact"
         assert Path(semantic_image["primary"]).is_file()
         await session.close()
-        launched = await terminal.launch(["/bin/sh", "-c", "printf ASYNC_LAUNCH; sleep 30"], evidence_root=sys.argv[3])
+        launched = await terminal.launch(
+            ["/bin/sh", "-c", "test \"${#CLIENT_SECRET}\" -eq 19; test -z \"${HOME+x}\"; printf ASYNC_LAUNCH; sleep 30"],
+            evidence_root=sys.argv[3],
+            environment=EnvironmentOptions(inherit_env=False, set={"CLIENT_SECRET": "async-private-value"}, copy=["PATH"]),
+            output_byte_budget=1000000,
+        )
         assert launched.canonical_session.is_dir()
         assert (await launched.screen.wait_for_text("ASYNC_LAUNCH"))["kind"] == "control"
         assert (await launched.screen.wait_for_regex("ASYNC_[A-Z]+"))["kind"] == "control"
+        assert (await launched.screen.wait_for_idle())["kind"] == "stable_snapshot"
+        assert b"async-private-value" not in launched.canonical_session.joinpath("session.json").read_bytes()
+        assert json.loads(launched.canonical_session.joinpath("session.json").read_text())["resource_limits"]["output_bytes"] == 1000000
         assert "ASYNC_LAUNCH" in await launched.screen.text()
         assert (await launched.screen.frame())["viewport_text"].startswith("ASYNC_LAUNCH")
         assert (await launched.output.wait_for_text("ASYNC_LAUNCH"))["kind"] == "output_wait"
@@ -381,10 +401,18 @@ const semanticImage = await attached.screen.screenshot(`${process.argv[4]}/types
 if (semanticImage.kind !== "artifact" || !existsSync(String(semanticImage.primary))) throw new Error("missing semantic screenshot")
 await assertScreenText(attached, "TYPESCRIPT")
 if ((await stableTerminalSnapshot(attached)).version !== 1) throw new Error("missing stable snapshot")
-await using launched = await terminal.launch({ command: ["/bin/sh", "-c", "printf TS_LAUNCH; sleep 30"], evidenceRoot: process.argv[4] })
+await using launched = await terminal.launch({
+  command: ["/bin/sh", "-c", "test \"${#CLIENT_SECRET}\" -eq 16; test -z \"${HOME+x}\"; printf TS_LAUNCH; sleep 30"],
+  evidenceRoot: process.argv[4],
+  environment: { inheritEnv: false, set: { CLIENT_SECRET: "ts-private-value" }, copy: ["PATH"], color: "never" },
+  outputByteBudget: 1000000,
+})
 if (typeof launched.sessionId !== "string") throw new Error("missing launched identity")
 if ((await launched.screen.waitForText(/TS_LAUNCH/)).kind !== "control") throw new Error("missing screen wait")
 if ((await launched.screen.waitForPredicate({ predicate: "row_contains", row: 0, text: "TS_LAUNCH" })).kind !== "control") throw new Error("missing structural wait")
+if ((await launched.screen.waitForIdle()).kind !== "stable_snapshot") throw new Error("missing stable capture")
+if (Buffer.from(await Bun.file(`${launched.canonicalSession}/session.json`).arrayBuffer()).includes("ts-private-value")) throw new Error("environment value leaked")
+if ((await Bun.file(`${launched.canonicalSession}/session.json`).json()).resource_limits.output_bytes !== 1000000) throw new Error("output budget missing")
 if (!await launched.screen.text().then((text) => text.includes("TS_LAUNCH"))) throw new Error("missing screen text")
 if (!String((await launched.screen.frame()).viewport_text).includes("TS_LAUNCH")) throw new Error("missing frame")
 if ((await launched.output.waitForText("TS_LAUNCH")).kind !== "output_wait") throw new Error("missing output wait")
@@ -421,10 +449,17 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
     fs_err::write(
         &scenario,
         serde_json::to_vec_pretty(&serde_json::json!({
-            "version": 1,
+            "version": 2,
             "name": "ready workflow",
             "launch": {
-                "command": ["/bin/sh", "-c", "printf Ready; IFS= read -r line; printf Done; sleep 30"],
+                "command": ["/bin/sh", "-c", "test \"$SCENARIO_ID\" = ready; printf Ready; IFS= read -r line; printf Done; sleep 30"],
+                "environment": {
+                    "base": "clear",
+                    "set": { "SCENARIO_ID": ByteString::from(b"ready".as_slice()) },
+                    "copy": ["PATH"],
+                    "unset": [],
+                    "color": "never"
+                },
                 "geometry": { "cols": 90, "rows": 25 },
                 "timeoutMs": 3000
             },
@@ -452,10 +487,17 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
     fs_err::write(
         &second,
         serde_json::to_vec_pretty(&serde_json::json!({
-            "version": 1,
+            "version": 2,
             "name": "simple workflow",
             "launch": {
-                "command": ["/bin/sh", "-c", "printf SIMPLE; sleep 30"],
+                "command": ["/bin/sh", "-c", "test \"$SCENARIO_ID\" = simple; printf SIMPLE; sleep 30"],
+                "environment": {
+                    "base": "clear",
+                    "set": { "SCENARIO_ID": ByteString::from(b"simple".as_slice()) },
+                    "copy": ["PATH"],
+                    "unset": [],
+                    "color": "auto"
+                },
                 "timeoutMs": 3000
             },
             "steps": [
@@ -519,10 +561,18 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
     fs_err::write(
         &scenario,
         serde_json::to_vec_pretty(&serde_json::json!({
-            "version": 1,
+            "version": 2,
             "name": "missing screen",
             "launch": {
                 "command": ["/bin/sh", "-c", "printf Ready; sleep 30"],
+                "environment": {
+                    "base": "clear",
+                    "set": { "SCENARIO_SECRET": ByteString::from(b"scenario-private".as_slice()) },
+                    "copy": ["PATH"],
+                    "unset": [],
+                    "color": "never"
+                },
+                "outputByteBudget": 1_000_000,
                 "timeoutMs": 1000
             },
             "steps": [{ "waitScreen": { "contains": "Missing", "timeoutMs": 50 } }]
@@ -560,6 +610,40 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
     assert!(failure.join("final-screen.png").is_file());
     assert!(failure.join("timeline.json").is_file());
     assert!(failure.join("diagnose.json").is_file());
+    let canonical = Path::new(
+        attempt["canonical_session"]
+            .as_str()
+            .expect("canonical session"),
+    );
+    assert_eq!(
+        read_manifest(canonical)
+            .expect("scenario manifest")
+            .resource_limits
+            .output_bytes,
+        Some(1_000_000)
+    );
+    let copied_scenario = fs_err::read(failure.join("scenario.json")).expect("copied scenario");
+    let encoded_secret = serde_json::to_vec(&ByteString::from(b"scenario-private".as_slice()))
+        .expect("encoded secret");
+    assert!(
+        !copied_scenario
+            .windows(encoded_secret.len())
+            .any(|window| return window == encoded_secret)
+    );
+    let encoded_secret = &encoded_secret[1..encoded_secret.len() - 1];
+    for entry in fs_err::read_dir(failure).expect("failure artifacts") {
+        let path = entry.expect("failure artifact entry").path();
+        if path.is_file() {
+            let bytes = fs_err::read(&path).expect("failure artifact");
+            assert!(
+                !bytes
+                    .windows(encoded_secret.len())
+                    .any(|window| return window == encoded_secret),
+                "scenario secret leaked into {}",
+                path.display()
+            );
+        }
+    }
 }
 
 #[test]
@@ -887,6 +971,14 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
             Duration::from_secs(5),
         )
         .expect("facade screen wait");
+    assert_eq!(
+        session
+            .screen()
+            .wait_for_idle(Duration::from_millis(20), Duration::from_secs(2))
+            .expect("facade atomic idle")
+            .quality,
+        StableCaptureQuality::Stable
+    );
     session
         .keyboard()
         .text("client\n")
@@ -1576,6 +1668,13 @@ fn restart_applies_only_explicit_successor_overrides() {
             "strict",
             "--provenance",
             "reproducible",
+            "--clear-env",
+            "--copy-env",
+            "PATH",
+            "--color-policy",
+            "never",
+            "--output-byte-budget",
+            "1000000",
             "--",
             "/bin/sh",
             "-c",
@@ -1634,8 +1733,13 @@ fn restart_applies_only_explicit_successor_overrides() {
         (700, 432)
     );
     assert_eq!(
-        manifest.child_environment.get("TERM").map(String::as_str),
-        Some("vt100")
+        manifest
+            .execution_provenance
+            .environment
+            .get("TERM")
+            .and_then(|item| return item.value.as_ref())
+            .map(|value| return value.as_bytes()),
+        Some(b"vt100".as_slice())
     );
     assert_eq!(manifest.durability_policy.maximum_interval_ms, Some(25));
     assert_eq!(
@@ -1646,6 +1750,13 @@ fn restart_applies_only_explicit_successor_overrides() {
         manifest.execution_provenance.policy.kind,
         ProvenancePolicyKind::Minimal
     );
+    assert_eq!(manifest.child_environment.base, EnvironmentBase::Clear);
+    assert_eq!(
+        manifest.child_environment.copied_names,
+        BTreeSet::from(["PATH".to_owned()])
+    );
+    assert_eq!(manifest.child_environment.color, ColorPolicy::Never);
+    assert_eq!(manifest.resource_limits.output_bytes, Some(1_000_000));
     assert_eq!(
         manifest.command[2].as_bytes(),
         b"trap 'exit 0' TERM; while :; do sleep 0.2; done"
@@ -1656,6 +1767,114 @@ fn restart_applies_only_explicit_successor_overrides() {
         .args(["stop", "demo", "--wait"])
         .assert()
         .success();
+}
+
+#[test]
+fn restart_verifies_resupplied_environment_and_requires_explicit_change() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let original_path = temporary.path().join("original-environment.json");
+    let changed_path = temporary.path().join("changed-environment.json");
+    let original = EnvironmentSpec {
+        base: EnvironmentBase::Clear,
+        set: BTreeMap::from([(
+            "RESTART_SECRET".to_owned(),
+            ByteString::from(b"original-private".as_slice()),
+        )]),
+        copy: BTreeSet::from(["PATH".to_owned()]),
+        ..EnvironmentSpec::default()
+    };
+    let mut changed = original.clone();
+    changed.set.insert(
+        "RESTART_SECRET".to_owned(),
+        ByteString::from(b"changed-private".as_slice()),
+    );
+    for (path, spec) in [(&original_path, &original), (&changed_path, &changed)] {
+        fs_err::write(path, serde_json::to_vec(spec).expect("environment JSON"))
+            .expect("environment file");
+        fs_err::set_permissions(path, Permissions::from_mode(0o600)).expect("private spec");
+    }
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["start", "secret-restart", "--environment-spec-stdin"])
+        .args([
+            "--provenance",
+            "custom",
+            "--provenance-env",
+            "PATH=hash",
+            "--",
+            "/bin/sh",
+            "-c",
+            "test \"${#RESTART_SECRET}\" -eq 16; trap 'exit 0' TERM; while :; do sleep .1; done",
+        ])
+        .write_stdin(serde_json::to_vec(&original).expect("start environment JSON"))
+        .assert()
+        .success();
+
+    let mut exact = Command::cargo_bin("termtrace").expect("binary should build");
+    exact
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["restart", "secret-restart", "--environment-spec"])
+        .arg(&original_path)
+        .assert()
+        .success();
+
+    let mut rejected = Command::cargo_bin("termtrace").expect("binary should build");
+    rejected
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["restart", "secret-restart", "--environment-spec"])
+        .arg(&changed_path)
+        .assert()
+        .failure();
+    let supervisor_errors = fs_err::read_dir(state.join("supervisor"))
+        .expect("supervisor directory")
+        .filter_map(|entry| return entry.ok().map(|entry| return entry.path()))
+        .filter(|path| {
+            return path
+                .extension()
+                .is_some_and(|extension| return extension == "stderr");
+        })
+        .filter_map(|path| return fs_err::read_to_string(path).ok())
+        .collect::<String>();
+    assert!(supervisor_errors.contains("does not match the predecessor"));
+
+    let mut changed_restart = Command::cargo_bin("termtrace").expect("binary should build");
+    changed_restart
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["restart", "secret-restart", "--environment-spec"])
+        .arg(&changed_path)
+        .arg("--allow-environment-change")
+        .assert()
+        .success();
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "secret-restart", "--wait"])
+        .assert()
+        .success();
+    let mut pending = vec![state.clone()];
+    while let Some(path) = pending.pop() {
+        if path.is_dir() {
+            pending.extend(
+                fs_err::read_dir(&path)
+                    .expect("state directory")
+                    .filter_map(|entry| return entry.ok().map(|entry| return entry.path())),
+            );
+        } else if let Ok(bytes) = fs_err::read(&path) {
+            for secret in [
+                b"original-private".as_slice(),
+                b"changed-private".as_slice(),
+            ] {
+                assert!(
+                    !bytes
+                        .windows(secret.len())
+                        .any(|window| return window == secret),
+                    "secret leaked into {}",
+                    path.display()
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -1969,6 +2188,329 @@ fn live_control_drives_and_audits_a_detached_session() {
         .stdout(predicate::str::contains(
             r#""mutation_journal_records_verified":4"#,
         ));
+}
+
+#[test]
+fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let stable_session = temporary.path().join("stable");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let mut stable_child = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&stable_session)
+        .args(["--", "/bin/sh", "-c", "printf READY; sleep 30"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn stable recorder");
+    wait_for_path(&stable_session.join("control.sock"));
+    wait_for_output(&stable_session, b"READY", Duration::from_secs(2)).expect("ready output");
+
+    let capture = send_request(
+        &stable_session,
+        &ControlRequest::new(ControlCommand::CaptureStable {
+            stable_for_ns: 30_000_000,
+            timeout_ns: 2_000_000_000,
+        }),
+    )
+    .expect("stable capture");
+    let ControlData::StableSnapshot {
+        semantic_state_zstd,
+        viewport_text,
+        state_hash,
+        quality,
+        boundaries,
+        ..
+    } = capture
+    else {
+        panic!("wrong stable capture payload");
+    };
+    assert_eq!(quality, StableCaptureQuality::Stable);
+    assert!(viewport_text.contains("READY"));
+    let encoded = decode_all(semantic_state_zstd.as_bytes()).expect("decode exact stable state");
+    assert_eq!(state_hash, blake3::hash(&encoded).to_hex().to_string());
+    assert_eq!(boundaries.observed.output_bytes, 5);
+    send_request(&stable_session, &ControlRequest::new(ControlCommand::Stop))
+        .expect("stop stable child");
+    let _stable_status = stable_child.wait().expect("stable recorder exit");
+
+    let changing_session = temporary.path().join("changing");
+    let mut changing_child = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&changing_session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,time\nfor i in range(500): os.write(1, f'\\r{i}'.encode()); time.sleep(.005)",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn changing recorder");
+    wait_for_path(&changing_session.join("control.sock"));
+    let deadline = send_request(
+        &changing_session,
+        &ControlRequest::new(ControlCommand::CaptureStable {
+            stable_for_ns: 100_000_000,
+            timeout_ns: 250_000_000,
+        }),
+    )
+    .expect("typed deadline capture");
+    assert!(matches!(
+        deadline,
+        ControlData::StableSnapshot {
+            quality: StableCaptureQuality::Deadline,
+            ..
+        }
+    ));
+    send_request(
+        &changing_session,
+        &ControlRequest::new(ControlCommand::Stop),
+    )
+    .expect("stop changing child");
+    let _changing_status = changing_child.wait().expect("changing recorder exit");
+
+    let completed_session = temporary.path().join("child-completed");
+    let mut completed_child = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&completed_session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,time\nos.write(1,b'READY')\nif os.fork() == 0:\n time.sleep(10); os._exit(0)\ntime.sleep(1); os._exit(0)",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn child-completed recorder");
+    wait_for_path(&completed_session.join("control.sock"));
+    wait_for_output(&completed_session, b"READY", Duration::from_secs(2))
+        .expect("completed fixture ready");
+    let completed = send_request(
+        &completed_session,
+        &ControlRequest::new(ControlCommand::CaptureStable {
+            stable_for_ns: 3_000_000_000,
+            timeout_ns: 5_000_000_000,
+        }),
+    )
+    .expect("typed child completion");
+    assert!(matches!(
+        completed,
+        ControlData::StableSnapshot {
+            quality: StableCaptureQuality::ChildCompleted,
+            ..
+        }
+    ));
+    let _completed_status = completed_child.wait().expect("completed recorder exit");
+
+    let closed_session = temporary.path().join("output-closed");
+    let mut closed_child = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&closed_session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf CLOSED; exec 0<&- 1>&- 2>&-; sleep 2",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn output-closed recorder");
+    wait_for_path(&closed_session.join("control.sock"));
+    wait_for_output(&closed_session, b"CLOSED", Duration::from_secs(2))
+        .expect("closed fixture output");
+    let mut strict_idle = Command::cargo_bin("termtrace").expect("binary should build");
+    strict_idle
+        .arg("wait-idle")
+        .arg(&closed_session)
+        .args(["--stable-for", "1s", "--timeout-ms", "3000"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("output_closed"));
+    let mut permissive_idle = Command::cargo_bin("termtrace").expect("binary should build");
+    permissive_idle
+        .arg("wait-idle")
+        .arg(&closed_session)
+        .args([
+            "--stable-for",
+            "1s",
+            "--timeout-ms",
+            "3000",
+            "--allow-incomplete",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""quality":"output_closed""#));
+    let closed = send_request(
+        &closed_session,
+        &ControlRequest::new(ControlCommand::CaptureStable {
+            stable_for_ns: 1_000_000_000,
+            timeout_ns: 3_000_000_000,
+        }),
+    )
+    .expect("typed output closure");
+    assert!(matches!(
+        closed,
+        ControlData::StableSnapshot {
+            quality: StableCaptureQuality::OutputClosed,
+            ..
+        }
+    ));
+    let _closed_status = closed_child.wait().expect("closed recorder exit");
+}
+
+#[test]
+fn environment_values_never_enter_recorder_argv_or_manifest() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("secret-safe");
+    let secret = b"argv-must-not-contain-this-secret";
+    let spec = EnvironmentSpec {
+        base: EnvironmentBase::Clear,
+        set: BTreeMap::from([(
+            "TERMTRACE_SECRET".to_owned(),
+            ByteString::from(secret.as_slice()),
+        )]),
+        ..EnvironmentSpec::default()
+    };
+    let encoded = serde_json::to_vec(&spec).expect("environment JSON");
+    let mut recorder = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--output-byte-budget", "1000000"])
+        .arg("--environment-spec-stdin")
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "test -n \"$TERMTRACE_SECRET\"; sleep 30",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn recorder");
+    recorder
+        .stdin
+        .take()
+        .expect("environment stdin")
+        .write_all(&encoded)
+        .expect("write environment stdin");
+    wait_for_path(&session.join("control.sock"));
+    let argv = fs_err::read(format!("/proc/{}/cmdline", recorder.id())).expect("recorder argv");
+    assert!(
+        !argv
+            .windows(secret.len())
+            .any(|window| return window == secret)
+    );
+    let manifest = fs_err::read(session.join("session.json")).expect("manifest");
+    assert!(
+        !manifest
+            .windows(secret.len())
+            .any(|window| return window == secret)
+    );
+    let manifest: SessionManifest = serde_json::from_slice(&manifest).expect("manifest JSON");
+    assert_eq!(manifest.resource_limits.output_bytes, Some(1_000_000));
+    send_request(&session, &ControlRequest::new(ControlCommand::Stop)).expect("stop child");
+    let recorder_output = recorder.wait_with_output().expect("recorder exit");
+    assert!(
+        !recorder_output
+            .stderr
+            .windows(secret.len())
+            .any(|window| return window == secret)
+    );
+
+    let invalid_session = temporary.path().join("invalid-secret-safe");
+    let invalid_secret = b"error-must-not-contain-this-secret";
+    let invalid_spec = EnvironmentSpec {
+        base: EnvironmentBase::Clear,
+        set: BTreeMap::from([(
+            "TERMTRACE_SECRET".to_owned(),
+            ByteString::from(invalid_secret.as_slice()),
+        )]),
+        copy: BTreeSet::from(["TERMTRACE_VARIABLE_THAT_MUST_NOT_EXIST_7B11".to_owned()]),
+        ..EnvironmentSpec::default()
+    };
+    let mut invalid = Command::cargo_bin("termtrace").expect("binary should build");
+    let invalid_output = invalid
+        .args(["record", "--no-input", "--out"])
+        .arg(&invalid_session)
+        .arg("--environment-spec-stdin")
+        .args(["--", "/bin/true"])
+        .write_stdin(serde_json::to_vec(&invalid_spec).expect("invalid spec JSON"))
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    assert!(
+        !invalid_output
+            .windows(invalid_secret.len())
+            .any(|window| return window == invalid_secret)
+    );
+    assert!(!invalid_session.exists());
+}
+
+#[test]
+#[allow(
+    clippy::needless_collect,
+    reason = "all recorders must launch before any join to prove concurrent isolation"
+)]
+fn concurrent_client_launches_keep_environment_snapshots_isolated() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let evidence = temporary.path().join("concurrent-evidence");
+    fs_err::create_dir(&evidence).expect("evidence root");
+    let workers = (0..8)
+        .map(|index| {
+            let evidence = evidence.clone();
+            return thread::spawn(move || {
+                let value = format!("isolated-{index}-{}", "x".repeat(index));
+                let script = format!(
+                    "test \"${{#ISOLATED_ID}}\" -eq {}; printf OK; sleep 30",
+                    value.len()
+                );
+                let terminal = ClientTerminal::new(env!("CARGO_BIN_EXE_termtrace"), &evidence);
+                let mut session = terminal
+                    .launch([
+                        OsString::from("/bin/sh"),
+                        OsString::from("-c"),
+                        OsString::from(script),
+                    ])
+                    .clear_environment()
+                    .copy_environment("PATH")
+                    .set_environment("ISOLATED_ID", value.into_bytes())
+                    .color_policy(ColorPolicy::Never)
+                    .output_byte_budget(1_000_000)
+                    .start()
+                    .expect("concurrent launch");
+                wait_for_output(session.path(), b"OK", Duration::from_secs(3))
+                    .expect("concurrent output");
+                session
+                    .stop(Some(Duration::from_secs(5)))
+                    .expect("concurrent stop");
+                let manifest = read_manifest(session.path()).expect("concurrent manifest");
+                assert_eq!(manifest.resource_limits.output_bytes, Some(1_000_000));
+                return manifest.child_environment.effective_digest;
+            });
+        })
+        .collect::<Vec<_>>();
+    let digests = workers
+        .into_iter()
+        .map(|worker| return worker.join().expect("launch worker"))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(digests.len(), 8);
+    assert!(
+        fs_err::read_dir(&evidence)
+            .expect("evidence entries")
+            .filter_map(|entry| return entry.ok())
+            .all(|entry| return !entry.file_name().to_string_lossy().contains("environment"))
+    );
 }
 
 #[test]
@@ -4477,7 +5019,7 @@ fn validate_json_lines(schema: &str, instance: &Path) {
 )]
 fn read_zstd_text(path: &Path) -> String {
     let file = File::open(path).expect("compressed JSONL artifact");
-    let mut decoder = zstd::stream::read::Decoder::new(file).expect("zstd decoder");
+    let mut decoder = Decoder::new(file).expect("zstd decoder");
     let mut text = String::new();
     decoder
         .read_to_string(&mut text)
@@ -4514,15 +5056,14 @@ fn validate_json_value(schema: &str, instance: &serde_json::Value) {
 
 #[test]
 fn playback_does_not_echo_terminal_query_responses() {
-    use std::collections::BTreeMap;
-
     use portable_pty::{CommandBuilder, PtySize, native_pty_system};
     use termtrace::{
+        environment::EnvironmentSpec,
         event::{ByteString, Event, EventLogHeader},
         event_log::{DurabilityPolicy, EventLogWriter, SessionClock},
         session::{
-            GeometryProvenance, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, SessionGeometry,
-            SessionManifest,
+            GeometryProvenance, ResourceLimits, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
+            SessionGeometry, SessionManifest,
         },
     };
     use uuid::Uuid;
@@ -4532,6 +5073,9 @@ fn playback_does_not_echo_terminal_query_responses() {
     fs_err::create_dir(&session).expect("session directory");
     fs_err::set_permissions(&session, Permissions::from_mode(0o700)).expect("private session");
     let clock = SessionClock::now().expect("session clock");
+    let environment = EnvironmentSpec::default()
+        .resolve("xterm-ghostty")
+        .expect("environment");
     let header = EventLogHeader::new(
         Uuid::now_v7(),
         "0000000000000000000000000000000000000000000000000000000000000000",
@@ -4576,10 +5120,10 @@ fn playback_does_not_echo_terminal_query_responses() {
         },
         geometry_provenance: GeometryProvenance::default(),
         ghostty_visual: None,
-        child_environment: BTreeMap::new(),
+        child_environment: environment.policy().clone(),
         execution_provenance: collect_execution_provenance(
             &ProvenancePolicy::default(),
-            &BTreeMap::new(),
+            &environment,
             &[OsString::from("/bin/true")],
             Path::new("/"),
         ),
@@ -4591,6 +5135,7 @@ fn playback_does_not_echo_terminal_query_responses() {
         request_journal: "requests.jsonl".to_owned(),
         contains_sensitive_terminal_data: true,
         durability_policy: DurabilityPolicy::default(),
+        resource_limits: ResourceLimits::default(),
     };
     fs_err::write(
         session.join("session.json"),

@@ -85,6 +85,34 @@
         },
         {
           "additionalProperties": false,
+          "description": "Atomically wait for a stable presented state and return that exact actor snapshot.",
+          "properties": {
+            "command": {
+              "const": "capture_stable",
+              "type": "string"
+            },
+            "stable_for_ns": {
+              "description": "Required unchanged presented-state interval.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "timeout_ns": {
+              "description": "Server-side monotonic deadline interval.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "command",
+            "stable_for_ns",
+            "timeout_ns"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Send exact bytes to the child PTY.",
           "properties": {
             "command": {

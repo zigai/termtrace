@@ -720,11 +720,12 @@ fn registry_error(operation: &'static str, reason: impl Into<String>) -> Error {
 mod tests {
     use super::*;
     use crate::{
+        environment::EnvironmentSpec,
         event::TerminalColors,
         event_log::DurabilityPolicy,
         provenance::ProvenancePolicy,
         record::{RecordOptions, record},
-        session::GeometryProvenance,
+        session::{GeometryProvenance, ResourceLimits},
     };
     use std::{ffi::OsString, os::unix::fs::symlink};
     use tempfile::TempDir;
@@ -784,10 +785,12 @@ mod tests {
             geometry_provenance: GeometryProvenance::default(),
             ghostty_profile: None,
             term: "xterm-ghostty".to_owned(),
+            environment: EnvironmentSpec::default(),
             colors: TerminalColors::default(),
             forward_stdin: false,
             durability_policy: DurabilityPolicy::default(),
             provenance_policy: ProvenancePolicy::default(),
+            resource_limits: ResourceLimits::default(),
         })
         .expect("record fixture");
         return output_directory;

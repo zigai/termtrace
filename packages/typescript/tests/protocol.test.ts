@@ -6,7 +6,7 @@ describe("parseDriverResponse", () => {
   test("parses correlated structured failures", () => {
     const response = parseDriverResponse(
       {
-        version: 1,
+        version: 2,
         request_id: "request-1",
         result: {
           status: "error",
@@ -36,7 +36,7 @@ describe("parseDriverResponse", () => {
   test("rejects an uncorrelated response", () => {
     expect(() =>
       parseDriverResponse(
-        { version: 1, request_id: "other", result: { status: "ok", data: {} } },
+        { version: 2, request_id: "other", result: { status: "ok", data: {} } },
         "request-1",
       ),
     ).toThrow(TermtraceProtocolError);

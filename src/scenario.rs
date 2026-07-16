@@ -19,7 +19,8 @@ use crate::{
     Error, Result,
     analysis::{DiagnosticCheck, diagnose},
     client::{Session, Terminal},
-    control::{ControlCommand, ControlData, ControlRequest, ScreenPredicate, StateHashComparison},
+    control::{ControlCommand, ControlData, ControlRequest, ScreenPredicate},
+    environment::EnvironmentSpec,
     event::{ByteString, Event, InputKind},
     event_log::EventLog,
     ghostty_vt::{KeyModifiers, NamedKey, SemanticState},
@@ -30,7 +31,7 @@ use crate::{
 };
 
 /// Current scenario document version.
-pub const SCENARIO_VERSION: u32 = 1;
+pub const SCENARIO_VERSION: u32 = 2;
 
 /// One fresh-session terminal scenario.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -71,11 +72,19 @@ impl Scenario {
     }
 
     fn validate(&self) -> Result<()> {
-        if self.version != SCENARIO_VERSION {
+        if !matches!(self.version, 1 | SCENARIO_VERSION) {
             return Err(scenario_error(format!(
-                "scenario version {} is unsupported",
+                "scenario version {} is unsupported; expected 1 or {SCENARIO_VERSION}",
                 self.version
             )));
+        }
+        if self.version == 1
+            && (self.launch.environment != EnvironmentSpec::default()
+                || self.launch.output_byte_budget.is_some())
+        {
+            return Err(scenario_error(
+                "scenario environment and output budgets require version 2",
+            ));
         }
         if self.name.trim().is_empty() || self.launch.command.is_empty() || self.steps.is_empty() {
             return Err(scenario_error(
@@ -87,6 +96,12 @@ impl Scenario {
                 "scenario geometry must be greater than zero",
             ));
         }
+        if self.launch.timeout_ms == 0 || self.launch.output_byte_budget == Some(0) {
+            return Err(scenario_error(
+                "scenario timeout and configured resource budgets must be greater than zero",
+            ));
+        }
+        self.launch.environment.validate()?;
         for step in &self.steps {
             if let ScenarioStep::WaitScreen(wait_screen) = step {
                 if wait_screen.contains.as_deref().is_none_or(str::is_empty)
@@ -211,6 +226,11 @@ pub struct ScenarioLaunch {
     pub geometry: ScenarioGeometry,
     /// Optional child working directory.
     pub working_directory: Option<PathBuf>,
+    /// Deterministic child environment; values are redacted from failure artifacts.
+    #[serde(default)]
+    pub environment: EnvironmentSpec,
+    /// Soft output budget; all observed bytes remain canonical evidence.
+    pub output_byte_budget: Option<u64>,
     /// Default deadline for waits and completion.
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
@@ -474,7 +494,11 @@ pub fn run(
     let mut builder = terminal
         .launch(command)
         .geometry(scenario.launch.geometry.cols, scenario.launch.geometry.rows)
-        .startup_timeout(Duration::from_millis(scenario.launch.timeout_ms));
+        .startup_timeout(Duration::from_millis(scenario.launch.timeout_ms))
+        .environment(scenario.launch.environment.clone());
+    if let Some(limit) = scenario.launch.output_byte_budget {
+        builder = builder.output_byte_budget(limit);
+    }
     if let Some(directory) = &scenario.launch.working_directory {
         builder = builder.working_directory(directory);
     }
@@ -609,32 +633,26 @@ fn execute_step(
                 })
         }
         ScenarioStep::MatchScreenSnapshot(snapshot) => {
-            let initial = session.screen().snapshot().map_err(|error| {
-                return step_failure(index, step, Vec::new(), error.to_string());
-            })?;
-            let ControlData::Snapshot { state_hash, .. } = &initial else {
+            let capture = session
+                .screen()
+                .wait_for_idle(
+                    Duration::from_millis(snapshot.stable_for_ms),
+                    Duration::from_millis(
+                        snapshot.timeout_ms.unwrap_or(scenario.launch.timeout_ms),
+                    ),
+                )
+                .map_err(|error| {
+                    return step_failure(index, step, Vec::new(), error.to_string());
+                })?;
+            let current = capture.snapshot;
+            let ControlData::StableSnapshot { state_hash, .. } = &current else {
                 return Err(step_failure(
                     index,
                     step,
                     Vec::new(),
-                    "screen endpoint did not return a snapshot",
+                    "screen endpoint did not return an atomic stable snapshot",
                 ));
             };
-            let matched = wait_for_screen(
-                session.path(),
-                ScreenPredicate::StateHash {
-                    hash: state_hash.clone(),
-                    comparison: StateHashComparison::Unchanged,
-                },
-                Duration::from_millis(snapshot.stable_for_ms),
-                Duration::from_millis(snapshot.timeout_ms.unwrap_or(scenario.launch.timeout_ms)),
-            )
-            .map_err(|error| {
-                return step_failure(index, step, Vec::new(), error.to_string());
-            })?;
-            let current = session.screen().snapshot().map_err(|error| {
-                return step_failure(index, step, Vec::new(), error.to_string());
-            })?;
             let baseline = frame_snapshot(&current).map_err(|error| {
                 return step_failure(index, step, Vec::new(), error.to_string());
             })?;
@@ -689,7 +707,7 @@ fn execute_step(
                 index,
                 kind: step.kind().to_owned(),
                 request_ids,
-                state_hash: Some(matched.state_hash),
+                state_hash: Some(state_hash.clone()),
             });
         }
         ScenarioStep::AssertTimeline(assertion) => {
@@ -738,7 +756,7 @@ fn step_failure(
 }
 
 fn frame_snapshot(data: &ControlData) -> Result<ScenarioFrameSnapshot> {
-    let ControlData::Snapshot {
+    let (ControlData::Snapshot {
         viewport_text,
         cols,
         rows,
@@ -746,7 +764,16 @@ fn frame_snapshot(data: &ControlData) -> Result<ScenarioFrameSnapshot> {
         cursor_row,
         cursor_visible,
         ..
-    } = data
+    }
+    | ControlData::StableSnapshot {
+        viewport_text,
+        cols,
+        rows,
+        cursor_column,
+        cursor_row,
+        cursor_visible,
+        ..
+    }) = data
     else {
         return Err(scenario_error("screen endpoint did not return a snapshot"));
     };
@@ -879,7 +906,11 @@ fn publish_failure(
             source,
         };
     })?;
-    write_json(temporary.join("scenario.json"), scenario)?;
+    let mut redacted_scenario = scenario.clone();
+    for value in redacted_scenario.launch.environment.set.values_mut() {
+        *value = ByteString::from(b"<redacted>".as_slice());
+    }
+    write_json(temporary.join("scenario.json"), &redacted_scenario)?;
     write_json(temporary.join("result.json"), report)?;
     let mut derivation_errors = Vec::new();
     if let Some(snapshot) = final_snapshot {
@@ -967,7 +998,7 @@ mod tests {
     #[test]
     fn strict_scenario_parses_typed_steps() {
         let scenario: Scenario = serde_json::from_value(serde_json::json!({
-            "version": 1,
+            "version": 2,
             "name": "ready flow",
             "launch": { "command": ["/bin/sh"], "geometry": { "cols": 90, "rows": 25 } },
             "steps": [
@@ -983,9 +1014,23 @@ mod tests {
     }
 
     #[test]
+    fn legacy_scenario_remains_valid_but_isolation_fields_require_version_two() {
+        let mut scenario: Scenario = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "name": "legacy",
+            "launch": { "command": ["/bin/true"] },
+            "steps": [{ "stop": {} }]
+        }))
+        .expect("legacy scenario JSON");
+        scenario.validate().expect("legacy scenario");
+        scenario.launch.output_byte_budget = Some(1024);
+        assert!(scenario.validate().is_err());
+    }
+
+    #[test]
     fn scenario_rejects_ambiguous_screen_predicate() {
         let scenario: Scenario = serde_json::from_value(serde_json::json!({
-            "version": 1,
+            "version": 2,
             "name": "ambiguous",
             "launch": { "command": ["/bin/true"] },
             "steps": [{ "waitScreen": { "contains": "yes", "absent": "no" } }]
@@ -997,7 +1042,7 @@ mod tests {
     #[test]
     fn scenario_matrix_expands_commands_and_isolates_snapshot_names() {
         let scenario: Scenario = serde_json::from_value(serde_json::json!({
-            "version": 1,
+            "version": 2,
             "name": "matrix",
             "matrix": { "theme": ["dark", "light"], "width": ["80", "120"] },
             "launch": { "command": ["/bin/echo", "{{theme}}", "{{width}}"] },
