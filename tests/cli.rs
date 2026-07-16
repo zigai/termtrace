@@ -4211,6 +4211,10 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
         .args(["capture", "--session"])
         .arg(&session)
         .args([
+            "--width",
+            "640",
+            "--height",
+            "480",
             "--from",
             &format!("{}ns", range_start + 1),
             "--to",
