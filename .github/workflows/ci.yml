@@ -14,17 +14,20 @@ concurrency:
 jobs:
   checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@1.91.1
         with:
-          components: rustfmt
+          components: clippy,rustfmt
       - run: bash -n install.sh scripts/*.sh demos/*.sh demos/apps/*.sh
       - run: bash tests/install.sh
       - run: python3 -m py_compile demos/apps/terminal_showcase.py
+      - run: scripts/bootstrap.sh
       - run: cargo fmt --all -- --check
       - run: cargo metadata --no-deps --format-version 1 >/dev/null
+      - run: cargo test --locked --all-features
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
   clients:
     runs-on: ubuntu-24.04
