@@ -8,6 +8,40 @@ termtrace record --out ./example.termtrace --geometry inherit your-command --arg
 
 The executable and its arguments follow the recording options. They are passed as an argument vector, not through a shell. Output is mirrored to the current terminal and standard input is forwarded unless `--no-input` is set.
 
+## Isolate the child environment
+
+The default snapshots and inherits the recorder environment. For deterministic tests, begin empty and copy only what the command needs:
+
+```sh
+termtrace record --out SESSION --no-input \
+  --clear-env --copy-env PATH --color-policy never \
+  -- /usr/bin/env
+```
+
+`--copy-env NAME` reads from one recorder-side snapshot; `--unset-env NAME` removes an inherited name. `TERM` and `COLORTERM` are recorder-owned, and common color variables are resolved after caller operations so precedence is deterministic. Conflicting or reserved operations are rejected.
+
+Use an owner-only `--environment-spec FILE` for structured `set`, `copy`, `unset`, base, and color policy. For secrets, prefer `--environment-spec-stdin` with `--no-input`; the value bytes then travel through a pipe and never enter recorder arguments, diagnostic logs, or canonical manifests. Potentially sensitive provenance values are hash-only even when a custom policy requests a raw value. The manifest retains the value-free policy, explicit/copied/unset names, and a BLAKE3 commitment to the exact effective environment.
+
+Example specification:
+
+```json
+{
+  "base": "clear",
+  "set": { "TOKEN": "YmFzZTY0LWVuY29kZWQtdmFsdWU=" },
+  "copy": ["PATH"],
+  "unset": [],
+  "color": "never"
+}
+```
+
+Environment values use the same padded Base64 byte-string representation as other Termtrace protocols. File specifications must be regular, non-symlink, owner-only files no larger than 4 MiB.
+
+Restart verifies the reconstructed environment against the predecessor commitment. Explicit values that are unavailable in the restart process must be resupplied with `restart --environment-spec FILE`. A differing specification is rejected unless the caller marks it intentional with `--allow-environment-change`; the successor then records its new commitment.
+
+## Bound runaway output
+
+`--output-byte-budget N` is a soft trigger, not transcript truncation. Termtrace first appends every observed PTY byte, then records `output_budget_exceeded`, sends graceful termination, and escalates if needed. `completion.json` records the configured limit, trigger count, and final exact output count.
+
 Termtrace refuses to reuse an existing output path.
 
 ## Choose terminal geometry

@@ -33,7 +33,7 @@ The session actor orders child output, control requests, and terminal-generated 
 
 ## Canonical recording
 
-`session.json` fixes the command, working directory, geometry, terminal profile, provenance policy, and durability policy. `events.jsonl` contains the integrity-chained execution. `completion.json` closes the recording and rejects pending mutations.
+`session.json` fixes the command, working directory, geometry, terminal profile, value-free child-environment policy and effective-environment commitment, provenance policy, durability policy, and resource limits. `events.jsonl` contains the integrity-chained execution. `completion.json` closes the recording, records any resource trigger, and rejects pending mutations.
 
 Input, resize, and signal operations use intent/result pairs. If recording stops between the pair, delivery is uncertain. Termtrace does not retry an uncertain mutation automatically.
 
@@ -47,6 +47,8 @@ The pinned semantic engine runs while recording. It answers terminal queries and
 - the newest state eligible for presentation.
 
 They differ during synchronized output. Screen observations and waits use the presented state so hidden intermediate changes do not masquerade as visible UI.
+
+`capture_stable` is registered and completed inside this actor. Stability timing, the returned semantic bytes and text, the state hash, terminal modes, and source boundaries therefore describe one state. Typed deadline/output-close/completion outcomes prevent clients from silently treating an incomplete observation as stable.
 
 Mutations may carry an expected state hash. The actor checks this immediately before writing to the PTY and rejects stale actions without creating an input intent.
 
@@ -64,7 +66,7 @@ Derived manifests bind their source range, component versions, configuration, an
 
 Friendly names live in an owner-only registry outside the recording. Each entry binds a canonical path and immutable session ID. Removing or retargeting a name cannot rewrite evidence.
 
-Restart creates a new session and records its predecessor identity. The old session remains closed and unchanged.
+Restart creates a new session and records its predecessor identity. The old session remains closed and unchanged. Environment reconstruction is verified against the predecessor's effective-environment commitment; a mismatch is refused instead of silently inheriting a different host environment. Explicit environment and resource overrides are bound into the successor manifest.
 
 ## Dependency boundary
 

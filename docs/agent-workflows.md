@@ -52,6 +52,14 @@ Use `--output TEXT` when you need historical output rather than the current scre
 
 Waits are observations. They do not append events to the recording.
 
+When the next action needs the exact state that became idle, do not issue a wait followed by `show`; the state can change between calls. Use the actor-atomic operation:
+
+```sh
+termtrace wait-idle demo --stable-for 250ms --timeout-ms 30000
+```
+
+The response contains the exact compressed semantic state, viewport text, state hash, modes, and canonical boundaries from one actor ordering point. The default accepts only `stable`. `--allow-incomplete` returns typed `child_completed`, `output_closed`, or `deadline` snapshots for explicit inspection.
+
 ## Send input
 
 `send` accepts text, paste, named keys, raw bytes, and files:
@@ -143,6 +151,8 @@ Removing a name never removes evidence. A positional target containing `/` is tr
 ## Automate repeated tests
 
 `termtrace test` runs versioned JSON scenarios in fresh sessions. Scenarios can send input, wait for screen state, add markers, compare snapshots, run temporal assertions, and retain failure evidence.
+
+Scenario launches accept `environment` and `outputByteBudget`. Snapshot matching uses the same atomic stable-screen primitive; it no longer waits and then races a second snapshot. Environment values are redacted from copied failure scenarios.
 
 ```bash
 termtrace test tests/scenarios/login.json --jobs 4 --reruns 1

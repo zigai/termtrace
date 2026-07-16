@@ -26,6 +26,7 @@ use crate::{
         MAX_CONTROL_MESSAGE_BYTES, send_request,
     },
     diff::{SemanticDiff, diff_states, inspect_point},
+    environment::EnvironmentSpec,
     event::{ByteString, EVENT_LOG_VERSION, EventProjection},
     event_log::EventLog,
     inspection::{WaitOutcome, wait_for_completion, wait_for_output},
@@ -33,8 +34,8 @@ use crate::{
     replay::{STATE_FORMAT_VERSION, StateSelection},
     save::{SaveFormat, save},
     session::{
-        CaptureTarget, SessionCompletion, VerificationLevel, VerificationReport, read_completion,
-        read_manifest, validate_completed_log, verify_session,
+        CaptureTarget, ResourceLimits, SessionCompletion, VerificationLevel, VerificationReport,
+        read_completion, read_manifest, validate_completed_log, verify_session,
     },
     session_registry::SessionRegistry,
     timeline::{TimelineEntry, build_timeline},
@@ -42,7 +43,7 @@ use crate::{
 };
 
 /// Current JSONL driver protocol version.
-pub const DRIVER_PROTOCOL_VERSION: u32 = 1;
+pub const DRIVER_PROTOCOL_VERSION: u32 = 2;
 const DRIVER_RESPONSE_CACHE: usize = 4096;
 
 /// Explicit screenshot truth path; no fallback occurs between variants.
@@ -85,6 +86,12 @@ pub enum DriverMethod {
         rows: u16,
         /// Optional child working directory.
         working_directory: Option<PathBuf>,
+        /// Deterministic child-environment policy; values travel only in driver stdin.
+        #[serde(default)]
+        environment: EnvironmentSpec,
+        /// Non-truncating runtime resource limits.
+        #[serde(default)]
+        resource_limits: ResourceLimits,
     },
     /// Attach a process-local handle to a canonical session or registry name.
     Attach {
@@ -489,12 +496,16 @@ impl Driver {
                     cols,
                     rows,
                     working_directory,
+                    environment,
+                    resource_limits,
                 } => self.launch(
                     evidence_root,
                     command,
                     *cols,
                     *rows,
                     working_directory.as_deref(),
+                    environment.clone(),
+                    resource_limits,
                 ),
                 DriverMethod::Attach { session } => self.attach(session),
                 DriverMethod::Control {
@@ -847,6 +858,8 @@ impl Driver {
         cols: u16,
         rows: u16,
         working_directory: Option<&Path>,
+        environment: EnvironmentSpec,
+        resource_limits: &ResourceLimits,
     ) -> StdResult<DriverData, Box<DriverResult>> {
         if command.is_empty() || cols == 0 || rows == 0 {
             return Err(driver_failure(
@@ -863,7 +876,13 @@ impl Driver {
             .iter()
             .map(|argument| return OsString::from_vec(argument.as_bytes().to_vec()))
             .collect::<Vec<_>>();
-        let mut builder = terminal.launch(command).geometry(cols, rows);
+        let mut builder = terminal
+            .launch(command)
+            .geometry(cols, rows)
+            .environment(environment);
+        if let Some(limit) = resource_limits.output_bytes {
+            builder = builder.output_byte_budget(limit);
+        }
         if let Some(directory) = working_directory {
             builder = builder.working_directory(directory);
         }

@@ -10,6 +10,7 @@ from types import TracebackType
 from typing import Literal, Self
 
 from termtrace.binary import resolve_binary
+from termtrace.client import EnvironmentOptions, _encode_environment
 from termtrace.errors import TermtraceOperationError, TermtraceProtocolError
 from termtrace.models import DriverResponse, JsonValue, parse_error
 
@@ -56,6 +57,8 @@ class AsyncTerminal:
         rows: int = 24,
         working_directory: str | Path | None = None,
         evidence: Literal["always", "on-failure", "manual"] = "always",
+        environment: EnvironmentOptions | None = None,
+        output_byte_budget: int | None = None,
     ) -> "AsyncSession":
         import base64
 
@@ -77,6 +80,10 @@ class AsyncTerminal:
                 "working_directory": None
                 if working_directory is None
                 else str(working_directory),
+                "environment": _encode_environment(environment),
+                "resource_limits": {
+                    "output_bytes": output_byte_budget,
+                },
             }
         )
         return AsyncSession(
@@ -108,7 +115,7 @@ class AsyncTerminal:
     ) -> dict[str, JsonValue]:
         correlation_id = request_id or str(uuid.uuid4())
         payload: dict[str, JsonValue] = {
-            "version": 1,
+            "version": 2,
             "request_id": correlation_id,
             "method": method,
         }
@@ -380,6 +387,33 @@ class AsyncScreen:
             stable_for=stable_for,
             timeout=timeout,
         )
+
+    async def wait_for_idle(
+        self,
+        *,
+        stable_for: float = 0.1,
+        timeout: float = 10.0,
+        allow_incomplete: bool = False,
+    ) -> dict[str, JsonValue]:
+        """Atomically return the exact state that satisfied or ended the idle wait."""
+        response = await self._session.control(
+            {
+                "command": "capture_stable",
+                "stable_for_ns": _seconds_to_ns(stable_for),
+                "timeout_ns": _seconds_to_ns(timeout),
+            }
+        )
+        if _required_str(response, "kind") != "control":
+            raise TermtraceProtocolError("stable capture response has an invalid wrapper")
+        data = _required_mapping(response, "data")
+        if _required_str(data, "kind") != "stable_snapshot":
+            raise TermtraceProtocolError("stable capture response has an invalid kind")
+        quality = _required_str(data, "quality")
+        if quality != "stable" and not allow_incomplete:
+            raise TermtraceProtocolError(
+                f"stable capture ended with {quality}; set allow_incomplete to inspect it"
+            )
+        return data
 
     async def screenshot(
         self,

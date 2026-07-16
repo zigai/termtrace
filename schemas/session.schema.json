@@ -29,6 +29,77 @@
       ],
       "type": "object"
     },
+    "ChildEnvironmentPolicy": {
+      "additionalProperties": false,
+      "description": "Value-free environment declaration retained in canonical evidence.",
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/EnvironmentBase",
+          "description": "Base environment policy."
+        },
+        "color": {
+          "$ref": "#/$defs/ColorPolicy",
+          "description": "Deterministic color-variable behavior."
+        },
+        "copied_names": {
+          "description": "Names copied from the recorder environment.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "effective_digest": {
+          "description": "BLAKE3 commitment to the exact ordered name/value byte pairs passed to the child.",
+          "type": "string"
+        },
+        "explicit_names": {
+          "description": "Names whose values were supplied explicitly.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "unset_names": {
+          "description": "Names explicitly removed before host policy was applied.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "base",
+        "explicit_names",
+        "copied_names",
+        "unset_names",
+        "color",
+        "effective_digest"
+      ],
+      "type": "object"
+    },
+    "ColorPolicy": {
+      "description": "Deterministic common color-variable policy applied after caller overrides.",
+      "oneOf": [
+        {
+          "const": "auto",
+          "description": "Preserve inherited color variables and add none to a clear environment.",
+          "type": "string"
+        },
+        {
+          "const": "always",
+          "description": "Request colored output through common de-facto variables.",
+          "type": "string"
+        },
+        {
+          "const": "never",
+          "description": "Request plain output through common de-facto variables.",
+          "type": "string"
+        }
+      ]
+    },
     "ContentIdentityStatus": {
       "description": "Whether content identity was retained for a resolved file.",
       "oneOf": [
@@ -105,6 +176,21 @@
         "mode"
       ],
       "type": "object"
+    },
+    "EnvironmentBase": {
+      "description": "Source environment used before explicit child overrides are applied.",
+      "oneOf": [
+        {
+          "const": "inherit",
+          "description": "Snapshot and inherit the recorder process environment.",
+          "type": "string"
+        },
+        {
+          "const": "clear",
+          "description": "Begin with an empty environment.",
+          "type": "string"
+        }
+      ]
     },
     "EnvironmentProvenance": {
       "additionalProperties": false,
@@ -538,6 +624,22 @@
       ],
       "type": "object"
     },
+    "ResourceLimits": {
+      "additionalProperties": false,
+      "description": "Canonical runtime resource limits for one recording.",
+      "properties": {
+        "output_bytes": {
+          "description": "Soft output budget that triggers termination after all observed bytes are retained.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "RuntimeProvenance": {
       "additionalProperties": false,
       "description": "Recorder process identity and host context.",
@@ -680,11 +782,8 @@
       "type": "string"
     },
     "child_environment": {
-      "additionalProperties": {
-        "type": "string"
-      },
-      "description": "Allowlisted child environment overrides.",
-      "type": "object"
+      "$ref": "#/$defs/ChildEnvironmentPolicy",
+      "description": "Value-free child-environment policy; selected values live in execution provenance."
     },
     "command": {
       "description": "Exact executable and argument bytes.",
@@ -780,6 +879,10 @@
       "description": "Persistent mutation deduplication journal relative path.",
       "type": "string"
     },
+    "resource_limits": {
+      "$ref": "#/$defs/ResourceLimits",
+      "description": "Chain-bound runtime resource limits."
+    },
     "session_id": {
       "description": "Session identifier shared with the event log.",
       "format": "uuid",
@@ -829,7 +932,8 @@
     "control_socket",
     "request_journal",
     "contains_sensitive_terminal_data",
-    "durability_policy"
+    "durability_policy",
+    "resource_limits"
   ],
   "title": "SessionManifest",
   "type": "object"

@@ -3,6 +3,7 @@
 use std::{
     ffi::OsString,
     fs::OpenOptions,
+    io::Write as _,
     os::unix::fs::OpenOptionsExt as _,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -17,9 +18,10 @@ use crate::{
     analysis::{DiagnoseReport, DiagnosticCheck, ExplainReport, diagnose, explain},
     control::{
         ControlCommand, ControlData, ControlRequest, PointerOperation, ScreenPredicate,
-        send_request,
+        StableCaptureQuality, send_request,
     },
     diff::{SemanticDiff, diff_states},
+    environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},
     event::{ByteString, EventProjection, InputKind},
     event_log::EventLog,
     ghostty_vt::{KeyModifiers, MouseButton, NamedKey},
@@ -57,6 +59,8 @@ impl Terminal {
             rows: 24,
             working_directory: None,
             startup_timeout: Duration::from_secs(10),
+            environment: EnvironmentSpec::default(),
+            output_byte_budget: None,
         };
     }
 
@@ -75,6 +79,8 @@ pub struct SessionBuilder {
     rows: u16,
     working_directory: Option<PathBuf>,
     startup_timeout: Duration,
+    environment: EnvironmentSpec,
+    output_byte_budget: Option<u64>,
 }
 
 impl SessionBuilder {
@@ -100,6 +106,57 @@ impl SessionBuilder {
         return self;
     }
 
+    /// Replace the complete deterministic child-environment policy.
+    #[must_use]
+    pub fn environment(mut self, environment: EnvironmentSpec) -> Self {
+        self.environment = environment;
+        return self;
+    }
+
+    /// Begin with an empty child environment instead of inheriting the recorder environment.
+    #[must_use]
+    pub fn clear_environment(mut self) -> Self {
+        self.environment.base = EnvironmentBase::Clear;
+        return self;
+    }
+
+    /// Set one child variable without putting its value in process arguments or logs.
+    #[must_use]
+    pub fn set_environment(mut self, name: impl Into<String>, value: impl Into<Vec<u8>>) -> Self {
+        self.environment
+            .set
+            .insert(name.into(), ByteString::new(value.into()));
+        return self;
+    }
+
+    /// Remove one child variable after base-environment resolution.
+    #[must_use]
+    pub fn unset_environment(mut self, name: impl Into<String>) -> Self {
+        self.environment.unset.insert(name.into());
+        return self;
+    }
+
+    /// Copy one variable from the recorder snapshot into an otherwise clear environment.
+    #[must_use]
+    pub fn copy_environment(mut self, name: impl Into<String>) -> Self {
+        self.environment.copy.insert(name.into());
+        return self;
+    }
+
+    /// Select deterministic common color-variable behavior.
+    #[must_use]
+    pub fn color_policy(mut self, policy: ColorPolicy) -> Self {
+        self.environment.color = policy;
+        return self;
+    }
+
+    /// Terminate runaway work after this many output bytes without truncating evidence.
+    #[must_use]
+    pub fn output_byte_budget(mut self, bytes: u64) -> Self {
+        self.output_byte_budget = Some(bytes);
+        return self;
+    }
+
     /// Spawn the recorder and wait for actor readiness.
     pub fn start(self) -> Result<Session> {
         if self.command.is_empty() {
@@ -111,6 +168,7 @@ impl SessionBuilder {
                 source,
             };
         })?;
+        self.environment.validate()?;
         let path = self
             .terminal
             .evidence_root
@@ -119,6 +177,13 @@ impl SessionBuilder {
             .terminal
             .evidence_root
             .join(format!(".{}.driver.log", Uuid::now_v7()));
+        let environment_bytes = serde_json::to_vec(&self.environment).map_err(|source| {
+            return Error::InvalidJson {
+                path: PathBuf::from("<environment-spec-stdin>"),
+                json_path: "$".to_owned(),
+                source,
+            };
+        })?;
         let log = OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -142,9 +207,14 @@ impl SessionBuilder {
                 "--out",
             ])
             .arg(&path)
+            .arg("--environment-spec-stdin");
+        if let Some(limit) = self.output_byte_budget {
+            process.arg("--output-byte-budget").arg(limit.to_string());
+        }
+        process
             .arg("--")
             .args(&self.command)
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
             .stdout(Stdio::from(log.try_clone().map_err(|source| {
                 return Error::Filesystem {
                     path: log_path.clone(),
@@ -161,19 +231,37 @@ impl SessionBuilder {
                 source,
             };
         })?;
+        let environment_write = child
+            .stdin
+            .take()
+            .ok_or_else(|| return client_error("recorder environment pipe was not created"))
+            .and_then(|mut stdin| {
+                return stdin.write_all(&environment_bytes).map_err(|error| {
+                    return client_error(format!("write environment pipe: {error}"));
+                });
+            });
+        if let Err(error) = environment_write {
+            let _kill = child.kill();
+            let _wait = child.wait();
+            return Err(error);
+        }
         let deadline = Instant::now() + self.startup_timeout;
         while !path.join("control.sock").exists() {
-            if let Some(status) = child.try_wait().map_err(|source| {
+            let status = child.try_wait().map_err(|source| {
+                let _kill = child.kill();
                 return Error::Filesystem {
                     path: self.terminal.binary.clone(),
                     source,
                 };
-            })? {
+            })?;
+            if let Some(status) = status {
                 return Err(client_error(format!(
                     "recorder exited before readiness with {status}"
                 )));
             }
             if Instant::now() >= deadline {
+                let _kill = child.kill();
+                let _wait = child.wait();
                 return Err(client_error(format!(
                     "recorder readiness timed out; diagnostics: {}",
                     log_path.display()
@@ -285,6 +373,15 @@ pub struct Screen<'session> {
     session: &'session Session,
 }
 
+/// Atomic stable-screen outcome retaining the exact actor snapshot.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StableScreenCapture {
+    /// Typed reason the actor returned.
+    pub quality: StableCaptureQuality,
+    /// Exact `StableSnapshot` control payload from the same actor ordering point.
+    pub snapshot: ControlData,
+}
+
 impl Screen<'_> {
     /// Return the latest actor-presented snapshot.
     pub fn snapshot(&self) -> Result<ControlData> {
@@ -311,6 +408,49 @@ impl Screen<'_> {
         timeout: Duration,
     ) -> Result<ScreenWaitOutcome> {
         return wait_for_screen(&self.session.path, predicate, stable_for, timeout);
+    }
+
+    /// Atomically wait for idle and return only a fully stable exact snapshot.
+    pub fn wait_for_idle(
+        &self,
+        stable_for: Duration,
+        timeout: Duration,
+    ) -> Result<StableScreenCapture> {
+        let capture = self.wait_for_idle_outcome(stable_for, timeout)?;
+        if capture.quality != StableCaptureQuality::Stable {
+            return Err(Error::ControlRejected {
+                code: "incomplete_stable_capture".to_owned(),
+                message: format!(
+                    "stable-screen capture ended with {}; use wait_for_idle_outcome to inspect incomplete snapshots",
+                    capture.quality.as_str()
+                ),
+            });
+        }
+        return Ok(capture);
+    }
+
+    /// Atomically wait for idle and retain typed stable/completed/output-closed/deadline outcomes.
+    pub fn wait_for_idle_outcome(
+        &self,
+        stable_for: Duration,
+        timeout: Duration,
+    ) -> Result<StableScreenCapture> {
+        let data = send_request(
+            &self.session.path,
+            &ControlRequest::new(ControlCommand::CaptureStable {
+                stable_for_ns: u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX),
+                timeout_ns: u64::try_from(timeout.as_nanos()).unwrap_or(u64::MAX),
+            }),
+        )?;
+        let ControlData::StableSnapshot { quality, .. } = &data else {
+            return Err(client_error(
+                "actor returned the wrong stable-capture payload",
+            ));
+        };
+        return Ok(StableScreenCapture {
+            quality: *quality,
+            snapshot: data,
+        });
     }
 }
 

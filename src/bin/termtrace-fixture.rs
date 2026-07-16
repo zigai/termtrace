@@ -1,7 +1,6 @@
 //! Deterministic canonical fixture generator for acceptance benchmarks.
 
 use std::{
-    collections::BTreeMap,
     env,
     ffi::OsString,
     fs::{self, DirBuilder, Permissions},
@@ -14,14 +13,15 @@ use clap::{Args, Parser, Subcommand};
 use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
     artifact::write_secure,
+    environment::EnvironmentSpec,
     event::{ByteString, Event, EventLogHeader},
     event_log::{DurabilityMode, DurabilityPolicy, EventLog, EventLogWriter, SessionClock},
     provenance::{ProvenancePolicy, collect_execution_provenance},
     session::{
-        COMPLETION_VALIDATION_VERSION, GeometryProvenance, SESSION_COMPLETION_FORMAT,
-        SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
-        SessionCompletion, SessionGeometry, SessionManifest, canonical_manifest_bytes,
-        manifest_hash, validate_completed_log,
+        COMPLETION_VALIDATION_VERSION, GeometryProvenance, ResourceLimits,
+        SESSION_COMPLETION_FORMAT, SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT,
+        SESSION_MANIFEST_VERSION, SessionCompletion, SessionGeometry, SessionManifest,
+        canonical_manifest_bytes, manifest_hash, validate_completed_log,
     },
 };
 use uuid::Uuid;
@@ -93,9 +93,10 @@ fn generate(arguments: LargeArgs) -> Result<()> {
     };
     let working_directory = env::current_dir().into_diagnostic()?;
     let command = [OsString::from("termtrace-fixture-generated")];
+    let environment = EnvironmentSpec::default().resolve("xterm-ghostty")?;
     let execution_provenance = collect_execution_provenance(
         &ProvenancePolicy::default(),
-        &BTreeMap::new(),
+        &environment,
         &[OsString::from("/bin/true")],
         &working_directory,
     );
@@ -122,7 +123,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         geometry: geometry.clone(),
         geometry_provenance: GeometryProvenance::default(),
         ghostty_visual: None,
-        child_environment: BTreeMap::new(),
+        child_environment: environment.policy().clone(),
         execution_provenance,
         import_provenance: None,
         termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -133,6 +134,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         request_journal: "requests.jsonl".to_owned(),
         contains_sensitive_terminal_data: true,
         durability_policy: durability.clone(),
+        resource_limits: ResourceLimits::default(),
     };
     let manifest_bytes = canonical_manifest_bytes(&manifest)?;
     write_secure(&arguments.out.join("session.json"), &manifest_bytes)?;
@@ -174,6 +176,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         event_count: writer.next_seq(),
         terminal_event_seq,
         durability: writer.durability_record(),
+        resource_limit: None,
     };
     drop(writer);
     write_secure(

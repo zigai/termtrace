@@ -1,9 +1,6 @@
 //! Stable session provenance and completion manifests.
 
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -12,6 +9,7 @@ use uuid::Uuid;
 use crate::{
     Error, Result,
     artifact::verify_session_artifacts,
+    environment::ChildEnvironmentPolicy,
     event::{ByteString, Event},
     event_log::{DurabilityPolicy, DurabilityRecord, EventLog},
     provenance::ExecutionProvenance,
@@ -22,17 +20,45 @@ use crate::{
 /// Session manifest format identifier.
 pub const SESSION_MANIFEST_FORMAT: &str = "termtrace-session";
 /// Session manifest schema version.
-pub const SESSION_MANIFEST_VERSION: u32 = 8;
+pub const SESSION_MANIFEST_VERSION: u32 = 9;
 /// Completion manifest format identifier.
 pub const SESSION_COMPLETION_FORMAT: &str = "termtrace-completion";
 /// Completion manifest schema version.
-pub const SESSION_COMPLETION_VERSION: u32 = 3;
+pub const SESSION_COMPLETION_VERSION: u32 = 4;
 /// Validation contract used when the completion manifest was created.
 pub const COMPLETION_VALIDATION_VERSION: u32 = 1;
 /// Verification report format identifier.
 pub const VERIFICATION_REPORT_FORMAT: &str = "termtrace-verification";
 /// Verification report schema version.
 pub const VERIFICATION_REPORT_VERSION: u32 = 4;
+
+/// Canonical runtime resource limits for one recording.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceLimits {
+    /// Soft output budget that triggers termination after all observed bytes are retained.
+    pub output_bytes: Option<u64>,
+}
+
+/// Canonical resource-limit kinds with implemented completion semantics.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceLimitKind {
+    /// Observed PTY output byte count.
+    OutputBytes,
+}
+
+/// Resource-limit trigger retained in immutable completion evidence.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceLimitOutcome {
+    /// Stable limit kind.
+    pub kind: ResourceLimitKind,
+    /// Configured trigger threshold.
+    pub limit: u64,
+    /// Exact observed count when the host triggered termination.
+    pub observed: u64,
+}
 
 /// Requested depth for an offline evidence verification.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -261,8 +287,8 @@ pub struct SessionManifest {
     /// Canonical per-recording Ghostty profile, when explicitly resolved.
     #[serde(default)]
     pub ghostty_visual: Option<GhosttyVisualProvenance>,
-    /// Allowlisted child environment overrides.
-    pub child_environment: BTreeMap<String, String>,
+    /// Value-free child-environment policy; selected values live in execution provenance.
+    pub child_environment: ChildEnvironmentPolicy,
     /// Sensitivity-aware execution provenance and its explicit collection policy.
     pub execution_provenance: ExecutionProvenance,
     /// Termtrace package version.
@@ -281,6 +307,8 @@ pub struct SessionManifest {
     pub contains_sensitive_terminal_data: bool,
     /// Chain-bound output persistence policy.
     pub durability_policy: DurabilityPolicy,
+    /// Chain-bound runtime resource limits.
+    pub resource_limits: ResourceLimits,
 }
 
 /// Immutable completion facts written after the final event is durable.
@@ -313,6 +341,8 @@ pub struct SessionCompletion {
     pub terminal_event_seq: u64,
     /// Recorder-observed persistence behavior and final sync result.
     pub durability: DurabilityRecord,
+    /// Resource limit that caused host termination, when one was reached.
+    pub resource_limit: Option<ResourceLimitOutcome>,
 }
 
 /// Serialize a session manifest into its sole canonical on-disk form.
@@ -728,6 +758,37 @@ pub fn validate_completed_log(
             ),
         });
     }
+    match (
+        &manifest.resource_limits.output_bytes,
+        &completion.resource_limit,
+    ) {
+        (Some(limit), Some(outcome))
+            if outcome.kind == ResourceLimitKind::OutputBytes
+                && outcome.limit == *limit
+                && outcome.observed > *limit
+                && outcome.observed <= output_bytes =>
+        {
+            if !log.events.iter().any(|record| {
+                return matches!(
+                    &record.event,
+                    Event::HostError { code, .. } if code == "output_budget_exceeded"
+                );
+            }) {
+                return Err(Error::InvalidReplay {
+                    reason: "resource-limit completion has no canonical output-budget trigger"
+                        .to_owned(),
+                });
+            }
+        }
+        (Some(limit), None) if output_bytes <= *limit => {}
+        (None, None) => {}
+        _ => {
+            return Err(Error::InvalidReplay {
+                reason: "completion resource-limit outcome does not match manifest policy and canonical output"
+                    .to_owned(),
+            });
+        }
+    }
     return Ok(completion);
 }
 
@@ -748,6 +809,16 @@ fn validate_manifest(manifest: &SessionManifest) -> Result<()> {
         });
     }
     manifest.durability_policy.validate()?;
+    if manifest.resource_limits.output_bytes == Some(0) {
+        return Err(Error::InvalidReplay {
+            reason: "session resource budgets must be greater than zero".to_owned(),
+        });
+    }
+    manifest.child_environment.validate().map_err(|error| {
+        return Error::InvalidReplay {
+            reason: format!("invalid manifest child environment policy: {error}"),
+        };
+    })?;
     return Ok(());
 }
 
@@ -818,6 +889,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::environment::EnvironmentSpec;
     use crate::provenance::{ProvenancePolicy, collect_execution_provenance};
     use crate::{
         event::{EventLogHeader, InputDescriptor, InputKind, InputSource},
@@ -832,6 +904,9 @@ mod tests {
             .expect("secure session directory");
         let clock = SessionClock::now().expect("session clock");
         let session_id = Uuid::now_v7();
+        let environment = EnvironmentSpec::default()
+            .resolve("xterm-ghostty")
+            .expect("environment");
         let manifest = SessionManifest {
             format: SESSION_MANIFEST_FORMAT.to_owned(),
             version: SESSION_MANIFEST_VERSION,
@@ -850,10 +925,10 @@ mod tests {
             },
             geometry_provenance: GeometryProvenance::default(),
             ghostty_visual: None,
-            child_environment: BTreeMap::new(),
+            child_environment: environment.policy().clone(),
             execution_provenance: collect_execution_provenance(
                 &ProvenancePolicy::default(),
-                &BTreeMap::new(),
+                &environment,
                 &[OsString::from("/bin/true")],
                 Path::new("/"),
             ),
@@ -865,6 +940,7 @@ mod tests {
             request_journal: "requests.jsonl".to_owned(),
             contains_sensitive_terminal_data: true,
             durability_policy: DurabilityPolicy::default(),
+            resource_limits: ResourceLimits::default(),
         };
         let manifest_bytes = canonical_manifest_bytes(&manifest).expect("manifest JSON");
         fs_err::write(session.join("session.json"), &manifest_bytes).expect("write manifest");
@@ -903,6 +979,7 @@ mod tests {
             event_count,
             terminal_event_seq: event_count.saturating_sub(1),
             durability,
+            resource_limit: None,
         };
         fs_err::write(
             session.join("completion.json"),

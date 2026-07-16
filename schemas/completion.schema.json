@@ -91,6 +91,44 @@
         "final_sync_completed"
       ],
       "type": "object"
+    },
+    "ResourceLimitKind": {
+      "description": "Canonical resource-limit kinds with implemented completion semantics.",
+      "oneOf": [
+        {
+          "const": "output_bytes",
+          "description": "Observed PTY output byte count.",
+          "type": "string"
+        }
+      ]
+    },
+    "ResourceLimitOutcome": {
+      "additionalProperties": false,
+      "description": "Resource-limit trigger retained in immutable completion evidence.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ResourceLimitKind",
+          "description": "Stable limit kind."
+        },
+        "limit": {
+          "description": "Configured trigger threshold.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed": {
+          "description": "Exact observed count when the host triggered termination.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "limit",
+        "observed"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/completion.schema.json",
@@ -133,6 +171,17 @@
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "resource_limit": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResourceLimitOutcome"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Resource limit that caused host termination, when one was reached."
     },
     "session_id": {
       "description": "Session identifier.",

@@ -1,7 +1,6 @@
 //! One-shot PTY recording with byte-exact event persistence.
 
 use std::{
-    collections::BTreeMap,
     collections::HashMap,
     collections::VecDeque,
     env::{
@@ -49,8 +48,9 @@ use crate::{
         ActorBoundaries, CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME, ControlCommand,
         ControlData, ControlErrorDetails, ControlRequest, ControlResponse, ControlResult,
         MAX_CONTROL_MESSAGE_BYTES, PointerOperation, ProcessSignal, ScreenMode, ScreenPredicate,
-        ScreenRegion, StateHashComparison, validate_frame,
+        ScreenRegion, StableCaptureQuality, StateHashComparison, validate_frame,
     },
+    environment::{EffectiveEnvironment, EnvironmentSpec},
     event::{
         ByteString, Event, EventLogHeader, InputDescriptor, InputKind, InputSource, LifecycleKind,
         OperationStatus, TerminalColors,
@@ -65,10 +65,11 @@ use crate::{
         MUTATION_JOURNAL_NAME, MutationJournal, MutationJournalRecord, guarded_command_hash,
     },
     session::{
-        COMPLETION_VALIDATION_VERSION, GeometryProvenance, ImportProvenance,
-        SESSION_COMPLETION_FORMAT, SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT,
-        SESSION_MANIFEST_VERSION, SessionCompletion, SessionGeometry, SessionLineage,
-        SessionManifest, canonical_manifest_bytes, manifest_hash,
+        COMPLETION_VALIDATION_VERSION, GeometryProvenance, ImportProvenance, ResourceLimitKind,
+        ResourceLimitOutcome, ResourceLimits, SESSION_COMPLETION_FORMAT,
+        SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
+        SessionCompletion, SessionGeometry, SessionLineage, SessionManifest,
+        canonical_manifest_bytes, manifest_hash,
     },
     terminal_mode::RawTerminalGuard,
 };
@@ -110,6 +111,8 @@ pub struct RecordOptions {
     pub ghostty_profile: Option<ResolvedGhosttyProfile>,
     /// Terminal identity exposed to the child.
     pub term: String,
+    /// Deterministic child-environment policy.
+    pub environment: EnvironmentSpec,
     /// Default colors exposed by the terminal host and pinned into replay.
     pub colors: TerminalColors,
     /// Forward standard input to the child PTY.
@@ -118,6 +121,8 @@ pub struct RecordOptions {
     pub durability_policy: DurabilityPolicy,
     /// Sensitivity-aware execution provenance collection policy.
     pub provenance_policy: ProvenancePolicy,
+    /// Runtime limits that terminate runaway work without truncating evidence.
+    pub resource_limits: ResourceLimits,
 }
 
 /// Completed command information.
@@ -213,11 +218,13 @@ struct RuntimeWorkers {
 struct RuntimeOutcome {
     status: ExitStatus,
     output_bytes: u64,
+    resource_limit: Option<ResourceLimitOutcome>,
 }
 
 struct RuntimeProgress {
     output_closed: bool,
     output_bytes: u64,
+    resource_limit: Option<ResourceLimitOutcome>,
 }
 
 struct InputApplication {
@@ -350,7 +357,7 @@ struct LiveTerminal {
 
 struct ScreenWaiter {
     request_id: Uuid,
-    predicate: ScreenPredicate,
+    predicate: Option<ScreenPredicate>,
     stable_for: Duration,
     deadline: Instant,
     matching_state: Option<(String, Instant, u64)>,
@@ -390,6 +397,7 @@ pub fn record(options: &RecordOptions) -> Result<RecordOutcome> {
 
 fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordOutcome> {
     let pty_size = validate_options(options)?;
+    let effective_environment = options.environment.resolve(&options.term)?;
     // Resolve this once and pass the same owned path to provenance and spawn.
     // Leaving cwd unset is not equivalent: portable-pty falls back to $HOME,
     // which would make a wrapper command silently leave the caller's project.
@@ -411,6 +419,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         pty_size,
         session_id,
         clock.started_unix_ns(),
+        &effective_environment,
     )?;
     let header = EventLogHeader::new(
         session_id,
@@ -431,7 +440,12 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         options.durability_policy.clone(),
     )?;
 
-    let mut spawned = spawn_command(options, &working_directory, pty_size)?;
+    let mut spawned = spawn_command(
+        options,
+        &working_directory,
+        pty_size,
+        &effective_environment,
+    )?;
     if let Err(error) = event_log.append(Event::Lifecycle {
         lifecycle_kind: LifecycleKind::Spawned,
         pid: spawned.pid,
@@ -448,6 +462,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         TerminalGeometry::from(pty_size),
         &options.output_directory,
         &options.colors,
+        &options.resource_limits,
     ) {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -486,6 +501,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
             event_count: event_log.next_seq(),
             terminal_event_seq,
             durability: event_log.durability_record(),
+            resource_limit: runtime.resource_limit,
         },
     )?;
 
@@ -503,10 +519,8 @@ fn write_session_manifest(
     size: PtySize,
     session_id: Uuid,
     started_unix_ns: u128,
+    effective_environment: &EffectiveEnvironment,
 ) -> Result<String> {
-    let mut child_environment = BTreeMap::new();
-    child_environment.insert("COLORTERM".to_owned(), "truecolor".to_owned());
-    child_environment.insert("TERM".to_owned(), options.term.clone());
     let manifest = SessionManifest {
         format: SESSION_MANIFEST_FORMAT.to_owned(),
         version: SESSION_MANIFEST_VERSION,
@@ -534,11 +548,11 @@ fn write_session_manifest(
             .map(|profile| return profile.provenance.clone()),
         execution_provenance: collect_execution_provenance(
             &options.provenance_policy,
-            &child_environment,
+            effective_environment,
             &options.command,
             working_directory,
         ),
-        child_environment,
+        child_environment: effective_environment.policy().clone(),
         termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
         operating_system: OS.to_owned(),
         architecture: ARCH.to_owned(),
@@ -547,6 +561,7 @@ fn write_session_manifest(
         request_journal: MUTATION_JOURNAL_NAME.to_owned(),
         contains_sensitive_terminal_data: true,
         durability_policy: options.durability_policy.clone(),
+        resource_limits: options.resource_limits.clone(),
     };
     let encoded = canonical_manifest_bytes(&manifest)?;
     let hash = manifest_hash(&encoded);
@@ -576,6 +591,13 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
     if options.command.is_empty() {
         return Err(terminal_error("validate command", "command is empty"));
     }
+    if options.resource_limits.output_bytes == Some(0) {
+        return Err(terminal_error(
+            "validate resource limits",
+            "resource budgets must be greater than zero",
+        ));
+    }
+    options.environment.validate()?;
     let pixel_width = options
         .cols
         .checked_mul(options.cell_width_px)
@@ -603,6 +625,7 @@ fn spawn_command(
     options: &RecordOptions,
     working_directory: &Path,
     pty_size: PtySize,
+    effective_environment: &EffectiveEnvironment,
 ) -> Result<SpawnedCommand> {
     let pair = native_pty_system()
         .openpty(pty_size)
@@ -612,8 +635,10 @@ fn spawn_command(
     };
     let mut command = CommandBuilder::new(program);
     command.args(arguments);
-    command.env("TERM", &options.term);
-    command.env("COLORTERM", "truecolor");
+    command.env_clear();
+    for (name, value) in effective_environment.variables() {
+        command.env(name, value);
+    }
     command.cwd(working_directory);
 
     let reader = pair
@@ -678,6 +703,7 @@ fn consume_runtime(
     initial_geometry: TerminalGeometry,
     session_directory: &Path,
     colors: &TerminalColors,
+    resource_limits: &ResourceLimits,
 ) -> Result<RuntimeOutcome> {
     let mut semantic = GhosttyVt::new(initial_geometry.cols, initial_geometry.rows, 100_000)?;
     semantic.apply_terminal_colors(colors)?;
@@ -711,10 +737,12 @@ fn consume_runtime(
     let mut progress = RuntimeProgress {
         output_closed: false,
         output_bytes: 0,
+        resource_limit: None,
     };
     let mut exit_status = None;
     let mut drain_deadline: Option<Instant> = None;
     let mut process_group_killed = false;
+    let mut resource_kill_deadline: Option<Instant> = None;
     let result = (|| {
         while !progress.output_closed || exit_status.is_none() {
             match receiver.recv_timeout(Duration::from_millis(10)) {
@@ -737,7 +765,40 @@ fn consume_runtime(
                 Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => {}
             }
             event_log.flush_due()?;
-            evaluate_screen_waiters(event_log, &live_terminal, &mut screen_waiters, false)?;
+            evaluate_screen_waiters(
+                event_log,
+                &live_terminal,
+                &mut screen_waiters,
+                false,
+                progress.output_closed,
+            )?;
+
+            if progress.resource_limit.is_none()
+                && let Some(limit) = resource_limits.output_bytes
+                && progress.output_bytes > limit
+            {
+                let outcome = ResourceLimitOutcome {
+                    kind: ResourceLimitKind::OutputBytes,
+                    limit,
+                    observed: progress.output_bytes,
+                };
+                event_log.append(Event::HostError {
+                    code: "output_budget_exceeded".to_owned(),
+                    message: format!(
+                        "output budget of {limit} bytes was exceeded at {} observed bytes; every observed byte was retained",
+                        progress.output_bytes
+                    ),
+                })?;
+                apply_signal(
+                    spawned.pid,
+                    event_log,
+                    Uuid::now_v7(),
+                    ProcessSignal::Terminate,
+                    true,
+                )?;
+                progress.resource_limit = Some(outcome);
+                resource_kill_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
+            }
 
             if exit_status.is_none() {
                 exit_status = spawned
@@ -747,6 +808,27 @@ fn consume_runtime(
                 if exit_status.is_some() && !progress.output_closed {
                     drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
                 }
+            }
+            if exit_status.is_some() && !progress.output_closed {
+                evaluate_screen_waiters(
+                    event_log,
+                    &live_terminal,
+                    &mut screen_waiters,
+                    true,
+                    false,
+                )?;
+            }
+            if exit_status.is_none()
+                && resource_kill_deadline.is_some_and(|deadline| return Instant::now() >= deadline)
+                && !process_group_killed
+            {
+                event_log.append(Event::HostError {
+                    code: "output_budget_force_kill".to_owned(),
+                    message: "child did not exit after output-budget termination; process group was killed"
+                        .to_owned(),
+                })?;
+                terminate_process_group(spawned.pid);
+                process_group_killed = true;
             }
             if drain_deadline.is_some_and(|deadline| return Instant::now() >= deadline)
                 && !progress.output_closed
@@ -762,7 +844,13 @@ fn consume_runtime(
                 drain_deadline = Some(Instant::now() + DESCENDANT_DRAIN_TIMEOUT);
             }
         }
-        evaluate_screen_waiters(event_log, &live_terminal, &mut screen_waiters, true)?;
+        evaluate_screen_waiters(
+            event_log,
+            &live_terminal,
+            &mut screen_waiters,
+            true,
+            progress.output_closed,
+        )?;
         fail_screen_waiters(
             &mut screen_waiters,
             "child_completed",
@@ -781,6 +869,7 @@ fn consume_runtime(
     return Ok(RuntimeOutcome {
         status,
         output_bytes: progress.output_bytes,
+        resource_limit: progress.resource_limit,
     });
 }
 
@@ -1134,7 +1223,8 @@ fn handle_control_connection(
         );
     }
     let response_timeout = match &request.command {
-        ControlCommand::WaitScreen { timeout_ns, .. } => {
+        ControlCommand::WaitScreen { timeout_ns, .. }
+        | ControlCommand::CaptureStable { timeout_ns, .. } => {
             Duration::from_nanos(*timeout_ns).saturating_add(Duration::from_secs(1))
         }
         _ => Duration::from_secs(10),
@@ -1315,6 +1405,7 @@ fn handle_control_request(
                 | ControlCommand::Status
                 | ControlCommand::Snapshot
                 | ControlCommand::WaitScreen { .. }
+                | ControlCommand::CaptureStable { .. }
         )
     {
         let response = control_error_response(
@@ -1355,7 +1446,40 @@ fn handle_control_request(
         }
         screen_waiters.push(ScreenWaiter {
             request_id: request.request_id,
-            predicate: predicate.clone(),
+            predicate: Some(predicate.clone()),
+            stable_for: Duration::from_nanos(*stable_for_ns),
+            deadline: Instant::now() + Duration::from_nanos(*timeout_ns),
+            matching_state: None,
+            response: response_sender,
+        });
+        return Ok(());
+    }
+    if let ControlCommand::CaptureStable {
+        stable_for_ns,
+        timeout_ns,
+    } = &request.command
+    {
+        if *timeout_ns == 0 || *timeout_ns > 3_600_000_000_000 || *stable_for_ns > *timeout_ns {
+            let response = control_error_response(
+                request.request_id,
+                "invalid_stable_capture",
+                "durations must satisfy stable <= timeout <= 1h and timeout must be nonzero",
+            );
+            let _ = response_sender.send(response);
+            return Ok(());
+        }
+        if screen_waiters.len() >= MAX_SCREEN_WAITERS {
+            let response = control_error_response(
+                request.request_id,
+                "waiter_limit_reached",
+                "session screen waiter limit has been reached",
+            );
+            let _ = response_sender.send(response);
+            return Ok(());
+        }
+        screen_waiters.push(ScreenWaiter {
+            request_id: request.request_id,
+            predicate: None,
             stable_for: Duration::from_nanos(*stable_for_ns),
             deadline: Instant::now() + Duration::from_nanos(*timeout_ns),
             matching_state: None,
@@ -1365,7 +1489,10 @@ fn handle_control_request(
     }
     let read_only = matches!(
         request.command,
-        ControlCommand::Ping | ControlCommand::Status | ControlCommand::Snapshot
+        ControlCommand::Ping
+            | ControlCommand::Status
+            | ControlCommand::Snapshot
+            | ControlCommand::CaptureStable { .. }
     );
     let command_hash = if read_only {
         None
@@ -1501,10 +1628,10 @@ fn execute_control_command(
                 boundaries: actor_boundaries(event_log),
             });
         }
-        ControlCommand::WaitScreen { .. } => {
+        ControlCommand::WaitScreen { .. } | ControlCommand::CaptureStable { .. } => {
             return Err(control_rejected(
                 "invalid_screen_wait_dispatch",
-                "screen waits must be registered asynchronously",
+                "screen waits and stable captures must be registered asynchronously",
             ));
         }
         ControlCommand::Input {
@@ -2078,7 +2205,7 @@ fn execute_control_command(
             });
         }
         ControlCommand::Signal { signal } => {
-            apply_signal(spawned.pid, event_log, request_id, *signal)?;
+            apply_signal(spawned.pid, event_log, request_id, *signal, false)?;
             return Ok(ControlData::Acknowledged {
                 boundaries: actor_boundaries(event_log),
             });
@@ -2102,7 +2229,13 @@ fn execute_control_command(
             });
         }
         ControlCommand::Stop => {
-            apply_signal(spawned.pid, event_log, request_id, ProcessSignal::Terminate)?;
+            apply_signal(
+                spawned.pid,
+                event_log,
+                request_id,
+                ProcessSignal::Terminate,
+                false,
+            )?;
             return Ok(ControlData::Acknowledged {
                 boundaries: actor_boundaries(event_log),
             });
@@ -2136,6 +2269,7 @@ fn evaluate_screen_waiters(
     live: &LiveTerminal,
     waiters: &mut Vec<ScreenWaiter>,
     child_completed: bool,
+    output_closed: bool,
 ) -> Result<()> {
     if waiters.is_empty() {
         return Ok(());
@@ -2152,12 +2286,14 @@ fn evaluate_screen_waiters(
         let Some(waiter) = waiters.get_mut(index) else {
             break;
         };
-        let matched = evaluate_screen_predicate(
-            &waiter.predicate,
-            &live.presented,
-            &viewport_text,
-            &state_hash,
-        );
+        let matched = waiter.predicate.as_ref().is_none_or(|predicate| {
+            return evaluate_screen_predicate(
+                predicate,
+                &live.presented,
+                &viewport_text,
+                &state_hash,
+            );
+        });
         if matched {
             match &waiter.matching_state {
                 Some((prior_hash, _, _)) if prior_hash == &state_hash => {}
@@ -2168,11 +2304,34 @@ fn evaluate_screen_waiters(
         } else {
             waiter.matching_state = None;
         }
-        let stable = waiter.matching_state.as_ref().is_some_and(|(_, since, _)| {
-            return child_completed || since.elapsed() >= waiter.stable_for;
+        let stable = waiter
+            .matching_state
+            .as_ref()
+            .is_some_and(|(_, since, _)| return since.elapsed() >= waiter.stable_for);
+        let capture_quality = waiter.predicate.is_none().then(|| {
+            if stable {
+                return StableCaptureQuality::Stable;
+            }
+            if child_completed {
+                return StableCaptureQuality::ChildCompleted;
+            }
+            if output_closed {
+                return StableCaptureQuality::OutputClosed;
+            }
+            return StableCaptureQuality::Deadline;
         });
-        if stable {
+        let capture_finished = waiter.predicate.is_none()
+            && (stable || child_completed || output_closed || now >= waiter.deadline);
+        let predicate_stable =
+            stable || (child_completed && output_closed && waiter.matching_state.is_some());
+        if predicate_stable && waiter.predicate.is_some() {
             let waiter = waiters.remove(index);
+            let Some(predicate) = waiter.predicate else {
+                return Err(terminal_error(
+                    "complete screen waiter",
+                    "predicate waiter lost its predicate",
+                ));
+            };
             let first_match_monotonic_ns = waiter
                 .matching_state
                 .as_ref()
@@ -2182,7 +2341,7 @@ fn evaluate_screen_waiters(
                 request_id: waiter.request_id,
                 result: ControlResult::Ok {
                     data: ControlData::ScreenWait {
-                        predicate: waiter.predicate,
+                        predicate,
                         state_hash: state_hash.clone(),
                         first_match_monotonic_ns,
                         stable_through_monotonic_ns: observed_monotonic_ns,
@@ -2197,6 +2356,47 @@ fn evaluate_screen_waiters(
                             "stable".to_owned()
                         },
                         child_completed,
+                    },
+                },
+            };
+            let _ = waiter.response.send(response);
+            continue;
+        }
+        if capture_finished {
+            let waiter = waiters.remove(index);
+            let Some(quality) = capture_quality else {
+                return Err(terminal_error(
+                    "complete stable capture",
+                    "capture waiter lost its typed quality",
+                ));
+            };
+            let first_observed_monotonic_ns = waiter
+                .matching_state
+                .as_ref()
+                .map_or(observed_monotonic_ns, |(_, _, value)| return *value);
+            let compressed = encode_all(state_bytes.as_slice(), 3).map_err(|error| {
+                return terminal_error("compress stable screen state", error.to_string());
+            })?;
+            let response = ControlResponse {
+                version: CONTROL_PROTOCOL_VERSION,
+                request_id: waiter.request_id,
+                result: ControlResult::Ok {
+                    data: ControlData::StableSnapshot {
+                        semantic_state_zstd: ByteString::from(compressed),
+                        viewport_text: viewport_text.clone(),
+                        state_hash: state_hash.clone(),
+                        cols: live.presented.cols,
+                        rows: live.presented.rows,
+                        cursor_column: live.presented.cursor.column,
+                        cursor_row: live.presented.cursor.row,
+                        cursor_visible: live.presented.cursor.visible,
+                        first_observed_monotonic_ns,
+                        observed_monotonic_ns,
+                        stable_for_ns: u64::try_from(waiter.stable_for.as_nanos())
+                            .unwrap_or(u64::MAX),
+                        quality,
+                        modes: live.presented.modes.clone(),
+                        boundaries: actor_boundaries(event_log),
                     },
                 },
             };
@@ -2441,6 +2641,7 @@ fn apply_signal(
     event_log: &mut EventLogWriter,
     operation_id: Uuid,
     signal: ProcessSignal,
+    missing_is_ok: bool,
 ) -> Result<()> {
     let (signal, name) = nix_signal(signal);
     event_log.append(Event::SignalIntent {
@@ -2470,6 +2671,9 @@ fn apply_signal(
     let Some(error) = signal_result.err() else {
         return result_write;
     };
+    if missing_is_ok && error == Errno::ESRCH {
+        return result_write;
+    }
     return finish_with_cleanup(
         Err(terminal_error(
             "signal child process group",
@@ -3061,16 +3265,21 @@ fn terminal_error(operation: &'static str, reason: impl Into<String>) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use std::{os::unix::fs::PermissionsExt as _, time::Instant};
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        os::unix::fs::PermissionsExt as _,
+        time::Instant,
+    };
 
     use tempfile::TempDir;
 
     use super::*;
     use crate::{
         control::ControlResult,
+        environment::EnvironmentBase,
         event::Event,
         event_log::{CanonicalBoundary, EventLog},
-        session::{SessionCompletion, SessionManifest},
+        session::{SessionCompletion, SessionManifest, validate_completed_log},
     };
 
     fn cached_test_response(request_id: Uuid, next_event_seq: u64) -> ControlResponse {
@@ -3091,6 +3300,172 @@ mod tests {
                 },
             },
         };
+    }
+
+    fn isolated_options(output_directory: PathBuf, command: Vec<OsString>) -> RecordOptions {
+        return RecordOptions {
+            output_directory,
+            creation_alias: None,
+            lineage: None,
+            import_provenance: None,
+            command,
+            working_directory: None,
+            cols: 80,
+            rows: 24,
+            cell_width_px: 9,
+            cell_height_px: 18,
+            geometry_provenance: GeometryProvenance::default(),
+            ghostty_profile: None,
+            term: "xterm-ghostty".to_owned(),
+            environment: EnvironmentSpec::default(),
+            colors: TerminalColors::default(),
+            forward_stdin: false,
+            durability_policy: DurabilityPolicy::default(),
+            provenance_policy: ProvenancePolicy::default(),
+            resource_limits: ResourceLimits::default(),
+        };
+    }
+
+    #[test]
+    fn clear_environment_is_exact_and_secret_values_do_not_enter_evidence() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let session = temporary.path().join("isolated");
+        let secret = b"not-for-any-artifact";
+        let mut options = isolated_options(
+            session.clone(),
+            vec![
+                OsString::from("/bin/sh"),
+                OsString::from("-c"),
+                OsString::from(
+                    "test \"${#TERMTRACE_PRIVATE_TOKEN}\" -eq 20; test -z \"${HOME+x}\"",
+                ),
+            ],
+        );
+        options.environment = EnvironmentSpec {
+            base: EnvironmentBase::Clear,
+            set: BTreeMap::from([(
+                "TERMTRACE_PRIVATE_TOKEN".to_owned(),
+                ByteString::from(secret.as_slice()),
+            )]),
+            ..EnvironmentSpec::default()
+        };
+
+        let outcome = record(&options).expect("isolated recording");
+        assert_eq!(outcome.exit_code, Some(0));
+        let manifest: SessionManifest =
+            serde_json::from_slice(&fs_err::read(session.join("session.json")).expect("manifest"))
+                .expect("manifest JSON");
+        assert_eq!(
+            manifest.child_environment.explicit_names,
+            BTreeSet::from(["TERMTRACE_PRIVATE_TOKEN".to_owned()])
+        );
+        for entry in fs_err::read_dir(&session).expect("session entries") {
+            let path = entry.expect("entry").path();
+            if path.is_file() {
+                let bytes = fs_err::read(&path).expect("artifact bytes");
+                assert!(
+                    !bytes
+                        .windows(secret.len())
+                        .any(|window| return window == secret),
+                    "secret leaked into {}",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn output_budget_retains_observed_bytes_and_records_termination() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let session = temporary.path().join("budget");
+        let mut options = isolated_options(
+            session.clone(),
+            vec![
+                OsString::from("/usr/bin/python3"),
+                OsString::from("-c"),
+                OsString::from("import os,time; os.write(1,b'x'*131072); time.sleep(30)"),
+            ],
+        );
+        options.resource_limits.output_bytes = Some(1024);
+
+        let outcome = record(&options).expect("budgeted recording");
+        assert!(outcome.output_bytes > 1024);
+        let completion: SessionCompletion = serde_json::from_slice(
+            &fs_err::read(session.join("completion.json")).expect("completion"),
+        )
+        .expect("completion JSON");
+        let limit = completion.resource_limit.expect("resource outcome");
+        assert_eq!(limit.kind, ResourceLimitKind::OutputBytes);
+        assert_eq!(limit.limit, 1024);
+        assert!(limit.observed > limit.limit);
+        assert_eq!(completion.output_bytes, outcome.output_bytes);
+        let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+        let retained = log.events.iter().fold(0_u64, |total, record| {
+            return total
+                + match &record.event {
+                    Event::Output { data } => data.as_bytes().len() as u64,
+                    _ => 0,
+                };
+        });
+        assert_eq!(retained, completion.output_bytes);
+        let signal_operation = log.events.iter().find_map(|record| {
+            return match &record.event {
+                Event::SignalIntent {
+                    operation_id, name, ..
+                } if name == "SIGTERM" => Some(*operation_id),
+                _ => None,
+            };
+        });
+        assert!(signal_operation.is_some());
+        assert!(log.events.iter().any(|record| {
+            return matches!(
+                &record.event,
+                Event::SignalResult { operation_id, .. }
+                    if Some(*operation_id) == signal_operation
+            );
+        }));
+        assert!(log.events.iter().any(|record| {
+            return matches!(
+                &record.event,
+                Event::HostError { code, .. } if code == "output_budget_exceeded"
+            );
+        }));
+        validate_completed_log(&session, &log).expect("valid completed budget evidence");
+    }
+
+    #[test]
+    fn spawn_and_provenance_share_the_effective_child_path() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let executable = temporary.path().join("child-path-command");
+        fs_err::write(&executable, b"#!/bin/sh\nprintf CHILD_PATH\n").expect("fixture");
+        fs_err::set_permissions(&executable, Permissions::from_mode(0o700)).expect("mode");
+        let session = temporary.path().join("child-path");
+        let mut options =
+            isolated_options(session.clone(), vec![OsString::from("child-path-command")]);
+        options.environment = EnvironmentSpec {
+            base: EnvironmentBase::Clear,
+            set: BTreeMap::from([(
+                "PATH".to_owned(),
+                ByteString::from(temporary.path().as_os_str().as_bytes()),
+            )]),
+            ..EnvironmentSpec::default()
+        };
+        let mut output = Vec::new();
+        let outcome = record_to(&options, &mut output).expect("record child PATH command");
+        assert_eq!(outcome.exit_code, Some(0));
+        assert_eq!(output, b"CHILD_PATH");
+        let manifest: SessionManifest =
+            serde_json::from_slice(&fs_err::read(session.join("session.json")).expect("manifest"))
+                .expect("manifest JSON");
+        assert_eq!(
+            manifest
+                .execution_provenance
+                .executable
+                .resolved
+                .as_ref()
+                .map(ByteString::as_bytes),
+            Some(executable.as_os_str().as_bytes())
+        );
     }
 
     #[test]
@@ -3158,10 +3533,12 @@ mod tests {
             geometry_provenance: GeometryProvenance::default(),
             ghostty_profile: None,
             term: "xterm-ghostty".to_owned(),
+            environment: EnvironmentSpec::default(),
             colors: TerminalColors::default(),
             forward_stdin: false,
             durability_policy: DurabilityPolicy::default(),
             provenance_policy: ProvenancePolicy::default(),
+            resource_limits: ResourceLimits::default(),
         };
 
         let mut mirrored_output = Vec::new();
@@ -3255,10 +3632,12 @@ mod tests {
             geometry_provenance: GeometryProvenance::default(),
             ghostty_profile: None,
             term: "xterm-ghostty".to_owned(),
+            environment: EnvironmentSpec::default(),
             colors: TerminalColors::default(),
             forward_stdin: false,
             durability_policy: DurabilityPolicy::default(),
             provenance_policy: ProvenancePolicy::default(),
+            resource_limits: ResourceLimits::default(),
         };
 
         let error = record(&options).expect_err("existing directory must fail");
@@ -3286,10 +3665,12 @@ mod tests {
             geometry_provenance: GeometryProvenance::default(),
             ghostty_profile: None,
             term: "xterm-ghostty".to_owned(),
+            environment: EnvironmentSpec::default(),
             colors: TerminalColors::default(),
             forward_stdin: false,
             durability_policy: DurabilityPolicy::default(),
             provenance_policy: ProvenancePolicy::default(),
+            resource_limits: ResourceLimits::default(),
         };
         let started = Instant::now();
         let mut output = Vec::new();
@@ -3327,10 +3708,12 @@ mod tests {
             geometry_provenance: GeometryProvenance::default(),
             ghostty_profile: None,
             term: "xterm-ghostty".to_owned(),
+            environment: EnvironmentSpec::default(),
             colors: TerminalColors::default(),
             forward_stdin: false,
             durability_policy: DurabilityPolicy::default(),
             provenance_policy: ProvenancePolicy::default(),
+            resource_limits: ResourceLimits::default(),
         };
         let mut output = Vec::new();
 
@@ -3375,10 +3758,12 @@ mod tests {
             geometry_provenance: GeometryProvenance::default(),
             ghostty_profile: None,
             term: "xterm-ghostty".to_owned(),
+            environment: EnvironmentSpec::default(),
             colors: TerminalColors::default(),
             forward_stdin: false,
             durability_policy: DurabilityPolicy::default(),
             provenance_policy: ProvenancePolicy::default(),
+            resource_limits: ResourceLimits::default(),
         };
         let mut output = Vec::new();
 

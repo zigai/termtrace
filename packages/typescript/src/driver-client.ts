@@ -40,7 +40,7 @@ export class DriverClient {
     }
     return new Promise<JsonObject>((resolve, reject) => {
       this.#pending.push({ requestId, resolve, reject });
-      this.#process.stdin.write(`${JSON.stringify({ version: 1, request_id: requestId, method })}\n`);
+      this.#process.stdin.write(`${JSON.stringify({ version: 2, request_id: requestId, method })}\n`);
     });
   }
 

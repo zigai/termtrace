@@ -10,9 +10,11 @@ from pathlib import Path
 
 COMMANDS = (
     "start",
+    "restart",
     "status",
     "send",
     "wait",
+    "wait-idle",
     "show",
     "output",
     "events",

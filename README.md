@@ -6,6 +6,7 @@ Termtrace records terminal and TUI sessions so you can review what happened with
 
 - **Recording** — run commands interactively or in the background
 - **Live control** — view the screen, wait for changes, and send input
+- **Isolated launches** — clear/copy/set/unset environment policy, deterministic color behavior, secret-safe transport, and non-truncating output budgets
 - **Replay** — inspect every terminal state, including brief changes
 - **Review** — browse timelines, compare states, and diagnose rendering issues
 - **Capture** — create text, JSON, HTML, screenshots, native or semantic video, and asciinema exports
@@ -49,6 +50,7 @@ Use a name when you want to start a command in the background and control it fro
 ```bash
 termtrace start demo --cols 120 --rows 36 your-command
 termtrace wait demo 'Ready' --stable-for 250ms
+termtrace wait-idle demo --stable-for 250ms
 termtrace send demo text:'help' enter
 termtrace show demo
 termtrace stop demo --wait
@@ -109,6 +111,7 @@ The byte-exact event log is canonical. It records PTY output alongside input, re
 
 - [Install Termtrace](docs/installation.md)
 - [Record a session](docs/recording.md)
+- [Deterministic test isolation](docs/test-isolation.md)
 - [Control and inspect a running session](docs/agent-workflows.md)
 - [Understand replay](docs/semantic-replay.md)
 - [Understand the saved files](docs/formats.md)

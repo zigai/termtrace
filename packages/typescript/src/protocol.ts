@@ -37,7 +37,7 @@ export type DriverResponse =
 /** Parse and correlate one untrusted driver response. */
 export function parseDriverResponse(input: unknown, expectedRequestId: string): DriverResponse {
   const root = parseObject(input, "response");
-  if (root.version !== 1 || root.request_id !== expectedRequestId) {
+  if (root.version !== 2 || root.request_id !== expectedRequestId) {
     throw new TermtraceProtocolError("driver response version or request ID does not match");
   }
   const result = parseObject(root.result, "response.result");
