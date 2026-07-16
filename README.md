@@ -12,15 +12,19 @@ Termtrace records terminal and TUI sessions so you can review what happened with
 - **Verification** — check integrity, recover damaged recordings, and detect changes
 - **Automation** — run terminal tests from the CLI, Python, TypeScript, or Rust
 
-## Getting started
+## Install
 
-Bootstrap the native dependency, build the release binary, and check what your machine supports:
+Install the latest prebuilt Linux release without Rust, Zig, or a source checkout:
 
 ```bash
-scripts/bootstrap.sh
-cargo build --release
-target/release/termtrace doctor --explain
+curl -LsSf https://github.com/zigai/termtrace/raw/main/install.sh | bash
+export PATH="$HOME/.local/bin:$PATH"
+termtrace doctor --explain
 ```
+
+The high-level [`install.sh`](install.sh) script verifies the release checksum and installs to `~/.local/bin` by default. For a stable, pinned installer, use the copy attached to a release. See [Installation](docs/installation.md) for pinned versions, private-repository access, manual verification, and source builds.
+
+## Getting started
 
 Record any command directly after the recording options:
 
@@ -111,4 +115,4 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 ```
 
-See [Installation](docs/installation.md#build-from-source) for build requirements.
+See [Installation](docs/installation.md#build-from-source) for contributor build requirements.

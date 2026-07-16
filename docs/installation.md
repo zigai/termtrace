@@ -2,6 +2,46 @@
 
 Termtrace currently targets Linux. Recording and semantic replay work on x86_64 and aarch64; native capture requires additional GUI and media tools.
 
+## Quick install
+
+Install the latest prebuilt release without cloning the repository or installing Rust and Zig:
+
+```bash
+curl -LsSf https://github.com/zigai/termtrace/raw/main/install.sh | bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+The high-level [`install.sh`](../install.sh) script detects the current architecture, verifies the archive's SHA-256 checksum, installs `termtrace` to `~/.local/bin`, and checks the core and semantic capabilities. It never invokes `sudo` or installs optional system packages. Because this command follows `main`, use the release-attached copy when you need a pinned installer:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/zigai/termtrace/releases/latest/download/termtrace-installer.sh | bash
+```
+
+Install a specific version or choose another destination with:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/zigai/termtrace/releases/latest/download/termtrace-installer.sh \
+  | bash -s -- --version 0.1.0 --install-dir "$HOME/bin"
+```
+
+Rerun the installer to upgrade or replace an installation. Remove the installed binary to uninstall it.
+
+### Private repository access
+
+Release downloads from a private repository require an authenticated GitHub CLI. Download and run the installer with:
+
+```bash
+gh auth status
+work=$(mktemp -d)
+gh release download --repo zigai/termtrace --pattern termtrace-installer.sh --dir "$work"
+bash "$work/termtrace-installer.sh"
+rm -rf "$work"
+```
+
+The installer first attempts an ordinary release download, then uses the authenticated `gh` command when the repository is private.
+
 ## Check capabilities
 
 After installing, run:
@@ -19,19 +59,21 @@ termtrace doctor --require core,semantic
 termtrace doctor --require native-screenshot,presentation
 ```
 
-## Release archives
+## Manual release archive
 
-Tagged releases provide Linux core and semantic archives for x86_64 and aarch64. Each archive includes checksums, an SBOM, provenance metadata, and cargo-binstall metadata.
+Tagged releases provide Linux core and semantic archives for x86_64 and aarch64. Release assets also include SHA-256 and BLAKE3 checksums, an SBOM, and GitHub build-provenance attestations. The binaries target glibc 2.28 or newer.
 
-Verify a downloaded archive before installation:
+Download the archive and matching `.sha256` file, then verify and install it:
 
 ```bash
-sha256sum --check termtrace-TARGET.tar.zst.sha256
-b3sum --check termtrace-TARGET.tar.zst.blake3
-scripts/validate-release-archive.sh termtrace-TARGET.tar.zst
+sha256sum --check termtrace-TARGET.tar.gz.sha256
+tar -xzf termtrace-TARGET.tar.gz
+mkdir -p "$HOME/.local/bin"
+install -m 0555 termtrace-TARGET/termtrace "$HOME/.local/bin/termtrace"
+termtrace doctor --require core,semantic
 ```
 
-The validation script tests recording, content verification, and semantic replay. Run `doctor` on the destination machine to establish native capabilities.
+The repository's `scripts/validate-release-archive.sh` performs a deeper recording, content-verification, and semantic-replay smoke test. Run `doctor` on the destination machine to establish native capabilities. GitHub documents independent attestation verification in [Verifying the integrity of a release](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity).
 
 ## Build from source
 
@@ -54,7 +96,7 @@ cargo install --path .
 
 Set `TERMTRACE_GHOSTTY_PREFIX` only when intentionally testing a compatible external semantic-library build.
 
-## Core requirements
+## Source build requirements
 
 - Rust 1.91.1, selected by `rust-toolchain.toml`
 - Git with submodule support
