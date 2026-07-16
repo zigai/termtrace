@@ -46,6 +46,9 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: bun install --frozen-lockfile
         working-directory: packages/typescript
+      - run: scripts/generate-client-protocol.sh
+      - name: Check generated client contracts
+        run: git diff --exit-code -- packages/python/src/termtrace/_generated packages/typescript/src/generated
       - run: bun test
         working-directory: packages/typescript
       - run: node --check bin/termtrace.js
@@ -55,4 +58,6 @@ jobs:
       - run: bunx tsc -p tsconfig.test.json --noEmit
         working-directory: packages/typescript
       - run: uv run --project packages/python --with pytest pytest -q packages/python/tests
-      - run: uv run --project packages/python --with ruff ruff check packages/python/src/termtrace/client.py packages/python/src/termtrace/async_client.py packages/python/src/termtrace/models.py packages/python/src/termtrace/errors.py packages/python/src/termtrace/binary.py
+      - run: uv run --project packages/python --with mypy --with pytest mypy packages/python/src packages/python/tests
+      - run: uv run --project packages/python --with ruff ruff check packages/python/src/termtrace packages/python/scripts packages/python/tests --exclude packages/python/src/termtrace/_generated
+      - run: uv run --project packages/python --with ruff ruff format --check packages/python/src/termtrace packages/python/scripts packages/python/tests --exclude packages/python/src/termtrace/_generated

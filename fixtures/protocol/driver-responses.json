@@ -1,0 +1,90 @@
+{
+  "valid": [
+    {
+      "name": "hello",
+      "response": {
+        "version": 2,
+        "request_id": "00000000-0000-0000-0000-000000000001",
+        "result": {
+          "status": "ok",
+          "data": {
+            "kind": "hello",
+            "driver_protocol_version": 2,
+            "control_protocol_version": 1,
+            "event_log_version": 1,
+            "state_format_version": 1,
+            "methods": ["hello", "launch", "attach"],
+            "max_message_bytes": 16777216
+          }
+        }
+      }
+    },
+    {
+      "name": "attached",
+      "response": {
+        "version": 2,
+        "request_id": "00000000-0000-0000-0000-000000000002",
+        "result": {
+          "status": "ok",
+          "data": {
+            "kind": "attached",
+            "handle": "00000000-0000-0000-0000-000000000010",
+            "session_id": "00000000-0000-0000-0000-000000000011",
+            "canonical_session": "/tmp/example.termtrace",
+            "completed": false
+          }
+        }
+      }
+    },
+    {
+      "name": "operation-error",
+      "response": {
+        "version": 2,
+        "request_id": "00000000-0000-0000-0000-000000000003",
+        "result": {
+          "status": "error",
+          "code": "stale_state",
+          "message": "state changed",
+          "retry_safety": "safe_new_request",
+          "uncertain": false,
+          "evidence": "/tmp/example.termtrace"
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-required-field",
+      "response": {
+        "version": 2,
+        "request_id": "00000000-0000-0000-0000-000000000004",
+        "result": {
+          "status": "ok",
+          "data": {
+            "kind": "hello",
+            "driver_protocol_version": 2,
+            "control_protocol_version": 1,
+            "event_log_version": 1,
+            "state_format_version": 1,
+            "methods": []
+          }
+        }
+      }
+    },
+    {
+      "name": "unknown-sensitive-field",
+      "response": {
+        "version": 2,
+        "request_id": "00000000-0000-0000-0000-000000000005",
+        "result": {
+          "status": "error",
+          "code": "invalid",
+          "message": "invalid response",
+          "retry_safety": "unknown",
+          "uncertain": false,
+          "secret_payload": "SECRET_SENTINEL"
+        }
+      }
+    }
+  ]
+}

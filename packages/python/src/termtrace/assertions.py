@@ -6,8 +6,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Pattern
 
+import msgspec
+
 from termtrace.client import Session
-from termtrace.models import JsonValue
+from termtrace.models import Frame, JsonValue
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,19 +28,20 @@ class TerminalSnapshot:
     rows: int
     viewport_text: str
     cursor: CursorSnapshot
-    modes: JsonValue
+    modes: dict[str, JsonValue]
 
 
-def stable_terminal_snapshot(session: Session, *, stable_for: float = 0.25) -> TerminalSnapshot:
+def stable_terminal_snapshot(
+    session: Session, *, stable_for: float = 0.25
+) -> TerminalSnapshot:
     """Prove presented-state stability and return a normalized frame."""
 
-    observed = _mapping(session.semantic.inspect(), "observation")
-    state_hash = _string(observed, "state_hash")
-    if observed.get("source_completed") is not True:
+    observed = session.semantic.inspect()
+    if not observed.source_completed:
         session.screen.wait_for(
             {
                 "predicate": "state_hash",
-                "hash": state_hash,
+                "hash": observed.state_hash,
                 "comparison": "unchanged",
             },
             stable_for=stable_for,
@@ -50,7 +53,11 @@ def assert_screen_text(session: Session, expected: str | Pattern[str]) -> None:
     """Assert against the current presented viewport, not output history."""
 
     text = session.screen.text()
-    matched = expected in text if isinstance(expected, str) else expected.search(text) is not None
+    matched = (
+        expected in text
+        if isinstance(expected, str)
+        else expected.search(text) is not None
+    )
     if not matched:
         raise AssertionError(
             f"presented screen did not match {expected!r}\n{text}\nevidence: {session.canonical_session}"
@@ -67,11 +74,16 @@ def assert_cursor(
     """Assert selected normalized cursor properties."""
 
     frame = session.screen.frame()
+    actual = {
+        "cursor_row": _optional_int(frame.cursor_row),
+        "cursor_column": _optional_int(frame.cursor_column),
+        "cursor_visible": frame.cursor_visible,
+    }
     expected = {"cursor_row": row, "cursor_column": column, "cursor_visible": visible}
     for field, value in expected.items():
-        if value is not None and frame.get(field) != value:
+        if value is not None and actual[field] != value:
             raise AssertionError(
-                f"{field} expected {value!r}, received {frame.get(field)!r}\n"
+                f"{field} expected {value!r}, received {actual[field]!r}\n"
                 f"evidence: {session.canonical_session}"
             )
 
@@ -79,12 +91,11 @@ def assert_cursor(
 def assert_no_presented_transient(session: Session) -> None:
     """Reject evidence-backed presentation-eligible transient findings."""
 
-    report = _mapping(session.semantic.diagnose(("transient",)), "report")
-    findings = report.get("findings")
-    if not isinstance(findings, list):
-        raise AssertionError("diagnostic report is missing findings")
-    if any(isinstance(item, dict) and item.get("code") == "presented_transient" for item in findings):
-        raise AssertionError(f"presented transient found\nevidence: {session.canonical_session}")
+    report = session.semantic.diagnose(("transient",))
+    if any(item.code == "presented_transient" for item in report.findings):
+        raise AssertionError(
+            f"presented transient found\nevidence: {session.canonical_session}"
+        )
 
 
 def assert_terminal_snapshot(
@@ -98,7 +109,10 @@ def assert_terminal_snapshot(
 
     snapshot = stable_terminal_snapshot(session, stable_for=stable_for)
     destination = Path(path)
-    encoded = json.dumps(asdict(snapshot), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    encoded = (
+        json.dumps(asdict(snapshot), ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n"
+    )
     if update:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(encoded, encoding="utf-8")
@@ -122,51 +136,39 @@ def regex(pattern: str) -> Pattern[str]:
     return re.compile(pattern)
 
 
-def _normalize_frame(frame: dict[str, JsonValue]) -> TerminalSnapshot:
-    modes = frame.get("modes")
+def _normalize_frame(frame: Frame) -> TerminalSnapshot:
+    modes = _json_mapping(msgspec.to_builtins(frame.modes))
     return TerminalSnapshot(
         version=1,
-        cols=_integer(frame, "cols"),
-        rows=_integer(frame, "rows"),
-        viewport_text=_string(frame, "viewport_text"),
+        cols=frame.cols,
+        rows=frame.rows,
+        viewport_text=frame.viewport_text,
         cursor=CursorSnapshot(
-            column=_optional_integer(frame, "cursor_column"),
-            row=_optional_integer(frame, "cursor_row"),
-            visible=_boolean(frame, "cursor_visible"),
+            column=_optional_int(frame.cursor_column),
+            row=_optional_int(frame.cursor_row),
+            visible=frame.cursor_visible,
         ),
         modes=modes,
     )
 
 
-def _mapping(value: dict[str, JsonValue], field: str) -> dict[str, JsonValue]:
-    item = value.get(field)
-    if not isinstance(item, dict):
-        raise AssertionError(f"{field} must be an object")
-    return item
-
-
-def _string(value: dict[str, JsonValue], field: str) -> str:
-    item = value.get(field)
-    if not isinstance(item, str):
-        raise AssertionError(f"{field} must be a string")
-    return item
-
-
-def _integer(value: dict[str, JsonValue], field: str) -> int:
-    item = value.get(field)
-    if not isinstance(item, int) or isinstance(item, bool):
-        raise AssertionError(f"{field} must be an integer")
-    return item
-
-
-def _optional_integer(value: dict[str, JsonValue], field: str) -> int | None:
-    if value.get(field) is None:
+def _optional_int(value: int | None | msgspec.UnsetType) -> int | None:
+    if value is None or value is msgspec.UNSET:
         return None
-    return _integer(value, field)
+    return value
 
 
-def _boolean(value: dict[str, JsonValue], field: str) -> bool:
-    item = value.get(field)
-    if not isinstance(item, bool):
-        raise AssertionError(f"{field} must be a boolean")
-    return item
+def _json_mapping(value: object) -> dict[str, JsonValue]:
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise AssertionError("terminal modes must encode as a JSON object")
+    return {key: _json_value(item) for key, item in value.items()}
+
+
+def _json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, dict) and all(isinstance(key, str) for key in value):
+        return {key: _json_value(item) for key, item in value.items()}
+    raise AssertionError("generated terminal model did not encode as JSON")

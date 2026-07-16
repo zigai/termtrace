@@ -4,8 +4,6 @@ import importlib
 from pathlib import Path
 from typing import Any
 
-pytest: Any = importlib.import_module("pytest")
-
 from termtrace.assertions import (
     TerminalSnapshot,
     assert_cursor,
@@ -14,6 +12,8 @@ from termtrace.assertions import (
     assert_terminal_snapshot,
 )
 from termtrace.client import Session
+
+pytest: Any = importlib.import_module("pytest")
 
 
 class TermtraceAssertions:

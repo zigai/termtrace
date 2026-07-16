@@ -1,4 +1,21 @@
-/** JSON values accepted by the newline-framed driver. */
+import validateDriverRequest from "./generated/validate-driver-request.js";
+import validateDriverResponse from "./generated/validate-driver-response.js";
+import type { DriverRequest as WireDriverRequest } from "./generated/driver-request.js";
+import type {
+  DiagnoseReport,
+  DriverResponse as WireDriverResponse,
+  EventProjection,
+  Observation,
+  ObservationFrame,
+  ScreenPredicate,
+  SemanticDiff,
+  SessionCompletion,
+  TimelineEntry,
+  VerificationReport,
+  WaitOutcome,
+} from "./generated/driver-response.js";
+
+/** JSON values accepted by the newline-framed driver request boundary. */
 export type JsonValue =
   | null
   | boolean
@@ -8,6 +25,31 @@ export type JsonValue =
   | { readonly [key: string]: JsonValue };
 
 export type JsonObject = { readonly [key: string]: JsonValue };
+
+type DriverResult = WireDriverResponse["result"];
+type DriverSuccess = Extract<DriverResult, { readonly status: "ok" }>;
+type DriverError = Extract<DriverResult, { readonly status: "error" }>;
+
+export type DriverData = DriverSuccess["data"];
+export type DriverDataKind = DriverData["kind"];
+export type DriverDataOf<Kind extends DriverDataKind> = Extract<DriverData, { readonly kind: Kind }>;
+export type ControlResult = DriverDataOf<"control">["data"];
+export type Artifact = DriverDataOf<"artifact">;
+export type BundleResult = DriverDataOf<"bundle">;
+export type EventPage = DriverDataOf<"events">;
+
+export type {
+  DiagnoseReport,
+  EventProjection,
+  Observation,
+  ObservationFrame,
+  ScreenPredicate,
+  SemanticDiff,
+  SessionCompletion,
+  TimelineEntry,
+  VerificationReport,
+  WaitOutcome,
+};
 
 export type DriverFailure = {
   readonly _tag: "DriverFailure";
@@ -31,73 +73,80 @@ export class TermtraceOperationError extends Error {
 }
 
 export type DriverResponse =
-  | { readonly _tag: "Success"; readonly data: JsonObject }
+  | { readonly _tag: "Success"; readonly data: DriverData }
   | { readonly _tag: "Failure"; readonly failure: DriverFailure };
 
-/** Parse and correlate one untrusted driver response. */
+/** Parse and correlate one untrusted driver response without exposing payload data in failures. */
 export function parseDriverResponse(input: unknown, expectedRequestId: string): DriverResponse {
-  const root = parseObject(input, "response");
+  if (!validateDriverResponse(input)) {
+    throw new TermtraceProtocolError("driver response does not match the protocol schema");
+  }
+  // SAFETY: the generated Ajv validator has proved the complete generated wire contract.
+  const root = input as WireDriverResponse;
   if (root.version !== 2 || root.request_id !== expectedRequestId) {
     throw new TermtraceProtocolError("driver response version or request ID does not match");
   }
-  const result = parseObject(root.result, "response.result");
-  if (result.status === "ok") {
-    return { _tag: "Success", data: parseObject(result.data, "response.result.data") };
+  if (root.result.status === "error") {
+    return { _tag: "Failure", failure: failureFromWire(root.result) };
   }
-  if (result.status !== "error") {
-    throw new TermtraceProtocolError("driver response status is invalid");
-  }
-  return {
-    _tag: "Failure",
-    failure: {
-      _tag: "DriverFailure",
-      code: parseString(result.code, "response.result.code"),
-      message: parseString(result.message, "response.result.message"),
-      retrySafety: parseString(result.retry_safety, "response.result.retry_safety"),
-      uncertain: parseBoolean(result.uncertain, "response.result.uncertain"),
-      evidence: parseOptionalString(result.evidence, "response.result.evidence"),
-    },
-  };
+  return { _tag: "Success", data: root.result.data };
 }
 
-export function parseString(input: JsonValue | undefined, path: string): string {
-  if (typeof input !== "string") {
-    throw new TermtraceProtocolError(`${path} must be a string`);
+/** Narrow method-specific data after checking its generated discriminant. */
+export function expectDriverData<Kind extends DriverDataKind>(
+  data: DriverData,
+  expectedKind: Kind,
+): DriverDataOf<Kind> {
+  if (data.kind !== expectedKind) {
+    throw new TermtraceProtocolError("driver returned an unexpected result kind");
   }
-  return input;
+  // SAFETY: DriverData is a generated discriminated union and kind was checked above.
+  return data as DriverDataOf<Kind>;
 }
 
-function parseBoolean(input: JsonValue | undefined, path: string): boolean {
-  if (typeof input !== "boolean") {
-    throw new TermtraceProtocolError(`${path} must be a boolean`);
+/** Validate and serialize one client-authored request without exposing its payload in failures. */
+export function encodeDriverRequest(method: JsonObject, requestId: string): string {
+  const request = { version: 2, request_id: requestId, method };
+  if (!validateDriverRequest(request)) {
+    throw new TermtraceProtocolError("client request does not match the protocol schema");
   }
-  return input;
+  // SAFETY: the generated Ajv validator proved the complete generated request contract.
+  const validated = request as WireDriverRequest;
+  return JSON.stringify(validated);
 }
 
-function parseOptionalString(input: JsonValue | undefined, path: string): string | undefined {
-  if (input === null || input === undefined) {
-    return undefined;
-  }
-  return parseString(input, path);
-}
-
-function parseObject(input: unknown, path: string): JsonObject {
+/** Copy one trusted request builder result into the exact JSON value domain. */
+export function parseJsonObject(input: unknown): JsonObject {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
-    throw new TermtraceProtocolError(`${path} must be an object`);
+    throw new TypeError("driver request method must be a JSON object");
   }
   const parsed: Record<string, JsonValue> = {};
   for (const [key, value] of Object.entries(input)) {
-    parsed[key] = parseJsonValue(value, `${path}.${key}`);
+    parsed[key] = parseJsonValue(value);
   }
   return parsed;
 }
 
-function parseJsonValue(input: unknown, path: string): JsonValue {
-  if (input === null || typeof input === "boolean" || typeof input === "number" || typeof input === "string") {
+function failureFromWire(failure: DriverError): DriverFailure {
+  return {
+    _tag: "DriverFailure",
+    code: failure.code,
+    message: failure.message,
+    retrySafety: failure.retry_safety,
+    uncertain: failure.uncertain,
+    evidence: failure.evidence ?? undefined,
+  };
+}
+
+function parseJsonValue(input: unknown): JsonValue {
+  if (input === null || typeof input === "boolean" || typeof input === "string") {
+    return input;
+  }
+  if (typeof input === "number" && Number.isFinite(input)) {
     return input;
   }
   if (Array.isArray(input)) {
-    return input.map((value) => parseJsonValue(value, path));
+    return input.map(parseJsonValue);
   }
-  return parseObject(input, path);
+  return parseJsonObject(input);
 }

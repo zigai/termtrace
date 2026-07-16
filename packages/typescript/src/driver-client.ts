@@ -4,17 +4,21 @@ import { randomUUID } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 
 import {
+  encodeDriverRequest,
+  expectDriverData,
   parseDriverResponse,
-  parseString,
+  parseJsonObject,
   TermtraceOperationError,
   TermtraceProtocolError,
+  type DriverData,
+  type DriverDataKind,
+  type DriverDataOf,
   type JsonObject,
-  type JsonValue,
 } from "./protocol.js";
 
 type PendingRequest = {
   readonly requestId: string;
-  readonly resolve: (data: JsonObject) => void;
+  readonly accept: (data: DriverData) => void;
   readonly reject: (cause: unknown) => void;
 };
 
@@ -34,13 +38,24 @@ export class DriverClient {
     this.#process.once("exit", () => this.#rejectAll(new TermtraceProtocolError("driver exited")));
   }
 
-  request(method: JsonObject, requestId: string = randomUUID()): Promise<JsonObject> {
+  request<Kind extends DriverDataKind>(
+    method: JsonObject,
+    expectedKind: Kind,
+    requestId: string = randomUUID(),
+  ): Promise<DriverDataOf<Kind>> {
     if (this.#closed) {
       return Promise.reject(new TermtraceProtocolError("driver is closed"));
     }
-    return new Promise<JsonObject>((resolve, reject) => {
-      this.#pending.push({ requestId, resolve, reject });
-      this.#process.stdin.write(`${JSON.stringify({ version: 2, request_id: requestId, method })}\n`);
+    return new Promise<DriverDataOf<Kind>>((resolve, reject) => {
+      const accept = (data: DriverData): void => {
+        try {
+          resolve(expectDriverData(data, expectedKind));
+        } catch (cause: unknown) {
+          reject(cause);
+        }
+      };
+      this.#pending.push({ requestId, accept, reject });
+      this.#process.stdin.write(`${encodeDriverRequest(method, requestId)}\n`);
     });
   }
 
@@ -69,7 +84,7 @@ export class DriverClient {
         pending.reject(new TermtraceOperationError(response.failure));
         return;
       }
-      pending.resolve(response.data);
+      pending.accept(response.data);
     } catch (cause: unknown) {
       pending.reject(cause);
     }
@@ -82,29 +97,6 @@ export class DriverClient {
   }
 }
 
-export type AttachData = {
-  readonly handle: string;
-  readonly sessionId: string;
-  readonly canonicalSession: string;
-  readonly completed: boolean;
-};
-
-export function parseAttachData(data: JsonObject): AttachData {
-  if (data.kind !== "attached" || typeof data.completed !== "boolean") {
-    throw new TermtraceProtocolError("attach response has an invalid kind or completion state");
-  }
-  return {
-    handle: parseString(data.handle, "attach.handle"),
-    sessionId: parseString(data.session_id, "attach.session_id"),
-    canonicalSession: parseString(data.canonical_session, "attach.canonical_session"),
-    completed: data.completed,
-  };
-}
-
-export function method(fields: JsonObject): JsonObject {
-  return fields;
-}
-
-export function controlCommand(command: JsonObject): JsonValue {
-  return command;
+export function method(fields: unknown): JsonObject {
+  return parseJsonObject(fields);
 }

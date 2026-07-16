@@ -113,6 +113,7 @@ The byte-exact event log is canonical. It records PTY output alongside input, re
 - [Record a session](docs/recording.md)
 - [Deterministic test isolation](docs/test-isolation.md)
 - [Control and inspect a running session](docs/agent-workflows.md)
+- [Use the Python and TypeScript clients](docs/language-clients.md)
 - [Understand replay](docs/semantic-replay.md)
 - [Understand the saved files](docs/formats.md)
 - [Fix common problems](docs/troubleshooting.md)
