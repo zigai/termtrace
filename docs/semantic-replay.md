@@ -61,3 +61,17 @@ The default selects the latest presented state. Explicit hidden states require `
 Semantic state is independent of video sampling. A state that lasts less than one video frame remains inspectable.
 
 Semantic PNG and SVG rendering are deterministic derived views. Native PNG explicitly launches the installed terminal application and never falls back to semantic rendering. Structured output labels the source and capture quality so consumers can distinguish them.
+
+## Semantic video
+
+Presentation planning, preview, and export use verified native Ghostty video by default. Select semantic rendering explicitly when a deterministic MP4 is needed on a host without the native display stack:
+
+```bash
+termtrace video plan SESSION --source semantic --fps 24 --edit EDIT.json
+termtrace video preview SESSION --source semantic --edit EDIT.json --out PREVIEW
+termtrace video export SESSION --source semantic --edit EDIT.json --out EXPORT
+```
+
+The semantic scheduler samples the latest presentation-eligible state at each frame boundary. It excludes synchronized-output hidden states and records states too brief to receive a frame as suppressed. A final source frame retains the completed semantic state. Resized sessions use one fixed maximum-grid canvas.
+
+Semantic video is labeled `semantic_rendering`. It visualizes terminal state with Termtrace's bundled deterministic renderer; it is not evidence of pixels drawn by Ghostty. Native remains the default and should be used for font, shaping, clipping, shader, image, or renderer-specific investigations. Source selection never falls back automatically.

@@ -1,0 +1,227 @@
+{
+  "$defs": {
+    "SemanticVideoCanvas": {
+      "additionalProperties": false,
+      "description": "Fixed canvas used for every frame of one semantic video source.",
+      "properties": {
+        "cell_height": {
+          "description": "Deterministic semantic cell height.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cell_width": {
+          "description": "Deterministic semantic cell width.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cols": {
+          "description": "Largest terminal column count in the source execution.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "height": {
+          "description": "Encoded source height.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "policy": {
+          "description": "Stable resize/canvas policy identifier.",
+          "type": "string"
+        },
+        "rows": {
+          "description": "Largest terminal row count in the source execution.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "description": "Encoded source width.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cols",
+        "rows",
+        "cell_width",
+        "cell_height",
+        "width",
+        "height",
+        "policy"
+      ],
+      "type": "object"
+    },
+    "SemanticVideoSourcePlan": {
+      "additionalProperties": false,
+      "description": "Immutable semantic source description resolved during presentation planning.",
+      "properties": {
+        "canvas": {
+          "$ref": "#/$defs/SemanticVideoCanvas",
+          "description": "Fixed source canvas."
+        },
+        "end_monotonic_ns": {
+          "description": "Inclusive completed-session endpoint used for the final frame hold.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "font_family": {
+          "description": "Bundled deterministic font family.",
+          "type": "string"
+        },
+        "font_hash": {
+          "description": "BLAKE3 identity of the bundled font bytes.",
+          "type": "string"
+        },
+        "fps": {
+          "description": "Constant semantic source frame rate.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "frame_count": {
+          "description": "Exact source frame count, including one final semantic-state frame.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "renderer": {
+          "description": "Semantic renderer identity.",
+          "type": "string"
+        },
+        "scheduling_policy": {
+          "description": "Stable state-to-frame scheduling policy.",
+          "type": "string"
+        },
+        "session": {
+          "description": "Canonical session path.",
+          "type": "string"
+        },
+        "session_id": {
+          "description": "Canonical session identity.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "source_event_hash": {
+          "description": "Terminal canonical event hash.",
+          "type": "string"
+        },
+        "start_monotonic_ns": {
+          "description": "Inclusive source-time origin.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "description": "Source-plan schema version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "session",
+        "session_id",
+        "source_event_hash",
+        "start_monotonic_ns",
+        "end_monotonic_ns",
+        "fps",
+        "frame_count",
+        "canvas",
+        "renderer",
+        "font_family",
+        "font_hash",
+        "scheduling_policy"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/semantic-video-source-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Provenance and scheduling result for one materialized semantic source video.",
+  "properties": {
+    "ffmpeg_arguments": {
+      "description": "Exact FFmpeg argument vector.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "ffmpeg_version": {
+      "description": "First line of the exact FFmpeg build used.",
+      "type": "string"
+    },
+    "pixel_stream_hash": {
+      "description": "BLAKE3 of exact RGBA frames sent to the encoder.",
+      "type": "string"
+    },
+    "plan": {
+      "$ref": "#/$defs/SemanticVideoSourcePlan",
+      "description": "Exact immutable source plan."
+    },
+    "presented_state_count": {
+      "description": "Number of presentation-eligible states in the selected interval.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "rendered_state_count": {
+      "description": "Number of presentation-eligible states owning at least one frame.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "source_video_hash": {
+      "description": "BLAKE3 of the lossless semantic source video.",
+      "type": "string"
+    },
+    "suppressed_state_count": {
+      "description": "Number of presentation-eligible states suppressed by frame sampling.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "truth_layer": {
+      "description": "Product truth layer.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Manifest schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "video_probe": {
+      "description": "Parsed FFprobe source-video evidence."
+    }
+  },
+  "required": [
+    "version",
+    "plan",
+    "truth_layer",
+    "presented_state_count",
+    "rendered_state_count",
+    "suppressed_state_count",
+    "pixel_stream_hash",
+    "source_video_hash",
+    "ffmpeg_version",
+    "ffmpeg_arguments",
+    "video_probe"
+  ],
+  "title": "SemanticVideoSourceManifest",
+  "type": "object"
+}

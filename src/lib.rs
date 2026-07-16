@@ -31,6 +31,7 @@ pub mod save;
 pub mod scenario;
 pub mod schema;
 pub mod semantic_image;
+pub mod semantic_video;
 pub mod session;
 pub mod session_registry;
 mod terminal_mode;

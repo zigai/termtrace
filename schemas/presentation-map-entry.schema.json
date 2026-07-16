@@ -56,10 +56,35 @@
       "type": "integer"
     },
     "source_frame": {
-      "description": "Native base source frame used for this output.",
+      "description": "Base source frame used for this output.",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "source_state_hash": {
+      "description": "Exact semantic source state hash, present only for semantic-rendered input.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_state_id": {
+      "description": "Exact semantic source state, present only for semantic-rendered input.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "source_state_monotonic_ns": {
+      "description": "Exact semantic source timestamp, present only for semantic-rendered input.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "transforms": {
       "description": "Presentation-only transforms applied to this frame.",

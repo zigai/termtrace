@@ -1,0 +1,45 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/semantic-frame-span.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One contiguous source-frame span rendered from one semantic state.",
+  "properties": {
+    "end_frame": {
+      "description": "Exclusive source frame.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "start_frame": {
+      "description": "Inclusive source frame.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "state_hash": {
+      "description": "Exact complete semantic state hash.",
+      "type": "string"
+    },
+    "state_id": {
+      "description": "Exact semantic state identifier.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "state_monotonic_ns": {
+      "description": "Canonical state timestamp.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "start_frame",
+    "end_frame",
+    "state_id",
+    "state_hash",
+    "state_monotonic_ns"
+  ],
+  "title": "SemanticFrameSpan",
+  "type": "object"
+}

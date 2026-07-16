@@ -110,3 +110,15 @@ Inspect `working_directory` in `session.json` to see the resolved value.
 Native video runs at 24 FPS, so a frame spans about 41.7 ms. Semantic replay is not frame-limited: brief states remain in `states.jsonl.zst` and can be inspected or rendered separately.
 
 States hidden by synchronized output are retained with `presented: false`. Use `index --presented-only` when they are not needed.
+
+Semantic video also uses a fixed frame rate and honestly reports presentation-eligible states that receive no sampled frame. Use the semantic timeline or render an exact state screenshot when every brief transition matters; increasing `--fps` can reduce, but not eliminate, sampling loss.
+
+## Semantic video export fails
+
+Check the independent semantic-video and presentation capabilities:
+
+```bash
+termtrace doctor --require semantic-video,presentation --explain
+```
+
+Semantic source failures retain `semantic-source-ffmpeg.log` in the failed presentation staging directory when available. They do not modify canonical evidence or silently retry with native capture.

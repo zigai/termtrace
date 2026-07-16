@@ -20,28 +20,44 @@ pub const SEMANTIC_SVG_RENDERER: &str = "termtrace-semantic-svg-v1";
 pub const SEMANTIC_PNG_RENDERER: &str = "termtrace-semantic-png-resvg-v1";
 /// Bundled deterministic font family.
 pub const SEMANTIC_FONT_FAMILY: &str = "Termtrace Fira Code";
+const SEMANTIC_RASTER_FONT_FAMILY: &str = "Fira Code";
 /// Repository-relative source of the bundled font.
 pub const SEMANTIC_FONT_SOURCE: &str = "vendor/ghostty/pkg/freetype/res/FiraCode-Regular.ttf";
 /// Exact bundled font bytes used by SVG and PNG output.
 pub const SEMANTIC_FONT_BYTES: &[u8] =
     include_bytes!("../vendor/ghostty/pkg/freetype/res/FiraCode-Regular.ttf");
+/// Deterministic semantic cell width in pixels.
+pub const SEMANTIC_CELL_WIDTH: u16 = 10;
+/// Deterministic semantic cell height in pixels.
+pub const SEMANTIC_CELL_HEIGHT: u16 = 20;
 
 /// Render a complete semantic state as a deterministic SVG scene.
 #[must_use]
 pub fn render_svg(state: &SemanticState) -> Vec<u8> {
-    const CELL_WIDTH: u32 = 10;
-    const CELL_HEIGHT: u32 = 20;
+    return render_svg_scene(state, true);
+}
+
+fn render_svg_scene(state: &SemanticState, embed_font: bool) -> Vec<u8> {
+    const CELL_WIDTH: u32 = SEMANTIC_CELL_WIDTH as u32;
+    const CELL_HEIGHT: u32 = SEMANTIC_CELL_HEIGHT as u32;
     const BASELINE: u32 = 15;
     let width = u32::from(state.cols).saturating_mul(CELL_WIDTH);
     let height = u32::from(state.rows).saturating_mul(CELL_HEIGHT);
     let mut svg = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" role=\"img\" data-truth-layer=\"semantic_rendering\" data-renderer=\"{SEMANTIC_SVG_RENDERER}\">\n"
     );
-    let font = STANDARD.encode(SEMANTIC_FONT_BYTES);
-    let _ = writeln!(
-        svg,
-        "<style>@font-face{{font-family:'{SEMANTIC_FONT_FAMILY}';src:url(data:font/ttf;base64,{font}) format('truetype');font-weight:normal;font-style:normal}}text{{font-family:'{SEMANTIC_FONT_FAMILY}'}}</style>"
-    );
+    let font_family = if embed_font {
+        SEMANTIC_FONT_FAMILY
+    } else {
+        SEMANTIC_RASTER_FONT_FAMILY
+    };
+    if embed_font {
+        let font = STANDARD.encode(SEMANTIC_FONT_BYTES);
+        let _ = writeln!(
+            svg,
+            "<style>@font-face{{font-family:'{font_family}';src:url(data:font/ttf;base64,{font}) format('truetype');font-weight:normal;font-style:normal}}text{{font-family:'{font_family}'}}</style>"
+        );
+    }
     let _ = writeln!(
         svg,
         "<rect width=\"100%\" height=\"100%\" fill=\"{}\"/>",
@@ -86,7 +102,7 @@ pub fn render_svg(state: &SemanticState) -> Vec<u8> {
             let text_y = y.saturating_add(BASELINE);
             let _ = writeln!(
                 svg,
-                "<text x=\"{x}\" y=\"{text_y}\" fill=\"{}\" font-family=\"{SEMANTIC_FONT_FAMILY}\" font-size=\"16\" font-weight=\"{weight}\" font-style=\"{font_style}\" opacity=\"{opacity}\" text-decoration=\"{decoration}\" xml:space=\"preserve\">{escaped}</text>",
+                "<text x=\"{x}\" y=\"{text_y}\" fill=\"{}\" font-family=\"{font_family}\" font-size=\"16\" font-weight=\"{weight}\" font-style=\"{font_style}\" opacity=\"{opacity}\" text-decoration=\"{decoration}\" xml:space=\"preserve\">{escaped}</text>",
                 color_hex(foreground)
             );
         }
@@ -139,8 +155,36 @@ pub fn render_svg(state: &SemanticState) -> Vec<u8> {
 ///
 /// Returns an error when the SVG cannot be parsed or the PNG cannot be encoded.
 pub fn render_png(state: &SemanticState) -> Result<Vec<u8>> {
-    let svg = render_svg(state);
+    let svg = render_svg_scene(state, false);
     return rasterize_svg(&svg);
+}
+
+/// Render one semantic state onto a fixed top-left-anchored video canvas.
+///
+/// The returned bytes are an opaque RGBA frame. The canvas may be larger than
+/// the state's current grid so recordings containing PTY resizes can retain a
+/// stable encoded-video geometry.
+///
+/// # Errors
+///
+/// Returns an error when the canvas is smaller than the semantic viewport or
+/// the SVG scene cannot be rasterized.
+pub fn render_video_rgba(
+    state: &SemanticState,
+    canvas_cols: u16,
+    canvas_rows: u16,
+) -> Result<Vec<u8>> {
+    if canvas_cols < state.cols || canvas_rows < state.rows {
+        return Err(image_error(format!(
+            "semantic video canvas {canvas_cols}x{canvas_rows} is smaller than state {}x{}",
+            state.cols, state.rows
+        )));
+    }
+    let mut canvas = state.clone();
+    canvas.cols = canvas_cols;
+    canvas.rows = canvas_rows;
+    let pixmap = rasterize_svg_pixmap(&render_svg_scene(&canvas, false))?;
+    return Ok(pixmap.data().to_vec());
 }
 
 /// Compose before/after semantic scenes and outline every changed later cell.
@@ -194,6 +238,12 @@ pub fn render_diff_png(
 }
 
 fn rasterize_svg(svg: &[u8]) -> Result<Vec<u8>> {
+    return rasterize_svg_pixmap(svg)?
+        .encode_png()
+        .map_err(|error| return image_error(format!("encode semantic PNG: {error}")));
+}
+
+fn rasterize_svg_pixmap(svg: &[u8]) -> Result<Pixmap> {
     let mut options = Options::default();
     options
         .fontdb_mut()
@@ -205,9 +255,7 @@ fn rasterize_svg(svg: &[u8]) -> Result<Vec<u8>> {
     let mut pixmap = Pixmap::new(size.width(), size.height())
         .ok_or_else(|| return image_error("allocate semantic PNG surface"))?;
     resvg::render(&tree, Transform::default(), &mut pixmap.as_mut());
-    return pixmap
-        .encode_png()
-        .map_err(|error| return image_error(format!("encode semantic PNG: {error}")));
+    return Ok(pixmap);
 }
 
 /// BLAKE3 identity of the exact bundled semantic font.

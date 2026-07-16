@@ -36,6 +36,7 @@ use crate::{
     reviewer::{ReviewExportManifest, ReviewSearchResult, ReviewSummary, ReviewerCapabilities},
     save::{SaveManifest, ScreenshotBatchManifest},
     scenario::{Scenario, ScenarioFrameSnapshot, ScenarioReport, ScenarioSuiteReport},
+    semantic_video::{SemanticFrameSpan, SemanticVideoSourceManifest, SemanticVideoSourcePlan},
     session::{SessionCompletion, SessionManifest, VerificationReport},
     session_registry::{RegistryEntry, RegistryListEntry},
     timeline::TimelineEntry,
@@ -117,6 +118,9 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<PresentationMapEntry>("presentation-map-entry.schema.json")?,
         schema::<PresentationPreviewManifest>("presentation-preview-manifest.schema.json")?,
         schema::<MarkerRecord>("marker-record.schema.json")?,
+        schema::<SemanticVideoSourcePlan>("semantic-video-source-plan.schema.json")?,
+        schema::<SemanticFrameSpan>("semantic-frame-span.schema.json")?,
+        schema::<SemanticVideoSourceManifest>("semantic-video-source-manifest.schema.json")?,
     ]);
 }
 

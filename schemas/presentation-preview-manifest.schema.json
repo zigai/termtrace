@@ -143,8 +143,8 @@
       },
       "type": "array"
     },
-    "source_video_hash": {
-      "description": "Immutable native source-video identity.",
+    "source_identity_hash": {
+      "description": "Immutable native-video or canonical semantic-source identity.",
       "type": "string"
     },
     "truth_layer": {
@@ -161,7 +161,7 @@
   "required": [
     "version",
     "edit_plan_hash",
-    "source_video_hash",
+    "source_identity_hash",
     "truth_layer",
     "options",
     "selected_frames",

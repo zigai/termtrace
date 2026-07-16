@@ -759,6 +759,54 @@
       ],
       "type": "object"
     },
+    "PresentationSource": {
+      "description": "Immutable visual source selected for one presentation plan.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Actual pixels from a verified native Ghostty capture.",
+          "properties": {
+            "kind": {
+              "const": "native",
+              "type": "string"
+            },
+            "video": {
+              "description": "Lossless native source video.",
+              "type": "string"
+            },
+            "video_hash": {
+              "description": "BLAKE3 of the native source video.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "video",
+            "video_hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Deterministic generated pixels from canonical semantic replay.",
+          "properties": {
+            "kind": {
+              "const": "semantic",
+              "type": "string"
+            },
+            "plan": {
+              "$ref": "#/$defs/SemanticVideoSourcePlan",
+              "description": "Complete semantic source plan."
+            }
+          },
+          "required": [
+            "kind",
+            "plan"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "RationalSpeed": {
       "additionalProperties": false,
       "description": "Exact positive playback speed numerator/denominator.",
@@ -779,6 +827,154 @@
       "required": [
         "numerator",
         "denominator"
+      ],
+      "type": "object"
+    },
+    "SemanticVideoCanvas": {
+      "additionalProperties": false,
+      "description": "Fixed canvas used for every frame of one semantic video source.",
+      "properties": {
+        "cell_height": {
+          "description": "Deterministic semantic cell height.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cell_width": {
+          "description": "Deterministic semantic cell width.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cols": {
+          "description": "Largest terminal column count in the source execution.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "height": {
+          "description": "Encoded source height.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "policy": {
+          "description": "Stable resize/canvas policy identifier.",
+          "type": "string"
+        },
+        "rows": {
+          "description": "Largest terminal row count in the source execution.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "description": "Encoded source width.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cols",
+        "rows",
+        "cell_width",
+        "cell_height",
+        "width",
+        "height",
+        "policy"
+      ],
+      "type": "object"
+    },
+    "SemanticVideoSourcePlan": {
+      "additionalProperties": false,
+      "description": "Immutable semantic source description resolved during presentation planning.",
+      "properties": {
+        "canvas": {
+          "$ref": "#/$defs/SemanticVideoCanvas",
+          "description": "Fixed source canvas."
+        },
+        "end_monotonic_ns": {
+          "description": "Inclusive completed-session endpoint used for the final frame hold.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "font_family": {
+          "description": "Bundled deterministic font family.",
+          "type": "string"
+        },
+        "font_hash": {
+          "description": "BLAKE3 identity of the bundled font bytes.",
+          "type": "string"
+        },
+        "fps": {
+          "description": "Constant semantic source frame rate.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "frame_count": {
+          "description": "Exact source frame count, including one final semantic-state frame.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "renderer": {
+          "description": "Semantic renderer identity.",
+          "type": "string"
+        },
+        "scheduling_policy": {
+          "description": "Stable state-to-frame scheduling policy.",
+          "type": "string"
+        },
+        "session": {
+          "description": "Canonical session path.",
+          "type": "string"
+        },
+        "session_id": {
+          "description": "Canonical session identity.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "source_event_hash": {
+          "description": "Terminal canonical event hash.",
+          "type": "string"
+        },
+        "start_monotonic_ns": {
+          "description": "Inclusive source-time origin.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "description": "Source-plan schema version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "session",
+        "session_id",
+        "source_event_hash",
+        "start_monotonic_ns",
+        "end_monotonic_ns",
+        "fps",
+        "frame_count",
+        "canvas",
+        "renderer",
+        "font_family",
+        "font_hash",
+        "scheduling_policy"
       ],
       "type": "object"
     },
@@ -864,7 +1060,7 @@
   "$id": "https://github.com/zigai/termtrace/schemas/presentation-plan.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Dry-run output binding a normalized edit to immutable native evidence.",
+  "description": "Dry-run output binding a normalized edit to immutable visual evidence.",
   "properties": {
     "annotations": {
       "description": "Annotation tracks normalized onto the output frame timeline.",
@@ -921,7 +1117,7 @@
       "type": "string"
     },
     "fps": {
-      "description": "Native capture frame rate.",
+      "description": "Native capture or generated semantic source frame rate.",
       "format": "uint16",
       "maximum": 65535,
       "minimum": 0,
@@ -958,27 +1154,23 @@
       "minimum": 0,
       "type": "integer"
     },
+    "source": {
+      "$ref": "#/$defs/PresentationSource",
+      "description": "Explicit immutable visual source; native remains the default request."
+    },
     "source_geometry": {
       "$ref": "#/$defs/TerminalGeometryReport",
-      "description": "Measured native source grid and cell geometry."
+      "description": "Measured native or deterministic semantic grid and cell geometry."
     },
     "source_height": {
-      "description": "Native source height in pixels.",
+      "description": "Visual source height in pixels.",
       "format": "uint16",
       "maximum": 65535,
       "minimum": 0,
       "type": "integer"
     },
-    "source_video": {
-      "description": "Immutable native base video.",
-      "type": "string"
-    },
-    "source_video_hash": {
-      "description": "BLAKE3 of the native base video.",
-      "type": "string"
-    },
     "source_width": {
-      "description": "Native source width in pixels.",
+      "description": "Visual source width in pixels.",
       "format": "uint16",
       "maximum": 65535,
       "minimum": 0,
@@ -1008,8 +1200,7 @@
   "required": [
     "version",
     "edit_plan_hash",
-    "source_video",
-    "source_video_hash",
+    "source",
     "fps",
     "source_width",
     "source_height",

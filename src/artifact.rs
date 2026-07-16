@@ -529,6 +529,7 @@ fn member_schema_type(path: &str) -> Option<&'static str> {
     return match filename {
         "state-index.jsonl" => Some("state-index-entry.schema.json"),
         "video-map.jsonl" => Some("video-map-entry.schema.json"),
+        "semantic-source-map.jsonl" => Some("semantic-frame-span.schema.json"),
         _ => None,
     };
 }
@@ -545,6 +546,9 @@ fn member_relationship(path: &str) -> &'static str {
         "session.mkv" => "native_capture_master",
         "final.png" => "native_final_frame",
         "video-map.jsonl" => "semantic_frame_mapping",
+        "semantic-source.mkv" => "semantic_rendering_master",
+        "semantic-source-map.jsonl" => "semantic_source_frame_mapping",
+        "semantic-source-manifest.json" => "semantic_source_manifest",
         _ => "derivation_diagnostic",
     };
 }

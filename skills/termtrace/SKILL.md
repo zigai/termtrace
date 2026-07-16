@@ -40,6 +40,7 @@ Read [references/commands.md](references/commands.md) only when exact flags or c
 
 - Use `screenshot` for deterministic semantic cell/style truth.
 - Use native capture only after `doctor` reports the required environment ready; retain geometry probes and exact profile hashes.
+- Keep native Ghostty video as the default visual source. Use `video ... --source semantic` only when the user explicitly wants deterministic generated video without native display dependencies; label it semantic rendering and never imply Ghostty pixel parity.
 - Use `bundle --profile screen` for the least-sensitive handoff, `debug` for additional operational metadata, and `forensic` only with explicit authorization.
 - Use `video plan` before `video export`; review resolved marker ranges, frame counts, speed, holds, and source hashes.
 - Use `review --json` or ordinary diagnostic commands for automation. Open the interactive reviewer only for human navigation.

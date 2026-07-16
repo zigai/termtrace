@@ -25,7 +25,8 @@ terminal replies ───┘        │
                              └─> live semantic state
 
 completed event log ─> semantic replay
-                    └> native capture on a private display
+                    ├> semantic video rendering (explicit alternative)
+                    └> native capture on a private display (default video source)
 ```
 
 The session actor orders child output, control requests, and terminal-generated replies. State-changing requests are recorded before their effects are acknowledged. Read-only operations such as `ping`, `status`, `show`, and waits do not change the event log.
@@ -54,6 +55,8 @@ Mutations may carry an expected state hash. The actor checks this immediately be
 Replay validates the canonical log and feeds output bytes through the pinned semantic engine. It emits a new state only when terminal content changes. Video frame rate does not limit semantic state granularity.
 
 Native capture launches the installed terminal application on a private display. Fitted recordings retain the measured viewport, grid, cell size, and effective configuration hash. Capture verifies geometry before playback instead of guessing font metrics.
+
+Semantic video instead schedules presentation-eligible replay states onto deterministic frame boundaries, renders them with the bundled semantic renderer, and retains exact state-to-frame spans. It requires no native display stack, but it is labeled semantic rendering and does not claim Ghostty pixel parity. Presentation source selection is explicit and never falls back automatically; native remains the default.
 
 Derived manifests bind their source range, component versions, configuration, and member hashes. Completed derivations are cataloged separately; the closed execution log is never reopened.
 

@@ -264,6 +264,20 @@ pub fn replay(log: &EventLog) -> Result<CollectedReplay> {
     return Ok(CollectedReplay { states, artifacts });
 }
 
+/// Visit every distinct semantic state with its complete reconstructed value.
+///
+/// This crate-private streaming interface lets derived renderers consume the
+/// byte-granular replay without retaining every complete viewport in memory.
+pub(crate) fn visit_states(
+    log: &EventLog,
+    mut visitor: impl FnMut(&StateRecord, &SemanticState) -> Result<()>,
+) -> Result<ReplayArtifacts> {
+    return replay_with(log, None, |record, state, _| {
+        visitor(&record, state)?;
+        return Ok(());
+    });
+}
+
 /// Reconstruct one state selected by state, event, time, or final position.
 ///
 /// # Errors
