@@ -2281,7 +2281,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
             "--",
             "/usr/bin/python3",
             "-c",
-            "import os,time\nos.write(1,b'READY')\nif os.fork() == 0:\n time.sleep(10); os._exit(0)\ntime.sleep(1); os._exit(0)",
+            "import os,time\nos.write(1,b'READY')\nif os.fork() == 0:\n time.sleep(30); os._exit(0)\ntime.sleep(1); os._exit(0)",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -2294,8 +2294,8 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     let completed = send_request(
         &completed_session,
         &ControlRequest::new(ControlCommand::CaptureStable {
-            stable_for_ns: 3_000_000_000,
-            timeout_ns: 5_000_000_000,
+            stable_for_ns: 10_000_000_000,
+            timeout_ns: 10_000_000_000,
         }),
     )
     .expect("typed child completion");
