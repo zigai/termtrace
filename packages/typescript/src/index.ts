@@ -1,12 +1,44 @@
-import { DriverClient, method, parseAttachData } from "./driver-client.js";
-import { TermtraceProtocolError, type JsonObject, type JsonValue } from "./protocol.js";
+import { DriverClient, method } from "./driver-client.js";
+import {
+  TermtraceProtocolError,
+  type Artifact,
+  type BundleResult,
+  type ControlResult,
+  type DiagnoseReport,
+  type DriverDataKind,
+  type DriverDataOf,
+  type EventPage,
+  type JsonObject,
+  type JsonValue,
+  type Observation,
+  type ObservationFrame,
+  type ScreenPredicate,
+  type SemanticDiff,
+  type SessionCompletion,
+  type TimelineEntry,
+  type VerificationReport,
+  type WaitOutcome,
+} from "./protocol.js";
 
 export {
   TermtraceOperationError,
   TermtraceProtocolError,
+  type Artifact,
+  type BundleResult,
+  type ControlResult,
+  type DiagnoseReport,
   type DriverFailure,
+  type EventPage,
   type JsonObject,
   type JsonValue,
+  type Observation,
+  type ObservationFrame,
+  type ScreenPredicate,
+  type SemanticDiff,
+  type SessionCompletion,
+  type TimelineEntry,
+  type VerificationReport,
+  type WaitOutcome,
 } from "./protocol.js";
 export {
   assertCursor,
@@ -56,7 +88,6 @@ export type WaitOptions = {
   readonly signal?: AbortSignal;
 };
 
-export type ScreenPredicate = JsonObject;
 export type StatePoint =
   | { readonly selector: "latest_presented" }
   | { readonly selector: "state_id"; readonly state_id: number }
@@ -74,13 +105,9 @@ export class Termtrace implements AsyncDisposable {
     this.#evidenceRoot = evidenceRoot;
   }
 
-  static async create(options: TermtraceOptions): Promise<Termtrace> {
+  static async create(options: TermtraceOptions = {}): Promise<Termtrace> {
     const driver = new DriverClient(options.binaryPath ?? process.env.TERMTRACE_BINARY ?? "termtrace");
-    const hello = await driver.request(method({ method: "hello" }));
-    if (hello.kind !== "hello") {
-      await driver.close();
-      throw new TermtraceProtocolError("driver hello response has an invalid kind");
-    }
+    await driver.request(method({ method: "hello" }), "hello");
     return new Termtrace(driver, options.evidenceRoot);
   }
 
@@ -91,27 +118,26 @@ export class Termtrace implements AsyncDisposable {
     }
     const viewport = options.viewport ?? { cols: 80, rows: 24 };
     const command = options.command.map((argument) => Buffer.from(argument).toString("base64"));
-    const data = parseAttachData(
-      await this.#driver.request(
-        method({
-          method: "launch",
-          evidence_root: evidenceRoot,
-          command,
-          cols: viewport.cols,
-          rows: viewport.rows,
-          working_directory: options.workingDirectory ?? null,
-          environment: encodeEnvironment(options.environment),
-          resource_limits: {
-            output_bytes: options.outputByteBudget ?? null,
-          },
-        }),
-      ),
+    const data = await this.#driver.request(
+      method({
+        method: "launch",
+        evidence_root: evidenceRoot,
+        command,
+        cols: viewport.cols,
+        rows: viewport.rows,
+        working_directory: options.workingDirectory ?? null,
+        environment: encodeEnvironment(options.environment),
+        resource_limits: {
+          output_bytes: options.outputByteBudget ?? null,
+        },
+      }),
+      "attached",
     );
     return new Session(this.#driver, data, true, options.evidence ?? "always");
   }
 
   async attach(session: string): Promise<Session> {
-    const data = parseAttachData(await this.#driver.request(method({ method: "attach", session })));
+    const data = await this.#driver.request(method({ method: "attach", session }), "attached");
     return new Session(this.#driver, data, false, "manual");
   }
 
@@ -124,12 +150,7 @@ export class Termtrace implements AsyncDisposable {
   }
 }
 
-type SessionIdentity = {
-  readonly handle: string;
-  readonly sessionId: string;
-  readonly canonicalSession: string;
-  readonly completed: boolean;
-};
+type SessionIdentity = DriverDataOf<"attached">;
 
 /** Process-local handle with explicit canonical evidence identity. */
 export class Session implements AsyncDisposable {
@@ -155,9 +176,9 @@ export class Session implements AsyncDisposable {
     this.#handle = identity.handle;
     this.#owned = owned;
     this.#evidencePolicy = evidencePolicy;
-    this.#completed = identity.completed ?? false;
-    this.sessionId = identity.sessionId;
-    this.canonicalSession = identity.canonicalSession;
+    this.#completed = identity.completed;
+    this.sessionId = identity.session_id;
+    this.canonicalSession = identity.canonical_session;
     this.screen = new Screen(this);
     this.keyboard = new Keyboard(this);
     this.output = new Output(this);
@@ -168,53 +189,69 @@ export class Session implements AsyncDisposable {
     this.evidence = new Evidence(this);
   }
 
-  control(command: JsonObject, options: MutationOptions = {}): Promise<JsonObject> {
+  async control(command: JsonObject, options: MutationOptions = {}): Promise<ControlResult> {
     const expectedState: JsonValue = options.ifState ?? null;
-    return this.#driver.request(
+    const result = await this.#driver.request(
       method({
         method: "control",
         handle: this.#handle,
         command,
         expected_presented_state_hash: expectedState,
       }),
+      "control",
       options.requestId,
     );
+    return result.data;
   }
 
-  request(methodFields: JsonObject, requestId?: string): Promise<JsonObject> {
+  request<Kind extends DriverDataKind>(
+    methodFields: JsonObject,
+    expectedKind: Kind,
+    requestId?: string,
+  ): Promise<DriverDataOf<Kind>> {
     return this.#driver.request(
       method({ ...methodFields, handle: this.#handle }),
+      expectedKind,
       requestId,
     );
   }
 
-  completion(): Promise<JsonObject> {
-    return this.#driver.request(method({ method: "completion", handle: this.#handle }));
+  async completion(): Promise<SessionCompletion> {
+    const result = await this.#driver.request(
+      method({ method: "completion", handle: this.#handle }),
+      "completion",
+    );
+    this.#completed = true;
+    return result.completion;
   }
 
-  complete(timeoutMs: number): Promise<JsonObject> {
-    return this.#driver.request(method({ method: "complete", handle: this.#handle, timeout_ms: timeoutMs })).then((result) => {
-      this.#completed = true;
-      return result;
-    });
+  async complete(timeoutMs: number): Promise<SessionCompletion> {
+    const result = await this.#driver.request(
+      method({ method: "complete", handle: this.#handle, timeout_ms: timeoutMs }),
+      "completion",
+    );
+    this.#completed = true;
+    return result.completion;
   }
 
-  waitForOutput(data: Uint8Array, timeoutMs: number): Promise<JsonObject> {
-    return this.#driver.request(
+  async waitForOutput(data: Uint8Array, timeoutMs: number): Promise<WaitOutcome> {
+    const result = await this.#driver.request(
       method({
         method: "wait_output",
         handle: this.#handle,
         data: Buffer.from(data).toString("base64"),
         timeout_ms: timeoutMs,
       }),
+      "output_wait",
     );
+    return result.outcome;
   }
 
-  stop(options: MutationOptions = {}): Promise<JsonObject> {
+  stop(options: MutationOptions = {}): Promise<ControlResult> {
     return this.control({ command: "stop" }, options);
   }
 
-  resize(viewport: { readonly cols: number; readonly rows: number; readonly pixelWidth?: number; readonly pixelHeight?: number }, options: MutationOptions = {}): Promise<JsonObject> {
+  resize(viewport: { readonly cols: number; readonly rows: number; readonly pixelWidth?: number; readonly pixelHeight?: number }, options: MutationOptions = {}): Promise<ControlResult> {
     return this.control({
       command: "resize",
       cols: viewport.cols,
@@ -231,7 +268,7 @@ export class Session implements AsyncDisposable {
     if (this.#owned && this.#evidencePolicy !== "manual") {
       await this.#ensureCompleted();
     }
-    await this.#driver.request(method({ method: "detach", handle: this.#handle }));
+    await this.#driver.request(method({ method: "detach", handle: this.#handle }), "detached");
     this.#closed = true;
   }
 
@@ -241,11 +278,14 @@ export class Session implements AsyncDisposable {
     if (!this.#owned) throw new TypeError("finish is valid only for sessions launched by this client");
     await this.#ensureCompleted();
     if (passed && this.#evidencePolicy === "on-failure") {
-      await this.#driver.request(method({ method: "discard_completed", handle: this.#handle }));
+      await this.#driver.request(
+        method({ method: "discard_completed", handle: this.#handle }),
+        "discarded",
+      );
       this.#closed = true;
       return;
     }
-    await this.#driver.request(method({ method: "detach", handle: this.#handle }));
+    await this.#driver.request(method({ method: "detach", handle: this.#handle }), "detached");
     this.#closed = true;
   }
 
@@ -268,38 +308,30 @@ export class Session implements AsyncDisposable {
 export class Screen {
   constructor(private readonly session: Session) {}
 
-  snapshot(): Promise<JsonObject> {
+  snapshot(): Promise<ControlResult> {
     return this.session.control({ command: "snapshot" });
   }
 
   async text(): Promise<string> {
-    const frame = await this.frame();
-    if (typeof frame.viewport_text !== "string") {
-      throw new TermtraceProtocolError("snapshot response is missing viewport text");
-    }
-    return frame.viewport_text;
+    return (await this.frame()).viewport_text;
   }
 
-  async frame(point: StatePoint = { selector: "latest_presented" }): Promise<JsonObject> {
-    const data = await this.session.request({ method: "observe", point, include_hidden: false });
-    if (data.kind !== "observation" || typeof data.observation !== "object" || data.observation === null || Array.isArray(data.observation)) {
-      throw new TermtraceProtocolError("observe response has an invalid shape");
-    }
-    const observation = data.observation as JsonObject;
-    if (typeof observation.frame !== "object" || observation.frame === null || Array.isArray(observation.frame)) {
-      throw new TermtraceProtocolError("observation is missing its compact frame");
-    }
-    return observation.frame as JsonObject;
+  async frame(point: StatePoint = { selector: "latest_presented" }): Promise<ObservationFrame> {
+    const data = await this.session.request(
+      { method: "observe", point, include_hidden: false },
+      "observation",
+    );
+    return data.observation.frame;
   }
 
-  async waitForText(expected: string | RegExp, options: WaitOptions = {}): Promise<JsonObject> {
+  async waitForText(expected: string | RegExp, options: WaitOptions = {}): Promise<ControlResult> {
     const timeoutMs = nonnegativeDuration(options.timeoutMs ?? 10_000, "timeoutMs");
     const stableForMs = nonnegativeDuration(options.stableForMs ?? 0, "stableForMs");
+    const predicate: ScreenPredicate = typeof expected === "string"
+      ? { predicate: "contains", text: expected }
+      : { predicate: "matches_regex", pattern: rustRegexSource(expected) };
     options.signal?.throwIfAborted();
     if (options.signal === undefined) {
-      const predicate: ScreenPredicate = typeof expected === "string"
-        ? { predicate: "contains", text: expected }
-        : { predicate: "matches_regex", pattern: rustRegexSource(expected) };
       return this.waitForPredicate(predicate, options);
     }
 
@@ -312,7 +344,9 @@ export class Screen {
       const now = performance.now();
       stableSince = matches ? (stableSince ?? now) : undefined;
       if (stableSince !== undefined && now - stableSince >= stableForMs) {
-        return { kind: "screen_wait", matched: true, viewport_text: text };
+        return this.waitForPredicate(predicate, {
+          timeoutMs: Math.max(1, Math.floor(timeoutMs - (now - started))),
+        });
       }
       if (now - started >= timeoutMs) {
         throw new TermtraceProtocolError("screen wait timed out");
@@ -321,37 +355,35 @@ export class Screen {
     }
   }
 
-  waitForPredicate(predicate: ScreenPredicate, options: WaitOptions = {}): Promise<JsonObject> {
+  waitForPredicate(predicate: ScreenPredicate, options: WaitOptions = {}): Promise<ControlResult> {
     if (options.signal !== undefined) {
       throw new TypeError("signal cancellation is available only for text and RegExp polling waits");
     }
     const timeoutMs = nonnegativeDuration(options.timeoutMs ?? 10_000, "timeoutMs");
     const stableForMs = nonnegativeDuration(options.stableForMs ?? 0, "stableForMs");
-    return this.session.control({
+    return this.session.control(method({
       command: "wait_screen",
       predicate,
       stable_for_ns: stableForMs * 1_000_000,
       timeout_ns: timeoutMs * 1_000_000,
-    });
+    }));
   }
 
-  waitForAbsence(text: string, options: WaitOptions = {}): Promise<JsonObject> {
+  waitForAbsence(text: string, options: WaitOptions = {}): Promise<ControlResult> {
     return this.waitForPredicate({ predicate: "absent", text }, options);
   }
 
-  async waitForIdle(options: IdleWaitOptions = {}): Promise<JsonObject> {
+  async waitForIdle(options: IdleWaitOptions = {}): Promise<ControlResult> {
     if (options.signal !== undefined) {
       throw new TypeError("signal cancellation is not supported for actor-atomic idle waits");
     }
     const timeoutMs = nonnegativeDuration(options.timeoutMs ?? 10_000, "timeoutMs");
     const stableForMs = nonnegativeDuration(options.stableForMs ?? 100, "stableForMs");
-    const data = controlData(
-      await this.session.control({
-        command: "capture_stable",
-        stable_for_ns: stableForMs * 1_000_000,
-        timeout_ns: timeoutMs * 1_000_000,
-      }),
-    );
+    const data = await this.session.control({
+      command: "capture_stable",
+      stable_for_ns: stableForMs * 1_000_000,
+      timeout_ns: timeoutMs * 1_000_000,
+    });
     if (data.kind !== "stable_snapshot" || typeof data.quality !== "string") {
       throw new TermtraceProtocolError("stable capture response has an invalid shape");
     }
@@ -363,21 +395,21 @@ export class Screen {
     return data;
   }
 
-  screenshot(destination: string, point: StatePoint = { selector: "latest_presented" }): Promise<JsonObject> {
+  screenshot(destination: string, point: StatePoint = { selector: "latest_presented" }): Promise<Artifact> {
     return this.session.request({
       method: "screenshot",
       point,
       destination,
       renderer: "semantic",
       viewport: null,
-    });
+    }, "artifact");
   }
 }
 
 export class Keyboard {
   constructor(private readonly session: Session) {}
 
-  press(key: string, options: MutationOptions = {}): Promise<JsonObject> {
+  press(key: string, options: MutationOptions = {}): Promise<ControlResult> {
     return this.session.control(
       {
         command: "key",
@@ -388,18 +420,18 @@ export class Keyboard {
     );
   }
 
-  type(text: string, options: MutationOptions = {}): Promise<JsonObject> {
+  type(text: string, options: MutationOptions = {}): Promise<ControlResult> {
     return this.bytes(new TextEncoder().encode(text), { ...options, inputKind: "text" });
   }
 
-  paste(text: string, options: MutationOptions = {}): Promise<JsonObject> {
+  paste(text: string, options: MutationOptions = {}): Promise<ControlResult> {
     return this.session.control(
       { command: "paste", data: Buffer.from(text).toString("base64") },
       options,
     );
   }
 
-  bytes(bytes: Uint8Array, options: MutationOptions & { readonly inputKind?: "raw" | "text" } = {}): Promise<JsonObject> {
+  bytes(bytes: Uint8Array, options: MutationOptions & { readonly inputKind?: "raw" | "text" } = {}): Promise<ControlResult> {
     const data = Buffer.from(bytes).toString("base64");
     return this.session.control(
       { command: "input", data, input_kind: options.inputKind ?? "raw", intent: null },
@@ -411,7 +443,7 @@ export class Keyboard {
 export class Pointer {
   constructor(private readonly session: Session) {}
 
-  click(column: number, row: number, button: "left" | "middle" | "right" = "left", options: MutationOptions & { readonly strict?: boolean } = {}): Promise<JsonObject> {
+  click(column: number, row: number, button: "left" | "middle" | "right" = "left", options: MutationOptions & { readonly strict?: boolean } = {}): Promise<ControlResult> {
     return this.session.control({
       command: "pointer",
       column,
@@ -421,7 +453,7 @@ export class Pointer {
     }, options);
   }
 
-  multiClick(column: number, row: number, count: 2 | 3 | 4, button: "left" | "middle" | "right" = "left", options: MutationOptions & { readonly strict?: boolean } = {}): Promise<JsonObject> {
+  multiClick(column: number, row: number, count: 2 | 3 | 4, button: "left" | "middle" | "right" = "left", options: MutationOptions & { readonly strict?: boolean } = {}): Promise<ControlResult> {
     return this.session.control({
       command: "pointer",
       column,
@@ -431,7 +463,7 @@ export class Pointer {
     }, options);
   }
 
-  drag(fromColumn: number, fromRow: number, toColumn: number, toRow: number, options: MutationOptions & { readonly button?: "left" | "middle" | "right"; readonly steps?: number; readonly strict?: boolean } = {}): Promise<JsonObject> {
+  drag(fromColumn: number, fromRow: number, toColumn: number, toRow: number, options: MutationOptions & { readonly button?: "left" | "middle" | "right"; readonly steps?: number; readonly strict?: boolean } = {}): Promise<ControlResult> {
     return this.session.control({
       command: "pointer",
       column: fromColumn,
@@ -441,7 +473,7 @@ export class Pointer {
     }, options);
   }
 
-  scroll(column: number, row: number, lines: number, options: MutationOptions & { readonly strict?: boolean } = {}): Promise<JsonObject> {
+  scroll(column: number, row: number, lines: number, options: MutationOptions & { readonly strict?: boolean } = {}): Promise<ControlResult> {
     return this.session.control({
       command: "pointer",
       column,
@@ -451,7 +483,7 @@ export class Pointer {
     }, options);
   }
 
-  focus(focused: boolean, options: MutationOptions & { readonly strict?: boolean } = {}): Promise<JsonObject> {
+  focus(focused: boolean, options: MutationOptions & { readonly strict?: boolean } = {}): Promise<ControlResult> {
     return this.session.control({ command: "focus", focused, strict: options.strict ?? false }, options);
   }
 }
@@ -459,41 +491,48 @@ export class Pointer {
 export class Semantic {
   constructor(private readonly session: Session) {}
 
-  inspect(point: StatePoint = { selector: "latest_presented" }, includeHidden = false): Promise<JsonObject> {
-    return this.session.request({ method: "observe", point, include_hidden: includeHidden });
+  async inspect(point: StatePoint = { selector: "latest_presented" }, includeHidden = false): Promise<Observation> {
+    const result = await this.session.request(
+      { method: "observe", point, include_hidden: includeHidden },
+      "observation",
+    );
+    return result.observation;
   }
 
-  timeline(options: { readonly allStates?: boolean; readonly controls?: boolean } = {}): Promise<JsonObject> {
-    return this.session.request({
+  async timeline(options: { readonly allStates?: boolean; readonly controls?: boolean } = {}): Promise<TimelineEntry[]> {
+    const result = await this.session.request({
       method: "timeline",
       all_states: options.allStates ?? false,
       controls: options.controls ?? false,
-    });
+    }, "timeline");
+    return result.entries;
   }
 
-  diff(from: StatePoint, to: StatePoint): Promise<JsonObject> {
-    return this.session.request({ method: "diff", from, to });
+  async diff(from: StatePoint, to: StatePoint): Promise<SemanticDiff> {
+    const result = await this.session.request({ method: "diff", from, to }, "diff");
+    return result.difference;
   }
 
-  diagnose(checks: ReadonlyArray<string> = [], broadChangePercent = 50): Promise<JsonObject> {
-    return this.session.request({
+  async diagnose(checks: ReadonlyArray<string> = [], broadChangePercent = 50): Promise<DiagnoseReport> {
+    const result = await this.session.request({
       method: "diagnose",
       checks,
       broad_change_percent: broadChangePercent,
-    });
+    }, "diagnose");
+    return result.report;
   }
 }
 
 export class Events {
   constructor(private readonly session: Session) {}
 
-  page(options: { readonly fromEventSeq?: number; readonly limit?: number; readonly metadataOnly?: boolean } = {}): Promise<JsonObject> {
+  page(options: { readonly fromEventSeq?: number; readonly limit?: number; readonly metadataOnly?: boolean } = {}): Promise<EventPage> {
     return this.session.request({
       method: "events",
       from_event_seq: options.fromEventSeq ?? 0,
       limit: options.limit ?? 256,
       metadata_only: options.metadataOnly ?? false,
-    });
+    }, "events");
   }
 }
 
@@ -506,57 +545,51 @@ export class Native {
       readonly point?: StatePoint;
       readonly viewport?: { readonly width: number; readonly height: number };
     } = {},
-  ): Promise<JsonObject> {
+  ): Promise<Artifact> {
     return this.session.request({
       method: "screenshot",
       point: options.point ?? { selector: "latest_presented" },
       destination,
       renderer: "native",
       viewport: options.viewport ?? null,
-    });
+    }, "artifact");
   }
 }
 
 export class Evidence {
   constructor(private readonly session: Session) {}
 
-  completion(): Promise<JsonObject> {
+  completion(): Promise<SessionCompletion> {
     return this.session.completion();
   }
 
-  complete(options: Pick<WaitOptions, "timeoutMs"> = {}): Promise<JsonObject> {
+  complete(options: Pick<WaitOptions, "timeoutMs"> = {}): Promise<SessionCompletion> {
     return this.session.complete(nonnegativeDuration(options.timeoutMs ?? 10_000, "timeoutMs"));
   }
 
-  verify(level: "structure" | "content" | "durability_record" = "content"): Promise<JsonObject> {
-    return this.session.request({ method: "verify", level });
+  async verify(level: "structure" | "content" | "durability_record" = "content"): Promise<VerificationReport> {
+    const result = await this.session.request({ method: "verify", level }, "verification");
+    return result.report;
   }
 
-  bundle(destination: string, profile: "screen" | "debug" | "forensic" = "screen"): Promise<JsonObject> {
-    return this.session.request({ method: "bundle", destination, profile });
+  bundle(destination: string, profile: "screen" | "debug" | "forensic" = "screen"): Promise<BundleResult> {
+    return this.session.request({ method: "bundle", destination, profile }, "bundle");
   }
 }
 
 export class Output {
   constructor(private readonly session: Session) {}
 
-  waitForBytes(data: Uint8Array, options: Pick<WaitOptions, "timeoutMs"> = {}): Promise<JsonObject> {
+  waitForBytes(data: Uint8Array, options: Pick<WaitOptions, "timeoutMs"> = {}): Promise<WaitOutcome> {
     return this.session.waitForOutput(
       data,
       nonnegativeDuration(options.timeoutMs ?? 10_000, "timeoutMs"),
     );
   }
 
-  waitForText(text: string, options: Pick<WaitOptions, "timeoutMs"> = {}): Promise<JsonObject> {
+  waitForText(text: string, options: Pick<WaitOptions, "timeoutMs"> = {}): Promise<WaitOutcome> {
     return this.waitForBytes(new TextEncoder().encode(text), options);
   }
-}
-
-function controlData(value: JsonObject): JsonObject {
-  if (value.kind !== "control" || typeof value.data !== "object" || value.data === null || Array.isArray(value.data)) {
-    throw new TermtraceProtocolError("driver control response has an invalid shape");
-  }
-  return value.data as JsonObject;
 }
 
 function encodeEnvironment(options: EnvironmentOptions | undefined): JsonObject {

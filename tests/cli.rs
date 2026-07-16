@@ -245,7 +245,7 @@ fn python_sync_and_async_clients_parse_driver_completion_contract() {
         .args(["--", "/bin/sh", "-c", "printf PYTHON"])
         .assert()
         .success();
-    let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/python/src");
+    let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/python");
     let binary = env!("CARGO_BIN_EXE_termtrace");
     let sync_code = r#"import json, sys
 from pathlib import Path
@@ -253,18 +253,17 @@ from termtrace import EnvironmentOptions, Terminal, assert_screen_text, assert_t
 with Terminal(binary_path=sys.argv[1]) as terminal:
     Path(sys.argv[3]).mkdir(parents=True, exist_ok=True)
     session = terminal.attach(sys.argv[2])
-    assert session.evidence.completion()["kind"] == "completion"
-    assert session.evidence.verify()["report"]["valid"] is True
-    assert session.evidence.bundle(Path(sys.argv[3]) / "python-screen-bundle")["kind"] == "bundle"
+    assert str(session.evidence.completion().session_id) == session.session_id
+    assert session.evidence.verify().valid is True
+    assert session.evidence.bundle(Path(sys.argv[3]) / "python-screen-bundle").directory
     assert isinstance(session.session_id, str)
-    assert session.semantic.inspect()["kind"] == "observation"
-    assert session.semantic.timeline()["kind"] == "timeline"
-    assert session.semantic.diff({"selector": "state_id", "state_id": 0}, {"selector": "latest_presented"})["kind"] == "diff"
-    assert session.semantic.diagnose()["kind"] == "diagnose"
-    assert session.events.page(metadata_only=True)["kind"] == "events"
+    assert session.semantic.inspect().state_hash
+    assert isinstance(session.semantic.timeline(), list)
+    assert isinstance(session.semantic.diff({"selector": "state_id", "state_id": 0}, {"selector": "latest_presented"}).rows, list)
+    assert isinstance(session.semantic.diagnose().findings, list)
+    assert session.events.page(metadata_only=True).next_event_seq >= 0
     semantic_image = session.screen.screenshot(Path(sys.argv[3]) / "python-semantic-image")
-    assert semantic_image["kind"] == "artifact"
-    assert Path(semantic_image["primary"]).is_file()
+    assert Path(semantic_image.primary).is_file()
     assert_screen_text(session, "PYTHON")
     snapshot = Path(sys.argv[3]) / "completed.snapshot.json"
     assert_terminal_snapshot(session, snapshot, update=True)
@@ -277,16 +276,16 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
         output_byte_budget=1000000,
     )
     assert launched.canonical_session.is_dir()
-    assert launched.screen.wait_for_text("PY_LAUNCH")["kind"] == "control"
-    assert launched.screen.wait_for_regex("PY_[A-Z]+")["kind"] == "control"
-    assert launched.screen.wait_for_idle()["kind"] == "stable_snapshot"
+    launched.screen.wait_for_text("PY_LAUNCH")
+    launched.screen.wait_for_regex("PY_[A-Z]+")
+    assert launched.screen.wait_for_idle().quality == "stable"
     assert b"python-private-value" not in launched.canonical_session.joinpath("session.json").read_bytes()
     assert json.loads(launched.canonical_session.joinpath("session.json").read_text())["resource_limits"]["output_bytes"] == 1000000
     assert "PY_LAUNCH" in launched.screen.text()
-    assert launched.screen.frame()["viewport_text"].startswith("PY_LAUNCH")
-    assert launched.output.wait_for_text("PY_LAUNCH")["kind"] == "output_wait"
+    assert launched.screen.frame().viewport_text.startswith("PY_LAUNCH")
+    assert launched.output.wait_for_text("PY_LAUNCH").event_seq >= 0
     launched.stop()
-    assert launched.evidence.complete()["kind"] == "completion"
+    assert str(launched.evidence.complete().session_id) == launched.session_id
     launched.close()
     with terminal.launch(["/bin/sh", "-c", "printf DISPOSABLE; sleep 30"], evidence_root=sys.argv[3], evidence="on-failure") as disposable:
         disposable_path = disposable.canonical_session
@@ -301,8 +300,10 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
         pass
     assert retained_path.joinpath("completion.json").is_file()
 "#;
-    let sync = StdCommand::new("python3")
-        .env("PYTHONPATH", &package)
+    let sync = StdCommand::new("uv")
+        .args(["run", "--isolated", "--project"])
+        .arg(&package)
+        .arg("python")
         .arg("-c")
         .arg(sync_code)
         .arg(binary)
@@ -320,18 +321,17 @@ async def main():
     terminal = await AsyncTerminal.create(binary_path=sys.argv[1])
     async with terminal:
         session = await terminal.attach(sys.argv[2])
-        assert (await session.completion())["kind"] == "completion"
-        assert (await session.evidence.verify())["report"]["valid"] is True
-        assert (await session.evidence.bundle(Path(sys.argv[3]) / "async-screen-bundle"))["kind"] == "bundle"
+        assert str((await session.completion()).session_id) == session.session_id
+        assert (await session.evidence.verify()).valid is True
+        assert (await session.evidence.bundle(Path(sys.argv[3]) / "async-screen-bundle")).directory
         assert isinstance(session.session_id, str)
-        assert (await session.semantic.inspect())["kind"] == "observation"
-        assert (await session.semantic.timeline())["kind"] == "timeline"
-        assert (await session.semantic.diff({"selector": "state_id", "state_id": 0}, {"selector": "latest_presented"}))["kind"] == "diff"
-        assert (await session.semantic.diagnose())["kind"] == "diagnose"
-        assert (await session.events.page(metadata_only=True))["kind"] == "events"
+        assert (await session.semantic.inspect()).state_hash
+        assert isinstance(await session.semantic.timeline(), list)
+        assert isinstance((await session.semantic.diff({"selector": "state_id", "state_id": 0}, {"selector": "latest_presented"})).rows, list)
+        assert isinstance((await session.semantic.diagnose()).findings, list)
+        assert (await session.events.page(metadata_only=True)).next_event_seq >= 0
         semantic_image = await session.screen.screenshot(Path(sys.argv[3]) / "async-semantic-image")
-        assert semantic_image["kind"] == "artifact"
-        assert Path(semantic_image["primary"]).is_file()
+        assert Path(semantic_image.primary).is_file()
         await session.close()
         launched = await terminal.launch(
             ["/bin/sh", "-c", "test \"${#CLIENT_SECRET}\" -eq 19; test -z \"${HOME+x}\"; printf ASYNC_LAUNCH; sleep 30"],
@@ -340,16 +340,16 @@ async def main():
             output_byte_budget=1000000,
         )
         assert launched.canonical_session.is_dir()
-        assert (await launched.screen.wait_for_text("ASYNC_LAUNCH"))["kind"] == "control"
-        assert (await launched.screen.wait_for_regex("ASYNC_[A-Z]+"))["kind"] == "control"
-        assert (await launched.screen.wait_for_idle())["kind"] == "stable_snapshot"
+        await launched.screen.wait_for_text("ASYNC_LAUNCH")
+        await launched.screen.wait_for_regex("ASYNC_[A-Z]+")
+        assert (await launched.screen.wait_for_idle()).quality == "stable"
         assert b"async-private-value" not in launched.canonical_session.joinpath("session.json").read_bytes()
         assert json.loads(launched.canonical_session.joinpath("session.json").read_text())["resource_limits"]["output_bytes"] == 1000000
         assert "ASYNC_LAUNCH" in await launched.screen.text()
-        assert (await launched.screen.frame())["viewport_text"].startswith("ASYNC_LAUNCH")
-        assert (await launched.output.wait_for_text("ASYNC_LAUNCH"))["kind"] == "output_wait"
+        assert (await launched.screen.frame()).viewport_text.startswith("ASYNC_LAUNCH")
+        assert (await launched.output.wait_for_text("ASYNC_LAUNCH")).event_seq >= 0
         await launched.stop()
-        assert (await launched.evidence.complete())["kind"] == "completion"
+        assert str((await launched.evidence.complete()).session_id) == launched.session_id
         await launched.close()
         disposable = await terminal.launch(["/bin/sh", "-c", "printf ASYNC_DISPOSABLE; sleep 30"], evidence_root=sys.argv[3], evidence="on-failure")
         disposable_path = disposable.canonical_session
@@ -358,8 +358,10 @@ async def main():
         assert not disposable_path.exists()
 asyncio.run(main())
 "#;
-    let asynchronous = StdCommand::new("python3")
-        .env("PYTHONPATH", package)
+    let asynchronous = StdCommand::new("uv")
+        .args(["run", "--isolated", "--project"])
+        .arg(package)
+        .arg("python")
         .arg("-c")
         .arg(async_code)
         .arg(binary)
@@ -388,14 +390,14 @@ mkdirSync(process.argv[4], { recursive: true })
 await using terminal = await Termtrace.create({ binaryPath: process.argv[2] })
 await using attached = await terminal.attach(process.argv[3])
 const completion = await attached.evidence.complete()
-if (completion.kind !== "completion") throw new Error("missing completion")
-if ((await attached.evidence.verify()).report.valid !== true) throw new Error("invalid evidence")
-if ((await attached.evidence.bundle(`${process.argv[4]}/typescript-screen-bundle`)).kind !== "bundle") throw new Error("missing bundle")
+if (completion.session_id !== attached.sessionId) throw new Error("missing completion")
+if ((await attached.evidence.verify()).valid !== true) throw new Error("invalid evidence")
+if (!(await attached.evidence.bundle(`${process.argv[4]}/typescript-screen-bundle`)).directory) throw new Error("missing bundle")
 if (typeof attached.sessionId !== "string") throw new Error("missing session identity")
-if ((await attached.semantic.inspect()).kind !== "observation") throw new Error("missing observation")
-if ((await attached.semantic.timeline()).kind !== "timeline") throw new Error("missing timeline")
-if ((await attached.semantic.diff({ selector: "state_id", state_id: 0 }, { selector: "latest_presented" })).kind !== "diff") throw new Error("missing diff")
-if ((await attached.semantic.diagnose()).kind !== "diagnose") throw new Error("missing diagnosis")
+if (!(await attached.semantic.inspect()).state_hash) throw new Error("missing observation")
+if (!Array.isArray(await attached.semantic.timeline())) throw new Error("missing timeline")
+if (!Array.isArray((await attached.semantic.diff({ selector: "state_id", state_id: 0 }, { selector: "latest_presented" })).rows)) throw new Error("missing diff")
+if (!Array.isArray((await attached.semantic.diagnose()).findings)) throw new Error("missing diagnosis")
 if ((await attached.events.page({ metadataOnly: true })).kind !== "events") throw new Error("missing events")
 const semanticImage = await attached.screen.screenshot(`${process.argv[4]}/typescript-semantic-image`)
 if (semanticImage.kind !== "artifact" || !existsSync(String(semanticImage.primary))) throw new Error("missing semantic screenshot")
@@ -408,16 +410,16 @@ await using launched = await terminal.launch({
   outputByteBudget: 1000000,
 })
 if (typeof launched.sessionId !== "string") throw new Error("missing launched identity")
-if ((await launched.screen.waitForText(/TS_LAUNCH/)).kind !== "control") throw new Error("missing screen wait")
-if ((await launched.screen.waitForPredicate({ predicate: "row_contains", row: 0, text: "TS_LAUNCH" })).kind !== "control") throw new Error("missing structural wait")
+await launched.screen.waitForText(/TS_LAUNCH/)
+await launched.screen.waitForPredicate({ predicate: "row_contains", row: 0, text: "TS_LAUNCH" })
 if ((await launched.screen.waitForIdle()).kind !== "stable_snapshot") throw new Error("missing stable capture")
 if (Buffer.from(await Bun.file(`${launched.canonicalSession}/session.json`).arrayBuffer()).includes("ts-private-value")) throw new Error("environment value leaked")
 if ((await Bun.file(`${launched.canonicalSession}/session.json`).json()).resource_limits.output_bytes !== 1000000) throw new Error("output budget missing")
 if (!await launched.screen.text().then((text) => text.includes("TS_LAUNCH"))) throw new Error("missing screen text")
 if (!String((await launched.screen.frame()).viewport_text).includes("TS_LAUNCH")) throw new Error("missing frame")
-if ((await launched.output.waitForText("TS_LAUNCH")).kind !== "output_wait") throw new Error("missing output wait")
+if ((await launched.output.waitForText("TS_LAUNCH")).event_seq < 0) throw new Error("missing output wait")
 await launched.stop()
-if ((await launched.evidence.complete()).kind !== "completion") throw new Error("missing launched completion")
+if ((await launched.evidence.complete()).session_id !== launched.sessionId) throw new Error("missing launched completion")
 const disposable = await terminal.launch({ command: ["/bin/sh", "-c", "printf TS_DISPOSABLE; sleep 30"], evidenceRoot: process.argv[4], evidence: "on-failure" })
 const disposablePath = disposable.canonicalSession
 await disposable.screen.waitForText("TS_DISPOSABLE")

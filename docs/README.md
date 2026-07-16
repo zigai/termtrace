@@ -17,6 +17,7 @@ For a working example, run the [end-to-end demo](../demos/README.md).
 | [Recording](recording.md) | choose geometry, provenance, and durability settings |
 | [Test isolation](test-isolation.md) | control child environment, limits, and atomic idle capture |
 | [Live control](agent-workflows.md) | send input, wait for state, inspect changes, or automate a session |
+| [Language clients](language-clients.md) | use the typed Python and TypeScript APIs or regenerate their contracts |
 | [Semantic replay](semantic-replay.md) | understand states, synchronized output, and ranged replay |
 | [Troubleshooting](troubleshooting.md) | diagnose build, control, replay, or capture failures |
 

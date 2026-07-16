@@ -1,18 +1,55 @@
 """Native asyncio transport with explicit subprocess ownership."""
 
 import asyncio
-import json
 import os
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
 from types import TracebackType
-from typing import Literal, Self
+from typing import Literal, Self, TypeVar
+
+import msgspec
 
 from termtrace.binary import resolve_binary
 from termtrace.client import EnvironmentOptions, _encode_environment
 from termtrace.errors import TermtraceOperationError, TermtraceProtocolError
-from termtrace.models import DriverResponse, JsonValue, parse_error
+from termtrace.models import (
+    Artifact,
+    BundleResult,
+    Completion,
+    ControlResult,
+    ControlStableSnapshotData,
+    DiagnosticReport,
+    DriverArtifactData,
+    DriverAttachedData,
+    DriverBundleData,
+    DriverCompletionData,
+    DriverControlData,
+    DriverDetachedData,
+    DriverDiagnoseData,
+    DriverDiffData,
+    DriverDiscardedData,
+    DriverEventsData,
+    DriverHelloData,
+    DriverObservationData,
+    DriverOutputWaitData,
+    DriverTimelineData,
+    DriverVerificationData,
+    EventPage,
+    Frame,
+    JsonObject,
+    JsonValue,
+    Observation,
+    SemanticDiff,
+    TimelineEntry,
+    VerificationReport,
+    WaitOutcome,
+    decode_driver_response,
+    encode_driver_request,
+)
+
+
+ResponseDataT = TypeVar("ResponseDataT", bound=msgspec.Struct)
 
 
 class AsyncTerminal:
@@ -45,7 +82,7 @@ class AsyncTerminal:
             stderr=asyncio.subprocess.DEVNULL,
         )
         terminal = cls(process, None if evidence_root is None else Path(evidence_root))
-        await terminal.request({"method": "hello"})
+        await terminal.request({"method": "hello"}, DriverHelloData)
         return terminal
 
     async def launch(
@@ -84,63 +121,48 @@ class AsyncTerminal:
                 "resource_limits": {
                     "output_bytes": output_byte_budget,
                 },
-            }
+            },
+            DriverAttachedData,
         )
         return AsyncSession(
             self,
-            _required_str(data, "handle"),
-            _required_str(data, "session_id"),
-            _required_str(data, "canonical_session"),
+            data.handle,
+            data.session_id,
+            data.canonical_session,
             owned=True,
             evidence_policy=evidence,
-            completed=_required_bool(data, "completed"),
+            completed=data.completed,
         )
 
     async def attach(self, session: str | Path) -> "AsyncSession":
-        data = await self.request({"method": "attach", "session": str(session)})
+        data = await self.request(
+            {"method": "attach", "session": str(session)}, DriverAttachedData
+        )
         return AsyncSession(
             self,
-            _required_str(data, "handle"),
-            _required_str(data, "session_id"),
-            _required_str(data, "canonical_session"),
+            data.handle,
+            data.session_id,
+            data.canonical_session,
             owned=False,
             evidence_policy="manual",
-            completed=_required_bool(data, "completed"),
+            completed=data.completed,
         )
 
     async def request(
         self,
-        method: dict[str, JsonValue],
+        method: JsonObject,
+        response_type: type[ResponseDataT],
         request_id: str | None = None,
-    ) -> dict[str, JsonValue]:
+    ) -> ResponseDataT:
         correlation_id = request_id or str(uuid.uuid4())
-        payload: dict[str, JsonValue] = {
-            "version": 2,
-            "request_id": correlation_id,
-            "method": method,
-        }
+        payload = encode_driver_request(method, correlation_id)
         async with self._lock:
-            self._stdin.write(
-                json.dumps(payload, separators=(",", ":")).encode() + b"\n"
-            )
+            self._stdin.write(payload + b"\n")
             await self._stdin.drain()
             line = await self._stdout.readline()
         if not line:
             raise TermtraceProtocolError("driver closed before its correlated response")
-        try:
-            raw: JsonValue = json.loads(line)
-        except json.JSONDecodeError as e:
-            raise TermtraceProtocolError("driver response is not valid JSON") from e
-        failure = parse_error(raw, correlation_id)
-        if failure is not None:
-            raise TermtraceOperationError(
-                _required_str(failure, "message"),
-                code=_required_str(failure, "code"),
-                retry_safety=_required_str(failure, "retry_safety"),
-                uncertain=_required_bool(failure, "uncertain"),
-                evidence=_optional_str(failure, "evidence"),
-            )
-        return DriverResponse.parse(raw, correlation_id).data
+        return decode_driver_response(line, correlation_id, response_type)
 
     async def close(self) -> None:
         if self._process.returncode is not None:
@@ -197,38 +219,44 @@ class AsyncSession:
 
     async def control(
         self,
-        command: dict[str, JsonValue],
+        command: JsonObject,
         *,
         request_id: str | None = None,
         if_state: str | None = None,
-    ) -> dict[str, JsonValue]:
-        return await self._terminal.request(
+    ) -> ControlResult:
+        response = await self._terminal.request(
             {
                 "method": "control",
                 "handle": self.handle,
                 "command": command,
                 "expected_presented_state_hash": if_state,
             },
+            DriverControlData,
             request_id,
         )
+        return response.data
 
-    async def completion(self) -> dict[str, JsonValue]:
+    async def completion(self) -> Completion:
         result = await self._terminal.request(
-            {"method": "completion", "handle": self.handle}
+            {"method": "completion", "handle": self.handle}, DriverCompletionData
         )
         self._completed = True
-        return result
+        return result.completion
 
     async def request(
-        self, method: dict[str, JsonValue], *, request_id: str | None = None
-    ) -> dict[str, JsonValue]:
+        self,
+        method: JsonObject,
+        response_type: type[ResponseDataT],
+        *,
+        request_id: str | None = None,
+    ) -> ResponseDataT:
         return await self._terminal.request(
-            {**method, "handle": self.handle}, request_id=request_id
+            {**method, "handle": self.handle}, response_type, request_id=request_id
         )
 
     async def stop(
         self, *, request_id: str | None = None, if_state: str | None = None
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         return await self.control(
             {"command": "stop"}, request_id=request_id, if_state=if_state
         )
@@ -242,7 +270,7 @@ class AsyncSession:
         pixel_height: int | None = None,
         request_id: str | None = None,
         if_state: str | None = None,
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         return await self.control(
             {
                 "command": "resize",
@@ -255,31 +283,34 @@ class AsyncSession:
             if_state=if_state,
         )
 
-    async def complete(self, *, timeout_ms: int) -> dict[str, JsonValue]:
+    async def complete(self, *, timeout_ms: int) -> Completion:
         result = await self._terminal.request(
-            {"method": "complete", "handle": self.handle, "timeout_ms": timeout_ms}
+            {"method": "complete", "handle": self.handle, "timeout_ms": timeout_ms},
+            DriverCompletionData,
         )
         self._completed = True
-        return result
+        return result.completion
 
-    async def wait_for_output(
-        self, data: str, *, timeout_ms: int
-    ) -> dict[str, JsonValue]:
-        return await self._terminal.request(
+    async def wait_for_output(self, data: str, *, timeout_ms: int) -> WaitOutcome:
+        result = await self._terminal.request(
             {
                 "method": "wait_output",
                 "handle": self.handle,
                 "data": data,
                 "timeout_ms": timeout_ms,
-            }
+            },
+            DriverOutputWaitData,
         )
+        return result.outcome
 
     async def close(self) -> None:
         if self._closed:
             return
         if self._owned and self._evidence_policy != "manual":
             await self._ensure_completed()
-        await self._terminal.request({"method": "detach", "handle": self.handle})
+        await self._terminal.request(
+            {"method": "detach", "handle": self.handle}, DriverDetachedData
+        )
         self._closed = True
 
     async def finish(self, *, passed: bool) -> None:
@@ -288,15 +319,20 @@ class AsyncSession:
         if self._closed:
             return
         if not self._owned:
-            raise ValueError("finish is valid only for sessions launched by this client")
+            raise ValueError(
+                "finish is valid only for sessions launched by this client"
+            )
         await self._ensure_completed()
         if passed and self._evidence_policy == "on-failure":
             await self._terminal.request(
-                {"method": "discard_completed", "handle": self.handle}
+                {"method": "discard_completed", "handle": self.handle},
+                DriverDiscardedData,
             )
             self._closed = True
             return
-        await self._terminal.request({"method": "detach", "handle": self.handle})
+        await self._terminal.request(
+            {"method": "detach", "handle": self.handle}, DriverDetachedData
+        )
         self._closed = True
 
     async def _ensure_completed(self) -> None:
@@ -327,27 +363,26 @@ class AsyncScreen:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def snapshot(self) -> dict[str, JsonValue]:
+    async def snapshot(self) -> ControlResult:
         return await self._session.control({"command": "snapshot"})
 
     async def text(self) -> str:
-        return _required_str(await self.frame(), "viewport_text")
+        return (await self.frame()).viewport_text
 
-    async def frame(
-        self, point: dict[str, JsonValue] | None = None
-    ) -> dict[str, JsonValue]:
+    async def frame(self, point: JsonObject | None = None) -> Frame:
         data = await self._session.request(
             {
                 "method": "observe",
                 "point": point or {"selector": "latest_presented"},
                 "include_hidden": False,
-            }
+            },
+            DriverObservationData,
         )
-        return _required_mapping(_required_mapping(data, "observation"), "frame")
+        return data.observation.frame
 
     async def wait_for_text(
         self, text: str, *, stable_for: float = 0.0, timeout: float = 10.0
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         return await self.wait_for(
             {"predicate": "contains", "text": text},
             stable_for=stable_for,
@@ -356,11 +391,11 @@ class AsyncScreen:
 
     async def wait_for(
         self,
-        predicate: dict[str, JsonValue],
+        predicate: JsonObject,
         *,
         stable_for: float = 0.0,
         timeout: float = 10.0,
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         return await self._session.control(
             {
                 "command": "wait_screen",
@@ -372,7 +407,7 @@ class AsyncScreen:
 
     async def wait_for_absence(
         self, text: str, *, stable_for: float = 0.0, timeout: float = 10.0
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         return await self.wait_for(
             {"predicate": "absent", "text": text},
             stable_for=stable_for,
@@ -381,7 +416,7 @@ class AsyncScreen:
 
     async def wait_for_regex(
         self, pattern: str, *, stable_for: float = 0.0, timeout: float = 10.0
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         return await self.wait_for(
             {"predicate": "matches_regex", "pattern": pattern},
             stable_for=stable_for,
@@ -394,7 +429,7 @@ class AsyncScreen:
         stable_for: float = 0.1,
         timeout: float = 10.0,
         allow_incomplete: bool = False,
-    ) -> dict[str, JsonValue]:
+    ) -> ControlStableSnapshotData:
         """Atomically return the exact state that satisfied or ended the idle wait."""
         response = await self._session.control(
             {
@@ -403,23 +438,19 @@ class AsyncScreen:
                 "timeout_ns": _seconds_to_ns(timeout),
             }
         )
-        if _required_str(response, "kind") != "control":
-            raise TermtraceProtocolError("stable capture response has an invalid wrapper")
-        data = _required_mapping(response, "data")
-        if _required_str(data, "kind") != "stable_snapshot":
+        if not isinstance(response, ControlStableSnapshotData):
             raise TermtraceProtocolError("stable capture response has an invalid kind")
-        quality = _required_str(data, "quality")
-        if quality != "stable" and not allow_incomplete:
+        if response.quality != "stable" and not allow_incomplete:
             raise TermtraceProtocolError(
-                f"stable capture ended with {quality}; set allow_incomplete to inspect it"
+                f"stable capture ended with {response.quality}; set allow_incomplete to inspect it"
             )
-        return data
+        return response
 
     async def screenshot(
         self,
         destination: str | Path,
-        point: dict[str, JsonValue] | None = None,
-    ) -> dict[str, JsonValue]:
+        point: JsonObject | None = None,
+    ) -> Artifact:
         return await self._session.request(
             {
                 "method": "screenshot",
@@ -427,7 +458,8 @@ class AsyncScreen:
                 "destination": str(destination),
                 "renderer": "semantic",
                 "viewport": None,
-            }
+            },
+            DriverArtifactData,
         )
 
 
@@ -437,7 +469,7 @@ class AsyncKeyboard:
 
     async def press(
         self, key: str, *, request_id: str | None = None, if_state: str | None = None
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         return await self._session.control(
             {
                 "command": "key",
@@ -455,7 +487,7 @@ class AsyncKeyboard:
 
     async def type(
         self, text: str, *, request_id: str | None = None, if_state: str | None = None
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         import base64
 
         return await self._session.control(
@@ -475,7 +507,7 @@ class AsyncKeyboard:
         *,
         request_id: str | None = None,
         if_state: str | None = None,
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         import base64
 
         raw = data.encode() if isinstance(data, str) else bytes(data)
@@ -499,7 +531,7 @@ class AsyncPointer:
         strict: bool = False,
         request_id: str | None = None,
         if_state: str | None = None,
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         return await self._session.control(
             {
                 "command": "pointer",
@@ -519,7 +551,7 @@ class AsyncPointer:
         strict: bool = False,
         request_id: str | None = None,
         if_state: str | None = None,
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         return await self._session.control(
             {"command": "focus", "focused": focused, "strict": strict},
             request_id=request_id,
@@ -536,7 +568,7 @@ class AsyncPointer:
         strict: bool = False,
         request_id: str | None = None,
         if_state: str | None = None,
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         return await self._session.control(
             {
                 "command": "pointer",
@@ -561,7 +593,7 @@ class AsyncPointer:
         strict: bool = False,
         request_id: str | None = None,
         if_state: str | None = None,
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         return await self._session.control(
             {
                 "command": "pointer",
@@ -589,7 +621,7 @@ class AsyncPointer:
         strict: bool = False,
         request_id: str | None = None,
         if_state: str | None = None,
-    ) -> dict[str, JsonValue]:
+    ) -> ControlResult:
         return await self._session.control(
             {
                 "command": "pointer",
@@ -609,49 +641,55 @@ class AsyncSemantic:
 
     async def inspect(
         self,
-        point: dict[str, JsonValue] | None = None,
+        point: JsonObject | None = None,
         *,
         include_hidden: bool = False,
-    ) -> dict[str, JsonValue]:
-        return await self._session.request(
+    ) -> Observation:
+        result = await self._session.request(
             {
                 "method": "observe",
                 "point": point or {"selector": "latest_presented"},
                 "include_hidden": include_hidden,
-            }
+            },
+            DriverObservationData,
         )
+        return result.observation
 
     async def timeline(
         self, *, all_states: bool = False, controls: bool = False
-    ) -> dict[str, JsonValue]:
-        return await self._session.request(
+    ) -> list[TimelineEntry]:
+        result = await self._session.request(
             {
                 "method": "timeline",
                 "all_states": all_states,
                 "controls": controls,
-            }
+            },
+            DriverTimelineData,
         )
+        return result.entries
 
-    async def diff(
-        self, from_point: dict[str, JsonValue], to_point: dict[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        return await self._session.request(
-            {"method": "diff", "from": from_point, "to": to_point}
+    async def diff(self, from_point: JsonObject, to_point: JsonObject) -> SemanticDiff:
+        result = await self._session.request(
+            {"method": "diff", "from": from_point, "to": to_point},
+            DriverDiffData,
         )
+        return result.difference
 
     async def diagnose(
         self,
         checks: Sequence[str] = (),
         *,
         broad_change_percent: int = 50,
-    ) -> dict[str, JsonValue]:
-        return await self._session.request(
+    ) -> DiagnosticReport:
+        result = await self._session.request(
             {
                 "method": "diagnose",
                 "checks": list(checks),
                 "broad_change_percent": broad_change_percent,
-            }
+            },
+            DriverDiagnoseData,
         )
+        return result.report
 
 
 class AsyncEvents:
@@ -664,14 +702,15 @@ class AsyncEvents:
         from_event_seq: int = 0,
         limit: int = 256,
         metadata_only: bool = False,
-    ) -> dict[str, JsonValue]:
+    ) -> EventPage:
         return await self._session.request(
             {
                 "method": "events",
                 "from_event_seq": from_event_seq,
                 "limit": limit,
                 "metadata_only": metadata_only,
-            }
+            },
+            DriverEventsData,
         )
 
 
@@ -683,13 +722,11 @@ class AsyncNative:
         self,
         destination: str | Path,
         *,
-        point: dict[str, JsonValue] | None = None,
+        point: JsonObject | None = None,
         viewport: tuple[int, int] | None = None,
-    ) -> dict[str, JsonValue]:
+    ) -> Artifact:
         target: JsonValue = (
-            None
-            if viewport is None
-            else {"width": viewport[0], "height": viewport[1]}
+            None if viewport is None else {"width": viewport[0], "height": viewport[1]}
         )
         return await self._session.request(
             {
@@ -698,7 +735,8 @@ class AsyncNative:
                 "destination": str(destination),
                 "renderer": "native",
                 "viewport": target,
-            }
+            },
+            DriverArtifactData,
         )
 
 
@@ -708,16 +746,14 @@ class AsyncOutput:
 
     async def wait_for_bytes(
         self, data: bytes | memoryview, *, timeout: float = 10.0
-    ) -> dict[str, JsonValue]:
+    ) -> WaitOutcome:
         import base64
 
         return await self._session.wait_for_output(
             base64.b64encode(bytes(data)).decode(), timeout_ms=_seconds_to_ms(timeout)
         )
 
-    async def wait_for_text(
-        self, text: str, *, timeout: float = 10.0
-    ) -> dict[str, JsonValue]:
+    async def wait_for_text(self, text: str, *, timeout: float = 10.0) -> WaitOutcome:
         return await self.wait_for_bytes(text.encode(), timeout=timeout)
 
 
@@ -725,25 +761,29 @@ class AsyncEvidence:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def complete(self, *, timeout: float = 10.0) -> dict[str, JsonValue]:
+    async def complete(self, *, timeout: float = 10.0) -> Completion:
         return await self._session.complete(timeout_ms=_seconds_to_ms(timeout))
 
     async def verify(
         self, level: Literal["structure", "content", "durability_record"] = "content"
-    ) -> dict[str, JsonValue]:
-        return await self._session.request({"method": "verify", "level": level})
+    ) -> VerificationReport:
+        result = await self._session.request(
+            {"method": "verify", "level": level}, DriverVerificationData
+        )
+        return result.report
 
     async def bundle(
         self,
         destination: str | Path,
         profile: Literal["screen", "debug", "forensic"] = "screen",
-    ) -> dict[str, JsonValue]:
+    ) -> BundleResult:
         return await self._session.request(
             {
                 "method": "bundle",
                 "destination": str(destination),
                 "profile": profile,
-            }
+            },
+            DriverBundleData,
         )
 
 
@@ -757,33 +797,3 @@ def _seconds_to_ms(value: float) -> int:
     if value < 0:
         raise ValueError("duration must be nonnegative")
     return int(value * 1000)
-
-
-def _required_str(value: dict[str, JsonValue], field: str) -> str:
-    item = value.get(field)
-    if not isinstance(item, str):
-        raise TermtraceProtocolError(f"driver field {field} must be a string")
-    return item
-
-
-def _optional_str(value: dict[str, JsonValue], field: str) -> str | None:
-    item = value.get(field)
-    if item is None or isinstance(item, str):
-        return item
-    raise TermtraceProtocolError(f"driver field {field} must be a string or null")
-
-
-def _required_bool(value: dict[str, JsonValue], field: str) -> bool:
-    item = value.get(field)
-    if not isinstance(item, bool):
-        raise TermtraceProtocolError(f"driver field {field} must be a boolean")
-    return item
-
-
-def _required_mapping(
-    value: dict[str, JsonValue], field: str
-) -> dict[str, JsonValue]:
-    item = value.get(field)
-    if not isinstance(item, dict):
-        raise TermtraceProtocolError(f"driver field {field} must be an object")
-    return item

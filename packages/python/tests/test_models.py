@@ -1,52 +1,88 @@
-"""Tests for the typed protocol boundary."""
+"""Cross-language fixtures for the generated protocol boundary."""
 
+import json
 import unittest
+from pathlib import Path
 
-from termtrace import TermtraceProtocolError
-from termtrace.models import DriverResponse, JsonValue, parse_error
+from termtrace import (
+    TermtraceOperationError,
+    TermtraceProtocolError,
+)
+from termtrace.models import (
+    DriverAttachedData,
+    DriverHelloData,
+    decode_driver_response,
+    encode_driver_request,
+)
+
+
+FIXTURES = Path(__file__).parents[3] / "fixtures" / "protocol" / "driver-responses.json"
 
 
 class DriverResponseTests(unittest.TestCase):
-    def test_parses_correlated_success(self) -> None:
-        response: JsonValue = {
-            "version": 2,
-            "request_id": "request-1",
-            "result": {"status": "ok", "data": {"kind": "hello"}},
-        }
+    def setUp(self) -> None:
+        self.cases = json.loads(FIXTURES.read_text(encoding="utf-8"))
 
-        parsed = DriverResponse.parse(response, "request-1")
+    def test_decodes_generated_success_variants(self) -> None:
+        hello = self.cases["valid"][0]["response"]
+        attached = self.cases["valid"][1]["response"]
 
-        self.assertEqual(parsed.data["kind"], "hello")
+        parsed_hello = decode_driver_response(
+            json.dumps(hello).encode(), hello["request_id"], DriverHelloData
+        )
+        parsed_attached = decode_driver_response(
+            json.dumps(attached).encode(),
+            attached["request_id"],
+            DriverAttachedData,
+        )
+
+        self.assertEqual(parsed_hello.driver_protocol_version, 2)
+        self.assertEqual(parsed_attached.canonical_session, "/tmp/example.termtrace")
 
     def test_rejects_uncorrelated_response(self) -> None:
-        response: JsonValue = {
-            "version": 2,
-            "request_id": "other-request",
-            "result": {"status": "ok", "data": {}},
-        }
+        hello = self.cases["valid"][0]["response"]
 
         with self.assertRaisesRegex(TermtraceProtocolError, "request ID"):
-            DriverResponse.parse(response, "request-1")
+            decode_driver_response(
+                json.dumps(hello).encode(),
+                "00000000-0000-0000-0000-000000000099",
+                DriverHelloData,
+            )
 
     def test_preserves_structured_operation_error(self) -> None:
-        response: JsonValue = {
-            "version": 2,
-            "request_id": "request-1",
-            "result": {
-                "status": "error",
-                "code": "stale_state",
-                "message": "state changed",
-                "retry_safety": "safe",
-                "uncertain": False,
-                "evidence": "session/events.jsonl",
-            },
-        }
+        response = self.cases["valid"][2]["response"]
 
-        error = parse_error(response, "request-1")
+        with self.assertRaises(TermtraceOperationError) as captured:
+            decode_driver_response(
+                json.dumps(response).encode(), response["request_id"], DriverHelloData
+            )
 
-        self.assertIsNotNone(error)
-        assert error is not None
-        self.assertEqual(error["code"], "stale_state")
+        self.assertEqual(captured.exception.code, "stale_state")
+        self.assertFalse(captured.exception.uncertain)
+
+    def test_rejects_every_invalid_shared_fixture_without_payload_leakage(self) -> None:
+        for case in self.cases["invalid"]:
+            with self.subTest(case=case["name"]):
+                response = case["response"]
+                with self.assertRaises(TermtraceProtocolError) as captured:
+                    decode_driver_response(
+                        json.dumps(response).encode(),
+                        response["request_id"],
+                        DriverHelloData,
+                    )
+                self.assertNotIn("SECRET_SENTINEL", str(captured.exception))
+
+    def test_validates_outgoing_requests_without_payload_leakage(self) -> None:
+        request_id = "00000000-0000-0000-0000-000000000020"
+
+        encoded = encode_driver_request({"method": "hello"}, request_id)
+
+        self.assertEqual(json.loads(encoded)["request_id"], request_id)
+        with self.assertRaises(TermtraceProtocolError) as captured:
+            encode_driver_request(
+                {"method": "hello", "secret_payload": "SECRET_SENTINEL"}, request_id
+            )
+        self.assertNotIn("SECRET_SENTINEL", str(captured.exception))
 
 
 if __name__ == "__main__":
