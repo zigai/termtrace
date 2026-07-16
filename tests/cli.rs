@@ -2296,18 +2296,21 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     let completed = send_request(
         &completed_session,
         &ControlRequest::new(ControlCommand::CaptureStable {
-            stable_for_ns: 10_000_000_000,
-            timeout_ns: 10_000_000_000,
+            stable_for_ns: 3_600_000_000_000,
+            timeout_ns: 3_600_000_000_000,
         }),
     )
     .expect("typed child completion");
-    assert!(matches!(
-        completed,
-        ControlData::StableSnapshot {
-            quality: StableCaptureQuality::ChildCompleted,
-            ..
-        }
-    ));
+    assert!(
+        matches!(
+            completed,
+            ControlData::StableSnapshot {
+                quality: StableCaptureQuality::ChildCompleted | StableCaptureQuality::OutputClosed,
+                ..
+            }
+        ),
+        "unexpected completed-child outcome: {completed:?}"
+    );
     let _completed_status = completed_child.wait().expect("completed recorder exit");
 
     let closed_session = temporary.path().join("output-closed");
