@@ -93,6 +93,22 @@ def _normalize(source: str, schema_name: str, add_aliases: bool) -> str:
         source = source.replace(") = 'inherit'", ") = EnvironmentBase.inherit").replace(
             ") = 'auto'", ") = ColorPolicy.auto"
         )
+        source = source.replace("Annotated, Literal, TypeAlias", "Annotated, TypeAlias")
+        source = source.replace(
+            "field(default_factory=list)",
+            "field(default_factory=lambda: list[str]())",
+            1,
+        )
+        source = source.replace(
+            "field(default_factory=dict)",
+            "field(default_factory=lambda: dict[str, Base64Bytes]())",
+            1,
+        )
+        source = source.replace(
+            "field(default_factory=list)",
+            "field(default_factory=lambda: list[str]())",
+            1,
+        )
     if not add_aliases:
         return source
     aliases: list[str] = []

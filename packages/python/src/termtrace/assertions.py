@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Pattern
+from typing import Pattern, cast
 
 import msgspec
 
@@ -159,16 +159,25 @@ def _optional_int(value: int | None | msgspec.UnsetType) -> int | None:
 
 
 def _json_mapping(value: object) -> dict[str, JsonValue]:
-    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+    if not isinstance(value, dict):
         raise AssertionError("terminal modes must encode as a JSON object")
-    return {key: _json_value(item) for key, item in value.items()}
+    # The runtime dict check establishes the container; Pyright cannot retain
+    # concrete object parameters when narrowing from `object`.
+    mapping = cast("dict[object, object]", value)
+    result: dict[str, JsonValue] = {}
+    for key, item in mapping.items():
+        if not isinstance(key, str):
+            raise AssertionError("terminal modes must encode with string keys")
+        result[key] = _json_value(item)
+    return result
 
 
 def _json_value(value: object) -> JsonValue:
     if value is None or isinstance(value, bool | int | float | str):
         return value
     if isinstance(value, list):
-        return [_json_value(item) for item in value]
-    if isinstance(value, dict) and all(isinstance(key, str) for key in value):
-        return {key: _json_value(item) for key, item in value.items()}
+        items = cast("list[object]", value)
+        return [_json_value(item) for item in items]
+    if isinstance(value, dict):
+        return _json_mapping(cast("dict[object, object]", value))
     raise AssertionError("generated terminal model did not encode as JSON")

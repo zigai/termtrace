@@ -11,7 +11,8 @@ from typing import Literal, Self, TypeVar
 import msgspec
 
 from termtrace.binary import resolve_binary
-from termtrace.client import EnvironmentOptions, _encode_environment
+from termtrace.duration import seconds_to_milliseconds, seconds_to_nanoseconds
+from termtrace.environment import EnvironmentOptions, encode_environment
 from termtrace.errors import TermtraceOperationError, TermtraceProtocolError
 from termtrace.models import (
     Artifact,
@@ -117,7 +118,7 @@ class AsyncTerminal:
                 "working_directory": None
                 if working_directory is None
                 else str(working_directory),
-                "environment": _encode_environment(environment),
+                "environment": encode_environment(environment),
                 "resource_limits": {
                     "output_bytes": output_byte_budget,
                 },
@@ -400,8 +401,8 @@ class AsyncScreen:
             {
                 "command": "wait_screen",
                 "predicate": predicate,
-                "stable_for_ns": _seconds_to_ns(stable_for),
-                "timeout_ns": _seconds_to_ns(timeout),
+                "stable_for_ns": seconds_to_nanoseconds(stable_for),
+                "timeout_ns": seconds_to_nanoseconds(timeout),
             }
         )
 
@@ -434,8 +435,8 @@ class AsyncScreen:
         response = await self._session.control(
             {
                 "command": "capture_stable",
-                "stable_for_ns": _seconds_to_ns(stable_for),
-                "timeout_ns": _seconds_to_ns(timeout),
+                "stable_for_ns": seconds_to_nanoseconds(stable_for),
+                "timeout_ns": seconds_to_nanoseconds(timeout),
             }
         )
         if not isinstance(response, ControlStableSnapshotData):
@@ -750,7 +751,8 @@ class AsyncOutput:
         import base64
 
         return await self._session.wait_for_output(
-            base64.b64encode(bytes(data)).decode(), timeout_ms=_seconds_to_ms(timeout)
+            base64.b64encode(bytes(data)).decode(),
+            timeout_ms=seconds_to_milliseconds(timeout),
         )
 
     async def wait_for_text(self, text: str, *, timeout: float = 10.0) -> WaitOutcome:
@@ -762,7 +764,9 @@ class AsyncEvidence:
         self._session = session
 
     async def complete(self, *, timeout: float = 10.0) -> Completion:
-        return await self._session.complete(timeout_ms=_seconds_to_ms(timeout))
+        return await self._session.complete(
+            timeout_ms=seconds_to_milliseconds(timeout)
+        )
 
     async def verify(
         self, level: Literal["structure", "content", "durability_record"] = "content"
@@ -785,15 +789,3 @@ class AsyncEvidence:
             },
             DriverBundleData,
         )
-
-
-def _seconds_to_ns(value: float) -> int:
-    if value < 0:
-        raise ValueError("duration must be nonnegative")
-    return int(value * 1_000_000_000)
-
-
-def _seconds_to_ms(value: float) -> int:
-    if value < 0:
-        raise ValueError("duration must be nonnegative")
-    return int(value * 1000)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, TypeAlias
 
 from msgspec import UNSET, Meta, Struct, UnsetType, convert, field
 
@@ -234,20 +234,20 @@ class EnvironmentSpec(Struct, forbid_unknown_fields=True):
             ),
         ]
         | UnsetType
-    ) = field(default_factory=list)
+    ) = field(default_factory=lambda: list[str]())
     set: (
         Annotated[
             dict[str, Base64Bytes],
             Meta(description='Exact UTF-8-named values supplied by the caller.'),
         ]
         | UnsetType
-    ) = field(default_factory=dict)
+    ) = field(default_factory=lambda: dict[str, Base64Bytes]())
     unset: (
         Annotated[
             list[str], Meta(description='Names removed from an inherited environment.')
         ]
         | UnsetType
-    ) = field(default_factory=list)
+    ) = field(default_factory=lambda: list[str]())
 
 
 class InputKind(StrEnum):

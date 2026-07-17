@@ -26,7 +26,6 @@ from termtrace._generated.driver_response import (
     DriverEventsData,
     DriverHelloData,
     DriverObservationData,
-    DriverOkResult,
     DriverOutputWaitData,
     DriverResponse as WireDriverResponse,
     DriverTimelineData,
@@ -106,8 +105,6 @@ def decode_driver_response(
             uncertain=result.uncertain,
             evidence=evidence,
         )
-    if not isinstance(result, DriverOkResult):
-        raise TermtraceProtocolError("driver response result has an invalid variant")
     if not isinstance(result.data, expected_type):
         raise TermtraceProtocolError("driver returned an unexpected result kind")
     return result.data

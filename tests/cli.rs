@@ -410,6 +410,14 @@ await using launched = await terminal.launch({
   outputByteBudget: 1000000,
 })
 if (typeof launched.sessionId !== "string") throw new Error("missing launched identity")
+for (const timeoutMs of [-1, Number.NaN, Number.POSITIVE_INFINITY, Math.floor(Number.MAX_SAFE_INTEGER / 1_000_000) + 1]) {
+  try {
+    await launched.screen.waitForPredicate({ predicate: "contains", text: "TS_LAUNCH" }, { timeoutMs })
+    throw new Error("invalid duration was accepted")
+  } catch (cause) {
+    if (!(cause instanceof TypeError)) throw cause
+  }
+}
 await launched.screen.waitForText(/TS_LAUNCH/)
 await launched.screen.waitForPredicate({ predicate: "row_contains", row: 0, text: "TS_LAUNCH" })
 if ((await launched.screen.waitForIdle()).kind !== "stable_snapshot") throw new Error("missing stable capture")

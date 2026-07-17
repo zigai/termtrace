@@ -4,8 +4,7 @@ import os
 import subprocess
 import threading
 import uuid
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Sequence
 from pathlib import Path
 from types import TracebackType
 from typing import IO, Literal, Self, TypeVar
@@ -13,6 +12,11 @@ from typing import IO, Literal, Self, TypeVar
 import msgspec
 
 from termtrace.binary import resolve_binary
+from termtrace.duration import seconds_to_milliseconds, seconds_to_nanoseconds
+from termtrace.environment import (
+    EnvironmentOptions as EnvironmentOptions,
+    encode_environment,
+)
 from termtrace.errors import TermtraceOperationError, TermtraceProtocolError
 from termtrace.models import (
     Artifact,
@@ -51,17 +55,6 @@ from termtrace.models import (
 
 
 ResponseDataT = TypeVar("ResponseDataT", bound=msgspec.Struct)
-
-
-@dataclass(frozen=True, slots=True)
-class EnvironmentOptions:
-    """Deterministic child-environment policy transported only through driver stdin."""
-
-    inherit_env: bool = True
-    set: Mapping[str, str | bytes] = field(default_factory=dict)
-    copy: Sequence[str] = ()
-    unset: Sequence[str] = ()
-    color: Literal["auto", "always", "never"] = "auto"
 
 
 class DriverTransport:
@@ -154,7 +147,7 @@ class Terminal:
                 "working_directory": None
                 if working_directory is None
                 else str(working_directory),
-                "environment": _encode_environment(environment),
+                "environment": encode_environment(environment),
                 "resource_limits": {
                     "output_bytes": output_byte_budget,
                 },
@@ -412,8 +405,8 @@ class Screen:
             {
                 "command": "wait_screen",
                 "predicate": predicate,
-                "stable_for_ns": _seconds_to_ns(stable_for),
-                "timeout_ns": _seconds_to_ns(timeout),
+                "stable_for_ns": seconds_to_nanoseconds(stable_for),
+                "timeout_ns": seconds_to_nanoseconds(timeout),
             }
         )
 
@@ -446,8 +439,8 @@ class Screen:
         response = self._session.control(
             {
                 "command": "capture_stable",
-                "stable_for_ns": _seconds_to_ns(stable_for),
-                "timeout_ns": _seconds_to_ns(timeout),
+                "stable_for_ns": seconds_to_nanoseconds(stable_for),
+                "timeout_ns": seconds_to_nanoseconds(timeout),
             }
         )
         if not isinstance(response, ControlStableSnapshotData):
@@ -757,7 +750,7 @@ class Evidence:
         return self._session.completion()
 
     def complete(self, *, timeout: float = 10.0) -> Completion:
-        return self._session.complete(timeout_ms=_seconds_to_ms(timeout))
+        return self._session.complete(timeout_ms=seconds_to_milliseconds(timeout))
 
     def verify(
         self, level: Literal["structure", "content", "durability_record"] = "content"
@@ -792,37 +785,9 @@ class Output:
         import base64
 
         return self._session.wait_for_output(
-            base64.b64encode(bytes(data)).decode(), timeout_ms=_seconds_to_ms(timeout)
+            base64.b64encode(bytes(data)).decode(),
+            timeout_ms=seconds_to_milliseconds(timeout),
         )
 
     def wait_for_text(self, text: str, *, timeout: float = 10.0) -> WaitOutcome:
         return self.wait_for_bytes(text.encode(), timeout=timeout)
-
-
-def _encode_environment(options: EnvironmentOptions | None) -> dict[str, JsonValue]:
-    import base64
-
-    selected = options or EnvironmentOptions()
-    encoded: dict[str, JsonValue] = {}
-    for name, value in selected.set.items():
-        raw = value.encode() if isinstance(value, str) else value
-        encoded[name] = base64.b64encode(raw).decode()
-    return {
-        "base": "inherit" if selected.inherit_env else "clear",
-        "set": encoded,
-        "copy": list(selected.copy),
-        "unset": list(selected.unset),
-        "color": selected.color,
-    }
-
-
-def _seconds_to_ns(value: float) -> int:
-    if value < 0:
-        raise ValueError("duration must be nonnegative")
-    return int(value * 1_000_000_000)
-
-
-def _seconds_to_ms(value: float) -> int:
-    if value < 0:
-        raise ValueError("duration must be nonnegative")
-    return int(value * 1000)

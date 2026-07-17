@@ -327,6 +327,8 @@ export class Screen {
   async waitForText(expected: string | RegExp, options: WaitOptions = {}): Promise<ControlResult> {
     const timeoutMs = nonnegativeDuration(options.timeoutMs ?? 10_000, "timeoutMs");
     const stableForMs = nonnegativeDuration(options.stableForMs ?? 0, "stableForMs");
+    millisecondsToNanoseconds(timeoutMs, "timeoutMs");
+    millisecondsToNanoseconds(stableForMs, "stableForMs");
     const predicate: ScreenPredicate = typeof expected === "string"
       ? { predicate: "contains", text: expected }
       : { predicate: "matches_regex", pattern: rustRegexSource(expected) };
@@ -364,8 +366,8 @@ export class Screen {
     return this.session.control(method({
       command: "wait_screen",
       predicate,
-      stable_for_ns: stableForMs * 1_000_000,
-      timeout_ns: timeoutMs * 1_000_000,
+      stable_for_ns: millisecondsToNanoseconds(stableForMs, "stableForMs"),
+      timeout_ns: millisecondsToNanoseconds(timeoutMs, "timeoutMs"),
     }));
   }
 
@@ -381,8 +383,8 @@ export class Screen {
     const stableForMs = nonnegativeDuration(options.stableForMs ?? 100, "stableForMs");
     const data = await this.session.control({
       command: "capture_stable",
-      stable_for_ns: stableForMs * 1_000_000,
-      timeout_ns: timeoutMs * 1_000_000,
+      stable_for_ns: millisecondsToNanoseconds(stableForMs, "stableForMs"),
+      timeout_ns: millisecondsToNanoseconds(timeoutMs, "timeoutMs"),
     });
     if (data.kind !== "stable_snapshot" || typeof data.quality !== "string") {
       throw new TermtraceProtocolError("stable capture response has an invalid shape");
@@ -612,6 +614,14 @@ function nonnegativeDuration(value: number, field: string): number {
     throw new TypeError(`${field} must be a nonnegative integer`);
   }
   return value;
+}
+
+function millisecondsToNanoseconds(milliseconds: number, field: string): number {
+  const nanoseconds = milliseconds * 1_000_000;
+  if (!Number.isSafeInteger(nanoseconds)) {
+    throw new TypeError(`${field} exceeds the exactly representable protocol maximum`);
+  }
+  return nanoseconds;
 }
 
 function regexMatches(pattern: RegExp, text: string): boolean {
