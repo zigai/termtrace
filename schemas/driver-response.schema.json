@@ -1382,7 +1382,7 @@
               "type": "string"
             },
             "max_message_bytes": {
-              "description": "Maximum newline-framed request bytes.",
+              "description": "Maximum newline-framed request bytes, or zero when requests have no framing cap.",
               "format": "uint64",
               "minimum": 0,
               "type": "integer"

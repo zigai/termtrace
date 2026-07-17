@@ -14,7 +14,7 @@
             "event_log_version": 1,
             "state_format_version": 1,
             "methods": ["hello", "launch", "attach"],
-            "max_message_bytes": 16777216
+            "max_message_bytes": 0
           }
         }
       }

@@ -546,7 +546,7 @@ export interface DriverResponse {
               event_log_version: number;
               kind: "hello";
               /**
-               * Maximum newline-framed request bytes.
+               * Maximum newline-framed request bytes, or zero when requests have no framing cap.
                */
               max_message_bytes: number;
               /**

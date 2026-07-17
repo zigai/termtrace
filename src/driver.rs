@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     env,
     ffi::OsString,
-    io::{BufRead, Write},
+    io::{BufRead, BufReader, Error as IoError, Read, Result as IoResult, Write},
     os::unix::ffi::OsStringExt as _,
     path::{Path, PathBuf},
     result::Result as StdResult,
@@ -22,8 +22,7 @@ use crate::{
     bundle::{BundleManifest, BundleProfile, create as create_bundle},
     client::Terminal,
     control::{
-        CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest,
-        MAX_CONTROL_MESSAGE_BYTES, send_request,
+        CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, send_request,
     },
     diff::{SemanticDiff, diff_states, inspect_point},
     environment::EnvironmentSpec,
@@ -45,6 +44,7 @@ use crate::{
 /// Current JSONL driver protocol version.
 pub const DRIVER_PROTOCOL_VERSION: u32 = 2;
 const DRIVER_RESPONSE_CACHE: usize = 4096;
+const UNBOUNDED_MESSAGE_BYTES: u64 = 0;
 
 /// Explicit screenshot truth path; no fallback occurs between variants.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -268,7 +268,7 @@ pub enum DriverData {
         state_format_version: u32,
         /// Stable supported methods.
         methods: Vec<String>,
-        /// Maximum newline-framed request bytes.
+        /// Maximum newline-framed request bytes, or zero when requests have no framing cap.
         max_message_bytes: u64,
     },
     /// Attached process-local handle and immutable identity.
@@ -359,20 +359,26 @@ pub enum DriverData {
 }
 
 /// Serve requests until clean input EOF.
-pub fn serve(input: impl BufRead, mut output: impl Write) -> Result<()> {
+pub fn serve(mut input: impl BufRead, mut output: impl Write) -> Result<()> {
     let mut driver = Driver::default();
-    for encoded in input.split(b'\n') {
-        let mut encoded = encoded.map_err(|source| {
-            return Error::Filesystem {
-                path: PathBuf::from("<driver-stdin>"),
-                source,
-            };
-        })?;
-        if encoded.is_empty() {
-            continue;
-        }
-        encoded.push(b'\n');
-        let response = driver.handle_frame(&encoded);
+    while let Some(frame) = read_frame(&mut input)? {
+        let response = match frame {
+            DriverFrame::Request(request) => driver.handle_request(request),
+            DriverFrame::Invalid { line, column } => driver_error(
+                Uuid::nil(),
+                "invalid_request",
+                format!(
+                    "driver request does not match the protocol schema at line {line} column {column}"
+                ),
+                None,
+            ),
+            DriverFrame::Unterminated => driver_error(
+                Uuid::nil(),
+                "invalid_request",
+                "driver request is not newline terminated",
+                None,
+            ),
+        };
         serde_json::to_writer(&mut output, &response).map_err(|source| {
             return Error::InvalidJson {
                 path: PathBuf::from("<driver-stdout>"),
@@ -393,6 +399,123 @@ pub fn serve(input: impl BufRead, mut output: impl Write) -> Result<()> {
     return Ok(());
 }
 
+enum DriverFrame {
+    Request(DriverRequest),
+    Invalid { line: usize, column: usize },
+    Unterminated,
+}
+
+fn read_frame(input: &mut impl BufRead) -> Result<Option<DriverFrame>> {
+    loop {
+        let available = input.fill_buf().map_err(driver_input_error)?;
+        if available.is_empty() {
+            return Ok(None);
+        }
+        if available.first() != Some(&b'\n') {
+            break;
+        }
+        input.consume(1);
+    }
+
+    let mut frame = NewlineFrameReader::new(input);
+    let parsed = {
+        let mut buffered = BufReader::new(&mut frame);
+        let mut deserializer = serde_json::Deserializer::from_reader(&mut buffered);
+        DriverRequest::deserialize(&mut deserializer)
+            .and_then(|request| return deserializer.end().map(|()| return request))
+    };
+    if let Some(source) = frame.take_input_error() {
+        return Err(driver_input_error(source));
+    }
+    frame.drain().map_err(driver_input_error)?;
+    if !frame.terminated() {
+        return Ok(Some(DriverFrame::Unterminated));
+    }
+    return Ok(Some(match parsed {
+        Ok(request) => DriverFrame::Request(request),
+        Err(error) => DriverFrame::Invalid {
+            line: error.line(),
+            column: error.column(),
+        },
+    }));
+}
+
+fn driver_input_error(source: IoError) -> Error {
+    return Error::Filesystem {
+        path: PathBuf::from("<driver-stdin>"),
+        source,
+    };
+}
+
+struct NewlineFrameReader<'input, R> {
+    input: &'input mut R,
+    terminated: bool,
+    input_error: Option<IoError>,
+}
+
+impl<'input, R> NewlineFrameReader<'input, R> {
+    fn new(input: &'input mut R) -> Self {
+        return Self {
+            input,
+            terminated: false,
+            input_error: None,
+        };
+    }
+
+    fn drain(&mut self) -> IoResult<()>
+    where
+        R: BufRead,
+    {
+        let mut buffer = [0_u8; 8192];
+        while !self.terminated {
+            if self.read(&mut buffer)? == 0 {
+                break;
+            }
+        }
+        return Ok(());
+    }
+
+    fn take_input_error(&mut self) -> Option<IoError> {
+        return self.input_error.take();
+    }
+
+    fn terminated(&self) -> bool {
+        return self.terminated;
+    }
+}
+
+impl<R: BufRead> Read for NewlineFrameReader<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+        if self.terminated || buf.is_empty() {
+            return Ok(0);
+        }
+        let available = match self.input.fill_buf() {
+            Ok(available) => available,
+            Err(source) => {
+                self.input_error = Some(IoError::new(source.kind(), source.to_string()));
+                return Err(source);
+            }
+        };
+        if available.is_empty() {
+            return Ok(0);
+        }
+        let newline = available.iter().position(|byte| return *byte == b'\n');
+        let frame_bytes = newline.map_or(available.len(), |index| return index.saturating_add(1));
+        let consumed = frame_bytes.min(buf.len());
+        let (Some(destination), Some(source)) =
+            (buf.get_mut(..consumed), available.get(..consumed))
+        else {
+            return Err(IoError::other(
+                "driver frame buffer bounds are inconsistent",
+            ));
+        };
+        destination.copy_from_slice(source);
+        self.input.consume(consumed);
+        self.terminated = newline.is_some_and(|index| return consumed > index);
+        return Ok(consumed);
+    }
+}
+
 #[derive(Default)]
 struct Driver {
     sessions: HashMap<Uuid, PathBuf>,
@@ -407,28 +530,14 @@ struct CachedDriverResponse {
 }
 
 impl Driver {
-    fn handle_frame(&mut self, encoded: &[u8]) -> DriverResponse {
-        if u64::try_from(encoded.len()).unwrap_or(u64::MAX) > MAX_CONTROL_MESSAGE_BYTES {
-            return driver_error(
-                Uuid::nil(),
-                "message_too_large",
-                "driver request exceeds 1 MiB",
-                None,
-            );
-        }
-        let request: DriverRequest = match serde_json::from_slice(encoded) {
-            Ok(value) => value,
-            Err(error) => {
-                return driver_error(Uuid::nil(), "invalid_request", error.to_string(), None);
-            }
-        };
+    fn handle_request(&mut self, request: DriverRequest) -> DriverResponse {
         let method_hash = match serde_json::to_vec(&request.method) {
             Ok(bytes) => blake3::hash(&bytes).to_hex().to_string(),
-            Err(error) => {
+            Err(_) => {
                 return driver_error(
                     request.request_id,
                     "invalid_request",
-                    error.to_string(),
+                    "driver request method could not be encoded",
                     None,
                 );
             }
@@ -488,7 +597,7 @@ impl Driver {
                     .into_iter()
                     .map(str::to_owned)
                     .collect(),
-                    max_message_bytes: MAX_CONTROL_MESSAGE_BYTES,
+                    max_message_bytes: UNBOUNDED_MESSAGE_BYTES,
                 }),
                 DriverMethod::Launch {
                     evidence_root,
@@ -974,4 +1083,150 @@ fn driver_error(
         request_id,
         result: *driver_failure(code, message, evidence),
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, io::Cursor};
+
+    use super::*;
+
+    #[test]
+    fn large_valid_frame_is_streamed_and_followed_by_another_request() {
+        let large_request_id = Uuid::now_v7();
+        let environment = EnvironmentSpec {
+            set: BTreeMap::from([(
+                "LARGE_VALUE".to_owned(),
+                ByteString::new(vec![b'x'; 1024 * 1024]),
+            )]),
+            ..EnvironmentSpec::default()
+        };
+        environment.validate().expect("valid environment");
+        let large_request = serde_json::to_vec(&DriverRequest {
+            version: DRIVER_PROTOCOL_VERSION,
+            request_id: large_request_id,
+            method: DriverMethod::Launch {
+                evidence_root: PathBuf::from("/unused"),
+                command: Vec::new(),
+                cols: 80,
+                rows: 24,
+                working_directory: None,
+                environment,
+                resource_limits: ResourceLimits::default(),
+            },
+        })
+        .expect("large request JSON");
+        assert!(large_request.len() > 1024 * 1024);
+
+        let hello_request_id = Uuid::now_v7();
+        let hello_request = serde_json::to_vec(&DriverRequest {
+            version: DRIVER_PROTOCOL_VERSION,
+            request_id: hello_request_id,
+            method: DriverMethod::Hello,
+        })
+        .expect("hello request JSON");
+        let mut input = vec![b'\n'];
+        input.extend_from_slice(&large_request);
+        input.push(b'\n');
+        input.extend_from_slice(&hello_request);
+        input.push(b'\n');
+
+        let mut output = Vec::new();
+        serve(Cursor::new(input), &mut output).expect("serve requests");
+        let responses = output
+            .split(|byte| return *byte == b'\n')
+            .filter(|line| return !line.is_empty())
+            .map(|line| return serde_json::from_slice::<DriverResponse>(line).expect("response"))
+            .collect::<Vec<_>>();
+        assert_eq!(responses.len(), 2);
+        assert_eq!(responses[0].request_id, large_request_id);
+        assert!(matches!(
+            &responses[0].result,
+            DriverResult::Error { code, .. } if code == "invalid_launch"
+        ));
+        assert_eq!(responses[1].request_id, hello_request_id);
+        assert!(matches!(
+            &responses[1].result,
+            DriverResult::Ok {
+                data: DriverData::Hello {
+                    max_message_bytes: UNBOUNDED_MESSAGE_BYTES,
+                    ..
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn large_malformed_frame_is_drained_before_the_next_request() {
+        let request_id = Uuid::now_v7();
+        let request = serde_json::to_vec(&DriverRequest {
+            version: DRIVER_PROTOCOL_VERSION,
+            request_id,
+            method: DriverMethod::Hello,
+        })
+        .expect("request JSON");
+        let mut input = vec![b'x'; 1024 * 1024 + 99];
+        input.push(b'\n');
+        input.extend_from_slice(&request);
+        input.push(b'\n');
+
+        let mut output = Vec::new();
+        serve(Cursor::new(input), &mut output).expect("serve requests");
+        let responses = output
+            .split(|byte| return *byte == b'\n')
+            .filter(|line| return !line.is_empty())
+            .map(|line| return serde_json::from_slice::<DriverResponse>(line).expect("response"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(responses.len(), 2);
+        assert!(matches!(
+            &responses[0].result,
+            DriverResult::Error { code, .. } if code == "invalid_request"
+        ));
+        assert_eq!(responses[1].request_id, request_id);
+        assert!(matches!(
+            responses[1].result,
+            DriverResult::Ok {
+                data: DriverData::Hello { .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn malformed_frames_are_rejected_without_echoing_payload() {
+        let request = serde_json::to_vec(&DriverRequest {
+            version: DRIVER_PROTOCOL_VERSION,
+            request_id: Uuid::now_v7(),
+            method: DriverMethod::Hello,
+        })
+        .expect("request JSON");
+        let mut output = Vec::new();
+
+        serve(Cursor::new(request), &mut output).expect("serve unterminated request");
+
+        let response: DriverResponse = serde_json::from_slice(&output).expect("response JSONL");
+        assert_eq!(response.request_id, Uuid::nil());
+        assert!(matches!(
+            response.result,
+            DriverResult::Error { code, message, .. }
+                if code == "invalid_request"
+                    && message.contains("newline")
+                    && !message.contains("hello")
+        ));
+
+        let malformed = br#"{"version":"SECRET_SENTINEL","request_id":"00000000-0000-0000-0000-000000000001","method":{"method":"hello"}}
+"#;
+        let mut output = Vec::new();
+        serve(Cursor::new(malformed), &mut output).expect("serve malformed request");
+
+        let response: DriverResponse = serde_json::from_slice(&output).expect("response JSONL");
+        assert_eq!(response.request_id, Uuid::nil());
+        assert!(matches!(
+            response.result,
+            DriverResult::Error { code, message, .. }
+                if code == "invalid_request"
+                    && message.contains("protocol schema")
+                    && !message.contains("SECRET_SENTINEL")
+        ));
+    }
 }

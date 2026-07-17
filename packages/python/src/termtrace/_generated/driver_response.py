@@ -106,7 +106,11 @@ class DriverData1(Struct, forbid_unknown_fields=True, tag_field='kind', tag='hel
         int, Meta(description='Canonical event format version.', ge=0)
     ]
     max_message_bytes: Annotated[
-        int, Meta(description='Maximum newline-framed request bytes.', ge=0)
+        int,
+        Meta(
+            description='Maximum newline-framed request bytes, or zero when requests have no framing cap.',
+            ge=0,
+        ),
     ]
     methods: Annotated[list[str], Meta(description='Stable supported methods.')]
     state_format_version: Annotated[
