@@ -19,8 +19,6 @@ Install the latest prebuilt Linux release without Rust, Zig, or a source checkou
 
 ```bash
 curl -LsSf https://github.com/zigai/termtrace/raw/main/install.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
-termtrace doctor --explain
 ```
 
 The high-level [`install.sh`](install.sh) script verifies the release checksum and installs to `~/.local/bin` by default. For a stable, pinned installer, use the copy attached to a release. See [Installation](docs/installation.md) for pinned versions, private-repository access, manual verification, and source builds.
