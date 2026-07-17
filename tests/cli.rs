@@ -3073,7 +3073,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
             "--",
             "/usr/bin/python3",
             "-c",
-            "import os,signal,sys,time; signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); os.write(1,b'VISIBLE'); time.sleep(.1); os.write(1,b'\\x1b[?2026hHIDDEN'); time.sleep(.5); os.write(1,b'\\r\\x1b[2KBUSY\\x1b[?2026l'); time.sleep(30)",
+            "import os,signal,sys,time; signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); os.write(1,b'VISIBLE\\x1b[?2026hHIDDEN'); time.sleep(.5); os.write(1,b'\\r\\x1b[2KBUSY\\x1b[?2026l'); time.sleep(30)",
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

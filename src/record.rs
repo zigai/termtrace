@@ -81,6 +81,7 @@ const DESCENDANT_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 const MUTATION_CACHE_CAPACITY: usize = 256;
 const MAX_SESSION_MUTATIONS: u64 = 1_000_000;
 const MAX_SCREEN_WAITERS: usize = 128;
+const MAX_PRESENTATION_SEQUENCE_BYTES: usize = 64 * 1024;
 
 /// Configuration for one recorded command.
 #[derive(Clone, Debug)]
@@ -351,6 +352,7 @@ fn mutation_retry_response(
 struct LiveTerminal {
     semantic: GhosttyVt,
     presented: SemanticState,
+    presentation_tracker: PresentationTracker,
     query_tracker: QueryTracker,
     geometry: TerminalGeometry,
 }
@@ -379,6 +381,45 @@ enum QueryKind {
     Csi,
     Osc,
     Single,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PresentationTransition {
+    EnterSynchronizedOutput,
+    ExitSynchronizedOutput,
+}
+
+enum PresentationAction {
+    Immediate,
+    Buffered,
+    Sequence {
+        bytes: Vec<u8>,
+        command: Option<bool>,
+    },
+}
+
+#[derive(Clone, Copy, Default)]
+enum PresentationParseState {
+    #[default]
+    Ground,
+    Escape,
+    Csi(CsiModeParser),
+    CsiPassthrough(CsiModeParser),
+}
+
+#[derive(Clone, Copy, Default)]
+struct CsiModeParser {
+    private: bool,
+    valid: bool,
+    has_parameter: bool,
+    parameter: u32,
+    includes_synchronized_output: bool,
+}
+
+struct PresentationTracker {
+    state: PresentationParseState,
+    pending: Vec<u8>,
+    synchronized_output: bool,
 }
 
 /// Record a command running in a real pseudo-terminal and mirror its output.
@@ -716,6 +757,7 @@ fn consume_runtime(
     let presented = semantic.snapshot()?;
     let mut live_terminal = LiveTerminal {
         semantic,
+        presentation_tracker: PresentationTracker::new(presented.modes.synchronized_output),
         presented,
         query_tracker: QueryTracker::default(),
         geometry: initial_geometry,
@@ -900,19 +942,21 @@ fn process_runtime_message(
                         source,
                     };
                 })?;
-            process_semantic_output(
-                &mut live.semantic,
-                &mut live.query_tracker,
-                spawned.writer.as_mut(),
-                event_log,
-                &data,
-            )?;
+            process_semantic_output(live, spawned.writer.as_mut(), event_log, &data)?;
             let latest = live.semantic.snapshot()?;
             if !latest.modes.synchronized_output {
                 live.presented = latest;
             }
         }
         RuntimeMessage::OutputClosed => {
+            let pending = live.presentation_tracker.finish();
+            if !pending.is_empty() {
+                process_semantic_bytes(live, spawned.writer.as_mut(), event_log, &pending)?;
+                let latest = live.semantic.snapshot()?;
+                if !latest.modes.synchronized_output {
+                    live.presented = latest;
+                }
+            }
             progress.output_closed = true;
             event_log.append(Event::Lifecycle {
                 lifecycle_kind: LifecycleKind::OutputClosed,
@@ -2727,19 +2771,65 @@ fn control_rejected(code: &str, message: &str) -> Error {
 }
 
 fn process_semantic_output(
-    semantic: &mut GhosttyVt,
-    tracker: &mut QueryTracker,
+    live: &mut LiveTerminal,
     writer: &mut dyn Write,
     event_log: &mut EventLogWriter,
     data: &[u8],
 ) -> Result<()> {
     for byte in data {
-        let complete = tracker.push(*byte);
-        semantic.write(slice::from_ref(byte));
-        tracker.pending_responses.extend(semantic.take_responses());
-        if complete || (!tracker.is_tracking() && !tracker.pending_responses.is_empty()) {
-            let query = ByteString::from(tracker.bytes());
-            for response in take(&mut tracker.pending_responses) {
+        match live.presentation_tracker.push(*byte) {
+            PresentationAction::Immediate => {
+                process_semantic_bytes(live, writer, event_log, slice::from_ref(byte))?;
+            }
+            PresentationAction::Buffered => {}
+            PresentationAction::Sequence { bytes, command } => {
+                let before_command = if command == Some(true) {
+                    Some(live.semantic.snapshot()?)
+                } else {
+                    None
+                };
+                process_semantic_bytes(live, writer, event_log, &bytes)?;
+                if command.is_some() {
+                    let after_command = live.semantic.snapshot()?;
+                    match live
+                        .presentation_tracker
+                        .reconcile(after_command.modes.synchronized_output)
+                    {
+                        Some(PresentationTransition::EnterSynchronizedOutput) => {
+                            if let Some(before_command) = before_command {
+                                live.presented = before_command;
+                            }
+                        }
+                        Some(PresentationTransition::ExitSynchronizedOutput) => {
+                            live.presented = after_command;
+                        }
+                        None => {}
+                    }
+                }
+            }
+        }
+    }
+    return Ok(());
+}
+
+fn process_semantic_bytes(
+    live: &mut LiveTerminal,
+    writer: &mut dyn Write,
+    event_log: &mut EventLogWriter,
+    data: &[u8],
+) -> Result<()> {
+    for byte in data {
+        let complete = live.query_tracker.push(*byte);
+        live.semantic.write(slice::from_ref(byte));
+        live.query_tracker
+            .pending_responses
+            .extend(live.semantic.take_responses());
+        if complete
+            || (!live.query_tracker.is_tracking()
+                && !live.query_tracker.pending_responses.is_empty())
+        {
+            let query = ByteString::from(live.query_tracker.bytes());
+            for response in take(&mut live.query_tracker.pending_responses) {
                 event_log.append(Event::QueryResponse {
                     query: query.clone(),
                     response: ByteString::from(response.as_slice()),
@@ -2758,10 +2848,171 @@ fn process_semantic_output(
             }
         }
         if complete {
-            tracker.clear();
+            live.query_tracker.clear();
         }
     }
     return Ok(());
+}
+
+impl PresentationTracker {
+    fn new(synchronized_output: bool) -> Self {
+        return Self {
+            state: PresentationParseState::Ground,
+            pending: Vec::new(),
+            synchronized_output,
+        };
+    }
+
+    fn push(&mut self, byte: u8) -> PresentationAction {
+        match &mut self.state {
+            PresentationParseState::Ground => match byte {
+                0x1b => {
+                    self.pending.push(byte);
+                    self.state = PresentationParseState::Escape;
+                    return PresentationAction::Buffered;
+                }
+                0x9b => {
+                    self.pending.push(byte);
+                    self.state = PresentationParseState::Csi(CsiModeParser::new());
+                    return PresentationAction::Buffered;
+                }
+                _ => return PresentationAction::Immediate,
+            },
+            PresentationParseState::Escape => {
+                if byte == 0x1b {
+                    let bytes = take(&mut self.pending);
+                    self.pending.push(byte);
+                    return PresentationAction::Sequence {
+                        bytes,
+                        command: None,
+                    };
+                }
+                self.pending.push(byte);
+                if byte == b'[' {
+                    self.state = PresentationParseState::Csi(CsiModeParser::new());
+                    return PresentationAction::Buffered;
+                }
+                self.state = PresentationParseState::Ground;
+                return self.take_sequence(None);
+            }
+            PresentationParseState::Csi(parser) => {
+                self.pending.push(byte);
+                if (0x40..=0x7e).contains(&byte) {
+                    let command = parser.finish(byte);
+                    self.state = PresentationParseState::Ground;
+                    return self.take_sequence(command);
+                }
+                if matches!(byte, 0x18 | 0x1a) {
+                    self.state = PresentationParseState::Ground;
+                    return self.take_sequence(None);
+                } else if byte == 0x1b {
+                    let mut bytes = take(&mut self.pending);
+                    bytes.pop();
+                    self.pending.push(byte);
+                    self.state = PresentationParseState::Escape;
+                    return PresentationAction::Sequence {
+                        bytes,
+                        command: None,
+                    };
+                } else {
+                    parser.push(byte);
+                }
+                if self.pending.len() > MAX_PRESENTATION_SEQUENCE_BYTES {
+                    let parser = *parser;
+                    self.state = PresentationParseState::CsiPassthrough(parser);
+                    return self.take_sequence(None);
+                }
+                return PresentationAction::Buffered;
+            }
+            PresentationParseState::CsiPassthrough(parser) => {
+                if (0x40..=0x7e).contains(&byte) || matches!(byte, 0x18 | 0x1a) {
+                    self.state = PresentationParseState::Ground;
+                } else if byte == 0x1b {
+                    self.pending.push(byte);
+                    self.state = PresentationParseState::Escape;
+                    return PresentationAction::Buffered;
+                } else {
+                    parser.push(byte);
+                }
+                return PresentationAction::Immediate;
+            }
+        }
+    }
+
+    fn finish(&mut self) -> Vec<u8> {
+        self.state = PresentationParseState::Ground;
+        return take(&mut self.pending);
+    }
+
+    fn take_sequence(&mut self, command: Option<bool>) -> PresentationAction {
+        return PresentationAction::Sequence {
+            bytes: take(&mut self.pending),
+            command,
+        };
+    }
+
+    fn reconcile(&mut self, synchronized_output: bool) -> Option<PresentationTransition> {
+        match (self.synchronized_output, synchronized_output) {
+            (false, true) => {
+                self.synchronized_output = synchronized_output;
+                return Some(PresentationTransition::EnterSynchronizedOutput);
+            }
+            (true, false) => {
+                self.synchronized_output = synchronized_output;
+                return Some(PresentationTransition::ExitSynchronizedOutput);
+            }
+            _ => {
+                self.synchronized_output = synchronized_output;
+                return None;
+            }
+        }
+    }
+}
+
+impl CsiModeParser {
+    fn new() -> Self {
+        return Self {
+            valid: true,
+            ..Self::default()
+        };
+    }
+
+    fn push(&mut self, byte: u8) {
+        match byte {
+            b'?' if !self.private && !self.has_parameter && self.parameter == 0 => {
+                self.private = true;
+            }
+            b'0'..=b'9' if self.private && self.valid => {
+                self.has_parameter = true;
+                self.parameter = self
+                    .parameter
+                    .saturating_mul(10)
+                    .saturating_add(u32::from(byte - b'0'));
+            }
+            b';' if self.private && self.valid => self.finish_parameter(),
+            _ => self.valid = false,
+        }
+    }
+
+    fn finish(mut self, final_byte: u8) -> Option<bool> {
+        self.finish_parameter();
+        if self.private && self.valid && self.includes_synchronized_output {
+            return match final_byte {
+                b'h' => Some(true),
+                b'l' => Some(false),
+                _ => None,
+            };
+        }
+        return None;
+    }
+
+    fn finish_parameter(&mut self) {
+        if self.has_parameter && self.parameter == 2026 {
+            self.includes_synchronized_output = true;
+        }
+        self.has_parameter = false;
+        self.parameter = 0;
+    }
 }
 
 impl QueryTracker {
@@ -3267,6 +3518,7 @@ fn terminal_error(operation: &'static str, reason: impl Into<String>) -> Error {
 mod tests {
     use std::{
         collections::{BTreeMap, BTreeSet},
+        iter,
         os::unix::fs::PermissionsExt as _,
         time::Instant,
     };
@@ -3776,6 +4028,53 @@ mod tests {
                 if query.as_bytes() == b"\x1b]11;?\x1b\\"
                     && response.as_bytes() == b"\x1b]11;rgb:0000/0000/0000\x1b\\"
         )));
+    }
+
+    #[test]
+    fn presentation_tracker_recognizes_only_synchronized_output_mode_commands() {
+        for (input, expected) in [
+            (
+                b"visible\x1b[?2026hhidden\x1b[?2026l".as_slice(),
+                vec![true, false],
+            ),
+            (b"\x1b[?25;2026h".as_slice(), vec![true]),
+            (b"\x9b?2026l".as_slice(), vec![false]),
+            (b"\x1b[2026h".as_slice(), Vec::new()),
+            (b"\x1b[?20260h".as_slice(), Vec::new()),
+            (b"\x1b[?2026:1h".as_slice(), Vec::new()),
+            (b"\x1b[?2026\x18h".as_slice(), Vec::new()),
+        ] {
+            let mut tracker = PresentationTracker::new(false);
+            let mut commands = Vec::new();
+            let mut framed = Vec::new();
+            for byte in input {
+                match tracker.push(*byte) {
+                    PresentationAction::Immediate => framed.push(*byte),
+                    PresentationAction::Buffered => {}
+                    PresentationAction::Sequence { bytes, command } => {
+                        framed.extend(bytes);
+                        if let Some(command) = command {
+                            commands.push(command);
+                        }
+                    }
+                }
+            }
+            framed.extend(tracker.finish());
+            assert_eq!(commands, expected, "input: {input:?}");
+            assert_eq!(framed, input, "framing must be lossless");
+        }
+
+        let mut tracker = PresentationTracker::new(false);
+        let mut longest_pending = 0;
+        for byte in b"\x1b[?"
+            .iter()
+            .copied()
+            .chain(iter::repeat_n(b'0', MAX_PRESENTATION_SEQUENCE_BYTES * 2))
+        {
+            let _ = tracker.push(byte);
+            longest_pending = longest_pending.max(tracker.pending.len());
+        }
+        assert!(longest_pending <= MAX_PRESENTATION_SEQUENCE_BYTES + 1);
     }
 
     #[test]
