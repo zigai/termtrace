@@ -1,131 +1,104 @@
 # Termtrace
 
-Termtrace records terminal and TUI sessions so you can review what happened without relying on video alone. It preserves the original PTY event stream, reconstructs terminal states for automated inspection, and can render native screenshots and video.
+Termtrace is a Linux terminal flight recorder for debugging and automating terminal applications. It preserves the byte-exact PTY event stream while reconstructing every semantic screen state, so humans and agents can inspect what was visible, how it changed, and which events caused it.
 
 ## Features
 
-- **Recording** — run commands interactively or in the background
-- **Live control** — view the screen, wait for changes, and send input
-- **Isolated launches** — clear/copy/set/unset environment policy, deterministic color behavior, secret-safe transport, and non-truncating output budgets
-- **Replay** — inspect every terminal state, including brief changes
-- **Review** — browse timelines, compare states, and diagnose rendering issues
-- **Capture** — create text, JSON, HTML, screenshots, native or semantic video, and asciinema exports
-- **Verification** — check integrity, recover damaged recordings, and detect changes
-- **Automation** — run terminal tests from the CLI, Python, TypeScript, or Rust
+- **Complete recordings** — run a command interactively or in the background and retain its output, input, resizes, signals, markers, lifecycle, and exit events.
+- **Live TUI control** — wait for screen conditions, send text, keys, paste, focus, or pointer input, resize the PTY, and capture an atomic stable screen.
+- **Semantic replay** — inspect states by time, event, marker, or state ID, including changes that existed for less than a video frame.
+- **Rendering diagnostics** — browse a timeline, compare states, connect VT sequences to screen changes, and detect flicker, stale cells, or unnecessary redraws.
+- **Repeatable launches** — control geometry, working directory, environment inheritance, color behavior, output limits, durability, and provenance.
+- **Screenshots and video** — render deterministic semantic screenshots or capture native Ghostty pixels; export edited video and asciinema casts.
+- **Verifiable evidence** — check recording integrity, sign evidence roots, recover the valid prefix of a damaged log, and create sensitivity-labeled handoff bundles.
+- **Test automation** — run JSON terminal scenarios or drive sessions through typed Python, TypeScript, and Rust APIs.
 
 ## Install
 
-Install the latest prebuilt Linux release without Rust, Zig, or a source checkout:
-
-```bash
+```sh
 curl -LsSf https://github.com/zigai/termtrace/raw/main/install.sh | bash
 ```
 
-The high-level [`install.sh`](install.sh) script verifies the release checksum and installs to `~/.local/bin` by default. For a stable, pinned installer, use the copy attached to a release. See [Installation](docs/installation.md) for pinned versions, private-repository access, manual verification, and source builds.
+## Record and inspect a command
 
-## Getting started
+Put the command and its arguments after the recording options:
 
-Record any command directly after the recording options:
-
-```bash
-termtrace record --out ./example.termtrace --geometry inherit your-command
+```sh
+termtrace record --out ./app.termtrace --geometry inherit -- my-terminal-app
 ```
 
-The command runs in a real PTY. Its output stays visible and input is forwarded normally. When it exits, you can inspect the final screen, browse the timeline, or verify the recording:
+The command runs in a real PTY with output and input forwarded normally. After it exits, inspect the final screen, browse every operation and state transition, or verify the saved evidence:
 
-```bash
-termtrace show ./example.termtrace
-termtrace timeline ./example.termtrace
-termtrace verify ./example.termtrace --level content
+```sh
+termtrace show ./app.termtrace
+termtrace timeline ./app.termtrace
+termtrace verify ./app.termtrace
 ```
 
-Every recording needs a new output path. Existing session directories are never replaced.
+Recordings are new owner-only directories. Termtrace never replaces an existing output path.
 
-## Working with a live session
+## Drive a live terminal
 
-Use a name when you want to start a command in the background and control it from another process:
+Start a named session in the background when another process needs to observe and control the application:
 
-```bash
-termtrace start demo --cols 120 --rows 36 your-command
-termtrace wait demo 'Ready' --stable-for 250ms
-termtrace wait-idle demo --stable-for 250ms
-termtrace send demo text:'help' enter
-termtrace show demo
-termtrace stop demo --wait
+```sh
+termtrace start app --cols 120 --rows 36 -- my-terminal-app
+termtrace wait app 'Ready' --stable-for 250ms
+termtrace send app text:'help' enter
+termtrace wait-idle app --stable-for 250ms
+termtrace show app
+termtrace stop app --wait
 ```
 
-`start` prints the canonical session path. The name is a local shortcut that can be listed, resolved, or removed without changing the recording.
+`wait` matches the presented viewport rather than searching output history. `wait-idle` returns the exact semantic state that satisfied the stability condition, avoiding a race between waiting and inspecting.
 
-## Reviewing a recording
+## Investigate and capture a recording
 
-Semantic replay lets you inspect states that may have existed for less than a video frame:
+Build the semantic index, inspect an earlier moment, run rendering diagnostics, or create a deterministic screenshot:
 
-```bash
-termtrace index --session ./example.termtrace
-termtrace show ./example.termtrace --at 5s
-termtrace diagnose ./example.termtrace
+```sh
+termtrace index --session ./app.termtrace
+termtrace show ./app.termtrace --at 5s
+termtrace diagnose ./app.termtrace
+termtrace screenshot ./app.termtrace --out ./app-screenshot
 ```
 
-Create a deterministic semantic screenshot:
+When actual renderer pixels matter, replay the recording through Ghostty on a private display:
 
-```bash
-termtrace screenshot ./example.termtrace --out ./example-screenshot
+```sh
+termtrace capture --session ./app.termtrace
 ```
 
-Or capture native terminal pixels on a private display:
+`termtrace doctor --explain` reports whether the optional native screenshot and video dependencies are available. Semantic inspection does not require them.
 
-```bash
-termtrace capture --session ./example.termtrace
+## Automate terminal tests
+
+Termtrace scenarios run in fresh sessions and can send input, wait for screen state, add markers, compare snapshots, and retain failure evidence:
+
+```sh
+termtrace test tests/scenarios/login.json --jobs 4 --reruns 1
 ```
 
-Native capture is an optional capability. `termtrace doctor --explain` reports any missing display or media dependencies.
+The Python, TypeScript, and Rust clients expose the same screen, keyboard, pointer, event, completion, and evidence operations for programmatic workflows.
 
-When native display dependencies are unavailable, explicitly render the same presentation from deterministic semantic state instead:
+## Evidence model
 
-```bash
-termtrace video export ./example.termtrace \
-  --source semantic \
-  --edit ./edit.json \
-  --out ./semantic-presentation
-```
-
-Native Ghostty pixels remain the default and the correct source for visual fidelity or renderer diagnostics. Semantic video is a portable generated visualization and never silently replaces native capture.
-
-## See it in action
-
-The demo walks through recording, live control, semantic replay, native capture, recovery, and tamper detection:
-
-```bash
-demos/run-all.sh
-```
-
-Its output includes one complete session, semantic states, a screenshot, native video, and verification reports. See the [demo guide](demos/README.md) for the artifact layout.
-
-## How evidence is organized
-
-The byte-exact event log is canonical. It records PTY output alongside input, resize, signal, marker, lifecycle, and exit events. Semantic states, text views, screenshots, videos, and exports are derived artifacts that can be regenerated from the recording.
+The event log is canonical. Text views, semantic states, screenshots, videos, and exports are derived artifacts that can be regenerated and checked against the original recording.
 
 ## Documentation
 
-- [Install Termtrace](docs/installation.md)
-- [Record a session](docs/recording.md)
+- [Installation](docs/installation.md)
+- [Recording sessions](docs/recording.md)
 - [Deterministic test isolation](docs/test-isolation.md)
-- [Control and inspect a running session](docs/agent-workflows.md)
-- [Use the Python and TypeScript clients](docs/language-clients.md)
-- [Understand replay](docs/semantic-replay.md)
-- [Understand the saved files](docs/formats.md)
-- [Fix common problems](docs/troubleshooting.md)
+- [Live control and inspection](docs/agent-workflows.md)
+- [Python and TypeScript clients](docs/language-clients.md)
+- [Semantic replay](docs/semantic-replay.md)
+- [Artifacts and verification](docs/formats.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [End-to-end demo](demos/README.md)
 
-For the complete command reference, use `termtrace --help` or `termtrace COMMAND --help`.
+For the complete command reference, run `termtrace --help` or `termtrace COMMAND --help`.
 
-## Development
+## License
 
-Termtrace is under active development and currently targets Linux.
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
-```
-
-See [Installation](docs/installation.md#build-from-source) for contributor build requirements.
+[MIT License](LICENSE).
