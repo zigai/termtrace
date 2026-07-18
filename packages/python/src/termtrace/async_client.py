@@ -764,9 +764,7 @@ class AsyncEvidence:
         self._session = session
 
     async def complete(self, *, timeout: float = 10.0) -> Completion:
-        return await self._session.complete(
-            timeout_ms=seconds_to_milliseconds(timeout)
-        )
+        return await self._session.complete(timeout_ms=seconds_to_milliseconds(timeout))
 
     async def verify(
         self, level: Literal["structure", "content", "durability_record"] = "content"

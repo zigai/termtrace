@@ -11,7 +11,9 @@ from termtrace.client import DriverTransport, Session
 @pytest.mark.parametrize(
     "duration", [-1.0, math.nan, math.inf, 1e30, sys.float_info.max]
 )
-def test_screen_waits_reject_invalid_durations_before_driver_io(duration: float) -> None:
+def test_screen_waits_reject_invalid_durations_before_driver_io(
+    duration: float,
+) -> None:
     session = Session(
         object.__new__(DriverTransport),
         "00000000-0000-0000-0000-000000000001",
