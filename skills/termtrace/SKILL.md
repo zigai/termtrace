@@ -1,69 +1,75 @@
 ---
 name: termtrace
-description: Flight recorder for terminal applications through Termtrace. Use when work needs presented-screen synchronization or mode-aware input, canonical timeline diagnosis, repeatable TUI scenarios, screenshots, evidence bundles, or presentation videos.
+description: Flight recorder for terminal applications through Termtrace. Use when work needs presented-screen synchronization, mode-aware input, canonical timeline diagnosis, repeatable TUI scenarios, screenshots, evidence bundles, or presentation videos.
 disable-model-invocation: false
 user-invocable: true
 ---
 
 # Termtrace
 
-Treat each session as a flight recorder: use the shortest path that proves the
-requested outcome, preserve the evidence when anything fails, and return the
-canonical session path even when operating through a friendly name.
+Use the smallest evidence-producing workflow that answers the task. Termtrace's
+normal CLI output is already compact; request full state, verbose atom outcomes,
+or `--all` only when the next decision needs them.
 
-## Process
+## Choose the interface first
 
-1. **Set the evidence target.** Assign every requested outcome to `screen`,
-   `output`, a semantic state, or a published artifact using the distinctions below.
-   Read [the command contract](references/commands.md) when exact forms or flags
-   are needed, [artifact branches](references/artifacts.md) when producing media
-   or a bundle, [repeatable testing](references/testing.md) when running
-   scenarios, and [reference maintenance](references/maintenance.md) after CLI
-   changes. This step is complete when every outcome has a truth source and every
-   applicable branch reference is loaded.
-2. **Establish the session.** For new work, start a fresh named session with
-   explicit geometry and capture its canonical path. For review, use the supplied
-   canonical evidence without relaunching the application. This step is complete
-   when the session is ready or the offline evidence has passed the required
-   verification.
-3. **Synchronize live work.** Wait on the presented viewport by default. Use
-   atomic idle waiting when the next action depends on the exact stable state;
-   never replace it with wait-then-show. Use output-history or structural
-   predicates only when their evidence semantics match the requirement. This step
-   is complete when no live synchronization is needed or the returned observation
-   itself proves the predicate, with `stable` quality unless an incomplete quality
-   was explicitly accepted.
-4. **Bracket each mutation.** When interaction is required, observe the current
-   state and mark important boundaries before it. Prefer named keys, text, or
-   paste; use raw bytes only when exact encoding is the task. Guard state-dependent
-   input with the observed state hash, and retain caller-owned request IDs in
-   driver or client workflows. Mark the boundary after the resulting observation.
-   This step is complete when no mutation is required or each mutation has one
-   known outcome and both relevant states are identifiable.
-5. **Explain surprises.** Inspect the timeline, semantic diff, and exact-state
-   explanation before requesting native pixels. If a mutation outcome is
-   uncertain, inspect its request journal and canonical evidence before retrying.
-   This step is complete when no unexplained transition remains, or the remaining
-   uncertainty is stated without another mutation.
-6. **Complete the record.** Stop with completion waiting when the child is still
-   live, then verify or bundle the immutable evidence required by the task. This
-   step is complete when the session has a typed terminal outcome, requested
-   artifacts are validated, and the result includes the canonical path plus any
-   preserved failure directory.
+- Use one CLI command for one observation, wait, mutation, or artifact.
+- Use `termtrace client python -` or `termtrace client typescript -` when the
+  workflow has more than three actions, branching, repeated observations, or
+  caller-owned retry IDs. These runners use installed SDK assets and managed
+  runtime caches; they create no package, config, or generated source in the
+  working tree. Read [client workflows](references/client-workflows.md).
+- Use `termtrace test` for a repeatable assertion workflow or regression. Start
+  from [the tested scenario example](examples/ready.termtrace.json) and read
+  [repeatable testing](references/testing.md).
+- Use the supplied canonical session directly for review. Never relaunch an
+  application merely to inspect existing evidence.
+
+## Choose the truth source
+
+- Presented UI requirement: `wait SESSION --screen ...`, `wait-idle`, or `show`.
+- Exact child byte-history requirement: `wait SESSION --output ...` or `output`.
+- Semantic transition: `timeline`, `diff`, then `explain` as needed.
+- Native pixels: request native screenshot/video explicitly; semantic images do
+  not become native evidence.
+- Handoff or publication: use a manifested save, screenshot, or bundle and read
+  [artifact branches](references/artifacts.md).
+
+Read [live control](references/live-control.md) before state-dependent input.
+Read [the command reference](references/commands.md) only for the command family
+being used; it is generated from the tested command graph.
+
+## Live workflow
+
+1. Start fresh evidence or resolve the supplied session.
+2. Synchronize on the presented screen unless exact output history is the real
+   requirement. Use `wait-idle` when the action must use the exact stable state it
+   returns; do not split that into a wait followed by a second observation.
+3. Guard state-dependent input with the returned presented-state hash. A hash
+   emitted by `show` or `wait-idle` can be used directly with `--state-hash` for
+   completed-state commands.
+4. Mark meaningful workflow milestones only: phase entry, failure boundary, or
+   a point requested by the user. Do not mark before and after every mutation;
+   canonical input intents/results already identify those operations.
+5. On a transport failure marked uncertain, retry only the identical payload
+   with the identical request ID. On `input_sequence_incomplete`, use its exact
+   attempted-prefix details; never resend the whole sequence with a new ID.
+6. Stop with completion waiting, then verify or publish the required artifact.
+   Preserve failed and incomplete evidence.
 
 ## Evidence invariants
 
-- `screen` is the latest presentation-eligible viewport; output history cannot satisfy a screen assertion.
-- `output` is exact canonical child PTY bytes, not application logs.
+- `screen` is the latest presentation-eligible viewport; output history cannot
+  satisfy a screen assertion.
 - Hidden synchronized-output states require explicit opt-in.
-- `stable` is the only complete idle-wait quality by default. Accept
-  `child_completed`, `output_closed`, or `deadline` only through an explicit
-  incomplete-evidence branch.
+- `stable` is complete idle evidence. Accept deadline, output-closed, or
+  child-completed quality only when the task permits incomplete stability.
 - Label live, stable, completed, interrupted-prefix, semantic-rendering,
   native-capture, and presentation-output evidence distinctly.
 - A nominal video-frame mapping does not prove which pixels were presented.
-- Retry a request ID only for the identical mutation after a safe-retry indication; otherwise stop.
-- Preserve incomplete sessions and failure directories during cleanup, timeout,
-  and child-failure diagnosis.
-- Never upload canonical input, output, environment values, native video, or raw
-  transcripts without explicit authorization for sensitive evidence transfer.
+- Raw terminal input/output and native captures may contain secrets. Do not
+  transfer them outside the requested scope without explicit authorization.
+- Return the canonical session path and any preserved failure artifact path.
+
+After changing the CLI or skill examples, follow
+[reference maintenance](references/maintenance.md).

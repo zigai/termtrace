@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "name": "ready-to-done",
+  "launch": {
+    "command": [
+      "/bin/sh",
+      "-c",
+      "printf Ready; IFS= read -r line; test \"$line\" = go; printf Done; sleep 30"
+    ],
+    "environment": {
+      "base": "clear",
+      "set": {},
+      "copy": ["PATH"],
+      "unset": [],
+      "color": "never"
+    },
+    "geometry": { "cols": 80, "rows": 24 },
+    "outputByteBudget": 1048576,
+    "timeoutMs": 5000
+  },
+  "steps": [
+    { "waitScreen": { "contains": "Ready" } },
+    { "mark": "ready-for-input" },
+    { "send": [{ "text": "go" }, { "key": "enter" }] },
+    { "waitScreen": { "contains": "Done" } },
+    { "stop": {} }
+  ]
+}

@@ -148,7 +148,8 @@ Options:
 ```text
 Send text or file bytes to a live child PTY
 
-Usage: termtrace send [OPTIONS] <ATOM|--stdin> <SESSION>
+Usage: termtrace send [OPTIONS] <SESSION> <ATOM>...
+       termtrace send [OPTIONS] --stdin <SESSION>
 
 Arguments:
   <SESSION>  Live session name or canonical path
@@ -165,6 +166,8 @@ Options:
           Human-readable reason retained with the input event
       --if-state <EXPECTED_PRESENTED_STATE_HASH>
           Apply every input atom only if the latest presented state has this BLAKE3 hash
+      --verbose
+          Include per-atom operation and canonical event identifiers in the response
   -h, --help
           Print help
 ```
@@ -174,7 +177,7 @@ Options:
 ```text
 Wait for exact UTF-8 text in canonical PTY output
 
-Usage: termtrace wait [OPTIONS] <SCREEN|--output <OUTPUT>|--screen-absent <SCREEN_ABSENT>|--screen-regex <SCREEN_REGEX>|--row-contains <ROW_CONTAINS>|--region-contains <REGION_CONTAINS>|--cursor-at <CURSOR_AT>|--cursor-visible <CURSOR_VISIBLE>|--cursor-shape <CURSOR_SHAPE>|--mode <MODE>|--mode-disabled <MODE_DISABLED>|--state-changed <STATE_CHANGED>|--state-unchanged <STATE_UNCHANGED>> <SESSION>
+Usage: termtrace wait [OPTIONS] <SESSION> <SCREEN|PREDICATE_OPTION>
 
 Arguments:
   <SESSION>  Live session name or canonical path
@@ -230,6 +233,7 @@ Options:
       --stable-for <STABLE_FOR>  Required unchanged presented-state interval [default: 100ms]
       --timeout-ms <TIMEOUT_MS>  Maximum server-side wait duration in milliseconds [default: 30000]
       --allow-incomplete         Return typed completed/output-closed/deadline snapshots instead of rejecting them
+      --full-state               Include the compressed complete semantic state in the response
   -h, --help                     Print help
 ```
 
@@ -253,6 +257,7 @@ Options:
       --out <OUT>                New canonical evidence path for a one-off command
       --discard-evidence         Remove auto-allocated one-off evidence only after successful output
       --state <STATE>            Exact semantic state identifier
+      --state-hash <STATE_HASH>  Exact content-addressed semantic state hash
       --event-seq <EVENT_SEQ>    Latest state at or before this event sequence
       --at <AT>                  Latest state at or before this session offset
       --at-marker <AT_MARKER>    State at a unique marker label
@@ -330,6 +335,12 @@ Options:
           Inclusive canonical event sequence
       --to-event-seq <TO_EVENT_SEQ>
           Exclusive canonical event sequence
+      --limit <LIMIT>
+          Maximum matching records returned by default [default: 100]
+      --offset <OFFSET>
+          Zero-based matching-record offset for deterministic pagination [default: 0]
+      --all
+          Return every matching record; explicit potentially-large output
       --from <OFFSET>
           Inclusive source offset, such as `90s`, `2m`, or `00:01:30.5`
       --from-marker <LABEL>
@@ -378,6 +389,9 @@ Options:
       --log <LOG>            [env: TERMTRACE_LOG=] [default: warn]
       --controls             Include lossless framed VT controls and printable runs
       --jsonl                Emit one stable JSON object per line
+      --limit <LIMIT>        Maximum matching records returned by default [default: 100]
+      --offset <OFFSET>      Zero-based matching-record offset for deterministic pagination [default: 0]
+      --all                  Return every matching record; explicit potentially-large output
       --from <OFFSET>        Inclusive source offset, such as `90s`, `2m`, or `00:01:30.5`
       --from-marker <LABEL>  Inclusive source marker; the label must occur exactly once
       --to <OFFSET>          Exclusive source offset, in the same format as `--from`
@@ -390,7 +404,7 @@ Options:
 ```text
 Compare two canonical semantic state points
 
-Usage: termtrace diff [OPTIONS] <--from-state <FROM_STATE>|--from-event-seq <FROM_EVENT_SEQ>|--from-at <FROM_AT>|--from-marker <FROM_MARKER>> <--to-state <TO_STATE>|--to-event-seq <TO_EVENT_SEQ>|--to-at <TO_AT>|--to-marker <TO_MARKER>> <SESSION>
+Usage: termtrace diff [OPTIONS] <--from-state <FROM_STATE>|--from-state-hash <FROM_STATE_HASH>|--from-event-seq <FROM_EVENT_SEQ>|--from-at <FROM_AT>|--from-marker <FROM_MARKER>> <--to-state <TO_STATE>|--to-state-hash <TO_STATE_HASH>|--to-event-seq <TO_EVENT_SEQ>|--to-at <TO_AT>|--to-marker <TO_MARKER>> <SESSION>
 
 Arguments:
   <SESSION>  Completed session name or canonical path
@@ -400,6 +414,8 @@ Options:
           Earlier exact semantic state identifier
       --log <LOG>
           [env: TERMTRACE_LOG=] [default: warn]
+      --from-state-hash <FROM_STATE_HASH>
+          Earlier exact content-addressed semantic state hash
       --from-event-seq <FROM_EVENT_SEQ>
           Earlier state at or before this event sequence
       --from-at <FROM_AT>
@@ -408,6 +424,8 @@ Options:
           Earlier state at a unique marker
       --to-state <TO_STATE>
           Later exact semantic state identifier
+      --to-state-hash <TO_STATE_HASH>
+          Later exact content-addressed semantic state hash
       --to-event-seq <TO_EVENT_SEQ>
           Later state at or before this event sequence
       --to-at <TO_AT>
@@ -427,20 +445,24 @@ Options:
 ```text
 Explain exact VT and semantic evidence around one state point
 
-Usage: termtrace explain [OPTIONS] <--state <STATE>|--event-seq <EVENT_SEQ>|--at <AT>|--marker <MARKER>> <SESSION>
+Usage: termtrace explain [OPTIONS] <--state <STATE>|--state-hash <STATE_HASH>|--event-seq <EVENT_SEQ>|--at <AT>|--marker <MARKER>> <SESSION>
 
 Arguments:
   <SESSION>  Completed session name or canonical path
 
 Options:
-      --log <LOG>              [env: TERMTRACE_LOG=] [default: warn]
-      --state <STATE>          Exact semantic state identifier
-      --event-seq <EVENT_SEQ>  Latest state at or before this event sequence
-      --at <AT>                Latest state at or before this session offset
-      --marker <MARKER>        State at a unique marker
-      --context <CONTEXT>      Canonical event radius before and after the target [default: 8]
-      --format <FORMAT>        Output representation [default: text] [possible values: text, json, json-compact]
-  -h, --help                   Print help
+      --log <LOG>                [env: TERMTRACE_LOG=] [default: warn]
+      --state <STATE>            Exact semantic state identifier
+      --state-hash <STATE_HASH>  Exact content-addressed semantic state hash
+      --event-seq <EVENT_SEQ>    Latest state at or before this event sequence
+      --at <AT>                  Latest state at or before this session offset
+      --marker <MARKER>          State at a unique marker
+      --context <CONTEXT>        Canonical event radius before and after the target [default: 8]
+      --format <FORMAT>          Output representation [default: text] [possible values: text, json, json-compact]
+      --limit <LIMIT>            Maximum matching records returned by default [default: 100]
+      --offset <OFFSET>          Zero-based matching-record offset for deterministic pagination [default: 0]
+      --all                      Return every matching record; explicit potentially-large output
+  -h, --help                     Print help
 ```
 
 ## `diagnose`
@@ -464,6 +486,12 @@ Options:
           Emit one stable structured report
       --fail-on-finding
           Exit unsuccessfully when at least one finding is emitted
+      --limit <LIMIT>
+          Maximum matching records returned by default [default: 100]
+      --offset <OFFSET>
+          Zero-based matching-record offset for deterministic pagination [default: 0]
+      --all
+          Return every matching record; explicit potentially-large output
   -h, --help
           Print help
 ```
@@ -479,19 +507,20 @@ Arguments:
   <SESSION>  Completed session name or canonical path
 
 Options:
-      --log <LOG>              [env: TERMTRACE_LOG=] [default: warn]
-      --out <OUT>              New artifact directory containing `screen.svg` and its manifest
-      --state <STATE>          Exact semantic state identifier
-      --event-seq <EVENT_SEQ>  Latest state at or before this event sequence
-      --at <AT>                Latest state at or before this session offset
-      --at-marker <AT_MARKER>  State at a unique marker
-      --include-hidden         Permit an explicitly selected synchronized-output hidden state
-      --format <FORMAT>        Semantic image representation [default: png] [possible values: svg, png]
-      --renderer <RENDERER>    Semantic state renderer or actual Ghostty native frame [default: semantic] [possible values: semantic, native]
-      --viewport <VIEWPORT>    Strict whole native viewport as `WIDTHxHEIGHT`
-      --fit-viewport           Explicitly request the default exact-grid viewport solver
-      --strict                 Emphasize that a supplied viewport is an exact evidentiary assertion
-  -h, --help                   Print help
+      --log <LOG>                [env: TERMTRACE_LOG=] [default: warn]
+      --out <OUT>                New artifact directory containing `screen.svg` and its manifest
+      --state <STATE>            Exact semantic state identifier
+      --state-hash <STATE_HASH>  Exact content-addressed semantic state hash
+      --event-seq <EVENT_SEQ>    Latest state at or before this event sequence
+      --at <AT>                  Latest state at or before this session offset
+      --at-marker <AT_MARKER>    State at a unique marker
+      --include-hidden           Permit an explicitly selected synchronized-output hidden state
+      --format <FORMAT>          Semantic image representation [default: png] [possible values: svg, png]
+      --renderer <RENDERER>      Semantic state renderer or actual Ghostty native frame [default: semantic] [possible values: semantic, native]
+      --viewport <VIEWPORT>      Strict whole native viewport as `WIDTHxHEIGHT`
+      --fit-viewport             Explicitly request the default exact-grid viewport solver
+      --strict                   Emphasize that a supplied viewport is an exact evidentiary assertion
+  -h, --help                     Print help
 ```
 
 ## `stop`
@@ -536,6 +565,12 @@ Options:
           Emit the stable machine-readable report
       --allowed-signers <ALLOWED_SIGNERS>
           OpenSSH allowed-signers file used to establish signer trust
+      --limit <LIMIT>
+          Maximum matching records returned by default [default: 100]
+      --offset <OFFSET>
+          Zero-based matching-record offset for deterministic pagination [default: 0]
+      --all
+          Return every matching record; explicit potentially-large output
   -h, --help
           Print help
 ```

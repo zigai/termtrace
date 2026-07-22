@@ -3,6 +3,17 @@
 Prefer `termtrace test` scenarios to sleeps or human timing. Every attempt,
 including a rerun, must launch a fresh canonical session.
 
+Run the installed example without copying it into the project:
+
+```sh
+termtrace test skills/termtrace/examples/ready.termtrace.json \
+  --artifacts "${TMPDIR:-/tmp}/termtrace-scenario-artifacts"
+```
+
+When the skill is installed outside the repository, resolve the example path
+relative to this skill directory. Treat it as a shape to adapt, not a reason to
+add generated scaffolding to the application repository.
+
 ## Isolation
 
 - Prefer `--clear-env --copy-env PATH --color-policy never` or a typed client
