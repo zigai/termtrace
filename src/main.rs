@@ -3,16 +3,17 @@
 use std::{
     collections::VecDeque,
     env,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fmt::Write as _,
-    fs::{File, OpenOptions},
+    fs::{File, OpenOptions, Permissions},
     io::{self, BufReader, Read as _, Write as _},
+    mem::take,
     os::unix::{
         ffi::{OsStrExt as _, OsStringExt as _},
-        fs::OpenOptionsExt as _,
+        fs::{OpenOptionsExt as _, PermissionsExt as _, symlink},
     },
     path::{Path, PathBuf},
-    process::{Command as ProcessCommand, ExitCode, Stdio},
+    process::{Command as ProcessCommand, ExitCode, ExitStatus, Stdio},
     result::Result as StdResult,
     sync::{Arc, Mutex, mpsc},
     thread,
@@ -24,7 +25,9 @@ use clap_complete::{Shell, generate};
 use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
     Error,
-    analysis::{DiagnoseReport, DiagnosticCheck, ExplainReport, diagnose, explain},
+    analysis::{
+        DiagnoseReport, DiagnosticCheck, ExplainOutputPage, ExplainReport, diagnose, explain,
+    },
     artifact::write_secure,
     bundle::{
         BundleProfile, archive as archive_bundle, create as create_bundle, plan as plan_bundle,
@@ -32,11 +35,12 @@ use termtrace::{
     },
     capability::{CapabilityReport, CapabilityStatus, probe_capabilities},
     control::{
-        CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, PointerOperation,
-        ProcessSignal, ScreenMode, ScreenPredicate, ScreenRegion, StableCaptureQuality,
-        StateHashComparison, request, send_request,
+        ActorBoundaries, CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest,
+        ControlResult, InputSequenceAtom, PointerOperation, ProcessSignal, ScreenMode,
+        ScreenPredicate, ScreenRegion, StableCaptureQuality, StateHashComparison, request,
+        send_request, send_request_response,
     },
-    diff::{SemanticDiff, diff_states, inspect_point},
+    diff::{SemanticDiff, diff_states_with_semantic_states, inspect_point},
     driver::serve as serve_driver,
     environment::{
         ColorPolicy, EnvironmentBase, EnvironmentSpec, parse_environment_spec,
@@ -56,10 +60,11 @@ use termtrace::{
     observation::{
         CaptureQuality, Observation, ObservationSourceKind, StatePoint, TruthLayer,
         format_ansi_stream, observe_ansi_stream, observe_one_off_session,
-        observe_session_with_options, observe_validated_prefix, semantic_state_for_session,
-        semantic_state_from_ansi,
+        observe_session_with_options, observe_validated_prefix, prune_replay_cache,
+        replay_cache_status, semantic_state_for_session, semantic_state_from_ansi,
     },
     output_projection::{ControlStripper, OutputProjectionQuality, OutputProjectionReport},
+    pagination::OutputPage,
     playback::{PlaybackOptions, playback},
     presentation::{
         EditPlan, PresentationSource, PresentationSourceRequest, PreviewOptions,
@@ -150,12 +155,16 @@ enum Command {
     List(ListArgs),
     /// Remove only a friendly registry binding, preserving evidence.
     Remove(RemoveArgs),
+    /// Plan or apply safe retention for completed unregistered managed recordings.
+    Gc(GcArgs),
     /// Verify that a live session control socket is responsive.
     Ping(SessionArgs),
     /// Print machine-readable live session status.
     Status(StatusArgs),
     /// Send text or file bytes to a live child PTY.
     Send(SendArgs),
+    /// Print the accepted symbolic key and modifier grammar.
+    Keys,
     /// Report terminal-window focus when the application opted in.
     Focus(FocusArgs),
     /// Send cell-addressed mouse input using live tracking modes.
@@ -186,6 +195,10 @@ enum Command {
     GeometryProbe(GeometryProbeArgs),
     /// Reconstruct one semantic state as JSON or text.
     Inspect(InspectArgs),
+    /// Inspect or clear bounded disposable replay checkpoints.
+    Cache(CacheArgs),
+    /// Run Python or TypeScript client code from managed SDK assets without project files.
+    Client(ClientArgs),
     /// Show a truth-labeled live or completed terminal viewport.
     Show(ShowArgs),
     /// List canonical operations and semantic state transitions in order.
@@ -354,6 +367,8 @@ struct VerifyArgs {
     /// OpenSSH allowed-signers file used to establish signer trust.
     #[arg(long)]
     allowed_signers: Option<PathBuf>,
+    #[command(flatten)]
+    page: PageArgs,
 }
 
 #[derive(Debug, Args)]
@@ -403,6 +418,19 @@ struct RemoveArgs {
 }
 
 #[derive(Debug, Args)]
+struct GcArgs {
+    /// Consider only recordings completed at least this many days ago.
+    #[arg(long, default_value_t = 30)]
+    older_than_days: u64,
+    /// Always retain this many newest completed unregistered recordings.
+    #[arg(long, default_value_t = 20)]
+    keep_latest: u64,
+    /// Apply the reported deletions; omission is a read-only dry run.
+    #[arg(long)]
+    apply: bool,
+}
+
+#[derive(Debug, Args)]
 struct ExportArgs {
     /// Source session directory.
     #[arg(long)]
@@ -440,7 +468,7 @@ enum InspectFormat {
 #[command(group(
     ArgGroup::new("selector")
         .multiple(false)
-        .args(["state", "event_seq", "monotonic_ns"])
+        .args(["state", "state_hash", "event_seq", "monotonic_ns"])
 ))]
 struct InspectArgs {
     /// Source session directory.
@@ -449,6 +477,9 @@ struct InspectArgs {
     /// Exact semantic state identifier.
     #[arg(long)]
     state: Option<u64>,
+    /// Exact content-addressed semantic state hash.
+    #[arg(long, value_parser = parse_state_hash)]
+    state_hash: Option<String>,
     /// Latest state at or before this event sequence.
     #[arg(long)]
     event_seq: Option<u64>,
@@ -461,6 +492,45 @@ struct InspectArgs {
     /// Restrict output to one zero-based row; JSON includes complete cell data.
     #[arg(long)]
     row: Option<u16>,
+}
+
+#[derive(Debug, Args)]
+struct CacheArgs {
+    #[command(subcommand)]
+    command: CacheCommand,
+}
+
+#[derive(Debug, Args)]
+struct ClientArgs {
+    #[command(subcommand)]
+    command: ClientCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ClientCommand {
+    /// Report SDK asset discovery and available managed runtimes.
+    Status,
+    /// Run a Python file, or `-` for standard input, in an isolated uv environment.
+    Python(ClientRunArgs),
+    /// Run a TypeScript file, or `-` for standard input, with an installed import mapping.
+    Typescript(ClientRunArgs),
+}
+
+#[derive(Debug, Args)]
+struct ClientRunArgs {
+    /// Client source file, or `-` to read the program from standard input.
+    script: PathBuf,
+    /// Arguments passed to the client program after `--`.
+    #[arg(last = true, allow_hyphen_values = true)]
+    arguments: Vec<OsString>,
+}
+
+#[derive(Debug, Subcommand)]
+enum CacheCommand {
+    /// Report retained compressed checkpoint count and byte limits.
+    Status(SessionArgs),
+    /// Delete disposable checkpoints while preserving canonical evidence.
+    Prune(SessionArgs),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -491,7 +561,7 @@ enum ShowRenderer {
 #[command(group(
     ArgGroup::new("show_selector")
         .multiple(false)
-        .args(["state", "event_seq", "at", "at_marker"])
+        .args(["state", "state_hash", "event_seq", "at", "at_marker"])
 ))]
 struct ShowArgs {
     /// Live session name or canonical completed session path.
@@ -520,6 +590,9 @@ struct ShowArgs {
     /// Exact semantic state identifier.
     #[arg(long)]
     state: Option<u64>,
+    /// Exact content-addressed semantic state hash.
+    #[arg(long, value_parser = parse_state_hash)]
+    state_hash: Option<String>,
     /// Latest state at or before this event sequence.
     #[arg(long)]
     event_seq: Option<u64>,
@@ -578,6 +651,8 @@ struct TimelineArgs {
     #[arg(long)]
     jsonl: bool,
     #[command(flatten)]
+    page: PageArgs,
+    #[command(flatten)]
     range: TimeRangeArgs,
 }
 
@@ -595,13 +670,13 @@ enum DiffFormat {
     ArgGroup::new("diff_from")
         .required(true)
         .multiple(false)
-        .args(["from_state", "from_event_seq", "from_at", "from_marker"])
+        .args(["from_state", "from_state_hash", "from_event_seq", "from_at", "from_marker"])
 ))]
 #[command(group(
     ArgGroup::new("diff_to")
         .required(true)
         .multiple(false)
-        .args(["to_state", "to_event_seq", "to_at", "to_marker"])
+        .args(["to_state", "to_state_hash", "to_event_seq", "to_at", "to_marker"])
 ))]
 struct DiffArgs {
     /// Completed session name or canonical path.
@@ -609,6 +684,9 @@ struct DiffArgs {
     /// Earlier exact semantic state identifier.
     #[arg(long)]
     from_state: Option<u64>,
+    /// Earlier exact content-addressed semantic state hash.
+    #[arg(long, value_parser = parse_state_hash)]
+    from_state_hash: Option<String>,
     /// Earlier state at or before this event sequence.
     #[arg(long)]
     from_event_seq: Option<u64>,
@@ -621,6 +699,9 @@ struct DiffArgs {
     /// Later exact semantic state identifier.
     #[arg(long)]
     to_state: Option<u64>,
+    /// Later exact content-addressed semantic state hash.
+    #[arg(long, value_parser = parse_state_hash)]
+    to_state_hash: Option<String>,
     /// Later state at or before this event sequence.
     #[arg(long)]
     to_event_seq: Option<u64>,
@@ -650,7 +731,7 @@ enum ExplainFormat {
     ArgGroup::new("explain_target")
         .required(true)
         .multiple(false)
-        .args(["state", "event_seq", "at", "marker"])
+        .args(["state", "state_hash", "event_seq", "at", "marker"])
 ))]
 struct ExplainArgs {
     /// Completed session name or canonical path.
@@ -658,6 +739,9 @@ struct ExplainArgs {
     /// Exact semantic state identifier.
     #[arg(long)]
     state: Option<u64>,
+    /// Exact content-addressed semantic state hash.
+    #[arg(long, value_parser = parse_state_hash)]
+    state_hash: Option<String>,
     /// Latest state at or before this event sequence.
     #[arg(long)]
     event_seq: Option<u64>,
@@ -673,6 +757,8 @@ struct ExplainArgs {
     /// Output representation.
     #[arg(long, value_enum, default_value_t = ExplainFormat::Text)]
     format: ExplainFormat,
+    #[command(flatten)]
+    page: PageArgs,
 }
 
 #[derive(Debug, Args)]
@@ -691,6 +777,8 @@ struct DiagnoseArgs {
     /// Exit unsuccessfully when at least one finding is emitted.
     #[arg(long)]
     fail_on_finding: bool,
+    #[command(flatten)]
+    page: PageArgs,
 }
 
 #[derive(Debug, Args)]
@@ -768,7 +856,22 @@ struct EventsArgs {
     #[arg(long, conflicts_with_all = ["end_monotonic_ns", "to_marker"])]
     to_event_seq: Option<u64>,
     #[command(flatten)]
+    page: PageArgs,
+    #[command(flatten)]
     range: TimeRangeArgs,
+}
+
+#[derive(Debug, Args)]
+struct PageArgs {
+    /// Maximum matching records returned by default.
+    #[arg(long, default_value_t = 100, value_parser = parse_page_limit)]
+    limit: usize,
+    /// Zero-based matching-record offset for deterministic pagination.
+    #[arg(long, default_value_t = 0)]
+    offset: usize,
+    /// Return every matching record; explicit potentially-large output.
+    #[arg(long)]
+    all: bool,
 }
 
 #[derive(Debug, Args)]
@@ -807,7 +910,7 @@ impl From<SaveFormatArg> for SaveFormat {
 #[command(group(
     ArgGroup::new("save_selector")
         .multiple(false)
-        .args(["state", "event_seq", "at", "at_marker"])
+        .args(["state", "state_hash", "event_seq", "at", "at_marker"])
 ))]
 struct SaveArgs {
     /// Completed session name or canonical path.
@@ -821,6 +924,9 @@ struct SaveArgs {
     /// Exact semantic state identifier.
     #[arg(long)]
     state: Option<u64>,
+    /// Exact content-addressed semantic state hash.
+    #[arg(long, value_parser = parse_state_hash)]
+    state_hash: Option<String>,
     /// Latest state at or before this event sequence.
     #[arg(long)]
     event_seq: Option<u64>,
@@ -839,7 +945,7 @@ struct SaveArgs {
 #[command(group(
     ArgGroup::new("screenshot_selector")
         .multiple(false)
-        .args(["state", "event_seq", "at", "at_marker"])
+        .args(["state", "state_hash", "event_seq", "at", "at_marker"])
 ))]
 struct ScreenshotArgs {
     /// Completed session name or canonical path.
@@ -850,6 +956,9 @@ struct ScreenshotArgs {
     /// Exact semantic state identifier.
     #[arg(long)]
     state: Vec<u64>,
+    /// Exact content-addressed semantic state hash.
+    #[arg(long, value_parser = parse_state_hash)]
+    state_hash: Vec<String>,
     /// Latest state at or before this event sequence.
     #[arg(long)]
     event_seq: Vec<u64>,
@@ -906,10 +1015,13 @@ enum ScreenshotFormat {
             "state_unchanged"
         ])
 ))]
+#[command(override_usage = "termtrace wait [OPTIONS] <SESSION> <SCREEN|PREDICATE_OPTION>")]
 struct WaitArgs {
     /// Live session name or canonical path.
+    #[arg(index = 1)]
     session: PathBuf,
     /// Exact UTF-8 text required in the latest presented viewport.
+    #[arg(index = 2)]
     screen: Option<String>,
     /// Exact UTF-8 text to find in canonical output history.
     #[arg(long)]
@@ -968,6 +1080,9 @@ struct WaitIdleArgs {
     /// Return typed completed/output-closed/deadline snapshots instead of rejecting them.
     #[arg(long)]
     allow_incomplete: bool,
+    /// Include the compressed complete semantic state in the response.
+    #[arg(long)]
+    full_state: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -1144,11 +1259,15 @@ struct StopArgs {
         .multiple(false)
         .args(["atoms", "stdin"])
 ))]
+#[command(
+    override_usage = "termtrace send [OPTIONS] <SESSION> <ATOM>...\n       termtrace send [OPTIONS] --stdin <SESSION>"
+)]
 struct SendArgs {
     /// Live session name or canonical path.
+    #[arg(index = 1)]
     session: PathBuf,
     /// Named keys, text:VALUE, paste:VALUE, raw:VALUE, or raw-file:PATH atoms.
-    #[arg(value_name = "ATOM", num_args = 1..)]
+    #[arg(index = 2, value_name = "ATOM", num_args = 1..)]
     atoms: Vec<String>,
     /// Read one exact raw burst from standard input.
     #[arg(long)]
@@ -1162,6 +1281,9 @@ struct SendArgs {
     /// Apply every input atom only if the latest presented state has this BLAKE3 hash.
     #[arg(long = "if-state")]
     expected_presented_state_hash: Option<String>,
+    /// Include per-atom operation and canonical event identifiers in the response.
+    #[arg(long)]
+    verbose: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1868,9 +1990,11 @@ fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Resolve(arguments) => return run_resolve(arguments),
         Command::List(arguments) => return run_list(arguments),
         Command::Remove(arguments) => return run_remove(arguments),
+        Command::Gc(arguments) => return run_gc(arguments),
         Command::Ping(arguments) => return run_control(arguments.session, ControlCommand::Ping),
         Command::Status(arguments) => return run_status(arguments),
         Command::Send(arguments) => return run_send(arguments),
+        Command::Keys => return run_keys(),
         Command::Focus(arguments) => {
             return run_control_guarded(
                 arguments.session,
@@ -1923,6 +2047,8 @@ fn dispatch(command: Command) -> Result<ExitCode> {
             return Ok(ExitCode::SUCCESS);
         }
         Command::Inspect(arguments) => return run_inspect(arguments),
+        Command::Cache(arguments) => return run_cache(arguments),
+        Command::Client(arguments) => return run_client(arguments),
         Command::Show(arguments) => return run_show(arguments),
         Command::Timeline(arguments) => return run_timeline(arguments),
         Command::Diff(arguments) => return run_diff(arguments),
@@ -2332,12 +2458,15 @@ fn run_verify(arguments: VerifyArgs) -> Result<ExitCode> {
             "--allowed-signers requires --level signature"
         ));
     }
-    let report = verify_session_with_trust(
+    let mut report = verify_session_with_trust(
         arguments.session,
         arguments.level.into(),
         arguments.allowed_signers.as_deref(),
     );
     let valid = report.valid;
+    let (findings, page, partial) = paginate(take(&mut report.findings), &arguments.page);
+    report.findings = findings;
+    report.output_page = partial.then_some(page.clone());
     if arguments.json {
         write_json_line(&report)?;
     } else {
@@ -2349,6 +2478,14 @@ fn run_verify(arguments: VerifyArgs) -> Result<ExitCode> {
         );
         for finding in &report.findings {
             writeln!(output, "{}: {}", finding.code, finding.message).into_diagnostic()?;
+        }
+        if partial {
+            writeln!(
+                output,
+                "page: {}",
+                serde_json::to_string(&page).into_diagnostic()?
+            )
+            .into_diagnostic()?;
         }
         write_stdout(output)?;
     }
@@ -2538,11 +2675,17 @@ fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> {
 }
 
 fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
-    let selector = match (arguments.state, arguments.event_seq, arguments.monotonic_ns) {
-        (Some(state), None, None) => StateSelector::StateId(state),
-        (None, Some(sequence), None) => StateSelector::EventSeq(sequence),
-        (None, None, Some(time)) => StateSelector::MonotonicNs(time),
-        (None, None, None) => StateSelector::Final,
+    let selector = match (
+        arguments.state,
+        arguments.state_hash,
+        arguments.event_seq,
+        arguments.monotonic_ns,
+    ) {
+        (Some(state), None, None, None) => StateSelector::StateId(state),
+        (None, Some(state_hash), None, None) => StateSelector::StateHash(state_hash),
+        (None, None, Some(sequence), None) => StateSelector::EventSeq(sequence),
+        (None, None, None, Some(time)) => StateSelector::MonotonicNs(time),
+        (None, None, None, None) => StateSelector::Final,
         _ => {
             return Err(miette::miette!(
                 "exactly one state selector may be provided"
@@ -2595,6 +2738,246 @@ fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
     }
 }
 
+fn run_cache(arguments: CacheArgs) -> Result<ExitCode> {
+    return match arguments.command {
+        CacheCommand::Status(arguments) => {
+            let session = resolve_session_ref(arguments.session)?;
+            write_json_line(&replay_cache_status(&session)?)
+        }
+        CacheCommand::Prune(arguments) => {
+            let session = resolve_session_ref(arguments.session)?;
+            write_json_line(&prune_replay_cache(&session)?)
+        }
+    };
+}
+
+fn run_client(arguments: ClientArgs) -> Result<ExitCode> {
+    let assets = client_assets_root()?;
+    return match arguments.command {
+        ClientCommand::Status => write_json_line(&serde_json::json!({
+            "kind": "client_assets",
+            "root": assets,
+            "python": {
+                "package": assets.join("python"),
+                "runtime": if executable_on_path("uv") { "uv_isolated" } else { "python_path_fallback" },
+                "uv_available": executable_on_path("uv"),
+                "python_available": executable_on_path("python3"),
+            },
+            "typescript": {
+                "package": assets.join("typescript"),
+                "runtime": "bun_private_package_mapping",
+                "bun_available": executable_on_path("bun"),
+            },
+            "worktree_files_created": false,
+        })),
+        ClientCommand::Python(arguments) => run_python_client(&assets, arguments),
+        ClientCommand::Typescript(arguments) => run_typescript_client(&assets, arguments),
+    };
+}
+
+fn run_python_client(assets: &Path, arguments: ClientRunArgs) -> Result<ExitCode> {
+    let (script, _temporary) = prepare_client_script(&arguments.script, "py")?;
+    let binary = env::current_exe().into_diagnostic()?;
+    if executable_on_path("uv") {
+        let status = ProcessCommand::new("uv")
+            .args(["run", "--quiet", "--isolated", "--no-project", "--with"])
+            .arg(assets.join("python"))
+            .args(["python"])
+            .arg(&script)
+            .args(&arguments.arguments)
+            .env("TERMTRACE_BINARY", &binary)
+            .status()
+            .into_diagnostic()?;
+        return process_exit_code(status);
+    }
+    let python_source = assets.join("python/src");
+    let python_path = match env::var_os("PYTHONPATH") {
+        Some(existing) => env::join_paths([python_source.as_os_str(), existing.as_os_str()])
+            .map_err(|error| return miette::miette!("invalid PYTHONPATH: {error}"))?,
+        None => python_source.into_os_string(),
+    };
+    let status = ProcessCommand::new("python3")
+        .arg(&script)
+        .args(&arguments.arguments)
+        .env("PYTHONPATH", python_path)
+        .env("TERMTRACE_BINARY", binary)
+        .status()
+        .map_err(|error| {
+            return miette::miette!(
+                "Python client execution requires `uv` or Python 3 with `msgspec`: {error}"
+            );
+        })?;
+    return process_exit_code(status);
+}
+
+fn run_typescript_client(assets: &Path, arguments: ClientRunArgs) -> Result<ExitCode> {
+    if !executable_on_path("bun") {
+        return Err(miette::miette!(
+            "TypeScript client execution requires Bun on PATH"
+        ));
+    }
+    let temporary = create_client_temp_directory()?;
+    let scope = temporary.path.join("node_modules/@termtrace");
+    fs_err::create_dir_all(&scope).into_diagnostic()?;
+    fs_err::set_permissions(&scope, Permissions::from_mode(0o700)).into_diagnostic()?;
+    symlink(assets.join("typescript"), scope.join("test")).into_diagnostic()?;
+    let source_link = temporary.path.join("source");
+    let script = if arguments.script.as_os_str() == OsStr::new("-") {
+        fs_err::create_dir(&source_link).into_diagnostic()?;
+        fs_err::set_permissions(&source_link, Permissions::from_mode(0o700)).into_diagnostic()?;
+        let path = source_link.join("client.ts");
+        write_secure(&path, &read_client_stdin()?)?;
+        path
+    } else {
+        let script = arguments.script.canonicalize().into_diagnostic()?;
+        let root = typescript_source_root(&script)?;
+        symlink(&root, &source_link).into_diagnostic()?;
+        let relative = script.strip_prefix(&root).map_err(|_| {
+            return miette::miette!("TypeScript script is outside its resolved source root");
+        })?;
+        source_link.join(relative)
+    };
+    let binary = env::current_exe().into_diagnostic()?;
+    let status = ProcessCommand::new("bun")
+        .arg("--preserve-symlinks")
+        .arg("--preserve-symlinks-main")
+        .arg("--no-install")
+        .arg(&script)
+        .args(&arguments.arguments)
+        .env("TERMTRACE_BINARY", binary)
+        .status()
+        .into_diagnostic()?;
+    return process_exit_code(status);
+}
+
+fn typescript_source_root(script: &Path) -> Result<PathBuf> {
+    let parent = script
+        .parent()
+        .ok_or_else(|| return miette::miette!("TypeScript script has no parent directory"))?;
+    for directory in parent.ancestors() {
+        if directory.join("package.json").is_file()
+            || directory.join("bun.lock").is_file()
+            || directory.join("bun.lockb").is_file()
+            || directory.join("tsconfig.json").is_file()
+            || directory.join(".git").exists()
+        {
+            return Ok(directory.to_path_buf());
+        }
+    }
+    return Ok(parent.to_path_buf());
+}
+
+struct ClientTempDirectory {
+    path: PathBuf,
+}
+
+impl Drop for ClientTempDirectory {
+    fn drop(&mut self) {
+        if let Err(error) = fs_err::remove_dir_all(&self.path) {
+            tracing::warn!(path = %self.path.display(), %error, "could not remove client runtime directory");
+        }
+    }
+}
+
+fn create_client_temp_directory() -> Result<ClientTempDirectory> {
+    for _ in 0..32 {
+        let path = env::temp_dir().join(format!("termtrace-client-{}", uuid::Uuid::now_v7()));
+        match fs_err::create_dir(&path) {
+            Ok(()) => {
+                fs_err::set_permissions(&path, Permissions::from_mode(0o700)).into_diagnostic()?;
+                return Ok(ClientTempDirectory { path });
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error).into_diagnostic(),
+        }
+    }
+    return Err(miette::miette!(
+        "could not allocate a private temporary client runtime directory"
+    ));
+}
+
+fn prepare_client_script(
+    script: &Path,
+    extension: &str,
+) -> Result<(PathBuf, Option<ClientTempDirectory>)> {
+    if script.as_os_str() != OsStr::new("-") {
+        return Ok((script.canonicalize().into_diagnostic()?, None));
+    }
+    let temporary = create_client_temp_directory()?;
+    let path = temporary.path.join(format!("client.{extension}"));
+    let bytes = read_client_stdin()?;
+    write_secure(&path, &bytes)?;
+    return Ok((path, Some(temporary)));
+}
+
+fn read_client_stdin() -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    io::stdin()
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .into_diagnostic()?;
+    if bytes.len() > 4 * 1024 * 1024 {
+        return Err(miette::miette!(
+            "standard-input client program exceeds the 4 MiB limit"
+        ));
+    }
+    return Ok(bytes);
+}
+
+fn client_assets_root() -> Result<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(path) = env::var_os("TERMTRACE_CLIENT_ASSETS") {
+        candidates.push(PathBuf::from(path));
+    }
+    if let Ok(binary) = env::current_exe()
+        && let Some(directory) = binary.parent()
+    {
+        candidates.push(directory.join("clients"));
+        if let Some(prefix) = directory.parent() {
+            candidates.push(prefix.join("share/termtrace/clients"));
+        }
+    }
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("packages"));
+    for candidate in candidates {
+        if candidate.join("python/pyproject.toml").is_file()
+            && candidate.join("typescript/lib/index.js").is_file()
+        {
+            return candidate.canonicalize().map_err(|error| {
+                return miette::miette!(
+                    "could not resolve client asset root {}: {error}",
+                    candidate.display()
+                );
+            });
+        }
+    }
+    return Err(miette::miette!(
+        "Termtrace client assets are unavailable; reinstall a release archive that includes `clients/` or set TERMTRACE_CLIENT_ASSETS"
+    ));
+}
+
+fn executable_on_path(program: &str) -> bool {
+    let Some(path) = env::var_os("PATH") else {
+        return false;
+    };
+    return env::split_paths(&path).any(|directory| {
+        let candidate = directory.join(program);
+        return candidate.metadata().is_ok_and(|metadata| {
+            return metadata.is_file() && metadata.permissions().mode() & 0o111 != 0;
+        });
+    });
+}
+
+fn process_exit_code(status: ExitStatus) -> Result<ExitCode> {
+    if status.success() {
+        return Ok(ExitCode::SUCCESS);
+    }
+    let code = status
+        .code()
+        .and_then(|code| return u8::try_from(code).ok())
+        .unwrap_or(1);
+    return Ok(ExitCode::from(code));
+}
+
 fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
     let image_format = matches!(arguments.format, ShowFormat::Svg | ShowFormat::Png);
     if !image_format && arguments.renderer == ShowRenderer::Native {
@@ -2609,15 +2992,17 @@ fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
     }
     let point = match (
         arguments.state,
+        arguments.state_hash,
         arguments.event_seq,
         arguments.at,
         arguments.at_marker,
     ) {
-        (Some(state_id), None, None, None) => StatePoint::StateId { state_id },
-        (None, Some(event_seq), None, None) => StatePoint::EventSeq { event_seq },
-        (None, None, Some(monotonic_ns), None) => StatePoint::MonotonicNs { monotonic_ns },
-        (None, None, None, Some(label)) => StatePoint::Marker { label },
-        (None, None, None, None) => StatePoint::LatestPresented,
+        (Some(state_id), None, None, None, None) => StatePoint::StateId { state_id },
+        (None, Some(state_hash), None, None, None) => StatePoint::StateHash { state_hash },
+        (None, None, Some(event_seq), None, None) => StatePoint::EventSeq { event_seq },
+        (None, None, None, Some(monotonic_ns), None) => StatePoint::MonotonicNs { monotonic_ns },
+        (None, None, None, None, Some(label)) => StatePoint::Marker { label },
+        (None, None, None, None, None) => StatePoint::LatestPresented,
         _ => return Err(miette::miette!("exactly one show selector may be supplied")),
     };
     let one_off_wait = match (&arguments.wait, &arguments.wait_regex) {
@@ -3062,15 +3447,30 @@ fn run_timeline(arguments: TimelineArgs) -> Result<ExitCode> {
         arguments.range.to_marker.as_deref(),
     )?;
     let entries = build_timeline(&log, arguments.all_states, arguments.controls, range)?;
+    let (entries, page, partial) = paginate(entries, &arguments.page);
     if arguments.jsonl {
         for entry in entries {
             write_json_line(&entry)?;
+        }
+        if partial {
+            write_json_line(&serde_json::json!({
+                "kind": "output_page",
+                "page": page,
+            }))?;
         }
         return Ok(ExitCode::SUCCESS);
     }
     let mut output = String::new();
     for entry in entries {
         writeln!(output, "{}", timeline_text(&entry)).into_diagnostic()?;
+    }
+    if partial {
+        writeln!(
+            output,
+            "page: {}",
+            serde_json::to_string(&page).into_diagnostic()?
+        )
+        .into_diagnostic()?;
     }
     return write_stdout(output);
 }
@@ -3081,25 +3481,21 @@ fn run_diff(arguments: DiffArgs) -> Result<ExitCode> {
     validate_completed_log(&session, &log)?;
     let from = diff_point(
         arguments.from_state,
+        arguments.from_state_hash,
         arguments.from_event_seq,
         arguments.from_at,
         arguments.from_marker,
     )?;
     let to = diff_point(
         arguments.to_state,
+        arguments.to_state_hash,
         arguments.to_event_seq,
         arguments.to_at,
         arguments.to_marker,
     )?;
-    let image_states = if matches!(arguments.format, DiffFormat::Svg | DiffFormat::Png) {
-        Some((
-            inspect_point(&log, &from)?.state,
-            inspect_point(&log, &to)?.state,
-        ))
-    } else {
-        None
-    };
-    let difference = diff_states(&log, from, to)?;
+    let (difference, before_state, after_state) = diff_states_with_semantic_states(&log, from, to)?;
+    let image_states = matches!(arguments.format, DiffFormat::Svg | DiffFormat::Png)
+        .then_some((before_state, after_state));
     let changed = difference.changed;
     let _output_status = match arguments.format {
         DiffFormat::Text => write_stdout(diff_text(&difference)?)?,
@@ -3133,18 +3529,49 @@ fn run_explain(arguments: ExplainArgs) -> Result<ExitCode> {
     validate_completed_log(&session, &log)?;
     let target = diff_point(
         arguments.state,
+        arguments.state_hash,
         arguments.event_seq,
         arguments.at,
         arguments.marker,
     )?;
-    let report = explain(&log, target, arguments.context)?;
+    let mut report = explain(&log, target, arguments.context)?;
+    let (tokens, tokens_page, tokens_partial) = paginate(take(&mut report.tokens), &arguments.page);
+    let (states, states_page, states_partial) = paginate(take(&mut report.states), &arguments.page);
+    let (findings, findings_page, findings_partial) =
+        paginate(take(&mut report.findings), &arguments.page);
+    report.tokens = tokens;
+    report.states = states;
+    report.findings = findings;
+    let partial = tokens_partial || states_partial || findings_partial;
+    let page = ExplainOutputPage {
+        tokens: tokens_page,
+        states: states_page,
+        findings: findings_page,
+    };
+    report.output_page = partial.then_some(page.clone());
     return match arguments.format {
-        ExplainFormat::Text => write_stdout(explain_text(&report)?),
-        ExplainFormat::Json => write_stdout(format!(
-            "{}\n",
-            serde_json::to_string_pretty(&report).into_diagnostic()?
-        )),
-        ExplainFormat::JsonCompact => write_json_line(&report),
+        ExplainFormat::Text => {
+            let mut output = explain_text(&report)?;
+            if partial {
+                writeln!(
+                    output,
+                    "page: {}",
+                    serde_json::to_string(&page).into_diagnostic()?
+                )
+                .into_diagnostic()?;
+            }
+            write_stdout(output)
+        }
+        ExplainFormat::Json | ExplainFormat::JsonCompact => {
+            if matches!(arguments.format, ExplainFormat::Json) {
+                write_stdout(format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&report).into_diagnostic()?
+                ))
+            } else {
+                write_json_line(&report)
+            }
+        }
     };
 }
 
@@ -3152,17 +3579,29 @@ fn run_diagnose(arguments: DiagnoseArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
     let log = EventLog::read(session.join("events.jsonl"))?;
     validate_completed_log(&session, &log)?;
-    let report = diagnose(
+    let mut report = diagnose(
         &session,
         &log,
         arguments.check,
         arguments.broad_change_percent,
     )?;
     let has_findings = !report.findings.is_empty();
+    let (findings, page, partial) = paginate(take(&mut report.findings), &arguments.page);
+    report.findings = findings;
+    report.output_page = partial.then_some(page.clone());
     if arguments.json {
         write_json_line(&report)?;
     } else {
-        write_stdout(diagnose_text(&report)?)?;
+        let mut output = diagnose_text(&report)?;
+        if partial {
+            writeln!(
+                output,
+                "page: {}",
+                serde_json::to_string(&page).into_diagnostic()?
+            )
+            .into_diagnostic()?;
+        }
+        write_stdout(output)?;
     }
     if arguments.fail_on_finding && has_findings {
         return Ok(ExitCode::FAILURE);
@@ -3447,6 +3886,7 @@ fn run_events(arguments: EventsArgs) -> Result<ExitCode> {
             "event range must satisfy 0 <= FROM <= TO <= {event_count}"
         ));
     }
+    let mut records = Vec::new();
     for record in &log.events {
         let kind = event_type(&record.event);
         if record.seq < from_event
@@ -3460,10 +3900,35 @@ fn run_events(arguments: EventsArgs) -> Result<ExitCode> {
         {
             continue;
         }
-        write_json_line(&EventProjection::from_record(
-            record,
-            arguments.metadata_only,
-        ))?;
+        records.push(record);
+    }
+    let next_sequences = records
+        .iter()
+        .map(|record| return record.seq)
+        .collect::<Vec<_>>();
+    let projections = records
+        .into_iter()
+        .map(|record| return EventProjection::from_record(record, arguments.metadata_only))
+        .collect::<Vec<_>>();
+    let (projections, page, partial) = paginate(projections, &arguments.page);
+    for projection in projections {
+        write_json_line(&projection)?;
+    }
+    if partial {
+        let next_event_seq = page
+            .next_offset
+            .and_then(|offset| return next_sequences.get(offset).copied());
+        let mut page = serde_json::to_value(page).into_diagnostic()?;
+        if let Some(object) = page.as_object_mut() {
+            object.insert(
+                "next_event_seq".to_owned(),
+                serde_json::json!(next_event_seq),
+            );
+        }
+        write_json_line(&serde_json::json!({
+            "kind": "output_page",
+            "page": page,
+        }))?;
     }
     return Ok(ExitCode::SUCCESS);
 }
@@ -3565,15 +4030,17 @@ fn run_save(arguments: SaveArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
     let point = match (
         arguments.state,
+        arguments.state_hash,
         arguments.event_seq,
         arguments.at,
         arguments.at_marker,
     ) {
-        (Some(state_id), None, None, None) => StatePoint::StateId { state_id },
-        (None, Some(event_seq), None, None) => StatePoint::EventSeq { event_seq },
-        (None, None, Some(monotonic_ns), None) => StatePoint::MonotonicNs { monotonic_ns },
-        (None, None, None, Some(label)) => StatePoint::Marker { label },
-        (None, None, None, None) => StatePoint::LatestPresented,
+        (Some(state_id), None, None, None, None) => StatePoint::StateId { state_id },
+        (None, Some(state_hash), None, None, None) => StatePoint::StateHash { state_hash },
+        (None, None, Some(event_seq), None, None) => StatePoint::EventSeq { event_seq },
+        (None, None, None, Some(monotonic_ns), None) => StatePoint::MonotonicNs { monotonic_ns },
+        (None, None, None, None, Some(label)) => StatePoint::Marker { label },
+        (None, None, None, None, None) => StatePoint::LatestPresented,
         _ => return Err(miette::miette!("exactly one save selector may be supplied")),
     };
     let formats = arguments
@@ -3605,6 +4072,12 @@ fn run_screenshot(arguments: ScreenshotArgs) -> Result<ExitCode> {
             .state
             .into_iter()
             .map(|state_id| return StatePoint::StateId { state_id }),
+    );
+    points.extend(
+        arguments
+            .state_hash
+            .into_iter()
+            .map(|state_hash| return StatePoint::StateHash { state_hash }),
     );
     points.extend(
         arguments
@@ -3884,15 +4357,19 @@ fn diagnose_text(report: &DiagnoseReport) -> Result<String> {
 
 fn diff_point(
     state: Option<u64>,
+    state_hash: Option<String>,
     event_seq: Option<u64>,
     monotonic_ns: Option<u64>,
     marker: Option<String>,
 ) -> Result<StatePoint> {
-    return match (state, event_seq, monotonic_ns, marker) {
-        (Some(state_id), None, None, None) => Ok(StatePoint::StateId { state_id }),
-        (None, Some(event_seq), None, None) => Ok(StatePoint::EventSeq { event_seq }),
-        (None, None, Some(monotonic_ns), None) => Ok(StatePoint::MonotonicNs { monotonic_ns }),
-        (None, None, None, Some(label)) => Ok(StatePoint::Marker { label }),
+    return match (state, state_hash, event_seq, monotonic_ns, marker) {
+        (Some(state_id), None, None, None, None) => Ok(StatePoint::StateId { state_id }),
+        (None, Some(state_hash), None, None, None) => Ok(StatePoint::StateHash { state_hash }),
+        (None, None, Some(event_seq), None, None) => Ok(StatePoint::EventSeq { event_seq }),
+        (None, None, None, Some(monotonic_ns), None) => {
+            Ok(StatePoint::MonotonicNs { monotonic_ns })
+        }
+        (None, None, None, None, Some(label)) => Ok(StatePoint::Marker { label }),
         _ => Err(miette::miette!(
             "exactly one diff endpoint selector is required"
         )),
@@ -4427,7 +4904,23 @@ fn run_wait_idle(arguments: WaitIdleArgs) -> Result<ExitCode> {
             timeout_ns: arguments.timeout_ms.saturating_mul(1_000_000),
         }),
     )?;
-    let ControlData::StableSnapshot { quality, .. } = &data else {
+    let ControlData::StableSnapshot {
+        semantic_state_zstd: _,
+        viewport_text,
+        state_hash,
+        cols,
+        rows,
+        cursor_column,
+        cursor_row,
+        cursor_visible,
+        first_observed_monotonic_ns,
+        observed_monotonic_ns,
+        stable_for_ns,
+        quality,
+        modes,
+        boundaries,
+    } = &data
+    else {
         return Err(miette::miette!(
             "recording actor returned an unexpected stable-capture payload"
         ));
@@ -4438,7 +4931,175 @@ fn run_wait_idle(arguments: WaitIdleArgs) -> Result<ExitCode> {
             quality.as_str()
         ));
     }
-    return write_json_line(&data);
+    if arguments.full_state {
+        return write_json_line(&data);
+    }
+    return write_json_line(&serde_json::json!({
+        "kind": "stable_snapshot",
+        "quality": quality,
+        "state_hash": state_hash,
+        "viewport_text": viewport_text,
+        "geometry": {
+            "cols": cols,
+            "rows": rows,
+        },
+        "cursor": {
+            "column": cursor_column,
+            "row": cursor_row,
+            "visible": cursor_visible,
+        },
+        "first_observed_monotonic_ns": first_observed_monotonic_ns,
+        "observed_monotonic_ns": observed_monotonic_ns,
+        "stable_for_ns": stable_for_ns,
+        "modes": modes,
+        "boundary": compact_boundaries(boundaries),
+    }));
+}
+
+fn compact_boundaries(boundaries: &ActorBoundaries) -> serde_json::Value {
+    if boundaries.durable == boundaries.observed {
+        return serde_json::json!({
+            "durable": true,
+            "next_event_seq": boundaries.observed.next_event_seq,
+            "event_hash": boundaries.observed.event_hash,
+            "output_bytes": boundaries.observed.output_bytes,
+        });
+    }
+    return serde_json::json!({
+        "durable": false,
+        "durable_boundary": boundaries.durable,
+        "observed_boundary": boundaries.observed,
+    });
+}
+
+fn compact_control_data(data: &ControlData) -> serde_json::Value {
+    return match data {
+        ControlData::Acknowledged { boundaries } => serde_json::json!({
+            "kind": "acknowledged",
+            "boundary": compact_boundaries(boundaries),
+        }),
+        ControlData::InputApplied {
+            operation_id,
+            input_kind,
+            bytes_written,
+            intent_event_seq,
+            result_event_seq,
+            boundaries,
+            ..
+        } => serde_json::json!({
+            "kind": "input_applied",
+            "operation_id": operation_id,
+            "input_kind": input_kind,
+            "bytes_written": bytes_written,
+            "intent_event_seq": intent_event_seq,
+            "result_event_seq": result_event_seq,
+            "boundary": compact_boundaries(boundaries),
+        }),
+        ControlData::InputSequenceApplied {
+            sequence_id,
+            atom_count,
+            bytes_written,
+            first_intent_event_seq,
+            last_result_event_seq,
+            pace_ns,
+            boundaries,
+            ..
+        } => serde_json::json!({
+            "kind": "input_sequence_applied",
+            "sequence_id": sequence_id,
+            "atom_count": atom_count,
+            "bytes_written": bytes_written,
+            "first_intent_event_seq": first_intent_event_seq,
+            "last_result_event_seq": last_result_event_seq,
+            "pace_ns": pace_ns,
+            "boundary": compact_boundaries(boundaries),
+        }),
+        ControlData::InputNoop {
+            input_kind,
+            reason,
+            terminal_modes_hash,
+            boundaries,
+        } => serde_json::json!({
+            "kind": "input_noop",
+            "input_kind": input_kind,
+            "reason": reason,
+            "terminal_modes_hash": terminal_modes_hash,
+            "boundary": compact_boundaries(boundaries),
+        }),
+        ControlData::Activated {
+            operation_id,
+            text,
+            start_column,
+            end_column,
+            row,
+            target_column,
+            presented_state_hash,
+            bytes_written,
+            intent_event_seq,
+            result_event_seq,
+            boundaries,
+            ..
+        } => serde_json::json!({
+            "kind": "activated",
+            "operation_id": operation_id,
+            "text": text,
+            "region": {
+                "start_column": start_column,
+                "end_column": end_column,
+                "row": row,
+                "target_column": target_column,
+            },
+            "presented_state_hash": presented_state_hash,
+            "bytes_written": bytes_written,
+            "intent_event_seq": intent_event_seq,
+            "result_event_seq": result_event_seq,
+            "boundary": compact_boundaries(boundaries),
+        }),
+        ControlData::Status { pid, boundaries } => serde_json::json!({
+            "kind": "status",
+            "pid": pid,
+            "boundary": compact_boundaries(boundaries),
+        }),
+        ControlData::Snapshot {
+            viewport_text,
+            state_hash,
+            presented,
+            cols,
+            rows,
+            cursor_column,
+            cursor_row,
+            cursor_visible,
+            observed_monotonic_ns,
+            modes,
+            boundaries,
+            ..
+        } => serde_json::json!({
+            "kind": "snapshot",
+            "state_hash": state_hash,
+            "viewport_text": viewport_text,
+            "presented": presented,
+            "geometry": { "cols": cols, "rows": rows },
+            "cursor": { "column": cursor_column, "row": cursor_row, "visible": cursor_visible },
+            "observed_monotonic_ns": observed_monotonic_ns,
+            "modes": modes,
+            "boundary": compact_boundaries(boundaries),
+        }),
+        ControlData::StableSnapshot { .. } | ControlData::ScreenWait { .. } => {
+            serde_json::to_value(data).unwrap_or_else(|_| {
+                return serde_json::json!({ "kind": "control_result_encoding_failed" });
+            })
+        }
+        ControlData::Marked {
+            label,
+            event_seq,
+            boundaries,
+        } => serde_json::json!({
+            "kind": "marked",
+            "label": label,
+            "event_seq": event_seq,
+            "boundary": compact_boundaries(boundaries),
+        }),
+    };
 }
 
 fn parse_row_predicate(value: &str) -> Result<(u16, String)> {
@@ -4492,6 +5153,16 @@ fn parse_cursor_position(value: &str) -> Result<(u16, u16)> {
     return Ok((column, row));
 }
 
+fn run_gc(arguments: GcArgs) -> Result<ExitCode> {
+    let registry = SessionRegistry::open_default()?;
+    let report = registry.garbage_collect(
+        arguments.older_than_days,
+        arguments.keep_latest,
+        arguments.apply,
+    )?;
+    return write_json_line(&report);
+}
+
 fn run_recover(arguments: RecoverArgs) -> Result<ExitCode> {
     let report = EventLog::recover_prefix(arguments.event_log, arguments.out)?;
     return write_stdout(format!(
@@ -4521,7 +5192,7 @@ fn run_control_guarded(
     let mut control_request = ControlRequest::new(command);
     control_request.expected_presented_state_hash = expected_presented_state_hash;
     let data = send_request(session, &control_request)?;
-    return write_json_line(&data);
+    return write_json_line(&compact_control_data(&data));
 }
 
 fn run_status(arguments: StatusArgs) -> Result<ExitCode> {
@@ -4536,7 +5207,7 @@ fn run_status(arguments: StatusArgs) -> Result<ExitCode> {
         }));
     }
     let data = request(session, ControlCommand::Status)?;
-    return write_json_line(&data);
+    return write_json_line(&compact_control_data(&data));
 }
 
 fn run_stop(arguments: StopArgs) -> Result<ExitCode> {
@@ -4552,7 +5223,7 @@ fn run_stop(arguments: StopArgs) -> Result<ExitCode> {
     control_request.expected_presented_state_hash = arguments.expected_presented_state_hash;
     let acknowledged = send_request(&session, &control_request)?;
     if !arguments.wait {
-        return write_json_line(&acknowledged);
+        return write_json_line(&compact_control_data(&acknowledged));
     }
     let completion = wait_for_completion(&session, Duration::from_millis(arguments.timeout_ms))?;
     return write_json_line(&serde_json::json!({
@@ -4643,6 +5314,36 @@ fn row_text(row: &RowState) -> String {
     return text.trim_end().to_owned();
 }
 
+fn paginate<T>(items: Vec<T>, page: &PageArgs) -> (Vec<T>, OutputPage, bool) {
+    let total = items.len();
+    let start = page.offset.min(total);
+    let end = if page.all {
+        total
+    } else {
+        start.saturating_add(page.limit).min(total)
+    };
+    let returned = end.saturating_sub(start);
+    let partial = start != 0 || end < total;
+    let next_offset = (end < total).then_some(end);
+    let selected = items
+        .into_iter()
+        .skip(start)
+        .take(returned)
+        .collect::<Vec<_>>();
+    return (
+        selected,
+        OutputPage {
+            offset: start,
+            limit: (!page.all).then_some(page.limit),
+            total,
+            returned,
+            truncated: end < total,
+            next_offset,
+        },
+        partial,
+    );
+}
+
 fn write_json_line(value: &impl serde::Serialize) -> Result<ExitCode> {
     let mut encoded = serde_json::to_vec(value).into_diagnostic()?;
     encoded.push(b'\n');
@@ -4665,69 +5366,112 @@ fn write_stdout(output: impl AsRef<[u8]>) -> Result<ExitCode> {
 }
 
 fn run_send(arguments: SendArgs) -> Result<ExitCode> {
+    let mut atoms = Vec::new();
     if arguments.stdin {
         let mut data = Vec::new();
         io::stdin().read_to_end(&mut data).into_diagnostic()?;
-        return run_control_guarded(
-            arguments.session,
-            ControlCommand::Input {
-                data: ByteString::new(data),
-                input_kind: InputKind::Raw,
-                intent: arguments.intent,
-            },
-            arguments.expected_presented_state_hash,
-        );
-    }
-    let session = resolve_session_ref(arguments.session)?;
-    let mut commands = Vec::new();
-    for atom in &arguments.atoms {
-        if arguments.pace.is_zero() || !atom.starts_with("text:") {
-            commands.push(control_command_for_atom(atom, arguments.intent.clone())?);
-            continue;
-        }
-        let text = atom.strip_prefix("text:").unwrap_or_default();
-        for scalar in text.chars() {
-            commands.push(ControlCommand::Input {
-                data: ByteString::new(scalar.to_string().into_bytes()),
-                input_kind: InputKind::Text,
-                intent: arguments.intent.clone(),
-            });
+        atoms.push(InputSequenceAtom::Bytes {
+            operation_id: uuid::Uuid::now_v7(),
+            data: ByteString::new(data),
+            input_kind: InputKind::Raw,
+            intent: arguments.intent.clone(),
+        });
+    } else {
+        for atom in &arguments.atoms {
+            if arguments.pace.is_zero() || !atom.starts_with("text:") {
+                atoms.push(input_sequence_atom_for_cli(atom, arguments.intent.clone())?);
+                continue;
+            }
+            let text = atom.strip_prefix("text:").unwrap_or_default();
+            for scalar in text.chars() {
+                atoms.push(InputSequenceAtom::Bytes {
+                    operation_id: uuid::Uuid::now_v7(),
+                    data: ByteString::new(scalar.to_string().into_bytes()),
+                    input_kind: InputKind::Text,
+                    intent: arguments.intent.clone(),
+                });
+            }
         }
     }
-    if commands.is_empty() || commands.len() > 4096 {
+    if atoms.is_empty() || atoms.len() > 4096 {
         return Err(miette::miette!(
             "input sequence must contain 1 to 4096 atoms"
         ));
     }
-    let sequence_id = uuid::Uuid::now_v7();
-    let mut outcomes = Vec::with_capacity(commands.len());
-    for (index, command) in commands.into_iter().enumerate() {
-        if index != 0 && !arguments.pace.is_zero() {
-            thread::sleep(arguments.pace);
+    let session = resolve_session_ref(arguments.session)?;
+    let mut request = ControlRequest::new(ControlCommand::InputSequence {
+        atoms,
+        pace_ns: u64::try_from(arguments.pace.as_nanos()).unwrap_or(u64::MAX),
+        include_atom_outcomes: arguments.verbose,
+    });
+    request.expected_presented_state_hash = arguments.expected_presented_state_hash;
+    let response = send_request_response(&session, &request)?;
+    let data = match response.result {
+        ControlResult::Ok { data } => data,
+        ControlResult::Error {
+            code,
+            message,
+            details,
+        } => {
+            write_json_line(&serde_json::json!({
+                "kind": "input_sequence_failed",
+                "sequence_id": request.request_id,
+                "code": code,
+                "message": message,
+                "details": details,
+            }))?;
+            return Err(miette::miette!("input sequence failed: {code}: {message}"));
         }
-        let mut request = ControlRequest::new(command);
-        request.expected_presented_state_hash = arguments.expected_presented_state_hash.clone();
-        let data = send_request(&session, &request)?;
-        outcomes.push(serde_json::json!({
-            "atom_id": request.request_id,
-            "status": "applied",
-            "result": data,
-        }));
-    }
-    return write_json_line(&serde_json::json!({
-        "kind": "input_sequence",
+    };
+    let ControlData::InputSequenceApplied {
+        sequence_id,
+        atom_count,
+        bytes_written,
+        first_intent_event_seq,
+        last_result_event_seq,
+        pace_ns,
+        atoms,
+        boundaries,
+    } = data
+    else {
+        return Err(miette::miette!(
+            "recording actor returned an unexpected input-sequence payload"
+        ));
+    };
+    let mut output = serde_json::json!({
+        "kind": "input_sequence_applied",
         "sequence_id": sequence_id,
-        "pace_ns": arguments.pace.as_nanos(),
-        "atoms": outcomes,
-    }));
+        "atom_count": atom_count,
+        "bytes_written": bytes_written,
+        "first_intent_event_seq": first_intent_event_seq,
+        "last_result_event_seq": last_result_event_seq,
+        "pace_ns": pace_ns,
+        "boundary": compact_boundaries(&boundaries),
+    });
+    if arguments.verbose {
+        output
+            .as_object_mut()
+            .ok_or_else(|| return miette::miette!("input-sequence output is not an object"))?
+            .insert(
+                "atoms".to_owned(),
+                serde_json::to_value(atoms).into_diagnostic()?,
+            );
+    }
+    return write_json_line(&output);
 }
 
-fn control_command_for_atom(atom: &str, intent: Option<String>) -> Result<ControlCommand> {
+fn input_sequence_atom_for_cli(atom: &str, intent: Option<String>) -> Result<InputSequenceAtom> {
+    let operation_id = uuid::Uuid::now_v7();
     if let Some((key, modifiers)) = parse_named_key(atom)? {
-        return Ok(ControlCommand::Key { key, modifiers });
+        return Ok(InputSequenceAtom::Key {
+            operation_id,
+            key,
+            modifiers,
+        });
     }
     if let Some(paste) = atom.strip_prefix("paste:") {
-        return Ok(ControlCommand::Paste {
+        return Ok(InputSequenceAtom::Paste {
+            operation_id,
             data: ByteString::new(paste.as_bytes().to_vec()),
         });
     }
@@ -4737,16 +5481,32 @@ fn control_command_for_atom(atom: &str, intent: Option<String>) -> Result<Contro
         (raw.as_bytes().to_vec(), InputKind::Raw)
     } else if let Some(path) = atom.strip_prefix("raw-file:") {
         (fs_err::read(path).into_diagnostic()?, InputKind::Raw)
+    } else if atom.chars().count() == 1
+        && atom.chars().all(|character| return !character.is_control())
+    {
+        (atom.as_bytes().to_vec(), InputKind::Text)
     } else {
         return Err(miette::miette!(
-            "unknown input atom; use a named key, text:VALUE, paste:VALUE, raw:VALUE, or raw-file:PATH"
+            "unknown input atom; run `termtrace keys` or use text:VALUE, paste:VALUE, raw:VALUE, or raw-file:PATH"
         ));
     };
-    return Ok(ControlCommand::Input {
+    return Ok(InputSequenceAtom::Bytes {
+        operation_id,
         data: ByteString::new(data),
         input_kind,
         intent,
     });
+}
+
+fn parse_state_hash(value: &str) -> StdResult<String, String> {
+    if value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| return byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Ok(value.to_owned());
+    }
+    return Err("state hash must contain exactly 64 lowercase hexadecimal characters".to_owned());
 }
 
 fn parse_event_type(value: &str) -> StdResult<String, String> {
@@ -4832,6 +5592,14 @@ fn parse_positive_usize(value: &str) -> StdResult<usize, String> {
     return Ok(parsed);
 }
 
+fn parse_page_limit(value: &str) -> StdResult<usize, String> {
+    let limit = parse_positive_usize(value)?;
+    if limit > 10_000 {
+        return Err("page limit must be between 1 and 10000".to_owned());
+    }
+    return Ok(limit);
+}
+
 fn parse_cell(value: &str) -> StdResult<(u16, u16), String> {
     let (column, row) = value
         .split_once(',')
@@ -4846,15 +5614,62 @@ fn parse_cell(value: &str) -> StdResult<(u16, u16), String> {
 }
 
 fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifiers)>> {
+    let normalized = atom.to_ascii_lowercase().replace('+', "-");
+    let mut remaining = normalized.as_str();
     let mut modifiers = KeyModifiers::default();
-    let key = match atom {
+    let mut modifier_count = 0_u8;
+    loop {
+        let (next, selected) = if let Some(next) = remaining.strip_prefix("ctrl-") {
+            if modifiers.control {
+                return Err(miette::miette!(
+                    "control modifier was supplied more than once"
+                ));
+            }
+            modifiers.control = true;
+            (next, true)
+        } else if let Some(next) = remaining.strip_prefix("control-") {
+            if modifiers.control {
+                return Err(miette::miette!(
+                    "control modifier was supplied more than once"
+                ));
+            }
+            modifiers.control = true;
+            (next, true)
+        } else if let Some(next) = remaining.strip_prefix("shift-") {
+            if modifiers.shift {
+                return Err(miette::miette!(
+                    "shift modifier was supplied more than once"
+                ));
+            }
+            modifiers.shift = true;
+            (next, true)
+        } else if let Some(next) = remaining.strip_prefix("alt-") {
+            if modifiers.alt {
+                return Err(miette::miette!("alt modifier was supplied more than once"));
+            }
+            modifiers.alt = true;
+            (next, true)
+        } else if let Some(next) = remaining.strip_prefix("super-") {
+            if modifiers.super_key {
+                return Err(miette::miette!(
+                    "super modifier was supplied more than once"
+                ));
+            }
+            modifiers.super_key = true;
+            (next, true)
+        } else {
+            (remaining, false)
+        };
+        if !selected {
+            break;
+        }
+        modifier_count = modifier_count.saturating_add(1);
+        remaining = next;
+    }
+    let key = match remaining {
         "enter" => NamedKey::Enter,
         "escape" | "esc" => NamedKey::Escape,
         "tab" => NamedKey::Tab,
-        "shift-tab" => {
-            modifiers.shift = true;
-            NamedKey::Tab
-        }
         "backspace" => NamedKey::Backspace,
         "delete" => NamedKey::Delete,
         "insert" => NamedKey::Insert,
@@ -4878,20 +5693,42 @@ fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifiers)>> {
             }
             NamedKey::Function(number)
         }
-        value if value.len() == 6 && value.starts_with("ctrl-") => {
+        value if modifier_count > 0 && value.len() == 1 => {
             let letter = value
                 .chars()
-                .nth(5)
-                .ok_or_else(|| miette::miette!("control key must be ctrl-a through ctrl-z"))?;
+                .next()
+                .ok_or_else(|| miette::miette!("modified letter is missing"))?;
             if !letter.is_ascii_alphabetic() {
-                return Err(miette::miette!("control key must be ctrl-a through ctrl-z"));
+                return Err(miette::miette!(
+                    "modified printable keys currently support ASCII letters; run `termtrace keys`"
+                ));
             }
-            modifiers.control = true;
             NamedKey::Letter(letter)
         }
         _ => return Ok(None),
     };
     return Ok(Some((key, modifiers)));
+}
+
+fn run_keys() -> Result<ExitCode> {
+    return write_json_line(&serde_json::json!({
+        "format": "termtrace-key-contract",
+        "version": 1,
+        "named_keys": [
+            "enter", "escape", "esc", "tab", "backspace", "delete", "insert",
+            "home", "end", "page-up", "page-down", "up", "down", "left", "right",
+            "f1..f24"
+        ],
+        "modifiers": ["ctrl", "shift", "alt", "super"],
+        "modifier_separators": ["-", "+"],
+        "modified_examples": ["ctrl-f", "ctrl+f", "ctrl-down", "shift-tab", "alt-left"],
+        "text": {
+            "single_printable_character": "q",
+            "explicit": "text:any UTF-8 text"
+        },
+        "paste": "paste:any UTF-8 text",
+        "raw": ["raw:exact bytes from this argument", "raw-file:PATH", "send --stdin SESSION"]
+    }));
 }
 
 fn run_resize(arguments: ResizeArgs) -> Result<ExitCode> {
@@ -5200,7 +6037,7 @@ fn run_start(arguments: StartArgs) -> Result<ExitCode> {
     let stdout = open_detached_log(&paths.stdout_log)?;
     let stderr = open_detached_log(&paths.stderr_log)?;
     let executable = env::current_exe().into_diagnostic()?;
-    let record_arguments = detached_record_arguments(&name, &paths.session)?;
+    let record_arguments = detached_record_arguments(&name, &paths.session, &recording);
     let environment_stdin = if recording.environment_spec_stdin {
         let mut bytes = Vec::new();
         io::stdin()
@@ -5674,50 +6511,164 @@ fn apply_restart_overrides(
     return Ok(());
 }
 
-fn detached_record_arguments(alias: &str, session: &Path) -> Result<Vec<OsString>> {
-    let mut source = env::args_os();
-    let _executable = source.next();
-    let mut arguments = Vec::new();
-    loop {
-        let argument = source.next().ok_or_else(|| {
-            return miette::miette!("cannot locate start subcommand in process arguments");
-        })?;
-        if argument == "start" {
-            break;
-        }
-        arguments.push(argument);
+fn detached_record_arguments(
+    alias: &str,
+    session: &Path,
+    recording: &RecordingArgs,
+) -> Vec<OsString> {
+    let mut arguments = vec![
+        OsString::from("record"),
+        OsString::from("--no-input"),
+        OsString::from("--out"),
+        session.as_os_str().to_os_string(),
+        OsString::from("--session-alias"),
+        OsString::from(alias),
+    ];
+    if let Some(cwd) = &recording.cwd {
+        push_record_option(&mut arguments, "--cwd", cwd.as_os_str());
     }
-    let supplied_name = source
-        .next()
-        .ok_or_else(|| miette::miette!("start session name is missing"))?;
-    if supplied_name != alias {
-        return Err(miette::miette!(
-            "parsed start name does not match process arguments"
-        ));
+    push_record_option(
+        &mut arguments,
+        "--geometry",
+        OsStr::new(match recording.geometry {
+            GeometryMode::Manual => "manual",
+            GeometryMode::Inherit => "inherit",
+            GeometryMode::Fit => "fit",
+        }),
+    );
+    if let Some(viewport) = recording.viewport {
+        push_record_option(
+            &mut arguments,
+            "--viewport",
+            OsStr::new(&format!("{}x{}", viewport.width, viewport.height)),
+        );
     }
-    arguments.push(OsString::from("record"));
-    arguments.push(OsString::from("--no-input"));
-    arguments.push(OsString::from("--out"));
-    arguments.push(session.as_os_str().to_os_string());
-    arguments.push(OsString::from("--session-alias"));
-    arguments.push(OsString::from(alias));
-    while let Some(argument) = source.next() {
-        if argument == "--startup-timeout-ms" {
-            let _timeout = source.next().ok_or_else(|| {
-                return miette::miette!("--startup-timeout-ms value is missing");
-            })?;
-            continue;
-        }
-        if argument
-            .as_os_str()
-            .as_bytes()
-            .starts_with(b"--startup-timeout-ms=")
-        {
-            continue;
-        }
-        arguments.push(argument);
+    if let Some(path) = &recording.ghostty_config {
+        push_record_option(&mut arguments, "--ghostty-config", path.as_os_str());
     }
-    return Ok(arguments);
+    if let Some(value) = &recording.font_family {
+        push_record_option(&mut arguments, "--font-family", OsStr::new(value));
+    }
+    if let Some(value) = &recording.font_size {
+        push_record_option(&mut arguments, "--font-size", OsStr::new(value));
+    }
+    push_optional_u16(&mut arguments, "--padding-x", recording.padding_x);
+    push_optional_u16(&mut arguments, "--padding-y", recording.padding_y);
+    if let Some(value) = &recording.foreground {
+        push_record_option(&mut arguments, "--foreground", OsStr::new(value));
+    }
+    if let Some(value) = &recording.background {
+        push_record_option(&mut arguments, "--background", OsStr::new(value));
+    }
+    push_record_option(
+        &mut arguments,
+        "--cols",
+        OsStr::new(&recording.cols.to_string()),
+    );
+    push_record_option(
+        &mut arguments,
+        "--rows",
+        OsStr::new(&recording.rows.to_string()),
+    );
+    push_record_option(
+        &mut arguments,
+        "--cell-width",
+        OsStr::new(&recording.cell_width.to_string()),
+    );
+    push_record_option(
+        &mut arguments,
+        "--cell-height",
+        OsStr::new(&recording.cell_height.to_string()),
+    );
+    push_record_option(&mut arguments, "--term", OsStr::new(&recording.term));
+    if let Some(path) = &recording.environment_spec {
+        push_record_option(&mut arguments, "--environment-spec", path.as_os_str());
+    }
+    if recording.environment_spec_stdin {
+        arguments.push(OsString::from("--environment-spec-stdin"));
+    }
+    if recording.clear_env {
+        arguments.push(OsString::from("--clear-env"));
+    }
+    for name in &recording.copy_env {
+        push_record_option(&mut arguments, "--copy-env", OsStr::new(name));
+    }
+    for name in &recording.unset_env {
+        push_record_option(&mut arguments, "--unset-env", OsStr::new(name));
+    }
+    if let Some(policy) = recording.color_policy {
+        push_record_option(
+            &mut arguments,
+            "--color-policy",
+            OsStr::new(match policy {
+                ColorPolicyArg::Auto => "auto",
+                ColorPolicyArg::Always => "always",
+                ColorPolicyArg::Never => "never",
+            }),
+        );
+    }
+    if let Some(value) = recording.output_byte_budget {
+        push_record_option(
+            &mut arguments,
+            "--output-byte-budget",
+            OsStr::new(&value.to_string()),
+        );
+    }
+    push_record_option(
+        &mut arguments,
+        "--durability",
+        OsStr::new(match recording.durability {
+            DurabilityModeArg::Strict => "strict",
+            DurabilityModeArg::Bounded => "bounded",
+            DurabilityModeArg::Throughput => "throughput",
+        }),
+    );
+    push_record_option(
+        &mut arguments,
+        "--durability-max-interval-ms",
+        OsStr::new(&recording.durability_max_interval_ms.to_string()),
+    );
+    push_record_option(
+        &mut arguments,
+        "--durability-max-uncommitted-bytes",
+        OsStr::new(&recording.durability_max_uncommitted_bytes.to_string()),
+    );
+    push_record_option(
+        &mut arguments,
+        "--provenance",
+        OsStr::new(match recording.provenance {
+            ProvenancePolicyArg::Minimal => "minimal",
+            ProvenancePolicyArg::Reproducible => "reproducible",
+            ProvenancePolicyArg::Custom => "custom",
+        }),
+    );
+    for (name, capture) in &recording.provenance_environment {
+        let capture = match capture {
+            ProvenanceCapture::Value => "value",
+            ProvenanceCapture::Hash => "hash",
+            ProvenanceCapture::Name => "name",
+            ProvenanceCapture::NotCaptured => "not-captured",
+        };
+        push_record_option(
+            &mut arguments,
+            "--provenance-env",
+            OsStr::new(&format!("{name}={capture}")),
+        );
+    }
+    arguments.push(OsString::from("--"));
+    arguments.extend(recording.command.iter().cloned());
+    return arguments;
+}
+
+fn push_record_option(arguments: &mut Vec<OsString>, name: &str, value: &OsStr) {
+    arguments.push(OsString::from(name));
+    arguments.push(value.to_os_string());
+}
+
+fn push_optional_u16(arguments: &mut Vec<OsString>, name: &str, value: Option<u16>) {
+    if let Some(value) = value {
+        push_record_option(arguments, name, OsStr::new(&value.to_string()));
+    }
 }
 
 fn open_detached_log(path: &Path) -> Result<File> {

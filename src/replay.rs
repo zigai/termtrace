@@ -154,7 +154,7 @@ pub struct CollectedReplay {
 }
 
 /// Selector for one reconstructed semantic state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StateSelector {
     /// Final distinct state.
     Final,
@@ -162,6 +162,8 @@ pub enum StateSelector {
     LatestPresented,
     /// Exact state identifier.
     StateId(u64),
+    /// Exact content-addressed semantic state hash.
+    StateHash(String),
     /// Latest state at or before an event sequence.
     EventSeq(u64),
     /// Latest state at or before a monotonic timestamp.
@@ -284,26 +286,47 @@ pub(crate) fn visit_states(
 ///
 /// Returns an error when the source cannot replay or no state matches.
 pub fn inspect(log: &EventLog, selector: StateSelector) -> Result<StateInspection> {
-    let mut selected = None;
+    return inspect_many(log, &[selector])?
+        .into_iter()
+        .next()
+        .ok_or_else(|| return invalid_replay("no semantic state matches the selector"));
+}
+
+/// Reconstruct several independently selected states in one canonical replay.
+///
+/// # Errors
+///
+/// Returns an error when replay fails or any selector has no matching state.
+pub fn inspect_many(log: &EventLog, selectors: &[StateSelector]) -> Result<Vec<StateInspection>> {
+    if selectors.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut selected = vec![None; selectors.len()];
     replay_with(log, None, |record, state, _| {
-        let matches = match selector {
-            StateSelector::Final => true,
-            StateSelector::LatestPresented => record.presented,
-            StateSelector::StateId(id) => record.state_id == id,
-            StateSelector::EventSeq(seq) => {
-                record.event_seq.is_none_or(|event| return event <= seq)
+        for (index, selector) in selectors.iter().enumerate() {
+            if state_selector_matches(selector, &record) {
+                let slot = selected.get_mut(index).ok_or_else(|| {
+                    return invalid_replay("state selector index exceeded result storage");
+                })?;
+                *slot = Some(StateInspection {
+                    record: record.clone(),
+                    state: state.clone(),
+                });
             }
-            StateSelector::MonotonicNs(time) => record.monotonic_ns <= time,
-        };
-        if matches {
-            selected = Some(StateInspection {
-                record,
-                state: state.clone(),
-            });
         }
         return Ok(());
     })?;
-    return selected.ok_or_else(|| return invalid_replay("no semantic state matches the selector"));
+    return selected
+        .into_iter()
+        .enumerate()
+        .map(|(index, inspection)| {
+            return inspection.ok_or_else(|| {
+                return invalid_replay(format!(
+                    "no semantic state matches selector at index {index}"
+                ));
+            });
+        })
+        .collect();
 }
 
 /// Format one selected state through the pinned Ghostty formatter.
@@ -314,21 +337,59 @@ pub fn inspect(log: &EventLog, selector: StateSelector) -> Result<StateInspectio
 pub fn format_state(log: &EventLog, selector: StateSelector, format: Format) -> Result<Vec<u8>> {
     let mut selected = None;
     replay_with(log, None, |record, _, engine| {
-        let matches = match selector {
-            StateSelector::Final => true,
-            StateSelector::LatestPresented => record.presented,
-            StateSelector::StateId(id) => record.state_id == id,
-            StateSelector::EventSeq(seq) => {
-                record.event_seq.is_none_or(|event| return event <= seq)
-            }
-            StateSelector::MonotonicNs(time) => record.monotonic_ns <= time,
-        };
-        if matches {
+        if state_selector_matches(&selector, &record) {
             selected = Some(engine.format(format)?);
         }
         return Ok(());
     })?;
     return selected.ok_or_else(|| return invalid_replay("no semantic state matches the selector"));
+}
+
+/// Engine-native format bytes paired with their requested format.
+pub type RenderedStateFormats = Vec<(Format, Vec<u8>)>;
+
+/// One selected state and all requested engine-native representations.
+pub type StateInspectionWithFormats = (StateInspection, RenderedStateFormats);
+
+/// Reconstruct one selected state and requested engine-native formats in one replay.
+///
+/// # Errors
+///
+/// Returns an error when replay, selection, or formatting fails.
+pub fn inspect_with_formats(
+    log: &EventLog,
+    selector: StateSelector,
+    formats: &[Format],
+) -> Result<StateInspectionWithFormats> {
+    let mut selected = None;
+    let mut rendered = Vec::new();
+    replay_with(log, None, |record, state, engine| {
+        if state_selector_matches(&selector, &record) {
+            selected = Some(StateInspection {
+                record,
+                state: state.clone(),
+            });
+            rendered.clear();
+            for format in formats {
+                rendered.push((*format, engine.format(*format)?));
+            }
+        }
+        return Ok(());
+    })?;
+    let inspection =
+        selected.ok_or_else(|| return invalid_replay("no semantic state matches the selector"))?;
+    return Ok((inspection, rendered));
+}
+
+fn state_selector_matches(selector: &StateSelector, record: &StateRecord) -> bool {
+    return match selector {
+        StateSelector::Final => true,
+        StateSelector::LatestPresented => record.presented,
+        StateSelector::StateId(id) => record.state_id == *id,
+        StateSelector::StateHash(hash) => record.state_hash == *hash,
+        StateSelector::EventSeq(seq) => record.event_seq.is_none_or(|event| return event <= *seq),
+        StateSelector::MonotonicNs(time) => record.monotonic_ns <= *time,
+    };
 }
 
 fn replay_with(
@@ -915,8 +976,8 @@ fn json_error(path: PathBuf, source: serde_json::Error) -> Error {
     };
 }
 
-fn invalid_replay(reason: &str) -> Error {
+fn invalid_replay(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
-        reason: reason.to_owned(),
+        reason: reason.into(),
     };
 }

@@ -12,6 +12,7 @@ use crate::{
     environment::ChildEnvironmentPolicy,
     event::{ByteString, Event},
     event_log::{DurabilityPolicy, DurabilityRecord, EventLog},
+    pagination::OutputPage,
     provenance::ExecutionProvenance,
     receipt::{EVIDENCE_RECEIPT_NAME, verify_ssh_receipt},
     request_journal::{MUTATION_JOURNAL_NAME, validate_mutation_journal},
@@ -126,6 +127,9 @@ pub struct VerificationReport {
     pub signature_signer_trusted: bool,
     /// Stable findings; empty when verification succeeds.
     pub findings: Vec<VerificationFinding>,
+    /// Page coordinates when CLI output intentionally contains a bounded subset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_page: Option<OutputPage>,
 }
 
 /// Offline status of the disposable mutation request journal.
@@ -400,6 +404,7 @@ pub fn verify_session_with_trust(
         signature_cryptographic_valid: false,
         signature_signer_trusted: false,
         findings: Vec::new(),
+        output_page: None,
     };
     let manifest_path = session_directory.join("session.json");
     let manifest_bytes = match fs_err::read(&manifest_path) {

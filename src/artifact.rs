@@ -2,7 +2,7 @@
 
 use std::{
     collections::BTreeSet,
-    fs::{DirBuilder, File, OpenOptions, Permissions},
+    fs::{DirBuilder, File, Metadata, OpenOptions, Permissions},
     io::{BufRead as _, BufReader, BufWriter, Error as IoError, ErrorKind, Read as _, Write as _},
     os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _},
     path::{Component, Path, PathBuf},
@@ -574,6 +574,7 @@ fn invalid_artifact(reason: impl Into<String>) -> Error {
 }
 
 pub(crate) fn create_private_directory(path: &Path) -> Result<()> {
+    ensure_private_parent_directories(path)?;
     let mut builder = DirBuilder::new();
     builder.mode(0o700);
     builder.create(path).map_err(|source| {
@@ -596,6 +597,7 @@ pub(crate) fn secure_writer(path: &Path) -> Result<BufWriter<File>> {
 }
 
 pub(crate) fn secure_file(path: &Path) -> Result<File> {
+    ensure_private_parent_directories(path)?;
     return OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -607,6 +609,81 @@ pub(crate) fn secure_file(path: &Path) -> Result<File> {
                 source,
             };
         });
+}
+
+fn ensure_private_parent_directories(path: &Path) -> Result<()> {
+    let Some(parent) = path.parent() else {
+        return Err(Error::Filesystem {
+            path: path.to_path_buf(),
+            source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
+        });
+    };
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
+    let directories = parent
+        .ancestors()
+        .filter(|directory| return !directory.as_os_str().is_empty())
+        .collect::<Vec<_>>();
+    for directory in directories.into_iter().rev() {
+        match fs_err::symlink_metadata(directory) {
+            Ok(metadata) => {
+                ensure_real_directory(directory, &metadata)?;
+                continue;
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(Error::Filesystem {
+                    path: directory.to_path_buf(),
+                    source,
+                });
+            }
+        }
+        let mut builder = DirBuilder::new();
+        builder.mode(0o700);
+        match builder.create(directory) {
+            Ok(()) => {
+                fs_err::set_permissions(directory, Permissions::from_mode(0o700)).map_err(
+                    |source| {
+                        return Error::Filesystem {
+                            path: directory.to_path_buf(),
+                            source,
+                        };
+                    },
+                )?;
+                sync_parent_directory(directory)?;
+            }
+            Err(source) if source.kind() == ErrorKind::AlreadyExists => {
+                let metadata = fs_err::symlink_metadata(directory).map_err(|source| {
+                    return Error::Filesystem {
+                        path: directory.to_path_buf(),
+                        source,
+                    };
+                })?;
+                ensure_real_directory(directory, &metadata)?;
+            }
+            Err(source) => {
+                return Err(Error::Filesystem {
+                    path: directory.to_path_buf(),
+                    source,
+                });
+            }
+        }
+    }
+    return Ok(());
+}
+
+fn ensure_real_directory(path: &Path, metadata: &Metadata) -> Result<()> {
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+        return Err(Error::Filesystem {
+            path: path.to_path_buf(),
+            source: IoError::new(
+                ErrorKind::NotADirectory,
+                "artifact parent is not a real directory",
+            ),
+        });
+    }
+    return Ok(());
 }
 
 pub(crate) fn finish_writer(mut writer: BufWriter<File>, path: &Path) -> Result<()> {
@@ -704,7 +781,7 @@ pub(crate) fn commit_directory(session: &Path, staging: &Path, destination: &Pat
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
 
     use tempfile::TempDir;
 
@@ -735,5 +812,50 @@ mod tests {
         symlink(temporary.path().join("outside"), artifact.join("linked"))
             .expect("payload symlink");
         assert!(collect_artifact_members(&artifact).is_err());
+    }
+
+    #[test]
+    fn secure_outputs_create_missing_owner_only_parent_directories() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let nested = temporary.path().join("missing/private/artifact");
+        create_private_directory(&nested).expect("nested artifact directory");
+        write_secure(&nested.join("report.json"), b"{}\n").expect("nested artifact file");
+        for path in [
+            temporary.path().join("missing"),
+            temporary.path().join("missing/private"),
+            nested,
+        ] {
+            let mode = fs_err::metadata(path)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o700);
+        }
+    }
+
+    #[test]
+    fn secure_outputs_do_not_follow_a_missing_parent_symlink() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let outside = temporary.path().join("outside");
+        fs_err::create_dir(&outside).expect("outside directory");
+        let link = temporary.path().join("linked-parent");
+        symlink(&outside, &link).expect("parent symlink");
+
+        assert!(write_secure(&link.join("nested/report.json"), b"{}\n").is_err());
+        assert!(!outside.join("nested").exists());
+    }
+
+    #[test]
+    fn secure_outputs_reject_symlinks_before_existing_parent_components() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let outside = temporary.path().join("outside");
+        fs_err::create_dir(&outside).expect("outside directory");
+        fs_err::create_dir(outside.join("existing")).expect("existing outside descendant");
+        let link = temporary.path().join("linked-parent");
+        symlink(&outside, &link).expect("parent symlink");
+
+        assert!(write_secure(&link.join("existing/nested/report.json"), b"{}\n").is_err());
+        assert!(!outside.join("existing/nested").exists());
     }
 }

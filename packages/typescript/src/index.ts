@@ -1,15 +1,18 @@
 import { DriverClient, method } from "./driver-client.js";
+import { randomUUID } from "node:crypto";
 import {
   TermtraceProtocolError,
   type Artifact,
   type BundleResult,
   type ControlResult,
+  type ControlErrorDetails,
   type DiagnoseReport,
   type DriverDataKind,
   type DriverDataOf,
   type EventPage,
   type JsonObject,
   type JsonValue,
+  type InputSequenceFailureDetails,
   type Observation,
   type ObservationFrame,
   type ScreenPredicate,
@@ -26,11 +29,13 @@ export {
   type Artifact,
   type BundleResult,
   type ControlResult,
+  type ControlErrorDetails,
   type DiagnoseReport,
   type DriverFailure,
   type EventPage,
   type JsonObject,
   type JsonValue,
+  type InputSequenceFailureDetails,
   type Observation,
   type ObservationFrame,
   type ScreenPredicate,
@@ -80,6 +85,31 @@ export type IdleWaitOptions = WaitOptions & {
 export type MutationOptions = {
   readonly requestId?: string;
   readonly ifState?: string;
+};
+
+export type KeyboardAtom =
+  | { readonly kind: "text"; readonly text: string; readonly intent?: string }
+  | {
+      readonly kind: "bytes";
+      readonly bytes: Uint8Array;
+      readonly inputKind?: "raw" | "text";
+      readonly intent?: string;
+    }
+  | {
+      readonly kind: "key";
+      readonly key: string;
+      readonly modifiers?: {
+        readonly shift?: boolean;
+        readonly control?: boolean;
+        readonly alt?: boolean;
+        readonly superKey?: boolean;
+      };
+    }
+  | { readonly kind: "paste"; readonly data: string | Uint8Array };
+
+export type InputSequenceOptions = MutationOptions & {
+  readonly paceMs?: number;
+  readonly verbose?: boolean;
 };
 
 export type WaitOptions = {
@@ -440,6 +470,78 @@ export class Keyboard {
       options,
     );
   }
+
+  sequence(atoms: ReadonlyArray<KeyboardAtom>, options: InputSequenceOptions = {}): Promise<ControlResult> {
+    if (atoms.length < 1 || atoms.length > 4096) {
+      throw new RangeError("input sequence must contain 1 through 4096 atoms");
+    }
+    const paceMs = options.paceMs ?? 0;
+    if (!Number.isSafeInteger(paceMs) || paceMs < 0 || paceMs > 60_000) {
+      throw new RangeError("paceMs must be an integer between 0 and 60000");
+    }
+    if (paceMs * Math.max(atoms.length - 1, 0) > 60_000) {
+      throw new RangeError("total input sequence pacing must not exceed 60000 ms");
+    }
+    const requestId = options.requestId ?? randomUUID();
+    const encoded = atoms.map((atom, index): JsonObject => {
+      const operationId = sequenceOperationId(requestId, index);
+      switch (atom.kind) {
+        case "text":
+          return {
+            input: "bytes",
+            operation_id: operationId,
+            data: Buffer.from(atom.text).toString("base64"),
+            input_kind: "text",
+            intent: atom.intent ?? null,
+          };
+        case "bytes":
+          return {
+            input: "bytes",
+            operation_id: operationId,
+            data: Buffer.from(atom.bytes).toString("base64"),
+            input_kind: atom.inputKind ?? "raw",
+            intent: atom.intent ?? null,
+          };
+        case "key":
+          return {
+            input: "key",
+            operation_id: operationId,
+            key: atom.key,
+            modifiers: {
+              shift: atom.modifiers?.shift ?? false,
+              control: atom.modifiers?.control ?? false,
+              alt: atom.modifiers?.alt ?? false,
+              super_key: atom.modifiers?.superKey ?? false,
+            },
+          };
+        case "paste":
+          return {
+            input: "paste",
+            operation_id: operationId,
+            data: Buffer.from(atom.data).toString("base64"),
+          };
+      }
+    });
+    return this.session.control(
+      {
+        command: "input_sequence",
+        atoms: encoded,
+        pace_ns: paceMs * 1_000_000,
+        include_atom_outcomes: options.verbose ?? false,
+      },
+      { ...options, requestId },
+    );
+  }
+}
+
+function sequenceOperationId(sequenceId: string, index: number): string {
+  const match = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-)([0-9a-f]{12})$/iu.exec(sequenceId);
+  if (match === null) throw new TypeError("requestId must be a UUID");
+  const prefix = match[1];
+  const tail = match[2];
+  if (prefix === undefined || tail === undefined) throw new TypeError("requestId must be a UUID");
+  const derived = (BigInt(`0x${tail}`) ^ BigInt(index + 1)).toString(16).padStart(12, "0");
+  return `${prefix}${derived}`;
 }
 
 export class Pointer {

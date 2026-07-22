@@ -1,5 +1,7 @@
 """Stable public error contracts."""
 
+from termtrace._generated.driver_response import ControlErrorDetails
+
 
 class TermtraceError(RuntimeError):
     """Base class for operational client failures."""
@@ -16,6 +18,7 @@ class TermtraceOperationError(TermtraceError):
     retry_safety: str
     uncertain: bool
     evidence: str | None
+    details: ControlErrorDetails | None
 
     def __init__(
         self,
@@ -25,9 +28,11 @@ class TermtraceOperationError(TermtraceError):
         retry_safety: str,
         uncertain: bool,
         evidence: str | None,
+        details: ControlErrorDetails | None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.retry_safety = retry_safety
         self.uncertain = uncertain
         self.evidence = evidence
+        self.details = details

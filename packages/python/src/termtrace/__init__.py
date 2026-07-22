@@ -1,5 +1,6 @@
 """Typed clients for Termtrace canonical terminal evidence."""
 
+from termtrace.atoms import BytesAtom, KeyAtom, KeyboardAtom, PasteAtom, TextAtom
 from termtrace.client import (
     DriverTransport,
     EnvironmentOptions,
@@ -35,10 +36,12 @@ from termtrace.models import (
     Artifact,
     BundleResult,
     Completion,
+    ControlErrorDetails,
     ControlResult,
     DiagnosticReport,
     EventPage,
     Frame,
+    InputSequenceFailureDetails,
     Observation,
     SemanticDiff,
     TimelineEntry,
@@ -57,6 +60,7 @@ from termtrace.assertions import (
 
 __all__ = [
     "Artifact",
+    "BytesAtom",
     "DriverTransport",
     "EnvironmentOptions",
     "CursorSnapshot",
@@ -72,17 +76,22 @@ __all__ = [
     "AsyncTerminal",
     "BundleResult",
     "Completion",
+    "ControlErrorDetails",
     "ControlResult",
     "DiagnosticReport",
     "Evidence",
     "Events",
     "EventPage",
     "Frame",
+    "InputSequenceFailureDetails",
     "Keyboard",
+    "KeyboardAtom",
+    "KeyAtom",
     "Native",
     "Observation",
     "Output",
     "Pointer",
+    "PasteAtom",
     "Screen",
     "SemanticDiff",
     "Semantic",
@@ -90,6 +99,7 @@ __all__ = [
     "Terminal",
     "TerminalSnapshot",
     "TimelineEntry",
+    "TextAtom",
     "TermtraceError",
     "TermtraceOperationError",
     "TermtraceProtocolError",

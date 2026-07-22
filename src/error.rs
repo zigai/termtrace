@@ -152,6 +152,113 @@ pub enum Error {
         message: String,
     },
 
+    /// A session has no reachable live control actor.
+    #[error("live control is unavailable for session `{session}` ({lifecycle})")]
+    #[diagnostic(
+        code(termtrace::control_unavailable),
+        help(
+            "Run `termtrace status SESSION` to inspect lifecycle state; completed sessions support offline observation but no further mutation"
+        )
+    )]
+    ControlUnavailable {
+        /// Session directory whose actor could not be reached.
+        session: PathBuf,
+        /// Best-effort lifecycle classification from canonical files.
+        lifecycle: String,
+        /// Underlying socket error.
+        #[source]
+        source: IoError,
+    },
+
+    /// A dispatched control request did not return before its bounded deadline.
+    #[error(
+        "live control timed out during `{phase}` for session `{session}` after {timeout_ms} ms"
+    )]
+    #[diagnostic(
+        code(termtrace::control_timeout),
+        help(
+            "For a mutation, retry the exact same request ID so the actor journal prevents duplicate application"
+        )
+    )]
+    ControlTimeout {
+        /// Session directory containing the control endpoint.
+        session: PathBuf,
+        /// Transport phase that exceeded its deadline.
+        phase: &'static str,
+        /// Configured bounded timeout.
+        timeout_ms: u64,
+        /// Whether any request bytes may already have reached the actor.
+        request_dispatched: bool,
+        /// Underlying timed-out I/O operation.
+        #[source]
+        source: IoError,
+    },
+
+    /// A control transport failed after a request may have reached the actor.
+    #[error("live control transport failed during `{phase}` for session `{session}`")]
+    #[diagnostic(
+        code(termtrace::control_transport),
+        help(
+            "When request delivery may be uncertain, retry the exact same request ID and payload"
+        )
+    )]
+    ControlTransport {
+        /// Session directory containing the control endpoint.
+        session: PathBuf,
+        /// Transport phase that failed.
+        phase: &'static str,
+        /// Whether any request bytes may already have reached the actor.
+        request_dispatched: bool,
+        /// Underlying socket error.
+        #[source]
+        source: IoError,
+    },
+
+    /// A canonical input result retained a failed or partial PTY write.
+    #[error("PTY input operation `{operation_id}` failed after {bytes_written} bytes: {reason}")]
+    #[diagnostic(code(termtrace::input_write_failed))]
+    InputWriteFailed {
+        /// Canonical operation identifier.
+        operation_id: uuid::Uuid,
+        /// Bytes written before the failure.
+        bytes_written: u64,
+        /// Canonical input intent event.
+        intent_event_seq: u64,
+        /// Canonical failed input result event.
+        result_event_seq: u64,
+        /// Underlying terminal write error.
+        reason: String,
+    },
+
+    /// A multi-atom input sequence stopped after retaining its exact applied prefix.
+    #[error("input sequence `{sequence_id}` stopped at atom {failed_atom_index}: {reason}")]
+    #[diagnostic(
+        code(termtrace::input_sequence_incomplete),
+        help(
+            "Inspect the structured control details before deciding whether to submit the unattempted suffix with a new request ID"
+        )
+    )]
+    InputSequenceIncomplete {
+        /// Caller-owned sequence request identifier.
+        sequence_id: uuid::Uuid,
+        /// Zero-based atom that failed after its intent was recorded.
+        failed_atom_index: u32,
+        /// Caller-owned identifier of the failed atom.
+        failed_operation_id: uuid::Uuid,
+        /// Number of preceding atoms applied completely.
+        atoms_applied: u32,
+        /// Number of bytes written by all attempted atoms, including a partial failed atom.
+        bytes_written: u64,
+        /// Number of bytes written for the failed atom.
+        failed_atom_bytes_written: u64,
+        /// First intent event in the attempted prefix.
+        first_intent_event_seq: u64,
+        /// Result event for the failed atom.
+        last_result_event_seq: u64,
+        /// Underlying terminal write failure.
+        reason: String,
+    },
+
     /// The pinned libghostty-vt semantic engine rejected an operation.
     #[error("libghostty-vt operation `{operation}` failed with result {result}")]
     #[diagnostic(code(termtrace::libghostty_vt))]

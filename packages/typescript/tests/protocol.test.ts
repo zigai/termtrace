@@ -8,6 +8,7 @@ import {
   parseDriverResponse,
   TermtraceProtocolError,
 } from "../src/protocol.js";
+import { Keyboard, type ControlResult, type JsonObject, type Session } from "../src/index.js";
 
 type FixtureCase = { readonly name: string; readonly response: unknown };
 
@@ -44,8 +45,34 @@ describe("parseDriverResponse", () => {
         retrySafety: "safe_new_request",
         uncertain: false,
         evidence: "/tmp/example.termtrace",
+        details: {
+          boundaries: {
+            durable: { event_hash: "durable", next_event_seq: 8, output_bytes: 5 },
+            observed: { event_hash: "observed", next_event_seq: 8, output_bytes: 5 },
+          },
+          current_presented_state_hash: "state",
+          scope: "state_guard",
+        },
       },
     });
+  });
+
+  test("preserves exact partial input sequence details", () => {
+    const fixture = fixtures.valid[3];
+    if (fixture === undefined) throw new Error("partial-input fixture is missing");
+
+    const response = parseDriverResponse(fixture.response, requestId(fixture.response));
+
+    expect(response._tag).toBe("Failure");
+    if (response._tag === "Failure") {
+      expect(response.failure.retrySafety).toBe("safe_same_request_id");
+      expect(response.failure.uncertain).toBe(true);
+      expect(response.failure.details?.input_sequence).toMatchObject({
+        atoms_applied: 1,
+        failed_atom_bytes_written: 2,
+        resume_from_atom_index: 2,
+      });
+    }
   });
 
   test("rejects an uncorrelated response", () => {
@@ -72,7 +99,7 @@ describe("parseDriverResponse", () => {
     const requestId = "00000000-0000-0000-0000-000000000020";
 
     expect(JSON.parse(encodeDriverRequest({ method: "hello" }, requestId))).toEqual({
-      version: 2,
+      version: 3,
       request_id: requestId,
       method: { method: "hello" },
     });
@@ -83,6 +110,67 @@ describe("parseDriverResponse", () => {
       expect(cause).toBeInstanceOf(TermtraceProtocolError);
       expect(String(cause)).not.toContain("SECRET_SENTINEL");
     }
+  });
+});
+
+describe("Keyboard.sequence", () => {
+  test("builds one guarded input-sequence request", async () => {
+    let captured: JsonObject | undefined;
+    const session = {
+      control(command: JsonObject): Promise<ControlResult> {
+        captured = command;
+        return Promise.resolve({} as ControlResult);
+      },
+    } as unknown as Session;
+    const keyboard = new Keyboard(session);
+
+    await keyboard.sequence(
+      [
+        { kind: "text", text: "go" },
+        { kind: "key", key: "enter", modifiers: { control: true } },
+      ],
+      { paceMs: 5, verbose: true, requestId: "00000000-0000-0000-0000-000000000020" },
+    );
+
+    expect(captured).toMatchObject({
+      command: "input_sequence",
+      pace_ns: 5_000_000,
+      include_atom_outcomes: true,
+    });
+    expect(captured?.atoms).toHaveLength(2);
+    const first = captured;
+    await keyboard.sequence(
+      [
+        { kind: "text", text: "go" },
+        { kind: "key", key: "enter", modifiers: { control: true } },
+      ],
+      { paceMs: 5, verbose: true, requestId: "00000000-0000-0000-0000-000000000020" },
+    );
+    expect(captured).toEqual(first);
+    if (captured === undefined) throw new Error("sequence command was not captured");
+    const sequenceCommand = captured;
+    expect(() =>
+      encodeDriverRequest(
+        {
+          method: "control",
+          handle: "00000000-0000-0000-0000-000000000021",
+          command: sequenceCommand,
+          expected_presented_state_hash: null,
+        },
+        "00000000-0000-0000-0000-000000000020",
+      ),
+    ).not.toThrow();
+    expect(() => keyboard.sequence([])).toThrow(RangeError);
+    expect(() =>
+      keyboard.sequence(
+        [
+          { kind: "text", text: "a" },
+          { kind: "text", text: "b" },
+          { kind: "text", text: "c" },
+        ],
+        { paceMs: 40_000 },
+      ),
+    ).toThrow("total input sequence pacing");
   });
 });
 

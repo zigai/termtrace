@@ -10,6 +10,7 @@ from typing import Literal, Self, TypeVar
 
 import msgspec
 
+from termtrace.atoms import KeyboardAtom, encode_input_sequence
 from termtrace.binary import resolve_binary
 from termtrace.duration import seconds_to_milliseconds, seconds_to_nanoseconds
 from termtrace.environment import EnvironmentOptions, encode_environment
@@ -515,6 +516,29 @@ class AsyncKeyboard:
         return await self._session.control(
             {"command": "paste", "data": base64.b64encode(raw).decode()},
             request_id=request_id,
+            if_state=if_state,
+        )
+
+    async def sequence(
+        self,
+        atoms: Sequence[KeyboardAtom],
+        *,
+        pace_ms: int = 0,
+        verbose: bool = False,
+        request_id: str | None = None,
+        if_state: str | None = None,
+    ) -> ControlResult:
+        """Apply a complete atom list under one state guard and request ID."""
+
+        sequence_id = request_id or str(uuid.uuid4())
+        return await self._session.control(
+            encode_input_sequence(
+                atoms,
+                pace_ms=pace_ms,
+                verbose=verbose,
+                sequence_id=sequence_id,
+            ),
+            request_id=sequence_id,
             if_state=if_state,
         )
 

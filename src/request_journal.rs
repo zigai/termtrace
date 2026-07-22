@@ -318,13 +318,20 @@ pub fn validate_mutation_journal(session: &Path, log: &EventLog) -> Result<u64> 
             ));
         }
         if record.event_end_seq > record.event_start_seq {
-            if record.operation_ids != [record.request_id]
-                || !log.events.iter().any(|event| {
-                    return event.seq >= record.event_start_seq
-                        && event.seq < record.event_end_seq
-                        && event_operation_id(&event.event) == Some(record.request_id);
+            let mut actual_operation_ids = Vec::new();
+            for operation_id in log
+                .events
+                .iter()
+                .filter(|event| {
+                    return event.seq >= record.event_start_seq && event.seq < record.event_end_seq;
                 })
+                .filter_map(|event| return event_operation_id(&event.event))
             {
+                if actual_operation_ids.last() != Some(&operation_id) {
+                    actual_operation_ids.push(operation_id);
+                }
+            }
+            if actual_operation_ids.is_empty() || record.operation_ids != actual_operation_ids {
                 return Err(invalid_journal(
                     "mutation journal operation identifiers do not match its canonical range",
                 ));
@@ -334,10 +341,11 @@ pub fn validate_mutation_journal(session: &Path, log: &EventLog) -> Result<u64> 
                 "event-free mutation journal outcome names canonical operations",
             ));
         }
-        if let ControlResult::Ok { data } = &record.response.result {
-            let boundaries = match data {
+        let boundaries = match &record.response.result {
+            ControlResult::Ok { data } => Some(match data {
                 ControlData::Acknowledged { boundaries }
                 | ControlData::InputApplied { boundaries, .. }
+                | ControlData::InputSequenceApplied { boundaries, .. }
                 | ControlData::InputNoop { boundaries, .. }
                 | ControlData::Activated { boundaries, .. }
                 | ControlData::Snapshot { boundaries, .. }
@@ -345,14 +353,20 @@ pub fn validate_mutation_journal(session: &Path, log: &EventLog) -> Result<u64> 
                 | ControlData::ScreenWait { boundaries, .. }
                 | ControlData::Status { boundaries, .. }
                 | ControlData::Marked { boundaries, .. } => boundaries,
-            };
-            if boundaries.observed.next_event_seq != record.event_end_seq
-                || boundaries.observed.event_hash != record.event_hash
-            {
-                return Err(invalid_journal(
-                    "mutation response boundary does not match its journaled canonical range",
-                ));
-            }
+            }),
+            ControlResult::Error {
+                details: Some(details),
+                ..
+            } => Some(&details.boundaries),
+            ControlResult::Error { details: None, .. } => None,
+        };
+        if let Some(boundaries) = boundaries
+            && (boundaries.observed.next_event_seq != record.event_end_seq
+                || boundaries.observed.event_hash != record.event_hash)
+        {
+            return Err(invalid_journal(
+                "mutation response boundary does not match its journaled canonical range",
+            ));
         }
     }
     return Ok(u64::try_from(records.len()).unwrap_or(u64::MAX));

@@ -50,7 +50,7 @@ class ControlCommand5(Struct, forbid_unknown_fields=True, tag_field='command', t
     ]
 
 
-class ControlCommand8(Struct, forbid_unknown_fields=True, tag_field='command', tag='paste'):
+class ControlCommand9(Struct, forbid_unknown_fields=True, tag_field='command', tag='paste'):
     data: Annotated[
         Base64Bytes,
         Meta(
@@ -59,7 +59,7 @@ class ControlCommand8(Struct, forbid_unknown_fields=True, tag_field='command', t
     ]
 
 
-class ControlCommand9(Struct, forbid_unknown_fields=True, tag_field='command', tag='focus'):
+class ControlCommand10(Struct, forbid_unknown_fields=True, tag_field='command', tag='focus'):
     focused: Annotated[
         bool,
         Meta(
@@ -74,7 +74,7 @@ class ControlCommand9(Struct, forbid_unknown_fields=True, tag_field='command', t
     ]
 
 
-class ControlCommand11(Struct, forbid_unknown_fields=True, tag_field='command', tag='activate'):
+class ControlCommand12(Struct, forbid_unknown_fields=True, tag_field='command', tag='activate'):
     strict: Annotated[
         bool,
         Meta(
@@ -90,7 +90,7 @@ class ControlCommand11(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-class ControlCommand12(Struct, forbid_unknown_fields=True, tag_field='command', tag='resize'):
+class ControlCommand13(Struct, forbid_unknown_fields=True, tag_field='command', tag='resize'):
     cols: Annotated[int, Meta(description='Terminal columns.', ge=0, le=65535)]
     pixel_height: Annotated[
         int, Meta(description='Total pixel height.', ge=0, le=65535)
@@ -99,11 +99,11 @@ class ControlCommand12(Struct, forbid_unknown_fields=True, tag_field='command', 
     rows: Annotated[int, Meta(description='Terminal rows.', ge=0, le=65535)]
 
 
-class ControlCommand14(Struct, forbid_unknown_fields=True, tag_field='command', tag='mark'):
+class ControlCommand15(Struct, forbid_unknown_fields=True, tag_field='command', tag='mark'):
     label: Annotated[str, Meta(description='Non-empty marker label.')]
 
 
-class ControlCommand15(Struct, forbid_unknown_fields=True, tag_field='command', tag='stop'):
+class ControlCommand16(Struct, forbid_unknown_fields=True, tag_field='command', tag='stop'):
     pass
 
 
@@ -257,6 +257,36 @@ class InputKind(StrEnum):
     paste = 'paste'
     focus = 'focus'
     pointer = 'pointer'
+
+
+class InputSequenceAtom1(Struct, forbid_unknown_fields=True, tag_field='input', tag='bytes'):
+    data: Annotated[Base64Bytes, Meta(description='Bytes encoded as Base64 in JSON.')]
+    input_kind: Annotated[
+        InputKind, Meta(description='Semantic category retained in canonical evidence.')
+    ]
+    operation_id: Annotated[
+        str,
+        Meta(
+            description='Caller-owned operation identifier retained in canonical events.'
+        ),
+    ]
+    intent: (
+        Annotated[str, Meta(description='Optional human-readable intent.')]
+        | None
+        | UnsetType
+    ) = UNSET
+
+
+class InputSequenceAtom3(Struct, forbid_unknown_fields=True, tag_field='input', tag='paste'):
+    data: Annotated[
+        Base64Bytes, Meta(description='Paste content before mode-dependent encoding.')
+    ]
+    operation_id: Annotated[
+        str,
+        Meta(
+            description='Caller-owned operation identifier retained in canonical events.'
+        ),
+    ]
 
 
 class KeyModifiers(Struct, forbid_unknown_fields=True):
@@ -460,21 +490,27 @@ class StatePoint2(Struct, forbid_unknown_fields=True, tag_field='selector', tag=
     state_id: Annotated[int, Meta(description='Exact semantic state identifier.', ge=0)]
 
 
-class StatePoint3(Struct, forbid_unknown_fields=True, tag_field='selector', tag='event_seq'):
+class StatePoint3(Struct, forbid_unknown_fields=True, tag_field='selector', tag='state_hash'):
+    state_hash: Annotated[
+        str, Meta(description='BLAKE3 hash of canonical semantic state JSON.')
+    ]
+
+
+class StatePoint4(Struct, forbid_unknown_fields=True, tag_field='selector', tag='event_seq'):
     event_seq: Annotated[int, Meta(description='Canonical event sequence.', ge=0)]
 
 
-class StatePoint4(Struct, forbid_unknown_fields=True, tag_field='selector', tag='monotonic_ns'):
+class StatePoint5(Struct, forbid_unknown_fields=True, tag_field='selector', tag='monotonic_ns'):
     monotonic_ns: Annotated[
         int, Meta(description='Session-monotonic nanoseconds.', ge=0)
     ]
 
 
-class StatePoint5(Struct, forbid_unknown_fields=True, tag_field='selector', tag='marker'):
+class StatePoint6(Struct, forbid_unknown_fields=True, tag_field='selector', tag='marker'):
     label: Annotated[str, Meta(description='Unique marker label.')]
 
 
-StatePoint: TypeAlias = Annotated[StatePoint1 | StatePoint2 | StatePoint3 | StatePoint4 | StatePoint5, Meta(description='Shared state selection vocabulary.')]
+StatePoint: TypeAlias = Annotated[StatePoint1 | StatePoint2 | StatePoint3 | StatePoint4 | StatePoint5 | StatePoint6, Meta(description='Shared state selection vocabulary.')]
 
 
 class VerificationLevel(StrEnum):
@@ -499,12 +535,12 @@ class ControlCommand6(Struct, forbid_unknown_fields=True, tag_field='command', t
     ) = UNSET
 
 
-class ControlCommand7(Struct, forbid_unknown_fields=True, tag_field='command', tag='key'):
+class ControlCommand8(Struct, forbid_unknown_fields=True, tag_field='command', tag='key'):
     key: Annotated[NamedKey, Meta(description='Layout-independent key.')]
     modifiers: Annotated[KeyModifiers, Meta(description='Typed modifier state.')]
 
 
-class ControlCommand10(Struct, forbid_unknown_fields=True, tag_field='command', tag='pointer'):
+class ControlCommand11(Struct, forbid_unknown_fields=True, tag_field='command', tag='pointer'):
     column: Annotated[
         int, Meta(description='Zero-based viewport column.', ge=0, le=65535)
     ]
@@ -520,7 +556,7 @@ class ControlCommand10(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-class ControlCommand13(Struct, forbid_unknown_fields=True, tag_field='command', tag='signal'):
+class ControlCommand14(Struct, forbid_unknown_fields=True, tag_field='command', tag='signal'):
     signal: Annotated[ProcessSignal, Meta(description='Signal to send.')]
 
 
@@ -600,6 +636,20 @@ class DriverMethod15(Struct, forbid_unknown_fields=True, tag_field='method', tag
     level: Annotated[VerificationLevel, Meta(description='Requested validation depth.')]
 
 
+class InputSequenceAtom2(Struct, forbid_unknown_fields=True, tag_field='input', tag='key'):
+    key: Annotated[NamedKey, Meta(description='Layout-independent key.')]
+    modifiers: Annotated[KeyModifiers, Meta(description='Typed modifier state.')]
+    operation_id: Annotated[
+        str,
+        Meta(
+            description='Caller-owned operation identifier retained in canonical events.'
+        ),
+    ]
+
+
+InputSequenceAtom: TypeAlias = Annotated[InputSequenceAtom1 | InputSequenceAtom2 | InputSequenceAtom3, Meta(description='One input atom accepted inside an admission-guarded sequence.')]
+
+
 class ScreenPredicate7(Struct, forbid_unknown_fields=True, tag_field='predicate', tag='region_contains'):
     region: Annotated[
         ScreenRegion, Meta(description='Region bounds in viewport cells.')
@@ -621,6 +671,28 @@ class ScreenPredicate11(Struct, forbid_unknown_fields=True, tag_field='predicate
     hash: Annotated[str, Meta(description='Lowercase BLAKE3 state hash.')]
 
 
+class ControlCommand7(Struct, forbid_unknown_fields=True, tag_field='command', tag='input_sequence'):
+    atoms: Annotated[
+        list[InputSequenceAtom],
+        Meta(
+            description='Ordered input atoms resolved against the actor state at admission.'
+        ),
+    ]
+    include_atom_outcomes: Annotated[
+        bool,
+        Meta(
+            description='Retain per-atom identifiers and canonical event positions in the response.'
+        ),
+    ]
+    pace_ns: Annotated[
+        int,
+        Meta(
+            description='Delay between atoms, bounded together with the atom count.',
+            ge=0,
+        ),
+    ]
+
+
 class DriverRequest(Struct, forbid_unknown_fields=True):
     method: Annotated[DriverMethod, Meta(description='Typed driver operation.')]
     request_id: Annotated[
@@ -639,7 +711,7 @@ class ControlCommand4(Struct, forbid_unknown_fields=True, tag_field='command', t
     ]
 
 
-ControlCommand: TypeAlias = Annotated[ControlCommand1 | ControlCommand2 | ControlCommand3 | ControlCommand4 | ControlCommand5 | ControlCommand6 | ControlCommand7 | ControlCommand8 | ControlCommand9 | ControlCommand10 | ControlCommand11 | ControlCommand12 | ControlCommand13 | ControlCommand14 | ControlCommand15, Meta(description='One command sent to the live session actor.')]
+ControlCommand: TypeAlias = Annotated[ControlCommand1 | ControlCommand2 | ControlCommand3 | ControlCommand4 | ControlCommand5 | ControlCommand6 | ControlCommand7 | ControlCommand8 | ControlCommand9 | ControlCommand10 | ControlCommand11 | ControlCommand12 | ControlCommand13 | ControlCommand14 | ControlCommand15 | ControlCommand16, Meta(description='One command sent to the live session actor.')]
 
 
 class DriverMethod4(Struct, forbid_unknown_fields=True, tag_field='method', tag='control'):

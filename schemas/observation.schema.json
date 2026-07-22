@@ -269,6 +269,25 @@
         },
         {
           "additionalProperties": false,
+          "description": "Exact content-addressed semantic state hash.",
+          "properties": {
+            "selector": {
+              "const": "state_hash",
+              "type": "string"
+            },
+            "state_hash": {
+              "description": "BLAKE3 hash of canonical semantic state JSON.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "state_hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Latest state at or before an event sequence.",
           "properties": {
             "event_seq": {

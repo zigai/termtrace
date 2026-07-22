@@ -3,14 +3,14 @@
     {
       "name": "hello",
       "response": {
-        "version": 2,
+        "version": 3,
         "request_id": "00000000-0000-0000-0000-000000000001",
         "result": {
           "status": "ok",
           "data": {
             "kind": "hello",
-            "driver_protocol_version": 2,
-            "control_protocol_version": 1,
+            "driver_protocol_version": 3,
+            "control_protocol_version": 13,
             "event_log_version": 1,
             "state_format_version": 1,
             "methods": ["hello", "launch", "attach"],
@@ -22,7 +22,7 @@
     {
       "name": "attached",
       "response": {
-        "version": 2,
+        "version": 3,
         "request_id": "00000000-0000-0000-0000-000000000002",
         "result": {
           "status": "ok",
@@ -39,7 +39,7 @@
     {
       "name": "operation-error",
       "response": {
-        "version": 2,
+        "version": 3,
         "request_id": "00000000-0000-0000-0000-000000000003",
         "result": {
           "status": "error",
@@ -47,7 +47,50 @@
           "message": "state changed",
           "retry_safety": "safe_new_request",
           "uncertain": false,
-          "evidence": "/tmp/example.termtrace"
+          "evidence": "/tmp/example.termtrace",
+          "details": {
+            "current_presented_state_hash": "state",
+            "boundaries": {
+              "durable": { "event_hash": "durable", "next_event_seq": 8, "output_bytes": 5 },
+              "observed": { "event_hash": "observed", "next_event_seq": 8, "output_bytes": 5 }
+            },
+            "scope": "state_guard"
+          }
+        }
+      }
+    },
+    {
+      "name": "partial-input-sequence",
+      "response": {
+        "version": 3,
+        "request_id": "00000000-0000-0000-0000-000000000006",
+        "result": {
+          "status": "error",
+          "code": "input_sequence_incomplete",
+          "message": "input stopped at atom 1",
+          "retry_safety": "safe_same_request_id",
+          "uncertain": true,
+          "evidence": "/tmp/example.termtrace",
+          "details": {
+            "current_presented_state_hash": "state-after-prefix",
+            "boundaries": {
+              "durable": { "event_hash": "durable-2", "next_event_seq": 12, "output_bytes": 5 },
+              "observed": { "event_hash": "observed-2", "next_event_seq": 12, "output_bytes": 5 }
+            },
+            "scope": "input_sequence",
+            "input_sequence": {
+              "sequence_id": "00000000-0000-0000-0000-000000000006",
+              "atom_count": 3,
+              "atoms_applied": 1,
+              "failed_atom_index": 1,
+              "failed_operation_id": "00000000-0000-0000-0000-000000000007",
+              "bytes_written": 4,
+              "failed_atom_bytes_written": 2,
+              "first_intent_event_seq": 8,
+              "last_result_event_seq": 11,
+              "resume_from_atom_index": 2
+            }
+          }
         }
       }
     }
@@ -56,14 +99,14 @@
     {
       "name": "missing-required-field",
       "response": {
-        "version": 2,
+        "version": 3,
         "request_id": "00000000-0000-0000-0000-000000000004",
         "result": {
           "status": "ok",
           "data": {
             "kind": "hello",
-            "driver_protocol_version": 2,
-            "control_protocol_version": 1,
+            "driver_protocol_version": 3,
+            "control_protocol_version": 13,
             "event_log_version": 1,
             "state_format_version": 1,
             "methods": []
@@ -74,7 +117,7 @@
     {
       "name": "unknown-sensitive-field",
       "response": {
-        "version": 2,
+        "version": 3,
         "request_id": "00000000-0000-0000-0000-000000000005",
         "result": {
           "status": "error",

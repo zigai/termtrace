@@ -151,23 +151,6 @@ class DriverData15(Struct, forbid_unknown_fields=True, tag_field='kind', tag='di
     ]
 
 
-class DriverResult2(Struct, forbid_unknown_fields=True, tag_field='status', tag='error'):
-    code: Annotated[str, Meta(description='Machine-readable code.')]
-    message: Annotated[str, Meta(description='Human-readable diagnostic.')]
-    retry_safety: Annotated[
-        str,
-        Meta(description='`safe_same_request_id`, `safe_new_request`, or `unknown`.'),
-    ]
-    uncertain: Annotated[
-        bool, Meta(description='Whether mutation application may be uncertain.')
-    ]
-    evidence: (
-        Annotated[str, Meta(description='Canonical evidence path when known.')]
-        | None
-        | UnsetType
-    ) = UNSET
-
-
 class DurabilityMode(StrEnum):
     strict = 'strict'
     bounded = 'bounded'
@@ -452,6 +435,69 @@ class InputKind(StrEnum):
     pointer = 'pointer'
 
 
+class InputSequenceAtomOutcome(Struct, forbid_unknown_fields=True):
+    bytes_written: Annotated[
+        int, Meta(description='Exact number of PTY bytes written.', ge=0)
+    ]
+    input_kind: Annotated[
+        InputKind, Meta(description='Semantic category retained in canonical evidence.')
+    ]
+    intent_event_seq: Annotated[
+        int, Meta(description='Canonical input-intent event sequence.', ge=0)
+    ]
+    operation_id: Annotated[
+        str, Meta(description='Caller-owned operation identifier for this atom.')
+    ]
+    result_event_seq: Annotated[
+        int, Meta(description='Canonical input-result event sequence.', ge=0)
+    ]
+
+
+class InputSequenceFailureDetails(Struct, forbid_unknown_fields=True):
+    atom_count: Annotated[
+        int, Meta(description='Total number of requested atoms.', ge=0)
+    ]
+    atoms_applied: Annotated[
+        int, Meta(description='Number of preceding atoms applied completely.', ge=0)
+    ]
+    bytes_written: Annotated[
+        int, Meta(description='Total bytes written across all attempted atoms.', ge=0)
+    ]
+    failed_atom_bytes_written: Annotated[
+        int,
+        Meta(
+            description='Bytes written for the failed atom; nonzero means application may be partial.',
+            ge=0,
+        ),
+    ]
+    failed_atom_index: Annotated[
+        int, Meta(description='Zero-based atom whose write failed.', ge=0)
+    ]
+    failed_operation_id: Annotated[
+        str, Meta(description='Caller-owned operation identifier for the failed atom.')
+    ]
+    first_intent_event_seq: Annotated[
+        int,
+        Meta(
+            description='First canonical input-intent event in the attempted prefix.',
+            ge=0,
+        ),
+    ]
+    last_result_event_seq: Annotated[
+        int, Meta(description='Canonical failed input-result event.', ge=0)
+    ]
+    resume_from_atom_index: Annotated[
+        int,
+        Meta(
+            description='First atom not attempted; only this suffix is safe to submit independently.',
+            ge=0,
+        ),
+    ]
+    sequence_id: Annotated[
+        str, Meta(description='Caller-owned sequence request identifier.')
+    ]
+
+
 class InputSource(StrEnum):
     human = 'human'
     agent = 'agent'
@@ -501,6 +547,44 @@ class ObservationSourceKind(StrEnum):
 class OperationStatus(StrEnum):
     applied = 'applied'
     failed = 'failed'
+
+
+class OutputPage(Struct, forbid_unknown_fields=True):
+    offset: Annotated[
+        int,
+        Meta(
+            description='Effective zero-based offset, clamped to the collection length.',
+            ge=0,
+        ),
+    ]
+    returned: Annotated[
+        int, Meta(description='Number of items included in this response.', ge=0)
+    ]
+    total: Annotated[
+        int,
+        Meta(
+            description='Complete matching collection length before pagination.', ge=0
+        ),
+    ]
+    truncated: Annotated[
+        bool, Meta(description='Whether more matching items remain after this page.')
+    ]
+    limit: (
+        Annotated[
+            int,
+            Meta(description='Requested maximum, or none when every remaining item was requested.', ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    next_offset: (
+        Annotated[
+            int,
+            Meta(description='Offset for the next page when more items remain.', ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
 class ResourceLimitKind(StrEnum):
@@ -697,21 +781,27 @@ class StatePoint2(Struct, forbid_unknown_fields=True, tag_field='selector', tag=
     state_id: Annotated[int, Meta(description='Exact semantic state identifier.', ge=0)]
 
 
-class StatePoint3(Struct, forbid_unknown_fields=True, tag_field='selector', tag='event_seq'):
+class StatePoint3(Struct, forbid_unknown_fields=True, tag_field='selector', tag='state_hash'):
+    state_hash: Annotated[
+        str, Meta(description='BLAKE3 hash of canonical semantic state JSON.')
+    ]
+
+
+class StatePoint4(Struct, forbid_unknown_fields=True, tag_field='selector', tag='event_seq'):
     event_seq: Annotated[int, Meta(description='Canonical event sequence.', ge=0)]
 
 
-class StatePoint4(Struct, forbid_unknown_fields=True, tag_field='selector', tag='monotonic_ns'):
+class StatePoint5(Struct, forbid_unknown_fields=True, tag_field='selector', tag='monotonic_ns'):
     monotonic_ns: Annotated[
         int, Meta(description='Session-monotonic nanoseconds.', ge=0)
     ]
 
 
-class StatePoint5(Struct, forbid_unknown_fields=True, tag_field='selector', tag='marker'):
+class StatePoint6(Struct, forbid_unknown_fields=True, tag_field='selector', tag='marker'):
     label: Annotated[str, Meta(description='Unique marker label.')]
 
 
-StatePoint: TypeAlias = Annotated[StatePoint1 | StatePoint2 | StatePoint3 | StatePoint4 | StatePoint5, Meta(description='Shared state selection vocabulary.')]
+StatePoint: TypeAlias = Annotated[StatePoint1 | StatePoint2 | StatePoint3 | StatePoint4 | StatePoint5 | StatePoint6, Meta(description='Shared state selection vocabulary.')]
 
 
 class TerminalMetadata(Struct, forbid_unknown_fields=True):
@@ -890,6 +980,14 @@ class VerificationReport(Struct, forbid_unknown_fields=True):
         | None
         | UnsetType
     ) = UNSET
+    output_page: (
+        Annotated[
+            OutputPage,
+            Meta(description='Page coordinates when CLI output intentionally contains a bounded subset.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
     session_id: (
         Annotated[str, Meta(description='Immutable session identifier, when readable.')]
         | None
@@ -1055,7 +1153,41 @@ class ControlData2(Struct, forbid_unknown_fields=True, tag_field='kind', tag='in
     ]
 
 
-class ControlData3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='input_noop'):
+class ControlData3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='input_sequence_applied'):
+    atom_count: Annotated[
+        int, Meta(description='Number of atoms applied completely.', ge=0)
+    ]
+    boundaries: Annotated[
+        ActorBoundaries,
+        Meta(description='Durable and observed positions after complete application.'),
+    ]
+    bytes_written: Annotated[
+        int, Meta(description='Total exact PTY bytes written across every atom.', ge=0)
+    ]
+    first_intent_event_seq: Annotated[
+        int,
+        Meta(description='First canonical input-intent event in the sequence.', ge=0),
+    ]
+    last_result_event_seq: Annotated[
+        int,
+        Meta(description='Last canonical input-result event in the sequence.', ge=0),
+    ]
+    pace_ns: Annotated[int, Meta(description='Requested delay between atoms.', ge=0)]
+    sequence_id: Annotated[
+        str, Meta(description='Canonical sequence identifier (the caller request ID).')
+    ]
+    atoms: (
+        Annotated[
+            list[InputSequenceAtomOutcome],
+            Meta(
+                description='Optional per-atom outcomes requested by an explicit verbose caller.'
+            ),
+        ]
+        | UnsetType
+    ) = UNSET
+
+
+class ControlData4(Struct, forbid_unknown_fields=True, tag_field='kind', tag='input_noop'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(description='Durable and observed positions at evaluation.'),
@@ -1068,7 +1200,7 @@ class ControlData3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='in
     ]
 
 
-class ControlData4(Struct, forbid_unknown_fields=True, tag_field='kind', tag='activated'):
+class ControlData5(Struct, forbid_unknown_fields=True, tag_field='kind', tag='activated'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(description='Durable and observed positions after application.'),
@@ -1100,7 +1232,7 @@ class ControlData4(Struct, forbid_unknown_fields=True, tag_field='kind', tag='ac
     text: Annotated[str, Meta(description='Exact matched text.')]
 
 
-class ControlData5(Struct, forbid_unknown_fields=True, tag_field='kind', tag='status'):
+class ControlData6(Struct, forbid_unknown_fields=True, tag_field='kind', tag='status'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(
@@ -1117,7 +1249,7 @@ class ControlData5(Struct, forbid_unknown_fields=True, tag_field='kind', tag='st
     ) = UNSET
 
 
-class ControlData9(Struct, forbid_unknown_fields=True, tag_field='kind', tag='marked'):
+class ControlData10(Struct, forbid_unknown_fields=True, tag_field='kind', tag='marked'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(description='Durable and observed canonical positions after the marker.'),
@@ -1126,6 +1258,31 @@ class ControlData9(Struct, forbid_unknown_fields=True, tag_field='kind', tag='ma
         int, Meta(description='Canonical event sequence containing the marker.', ge=0)
     ]
     label: Annotated[str, Meta(description='Normalized marker label.')]
+
+
+class ControlErrorDetails(Struct, forbid_unknown_fields=True):
+    boundaries: Annotated[
+        ActorBoundaries,
+        Meta(
+            description='Durable and observed source positions at the failure boundary.'
+        ),
+    ]
+    current_presented_state_hash: Annotated[
+        str,
+        Meta(description='Latest presented-state hash at the actor ordering point.'),
+    ]
+    scope: Annotated[
+        str,
+        Meta(description='Exact output or mutation scope covered by these details.'),
+    ]
+    input_sequence: (
+        Annotated[
+            InputSequenceFailureDetails,
+            Meta(description='Exact attempted prefix when an admitted input sequence stopped early.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
 class CursorState(Struct, forbid_unknown_fields=True):
@@ -1202,6 +1359,31 @@ class DriverData12(Struct, forbid_unknown_fields=True, tag_field='kind', tag='ve
 class DriverData13(Struct, forbid_unknown_fields=True, tag_field='kind', tag='bundle'):
     directory: Annotated[str, Meta(description='Atomically committed directory.')]
     manifest: Annotated[BundleManifest, Meta(description='Complete bundle manifest.')]
+
+
+class DriverResult2(Struct, forbid_unknown_fields=True, tag_field='status', tag='error'):
+    code: Annotated[str, Meta(description='Machine-readable code.')]
+    message: Annotated[str, Meta(description='Human-readable diagnostic.')]
+    retry_safety: Annotated[
+        str,
+        Meta(description='`safe_same_request_id`, `safe_new_request`, or `unknown`.'),
+    ]
+    uncertain: Annotated[
+        bool, Meta(description='Whether mutation application may be uncertain.')
+    ]
+    details: (
+        Annotated[
+            ControlErrorDetails,
+            Meta(description='Actor-provided ordering or attempted-prefix details when available.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    evidence: (
+        Annotated[str, Meta(description='Canonical evidence path when known.')]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
 class Event2(Struct, forbid_unknown_fields=True, tag_field='type', tag='input_intent'):
@@ -1451,7 +1633,7 @@ class CellStyle(Struct, forbid_unknown_fields=True):
     underline_color: Annotated[ColorSpec, Meta(description='Underline color source.')]
 
 
-class ControlData6(Struct, forbid_unknown_fields=True, tag_field='kind', tag='snapshot'):
+class ControlData7(Struct, forbid_unknown_fields=True, tag_field='kind', tag='snapshot'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(description='Durable and observed source boundaries at observation time.'),
@@ -1498,7 +1680,7 @@ class ControlData6(Struct, forbid_unknown_fields=True, tag_field='kind', tag='sn
     ) = UNSET
 
 
-class ControlData7(Struct, forbid_unknown_fields=True, tag_field='kind', tag='stable_snapshot'):
+class ControlData8(Struct, forbid_unknown_fields=True, tag_field='kind', tag='stable_snapshot'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(
@@ -1716,6 +1898,14 @@ class DiagnoseReport(Struct, forbid_unknown_fields=True):
         str, Meta(description='Final canonical event hash anchoring the report.')
     ]
     version: Annotated[int, Meta(description='Report schema version.', ge=0)]
+    output_page: (
+        Annotated[
+            OutputPage,
+            Meta(description='Page coordinates when CLI output intentionally contains a bounded subset.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
 class DriverData6(Struct, forbid_unknown_fields=True, tag_field='kind', tag='observation'):
@@ -1836,7 +2026,7 @@ class DriverResponse(Struct, forbid_unknown_fields=True):
     version: Annotated[int, Meta(description='Driver protocol version.', ge=0)]
 
 
-class ControlData8(Struct, forbid_unknown_fields=True, tag_field='kind', tag='screen_wait'):
+class ControlData9(Struct, forbid_unknown_fields=True, tag_field='kind', tag='screen_wait'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(description='Actor-consistent canonical source boundaries.'),
@@ -1871,7 +2061,7 @@ class ControlData8(Struct, forbid_unknown_fields=True, tag_field='kind', tag='sc
     ]
 
 
-ControlData: TypeAlias = Annotated[ControlData1 | ControlData2 | ControlData3 | ControlData4 | ControlData5 | ControlData6 | ControlData7 | ControlData8 | ControlData9, Meta(description='Successful response payload.')]
+ControlData: TypeAlias = Annotated[ControlData1 | ControlData2 | ControlData3 | ControlData4 | ControlData5 | ControlData6 | ControlData7 | ControlData8 | ControlData9 | ControlData10, Meta(description='Successful response payload.')]
 
 
 class DriverData3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='control'):
@@ -1920,12 +2110,13 @@ DriverDiffData: TypeAlias = DriverData8
 DriverControlData: TypeAlias = DriverData3
 ControlAcknowledgedData: TypeAlias = ControlData1
 ControlInputAppliedData: TypeAlias = ControlData2
-ControlInputNoopData: TypeAlias = ControlData3
-ControlActivatedData: TypeAlias = ControlData4
-ControlStatusData: TypeAlias = ControlData5
-ControlMarkedData: TypeAlias = ControlData9
-ControlSnapshotData: TypeAlias = ControlData6
-ControlStableSnapshotData: TypeAlias = ControlData7
-ControlScreenWaitData: TypeAlias = ControlData8
+ControlInputSequenceAppliedData: TypeAlias = ControlData3
+ControlInputNoopData: TypeAlias = ControlData4
+ControlActivatedData: TypeAlias = ControlData5
+ControlStatusData: TypeAlias = ControlData6
+ControlMarkedData: TypeAlias = ControlData10
+ControlSnapshotData: TypeAlias = ControlData7
+ControlStableSnapshotData: TypeAlias = ControlData8
+ControlScreenWaitData: TypeAlias = ControlData9
 DriverErrorResult: TypeAlias = DriverResult2
 DriverOkResult: TypeAlias = DriverResult1

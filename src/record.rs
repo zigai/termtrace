@@ -1,8 +1,7 @@
 //! One-shot PTY recording with byte-exact event persistence.
 
 use std::{
-    collections::HashMap,
-    collections::VecDeque,
+    collections::{HashMap, HashSet, VecDeque},
     env::{
         self,
         consts::{ARCH, OS},
@@ -47,8 +46,10 @@ use crate::{
     control::{
         ActorBoundaries, CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME, ControlCommand,
         ControlData, ControlErrorDetails, ControlRequest, ControlResponse, ControlResult,
+        InputSequenceAtom, InputSequenceAtomOutcome, InputSequenceFailureDetails,
         MAX_CONTROL_MESSAGE_BYTES, PointerOperation, ProcessSignal, ScreenMode, ScreenPredicate,
-        ScreenRegion, StableCaptureQuality, StateHashComparison, validate_frame,
+        ScreenRegion, StableCaptureQuality, StateHashComparison, control_response_timeout,
+        validate_frame,
     },
     environment::{EffectiveEnvironment, EnvironmentSpec},
     event::{
@@ -234,6 +235,14 @@ struct InputApplication {
     result_event_seq: u64,
 }
 
+struct PreparedSequenceAtom {
+    operation_id: Uuid,
+    input_kind: InputKind,
+    descriptor: InputDescriptor,
+    intent: Option<String>,
+    data: Vec<u8>,
+}
+
 #[derive(Clone)]
 struct CachedMutation {
     command_hash: String,
@@ -287,16 +296,25 @@ impl MutationHistory {
     fn remember(
         &mut self,
         request_id: Uuid,
+        command: &ControlCommand,
         command_hash: String,
         event_start_seq: u64,
         event_end_seq: u64,
         event_hash: String,
         response: ControlResponse,
     ) -> Result<()> {
-        let operation_ids = if event_end_seq > event_start_seq {
-            vec![request_id]
-        } else {
+        let operation_ids = if event_end_seq == event_start_seq {
             Vec::new()
+        } else if let ControlCommand::InputSequence { atoms, .. } = command {
+            let attempted = usize::try_from(event_end_seq.saturating_sub(event_start_seq) / 2)
+                .unwrap_or(usize::MAX);
+            atoms
+                .iter()
+                .take(attempted)
+                .map(input_sequence_operation_id)
+                .collect()
+        } else {
+            vec![request_id]
         };
         let record = self.journal.append(
             request_id,
@@ -1266,13 +1284,7 @@ fn handle_control_connection(
             },
         );
     }
-    let response_timeout = match &request.command {
-        ControlCommand::WaitScreen { timeout_ns, .. }
-        | ControlCommand::CaptureStable { timeout_ns, .. } => {
-            Duration::from_nanos(*timeout_ns).saturating_add(Duration::from_secs(1))
-        }
-        _ => Duration::from_secs(10),
-    };
+    let response_timeout = control_response_timeout(&request.command, Duration::from_secs(1));
     stream
         .set_write_timeout(Some(response_timeout))
         .map_err(|error| return terminal_error("configure wait response", error.to_string()))?;
@@ -1598,9 +1610,58 @@ fn handle_control_request(
                     current_presented_state_hash: current_state_hash,
                     boundaries: actor_boundaries(event_log),
                     scope: "actor_processed_presented_output".to_owned(),
+                    input_sequence: None,
                 }),
             },
         },
+        (
+            Err(Error::InputSequenceIncomplete {
+                sequence_id,
+                failed_atom_index,
+                failed_operation_id,
+                atoms_applied,
+                bytes_written,
+                failed_atom_bytes_written,
+                first_intent_event_seq,
+                last_result_event_seq,
+                reason,
+            }),
+            _,
+        ) => {
+            let atom_count = match &request.command {
+                ControlCommand::InputSequence { atoms, .. } => {
+                    u32::try_from(atoms.len()).unwrap_or(u32::MAX)
+                }
+                _ => 0,
+            };
+            ControlResponse {
+                version: CONTROL_PROTOCOL_VERSION,
+                request_id: request.request_id,
+                result: ControlResult::Error {
+                    code: "input_sequence_incomplete".to_owned(),
+                    message: format!(
+                        "input sequence `{sequence_id}` stopped at atom {failed_atom_index}: {reason}"
+                    ),
+                    details: Some(ControlErrorDetails {
+                        current_presented_state_hash: current_state_hash,
+                        boundaries: actor_boundaries(event_log),
+                        scope: "input_sequence_attempted_prefix".to_owned(),
+                        input_sequence: Some(InputSequenceFailureDetails {
+                            sequence_id: *sequence_id,
+                            atom_count,
+                            atoms_applied: *atoms_applied,
+                            failed_atom_index: *failed_atom_index,
+                            failed_operation_id: *failed_operation_id,
+                            bytes_written: *bytes_written,
+                            failed_atom_bytes_written: *failed_atom_bytes_written,
+                            first_intent_event_seq: *first_intent_event_seq,
+                            last_result_event_seq: *last_result_event_seq,
+                            resume_from_atom_index: failed_atom_index.saturating_add(1),
+                        }),
+                    }),
+                },
+            }
+        }
         (Ok(data), _) => ControlResponse {
             version: CONTROL_PROTOCOL_VERSION,
             request_id: request.request_id,
@@ -1615,6 +1676,7 @@ fn handle_control_request(
     if let Some(command_hash) = command_hash {
         history.remember(
             request.request_id,
+            &request.command,
             command_hash,
             event_start_seq,
             event_log.next_seq(),
@@ -1626,7 +1688,9 @@ fn handle_control_request(
         tracing::warn!(request_id = %request.request_id, "control response receiver disconnected");
     }
     match outcome {
-        Ok(_) | Err(Error::ControlRejected { .. }) => return Ok(()),
+        Ok(_) | Err(Error::ControlRejected { .. } | Error::InputSequenceIncomplete { .. }) => {
+            return Ok(());
+        }
         Err(error) => return Err(error),
     }
 }
@@ -1710,6 +1774,21 @@ fn execute_control_command(
                 result_event_seq: applied.result_event_seq,
                 boundaries: actor_boundaries(event_log),
             });
+        }
+        ControlCommand::InputSequence {
+            atoms,
+            pace_ns,
+            include_atom_outcomes,
+        } => {
+            return apply_input_sequence(
+                spawned.writer.as_mut(),
+                event_log,
+                request_id,
+                atoms,
+                *pace_ns,
+                *include_atom_outcomes,
+                live,
+            );
         }
         ControlCommand::Key { key, modifiers } => {
             let modes = live.semantic.snapshot()?.modes;
@@ -2756,8 +2835,13 @@ fn control_error_response(
 fn control_error_code(error: &Error) -> &str {
     match error {
         Error::ControlRejected { code, .. } => return code,
+        Error::InputSequenceIncomplete { .. } => return "input_sequence_incomplete",
+        Error::InputWriteFailed { .. } => return "input_write_failed",
         Error::EventLogPoisoned { .. } | Error::InvalidEventLog { .. } => return "event_log_failed",
-        Error::Filesystem { .. } => return "io_failed",
+        Error::Filesystem { .. }
+        | Error::ControlUnavailable { .. }
+        | Error::ControlTimeout { .. }
+        | Error::ControlTransport { .. } => return "io_failed",
         Error::TerminalOperation { .. } => return "terminal_operation_failed",
         _ => return "internal_error",
     }
@@ -3263,10 +3347,222 @@ fn apply_input(
             result_event_seq,
         });
     };
-    return finish_with_cleanup(
-        Err(terminal_error("write PTY input", error.to_string())),
-        result_write.map(|_| ()),
-    );
+    let result_event_seq = match result_write {
+        Ok(result_event_seq) => result_event_seq,
+        Err(cleanup) => {
+            return finish_with_cleanup(
+                Err(terminal_error("write PTY input", error.to_string())),
+                Err(cleanup),
+            );
+        }
+    };
+    return Err(Error::InputWriteFailed {
+        operation_id,
+        bytes_written,
+        intent_event_seq,
+        result_event_seq,
+        reason: error.to_string(),
+    });
+}
+
+fn apply_input_sequence(
+    writer: &mut dyn Write,
+    event_log: &mut EventLogWriter,
+    sequence_id: Uuid,
+    atoms: &[InputSequenceAtom],
+    pace_ns: u64,
+    include_atom_outcomes: bool,
+    live: &mut LiveTerminal,
+) -> Result<ControlData> {
+    if atoms.is_empty() || atoms.len() > 4096 {
+        return Err(control_rejected(
+            "invalid_input_sequence",
+            "input sequence must contain 1 through 4096 atoms",
+        ));
+    }
+    let gap_count = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
+    let total_pace_ns = pace_ns.checked_mul(gap_count).ok_or_else(|| {
+        return control_rejected(
+            "invalid_input_sequence",
+            "input sequence pacing duration overflowed",
+        );
+    })?;
+    if total_pace_ns > 60_000_000_000 {
+        return Err(control_rejected(
+            "invalid_input_sequence",
+            "input sequence pacing may not exceed 60 seconds in total",
+        ));
+    }
+    let prepared = prepare_input_sequence(atoms, live)?;
+    let mut outcomes = Vec::with_capacity(if include_atom_outcomes {
+        prepared.len()
+    } else {
+        0
+    });
+    let mut total_bytes_written = 0_u64;
+    let mut first_intent_event_seq = None;
+    let mut last_result_event_seq = None;
+    for (index, atom) in prepared.into_iter().enumerate() {
+        if index != 0 && pace_ns != 0 {
+            thread::sleep(Duration::from_nanos(pace_ns));
+        }
+        let applied = match apply_input(
+            writer,
+            event_log,
+            atom.operation_id,
+            InputSource::Agent,
+            atom.input_kind,
+            atom.descriptor,
+            atom.intent,
+            &atom.data,
+        ) {
+            Ok(applied) => applied,
+            Err(Error::InputWriteFailed {
+                operation_id,
+                bytes_written,
+                intent_event_seq,
+                result_event_seq,
+                reason,
+            }) => {
+                let first_intent_event_seq = first_intent_event_seq.unwrap_or(intent_event_seq);
+                return Err(Error::InputSequenceIncomplete {
+                    sequence_id,
+                    failed_atom_index: u32::try_from(index).unwrap_or(u32::MAX),
+                    failed_operation_id: operation_id,
+                    atoms_applied: u32::try_from(index).unwrap_or(u32::MAX),
+                    bytes_written: total_bytes_written.saturating_add(bytes_written),
+                    failed_atom_bytes_written: bytes_written,
+                    first_intent_event_seq,
+                    last_result_event_seq: result_event_seq,
+                    reason,
+                });
+            }
+            Err(error) => return Err(error),
+        };
+        first_intent_event_seq.get_or_insert(applied.intent_event_seq);
+        last_result_event_seq = Some(applied.result_event_seq);
+        total_bytes_written = total_bytes_written.saturating_add(applied.bytes_written);
+        if include_atom_outcomes {
+            outcomes.push(InputSequenceAtomOutcome {
+                operation_id: atom.operation_id,
+                input_kind: atom.input_kind,
+                bytes_written: applied.bytes_written,
+                intent_event_seq: applied.intent_event_seq,
+                result_event_seq: applied.result_event_seq,
+            });
+        }
+    }
+    return Ok(ControlData::InputSequenceApplied {
+        sequence_id,
+        atom_count: u32::try_from(atoms.len()).unwrap_or(u32::MAX),
+        bytes_written: total_bytes_written,
+        first_intent_event_seq: first_intent_event_seq
+            .unwrap_or_else(|| return event_log.next_seq()),
+        last_result_event_seq: last_result_event_seq.unwrap_or_else(|| return event_log.next_seq()),
+        pace_ns,
+        atoms: outcomes,
+        boundaries: actor_boundaries(event_log),
+    });
+}
+
+fn prepare_input_sequence(
+    atoms: &[InputSequenceAtom],
+    live: &mut LiveTerminal,
+) -> Result<Vec<PreparedSequenceAtom>> {
+    let mut operation_ids = HashSet::with_capacity(atoms.len());
+    let mut prepared = Vec::with_capacity(atoms.len());
+    for atom in atoms {
+        let operation_id = input_sequence_operation_id(atom);
+        if !operation_ids.insert(operation_id) {
+            return Err(control_rejected(
+                "invalid_input_sequence",
+                "input sequence operation identifiers must be unique",
+            ));
+        }
+        let value = match atom {
+            InputSequenceAtom::Bytes {
+                operation_id,
+                data,
+                input_kind,
+                intent,
+            } => {
+                validate_control_input(data.as_bytes(), intent.as_deref())?;
+                PreparedSequenceAtom {
+                    operation_id: *operation_id,
+                    input_kind: *input_kind,
+                    descriptor: match input_kind {
+                        InputKind::Text => InputDescriptor::Text,
+                        InputKind::Raw
+                        | InputKind::Keys
+                        | InputKind::Paste
+                        | InputKind::Focus
+                        | InputKind::Pointer => InputDescriptor::Raw,
+                    },
+                    intent: intent.clone(),
+                    data: data.as_bytes().to_vec(),
+                }
+            }
+            InputSequenceAtom::Key {
+                operation_id,
+                key,
+                modifiers,
+            } => {
+                let modes = live.semantic.snapshot()?.modes;
+                let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
+                    return terminal_error("serialize keyboard modes", error.to_string());
+                })?;
+                let encoded = live.semantic.encode_key(*key, *modifiers)?;
+                if encoded.data.as_bytes().is_empty() {
+                    return Err(control_rejected(
+                        "key_has_no_output",
+                        "the requested key press produced no terminal bytes",
+                    ));
+                }
+                PreparedSequenceAtom {
+                    operation_id: *operation_id,
+                    input_kind: InputKind::Keys,
+                    descriptor: InputDescriptor::Key {
+                        key: semantic_key_name(*key),
+                        shift: modifiers.shift,
+                        control: modifiers.control,
+                        alt: modifiers.alt,
+                        super_key: modifiers.super_key,
+                        encoder: encoded.encoder,
+                        terminal_modes_hash: blake3::hash(&mode_bytes).to_hex().to_string(),
+                    },
+                    intent: Some(semantic_key_name(*key)),
+                    data: encoded.data.as_bytes().to_vec(),
+                }
+            }
+            InputSequenceAtom::Paste { operation_id, data } => {
+                validate_control_input(data.as_bytes(), Some("paste"))?;
+                let modes = live.semantic.snapshot()?.modes;
+                let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
+                    return terminal_error("serialize paste modes", error.to_string());
+                })?;
+                PreparedSequenceAtom {
+                    operation_id: *operation_id,
+                    input_kind: InputKind::Paste,
+                    descriptor: InputDescriptor::Paste {
+                        bracketed: modes.bracketed_paste,
+                        terminal_modes_hash: blake3::hash(&mode_bytes).to_hex().to_string(),
+                    },
+                    intent: Some("paste".to_owned()),
+                    data: encode_paste(data.as_bytes(), modes.bracketed_paste)?,
+                }
+            }
+        };
+        prepared.push(value);
+    }
+    return Ok(prepared);
+}
+
+fn input_sequence_operation_id(atom: &InputSequenceAtom) -> Uuid {
+    return match atom {
+        InputSequenceAtom::Bytes { operation_id, .. }
+        | InputSequenceAtom::Key { operation_id, .. }
+        | InputSequenceAtom::Paste { operation_id, .. } => *operation_id,
+    };
 }
 
 fn apply_resize(
@@ -3733,6 +4029,7 @@ mod tests {
         history
             .remember(
                 first_id,
+                &first_command,
                 guarded_command_hash(&first_command, None).expect("command hash"),
                 0,
                 1,
@@ -3747,6 +4044,7 @@ mod tests {
         history
             .remember(
                 second_id,
+                &second_command,
                 guarded_command_hash(&second_command, None).expect("command hash"),
                 1,
                 2,

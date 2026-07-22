@@ -2,9 +2,11 @@ import validateDriverRequest from "./generated/validate-driver-request.js";
 import validateDriverResponse from "./generated/validate-driver-response.js";
 import type { DriverRequest as WireDriverRequest } from "./generated/driver-request.js";
 import type {
+  ControlErrorDetails,
   DiagnoseReport,
   DriverResponse as WireDriverResponse,
   EventProjection,
+  InputSequenceFailureDetails,
   Observation,
   ObservationFrame,
   ScreenPredicate,
@@ -39,8 +41,10 @@ export type BundleResult = DriverDataOf<"bundle">;
 export type EventPage = DriverDataOf<"events">;
 
 export type {
+  ControlErrorDetails,
   DiagnoseReport,
   EventProjection,
+  InputSequenceFailureDetails,
   Observation,
   ObservationFrame,
   ScreenPredicate,
@@ -58,6 +62,7 @@ export type DriverFailure = {
   readonly retrySafety: string;
   readonly uncertain: boolean;
   readonly evidence: string | undefined;
+  readonly details: ControlErrorDetails | undefined;
 };
 
 export class TermtraceProtocolError extends Error {
@@ -83,7 +88,7 @@ export function parseDriverResponse(input: unknown, expectedRequestId: string): 
   }
   // SAFETY: the generated Ajv validator has proved the complete generated wire contract.
   const root = input as WireDriverResponse;
-  if (root.version !== 2 || root.request_id !== expectedRequestId) {
+  if (root.version !== 3 || root.request_id !== expectedRequestId) {
     throw new TermtraceProtocolError("driver response version or request ID does not match");
   }
   if (root.result.status === "error") {
@@ -106,7 +111,7 @@ export function expectDriverData<Kind extends DriverDataKind>(
 
 /** Validate and serialize one client-authored request without exposing its payload in failures. */
 export function encodeDriverRequest(method: JsonObject, requestId: string): string {
-  const request = { version: 2, request_id: requestId, method };
+  const request = { version: 3, request_id: requestId, method };
   if (!validateDriverRequest(request)) {
     throw new TermtraceProtocolError("client request does not match the protocol schema");
   }
@@ -135,6 +140,7 @@ function failureFromWire(failure: DriverError): DriverFailure {
     retrySafety: failure.retry_safety,
     uncertain: failure.uncertain,
     evidence: failure.evidence ?? undefined,
+    details: failure.details ?? undefined,
   };
 }
 

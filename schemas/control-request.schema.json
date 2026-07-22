@@ -144,6 +144,40 @@
         },
         {
           "additionalProperties": false,
+          "description": "Apply one admission-guarded, journaled sequence of keyboard input atoms.",
+          "properties": {
+            "atoms": {
+              "description": "Ordered input atoms resolved against the actor state at admission.",
+              "items": {
+                "$ref": "#/$defs/InputSequenceAtom"
+              },
+              "type": "array"
+            },
+            "command": {
+              "const": "input_sequence",
+              "type": "string"
+            },
+            "include_atom_outcomes": {
+              "description": "Retain per-atom identifiers and canonical event positions in the response.",
+              "type": "boolean"
+            },
+            "pace_ns": {
+              "description": "Delay between atoms, bounded together with the atom count.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "command",
+            "atoms",
+            "pace_ns",
+            "include_atom_outcomes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Encode and apply one symbolic key against the actor's live terminal modes.",
           "properties": {
             "command": {
@@ -435,6 +469,103 @@
           "const": "pointer",
           "description": "Cell-addressed mouse or wheel operation.",
           "type": "string"
+        }
+      ]
+    },
+    "InputSequenceAtom": {
+      "description": "One input atom accepted inside an admission-guarded sequence.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Exact caller bytes with an explicit semantic category.",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Bytes encoded as Base64 in JSON."
+            },
+            "input": {
+              "const": "bytes",
+              "type": "string"
+            },
+            "input_kind": {
+              "$ref": "#/$defs/InputKind",
+              "description": "Semantic category retained in canonical evidence."
+            },
+            "intent": {
+              "description": "Optional human-readable intent.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Caller-owned operation identifier retained in canonical events.",
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "operation_id",
+            "data",
+            "input_kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One symbolic key encoded against live terminal modes.",
+          "properties": {
+            "input": {
+              "const": "key",
+              "type": "string"
+            },
+            "key": {
+              "$ref": "#/$defs/NamedKey",
+              "description": "Layout-independent key."
+            },
+            "modifiers": {
+              "$ref": "#/$defs/KeyModifiers",
+              "description": "Typed modifier state."
+            },
+            "operation_id": {
+              "description": "Caller-owned operation identifier retained in canonical events.",
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "operation_id",
+            "key",
+            "modifiers"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "UTF-8 paste encoded using live bracketed-paste mode.",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Paste content before mode-dependent encoding."
+            },
+            "input": {
+              "const": "paste",
+              "type": "string"
+            },
+            "operation_id": {
+              "description": "Caller-owned operation identifier retained in canonical events.",
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "operation_id",
+            "data"
+          ],
+          "type": "object"
         }
       ]
     },

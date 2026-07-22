@@ -9,7 +9,7 @@ use std::{
     io::{BufRead as _, BufReader, Read as _, Write as _},
     os::unix::{
         ffi::{OsStrExt as _, OsStringExt as _},
-        fs::PermissionsExt as _,
+        fs::{PermissionsExt as _, symlink},
     },
     path::{Path, PathBuf},
     process::{Command as StdCommand, Stdio},
@@ -199,12 +199,12 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
     let hello_id = "019f0000-0000-7000-8000-000000000001";
     let attach_id = "019f0000-0000-7000-8000-000000000002";
     let hello = serde_json::json!({
-        "version": 2,
+        "version": 3,
         "request_id": hello_id,
         "method": { "method": "hello" }
     });
     let attach = serde_json::json!({
-        "version": 2,
+        "version": 3,
         "request_id": attach_id,
         "method": { "method": "attach", "session": session }
     });
@@ -228,7 +228,7 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
     };
     assert_eq!(first, second);
     assert_eq!(first["result"]["data"]["kind"], "hello");
-    assert_eq!(first["result"]["data"]["driver_protocol_version"], 2);
+    assert_eq!(first["result"]["data"]["driver_protocol_version"], 3);
     assert_eq!(third["result"]["data"]["kind"], "attached");
     assert_eq!(third["result"]["data"]["completed"], true);
     assert!(third["result"]["data"]["handle"].is_string());
@@ -452,6 +452,61 @@ if (!existsSync(`${retainedPath}/completion.json`)) throw new Error("failed-run 
 }
 
 #[test]
+fn managed_client_runners_leave_the_callers_worktree_untouched() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let assets = temporary.path().join("client-assets");
+    let typescript = assets.join("typescript");
+    fs_err::create_dir_all(typescript.join("lib")).expect("TypeScript fixture assets");
+    symlink(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/python"),
+        assets.join("python"),
+    )
+    .expect("Python fixture asset link");
+    fs_err::write(
+        typescript.join("package.json"),
+        br#"{"name":"@termtrace/test","type":"module","exports":{".":"./lib/index.js"}}"#,
+    )
+    .expect("TypeScript fixture package");
+    fs_err::write(
+        typescript.join("lib/index.js"),
+        b"export const managedRunnerMarker = 'typescript-managed';\n",
+    )
+    .expect("TypeScript fixture module");
+    let worktree = temporary.path().join("worktree");
+    fs_err::create_dir(&worktree).expect("empty caller worktree");
+
+    let mut python = Command::cargo_bin("termtrace").expect("binary should build");
+    python
+        .env("TERMTRACE_CLIENT_ASSETS", &assets)
+        .current_dir(&worktree)
+        .args(["client", "python", "-"])
+        .write_stdin("from termtrace import Terminal\nprint(Terminal.__name__)\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Terminal"));
+
+    let mut typescript_run = Command::cargo_bin("termtrace").expect("binary should build");
+    typescript_run
+        .env("TERMTRACE_CLIENT_ASSETS", &assets)
+        .current_dir(&worktree)
+        .args(["client", "typescript", "-"])
+        .write_stdin(
+            "import { managedRunnerMarker } from '@termtrace/test';\nconsole.log(managedRunnerMarker);\n",
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("typescript-managed"));
+
+    assert_eq!(
+        fs_err::read_dir(&worktree)
+            .expect("caller worktree")
+            .count(),
+        0,
+        "managed runners must not create project files"
+    );
+}
+
+#[test]
 fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
     let temporary = TempDir::new().expect("temporary directory");
     let scenario = temporary.path().join("ready.termtrace.json");
@@ -561,6 +616,22 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
     let attempt = &report["cases"][0]["attempts"][0]["report"];
     assert_eq!(attempt["steps"].as_array().expect("steps").len(), 8);
     assert!(Path::new(attempt["canonical_session"].as_str().expect("path")).is_dir());
+}
+
+#[test]
+fn bundled_agent_skill_scenario_is_directly_executable() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let scenario = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("skills/termtrace/examples/ready.termtrace.json");
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+    command
+        .arg("test")
+        .arg(scenario)
+        .arg("--artifacts")
+        .arg(temporary.path().join("skill-example-artifacts"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""status":"passed""#));
 }
 
 #[test]
@@ -1426,6 +1497,92 @@ fn registry_binds_alias_to_canonical_session_identity() {
 }
 
 #[test]
+fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomplete_evidence() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let sessions = state.join("sessions");
+    fs_err::create_dir_all(&sessions).expect("managed session directory");
+    fs_err::set_permissions(&state, Permissions::from_mode(0o700)).expect("private state root");
+    fs_err::set_permissions(&sessions, Permissions::from_mode(0o700))
+        .expect("private managed session directory");
+    let eligible = sessions.join("eligible.termtrace");
+    let registered = sessions.join("registered.termtrace");
+    for session in [&eligible, &registered] {
+        let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+        record
+            .args(["record", "--no-input", "--out"])
+            .arg(session)
+            .args(["--", "/bin/sh", "-c", "printf GC"])
+            .assert()
+            .success();
+    }
+    let eligible_id = read_manifest(&eligible)
+        .expect("eligible manifest")
+        .session_id;
+    let mut register = Command::cargo_bin("termtrace").expect("binary should build");
+    register
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["register", "protected", "--session"])
+        .arg(&registered)
+        .assert()
+        .success();
+    let incomplete = sessions.join("incomplete.termtrace");
+    fs_err::create_dir(&incomplete).expect("incomplete managed session");
+    fs_err::set_permissions(&incomplete, Permissions::from_mode(0o700))
+        .expect("private incomplete session");
+    let supervisor = state.join("supervisor");
+    fs_err::create_dir(&supervisor).expect("supervisor directory");
+    fs_err::set_permissions(&supervisor, Permissions::from_mode(0o700))
+        .expect("private supervisor directory");
+    for extension in ["stdout", "stderr"] {
+        fs_err::write(
+            supervisor.join(format!("{eligible_id}.{extension}")),
+            b"diagnostic",
+        )
+        .expect("supervisor diagnostic");
+    }
+
+    let mut dry_run = Command::cargo_bin("termtrace").expect("binary should build");
+    let dry_run = dry_run
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["gc", "--older-than-days", "0", "--keep-latest", "0"])
+        .assert()
+        .success();
+    let dry_run: serde_json::Value =
+        serde_json::from_slice(&dry_run.get_output().stdout).expect("GC dry-run report");
+    assert_eq!(dry_run["applied"], false);
+    assert_eq!(dry_run["candidates"].as_array().map(Vec::len), Some(1));
+    assert_eq!(dry_run["protected_registered"], 1);
+    assert!(
+        dry_run["skipped_non_completed"]
+            .as_u64()
+            .is_some_and(|count| return count >= 1)
+    );
+    assert!(eligible.is_dir(), "dry run removed eligible evidence");
+
+    let mut apply = Command::cargo_bin("termtrace").expect("binary should build");
+    apply
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "gc",
+            "--older-than-days",
+            "0",
+            "--keep-latest",
+            "0",
+            "--apply",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""removed_sessions":1"#))
+        .stdout(predicate::str::contains(r#""removed_supervisor_files":2"#));
+    assert!(!eligible.exists());
+    assert!(registered.is_dir());
+    assert!(incomplete.is_dir());
+    assert!(!supervisor.join(format!("{eligible_id}.stdout")).exists());
+    assert!(!supervisor.join(format!("{eligible_id}.stderr")).exists());
+}
+
+#[test]
 fn start_publishes_alias_only_after_detached_recorder_readiness() {
     let temporary = TempDir::new().expect("temporary directory");
     let state = temporary.path().join("state");
@@ -1434,11 +1591,11 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
             "start",
-            "demo",
             "--cols",
             "90",
             "--rows",
             "25",
+            "demo",
             "/bin/sh",
             "-c",
             "trap 'exit 0' TERM; printf READY; while :; do sleep 0.1; done",
@@ -2241,6 +2398,39 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     let encoded = decode_all(semantic_state_zstd.as_bytes()).expect("decode exact stable state");
     assert_eq!(state_hash, blake3::hash(&encoded).to_hex().to_string());
     assert_eq!(boundaries.observed.output_bytes, 5);
+    let mut compact_idle = Command::cargo_bin("termtrace").expect("binary should build");
+    let compact_output = compact_idle
+        .arg("wait-idle")
+        .arg(&stable_session)
+        .args(["--stable-for", "10ms", "--timeout-ms", "2000"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let compact: serde_json::Value =
+        serde_json::from_slice(&compact_output).expect("compact idle response");
+    assert_eq!(
+        compact.pointer("/kind").and_then(serde_json::Value::as_str),
+        Some("stable_snapshot")
+    );
+    assert!(compact.pointer("/viewport_text").is_some());
+    assert!(compact.pointer("/boundary/next_event_seq").is_some());
+    assert!(compact.pointer("/semantic_state_zstd").is_none());
+    let mut full_idle = Command::cargo_bin("termtrace").expect("binary should build");
+    full_idle
+        .arg("wait-idle")
+        .arg(&stable_session)
+        .args([
+            "--stable-for",
+            "10ms",
+            "--timeout-ms",
+            "2000",
+            "--full-state",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""semantic_state_zstd""#));
     send_request(&stable_session, &ControlRequest::new(ControlCommand::Stop))
         .expect("stop stable child");
     let _stable_status = stable_child.wait().expect("stable recorder exit");
@@ -2661,6 +2851,63 @@ fn named_key_is_encoded_from_live_application_cursor_mode() {
 }
 
 #[test]
+fn send_accepts_natural_modifier_aliases_and_single_character_text() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("natural-key-session");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let child = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,tty; tty.setraw(0); os.write(1,b'READY'); data=b''\nwhile b'\\r' not in data: data += os.read(0,64)\nos.write(1,b'KEYS:'+data.hex().encode())",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn natural key fixture");
+    wait_for_path(&session.join("control.sock"));
+    wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("ready output");
+
+    for atom in ["q", "ctrl+f", "ctrl+down", "enter"] {
+        let mut send = Command::cargo_bin("termtrace").expect("binary should build");
+        send.arg("send").arg(&session).arg(atom).assert().success();
+    }
+    let output = child.wait_with_output().expect("natural key completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+
+    let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+    assert!(log.events.iter().any(|record| matches!(
+        &record.event,
+        Event::InputIntent {
+            source: InputSource::Agent,
+            input_kind: InputKind::Text,
+            data,
+            ..
+        } if data.as_bytes() == b"q"
+    )));
+    assert!(log.events.iter().any(|record| matches!(
+        &record.event,
+        Event::InputIntent {
+            source: InputSource::Agent,
+            descriptor: InputDescriptor::Key { key, control, .. },
+            ..
+        } if key == "down" && *control
+    )));
+
+    let mut keys = Command::cargo_bin("termtrace").expect("binary should build");
+    keys.arg("keys")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            r#""format":"termtrace-key-contract""#,
+        ))
+        .stdout(predicate::str::contains("ctrl+f"));
+}
+
+#[test]
 fn focus_events_are_mode_gated_encoded_and_audited() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("focus-session");
@@ -2975,7 +3222,7 @@ fn paced_unicode_text_splits_only_at_scalar_boundaries() {
     let sent = send
         .arg("send")
         .arg(&session)
-        .args(["--pace", "1ms", "text:é界", "enter"])
+        .args(["--pace", "1ms", "--verbose", "text:é界", "enter"])
         .assert()
         .success();
     let response: serde_json::Value =
@@ -3268,6 +3515,30 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
         .expect("checkpoint entry")
         .expect("checkpoint path")
         .path();
+    assert_eq!(
+        cache.extension().and_then(|value| return value.to_str()),
+        Some("zst")
+    );
+    assert!(
+        fs_err::read(&cache)
+            .expect("compressed checkpoint")
+            .starts_with(&[0x28, 0xb5, 0x2f, 0xfd])
+    );
+    let mut cache_status = Command::cargo_bin("termtrace").expect("binary should build");
+    let status = cache_status
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["cache", "status", "demo"])
+        .assert()
+        .success();
+    let status: serde_json::Value =
+        serde_json::from_slice(&status.get_output().stdout).expect("cache status");
+    assert_eq!(status["entries"], 1);
+    assert!(
+        status["compressed_bytes"]
+            .as_u64()
+            .is_some_and(|bytes| return bytes > 0)
+    );
+    assert_eq!(status["maximum_entries"], 32);
     fs_err::write(&cache, b"{}\n").expect("tamper disposable checkpoint");
     let mut fallback = Command::cargo_bin("termtrace").expect("binary should build");
     fallback
@@ -3278,6 +3549,14 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
         .stdout(predicate::str::contains(
             r#""resolution":"canonical_replay""#,
         ));
+    let mut prune = Command::cargo_bin("termtrace").expect("binary should build");
+    prune
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["cache", "prune", "demo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""removed_entries":1"#))
+        .stdout(predicate::str::contains(r#""entries":0"#));
 }
 
 #[test]
@@ -3779,6 +4058,100 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
 }
 
 #[test]
+fn state_hash_selectors_reach_every_exact_state_workflow() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("hash-selector-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf HASH-SELECTOR"])
+        .assert()
+        .success();
+    let initial = inspect_session(&session, StateSelector::StateId(0)).expect("initial state");
+    let final_state = inspect_session(&session, StateSelector::Final).expect("final state");
+    let final_hash = final_state.record.state_hash;
+
+    let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
+    inspect
+        .arg("inspect")
+        .arg("--session")
+        .arg(&session)
+        .args(["--state-hash", &final_hash, "--format", "json-compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&final_hash));
+
+    let mut show = Command::cargo_bin("termtrace").expect("binary should build");
+    show.arg("show")
+        .arg(&session)
+        .args(["--state-hash", &final_hash, "--format", "json-compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&final_hash));
+
+    let mut diff = Command::cargo_bin("termtrace").expect("binary should build");
+    diff.arg("diff")
+        .arg(&session)
+        .args([
+            "--from-state-hash",
+            &initial.record.state_hash,
+            "--to-state-hash",
+            &final_hash,
+            "--format",
+            "json-compact",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""changed":true"#));
+
+    let mut explain = Command::cargo_bin("termtrace").expect("binary should build");
+    explain
+        .arg("explain")
+        .arg(&session)
+        .args(["--state-hash", &final_hash, "--format", "json-compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&final_hash));
+
+    let save = temporary.path().join("nested/artifacts/hash-save");
+    let mut save_command = Command::cargo_bin("termtrace").expect("binary should build");
+    save_command
+        .arg("save")
+        .arg(&session)
+        .arg("--state-hash")
+        .arg(&final_hash)
+        .arg("--out")
+        .arg(&save)
+        .args(["--format", "txt"])
+        .assert()
+        .success();
+    assert!(save.join("screen.txt").is_file());
+
+    let screenshot = temporary.path().join("other/nested/hash-screenshot");
+    let mut screenshot_command = Command::cargo_bin("termtrace").expect("binary should build");
+    screenshot_command
+        .arg("screenshot")
+        .arg(&session)
+        .arg("--state-hash")
+        .arg(&final_hash)
+        .arg("--out")
+        .arg(&screenshot)
+        .assert()
+        .success();
+    assert!(screenshot.join("screen.png").is_file());
+
+    let mut invalid = Command::cargo_bin("termtrace").expect("binary should build");
+    invalid
+        .arg("show")
+        .arg(&session)
+        .args(["--state-hash", &final_hash.to_uppercase()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("lowercase hexadecimal"));
+}
+
+#[test]
 fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("bundle-session");
@@ -3953,6 +4326,95 @@ fn timeline_streams_presented_states_and_canonical_operations() {
         .stdout(predicate::str::contains(r#""kind":"vt_token""#))
         .stdout(predicate::str::contains("set synchronized output"))
         .stdout(predicate::str::contains("reset synchronized output"));
+}
+
+#[test]
+fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("paged-session");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let recorder = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; while :; do sleep .1; done",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn recorder");
+    wait_for_path(&session.join("control.sock"));
+    for index in 0..205 {
+        send_request(
+            &session,
+            &ControlRequest::new(ControlCommand::Mark {
+                label: format!("page-{index:03}"),
+            }),
+        )
+        .expect("append page marker");
+    }
+    send_request(&session, &ControlRequest::new(ControlCommand::Stop)).expect("stop paged session");
+    let recorded = recorder.wait_with_output().expect("wait for recorder");
+    assert!(recorded.status.success(), "{recorded:?}");
+
+    let mut timeline = Command::cargo_bin("termtrace").expect("binary should build");
+    let timeline = timeline
+        .arg("timeline")
+        .arg(&session)
+        .arg("--jsonl")
+        .assert()
+        .success();
+    let timeline_lines = json_lines(&timeline.get_output().stdout);
+    assert_eq!(timeline_lines.len(), 101);
+    let timeline_page = timeline_lines.last().expect("timeline page marker");
+    assert_eq!(timeline_page["kind"], "output_page");
+    assert_eq!(timeline_page["page"]["returned"], 100);
+    assert_eq!(timeline_page["page"]["next_offset"], 100);
+
+    let mut events = Command::cargo_bin("termtrace").expect("binary should build");
+    let events = events
+        .arg("events")
+        .arg(&session)
+        .args(["--type", "marker", "--metadata-only"])
+        .assert()
+        .success();
+    let event_lines = json_lines(&events.get_output().stdout);
+    assert_eq!(event_lines.len(), 101);
+    let event_page = event_lines.last().expect("event page marker");
+    assert_eq!(event_page["kind"], "output_page");
+    assert_eq!(event_page["page"]["total"], 205);
+    assert_eq!(event_page["page"]["next_offset"], 100);
+    assert!(event_page["page"]["next_event_seq"].is_u64());
+
+    let mut resume = Command::cargo_bin("termtrace").expect("binary should build");
+    let resume = resume
+        .arg("events")
+        .arg(&session)
+        .args([
+            "--type",
+            "marker",
+            "--metadata-only",
+            "--offset",
+            "200",
+            "--limit",
+            "10",
+        ])
+        .assert()
+        .success();
+    let resumed_lines = json_lines(&resume.get_output().stdout);
+    assert_eq!(resumed_lines.len(), 6);
+    assert_eq!(
+        resumed_lines.last().expect("resumed page")["kind"],
+        "output_page"
+    );
+    assert_eq!(
+        resumed_lines.last().expect("resumed page")["page"]["returned"],
+        5
+    );
 }
 
 #[test]
@@ -5017,6 +5479,18 @@ fn validate_json_file(schema: &str, instance: &Path) {
     let value = serde_json::from_slice(&fs_err::read(instance).expect("instance file"))
         .expect("instance JSON");
     validate_json_value(schema, &value);
+}
+
+#[allow(
+    clippy::expect_used,
+    reason = "test helper failures should stop at the invalid fixture"
+)]
+fn json_lines(bytes: &[u8]) -> Vec<serde_json::Value> {
+    return bytes
+        .split(|byte| return *byte == b'\n')
+        .filter(|line| return !line.is_empty())
+        .map(|line| return serde_json::from_slice(line).expect("JSONL record"))
+        .collect();
 }
 
 #[allow(

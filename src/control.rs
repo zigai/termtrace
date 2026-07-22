@@ -1,7 +1,7 @@
 //! Versioned, bounded client protocol for controlling a live recording.
 
 use std::{
-    io::{BufRead as _, BufReader, Read as _, Write as _},
+    io::{BufRead as _, BufReader, Error as IoError, ErrorKind, Read as _, Write as _},
     net::Shutdown,
     os::unix::net::UnixStream,
     path::Path,
@@ -20,11 +20,13 @@ use crate::{
 };
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 12;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 13;
 /// Relative socket path inside a live session directory.
 pub const CONTROL_SOCKET_NAME: &str = "control.sock";
 /// Maximum encoded request or response size.
 pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 1024 * 1024;
+const DEFAULT_CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_INPUT_SEQUENCE_PACING: Duration = Duration::from_secs(60);
 
 /// Safely supported process-group signals.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -275,6 +277,15 @@ pub enum ControlCommand {
         /// Optional human-readable intent.
         intent: Option<String>,
     },
+    /// Apply one admission-guarded, journaled sequence of keyboard input atoms.
+    InputSequence {
+        /// Ordered input atoms resolved against the actor state at admission.
+        atoms: Vec<InputSequenceAtom>,
+        /// Delay between atoms, bounded together with the atom count.
+        pace_ns: u64,
+        /// Retain per-atom identifiers and canonical event positions in the response.
+        include_atom_outcomes: bool,
+    },
     /// Encode and apply one symbolic key against the actor's live terminal modes.
     Key {
         /// Layout-independent key.
@@ -397,6 +408,26 @@ pub enum ControlData {
         /// Canonical result event sequence.
         result_event_seq: u64,
         /// Durable and observed positions after application.
+        boundaries: ActorBoundaries,
+    },
+    /// Complete result of one admission-guarded input sequence.
+    InputSequenceApplied {
+        /// Canonical sequence identifier (the caller request ID).
+        sequence_id: Uuid,
+        /// Number of atoms applied completely.
+        atom_count: u32,
+        /// Total exact PTY bytes written across every atom.
+        bytes_written: u64,
+        /// First canonical input-intent event in the sequence.
+        first_intent_event_seq: u64,
+        /// Last canonical input-result event in the sequence.
+        last_result_event_seq: u64,
+        /// Requested delay between atoms.
+        pace_ns: u64,
+        /// Optional per-atom outcomes requested by an explicit verbose caller.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        atoms: Vec<InputSequenceAtomOutcome>,
+        /// Durable and observed positions after complete application.
         boundaries: ActorBoundaries,
     },
     /// Successful semantic input request that correctly emitted no bytes.
@@ -536,6 +567,55 @@ pub enum ControlData {
     },
 }
 
+/// One input atom accepted inside an admission-guarded sequence.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "input", rename_all = "snake_case", deny_unknown_fields)]
+pub enum InputSequenceAtom {
+    /// Exact caller bytes with an explicit semantic category.
+    Bytes {
+        /// Caller-owned operation identifier retained in canonical events.
+        operation_id: Uuid,
+        /// Bytes encoded as Base64 in JSON.
+        data: ByteString,
+        /// Semantic category retained in canonical evidence.
+        input_kind: InputKind,
+        /// Optional human-readable intent.
+        intent: Option<String>,
+    },
+    /// One symbolic key encoded against live terminal modes.
+    Key {
+        /// Caller-owned operation identifier retained in canonical events.
+        operation_id: Uuid,
+        /// Layout-independent key.
+        key: NamedKey,
+        /// Typed modifier state.
+        modifiers: KeyModifiers,
+    },
+    /// UTF-8 paste encoded using live bracketed-paste mode.
+    Paste {
+        /// Caller-owned operation identifier retained in canonical events.
+        operation_id: Uuid,
+        /// Paste content before mode-dependent encoding.
+        data: ByteString,
+    },
+}
+
+/// Canonical result coordinates for one atom in a successful input sequence.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InputSequenceAtomOutcome {
+    /// Caller-owned operation identifier for this atom.
+    pub operation_id: Uuid,
+    /// Semantic category retained in canonical evidence.
+    pub input_kind: InputKind,
+    /// Exact number of PTY bytes written.
+    pub bytes_written: u64,
+    /// Canonical input-intent event sequence.
+    pub intent_event_seq: u64,
+    /// Canonical input-result event sequence.
+    pub result_event_seq: u64,
+}
+
 /// Durable and latest actor-processed positions returned by live operations.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -579,16 +659,45 @@ pub enum ControlResult {
     },
 }
 
-/// Structured context attached to an optimistic-concurrency rejection.
+/// Structured actor context attached to a rejected or incomplete request.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ControlErrorDetails {
     /// Latest presented-state hash at the actor ordering point.
     pub current_presented_state_hash: String,
-    /// Durable and observed source positions used for the comparison.
+    /// Durable and observed source positions at the failure boundary.
     pub boundaries: ActorBoundaries,
-    /// Exact output scope covered by the state comparison.
+    /// Exact output or mutation scope covered by these details.
     pub scope: String,
+    /// Exact attempted prefix when an admitted input sequence stopped early.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_sequence: Option<InputSequenceFailureDetails>,
+}
+
+/// Recoverable accounting for an input sequence that stopped during PTY delivery.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InputSequenceFailureDetails {
+    /// Caller-owned sequence request identifier.
+    pub sequence_id: Uuid,
+    /// Total number of requested atoms.
+    pub atom_count: u32,
+    /// Number of preceding atoms applied completely.
+    pub atoms_applied: u32,
+    /// Zero-based atom whose write failed.
+    pub failed_atom_index: u32,
+    /// Caller-owned operation identifier for the failed atom.
+    pub failed_operation_id: Uuid,
+    /// Total bytes written across all attempted atoms.
+    pub bytes_written: u64,
+    /// Bytes written for the failed atom; nonzero means application may be partial.
+    pub failed_atom_bytes_written: u64,
+    /// First canonical input-intent event in the attempted prefix.
+    pub first_intent_event_seq: u64,
+    /// Canonical failed input-result event.
+    pub last_result_event_seq: u64,
+    /// First atom not attempted; only this suffix is safe to submit independently.
+    pub resume_from_atom_index: u32,
 }
 
 /// Send one command to a live session and wait for its correlated response.
@@ -636,46 +745,48 @@ pub fn send_request_response(
     session_directory: impl AsRef<Path>,
     request: &ControlRequest,
 ) -> Result<ControlResponse> {
-    let socket = session_directory.as_ref().join(CONTROL_SOCKET_NAME);
-    let mut stream = UnixStream::connect(&socket).map_err(|source| {
-        return Error::Filesystem {
-            path: socket.clone(),
-            source,
-        };
-    })?;
-    let timeout = Some(match &request.command {
-        ControlCommand::WaitScreen { timeout_ns, .. } => {
-            Duration::from_nanos(*timeout_ns).saturating_add(Duration::from_secs(2))
-        }
-        _ => Duration::from_secs(10),
-    });
-    stream
-        .set_read_timeout(timeout)
-        .and_then(|()| return stream.set_write_timeout(timeout))
-        .map_err(|source| {
-            return Error::Filesystem {
-                path: socket.clone(),
-                source,
-            };
-        })?;
-    serde_json::to_writer(&mut stream, request).map_err(|source| {
+    let session_directory = session_directory.as_ref();
+    let socket = session_directory.join(CONTROL_SOCKET_NAME);
+    let mut request_frame = serde_json::to_vec(request).map_err(|source| {
         return Error::InvalidJson {
             path: socket.clone(),
             json_path: "$".to_owned(),
             source,
         };
     })?;
-    stream.write_all(b"\n").map_err(|source| {
-        return Error::Filesystem {
-            path: socket.clone(),
+    if u64::try_from(request_frame.len().saturating_add(1)).unwrap_or(u64::MAX)
+        > MAX_CONTROL_MESSAGE_BYTES
+    {
+        return Err(Error::InvalidControlProtocol {
+            reason: "request must be no larger than 1 MiB".to_owned(),
+        });
+    }
+    request_frame.push(b'\n');
+    let mut stream = UnixStream::connect(&socket).map_err(|source| {
+        return Error::ControlUnavailable {
+            session: session_directory.to_path_buf(),
+            lifecycle: control_lifecycle_hint(session_directory, &socket),
             source,
         };
     })?;
+    let timeout = control_response_timeout(&request.command, Duration::from_secs(2));
+    stream
+        .set_read_timeout(Some(timeout))
+        .and_then(|()| return stream.set_write_timeout(Some(timeout)))
+        .map_err(|source| {
+            return control_transport_error(
+                session_directory,
+                "configure deadlines",
+                timeout,
+                false,
+                source,
+            );
+        })?;
+    stream.write_all(&request_frame).map_err(|source| {
+        return control_transport_error(session_directory, "write request", timeout, true, source);
+    })?;
     stream.shutdown(Shutdown::Write).map_err(|source| {
-        return Error::Filesystem {
-            path: socket.clone(),
-            source,
-        };
+        return control_transport_error(session_directory, "finish request", timeout, true, source);
     })?;
 
     let mut encoded = Vec::new();
@@ -683,10 +794,13 @@ pub fn send_request_response(
         .take(MAX_CONTROL_MESSAGE_BYTES + 1)
         .read_until(b'\n', &mut encoded)
         .map_err(|source| {
-            return Error::Filesystem {
-                path: socket.clone(),
+            return control_transport_error(
+                session_directory,
+                "read response",
+                timeout,
+                true,
                 source,
-            };
+            );
         })?;
     validate_frame(&encoded)?;
     let response: ControlResponse = serde_json::from_slice(&encoded).map_err(|source| {
@@ -704,6 +818,59 @@ pub fn send_request_response(
     return Ok(response);
 }
 
+pub(crate) fn control_response_timeout(command: &ControlCommand, wait_slack: Duration) -> Duration {
+    return match command {
+        ControlCommand::WaitScreen { timeout_ns, .. }
+        | ControlCommand::CaptureStable { timeout_ns, .. } => {
+            Duration::from_nanos(*timeout_ns).saturating_add(wait_slack)
+        }
+        ControlCommand::InputSequence { atoms, pace_ns, .. } => {
+            let gaps = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
+            let pacing =
+                Duration::from_nanos(pace_ns.saturating_mul(gaps)).min(MAX_INPUT_SEQUENCE_PACING);
+            DEFAULT_CONTROL_TIMEOUT.saturating_add(pacing)
+        }
+        _ => DEFAULT_CONTROL_TIMEOUT,
+    };
+}
+
+fn control_lifecycle_hint(session: &Path, socket: &Path) -> String {
+    if session.join("completion.json").is_file() {
+        return "completed".to_owned();
+    }
+    if !session.join("session.json").is_file() {
+        return "not_a_session".to_owned();
+    }
+    if !socket.exists() {
+        return "control_socket_missing_or_recorder_starting".to_owned();
+    }
+    return "stale_or_unreachable_actor".to_owned();
+}
+
+fn control_transport_error(
+    session: &Path,
+    phase: &'static str,
+    timeout: Duration,
+    request_dispatched: bool,
+    source: IoError,
+) -> Error {
+    if matches!(source.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) {
+        return Error::ControlTimeout {
+            session: session.to_path_buf(),
+            phase,
+            timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+            request_dispatched,
+            source,
+        };
+    }
+    return Error::ControlTransport {
+        session: session.to_path_buf(),
+        phase,
+        request_dispatched,
+        source,
+    };
+}
+
 pub(crate) fn validate_frame(encoded: &[u8]) -> Result<()> {
     if encoded.is_empty()
         || encoded.last() != Some(&b'\n')
@@ -719,6 +886,8 @@ pub(crate) fn validate_frame(encoded: &[u8]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::TempDir;
+
     use super::*;
 
     #[test]
@@ -736,5 +905,43 @@ mod tests {
             Uuid::now_v7()
         );
         assert!(serde_json::from_str::<ControlRequest>(&encoded).is_err());
+    }
+
+    #[test]
+    fn missing_live_actor_has_a_typed_lifecycle_error() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let error = request(temporary.path(), ControlCommand::Ping).expect_err("missing actor");
+        assert!(matches!(
+            error,
+            Error::ControlUnavailable { lifecycle, .. } if lifecycle == "not_a_session"
+        ));
+    }
+
+    #[test]
+    fn paced_sequences_extend_both_sides_of_the_control_deadline() {
+        let atoms = vec![
+            InputSequenceAtom::Bytes {
+                operation_id: Uuid::now_v7(),
+                data: ByteString::new(vec![b'a']),
+                input_kind: InputKind::Text,
+                intent: None,
+            },
+            InputSequenceAtom::Bytes {
+                operation_id: Uuid::now_v7(),
+                data: ByteString::new(vec![b'b']),
+                input_kind: InputKind::Text,
+                intent: None,
+            },
+        ];
+        let command = ControlCommand::InputSequence {
+            atoms,
+            pace_ns: 11_000_000_000,
+            include_atom_outcomes: false,
+        };
+
+        assert_eq!(
+            control_response_timeout(&command, Duration::from_secs(2)),
+            Duration::from_secs(21)
+        );
     }
 }

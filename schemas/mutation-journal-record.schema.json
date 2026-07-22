@@ -132,6 +132,73 @@
         },
         {
           "additionalProperties": false,
+          "description": "Complete result of one admission-guarded input sequence.",
+          "properties": {
+            "atom_count": {
+              "description": "Number of atoms applied completely.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "atoms": {
+              "description": "Optional per-atom outcomes requested by an explicit verbose caller.",
+              "items": {
+                "$ref": "#/$defs/InputSequenceAtomOutcome"
+              },
+              "type": "array"
+            },
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed positions after complete application."
+            },
+            "bytes_written": {
+              "description": "Total exact PTY bytes written across every atom.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "first_intent_event_seq": {
+              "description": "First canonical input-intent event in the sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "input_sequence_applied",
+              "type": "string"
+            },
+            "last_result_event_seq": {
+              "description": "Last canonical input-result event in the sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pace_ns": {
+              "description": "Requested delay between atoms.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "sequence_id": {
+              "description": "Canonical sequence identifier (the caller request ID).",
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "sequence_id",
+            "atom_count",
+            "bytes_written",
+            "first_intent_event_seq",
+            "last_result_event_seq",
+            "pace_ns",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Successful semantic input request that correctly emitted no bytes.",
           "properties": {
             "boundaries": {
@@ -594,18 +661,29 @@
     },
     "ControlErrorDetails": {
       "additionalProperties": false,
-      "description": "Structured context attached to an optimistic-concurrency rejection.",
+      "description": "Structured actor context attached to a rejected or incomplete request.",
       "properties": {
         "boundaries": {
           "$ref": "#/$defs/ActorBoundaries",
-          "description": "Durable and observed source positions used for the comparison."
+          "description": "Durable and observed source positions at the failure boundary."
         },
         "current_presented_state_hash": {
           "description": "Latest presented-state hash at the actor ordering point.",
           "type": "string"
         },
+        "input_sequence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InputSequenceFailureDetails"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact attempted prefix when an admitted input sequence stopped early."
+        },
         "scope": {
-          "description": "Exact output scope covered by the state comparison.",
+          "description": "Exact output or mutation scope covered by these details.",
           "type": "string"
         }
       },
@@ -761,6 +839,124 @@
           "type": "string"
         }
       ]
+    },
+    "InputSequenceAtomOutcome": {
+      "additionalProperties": false,
+      "description": "Canonical result coordinates for one atom in a successful input sequence.",
+      "properties": {
+        "bytes_written": {
+          "description": "Exact number of PTY bytes written.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "input_kind": {
+          "$ref": "#/$defs/InputKind",
+          "description": "Semantic category retained in canonical evidence."
+        },
+        "intent_event_seq": {
+          "description": "Canonical input-intent event sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "operation_id": {
+          "description": "Caller-owned operation identifier for this atom.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "result_event_seq": {
+          "description": "Canonical input-result event sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "operation_id",
+        "input_kind",
+        "bytes_written",
+        "intent_event_seq",
+        "result_event_seq"
+      ],
+      "type": "object"
+    },
+    "InputSequenceFailureDetails": {
+      "additionalProperties": false,
+      "description": "Recoverable accounting for an input sequence that stopped during PTY delivery.",
+      "properties": {
+        "atom_count": {
+          "description": "Total number of requested atoms.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "atoms_applied": {
+          "description": "Number of preceding atoms applied completely.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "bytes_written": {
+          "description": "Total bytes written across all attempted atoms.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failed_atom_bytes_written": {
+          "description": "Bytes written for the failed atom; nonzero means application may be partial.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failed_atom_index": {
+          "description": "Zero-based atom whose write failed.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failed_operation_id": {
+          "description": "Caller-owned operation identifier for the failed atom.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "first_intent_event_seq": {
+          "description": "First canonical input-intent event in the attempted prefix.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "last_result_event_seq": {
+          "description": "Canonical failed input-result event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resume_from_atom_index": {
+          "description": "First atom not attempted; only this suffix is safe to submit independently.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sequence_id": {
+          "description": "Caller-owned sequence request identifier.",
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sequence_id",
+        "atom_count",
+        "atoms_applied",
+        "failed_atom_index",
+        "failed_operation_id",
+        "bytes_written",
+        "failed_atom_bytes_written",
+        "first_intent_event_seq",
+        "last_result_event_seq",
+        "resume_from_atom_index"
+      ],
+      "type": "object"
     },
     "ModeState": {
       "description": "Terminal modes relevant to presentation and input.",

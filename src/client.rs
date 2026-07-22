@@ -4,7 +4,7 @@ use std::{
     ffi::OsString,
     fs::OpenOptions,
     io::Write as _,
-    os::unix::fs::OpenOptionsExt as _,
+    os::unix::{ffi::OsStrExt as _, fs::OpenOptionsExt as _},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
@@ -17,8 +17,8 @@ use crate::{
     Error, Result,
     analysis::{DiagnoseReport, DiagnosticCheck, ExplainReport, diagnose, explain},
     control::{
-        ControlCommand, ControlData, ControlRequest, PointerOperation, ScreenPredicate,
-        StableCaptureQuality, send_request,
+        CONTROL_SOCKET_NAME, ControlCommand, ControlData, ControlRequest, PointerOperation,
+        ScreenPredicate, StableCaptureQuality, send_request,
     },
     diff::{SemanticDiff, diff_states},
     environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},
@@ -172,7 +172,14 @@ impl SessionBuilder {
         let path = self
             .terminal
             .evidence_root
-            .join(format!("{}.termtrace", Uuid::now_v7()));
+            .join(format!("{}.tt", Uuid::now_v7().simple()));
+        let control_path = path.join(CONTROL_SOCKET_NAME);
+        if control_path.as_os_str().as_bytes().len() >= 108 {
+            return Err(client_error(format!(
+                "evidence root is too long for a Linux control socket; choose a shorter root than `{}`",
+                self.terminal.evidence_root.display()
+            )));
+        }
         let log_path = self
             .terminal
             .evidence_root

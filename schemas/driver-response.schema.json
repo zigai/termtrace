@@ -574,6 +574,73 @@
         },
         {
           "additionalProperties": false,
+          "description": "Complete result of one admission-guarded input sequence.",
+          "properties": {
+            "atom_count": {
+              "description": "Number of atoms applied completely.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "atoms": {
+              "description": "Optional per-atom outcomes requested by an explicit verbose caller.",
+              "items": {
+                "$ref": "#/$defs/InputSequenceAtomOutcome"
+              },
+              "type": "array"
+            },
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed positions after complete application."
+            },
+            "bytes_written": {
+              "description": "Total exact PTY bytes written across every atom.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "first_intent_event_seq": {
+              "description": "First canonical input-intent event in the sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "input_sequence_applied",
+              "type": "string"
+            },
+            "last_result_event_seq": {
+              "description": "Last canonical input-result event in the sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pace_ns": {
+              "description": "Requested delay between atoms.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "sequence_id": {
+              "description": "Canonical sequence identifier (the caller request ID).",
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "sequence_id",
+            "atom_count",
+            "bytes_written",
+            "first_intent_event_seq",
+            "last_result_event_seq",
+            "pace_ns",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Successful semantic input request that correctly emitted no bytes.",
           "properties": {
             "boundaries": {
@@ -1034,6 +1101,41 @@
         }
       ]
     },
+    "ControlErrorDetails": {
+      "additionalProperties": false,
+      "description": "Structured actor context attached to a rejected or incomplete request.",
+      "properties": {
+        "boundaries": {
+          "$ref": "#/$defs/ActorBoundaries",
+          "description": "Durable and observed source positions at the failure boundary."
+        },
+        "current_presented_state_hash": {
+          "description": "Latest presented-state hash at the actor ordering point.",
+          "type": "string"
+        },
+        "input_sequence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InputSequenceFailureDetails"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact attempted prefix when an admitted input sequence stopped early."
+        },
+        "scope": {
+          "description": "Exact output or mutation scope covered by these details.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "current_presented_state_hash",
+        "boundaries",
+        "scope"
+      ],
+      "type": "object"
+    },
     "CursorState": {
       "description": "Cursor state at one semantic boundary.",
       "properties": {
@@ -1139,6 +1241,17 @@
         "format": {
           "description": "Stable report format.",
           "type": "string"
+        },
+        "output_page": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputPage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Page coordinates when CLI output intentionally contains a bounded subset."
         },
         "session_id": {
           "description": "Canonical session identity.",
@@ -1759,6 +1872,17 @@
             "code": {
               "description": "Machine-readable code.",
               "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ControlErrorDetails"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Actor-provided ordering or attempted-prefix details when available."
             },
             "evidence": {
               "description": "Canonical evidence path when known.",
@@ -2732,6 +2856,124 @@
         }
       ]
     },
+    "InputSequenceAtomOutcome": {
+      "additionalProperties": false,
+      "description": "Canonical result coordinates for one atom in a successful input sequence.",
+      "properties": {
+        "bytes_written": {
+          "description": "Exact number of PTY bytes written.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "input_kind": {
+          "$ref": "#/$defs/InputKind",
+          "description": "Semantic category retained in canonical evidence."
+        },
+        "intent_event_seq": {
+          "description": "Canonical input-intent event sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "operation_id": {
+          "description": "Caller-owned operation identifier for this atom.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "result_event_seq": {
+          "description": "Canonical input-result event sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "operation_id",
+        "input_kind",
+        "bytes_written",
+        "intent_event_seq",
+        "result_event_seq"
+      ],
+      "type": "object"
+    },
+    "InputSequenceFailureDetails": {
+      "additionalProperties": false,
+      "description": "Recoverable accounting for an input sequence that stopped during PTY delivery.",
+      "properties": {
+        "atom_count": {
+          "description": "Total number of requested atoms.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "atoms_applied": {
+          "description": "Number of preceding atoms applied completely.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "bytes_written": {
+          "description": "Total bytes written across all attempted atoms.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failed_atom_bytes_written": {
+          "description": "Bytes written for the failed atom; nonzero means application may be partial.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failed_atom_index": {
+          "description": "Zero-based atom whose write failed.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failed_operation_id": {
+          "description": "Caller-owned operation identifier for the failed atom.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "first_intent_event_seq": {
+          "description": "First canonical input-intent event in the attempted prefix.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "last_result_event_seq": {
+          "description": "Canonical failed input-result event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resume_from_atom_index": {
+          "description": "First atom not attempted; only this suffix is safe to submit independently.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sequence_id": {
+          "description": "Caller-owned sequence request identifier.",
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sequence_id",
+        "atom_count",
+        "atoms_applied",
+        "failed_atom_index",
+        "failed_operation_id",
+        "bytes_written",
+        "failed_atom_bytes_written",
+        "first_intent_event_seq",
+        "last_result_event_seq",
+        "resume_from_atom_index"
+      ],
+      "type": "object"
+    },
     "InputSource": {
       "description": "Origin of bytes sent to the child process.",
       "oneOf": [
@@ -3157,6 +3399,59 @@
           "type": "string"
         }
       ]
+    },
+    "OutputPage": {
+      "additionalProperties": false,
+      "description": "Deterministic page coordinates for one ordered collection.",
+      "properties": {
+        "limit": {
+          "description": "Requested maximum, or none when every remaining item was requested.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "next_offset": {
+          "description": "Offset for the next page when more items remain.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "offset": {
+          "description": "Effective zero-based offset, clamped to the collection length.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "returned": {
+          "description": "Number of items included in this response.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total": {
+          "description": "Complete matching collection length before pagination.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "description": "Whether more matching items remain after this page.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "offset",
+        "total",
+        "returned",
+        "truncated"
+      ],
+      "type": "object"
     },
     "ResourceLimitKind": {
       "description": "Canonical resource-limit kinds with implemented completion semantics.",
@@ -4016,6 +4311,25 @@
         },
         {
           "additionalProperties": false,
+          "description": "Exact content-addressed semantic state hash.",
+          "properties": {
+            "selector": {
+              "const": "state_hash",
+              "type": "string"
+            },
+            "state_hash": {
+              "description": "BLAKE3 hash of canonical semantic state JSON.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "state_hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Latest state at or before an event sequence.",
           "properties": {
             "event_seq": {
@@ -4548,6 +4862,17 @@
         "mutation_journal_status": {
           "$ref": "#/$defs/MutationJournalStatus",
           "description": "State of the disposable mutation deduplication acceleration journal."
+        },
+        "output_page": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputPage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Page coordinates when CLI output intentionally contains a bounded subset."
         },
         "session": {
           "description": "Canonical session directory checked by the verifier.",

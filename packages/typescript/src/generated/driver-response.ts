@@ -615,7 +615,39 @@ export interface DriverResponse {
                     result_event_seq: number;
                   }
                 | {
+                    /**
+                     * Number of atoms applied completely.
+                     */
+                    atom_count: number;
+                    /**
+                     * Optional per-atom outcomes requested by an explicit verbose caller.
+                     */
+                    atoms?: InputSequenceAtomOutcome[];
                     boundaries: ActorBoundaries2;
+                    /**
+                     * Total exact PTY bytes written across every atom.
+                     */
+                    bytes_written: number;
+                    /**
+                     * First canonical input-intent event in the sequence.
+                     */
+                    first_intent_event_seq: number;
+                    kind: "input_sequence_applied";
+                    /**
+                     * Last canonical input-result event in the sequence.
+                     */
+                    last_result_event_seq: number;
+                    /**
+                     * Requested delay between atoms.
+                     */
+                    pace_ns: number;
+                    /**
+                     * Canonical sequence identifier (the caller request ID).
+                     */
+                    sequence_id: string;
+                  }
+                | {
+                    boundaries: ActorBoundaries3;
                     /**
                      * Semantic input category.
                      */
@@ -631,7 +663,7 @@ export interface DriverResponse {
                     terminal_modes_hash: string;
                   }
                 | {
-                    boundaries: ActorBoundaries3;
+                    boundaries: ActorBoundaries4;
                     /**
                      * Number of bytes written completely.
                      */
@@ -679,7 +711,7 @@ export interface DriverResponse {
                     text: string;
                   }
                 | {
-                    boundaries: ActorBoundaries4;
+                    boundaries: ActorBoundaries5;
                     kind: "status";
                     /**
                      * Child process identifier when available.
@@ -687,7 +719,7 @@ export interface DriverResponse {
                     pid?: number | null;
                   }
                 | {
-                    boundaries: ActorBoundaries5;
+                    boundaries: ActorBoundaries6;
                     /**
                      * Terminal columns.
                      */
@@ -732,7 +764,7 @@ export interface DriverResponse {
                     viewport_text: string;
                   }
                 | {
-                    boundaries: ActorBoundaries6;
+                    boundaries: ActorBoundaries7;
                     /**
                      * Terminal columns.
                      */
@@ -785,7 +817,7 @@ export interface DriverResponse {
                     viewport_text: string;
                   }
                 | {
-                    boundaries: ActorBoundaries7;
+                    boundaries: ActorBoundaries8;
                     /**
                      * Whether immutable child completion made the final matching state stable.
                      */
@@ -972,7 +1004,7 @@ export interface DriverResponse {
                     state_hash: string;
                   }
                 | {
-                    boundaries: ActorBoundaries8;
+                    boundaries: ActorBoundaries9;
                     /**
                      * Canonical event sequence containing the marker.
                      */
@@ -1076,6 +1108,10 @@ export interface DriverResponse {
          */
         code: string;
         /**
+         * Actor-provided ordering or attempted-prefix details when available.
+         */
+        details?: ControlErrorDetails | null;
+        /**
          * Canonical evidence path when known.
          */
         evidence?: string | null;
@@ -1147,30 +1183,62 @@ export interface ActorBoundaries1 {
   observed: CanonicalBoundary1;
 }
 /**
- * Durable and observed positions at evaluation.
+ * Canonical result coordinates for one atom in a successful input sequence.
+ */
+export interface InputSequenceAtomOutcome {
+  /**
+   * Exact number of PTY bytes written.
+   */
+  bytes_written: number;
+  /**
+   * Semantic category retained in canonical evidence.
+   */
+  input_kind: "raw" | "text" | "keys" | "paste" | "focus" | "pointer";
+  /**
+   * Canonical input-intent event sequence.
+   */
+  intent_event_seq: number;
+  /**
+   * Caller-owned operation identifier for this atom.
+   */
+  operation_id: string;
+  /**
+   * Canonical input-result event sequence.
+   */
+  result_event_seq: number;
+}
+/**
+ * Durable and observed positions after complete application.
  */
 export interface ActorBoundaries2 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
 /**
- * Durable and observed positions after application.
+ * Durable and observed positions at evaluation.
  */
 export interface ActorBoundaries3 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
 /**
- * Durable and observed canonical positions at status evaluation.
+ * Durable and observed positions after application.
  */
 export interface ActorBoundaries4 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
 /**
- * Durable and observed source boundaries at observation time.
+ * Durable and observed canonical positions at status evaluation.
  */
 export interface ActorBoundaries5 {
+  durable: CanonicalBoundary;
+  observed: CanonicalBoundary1;
+}
+/**
+ * Durable and observed source boundaries at observation time.
+ */
+export interface ActorBoundaries6 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
@@ -1221,7 +1289,7 @@ export interface TerminalMode {
 /**
  * Actor-consistent canonical source boundaries for this exact state.
  */
-export interface ActorBoundaries6 {
+export interface ActorBoundaries7 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
@@ -1254,7 +1322,7 @@ export interface ModeState1 {
 /**
  * Actor-consistent canonical source boundaries.
  */
-export interface ActorBoundaries7 {
+export interface ActorBoundaries8 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
@@ -1303,7 +1371,7 @@ export interface ScreenRegion1 {
 /**
  * Durable and observed canonical positions after the marker.
  */
-export interface ActorBoundaries8 {
+export interface ActorBoundaries9 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
@@ -1511,6 +1579,13 @@ export interface Observation {
          * Exact semantic state identifier.
          */
         state_id: number;
+      }
+    | {
+        selector: "state_hash";
+        /**
+         * BLAKE3 hash of canonical semantic state JSON.
+         */
+        state_hash: string;
       }
     | {
         /**
@@ -2526,6 +2601,13 @@ export interface DiffEndpoint {
         state_id: number;
       }
     | {
+        selector: "state_hash";
+        /**
+         * BLAKE3 hash of canonical semantic state JSON.
+         */
+        state_hash: string;
+      }
+    | {
         /**
          * Canonical event sequence.
          */
@@ -2873,6 +2955,13 @@ export interface DiffEndpoint1 {
         state_id: number;
       }
     | {
+        selector: "state_hash";
+        /**
+         * BLAKE3 hash of canonical semantic state JSON.
+         */
+        state_hash: string;
+      }
+    | {
         /**
          * Canonical event sequence.
          */
@@ -2926,6 +3015,10 @@ export interface DiagnoseReport {
    * Stable report format.
    */
   format: string;
+  /**
+   * Page coordinates when CLI output intentionally contains a bounded subset.
+   */
+  output_page?: OutputPage | null;
   /**
    * Canonical session identity.
    */
@@ -2996,6 +3089,35 @@ export interface NativeCorrelation {
    * Related semantic state.
    */
   state_id: number;
+}
+/**
+ * Deterministic page coordinates for one ordered collection.
+ */
+export interface OutputPage {
+  /**
+   * Requested maximum, or none when every remaining item was requested.
+   */
+  limit?: number | null;
+  /**
+   * Offset for the next page when more items remain.
+   */
+  next_offset?: number | null;
+  /**
+   * Effective zero-based offset, clamped to the collection length.
+   */
+  offset: number;
+  /**
+   * Number of items included in this response.
+   */
+  returned: number;
+  /**
+   * Complete matching collection length before pagination.
+   */
+  total: number;
+  /**
+   * Whether more matching items remain after this page.
+   */
+  truncated: boolean;
 }
 /**
  * Stable JSONL projection of one canonical event record.
@@ -3093,6 +3215,10 @@ export interface VerificationReport {
    * State of the disposable mutation deduplication acceleration journal.
    */
   mutation_journal_status: "missing" | "verified" | "invalid";
+  /**
+   * Page coordinates when CLI output intentionally contains a bounded subset.
+   */
+  output_page?: OutputPage | null;
   /**
    * Canonical session directory checked by the verifier.
    */
@@ -3216,4 +3342,74 @@ export interface ArtifactMember {
    * Sensitivity classification.
    */
   sensitivity: "sensitive_terminal_data" | "operational_metadata";
+}
+/**
+ * Structured actor context attached to a rejected or incomplete request.
+ */
+export interface ControlErrorDetails {
+  boundaries: ActorBoundaries10;
+  /**
+   * Latest presented-state hash at the actor ordering point.
+   */
+  current_presented_state_hash: string;
+  /**
+   * Exact attempted prefix when an admitted input sequence stopped early.
+   */
+  input_sequence?: InputSequenceFailureDetails | null;
+  /**
+   * Exact output or mutation scope covered by these details.
+   */
+  scope: string;
+}
+/**
+ * Durable and observed source positions at the failure boundary.
+ */
+export interface ActorBoundaries10 {
+  durable: CanonicalBoundary;
+  observed: CanonicalBoundary1;
+}
+/**
+ * Recoverable accounting for an input sequence that stopped during PTY delivery.
+ */
+export interface InputSequenceFailureDetails {
+  /**
+   * Total number of requested atoms.
+   */
+  atom_count: number;
+  /**
+   * Number of preceding atoms applied completely.
+   */
+  atoms_applied: number;
+  /**
+   * Total bytes written across all attempted atoms.
+   */
+  bytes_written: number;
+  /**
+   * Bytes written for the failed atom; nonzero means application may be partial.
+   */
+  failed_atom_bytes_written: number;
+  /**
+   * Zero-based atom whose write failed.
+   */
+  failed_atom_index: number;
+  /**
+   * Caller-owned operation identifier for the failed atom.
+   */
+  failed_operation_id: string;
+  /**
+   * First canonical input-intent event in the attempted prefix.
+   */
+  first_intent_event_seq: number;
+  /**
+   * Canonical failed input-result event.
+   */
+  last_result_event_seq: number;
+  /**
+   * First atom not attempted; only this suffix is safe to submit independently.
+   */
+  resume_from_atom_index: number;
+  /**
+   * Caller-owned sequence request identifier.
+   */
+  sequence_id: string;
 }

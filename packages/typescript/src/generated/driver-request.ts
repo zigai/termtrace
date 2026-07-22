@@ -157,6 +157,72 @@ export type ScreenPredicate =
       predicates: ScreenPredicate[];
     };
 /**
+ * One input atom accepted inside an admission-guarded sequence.
+ */
+export type InputSequenceAtom =
+  | {
+      /**
+       * Bytes encoded as Base64 in JSON.
+       */
+      data: string;
+      input: "bytes";
+      /**
+       * Semantic category retained in canonical evidence.
+       */
+      input_kind: "raw" | "text" | "keys" | "paste" | "focus" | "pointer";
+      /**
+       * Optional human-readable intent.
+       */
+      intent?: string | null;
+      /**
+       * Caller-owned operation identifier retained in canonical events.
+       */
+      operation_id: string;
+    }
+  | {
+      input: "key";
+      /**
+       * Layout-independent key.
+       */
+      key:
+        | "enter"
+        | "escape"
+        | "tab"
+        | "backspace"
+        | "delete"
+        | "insert"
+        | "home"
+        | "end"
+        | "page_up"
+        | "page_down"
+        | "arrow_up"
+        | "arrow_down"
+        | "arrow_left"
+        | "arrow_right"
+        | {
+            function: number;
+          }
+        | {
+            letter: string;
+          };
+      modifiers: KeyModifiers;
+      /**
+       * Caller-owned operation identifier retained in canonical events.
+       */
+      operation_id: string;
+    }
+  | {
+      /**
+       * Paste content before mode-dependent encoding.
+       */
+      data: string;
+      input: "paste";
+      /**
+       * Caller-owned operation identifier retained in canonical events.
+       */
+      operation_id: string;
+    };
+/**
  * Stable detector selectable by `diagnose --check`.
  */
 export type DiagnosticCheck = "full_redraw" | "transient" | "dirty" | "cursor" | "modes" | "palette" | "query_loop";
@@ -407,6 +473,21 @@ export interface DriverRequest {
               intent?: string | null;
             }
           | {
+              /**
+               * Ordered input atoms resolved against the actor state at admission.
+               */
+              atoms: InputSequenceAtom[];
+              command: "input_sequence";
+              /**
+               * Retain per-atom identifiers and canonical event positions in the response.
+               */
+              include_atom_outcomes: boolean;
+              /**
+               * Delay between atoms, bounded together with the atom count.
+               */
+              pace_ns: number;
+            }
+          | {
               command: "key";
               /**
                * Layout-independent key.
@@ -432,7 +513,7 @@ export interface DriverRequest {
                 | {
                     letter: string;
                   };
-              modifiers: KeyModifiers;
+              modifiers: KeyModifiers1;
             }
           | {
               command: "paste";
@@ -641,6 +722,13 @@ export interface DriverRequest {
               state_id: number;
             }
           | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of canonical semantic state JSON.
+               */
+              state_hash: string;
+            }
+          | {
               /**
                * Canonical event sequence.
                */
@@ -693,6 +781,13 @@ export interface DriverRequest {
               state_id: number;
             }
           | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of canonical semantic state JSON.
+               */
+              state_hash: string;
+            }
+          | {
               /**
                * Canonical event sequence.
                */
@@ -731,6 +826,13 @@ export interface DriverRequest {
                * Exact semantic state identifier.
                */
               state_id: number;
+            }
+          | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of canonical semantic state JSON.
+               */
+              state_hash: string;
             }
           | {
               /**
@@ -811,6 +913,13 @@ export interface DriverRequest {
                * Exact semantic state identifier.
                */
               state_id: number;
+            }
+          | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of canonical semantic state JSON.
+               */
+              state_hash: string;
             }
           | {
               /**
@@ -966,6 +1075,28 @@ export interface ScreenRegion1 {
  * Typed modifier state.
  */
 export interface KeyModifiers {
+  /**
+   * Alt modifier.
+   */
+  alt: boolean;
+  /**
+   * Control modifier.
+   */
+  control: boolean;
+  /**
+   * Shift modifier.
+   */
+  shift: boolean;
+  /**
+   * Super modifier.
+   */
+  super_key: boolean;
+  [k: string]: unknown;
+}
+/**
+ * Typed modifier state.
+ */
+export interface KeyModifiers1 {
   /**
    * Alt modifier.
    */

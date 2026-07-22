@@ -356,6 +356,30 @@
       ],
       "type": "object"
     },
+    "ExplainOutputPage": {
+      "additionalProperties": false,
+      "description": "Independent page coordinates for each ordered explain collection.",
+      "properties": {
+        "findings": {
+          "$ref": "#/$defs/OutputPage",
+          "description": "Deterministic-finding page."
+        },
+        "states": {
+          "$ref": "#/$defs/OutputPage",
+          "description": "Semantic-state page."
+        },
+        "tokens": {
+          "$ref": "#/$defs/OutputPage",
+          "description": "Lossless VT-token page."
+        }
+      },
+      "required": [
+        "tokens",
+        "states",
+        "findings"
+      ],
+      "type": "object"
+    },
     "FindingConfidence": {
       "description": "Conservative confidence label for a derived finding.",
       "oneOf": [
@@ -404,6 +428,59 @@
         "wraparound",
         "bracketed_paste",
         "values"
+      ],
+      "type": "object"
+    },
+    "OutputPage": {
+      "additionalProperties": false,
+      "description": "Deterministic page coordinates for one ordered collection.",
+      "properties": {
+        "limit": {
+          "description": "Requested maximum, or none when every remaining item was requested.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "next_offset": {
+          "description": "Offset for the next page when more items remain.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "offset": {
+          "description": "Effective zero-based offset, clamped to the collection length.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "returned": {
+          "description": "Number of items included in this response.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total": {
+          "description": "Complete matching collection length before pagination.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "description": "Whether more matching items remain after this page.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "offset",
+        "total",
+        "returned",
+        "truncated"
       ],
       "type": "object"
     },
@@ -592,6 +669,25 @@
           "required": [
             "selector",
             "state_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact content-addressed semantic state hash.",
+          "properties": {
+            "selector": {
+              "const": "state_hash",
+              "type": "string"
+            },
+            "state_hash": {
+              "description": "BLAKE3 hash of canonical semantic state JSON.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "state_hash"
           ],
           "type": "object"
         },
@@ -927,6 +1023,17 @@
         "$ref": "#/$defs/ExplainFinding"
       },
       "type": "array"
+    },
+    "output_page": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExplainOutputPage"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Page coordinates when CLI output intentionally contains bounded subsets."
     },
     "session_id": {
       "description": "Canonical session identity.",

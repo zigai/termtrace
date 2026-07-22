@@ -12,7 +12,7 @@ use crate::{
         TerminalMetadata,
     },
     observation::StatePoint,
-    replay::{StateInspection, StateSelector, inspect},
+    replay::{StateInspection, StateSelector, inspect, inspect_many},
 };
 
 /// Stable identity for one semantic diff endpoint.
@@ -103,8 +103,27 @@ pub struct SemanticDiff {
 ///
 /// Returns an error when either selector is missing/ambiguous or replay fails.
 pub fn diff_states(log: &EventLog, from: StatePoint, to: StatePoint) -> Result<SemanticDiff> {
-    let from_inspection = inspect_point(log, &from)?;
-    let to_inspection = inspect_point(log, &to)?;
+    let (difference, _, _) = diff_states_with_semantic_states(log, from, to)?;
+    return Ok(difference);
+}
+
+/// Compare two points and retain both complete endpoint states from the same replay.
+///
+/// # Errors
+///
+/// Returns an error when either selector is missing/ambiguous or replay fails.
+pub fn diff_states_with_semantic_states(
+    log: &EventLog,
+    from: StatePoint,
+    to: StatePoint,
+) -> Result<(SemanticDiff, SemanticState, SemanticState)> {
+    let mut inspections = inspect_points(log, &[from.clone(), to.clone()])?;
+    let to_inspection = inspections
+        .pop()
+        .ok_or_else(|| return diff_error("missing later diff endpoint"))?;
+    let from_inspection = inspections
+        .pop()
+        .ok_or_else(|| return diff_error("missing earlier diff endpoint"))?;
     let rows = changed_rows(&from_inspection.state, &to_inspection.state);
     let geometry = changed(
         (from_inspection.state.cols, from_inspection.state.rows),
@@ -142,7 +161,7 @@ pub fn diff_states(log: &EventLog, from: StatePoint, to: StatePoint) -> Result<S
         || metadata.is_some()
         || presented.is_some()
         || !rows.is_empty();
-    return Ok(SemanticDiff {
+    let difference = SemanticDiff {
         from: endpoint(from, &from_inspection),
         to: endpoint(to, &to_inspection),
         changed: any_changed,
@@ -154,7 +173,8 @@ pub fn diff_states(log: &EventLog, from: StatePoint, to: StatePoint) -> Result<S
         metadata,
         presented,
         rows,
-    });
+    };
+    return Ok((difference, from_inspection.state, to_inspection.state));
 }
 
 /// Resolve one shared state point against a canonical event log.
@@ -163,14 +183,32 @@ pub fn diff_states(log: &EventLog, from: StatePoint, to: StatePoint) -> Result<S
 ///
 /// Returns an error when replay fails or a marker is missing/ambiguous.
 pub fn inspect_point(log: &EventLog, point: &StatePoint) -> Result<StateInspection> {
-    let selector = match point {
+    let selector = state_selector(log, point)?;
+    return inspect(log, selector);
+}
+
+/// Resolve several shared state points in one canonical replay.
+///
+/// # Errors
+///
+/// Returns an error when replay fails or any marker/selector cannot resolve.
+pub fn inspect_points(log: &EventLog, points: &[StatePoint]) -> Result<Vec<StateInspection>> {
+    let selectors = points
+        .iter()
+        .map(|point| return state_selector(log, point))
+        .collect::<Result<Vec<_>>>()?;
+    return inspect_many(log, &selectors);
+}
+
+fn state_selector(log: &EventLog, point: &StatePoint) -> Result<StateSelector> {
+    return Ok(match point {
         StatePoint::LatestPresented => StateSelector::LatestPresented,
         StatePoint::StateId { state_id } => StateSelector::StateId(*state_id),
+        StatePoint::StateHash { state_hash } => StateSelector::StateHash(state_hash.clone()),
         StatePoint::EventSeq { event_seq } => StateSelector::EventSeq(*event_seq),
         StatePoint::MonotonicNs { monotonic_ns } => StateSelector::MonotonicNs(*monotonic_ns),
         StatePoint::Marker { label } => StateSelector::EventSeq(unique_marker(log, label)?),
-    };
-    return inspect(log, selector);
+    });
 }
 
 fn unique_marker(log: &EventLog, label: &str) -> Result<u64> {

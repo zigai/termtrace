@@ -11,11 +11,11 @@ use uuid::Uuid;
 
 use crate::{
     Error, Result,
-    diff::inspect_point,
     event::Event,
     event_log::EventLog,
     ghostty_vt::{CursorState, DirtyState},
     observation::StatePoint,
+    pagination::OutputPage,
     replay::{StateRecord, replay},
     visual::{VideoMapEntry, VisualManifest},
     vt_framer::{VtToken, frame_event_log},
@@ -67,6 +67,21 @@ pub struct ExplainReport {
     pub states: Vec<StateRecord>,
     /// Conservative deterministic findings.
     pub findings: Vec<ExplainFinding>,
+    /// Page coordinates when CLI output intentionally contains bounded subsets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_page: Option<ExplainOutputPage>,
+}
+
+/// Independent page coordinates for each ordered explain collection.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExplainOutputPage {
+    /// Lossless VT-token page.
+    pub tokens: OutputPage,
+    /// Semantic-state page.
+    pub states: OutputPage,
+    /// Deterministic-finding page.
+    pub findings: OutputPage,
 }
 
 /// Stable detector selectable by `diagnose --check`.
@@ -175,6 +190,9 @@ pub struct DiagnoseReport {
     pub broad_change_fraction: String,
     /// Deterministic findings.
     pub findings: Vec<DiagnosticFinding>,
+    /// Page coordinates when CLI output intentionally contains a bounded subset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_page: Option<OutputPage>,
 }
 
 /// Run conservative detectors across a completed canonical session.
@@ -261,6 +279,7 @@ pub fn diagnose(
         checks,
         broad_change_fraction: format!("{broad_change_percent}/100"),
         findings: detected,
+        output_page: None,
     });
 }
 
@@ -270,8 +289,9 @@ pub fn diagnose(
 ///
 /// Returns an error when the target cannot resolve or replay/framing fails.
 pub fn explain(log: &EventLog, target: StatePoint, context_events: u64) -> Result<ExplainReport> {
-    let target_inspection = inspect_point(log, &target)?;
-    let target_event = target_inspection.record.event_seq.unwrap_or(0);
+    let replayed = replay(log)?;
+    let target_state = resolve_target_record(log, &replayed.states, &target)?.clone();
+    let target_event = target_state.event_seq.unwrap_or(0);
     let start_event = target_event.saturating_sub(context_events);
     let end_event = target_event.saturating_add(context_events);
     let tokens = frame_event_log(log)?
@@ -282,7 +302,7 @@ pub fn explain(log: &EventLog, target: StatePoint, context_events: u64) -> Resul
             });
         })
         .collect::<Vec<_>>();
-    let states = replay(log)?
+    let states = replayed
         .states
         .into_iter()
         .filter(|state| {
@@ -311,12 +331,57 @@ pub fn explain(log: &EventLog, target: StatePoint, context_events: u64) -> Resul
         source_final_event_hash,
         source_event_count,
         target,
-        target_state: target_inspection.record,
+        target_state,
         context_events,
         tokens,
         states,
         findings,
+        output_page: None,
     });
+}
+
+fn resolve_target_record<'states>(
+    log: &EventLog,
+    states: &'states [StateRecord],
+    target: &StatePoint,
+) -> Result<&'states StateRecord> {
+    let marker_event = if let StatePoint::Marker { label } = target {
+        let mut matches = log.events.iter().filter(|record| {
+            return matches!(&record.event, Event::Marker { label: value, .. } if value == label);
+        });
+        let event_seq = matches
+            .next()
+            .map(|record| return record.seq)
+            .ok_or_else(|| return analysis_error("marker does not exist"))?;
+        if matches.next().is_some() {
+            return Err(analysis_error("marker label is ambiguous"));
+        }
+        Some(event_seq)
+    } else {
+        None
+    };
+    return states
+        .iter()
+        .rev()
+        .find(|state| match target {
+            StatePoint::LatestPresented => return state.presented,
+            StatePoint::StateId { state_id } => return state.state_id == *state_id,
+            StatePoint::StateHash { state_hash } => return state.state_hash == *state_hash,
+            StatePoint::EventSeq { event_seq } => {
+                return state
+                    .event_seq
+                    .is_none_or(|value| return value <= *event_seq);
+            }
+            StatePoint::MonotonicNs { monotonic_ns } => {
+                return state.monotonic_ns <= *monotonic_ns;
+            }
+            StatePoint::Marker { .. } => {
+                return state
+                    .event_seq
+                    .is_none_or(|value| return value <= marker_event.unwrap_or(0));
+            }
+        })
+        .ok_or_else(|| return analysis_error("no semantic state matches the target selector"));
 }
 
 fn detect_redundant_full_redraw(states: &[StateRecord], findings: &mut Vec<DiagnosticFinding>) {
@@ -819,4 +884,10 @@ fn findings(tokens: &[VtToken], states: &[StateRecord]) -> Vec<ExplainFinding> {
         });
     }
     return findings;
+}
+
+fn analysis_error(reason: impl Into<String>) -> Error {
+    return Error::InvalidReplay {
+        reason: reason.into(),
+    };
 }

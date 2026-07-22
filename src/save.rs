@@ -8,12 +8,13 @@ use uuid::Uuid;
 use crate::{
     Error, Result,
     artifact::{commit_directory, create_private_directory, sync_directory, write_secure},
-    diff::inspect_point,
     event::ByteString,
     event_log::EventLog,
     ghostty_vt::Format,
-    observation::{StatePoint, observe_session_with_options},
-    replay::{StateSelector, format_state},
+    observation::{
+        ObservationResolution, StatePoint, completed_observation_from_inspection, state_selector,
+    },
+    replay::{inspect_many, inspect_with_formats},
     semantic_image::{
         SEMANTIC_FONT_BYTES, SEMANTIC_FONT_FAMILY, SEMANTIC_FONT_SOURCE, SEMANTIC_PNG_RENDERER,
         SEMANTIC_SVG_RENDERER, render_png, render_svg, semantic_font_hash,
@@ -181,22 +182,35 @@ pub fn save(
     let log = EventLog::read(canonical.join("events.jsonl"))?;
     let completion = validate_completed_log(&canonical, &log)?;
     let manifest = read_manifest(&canonical)?;
-    let observation = observe_session_with_options(&canonical, point.clone(), include_hidden)?;
-    let inspection = inspect_point(&log, &point)?;
-    if observation.state_hash != inspection.record.state_hash {
+    let engine_formats = formats
+        .iter()
+        .filter_map(|format| match format {
+            SaveFormat::Vt => return Some(Format::Vt),
+            SaveFormat::Html => return Some(Format::Html),
+            _ => return None,
+        })
+        .collect::<Vec<_>>();
+    let selector = state_selector(&log, &point)?;
+    let (inspection, rendered) = inspect_with_formats(&log, selector, &engine_formats)?;
+    if !inspection.record.presented && !include_hidden {
         return Err(save_error(
-            "observation and deep replay resolved different states",
+            "selected semantic state is hidden; pass explicit hidden-state permission",
         ));
     }
+    let observation = completed_observation_from_inspection(
+        &canonical,
+        manifest.session_id,
+        point.clone(),
+        &completion,
+        &inspection,
+        ObservationResolution::CanonicalReplay,
+    )?;
     let parent = destination
         .parent()
         .ok_or_else(|| return save_error("save path has no parent"))?;
     let name = destination
         .file_name()
         .ok_or_else(|| return save_error("save path has no basename"))?;
-    if !parent.is_dir() {
-        return Err(save_error("save parent directory does not exist"));
-    }
     let staging = parent.join(format!(
         ".{}.{}.tmp",
         name.to_string_lossy(),
@@ -231,22 +245,14 @@ pub fn save(
                 SaveFormat::Vt => (
                     "screen.vt",
                     "application/vnd.termtrace.vt",
-                    format_state(
-                        &log,
-                        StateSelector::StateId(inspection.record.state_id),
-                        Format::Vt,
-                    )?,
+                    rendered_format(&rendered, Format::Vt)?,
                     Some("semantic"),
                     Some("pinned-libghostty-vt-formatter"),
                 ),
                 SaveFormat::Html => (
                     "screen.html",
                     "text/html; charset=utf-8",
-                    format_state(
-                        &log,
-                        StateSelector::StateId(inspection.record.state_id),
-                        Format::Html,
-                    )?,
+                    rendered_format(&rendered, Format::Html)?,
                     Some("semantic"),
                     Some("pinned-libghostty-vt-formatter"),
                 ),
@@ -291,18 +297,7 @@ pub fn save(
                 .iter()
                 .any(|format| matches!(format, SaveFormat::Svg | SaveFormat::Png))
             {
-                vec![SemanticImageResource {
-                    font_family: SEMANTIC_FONT_FAMILY.to_owned(),
-                    font_source: SEMANTIC_FONT_SOURCE.to_owned(),
-                    font_byte_count: u64::try_from(SEMANTIC_FONT_BYTES.len()).unwrap_or(u64::MAX),
-                    font_blake3: semantic_font_hash(),
-                    fallback_policy: "bundled_font_only_missing_glyph_box".to_owned(),
-                    font_size: 16,
-                    cell_width: 10,
-                    cell_height: 20,
-                    padding: 0,
-                    background_policy: "opaque_terminal_background".to_owned(),
-                }]
+                semantic_image_resources()
             } else {
                 Vec::new()
             },
@@ -348,15 +343,35 @@ pub fn save_screenshot_batch(
             "screenshot batches require at least one point and an SVG or PNG format",
         ));
     }
+    let canonical = session.canonicalize().map_err(|source| {
+        return Error::Filesystem {
+            path: session.to_path_buf(),
+            source,
+        };
+    })?;
+    let log = EventLog::read(canonical.join("events.jsonl"))?;
+    let completion = validate_completed_log(&canonical, &log)?;
+    let source_manifest = read_manifest(&canonical)?;
+    let selectors = points
+        .iter()
+        .map(|point| return state_selector(&log, point))
+        .collect::<Result<Vec<_>>>()?;
+    let inspections = inspect_many(&log, &selectors)?;
+    if !include_hidden
+        && inspections
+            .iter()
+            .any(|inspection| return !inspection.record.presented)
+    {
+        return Err(save_error(
+            "selected semantic state is hidden; pass explicit hidden-state permission",
+        ));
+    }
     let parent = destination
         .parent()
         .ok_or_else(|| return save_error("batch path has no parent"))?;
     let name = destination
         .file_name()
         .ok_or_else(|| return save_error("batch path has no basename"))?;
-    if !parent.is_dir() {
-        return Err(save_error("batch parent directory does not exist"));
-    }
     let staging = parent.join(format!(
         ".{}.{}.tmp",
         name.to_string_lossy(),
@@ -370,19 +385,53 @@ pub fn save_screenshot_batch(
             _ => return Err(save_error("batch format must be SVG or PNG")),
         };
         let mut entries = Vec::with_capacity(points.len());
-        for (index, point) in points.iter().enumerate() {
+        for (index, (point, inspection)) in points.iter().zip(inspections).enumerate() {
             let directory = format!("state-{index:04}");
-            let outcome = save(
-                session,
-                &staging.join(&directory),
-                point.clone(),
-                &[format],
-                include_hidden,
+            let entry_directory = staging.join(&directory);
+            create_private_directory(&entry_directory)?;
+            let (bytes, media_type, renderer) = match format {
+                SaveFormat::Svg => (
+                    render_svg(&inspection.state),
+                    "image/svg+xml",
+                    SEMANTIC_SVG_RENDERER,
+                ),
+                SaveFormat::Png => (
+                    render_png(&inspection.state)?,
+                    "image/png",
+                    SEMANTIC_PNG_RENDERER,
+                ),
+                _ => return Err(save_error("batch format must be SVG or PNG")),
+            };
+            write_secure(&entry_directory.join(filename), &bytes)?;
+            let save_manifest = SaveManifest {
+                format: "termtrace-save".to_owned(),
+                version: 2,
+                session_id: source_manifest.session_id,
+                canonical_session: ByteString::from(canonical.as_os_str().as_encoded_bytes()),
+                state_point: point.clone(),
+                state_id: inspection.record.state_id,
+                state_hash: inspection.record.state_hash,
+                source_final_event_hash: completion.final_event_hash.clone(),
+                sensitivity: "terminal_screen_may_contain_secrets".to_owned(),
+                files: vec![SavedFile {
+                    path: filename.to_owned(),
+                    media_type: media_type.to_owned(),
+                    byte_count: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+                    blake3: blake3::hash(&bytes).to_hex().to_string(),
+                    truth_layer: Some("semantic_rendering".to_owned()),
+                    renderer: Some(renderer.to_owned()),
+                }],
+                semantic_image_resources: semantic_image_resources(),
+            };
+            write_secure(
+                &entry_directory.join("save-manifest.json"),
+                &pretty_json(&save_manifest, "save-manifest.json")?,
             )?;
+            sync_directory(&entry_directory)?;
             entries.push(ScreenshotBatchEntry {
                 image: format!("{directory}/{filename}"),
                 directory,
-                manifest: outcome.manifest,
+                manifest: save_manifest,
             });
         }
         let manifest = ScreenshotBatchManifest {
@@ -412,6 +461,21 @@ pub fn save_screenshot_batch(
     return Ok(manifest);
 }
 
+fn semantic_image_resources() -> Vec<SemanticImageResource> {
+    return vec![SemanticImageResource {
+        font_family: SEMANTIC_FONT_FAMILY.to_owned(),
+        font_source: SEMANTIC_FONT_SOURCE.to_owned(),
+        font_byte_count: u64::try_from(SEMANTIC_FONT_BYTES.len()).unwrap_or(u64::MAX),
+        font_blake3: semantic_font_hash(),
+        fallback_policy: "bundled_font_only_missing_glyph_box".to_owned(),
+        font_size: 16,
+        cell_width: 10,
+        cell_height: 20,
+        padding: 0,
+        background_policy: "opaque_terminal_background".to_owned(),
+    }];
+}
+
 fn pretty_json(value: &impl Serialize, path: &str) -> Result<Vec<u8>> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|source| {
         return Error::InvalidJson {
@@ -422,6 +486,14 @@ fn pretty_json(value: &impl Serialize, path: &str) -> Result<Vec<u8>> {
     })?;
     bytes.push(b'\n');
     return Ok(bytes);
+}
+
+fn rendered_format(rendered: &[(Format, Vec<u8>)], format: Format) -> Result<Vec<u8>> {
+    return rendered
+        .iter()
+        .find(|(candidate, _)| return *candidate == format)
+        .map(|(_, bytes)| return bytes.clone())
+        .ok_or_else(|| return save_error("requested semantic format was not captured"));
 }
 
 fn save_error(reason: impl Into<String>) -> Error {

@@ -3,15 +3,18 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zstd::stream::decode_all;
+use zstd::stream::{decode_all, encode_all, read::Decoder};
 
 use std::{
-    fs::File,
+    fs::{File, OpenOptions},
     io::{BufReader, ErrorKind, Read as _},
     os::unix::ffi::OsStrExt as _,
-    os::unix::fs::PermissionsExt as _,
+    os::unix::fs::{FileTypeExt as _, OpenOptionsExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
+    time::SystemTime,
 };
+
+use nix::libc::O_NOFOLLOW;
 
 use crate::{
     Error, Result,
@@ -116,6 +119,41 @@ pub struct ReplayCheckpoint {
     pub inspection_state_blake3: String,
 }
 
+/// Bounded disposable replay-cache inventory for one canonical session.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayCacheStatus {
+    /// Cache directory inside the canonical session.
+    pub directory: PathBuf,
+    /// Number of checkpoint files currently retained.
+    pub entries: u64,
+    /// Total compressed bytes retained.
+    pub compressed_bytes: u64,
+    /// Automatic per-session checkpoint limit.
+    pub maximum_entries: u64,
+    /// Automatic per-session compressed-byte limit.
+    pub maximum_compressed_bytes: u64,
+}
+
+/// Result of explicitly deleting disposable replay checkpoints.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayCachePruneReport {
+    /// Cache directory considered.
+    pub directory: PathBuf,
+    /// Files removed.
+    pub removed_entries: u64,
+    /// Compressed bytes removed.
+    pub removed_bytes: u64,
+    /// Inventory remaining after pruning.
+    pub remaining: ReplayCacheStatus,
+}
+
+const MAX_REPLAY_CACHE_ENTRIES: u64 = 32;
+const MAX_REPLAY_CACHE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_REPLAY_CHECKPOINT_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_REPLAY_CHECKPOINT_DECOMPRESSED_BYTES: u64 = 128 * 1024 * 1024;
+
 /// Shared state selection vocabulary.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "selector", rename_all = "snake_case", deny_unknown_fields)]
@@ -126,6 +164,11 @@ pub enum StatePoint {
     StateId {
         /// Exact semantic state identifier.
         state_id: u64,
+    },
+    /// Exact content-addressed semantic state hash.
+    StateHash {
+        /// BLAKE3 hash of canonical semantic state JSON.
+        state_hash: String,
     },
     /// Latest state at or before an event sequence.
     EventSeq {
@@ -398,12 +441,12 @@ fn observe_completed(
                 "selected semantic state is hidden; pass explicit hidden-state permission",
             ));
         }
-        return completed_observation(
+        return completed_observation_from_inspection(
             session,
             session_id,
             point,
             &completion,
-            inspection,
+            &inspection,
             ObservationResolution::ValidatedCheckpoint,
         );
     }
@@ -419,22 +462,22 @@ fn observe_completed(
     if let Err(error) = publish_checkpoint(session, &point, &completion, &inspection) {
         tracing::warn!(%error, "could not publish disposable replay checkpoint");
     }
-    return completed_observation(
+    return completed_observation_from_inspection(
         session,
         session_id,
         point,
         &completion,
-        inspection,
+        &inspection,
         ObservationResolution::CanonicalReplay,
     );
 }
 
-fn completed_observation(
+pub(crate) fn completed_observation_from_inspection(
     session: &Path,
     session_id: Uuid,
     point: StatePoint,
     completion: &SessionCompletion,
-    inspection: StateInspection,
+    inspection: &StateInspection,
     resolution: ObservationResolution,
 ) -> Result<Observation> {
     let frame = frame_from_state(&inspection.state);
@@ -446,7 +489,7 @@ fn completed_observation(
         source_completed: true,
         state_point: point,
         state_id: Some(inspection.record.state_id),
-        state_hash: inspection.record.state_hash,
+        state_hash: inspection.record.state_hash.clone(),
         event_seq: inspection.record.event_seq,
         monotonic_ns: Some(inspection.record.monotonic_ns),
         presented: inspection.record.presented,
@@ -464,10 +507,11 @@ fn completed_observation(
     });
 }
 
-fn state_selector(log: &EventLog, point: &StatePoint) -> Result<StateSelector> {
+pub(crate) fn state_selector(log: &EventLog, point: &StatePoint) -> Result<StateSelector> {
     let selector = match point {
         StatePoint::LatestPresented => StateSelector::LatestPresented,
         StatePoint::StateId { state_id } => StateSelector::StateId(*state_id),
+        StatePoint::StateHash { state_hash } => StateSelector::StateHash(state_hash.clone()),
         StatePoint::EventSeq { event_seq } => StateSelector::EventSeq(*event_seq),
         StatePoint::MonotonicNs { monotonic_ns } => StateSelector::MonotonicNs(*monotonic_ns),
         StatePoint::Marker { label } => {
@@ -493,16 +537,67 @@ fn load_checkpoint(
     completion: &SessionCompletion,
 ) -> Result<Option<StateInspection>> {
     let path = checkpoint_path(session, point, completion)?;
-    if !path.is_file() {
-        return Ok(None);
+    match fs_err::symlink_metadata(&path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(Error::Filesystem { path, source });
+        }
     }
     let validate = (|| -> Result<StateInspection> {
-        let bytes = fs_err::read(&path).map_err(|source| {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(O_NOFOLLOW)
+            .open(&path)
+            .map_err(|source| {
+                return Error::Filesystem {
+                    path: path.clone(),
+                    source,
+                };
+            })?;
+        let metadata = file.metadata().map_err(|source| {
             return Error::Filesystem {
                 path: path.clone(),
                 source,
             };
         })?;
+        let file_type = metadata.file_type();
+        if file_type.is_dir()
+            || file_type.is_block_device()
+            || file_type.is_char_device()
+            || file_type.is_fifo()
+            || file_type.is_socket()
+            || metadata.permissions().mode() & 0o077 != 0
+        {
+            return Err(observation_error(
+                "replay checkpoint must be a regular owner-only file",
+            ));
+        }
+        let compressed_bytes = metadata.len();
+        if compressed_bytes > MAX_REPLAY_CHECKPOINT_BYTES {
+            return Err(observation_error(
+                "replay checkpoint exceeds its compressed size limit",
+            ));
+        }
+        let decoder = Decoder::new(file).map_err(|error| {
+            return observation_error(format!("could not decompress replay checkpoint: {error}"));
+        })?;
+        let mut bytes = Vec::new();
+        decoder
+            .take(MAX_REPLAY_CHECKPOINT_DECOMPRESSED_BYTES.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(|source| {
+                return Error::Filesystem {
+                    path: path.clone(),
+                    source,
+                };
+            })?;
+        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_REPLAY_CHECKPOINT_DECOMPRESSED_BYTES
+        {
+            return Err(observation_error(
+                "replay checkpoint exceeds its decompressed size limit",
+            ));
+        }
         let checkpoint: ReplayCheckpoint = serde_json::from_slice(&bytes).map_err(|source| {
             return Error::InvalidJson {
                 path: path.clone(),
@@ -546,6 +641,13 @@ fn load_checkpoint(
         Ok(inspection) => Ok(Some(inspection)),
         Err(error) => {
             tracing::warn!(path = %path.display(), %error, "rejected replay checkpoint");
+            if let Err(remove_error) = fs_err::remove_file(&path) {
+                tracing::warn!(path = %path.display(), %remove_error, "could not remove rejected replay checkpoint");
+            } else if let Some(directory) = path.parent()
+                && let Err(sync_error) = sync_directory(directory)
+            {
+                tracing::warn!(path = %directory.display(), %sync_error, "could not sync replay-cache cleanup");
+            }
             Ok(None)
         }
     };
@@ -592,15 +694,22 @@ fn publish_checkpoint(
         inspection: inspection.clone(),
         inspection_state_blake3: blake3::hash(&state_bytes).to_hex().to_string(),
     };
-    let mut bytes = serde_json::to_vec_pretty(&checkpoint).map_err(|source| {
+    let bytes = serde_json::to_vec(&checkpoint).map_err(|source| {
         return Error::InvalidJson {
             path: path.clone(),
             json_path: "$".to_owned(),
             source,
         };
     })?;
-    bytes.push(b'\n');
-    write_secure(&path, &bytes)?;
+    let compressed = encode_all(bytes.as_slice(), 3).map_err(|error| {
+        return observation_error(format!("could not compress replay checkpoint: {error}"));
+    })?;
+    if u64::try_from(compressed.len()).unwrap_or(u64::MAX) > MAX_REPLAY_CHECKPOINT_BYTES {
+        tracing::warn!(path = %path.display(), "skipped oversized disposable replay checkpoint");
+        return Ok(());
+    }
+    write_secure(&path, &compressed)?;
+    enforce_replay_cache_limits(session, Some(&path))?;
     return sync_directory(directory);
 }
 
@@ -618,9 +727,177 @@ fn checkpoint_path(
     })?;
     let key = blake3::hash(&encoded).to_hex().to_string();
     return Ok(session.join("derived-cache").join(format!(
-        "checkpoint-{}-{key}.json",
+        "checkpoint-{}-{key}.json.zst",
         completion.final_event_hash
     )));
+}
+
+struct ReplayCacheEntry {
+    path: PathBuf,
+    bytes: u64,
+    modified: SystemTime,
+}
+
+/// Inspect the bounded disposable replay cache without creating it.
+///
+/// # Errors
+///
+/// Returns an error when an existing cache directory or member is unsafe.
+pub fn replay_cache_status(session: &Path) -> Result<ReplayCacheStatus> {
+    let directory = session.join("derived-cache");
+    let entries = replay_cache_entries(&directory)?;
+    return Ok(cache_status_from_entries(directory, &entries));
+}
+
+/// Delete every disposable replay checkpoint for one session.
+///
+/// Canonical evidence and manifested derived artifacts are never touched.
+///
+/// # Errors
+///
+/// Returns an error when the cache is unsafe or a checkpoint cannot be removed durably.
+pub fn prune_replay_cache(session: &Path) -> Result<ReplayCachePruneReport> {
+    let directory = session.join("derived-cache");
+    let entries = replay_cache_entries(&directory)?;
+    let removed_entries = u64::try_from(entries.len()).unwrap_or(u64::MAX);
+    let removed_bytes = entries.iter().fold(0_u64, |total, entry| {
+        return total.saturating_add(entry.bytes);
+    });
+    for entry in entries {
+        fs_err::remove_file(&entry.path).map_err(|source| {
+            return Error::Filesystem {
+                path: entry.path,
+                source,
+            };
+        })?;
+    }
+    if directory.is_dir() {
+        sync_directory(&directory)?;
+    }
+    let remaining = replay_cache_status(session)?;
+    return Ok(ReplayCachePruneReport {
+        directory,
+        removed_entries,
+        removed_bytes,
+        remaining,
+    });
+}
+
+fn enforce_replay_cache_limits(session: &Path, preserve: Option<&Path>) -> Result<()> {
+    let directory = session.join("derived-cache");
+    let mut entries = replay_cache_entries(&directory)?;
+    entries.sort_by(|left, right| {
+        return left
+            .modified
+            .cmp(&right.modified)
+            .then_with(|| return left.path.cmp(&right.path));
+    });
+    let mut count = u64::try_from(entries.len()).unwrap_or(u64::MAX);
+    let mut bytes = entries.iter().fold(0_u64, |total, entry| {
+        return total.saturating_add(entry.bytes);
+    });
+    for entry in entries {
+        if count <= MAX_REPLAY_CACHE_ENTRIES && bytes <= MAX_REPLAY_CACHE_BYTES {
+            break;
+        }
+        if preserve.is_some_and(|path| return path == entry.path) {
+            continue;
+        }
+        fs_err::remove_file(&entry.path).map_err(|source| {
+            return Error::Filesystem {
+                path: entry.path.clone(),
+                source,
+            };
+        })?;
+        count = count.saturating_sub(1);
+        bytes = bytes.saturating_sub(entry.bytes);
+    }
+    return sync_directory(&directory);
+}
+
+fn replay_cache_entries(directory: &Path) -> Result<Vec<ReplayCacheEntry>> {
+    match fs_err::symlink_metadata(directory) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_dir()
+                || metadata.file_type().is_symlink()
+                || metadata.permissions().mode() & 0o077 != 0
+            {
+                return Err(observation_error(
+                    "replay checkpoint directory must be a real owner-only directory",
+                ));
+            }
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => {
+            return Err(Error::Filesystem {
+                path: directory.to_path_buf(),
+                source,
+            });
+        }
+    }
+    let mut entries = Vec::new();
+    for item in fs_err::read_dir(directory).map_err(|source| {
+        return Error::Filesystem {
+            path: directory.to_path_buf(),
+            source,
+        };
+    })? {
+        let item = item.map_err(|source| {
+            return Error::Filesystem {
+                path: directory.to_path_buf(),
+                source,
+            };
+        })?;
+        let name = item.file_name();
+        if !name.as_encoded_bytes().starts_with(b"checkpoint-") {
+            continue;
+        }
+        let path = item.path();
+        let metadata = fs_err::symlink_metadata(&path).map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+        let file_type = metadata.file_type();
+        if file_type.is_dir()
+            || file_type.is_symlink()
+            || file_type.is_block_device()
+            || file_type.is_char_device()
+            || file_type.is_fifo()
+            || file_type.is_socket()
+        {
+            return Err(observation_error(
+                "replay checkpoint cache contains a non-regular member",
+            ));
+        }
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(observation_error(
+                "replay checkpoint cache contains a non-owner-only member",
+            ));
+        }
+        entries.push(ReplayCacheEntry {
+            path,
+            bytes: metadata.len(),
+            modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+        });
+    }
+    return Ok(entries);
+}
+
+fn cache_status_from_entries(
+    directory: PathBuf,
+    entries: &[ReplayCacheEntry],
+) -> ReplayCacheStatus {
+    return ReplayCacheStatus {
+        directory,
+        entries: u64::try_from(entries.len()).unwrap_or(u64::MAX),
+        compressed_bytes: entries.iter().fold(0_u64, |total, entry| {
+            return total.saturating_add(entry.bytes);
+        }),
+        maximum_entries: MAX_REPLAY_CACHE_ENTRIES,
+        maximum_compressed_bytes: MAX_REPLAY_CACHE_BYTES,
+    };
 }
 
 fn ensure_private_cache_directory(path: &Path) -> Result<()> {

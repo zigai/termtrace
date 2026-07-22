@@ -174,6 +174,59 @@
           "type": "string"
         }
       ]
+    },
+    "OutputPage": {
+      "additionalProperties": false,
+      "description": "Deterministic page coordinates for one ordered collection.",
+      "properties": {
+        "limit": {
+          "description": "Requested maximum, or none when every remaining item was requested.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "next_offset": {
+          "description": "Offset for the next page when more items remain.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "offset": {
+          "description": "Effective zero-based offset, clamped to the collection length.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "returned": {
+          "description": "Number of items included in this response.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total": {
+          "description": "Complete matching collection length before pagination.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "description": "Whether more matching items remain after this page.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "offset",
+        "total",
+        "returned",
+        "truncated"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/diagnose-report.schema.json",
@@ -202,6 +255,17 @@
     "format": {
       "description": "Stable report format.",
       "type": "string"
+    },
+    "output_page": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OutputPage"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Page coordinates when CLI output intentionally contains a bounded subset."
     },
     "session_id": {
       "description": "Canonical session identity.",

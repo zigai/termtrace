@@ -19,6 +19,7 @@ pub mod inspection;
 pub mod interop;
 pub mod observation;
 pub mod output_projection;
+pub mod pagination;
 pub mod playback;
 pub mod presentation;
 pub mod profile;

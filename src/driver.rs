@@ -22,7 +22,8 @@ use crate::{
     bundle::{BundleManifest, BundleProfile, create as create_bundle},
     client::Terminal,
     control::{
-        CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, send_request,
+        CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlErrorDetails, ControlRequest,
+        ControlResult, send_request_response,
     },
     diff::{SemanticDiff, diff_states, inspect_point},
     environment::EnvironmentSpec,
@@ -42,7 +43,7 @@ use crate::{
 };
 
 /// Current JSONL driver protocol version.
-pub const DRIVER_PROTOCOL_VERSION: u32 = 2;
+pub const DRIVER_PROTOCOL_VERSION: u32 = 3;
 const DRIVER_RESPONSE_CACHE: usize = 4096;
 const UNBOUNDED_MESSAGE_BYTES: u64 = 0;
 
@@ -249,6 +250,9 @@ pub enum DriverResult {
         uncertain: bool,
         /// Canonical evidence path when known.
         evidence: Option<PathBuf>,
+        /// Actor-provided ordering or attempted-prefix details when available.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        details: Option<ControlErrorDetails>,
     },
 }
 
@@ -563,7 +567,9 @@ impl Driver {
         } else {
             self.execute(&request)
         };
-        self.cache(request.request_id, method_hash, response.clone());
+        if driver_response_is_cacheable(&response) {
+            self.cache(request.request_id, method_hash, response.clone());
+        }
         return response;
     }
 
@@ -632,11 +638,32 @@ impl Driver {
                     let mut control = ControlRequest::new(command.clone());
                     control.request_id = request.request_id;
                     control.expected_presented_state_hash = expected_presented_state_hash.clone();
-                    send_request(path, &control)
-                        .map(|data| return DriverData::Control { data })
-                        .map_err(|error| {
-                            return driver_failure_from_error(error, Some(path.clone()));
-                        })
+                    match send_request_response(path, &control) {
+                        Ok(response) => match response.result {
+                            ControlResult::Ok { data } => Ok(DriverData::Control { data }),
+                            ControlResult::Error {
+                                code,
+                                message,
+                                details,
+                            } => {
+                                let (retry_safety, uncertain) =
+                                    actor_failure_retry(&code, details.as_ref());
+                                Err(driver_failure_with_retry(
+                                    &code,
+                                    message,
+                                    Some(path.clone()),
+                                    retry_safety,
+                                    uncertain,
+                                    details,
+                                ))
+                            }
+                        },
+                        Err(error) => Err(driver_control_failure_from_error(
+                            error,
+                            path.clone(),
+                            control_command_mutates(command),
+                        )),
+                    }
                 }
                 DriverMethod::WaitOutput {
                     handle,
@@ -1058,17 +1085,111 @@ fn driver_failure_from_error(error: Error, evidence: Option<PathBuf>) -> Box<Dri
     return driver_failure(&code, error.to_string(), evidence);
 }
 
+fn driver_control_failure_from_error(
+    error: Error,
+    evidence: PathBuf,
+    mutation: bool,
+) -> Box<DriverResult> {
+    let (code, dispatched) = match &error {
+        Error::ControlUnavailable { .. } => ("control_unavailable", false),
+        Error::ControlTimeout {
+            request_dispatched, ..
+        } => ("control_timeout", *request_dispatched),
+        Error::ControlTransport {
+            request_dispatched, ..
+        } => ("control_transport", *request_dispatched),
+        Error::InvalidControlProtocol { .. } | Error::InvalidJson { .. } => {
+            ("invalid_control_response", true)
+        }
+        Error::ControlRejected { code, .. } => {
+            return driver_failure_with_retry(
+                code,
+                error.to_string(),
+                Some(evidence),
+                "safe_new_request",
+                false,
+                None,
+            );
+        }
+        _ => ("control_failed", true),
+    };
+    let uncertain = mutation && dispatched;
+    return driver_failure_with_retry(
+        code,
+        error.to_string(),
+        Some(evidence),
+        if uncertain {
+            "safe_same_request_id"
+        } else {
+            "safe_new_request"
+        },
+        uncertain,
+        None,
+    );
+}
+
+fn actor_failure_retry(code: &str, details: Option<&ControlErrorDetails>) -> (&'static str, bool) {
+    if code == "input_sequence_incomplete" {
+        let uncertain = details
+            .and_then(|value| return value.input_sequence.as_ref())
+            .is_some_and(|sequence| return sequence.failed_atom_bytes_written != 0);
+        return ("safe_same_request_id", uncertain);
+    }
+    if code == "input_write_failed" {
+        return ("safe_same_request_id", true);
+    }
+    return ("safe_new_request", false);
+}
+
+fn control_command_mutates(command: &ControlCommand) -> bool {
+    return !matches!(
+        command,
+        ControlCommand::Ping
+            | ControlCommand::Status
+            | ControlCommand::Snapshot
+            | ControlCommand::WaitScreen { .. }
+            | ControlCommand::CaptureStable { .. }
+    );
+}
+
+fn driver_response_is_cacheable(response: &DriverResponse) -> bool {
+    return !matches!(
+        &response.result,
+        DriverResult::Error { code, .. }
+            if matches!(
+                code.as_str(),
+                "control_unavailable"
+                    | "control_timeout"
+                    | "control_transport"
+                    | "invalid_control_response"
+                    | "control_failed"
+            )
+    );
+}
+
 fn driver_failure(
     code: &str,
     message: impl Into<String>,
     evidence: Option<PathBuf>,
 ) -> Box<DriverResult> {
+    return driver_failure_with_retry(code, message, evidence, "safe_new_request", false, None);
+}
+
+fn driver_failure_with_retry(
+    code: &str,
+    message: impl Into<String>,
+    evidence: Option<PathBuf>,
+    retry_safety: &str,
+    uncertain: bool,
+    details: Option<ControlErrorDetails>,
+) -> Box<DriverResult> {
     return Box::new(DriverResult::Error {
         code: code.to_owned(),
         message: message.into(),
-        retry_safety: "safe_same_request_id".to_owned(),
-        uncertain: false,
+        retry_safety: retry_safety.to_owned(),
+        uncertain,
         evidence,
+        details,
     });
 }
 
@@ -1228,5 +1349,62 @@ mod tests {
                     && message.contains("protocol schema")
                     && !message.contains("SECRET_SENTINEL")
         ));
+    }
+
+    #[test]
+    fn retryable_transport_failures_are_not_cached_by_request_id() {
+        let response = DriverResponse {
+            version: DRIVER_PROTOCOL_VERSION,
+            request_id: Uuid::now_v7(),
+            result: *driver_failure_with_retry(
+                "control_timeout",
+                "timed out",
+                None,
+                "safe_same_request_id",
+                true,
+                None,
+            ),
+        };
+        assert!(!driver_response_is_cacheable(&response));
+
+        let actor_response = DriverResponse {
+            version: DRIVER_PROTOCOL_VERSION,
+            request_id: Uuid::now_v7(),
+            result: *driver_failure_with_retry(
+                "input_sequence_incomplete",
+                "prefix applied",
+                None,
+                "safe_same_request_id",
+                true,
+                None,
+            ),
+        };
+        assert!(driver_response_is_cacheable(&actor_response));
+
+        let deterministic = driver_error(
+            Uuid::now_v7(),
+            "unknown_handle",
+            "session handle is not attached",
+            None,
+        );
+        assert!(driver_response_is_cacheable(&deterministic));
+    }
+
+    #[test]
+    fn retry_classification_distinguishes_observation_from_mutation() {
+        assert!(!control_command_mutates(&ControlCommand::Snapshot));
+        assert!(control_command_mutates(&ControlCommand::InputSequence {
+            atoms: Vec::new(),
+            pace_ns: 0,
+            include_atom_outcomes: false,
+        }));
+        assert_eq!(
+            actor_failure_retry("input_sequence_incomplete", None),
+            ("safe_same_request_id", false)
+        );
+        assert_eq!(
+            actor_failure_retry("input_write_failed", None),
+            ("safe_same_request_id", true)
+        );
     }
 }
