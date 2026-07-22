@@ -38,3 +38,15 @@ It records elapsed time, peak resident memory, configured policy, observed
 uncommitted maxima, sync count, and final-sync result as JSONL under the ignored
 `benchmarks/results/` directory. `REPETITIONS`, `PAYLOAD_BYTES`, and `OUTPUT`
 may override the run without changing the acceptance contract.
+
+Run the compact agent-facing workflow gates with:
+
+```sh
+cargo build --release
+benchmarks/run-agent-workflows.sh
+```
+
+`agent-workflows-v1.json` caps default stdout for stable observation, atomic
+input, status, and bounded timeline operations. The runner fails immediately
+when a command crosses its byte budget and records timing plus byte counts as
+JSONL.

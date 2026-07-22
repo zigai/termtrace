@@ -35,7 +35,7 @@ The session actor orders child output, control requests, and terminal-generated 
 
 `session.json` fixes the command, working directory, geometry, terminal profile, value-free child-environment policy and effective-environment commitment, provenance policy, durability policy, and resource limits. `events.jsonl` contains the integrity-chained execution. `completion.json` closes the recording, records any resource trigger, and rejects pending mutations.
 
-Input, resize, and signal operations use intent/result pairs. If recording stops between the pair, delivery is uncertain. Termtrace does not retry an uncertain mutation automatically.
+Input, resize, and signal operations use intent/result pairs. Multi-atom input is admitted under one state guard and retains one pair per atom plus an exact attempted-prefix result if PTY delivery stops. If recording stops between a pair, delivery is uncertain. Termtrace does not retry an uncertain mutation automatically.
 
 A separate request journal makes caller-owned mutation IDs idempotent across retries. It can be reconstructed from canonical events and is not itself an evidence root.
 
@@ -48,7 +48,7 @@ The pinned semantic engine runs while recording. It answers terminal queries and
 
 They differ during synchronized output. Screen observations and waits use the presented state so hidden intermediate changes do not masquerade as visible UI.
 
-`capture_stable` is registered and completed inside this actor. Stability timing, the returned semantic bytes and text, the state hash, terminal modes, and source boundaries therefore describe one state. Typed deadline/output-close/completion outcomes prevent clients from silently treating an incomplete observation as stable.
+`capture_stable` is registered and completed inside this actor. Stability timing, semantic bytes and text, the state hash, terminal modes, and source boundaries therefore describe one state. The routine CLI view omits compressed semantic bytes while preserving the coherent viewport and source boundary; protocol and `--full-state` consumers can request the complete payload. Typed deadline/output-close/completion outcomes prevent clients from silently treating an incomplete observation as stable.
 
 Mutations may carry an expected state hash. The actor checks this immediately before writing to the PTY and rejects stale actions without creating an input intent.
 

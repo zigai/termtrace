@@ -5,13 +5,12 @@ Typed synchronous and asynchronous clients for the versioned Termtrace driver. T
 ```python
 from pathlib import Path
 
-from termtrace import Terminal
+from termtrace import KeyAtom, Terminal, TextAtom
 
 with Terminal(evidence_root=Path(".termtrace-evidence")) as terminal:
     with terminal.launch(["my-terminal-app"], evidence="on-failure") as session:
         session.screen.wait_for_text("Ready")
-        session.keyboard.type("help")
-        session.keyboard.press("enter")
+        session.keyboard.sequence([TextAtom("help"), KeyAtom("enter")])
 
         frame = session.screen.frame()
         assert "Commands" in frame.viewport_text
@@ -20,5 +19,7 @@ with Terminal(evidence_root=Path(".termtrace-evidence")) as terminal:
 `Frame`, `Observation`, `SemanticDiff`, `DiagnosticReport`, `Completion`, `VerificationReport`, and related return values are concrete generated models. Invalid or version-skewed driver messages raise `TermtraceProtocolError` without including the raw payload.
 
 Use `AsyncTerminal` for the equivalent native-asyncio lifecycle.
+`keyboard.sequence` admits all typed text, byte, key, and paste atoms under one
+optional `if_state` guard and caller-owned `request_id`.
 
 The public session façade is handwritten. Internal request and response models are generated from the Rust-owned JSON Schemas and decoded with `msgspec`; do not edit files under `src/termtrace/_generated/`.

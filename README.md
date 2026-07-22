@@ -6,6 +6,7 @@ Termtrace is a Linux terminal flight recorder for debugging and automating termi
 
 - **Complete recordings** — run a command interactively or in the background and retain its output, input, resizes, signals, markers, lifecycle, and exit events.
 - **Live TUI control** — wait for screen conditions, send text, keys, paste, focus, or pointer input, resize the PTY, and capture an atomic stable screen.
+- **Agent-sized defaults** — atomic input sequences, compact live acknowledgements, bounded report pages, and opt-in full-state payloads keep routine automation concise.
 - **Semantic replay** — inspect states by time, event, marker, or state ID, including changes that existed for less than a video frame.
 - **Rendering diagnostics** — browse a timeline, compare states, connect VT sequences to screen changes, and detect flicker, stale cells, or unnecessary redraws.
 - **Repeatable launches** — control geometry, working directory, environment inheritance, color behavior, output limits, durability, and provenance.
@@ -52,6 +53,16 @@ termtrace stop app --wait
 
 `wait` matches the presented viewport rather than searching output history. `wait-idle` returns the exact semantic state that satisfied the stability condition, avoiding a race between waiting and inspecting.
 
+For a branching or repeated workflow, run the installed typed SDK without adding project files:
+
+```sh
+termtrace client status
+termtrace client python workflow.py
+termtrace client typescript workflow.ts
+```
+
+The managed runners use private temporary mappings and shared runtime caches; they leave the caller's working tree untouched.
+
 ## Investigate and capture a recording
 
 Build the semantic index, inspect an earlier moment, run rendering diagnostics, or create a deterministic screenshot:
@@ -59,6 +70,7 @@ Build the semantic index, inspect an earlier moment, run rendering diagnostics, 
 ```sh
 termtrace index --session ./app.termtrace
 termtrace show ./app.termtrace --at 5s
+termtrace show ./app.termtrace --state-hash HASH
 termtrace diagnose ./app.termtrace
 termtrace screenshot ./app.termtrace --out ./app-screenshot
 ```

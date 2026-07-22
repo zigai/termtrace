@@ -49,12 +49,22 @@ Completed sessions can resolve a state, event, time, or marker:
 
 ```bash
 termtrace show SESSION --state 42
+termtrace show SESSION --state-hash HASH
 termtrace show SESSION --event-seq 120
 termtrace show SESSION --at 12.5s
 termtrace show SESSION --at-marker ready
 ```
 
 The default selects the latest presented state. Explicit hidden states require `--include-hidden`.
+
+A state hash selects semantic content across `inspect`, `show`, `save`, `screenshot`, `diff`, and `explain`. When the same content recurs, the latest matching canonical occurrence supplies the source boundary.
+
+One-off completed observations publish compressed disposable checkpoints. They are bounded to 32 entries and 64 MiB per session and never replace canonical evidence:
+
+```bash
+termtrace cache status SESSION
+termtrace cache prune SESSION
+```
 
 ## Semantic and native views
 

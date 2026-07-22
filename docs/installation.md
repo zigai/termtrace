@@ -11,7 +11,7 @@ curl -LsSf https://github.com/zigai/termtrace/raw/main/install.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The high-level [`install.sh`](../install.sh) script detects the current architecture, verifies the archive's SHA-256 checksum, installs `termtrace` to `~/.local/bin`, and checks the core and semantic capabilities. It never invokes `sudo` or installs optional system packages. Because this command follows `main`, use the release-attached copy when you need a pinned installer:
+The high-level [`install.sh`](../install.sh) script detects the current architecture, verifies the archive's SHA-256 checksum, installs `termtrace` to `~/.local/bin`, installs managed Python and TypeScript assets under `~/.local/share/termtrace/clients`, and checks the core and semantic capabilities. It never invokes `sudo` or installs optional system packages. Because this command follows `main`, use the release-attached copy when you need a pinned installer:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
@@ -73,7 +73,10 @@ sha256sum --check termtrace-TARGET.tar.gz.sha256
 tar -xzf termtrace-TARGET.tar.gz
 mkdir -p "$HOME/.local/bin"
 install -m 0555 termtrace-TARGET/termtrace "$HOME/.local/bin/termtrace"
+mkdir -p "$HOME/.local/share/termtrace"
+cp -R termtrace-TARGET/clients "$HOME/.local/share/termtrace/clients"
 termtrace doctor --require core,semantic
+termtrace client status
 ```
 
 The repository's `scripts/validate-release-archive.sh` performs a deeper recording, content-verification, and semantic-replay smoke test. Run `doctor` on the destination machine to establish native capabilities. GitHub documents independent attestation verification in [Verifying the integrity of a release](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity).
@@ -96,6 +99,8 @@ Install the validated binary for the current user with:
 ```bash
 cargo install --path .
 ```
+
+`cargo install` installs only the executable. While developing from a clone, the executable discovers `packages/` automatically; set `TERMTRACE_CLIENT_ASSETS="$PWD/packages"` explicitly if it is moved elsewhere. Release archives and the installer carry the built client assets with the binary.
 
 Set `TERMTRACE_GHOSTTY_PREFIX` only when intentionally testing a compatible external semantic-library build.
 
