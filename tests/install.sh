@@ -12,7 +12,9 @@ trap 'rm -rf "$work"' EXIT
 assets="$work/assets"
 root="$assets/termtrace-$target"
 install_dir="$work/bin"
-mkdir -p "$root" "$install_dir"
+mkdir -p "$root/clients/python" "$root/clients/typescript/lib" "$install_dir"
+printf '[project]\nname="termtrace"\nversion="0.0.0"\n' > "$root/clients/python/pyproject.toml"
+printf 'export {}\n' > "$root/clients/typescript/lib/index.js"
 
 build_archive() {
     archive="$assets/termtrace-$target.tar.gz"
@@ -25,6 +27,8 @@ chmod 0555 "$root/termtrace"
 build_archive
 TERMTRACE_DOWNLOAD_BASE="file://$assets" ./install.sh --install-dir "$install_dir"
 cmp "$root/termtrace" "$install_dir/termtrace"
+test -f "$work/share/termtrace/clients/python/pyproject.toml"
+test -f "$work/share/termtrace/clients/typescript/lib/index.js"
 
 rm -f "$root/termtrace"
 printf '#!/bin/sh\nexit 1\n' > "$root/termtrace"

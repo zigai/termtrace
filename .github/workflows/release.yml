@@ -55,12 +55,17 @@ jobs:
         env:
           TERMTRACE_BUILD_REVISION: ${{ github.sha }}
       - run: scripts/check-glibc-compat.sh "target/${{ matrix.target }}/release/termtrace" 2.28
+      - run: bun install --cwd packages/typescript --frozen-lockfile && bun run --cwd packages/typescript build
       - name: Package deterministic archive
         run: |
           root="termtrace-${{ matrix.target }}"
-          mkdir -p "dist/$root"
+          mkdir -p "dist/$root/clients/python" "dist/$root/clients/typescript"
           install -m 0555 "target/${{ matrix.target }}/release/termtrace" "dist/$root/termtrace"
           install -m 0444 LICENSE README.md "dist/$root/"
+          install -m 0444 packages/python/pyproject.toml packages/python/README.md "dist/$root/clients/python/"
+          cp -R packages/python/src "dist/$root/clients/python/"
+          install -m 0444 packages/typescript/package.json packages/typescript/README.md "dist/$root/clients/typescript/"
+          cp -R packages/typescript/lib "dist/$root/clients/typescript/"
           tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -C dist -cf - "$root" | gzip -9 -n > "dist/$root.tar.gz"
           (cd dist && sha256sum "$root.tar.gz" > "$root.tar.gz.sha256")
           (cd dist && b3sum "$root.tar.gz" > "$root.tar.gz.blake3")
@@ -72,7 +77,10 @@ jobs:
           trap 'rm -rf "$install_root"' EXIT
           TERMTRACE_DOWNLOAD_BASE="file://$PWD/dist" ./install.sh --install-dir "$install_root/bin"
           cmp "target/${{ matrix.target }}/release/termtrace" "$install_root/bin/termtrace"
+          test -f "$install_root/share/termtrace/clients/python/pyproject.toml"
+          test -f "$install_root/share/termtrace/clients/typescript/lib/index.js"
           "$install_root/bin/termtrace" doctor --require core,semantic
+          "$install_root/bin/termtrace" client status
       - name: Package shell installer
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |

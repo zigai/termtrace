@@ -19,9 +19,13 @@ if [[ -z "$binary" ]]; then
     echo "release archive contains no executable termtrace binary" >&2
     exit 1
 fi
+archive_root=$(dirname "$binary")
+test -f "$archive_root/clients/python/pyproject.toml"
+test -f "$archive_root/clients/typescript/lib/index.js"
 
 "$binary" version --json | python3 -c 'import json,sys; value=json.load(sys.stdin); assert value["termtrace_version"] and value["build_revision"]'
 "$binary" doctor --require core,semantic
+"$binary" client status
 session="$work/install-smoke.termtrace"
 "$binary" record --no-input --out "$session" -- /bin/sh -c 'printf RELEASE-SMOKE'
 "$binary" verify "$session" --level content --json >/dev/null
