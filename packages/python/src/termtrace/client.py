@@ -67,7 +67,7 @@ class DriverTransport:
 
     def __init__(self, binary_path: str | Path) -> None:
         self._process = subprocess.Popen(
-            [str(binary_path), "driver"],
+            [str(binary_path), "tooling", "driver"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,

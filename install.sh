@@ -193,5 +193,5 @@ printf 'Termtrace installed at %s\n' "$destination"
 printf 'Termtrace client assets installed at %s\n' "$client_dir"
 case ":${PATH}:" in
     *:"$install_dir":*) ;;
-    *) printf 'Add %s to PATH, then run: termtrace doctor --explain\n' "$install_dir" ;;
+    *) printf 'Add %s to PATH, then run: termtrace tooling doctor --explain\n' "$install_dir" ;;
 esac

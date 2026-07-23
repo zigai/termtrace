@@ -30,7 +30,7 @@
     },
     {
       "id": "managed-client-python",
-      "command": "termtrace client python WORKFLOW.py",
+      "command": "termtrace tooling client python WORKFLOW.py",
       "maximum_stdout_bytes": 128,
       "maximum_commands": 1
     }

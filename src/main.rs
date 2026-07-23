@@ -20,7 +20,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use clap::{ArgGroup, Args, CommandFactory as _, Parser, Subcommand, ValueEnum};
+use clap::{
+    ArgGroup, Args, CommandFactory as _, FromArgMatches as _, Parser, Subcommand, ValueEnum,
+};
 use clap_complete::{Shell, generate};
 use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
@@ -113,6 +115,33 @@ use termtrace::{
 };
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, registry, util::SubscriberInitExt};
 
+const ROOT_HELP_TEMPLATE: &str = "\
+{about-with-newline}
+{usage-heading} {usage}{after-help}
+
+Options:
+{options}
+";
+
+const ROOT_COMMAND_GROUPS: &[(&str, &[&str])] = &[
+    ("Recording", &["record", "test", "start", "restart", "stop"]),
+    (
+        "Live workflow",
+        &["status", "send", "wait", "wait-idle", "show"],
+    ),
+    (
+        "Command groups",
+        &[
+            "control",
+            "analyze",
+            "artifact",
+            "registry",
+            "integrity",
+            "tooling",
+        ],
+    ),
+];
+
 #[derive(Debug, Parser)]
 #[command(
     name = "termtrace",
@@ -129,12 +158,6 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Report build and runtime component versions.
-    Version(VersionArgs),
-    /// Probe built-in and optional host capabilities.
-    Doctor(DoctorArgs),
-    /// Report the current bounded capability inventory.
-    Capabilities(CapabilitiesArgs),
     /// Run a command in a PTY and preserve its byte-exact event stream.
     Record(RecordArgs),
     /// Execute one strict evidence-native terminal scenario.
@@ -143,26 +166,49 @@ enum Command {
     Start(StartArgs),
     /// Stop a named session and atomically publish an immutable successor.
     Restart(RestartArgs),
-    /// Verify a completed session's structure and evidence bindings offline.
-    Verify(VerifyArgs),
-    /// Create a detached OpenSSH receipt for verified evidence roots.
-    Sign(SignArgs),
-    /// Register a friendly name for an existing canonical session.
-    Register(RegisterArgs),
-    /// Resolve a friendly name to its canonical session directory.
-    Resolve(ResolveArgs),
-    /// List registered sessions and their derived lifecycle.
-    List(ListArgs),
-    /// Remove only a friendly registry binding, preserving evidence.
-    Remove(RemoveArgs),
-    /// Plan or apply safe retention for completed unregistered managed recordings.
-    Gc(GcArgs),
-    /// Verify that a live session control socket is responsive.
-    Ping(SessionArgs),
     /// Print machine-readable live session status.
     Status(StatusArgs),
     /// Send text or file bytes to a live child PTY.
     Send(SendArgs),
+    /// Request graceful termination of a live session child.
+    Stop(StopArgs),
+    /// Live session control commands.
+    Control(ControlArgs),
+    /// Replay, inspect, compare, and diagnose terminal evidence.
+    Analyze(AnalyzeArgs),
+    /// Render, capture, and publish terminal artifacts.
+    Artifact(ArtifactArgs),
+    /// Register and manage friendly session names.
+    Registry(RegistryArgs),
+    /// Verify, sign, and recover canonical evidence.
+    Integrity(IntegrityArgs),
+    /// Runtime, SDK, and shell integration tools.
+    Tooling(ToolingArgs),
+
+    /// Internal timed event playback used as Ghostty's child process.
+    #[command(hide = true)]
+    Playback(PlaybackArgs),
+    /// Internal live terminal geometry probe.
+    #[command(hide = true)]
+    GeometryProbe(GeometryProbeArgs),
+    /// Show a truth-labeled live or completed terminal viewport.
+    Show(ShowArgs),
+    /// Wait for exact UTF-8 text in canonical PTY output.
+    Wait(WaitArgs),
+    /// Atomically wait for a stable presented screen and return that exact snapshot.
+    WaitIdle(WaitIdleArgs),
+}
+
+#[derive(Debug, Args)]
+struct ControlArgs {
+    #[command(subcommand)]
+    command: ControlSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ControlSubcommand {
+    /// Verify that a live session control socket is responsive.
+    Ping(SessionArgs),
     /// Print the accepted symbolic key and modifier grammar.
     Keys,
     /// Report terminal-window focus when the application opted in.
@@ -177,30 +223,20 @@ enum Command {
     Signal(SignalArgs),
     /// Add a marker to a live session timeline.
     Mark(MarkArgs),
-    /// List canonical marker positions and nominal source frames.
-    Markers(MarkersArgs),
-    /// Plan or export presentation edits; native Ghostty pixels are the default source.
-    Video(VideoArgs),
-    /// Request graceful termination of a live session child.
-    Stop(StopArgs),
+}
+
+#[derive(Debug, Args)]
+struct AnalyzeArgs {
+    #[command(subcommand)]
+    command: AnalyzeSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AnalyzeSubcommand {
     /// Replay canonical events and build semantic state artifacts.
     Index(IndexArgs),
-    /// Capture actual Ghostty pixels on a private headless display.
-    Capture(CaptureArgs),
-    /// Internal timed event playback used as Ghostty's child process.
-    #[command(hide = true)]
-    Playback(PlaybackArgs),
-    /// Internal live terminal geometry probe.
-    #[command(hide = true)]
-    GeometryProbe(GeometryProbeArgs),
     /// Reconstruct one semantic state as JSON or text.
     Inspect(InspectArgs),
-    /// Inspect or clear bounded disposable replay checkpoints.
-    Cache(CacheArgs),
-    /// Run Python or TypeScript client code from managed SDK assets without project files.
-    Client(ClientArgs),
-    /// Show a truth-labeled live or completed terminal viewport.
-    Show(ShowArgs),
     /// List canonical operations and semantic state transitions in order.
     Timeline(TimelineArgs),
     /// Compare two canonical semantic state points.
@@ -215,28 +251,157 @@ enum Command {
     Output(OutputArgs),
     /// Stream filtered canonical event projections as JSONL.
     Events(EventsArgs),
-    /// Generate a shell completion script from the current command graph.
-    Completions(CompletionsArgs),
-    /// Serve the versioned language-neutral JSONL process protocol.
-    Driver,
+    /// List canonical marker positions and nominal source frames.
+    Markers(MarkersArgs),
+    /// Inspect or clear bounded disposable replay checkpoints.
+    Cache(CacheArgs),
+}
+
+#[derive(Debug, Args)]
+struct ArtifactArgs {
+    #[command(subcommand)]
+    command: ArtifactSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ArtifactSubcommand {
+    /// Capture actual Ghostty pixels on a private headless display.
+    Capture(CaptureArgs),
     /// Atomically publish representations of one semantic state.
     Save(SaveArgs),
     /// Render one deterministic semantic screenshot artifact directory.
     Screenshot(ScreenshotArgs),
+    /// Plan or export presentation edits; native Ghostty pixels are the default source.
+    Video(VideoArgs),
+    /// Publish or inspect a deterministic sensitivity-labeled handoff.
+    Bundle(ArtifactBundleArgs),
+    /// Export a lossy UTF-8 asciinema v2 interoperability cast.
+    Asciicast(ExportArgs),
+}
+
+#[derive(Debug, Args)]
+struct ArtifactBundleArgs {
+    #[command(subcommand)]
+    command: ArtifactBundleSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ArtifactBundleSubcommand {
     /// Publish a deterministic sensitivity-labeled handoff directory.
-    Bundle(BundleArgs),
+    Create(BundleArgs),
     /// Verify every manifested bundle member and included evidence.
-    BundleVerify(BundleVerifyArgs),
+    Verify(BundleVerifyArgs),
+}
+
+#[derive(Debug, Args)]
+struct RegistryArgs {
+    #[command(subcommand)]
+    command: RegistrySubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum RegistrySubcommand {
+    /// Register a friendly name for an existing canonical session.
+    Register(RegisterArgs),
+    /// Resolve a friendly name to its canonical session directory.
+    Resolve(ResolveArgs),
+    /// List registered sessions and their derived lifecycle.
+    List(ListArgs),
+    /// Remove only a friendly registry binding, preserving evidence.
+    Remove(RemoveArgs),
+    /// Plan or apply safe retention for completed unregistered managed recordings.
+    Gc(GcArgs),
+}
+
+#[derive(Debug, Args)]
+struct IntegrityArgs {
+    #[command(subcommand)]
+    command: IntegritySubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum IntegritySubcommand {
+    /// Verify a completed session's structure and evidence bindings offline.
+    Verify(VerifyArgs),
+    /// Create a detached OpenSSH receipt for verified evidence roots.
+    Sign(SignArgs),
+    /// Copy the longest integrity-checked event prefix without modifying source.
+    Recover(RecoverArgs),
+}
+
+#[derive(Debug, Args)]
+struct ToolingArgs {
+    #[command(subcommand)]
+    command: ToolingSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ToolingSubcommand {
+    /// Probe built-in and optional host capabilities.
+    Doctor(DoctorArgs),
+    /// Report the current bounded capability inventory.
+    Capabilities(CapabilitiesArgs),
+    /// Run Python or TypeScript client code from managed SDK assets without project files.
+    Client(ClientArgs),
+    /// Serve the versioned language-neutral JSONL process protocol.
+    Driver,
+    /// Generate JSON Schemas for public events, controls, and artifacts.
+    Schemas(SchemaArgs),
+    /// Generate a shell completion script from the current command graph.
+    Completions(CompletionsArgs),
+    /// Report build and runtime component versions.
+    Version(VersionArgs),
+}
+
+/// Completion generation uses the public command graph and omits internal commands.
+#[derive(Debug, Parser)]
+#[command(
+    name = "termtrace",
+    version,
+    about = "Record native terminal pixels and every semantic terminal state"
+)]
+struct CompletionCli {
+    #[arg(long, global = true, env = "TERMTRACE_LOG", default_value = "warn")]
+    log: tracing::Level,
+
+    #[command(subcommand)]
+    command: CompletionCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum CompletionCommand {
+    /// Run a command in a PTY and preserve its byte-exact event stream.
+    Record(RecordArgs),
+    /// Execute one strict evidence-native terminal scenario.
+    Test(TestArgs),
+    /// Start a detached recording and publish a name after readiness.
+    Start(StartArgs),
+    /// Stop a named session and atomically publish an immutable successor.
+    Restart(RestartArgs),
+    /// Request graceful termination of a live session child.
+    Stop(StopArgs),
+    /// Print machine-readable live session status.
+    Status(StatusArgs),
+    /// Send text or file bytes to a live child PTY.
+    Send(SendArgs),
     /// Wait for exact UTF-8 text in canonical PTY output.
     Wait(WaitArgs),
     /// Atomically wait for a stable presented screen and return that exact snapshot.
     WaitIdle(WaitIdleArgs),
-    /// Copy the longest integrity-checked event prefix without modifying source.
-    Recover(RecoverArgs),
-    /// Generate JSON Schemas for public events, controls, and artifacts.
-    Schemas(SchemaArgs),
-    /// Export a lossy UTF-8 asciinema v2 interoperability cast.
-    ExportAsciicast(ExportArgs),
+    /// Show a truth-labeled live or completed terminal viewport.
+    Show(ShowArgs),
+    /// Live session control commands.
+    Control(ControlArgs),
+    /// Replay, inspect, compare, and diagnose terminal evidence.
+    Analyze(AnalyzeArgs),
+    /// Render, capture, and publish terminal artifacts.
+    Artifact(ArtifactArgs),
+    /// Register and manage friendly session names.
+    Registry(RegistryArgs),
+    /// Verify, sign, and recover canonical evidence.
+    Integrity(IntegrityArgs),
+    /// Runtime, SDK, and shell integration tools.
+    Tooling(ToolingArgs),
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -1193,6 +1358,9 @@ struct PlaybackArgs {
     /// Structured failure handshake path.
     #[arg(long)]
     error_file: PathBuf,
+    /// Playback-terminal geometry handshake path.
+    #[arg(long)]
+    geometry_file: PathBuf,
     /// Final-frame readiness path.
     #[arg(long)]
     ready_file: PathBuf,
@@ -1969,33 +2137,106 @@ fn init_diagnostics(level: tracing::Level) {
         .init();
 }
 
+fn root_command() -> clap::Command {
+    let command = Cli::command();
+    let visible_commands = command
+        .get_subcommands()
+        .filter(|subcommand| return !subcommand.is_hide_set())
+        .map(|subcommand| {
+            return (
+                subcommand.get_name().to_owned(),
+                subcommand
+                    .get_about()
+                    .map(ToString::to_string)
+                    .unwrap_or_default(),
+            );
+        })
+        .collect::<Vec<_>>();
+    let grouped_names = ROOT_COMMAND_GROUPS
+        .iter()
+        .flat_map(|(_, names)| return names.iter().copied())
+        .collect::<Vec<_>>();
+
+    for (name, _) in &visible_commands {
+        assert!(
+            grouped_names.contains(&name.as_str()),
+            "visible command `{name}` is missing from ROOT_COMMAND_GROUPS"
+        );
+    }
+    for name in &grouped_names {
+        assert!(
+            visible_commands
+                .iter()
+                .any(|(visible, _)| return visible == name),
+            "ROOT_COMMAND_GROUPS contains unknown or hidden command `{name}`"
+        );
+    }
+
+    let command_width = grouped_names
+        .iter()
+        .map(|name| return name.len())
+        .max()
+        .unwrap_or_default();
+    let mut grouped_help = String::from("Commands:\n");
+    for (heading, names) in ROOT_COMMAND_GROUPS {
+        let _ = writeln!(grouped_help, "  {heading}:");
+        for name in *names {
+            let Some(about) = visible_commands.iter().find_map(|(visible, about)| {
+                return (visible == name).then_some(about.as_str());
+            }) else {
+                continue;
+            };
+            let _ = writeln!(grouped_help, "    {name:<command_width$}  {about}");
+        }
+        grouped_help.push('\n');
+    }
+    grouped_help.push_str("Run `termtrace <command> --help` for more details.");
+
+    return command
+        .help_template(ROOT_HELP_TEMPLATE)
+        .after_help(grouped_help);
+}
+
 fn main() -> Result<ExitCode> {
-    let cli = Cli::parse();
+    let matches = root_command().get_matches();
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     init_diagnostics(cli.log);
     return dispatch(cli.command);
 }
 
 fn dispatch(command: Command) -> Result<ExitCode> {
     match command {
-        Command::Version(arguments) => return run_version(arguments),
-        Command::Doctor(arguments) => return run_doctor(arguments),
-        Command::Capabilities(arguments) => return run_capabilities(arguments),
         Command::Record(arguments) => return run_record(arguments),
         Command::Test(arguments) => return run_test(arguments),
         Command::Start(arguments) => return run_start(arguments),
         Command::Restart(arguments) => return run_restart(arguments),
-        Command::Verify(arguments) => return run_verify(arguments),
-        Command::Sign(arguments) => return run_sign(arguments),
-        Command::Register(arguments) => return run_register(arguments),
-        Command::Resolve(arguments) => return run_resolve(arguments),
-        Command::List(arguments) => return run_list(arguments),
-        Command::Remove(arguments) => return run_remove(arguments),
-        Command::Gc(arguments) => return run_gc(arguments),
-        Command::Ping(arguments) => return run_control(arguments.session, ControlCommand::Ping),
         Command::Status(arguments) => return run_status(arguments),
         Command::Send(arguments) => return run_send(arguments),
-        Command::Keys => return run_keys(),
-        Command::Focus(arguments) => {
+        Command::Stop(arguments) => return run_stop(arguments),
+        Command::Control(arguments) => return dispatch_control(arguments.command),
+        Command::Analyze(arguments) => return dispatch_analyze(arguments.command),
+        Command::Artifact(arguments) => return dispatch_artifact(arguments.command),
+        Command::Registry(arguments) => return dispatch_registry(arguments.command),
+        Command::Integrity(arguments) => return dispatch_integrity(arguments.command),
+        Command::Tooling(arguments) => return dispatch_tooling(arguments.command),
+        Command::Playback(arguments) => return run_playback(arguments),
+        Command::GeometryProbe(arguments) => {
+            run_probe(&arguments.out)?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Command::Show(arguments) => return run_show(arguments),
+        Command::Wait(arguments) => return run_wait(arguments),
+        Command::WaitIdle(arguments) => return run_wait_idle(arguments),
+    }
+}
+
+fn dispatch_control(command: ControlSubcommand) -> Result<ExitCode> {
+    match command {
+        ControlSubcommand::Ping(arguments) => {
+            return run_control(arguments.session, ControlCommand::Ping);
+        }
+        ControlSubcommand::Keys => return run_keys(),
+        ControlSubcommand::Focus(arguments) => {
             return run_control_guarded(
                 arguments.session,
                 ControlCommand::Focus {
@@ -2005,8 +2246,8 @@ fn dispatch(command: Command) -> Result<ExitCode> {
                 arguments.expected_presented_state_hash,
             );
         }
-        Command::Pointer(arguments) => return run_pointer(arguments),
-        Command::Activate(arguments) => {
+        ControlSubcommand::Pointer(arguments) => return run_pointer(arguments),
+        ControlSubcommand::Activate(arguments) => {
             return run_control_guarded(
                 arguments.session,
                 ControlCommand::Activate {
@@ -2017,8 +2258,8 @@ fn dispatch(command: Command) -> Result<ExitCode> {
                 arguments.expected_presented_state_hash,
             );
         }
-        Command::Resize(arguments) => return run_resize(arguments),
-        Command::Signal(arguments) => {
+        ControlSubcommand::Resize(arguments) => return run_resize(arguments),
+        ControlSubcommand::Signal(arguments) => {
             return run_control_guarded(
                 arguments.session,
                 ControlCommand::Signal {
@@ -2027,7 +2268,7 @@ fn dispatch(command: Command) -> Result<ExitCode> {
                 arguments.expected_presented_state_hash,
             );
         }
-        Command::Mark(arguments) => {
+        ControlSubcommand::Mark(arguments) => {
             return run_control_guarded(
                 arguments.session,
                 ControlCommand::Mark {
@@ -2036,42 +2277,74 @@ fn dispatch(command: Command) -> Result<ExitCode> {
                 arguments.expected_presented_state_hash,
             );
         }
-        Command::Markers(arguments) => return run_markers(arguments),
-        Command::Video(arguments) => return run_video(arguments),
-        Command::Stop(arguments) => return run_stop(arguments),
-        Command::Index(arguments) => return run_index(arguments),
-        Command::Capture(arguments) => return run_capture(arguments),
-        Command::Playback(arguments) => return run_playback(arguments),
-        Command::GeometryProbe(arguments) => {
-            run_probe(&arguments.out)?;
-            return Ok(ExitCode::SUCCESS);
-        }
-        Command::Inspect(arguments) => return run_inspect(arguments),
-        Command::Cache(arguments) => return run_cache(arguments),
-        Command::Client(arguments) => return run_client(arguments),
-        Command::Show(arguments) => return run_show(arguments),
-        Command::Timeline(arguments) => return run_timeline(arguments),
-        Command::Diff(arguments) => return run_diff(arguments),
-        Command::Explain(arguments) => return run_explain(arguments),
-        Command::Diagnose(arguments) => return run_diagnose(arguments),
-        Command::Review(arguments) => return run_review(arguments),
-        Command::Output(arguments) => return run_output(arguments),
-        Command::Events(arguments) => return run_events(arguments),
-        Command::Completions(arguments) => return run_completions(arguments),
-        Command::Driver => return run_driver(),
-        Command::Save(arguments) => return run_save(arguments),
-        Command::Screenshot(arguments) => return run_screenshot(arguments),
-        Command::Bundle(arguments) => return run_bundle(arguments),
-        Command::BundleVerify(arguments) => return run_bundle_verify(arguments),
-        Command::Wait(arguments) => return run_wait(arguments),
-        Command::WaitIdle(arguments) => return run_wait_idle(arguments),
-        Command::Recover(arguments) => return run_recover(arguments),
-        Command::Schemas(arguments) => return run_schemas(arguments),
-        Command::ExportAsciicast(arguments) => {
-            export_asciicast(arguments.session, arguments.out)?;
-            return Ok(ExitCode::SUCCESS);
-        }
     }
+}
+
+fn dispatch_analyze(command: AnalyzeSubcommand) -> Result<ExitCode> {
+    match command {
+        AnalyzeSubcommand::Index(arguments) => return run_index(arguments),
+        AnalyzeSubcommand::Inspect(arguments) => return run_inspect(arguments),
+        AnalyzeSubcommand::Timeline(arguments) => return run_timeline(arguments),
+        AnalyzeSubcommand::Diff(arguments) => return run_diff(arguments),
+        AnalyzeSubcommand::Explain(arguments) => return run_explain(arguments),
+        AnalyzeSubcommand::Diagnose(arguments) => return run_diagnose(arguments),
+        AnalyzeSubcommand::Review(arguments) => return run_review(arguments),
+        AnalyzeSubcommand::Output(arguments) => return run_output(arguments),
+        AnalyzeSubcommand::Events(arguments) => return run_events(arguments),
+        AnalyzeSubcommand::Markers(arguments) => return run_markers(arguments),
+        AnalyzeSubcommand::Cache(arguments) => return run_cache(arguments),
+    }
+}
+
+fn dispatch_artifact(command: ArtifactSubcommand) -> Result<ExitCode> {
+    match command {
+        ArtifactSubcommand::Capture(arguments) => return run_capture(arguments),
+        ArtifactSubcommand::Save(arguments) => return run_save(arguments),
+        ArtifactSubcommand::Screenshot(arguments) => return run_screenshot(arguments),
+        ArtifactSubcommand::Video(arguments) => return run_video(arguments),
+        ArtifactSubcommand::Bundle(arguments) => {
+            return match arguments.command {
+                ArtifactBundleSubcommand::Create(arguments) => run_bundle(arguments),
+                ArtifactBundleSubcommand::Verify(arguments) => run_bundle_verify(arguments),
+            };
+        }
+        ArtifactSubcommand::Asciicast(arguments) => return run_export_asciicast(arguments),
+    }
+}
+
+fn dispatch_registry(command: RegistrySubcommand) -> Result<ExitCode> {
+    match command {
+        RegistrySubcommand::Register(arguments) => return run_register(arguments),
+        RegistrySubcommand::Resolve(arguments) => return run_resolve(arguments),
+        RegistrySubcommand::List(arguments) => return run_list(arguments),
+        RegistrySubcommand::Remove(arguments) => return run_remove(arguments),
+        RegistrySubcommand::Gc(arguments) => return run_gc(arguments),
+    }
+}
+
+fn dispatch_integrity(command: IntegritySubcommand) -> Result<ExitCode> {
+    match command {
+        IntegritySubcommand::Verify(arguments) => return run_verify(arguments),
+        IntegritySubcommand::Sign(arguments) => return run_sign(arguments),
+        IntegritySubcommand::Recover(arguments) => return run_recover(arguments),
+    }
+}
+
+fn dispatch_tooling(command: ToolingSubcommand) -> Result<ExitCode> {
+    match command {
+        ToolingSubcommand::Doctor(arguments) => return run_doctor(arguments),
+        ToolingSubcommand::Capabilities(arguments) => return run_capabilities(arguments),
+        ToolingSubcommand::Client(arguments) => return run_client(arguments),
+        ToolingSubcommand::Driver => return run_driver(),
+        ToolingSubcommand::Schemas(arguments) => return run_schemas(arguments),
+        ToolingSubcommand::Completions(arguments) => return run_completions(arguments),
+        ToolingSubcommand::Version(arguments) => return run_version(arguments),
+    }
+}
+
+fn run_export_asciicast(arguments: ExportArgs) -> Result<ExitCode> {
+    export_asciicast(arguments.session, arguments.out)?;
+    return Ok(ExitCode::SUCCESS);
 }
 
 fn run_markers(arguments: MarkersArgs) -> Result<ExitCode> {
@@ -2662,6 +2935,7 @@ fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> {
         session_directory: arguments.session,
         timing_file: arguments.timing_file,
         error_file: arguments.error_file,
+        geometry_file: arguments.geometry_file,
         ready_file: arguments.ready_file,
         start_delay: Duration::from_millis(arguments.start_delay_ms),
         final_hold: Duration::from_millis(arguments.final_hold_ms),
@@ -4009,7 +4283,7 @@ fn follow_events(
 }
 
 fn run_completions(arguments: CompletionsArgs) -> Result<ExitCode> {
-    let mut command = Cli::command();
+    let mut command = CompletionCli::command();
     generate(
         arguments.shell,
         &mut command,
@@ -5487,7 +5761,7 @@ fn input_sequence_atom_for_cli(atom: &str, intent: Option<String>) -> Result<Inp
         (atom.as_bytes().to_vec(), InputKind::Text)
     } else {
         return Err(miette::miette!(
-            "unknown input atom; run `termtrace keys` or use text:VALUE, paste:VALUE, raw:VALUE, or raw-file:PATH"
+            "unknown input atom; run `termtrace control keys` or use text:VALUE, paste:VALUE, raw:VALUE, or raw-file:PATH"
         ));
     };
     return Ok(InputSequenceAtom::Bytes {
@@ -5700,7 +5974,7 @@ fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifiers)>> {
                 .ok_or_else(|| miette::miette!("modified letter is missing"))?;
             if !letter.is_ascii_alphabetic() {
                 return Err(miette::miette!(
-                    "modified printable keys currently support ASCII letters; run `termtrace keys`"
+                    "modified printable keys currently support ASCII letters; run `termtrace control keys`"
                 ));
             }
             NamedKey::Letter(letter)

@@ -209,7 +209,7 @@ mod tests {
                     panic!("read checked-in schema {}: {error}", path.display())
                 }),
                 generated.json,
-                "regenerate schemas with `termtrace schemas --out schemas`"
+                "regenerate schemas with `termtrace tooling schemas --out schemas`"
             );
         }
     }

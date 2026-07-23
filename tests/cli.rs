@@ -50,11 +50,76 @@ use termtrace::{
 use zstd::stream::{decode_all, read::Decoder};
 
 #[test]
+fn root_help_groups_commands_by_workflow() {
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+
+    command
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Commands:\n  Recording:"))
+        .stdout(predicate::str::contains("\n  Live workflow:"))
+        .stdout(predicate::str::contains("\n  Command groups:"))
+        .stdout(predicate::str::contains("\n  Control:").not())
+        .stdout(predicate::str::contains("\n  Analysis:").not())
+        .stdout(predicate::str::contains("\n  Artifacts:").not())
+        .stdout(predicate::str::contains("\n  Sessions:").not())
+        .stdout(predicate::str::contains("\n  Integrity:").not())
+        .stdout(predicate::str::contains("\n  Tooling:").not())
+        .stdout(predicate::str::contains("\n  Meta:").not())
+        .stdout(predicate::str::contains("bundle-verify").not())
+        .stdout(predicate::str::contains("export-asciicast").not())
+        .stdout(predicate::str::contains(
+            "Run `termtrace <command> --help` for more details.",
+        ));
+}
+
+#[test]
+fn nested_command_paths_dispatch() {
+    let mut version = Command::cargo_bin("termtrace").expect("binary should build");
+    version
+        .args(["tooling", "version"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("termtrace "));
+
+    let mut keys = Command::cargo_bin("termtrace").expect("binary should build");
+    keys.args(["control", "keys"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ctrl"));
+
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("nested-session");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf NESTED"])
+        .assert()
+        .success();
+
+    let mut index = Command::cargo_bin("termtrace").expect("binary should build");
+    index
+        .args(["analyze", "index", "--session"])
+        .arg(&session)
+        .assert()
+        .success();
+
+    let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
+    verify
+        .args(["integrity", "verify"])
+        .arg(&session)
+        .assert()
+        .success();
+}
+
+#[test]
 fn version_subcommand_reports_package_version() {
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
 
     command
-        .arg("version")
+        .args(["tooling", "version"])
         .assert()
         .success()
         .stdout(predicate::str::contains(concat!(
@@ -74,7 +139,7 @@ fn version_subcommand_reports_package_version() {
 fn doctor_reports_capability_boundaries_and_enforces_requirements() {
     let mut version = Command::cargo_bin("termtrace").expect("binary should build");
     version
-        .args(["version", "--json"])
+        .args(["tooling", "version", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""termtrace_version":"0.1.0""#))
@@ -83,7 +148,7 @@ fn doctor_reports_capability_boundaries_and_enforces_requirements() {
 
     let mut semantic = Command::cargo_bin("termtrace").expect("binary should build");
     semantic
-        .args(["doctor", "--require", "semantic", "--json"])
+        .args(["tooling", "doctor", "--require", "semantic", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""id":"semantic""#))
@@ -92,7 +157,13 @@ fn doctor_reports_capability_boundaries_and_enforces_requirements() {
     let mut blocked = Command::cargo_bin("termtrace").expect("binary should build");
     blocked
         .env("PATH", "")
-        .args(["doctor", "--require", "native-video", "--explain"])
+        .args([
+            "tooling",
+            "doctor",
+            "--require",
+            "native-video",
+            "--explain",
+        ])
         .assert()
         .failure()
         .stdout(predicate::str::contains("native-video"))
@@ -131,7 +202,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
 
     let mut semantic = Command::cargo_bin("termtrace").expect("binary should build");
     semantic
-        .args(["video", "plan"])
+        .args(["artifact", "video", "plan"])
         .arg(&session)
         .args(["--source", "semantic", "--fps", "60", "--edit"])
         .arg(&edit)
@@ -143,7 +214,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
 
     let mut native_default = Command::cargo_bin("termtrace").expect("binary should build");
     native_default
-        .args(["video", "plan"])
+        .args(["artifact", "video", "plan"])
         .arg(&session)
         .arg("--edit")
         .arg(&edit)
@@ -153,7 +224,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
 
     let mut invalid_native_fps = Command::cargo_bin("termtrace").expect("binary should build");
     invalid_native_fps
-        .args(["video", "plan"])
+        .args(["artifact", "video", "plan"])
         .arg(&session)
         .args(["--source", "native", "--fps", "60", "--edit"])
         .arg(&edit)
@@ -175,13 +246,18 @@ fn completions_are_generated_from_the_current_command_graph() {
     ] {
         let mut command = Command::cargo_bin("termtrace").expect("binary should build");
         command
-            .args(["completions", shell])
+            .args(["tooling", "completions", shell])
             .assert()
             .success()
             .stdout(predicate::str::contains(signature))
+            .stdout(predicate::str::contains("control"))
+            .stdout(predicate::str::contains("analyze"))
+            .stdout(predicate::str::contains("artifact"))
             .stdout(predicate::str::contains("timeline"))
             .stdout(predicate::str::contains("explain"))
-            .stdout(predicate::str::contains("events"));
+            .stdout(predicate::str::contains("events"))
+            .stdout(predicate::str::contains("bundle-verify").not())
+            .stdout(predicate::str::contains("export-asciicast").not());
     }
 }
 
@@ -211,7 +287,7 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
     let input = format!("{hello}\n{hello}\n{attach}\n");
     let mut driver = Command::cargo_bin("termtrace").expect("binary should build");
     let output = driver
-        .arg("driver")
+        .args(["tooling", "driver"])
         .write_stdin(input)
         .assert()
         .success()
@@ -479,7 +555,7 @@ fn managed_client_runners_leave_the_callers_worktree_untouched() {
     python
         .env("TERMTRACE_CLIENT_ASSETS", &assets)
         .current_dir(&worktree)
-        .args(["client", "python", "-"])
+        .args(["tooling", "client", "python", "-"])
         .write_stdin("from termtrace import Terminal\nprint(Terminal.__name__)\n")
         .assert()
         .success()
@@ -489,7 +565,7 @@ fn managed_client_runners_leave_the_callers_worktree_untouched() {
     typescript_run
         .env("TERMTRACE_CLIENT_ASSETS", &assets)
         .current_dir(&worktree)
-        .args(["client", "typescript", "-"])
+        .args(["tooling", "client", "typescript", "-"])
         .write_stdin(
             "import { managedRunnerMarker } from '@termtrace/test';\nconsole.log(managedRunnerMarker);\n",
         )
@@ -748,7 +824,7 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
 
     let mut review = Command::cargo_bin("termtrace").expect("binary should build");
     let assertion = review
-        .arg("review")
+        .args(["analyze", "review"])
         .arg(&session)
         .arg("--json")
         .assert()
@@ -769,7 +845,7 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
     );
     let mut search = Command::cargo_bin("termtrace").expect("binary should build");
     let searched = search
-        .arg("review")
+        .args(["analyze", "review"])
         .arg(&session)
         .args(["--json", "--search", "SAFE"])
         .assert()
@@ -789,7 +865,7 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
     let exported = temporary.path().join("review-export");
     let mut export = Command::cargo_bin("termtrace").expect("binary should build");
     export
-        .arg("review")
+        .args(["analyze", "review"])
         .arg(&session)
         .arg("--export-state")
         .arg(&exported)
@@ -810,7 +886,7 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
 fn reviewer_exposes_scriptable_commands_without_a_session() {
     let mut review = Command::cargo_bin("termtrace").expect("binary should build");
     review
-        .args(["review", "--commands"])
+        .args(["analyze", "review", "--commands"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -1121,7 +1197,7 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
 
     let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
     verify
-        .arg("verify")
+        .args(["integrity", "verify"])
         .arg(&session)
         .arg("--json")
         .assert()
@@ -1131,7 +1207,7 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
 
     let mut verify_durability = Command::cargo_bin("termtrace").expect("binary should build");
     verify_durability
-        .arg("verify")
+        .args(["integrity", "verify"])
         .arg(&session)
         .args(["--level", "durability-record", "--json"])
         .assert()
@@ -1147,7 +1223,7 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
 
     let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
     verify
-        .arg("verify")
+        .args(["integrity", "verify"])
         .arg(&session)
         .arg("--json")
         .assert()
@@ -1188,7 +1264,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
         .expect("allowed signers");
 
     let mut sign = Command::cargo_bin("termtrace").expect("binary should build");
-    sign.arg("sign")
+    sign.args(["integrity", "sign"])
         .arg(&session)
         .arg("--key")
         .arg(&key)
@@ -1198,7 +1274,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
 
     let mut cryptography_only = Command::cargo_bin("termtrace").expect("binary should build");
     cryptography_only
-        .arg("verify")
+        .args(["integrity", "verify"])
         .arg(&session)
         .args(["--level", "signature", "--json"])
         .assert()
@@ -1215,7 +1291,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
 
     let mut trusted = Command::cargo_bin("termtrace").expect("binary should build");
     trusted
-        .arg("verify")
+        .args(["integrity", "verify"])
         .arg(&session)
         .args(["--level", "signature", "--allowed-signers"])
         .arg(&allowed)
@@ -1244,7 +1320,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
     .expect("tamper receipt");
     let mut tampered = Command::cargo_bin("termtrace").expect("binary should build");
     tampered
-        .arg("verify")
+        .args(["integrity", "verify"])
         .arg(&session)
         .args(["--level", "signature", "--allowed-signers"])
         .arg(&allowed)
@@ -1417,7 +1493,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut register = Command::cargo_bin("termtrace").expect("binary should build");
     register
         .env("TERMTRACE_STATE_DIR", &state)
-        .arg("register")
+        .args(["registry", "register"])
         .arg("demo")
         .arg("--session")
         .arg(&session)
@@ -1428,7 +1504,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut resolve = Command::cargo_bin("termtrace").expect("binary should build");
     resolve
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["resolve", "demo"])
+        .args(["registry", "resolve", "demo"])
         .assert()
         .success()
         .stdout(format!(
@@ -1439,7 +1515,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut structured = Command::cargo_bin("termtrace").expect("binary should build");
     structured
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["resolve", "demo", "--json"])
+        .args(["registry", "resolve", "demo", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains(manifest.session_id.to_string()))
@@ -1457,7 +1533,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
         .env("TERMTRACE_STATE_DIR", &state)
-        .arg("register")
+        .args(["registry", "register"])
         .arg("demo")
         .arg("--session")
         .arg(&session)
@@ -1467,13 +1543,13 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut active_only = Command::cargo_bin("termtrace").expect("binary should build");
     active_only
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["list", "--json"])
+        .args(["registry", "list", "--json"])
         .assert()
         .success()
         .stdout("[]\n");
     let mut all = Command::cargo_bin("termtrace").expect("binary should build");
     all.env("TERMTRACE_STATE_DIR", &state)
-        .args(["list", "--all", "--json"])
+        .args(["registry", "list", "--all", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""lifecycle":"completed""#))
@@ -1482,7 +1558,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut remove = Command::cargo_bin("termtrace").expect("binary should build");
     remove
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["remove", "demo"])
+        .args(["registry", "remove", "demo"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""evidence_preserved":true"#));
@@ -1522,7 +1598,7 @@ fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomple
     let mut register = Command::cargo_bin("termtrace").expect("binary should build");
     register
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["register", "protected", "--session"])
+        .args(["registry", "register", "protected", "--session"])
         .arg(&registered)
         .assert()
         .success();
@@ -1545,7 +1621,14 @@ fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomple
     let mut dry_run = Command::cargo_bin("termtrace").expect("binary should build");
     let dry_run = dry_run
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["gc", "--older-than-days", "0", "--keep-latest", "0"])
+        .args([
+            "registry",
+            "gc",
+            "--older-than-days",
+            "0",
+            "--keep-latest",
+            "0",
+        ])
         .assert()
         .success();
     let dry_run: serde_json::Value =
@@ -1564,6 +1647,7 @@ fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomple
     apply
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
+            "registry",
             "gc",
             "--older-than-days",
             "0",
@@ -1798,7 +1882,7 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
     let mut resolve = Command::cargo_bin("termtrace").expect("binary should build");
     resolve
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["resolve", "demo"])
+        .args(["registry", "resolve", "demo"])
         .assert()
         .success()
         .stdout(format!("{}\n", successor.display()));
@@ -2169,14 +2253,14 @@ fn live_control_drives_and_audits_a_detached_session() {
     let mut register = Command::cargo_bin("termtrace").expect("binary should build");
     register
         .env("TERMTRACE_STATE_DIR", &registry_state)
-        .args(["register", "live-demo", "--session"])
+        .args(["registry", "register", "live-demo", "--session"])
         .arg(&session)
         .assert()
         .success();
     let mut named_ping = Command::cargo_bin("termtrace").expect("binary should build");
     named_ping
         .env("TERMTRACE_STATE_DIR", &registry_state)
-        .args(["ping", "live-demo"])
+        .args(["control", "ping", "live-demo"])
         .assert()
         .success();
     let entry: serde_json::Value = serde_json::from_slice(
@@ -2198,7 +2282,7 @@ fn live_control_drives_and_audits_a_detached_session() {
     let mut named_list = Command::cargo_bin("termtrace").expect("binary should build");
     named_list
         .env("TERMTRACE_STATE_DIR", &registry_state)
-        .args(["list", "--json"])
+        .args(["registry", "list", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""lifecycle":"live""#))
@@ -2242,15 +2326,17 @@ fn live_control_drives_and_audits_a_detached_session() {
     ));
 
     for arguments in [
-        vec!["ping", session.to_str().expect("UTF-8 path")],
+        vec!["control", "ping", session.to_str().expect("UTF-8 path")],
         vec!["status", session.to_str().expect("UTF-8 path")],
         vec![
+            "control",
             "mark",
             session.to_str().expect("UTF-8 path"),
             "--label",
             "before-input",
         ],
         vec![
+            "control",
             "resize",
             session.to_str().expect("UTF-8 path"),
             "--cols",
@@ -2344,7 +2430,7 @@ fn live_control_drives_and_audits_a_detached_session() {
     );
     let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
     verify
-        .arg("verify")
+        .args(["integrity", "verify"])
         .arg(&session)
         .arg("--json")
         .assert()
@@ -2898,7 +2984,7 @@ fn send_accepts_natural_modifier_aliases_and_single_character_text() {
     )));
 
     let mut keys = Command::cargo_bin("termtrace").expect("binary should build");
-    keys.arg("keys")
+    keys.args(["control", "keys"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -2931,7 +3017,7 @@ fn focus_events_are_mode_gated_encoded_and_audited() {
     for direction in ["in", "out"] {
         let mut focus = Command::cargo_bin("termtrace").expect("binary should build");
         focus
-            .arg("focus")
+            .args(["control", "focus"])
             .arg(&session)
             .arg(direction)
             .arg("--strict")
@@ -3010,7 +3096,7 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
 
     let mut pointer = Command::cargo_bin("termtrace").expect("binary should build");
     pointer
-        .arg("pointer")
+        .args(["control", "pointer"])
         .arg(&session)
         .args(["click", "--cell", "2,3", "--button", "left", "--strict"])
         .assert()
@@ -3122,7 +3208,7 @@ fn activate_resolves_visible_text_rejects_ambiguity_and_records_region() {
 
     let mut ambiguous = Command::cargo_bin("termtrace").expect("binary should build");
     ambiguous
-        .arg("activate")
+        .args(["control", "activate"])
         .arg(&session)
         .args(["--text", "Save changes", "--unique", "--strict"])
         .assert()
@@ -3130,7 +3216,7 @@ fn activate_resolves_visible_text_rejects_ambiguity_and_records_region() {
         .stderr(predicate::str::contains("activation_text_ambiguous"));
     let mut activate = Command::cargo_bin("termtrace").expect("binary should build");
     activate
-        .arg("activate")
+        .args(["control", "activate"])
         .arg(&session)
         .args(["--text", "Save changes", "--strict"])
         .assert()
@@ -3527,7 +3613,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
     let mut cache_status = Command::cargo_bin("termtrace").expect("binary should build");
     let status = cache_status
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["cache", "status", "demo"])
+        .args(["analyze", "cache", "status", "demo"])
         .assert()
         .success();
     let status: serde_json::Value =
@@ -3552,7 +3638,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
     let mut prune = Command::cargo_bin("termtrace").expect("binary should build");
     prune
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["cache", "prune", "demo"])
+        .args(["analyze", "cache", "prune", "demo"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""removed_entries":1"#))
@@ -3604,7 +3690,7 @@ fn show_requires_explicit_permission_for_hidden_states() {
         .stdout(predicate::str::contains("HIDDEN"));
     let mut native = Command::cargo_bin("termtrace").expect("binary should build");
     native
-        .arg("screenshot")
+        .args(["artifact", "screenshot"])
         .arg(&session)
         .args([
             "--renderer",
@@ -3940,7 +4026,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         .assert()
         .success();
     let mut save = Command::cargo_bin("termtrace").expect("binary should build");
-    save.arg("save")
+    save.args(["artifact", "save"])
         .arg(&session)
         .args(["--out"])
         .arg(&destination)
@@ -4011,7 +4097,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
     let screenshot = temporary.path().join("semantic-screenshot");
     let mut screenshot_command = Command::cargo_bin("termtrace").expect("binary should build");
     screenshot_command
-        .arg("screenshot")
+        .args(["artifact", "screenshot"])
         .arg(&session)
         .args(["--out"])
         .arg(&screenshot)
@@ -4029,7 +4115,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
     let batch = temporary.path().join("semantic-screenshot-batch");
     let mut batch_command = Command::cargo_bin("termtrace").expect("binary should build");
     batch_command
-        .arg("screenshot")
+        .args(["artifact", "screenshot"])
         .arg(&session)
         .args(["--out"])
         .arg(&batch)
@@ -4047,7 +4133,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
 
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
-        .arg("save")
+        .args(["artifact", "save"])
         .arg(&session)
         .args(["--out"])
         .arg(&destination)
@@ -4074,7 +4160,7 @@ fn state_hash_selectors_reach_every_exact_state_workflow() {
 
     let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
     inspect
-        .arg("inspect")
+        .args(["analyze", "inspect"])
         .arg("--session")
         .arg(&session)
         .args(["--state-hash", &final_hash, "--format", "json-compact"])
@@ -4091,7 +4177,7 @@ fn state_hash_selectors_reach_every_exact_state_workflow() {
         .stdout(predicate::str::contains(&final_hash));
 
     let mut diff = Command::cargo_bin("termtrace").expect("binary should build");
-    diff.arg("diff")
+    diff.args(["analyze", "diff"])
         .arg(&session)
         .args([
             "--from-state-hash",
@@ -4107,7 +4193,7 @@ fn state_hash_selectors_reach_every_exact_state_workflow() {
 
     let mut explain = Command::cargo_bin("termtrace").expect("binary should build");
     explain
-        .arg("explain")
+        .args(["analyze", "explain"])
         .arg(&session)
         .args(["--state-hash", &final_hash, "--format", "json-compact"])
         .assert()
@@ -4117,7 +4203,7 @@ fn state_hash_selectors_reach_every_exact_state_workflow() {
     let save = temporary.path().join("nested/artifacts/hash-save");
     let mut save_command = Command::cargo_bin("termtrace").expect("binary should build");
     save_command
-        .arg("save")
+        .args(["artifact", "save"])
         .arg(&session)
         .arg("--state-hash")
         .arg(&final_hash)
@@ -4131,7 +4217,7 @@ fn state_hash_selectors_reach_every_exact_state_workflow() {
     let screenshot = temporary.path().join("other/nested/hash-screenshot");
     let mut screenshot_command = Command::cargo_bin("termtrace").expect("binary should build");
     screenshot_command
-        .arg("screenshot")
+        .args(["artifact", "screenshot"])
         .arg(&session)
         .arg("--state-hash")
         .arg(&final_hash)
@@ -4166,7 +4252,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
 
     let mut dry_run = Command::cargo_bin("termtrace").expect("binary should build");
     dry_run
-        .arg("bundle")
+        .args(["artifact", "bundle", "create"])
         .arg(&session)
         .args(["--profile", "debug", "--out"])
         .arg(temporary.path().join("unused"))
@@ -4181,7 +4267,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
 
     let mut create = Command::cargo_bin("termtrace").expect("binary should build");
     create
-        .arg("bundle")
+        .args(["artifact", "bundle", "create"])
         .arg(&session)
         .args(["--profile", "forensic", "--out"])
         .arg(&bundle)
@@ -4198,7 +4284,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     assert!(bundle.join("canonical/completion.json").is_file());
     let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
     verify
-        .arg("bundle-verify")
+        .args(["artifact", "bundle", "verify"])
         .arg(&bundle)
         .assert()
         .success()
@@ -4211,7 +4297,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     for destination in [&archive, &archive_copy] {
         let mut create_archive = Command::cargo_bin("termtrace").expect("binary should build");
         create_archive
-            .arg("bundle")
+            .args(["artifact", "bundle", "create"])
             .arg(&session)
             .args(["--profile", "forensic", "--archive", "--out"])
             .arg(destination)
@@ -4233,7 +4319,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     );
     let mut verify_archive = Command::cargo_bin("termtrace").expect("binary should build");
     verify_archive
-        .arg("bundle-verify")
+        .args(["artifact", "bundle", "verify"])
         .arg(&archive)
         .assert()
         .success()
@@ -4246,7 +4332,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     fs_err::write(&archive_copy, corrupted).expect("write corrupted archive");
     let mut reject_archive = Command::cargo_bin("termtrace").expect("binary should build");
     reject_archive
-        .arg("bundle-verify")
+        .args(["artifact", "bundle", "verify"])
         .arg(&archive_copy)
         .assert()
         .failure();
@@ -4254,7 +4340,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     fs_err::write(bundle.join("screen.txt"), b"tampered").expect("tamper bundle");
     let mut tampered = Command::cargo_bin("termtrace").expect("binary should build");
     tampered
-        .arg("bundle-verify")
+        .args(["artifact", "bundle", "verify"])
         .arg(&bundle)
         .assert()
         .failure()
@@ -4280,7 +4366,7 @@ fn timeline_streams_presented_states_and_canonical_operations() {
 
     let mut concise = Command::cargo_bin("termtrace").expect("binary should build");
     let concise_output = concise
-        .arg("timeline")
+        .args(["analyze", "timeline"])
         .arg(&session)
         .arg("--jsonl")
         .assert()
@@ -4309,7 +4395,7 @@ fn timeline_streams_presented_states_and_canonical_operations() {
 
     let mut complete = Command::cargo_bin("termtrace").expect("binary should build");
     complete
-        .arg("timeline")
+        .args(["analyze", "timeline"])
         .arg(&session)
         .args(["--jsonl", "--all-states"])
         .assert()
@@ -4318,7 +4404,7 @@ fn timeline_streams_presented_states_and_canonical_operations() {
 
     let mut controls = Command::cargo_bin("termtrace").expect("binary should build");
     controls
-        .arg("timeline")
+        .args(["analyze", "timeline"])
         .arg(&session)
         .args(["--jsonl", "--controls"])
         .assert()
@@ -4363,7 +4449,7 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
 
     let mut timeline = Command::cargo_bin("termtrace").expect("binary should build");
     let timeline = timeline
-        .arg("timeline")
+        .args(["analyze", "timeline"])
         .arg(&session)
         .arg("--jsonl")
         .assert()
@@ -4377,7 +4463,7 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
 
     let mut events = Command::cargo_bin("termtrace").expect("binary should build");
     let events = events
-        .arg("events")
+        .args(["analyze", "events"])
         .arg(&session)
         .args(["--type", "marker", "--metadata-only"])
         .assert()
@@ -4392,7 +4478,7 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
 
     let mut resume = Command::cargo_bin("termtrace").expect("binary should build");
     let resume = resume
-        .arg("events")
+        .args(["analyze", "events"])
         .arg(&session)
         .args([
             "--type",
@@ -4435,7 +4521,7 @@ fn diff_reports_complete_cell_changes_and_enforces_expectations() {
 
     let mut changed = Command::cargo_bin("termtrace").expect("binary should build");
     changed
-        .arg("diff")
+        .args(["analyze", "diff"])
         .arg(&session)
         .args([
             "--from-state",
@@ -4453,7 +4539,7 @@ fn diff_reports_complete_cell_changes_and_enforces_expectations() {
 
     let mut visual = Command::cargo_bin("termtrace").expect("binary should build");
     let png = visual
-        .arg("diff")
+        .args(["analyze", "diff"])
         .arg(&session)
         .args([
             "--from-state",
@@ -4471,7 +4557,7 @@ fn diff_reports_complete_cell_changes_and_enforces_expectations() {
     assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
     let mut visual_svg = Command::cargo_bin("termtrace").expect("binary should build");
     visual_svg
-        .arg("diff")
+        .args(["analyze", "diff"])
         .arg(&session)
         .args([
             "--from-state",
@@ -4488,7 +4574,7 @@ fn diff_reports_complete_cell_changes_and_enforces_expectations() {
 
     let mut rejected = Command::cargo_bin("termtrace").expect("binary should build");
     rejected
-        .arg("diff")
+        .args(["analyze", "diff"])
         .arg(&session)
         .args([
             "--from-state",
@@ -4503,7 +4589,7 @@ fn diff_reports_complete_cell_changes_and_enforces_expectations() {
 
     let mut unchanged = Command::cargo_bin("termtrace").expect("binary should build");
     unchanged
-        .arg("diff")
+        .args(["analyze", "diff"])
         .arg(&session)
         .args([
             "--from-state",
@@ -4540,7 +4626,7 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
 
     let mut explain = Command::cargo_bin("termtrace").expect("binary should build");
     explain
-        .arg("explain")
+        .args(["analyze", "explain"])
         .arg(&session)
         .args([
             "--state",
@@ -4576,7 +4662,7 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         .success();
     let mut diagnose = Command::cargo_bin("termtrace").expect("binary should build");
     diagnose
-        .arg("diagnose")
+        .args(["analyze", "diagnose"])
         .arg(&diagnostic_session)
         .args([
             "--check",
@@ -4595,7 +4681,7 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         ));
 
     let mut gate = Command::cargo_bin("termtrace").expect("binary should build");
-    gate.arg("diagnose")
+    gate.args(["analyze", "diagnose"])
         .arg(&diagnostic_session)
         .args(["--check", "full-redraw", "--fail-on-finding"])
         .assert()
@@ -4635,7 +4721,7 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
 
     let mut output = Command::cargo_bin("termtrace").expect("binary should build");
     output
-        .arg("output")
+        .args(["analyze", "output"])
         .arg(&session)
         .arg("--raw")
         .assert()
@@ -4651,7 +4737,7 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
     let first = output_events.first().copied().expect("output event");
     let mut bounded = Command::cargo_bin("termtrace").expect("binary should build");
     bounded
-        .arg("output")
+        .args(["analyze", "output"])
         .arg(&session)
         .args([
             "--raw",
@@ -4667,7 +4753,7 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
     let projection_manifest = temporary.path().join("output-projection.json");
     let mut stripped = Command::cargo_bin("termtrace").expect("binary should build");
     stripped
-        .arg("output")
+        .args(["analyze", "output"])
         .arg(&session)
         .args(["--strip-controls", "--manifest"])
         .arg(&projection_manifest)
@@ -4705,7 +4791,7 @@ fn output_follow_emits_each_durable_prefix_once_until_completion() {
         .expect("spawn recorder");
     wait_for_path(&session.join("control.sock"));
     let follower = StdCommand::new(binary)
-        .arg("output")
+        .args(["analyze", "output"])
         .arg(&session)
         .args(["--raw", "--follow"])
         .stdout(Stdio::piped())
@@ -4731,7 +4817,7 @@ fn output_follow_emits_each_durable_prefix_once_until_completion() {
         .collect::<Vec<_>>();
     assert_eq!(followed.stdout, expected);
     let stripped = StdCommand::new(binary)
-        .arg("output")
+        .args(["analyze", "output"])
         .arg(&session)
         .args(["--strip-controls", "--follow"])
         .output()
@@ -4755,7 +4841,7 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
 
     let mut metadata = Command::cargo_bin("termtrace").expect("binary should build");
     let output = metadata
-        .arg("events")
+        .args(["analyze", "events"])
         .arg(&session)
         .args(["--type", "output", "--metadata-only"])
         .assert()
@@ -4773,7 +4859,7 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
 
     let mut exact = Command::cargo_bin("termtrace").expect("binary should build");
     exact
-        .arg("events")
+        .args(["analyze", "events"])
         .arg(&session)
         .args(["--type", "output"])
         .assert()
@@ -4805,7 +4891,7 @@ fn events_follow_resumes_filtered_durable_records_without_duplicates() {
         .expect("spawn recorder");
     wait_for_path(&session.join("control.sock"));
     let follower = StdCommand::new(binary)
-        .arg("events")
+        .args(["analyze", "events"])
         .arg(&session)
         .args(["--follow", "--type", "output", "--metadata-only"])
         .stdout(Stdio::piped())
@@ -4867,7 +4953,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
 
     let mut marker = Command::cargo_bin("termtrace").expect("binary should build");
     marker
-        .arg("mark")
+        .args(["control", "mark"])
         .arg(&session)
         .args(["--label", "settled"])
         .assert()
@@ -4876,14 +4962,14 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
 
     let mut incomplete_index = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_index
-        .args(["index", "--session"])
+        .args(["analyze", "index", "--session"])
         .arg(&session)
         .assert()
         .failure()
         .stderr(predicate::str::contains("is not complete"));
     let mut incomplete_capture = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_capture
-        .args(["capture", "--session"])
+        .args(["artifact", "capture", "--session"])
         .arg(&session)
         .args(["--width", "320", "--height", "200"])
         .assert()
@@ -4938,7 +5024,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
 
     let mut marker_range = Command::cargo_bin("termtrace").expect("binary should build");
     marker_range
-        .args(["index", "--from-marker", "settled", "--session"])
+        .args(["analyze", "index", "--from-marker", "settled", "--session"])
         .arg(&session)
         .assert()
         .success();
@@ -5059,7 +5145,7 @@ fn index_replays_every_distinct_state_deterministically() {
     let cast = temporary.path().join("session.cast");
     let mut export = Command::cargo_bin("termtrace").expect("binary should build");
     export
-        .args(["export-asciicast", "--session"])
+        .args(["artifact", "asciicast", "--session"])
         .arg(&session)
         .args(["--out"])
         .arg(&cast)
@@ -5091,7 +5177,7 @@ fn index_replays_every_distinct_state_deterministically() {
 
     let mut index = Command::cargo_bin("termtrace").expect("binary should build");
     index
-        .args(["index", "--session"])
+        .args(["analyze", "index", "--session"])
         .arg(&session)
         .assert()
         .success();
@@ -5099,7 +5185,7 @@ fn index_replays_every_distinct_state_deterministically() {
 
     let mut presented = Command::cargo_bin("termtrace").expect("binary should build");
     presented
-        .args(["index", "--presented-only", "--session"])
+        .args(["analyze", "index", "--presented-only", "--session"])
         .arg(&session)
         .assert()
         .success();
@@ -5134,7 +5220,7 @@ fn index_replays_every_distinct_state_deterministically() {
     );
     let mut inspect_text = Command::cargo_bin("termtrace").expect("binary should build");
     inspect_text
-        .args(["inspect", "--session"])
+        .args(["analyze", "inspect", "--session"])
         .arg(&session)
         .args(["--format", "text"])
         .assert()
@@ -5142,7 +5228,7 @@ fn index_replays_every_distinct_state_deterministically() {
         .stdout(predicate::str::contains("AB界"));
     let mut inspect_initial = Command::cargo_bin("termtrace").expect("binary should build");
     inspect_initial
-        .args(["inspect", "--session"])
+        .args(["analyze", "inspect", "--session"])
         .arg(&session)
         .args(["--state", "0", "--format", "json"])
         .assert()
@@ -5151,7 +5237,7 @@ fn index_replays_every_distinct_state_deterministically() {
 
     let mut inspect_row = Command::cargo_bin("termtrace").expect("binary should build");
     inspect_row
-        .args(["inspect", "--session"])
+        .args(["analyze", "inspect", "--session"])
         .arg(&session)
         .args(["--state", "0", "--row", "0", "--format", "json-compact"])
         .assert()
@@ -5164,7 +5250,7 @@ fn index_replays_every_distinct_state_deterministically() {
     );
     let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
     verify
-        .arg("verify")
+        .args(["integrity", "verify"])
         .arg(&session)
         .arg("--json")
         .assert()
@@ -5180,7 +5266,7 @@ fn index_replays_every_distinct_state_deterministically() {
     fs_err::write(&tampered_member, contents).expect("tamper derived member");
     let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
     verify
-        .arg("verify")
+        .args(["integrity", "verify"])
         .arg(&session)
         .arg("--json")
         .assert()
@@ -5191,7 +5277,7 @@ fn index_replays_every_distinct_state_deterministically() {
 
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
-        .args(["index", "--session"])
+        .args(["analyze", "index", "--session"])
         .arg(&session)
         .assert()
         .failure()
@@ -5226,7 +5312,7 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
 
     let mut empty = Command::cargo_bin("termtrace").expect("binary should build");
     empty
-        .args(["index", "--session"])
+        .args(["analyze", "index", "--session"])
         .arg(&session)
         .args([
             "--from",
@@ -5240,7 +5326,7 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
 
     let mut index = Command::cargo_bin("termtrace").expect("binary should build");
     index
-        .args(["index", "--session"])
+        .args(["analyze", "index", "--session"])
         .arg(&session)
         .args([
             "--from",
@@ -5286,7 +5372,7 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
     assert!(!final_text.contains("AFTER"));
 
     let mut full = Command::cargo_bin("termtrace").expect("binary should build");
-    full.args(["index", "--session"])
+    full.args(["analyze", "index", "--session"])
         .arg(&session)
         .assert()
         .success();
@@ -5295,7 +5381,7 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
 
     let mut unmatched_capture = Command::cargo_bin("termtrace").expect("binary should build");
     unmatched_capture
-        .args(["capture", "--session"])
+        .args(["artifact", "capture", "--session"])
         .arg(&session)
         .args([
             "--width",
@@ -5315,7 +5401,7 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
 
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
-        .args(["index", "--session"])
+        .args(["analyze", "index", "--session"])
         .arg(&session)
         .args([
             "--from",
@@ -5342,7 +5428,7 @@ fn inspect_exits_cleanly_when_downstream_closes_the_pipe() {
 
     let binary = env!("CARGO_BIN_EXE_termtrace");
     let mut inspect = StdCommand::new(binary)
-        .args(["inspect", "--session"])
+        .args(["analyze", "inspect", "--session"])
         .arg(&session)
         .args(["--format", "json"])
         .stdout(Stdio::piped())
@@ -5647,6 +5733,7 @@ fn playback_does_not_echo_terminal_query_responses() {
     let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_termtrace"));
     let timing_file = temporary.path().join("timing.json");
     let error_file = temporary.path().join("playback-error.json");
+    let geometry_file = temporary.path().join("geometry.json");
     let ready_file = temporary.path().join("ready");
     command.args([
         "playback",
@@ -5656,6 +5743,8 @@ fn playback_does_not_echo_terminal_query_responses() {
         timing_file.to_str().expect("UTF-8 timing"),
         "--error-file",
         error_file.to_str().expect("UTF-8 playback error"),
+        "--geometry-file",
+        geometry_file.to_str().expect("UTF-8 geometry"),
         "--ready-file",
         ready_file.to_str().expect("UTF-8 ready"),
         "--start-delay-ms",
@@ -5684,6 +5773,7 @@ fn playback_does_not_echo_terminal_query_responses() {
     drop(pty.master);
     let output = reader_thread.join().expect("join PTY reader");
 
+    assert!(geometry_file.is_file());
     assert!(
         output
             .windows(query.len())

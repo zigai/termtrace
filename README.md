@@ -32,8 +32,8 @@ The command runs in a real PTY with output and input forwarded normally. After i
 
 ```sh
 termtrace show ./app.termtrace
-termtrace timeline ./app.termtrace
-termtrace verify ./app.termtrace
+termtrace analyze timeline ./app.termtrace
+termtrace integrity verify ./app.termtrace
 ```
 
 Recordings are new owner-only directories. Termtrace never replaces an existing output path.
@@ -56,32 +56,34 @@ termtrace stop app --wait
 For a branching or repeated workflow, run the installed typed SDK without adding project files:
 
 ```sh
-termtrace client status
-termtrace client python workflow.py
-termtrace client typescript workflow.ts
+termtrace tooling client status
+termtrace tooling client python workflow.py
+termtrace tooling client typescript workflow.ts
 ```
 
 The managed runners use private temporary mappings and shared runtime caches; they leave the caller's working tree untouched.
+
+Advanced workflows are grouped under `control`, `analyze`, `artifact`, `registry`, `integrity`, and `tooling`.
 
 ## Investigate and capture a recording
 
 Build the semantic index, inspect an earlier moment, run rendering diagnostics, or create a deterministic screenshot:
 
 ```sh
-termtrace index --session ./app.termtrace
+termtrace analyze index --session ./app.termtrace
 termtrace show ./app.termtrace --at 5s
 termtrace show ./app.termtrace --state-hash HASH
-termtrace diagnose ./app.termtrace
-termtrace screenshot ./app.termtrace --out ./app-screenshot
+termtrace analyze diagnose ./app.termtrace
+termtrace artifact screenshot ./app.termtrace --out ./app-screenshot
 ```
 
 When actual renderer pixels matter, replay the recording through Ghostty on a private display:
 
 ```sh
-termtrace capture --session ./app.termtrace
+termtrace artifact capture --session ./app.termtrace
 ```
 
-`termtrace doctor --explain` reports whether the optional native screenshot and video dependencies are available. Semantic inspection does not require them.
+`termtrace tooling doctor --explain` reports whether the optional native screenshot and video dependencies are available. Semantic inspection does not require them.
 
 ## Automate terminal tests
 

@@ -14,7 +14,7 @@ or `--all` only when the next decision needs them.
 ## Choose the interface first
 
 - Use one CLI command for one observation, wait, mutation, or artifact.
-- Use `termtrace client python -` or `termtrace client typescript -` when the
+- Use `termtrace tooling client python -` or `termtrace tooling client typescript -` when the
   workflow has more than three actions, branching, repeated observations, or
   caller-owned retry IDs. These runners use installed SDK assets and managed
   runtime caches; they create no package, config, or generated source in the
@@ -28,8 +28,8 @@ or `--all` only when the next decision needs them.
 ## Choose the truth source
 
 - Presented UI requirement: `wait SESSION --screen ...`, `wait-idle`, or `show`.
-- Exact child byte-history requirement: `wait SESSION --output ...` or `output`.
-- Semantic transition: `timeline`, `diff`, then `explain` as needed.
+- Exact child byte-history requirement: `wait SESSION --output ...` or `analyze output`.
+- Semantic transition: `analyze timeline`, `analyze diff`, then `analyze explain` as needed.
 - Native pixels: request native screenshot/video explicitly; semantic images do
   not become native evidence.
 - Handoff or publication: use a manifested save, screenshot, or bundle and read

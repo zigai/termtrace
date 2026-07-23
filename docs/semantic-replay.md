@@ -3,8 +3,8 @@
 Semantic replay turns canonical PTY output into inspectable terminal states.
 
 ```bash
-termtrace index --session SESSION
-termtrace inspect --session SESSION --format text
+termtrace analyze index --session SESSION
+termtrace analyze inspect --session SESSION --format text
 ```
 
 Replay validates the event chain and uses the exact pinned semantic engine. The same recording therefore produces byte-for-byte deterministic state artifacts when the engine and schema versions are unchanged.
@@ -35,8 +35,8 @@ This distinction lets protocol debugging inspect hidden work without claiming th
 Use time offsets or unique markers to replay part of a session:
 
 ```bash
-termtrace index --session SESSION --from 30s --to 45s
-termtrace index --session SESSION --from-marker start --to-marker finish
+termtrace analyze index --session SESSION --from 30s --to 45s
+termtrace analyze index --session SESSION --from-marker start --to-marker finish
 ```
 
 Ranges are half-open: the start is included and the end is excluded. Replay processes the earlier prefix to reconstruct the correct starting state but does not emit prefix states. The range begins with a complete state at its inclusive boundary.
@@ -62,8 +62,8 @@ A state hash selects semantic content across `inspect`, `show`, `save`, `screens
 One-off completed observations publish compressed disposable checkpoints. They are bounded to 32 entries and 64 MiB per session and never replace canonical evidence:
 
 ```bash
-termtrace cache status SESSION
-termtrace cache prune SESSION
+termtrace analyze cache status SESSION
+termtrace analyze cache prune SESSION
 ```
 
 ## Semantic and native views
@@ -77,9 +77,9 @@ Semantic PNG and SVG rendering are deterministic derived views. Native PNG expli
 Presentation planning, preview, and export use verified native Ghostty video by default. Select semantic rendering explicitly when a deterministic MP4 is needed on a host without the native display stack:
 
 ```bash
-termtrace video plan SESSION --source semantic --fps 24 --edit EDIT.json
-termtrace video preview SESSION --source semantic --edit EDIT.json --out PREVIEW
-termtrace video export SESSION --source semantic --edit EDIT.json --out EXPORT
+termtrace artifact video plan SESSION --source semantic --fps 24 --edit EDIT.json
+termtrace artifact video preview SESSION --source semantic --edit EDIT.json --out PREVIEW
+termtrace artifact video export SESSION --source semantic --edit EDIT.json --out EXPORT
 ```
 
 The semantic scheduler samples the latest presentation-eligible state at each frame boundary. It excludes synchronized-output hidden states and records states too brief to receive a frame as suppressed. A final source frame retains the completed semantic state. Resized sessions use one fixed maximum-grid canvas.

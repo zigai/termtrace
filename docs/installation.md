@@ -47,7 +47,7 @@ The installer first attempts an ordinary release download, then uses the authent
 After installing, run:
 
 ```bash
-termtrace doctor --explain
+termtrace tooling doctor --explain
 ```
 
 Capabilities are reported independently. A machine may support recording and semantic replay without supporting native screenshots or video.
@@ -55,9 +55,9 @@ Capabilities are reported independently. A machine may support recording and sem
 Use `--require` in CI:
 
 ```bash
-termtrace doctor --require core,semantic
-termtrace doctor --require native-screenshot,presentation
-termtrace doctor --require semantic-video,presentation
+termtrace tooling doctor --require core,semantic
+termtrace tooling doctor --require native-screenshot,presentation
+termtrace tooling doctor --require semantic-video,presentation
 ```
 
 `semantic-video` requires the pinned semantic engine plus FFmpeg/FFprobe with `libx264rgb`; it does not require Ghostty GTK, Xvfb, D-Bus, ImageMagick, or OpenGL. Native video remains the default presentation source.
@@ -75,8 +75,8 @@ mkdir -p "$HOME/.local/bin"
 install -m 0555 termtrace-TARGET/termtrace "$HOME/.local/bin/termtrace"
 mkdir -p "$HOME/.local/share/termtrace"
 cp -R termtrace-TARGET/clients "$HOME/.local/share/termtrace/clients"
-termtrace doctor --require core,semantic
-termtrace client status
+termtrace tooling doctor --require core,semantic
+termtrace tooling client status
 ```
 
 The repository's `scripts/validate-release-archive.sh` performs a deeper recording, content-verification, and semantic-replay smoke test. Run `doctor` on the destination machine to establish native capabilities. GitHub documents independent attestation verification in [Verifying the integrity of a release](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity).
@@ -136,9 +136,9 @@ Pixels produced there describe that container environment, not every workstation
 Generate completions from the installed command graph:
 
 ```bash
-termtrace completions bash
-termtrace completions zsh
-termtrace completions fish
+termtrace tooling completions bash
+termtrace tooling completions zsh
+termtrace tooling completions fish
 ```
 
 Install or source the output using your shell's normal mechanism. Regenerate it after upgrading.

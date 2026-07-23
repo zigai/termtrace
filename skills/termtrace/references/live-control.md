@@ -8,7 +8,7 @@ mutations.
 `send` admits its complete atom list under one guard and one request journal
 entry. Natural atoms include single printable characters, named keys such as
 `enter`, modifiers such as `ctrl+f` or `ctrl-down`, and explicit `text:`,
-`paste:`, `raw:`, or `raw-file:` values. Run `termtrace keys` for the complete
+`paste:`, `raw:`, or `raw-file:` values. Run `termtrace control keys` for the complete
 grammar. Use `--verbose` only when per-atom canonical event coordinates are
 needed.
 

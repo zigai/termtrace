@@ -48,7 +48,7 @@ Friendly-name registry files are also outside canonical evidence. Names may chan
 
 ## Semantic artifacts
 
-Running `termtrace index --session SESSION` creates:
+Running `termtrace analyze index --session SESSION` creates:
 
 | File | Contents |
 | --- | --- |
@@ -63,7 +63,7 @@ Ranged indexes use a range-specific directory. Live snapshots are hash-addressed
 
 ## Native visual artifacts
 
-Running `termtrace capture --session SESSION` creates:
+Running `termtrace artifact capture --session SESSION` creates:
 
 | File | Contents |
 | --- | --- |
@@ -76,7 +76,7 @@ Native capture is a separate capability. It never silently falls back to semanti
 
 ## Presentation artifacts
 
-`termtrace video export` publishes `presentation.mp4`, a normalized plan, an output probe, a per-frame presentation map, and a manifest. Native Ghostty capture is the default presentation source.
+`termtrace artifact video export` publishes `presentation.mp4`, a normalized plan, an output probe, a per-frame presentation map, and a manifest. Native Ghostty capture is the default presentation source.
 
 With `--source semantic`, the same directory also retains:
 
@@ -96,7 +96,7 @@ Completed derivations append a root to `artifact-roots.jsonl`. Each entry binds 
 ## Verify a session
 
 ```bash
-termtrace verify SESSION --level content --json
+termtrace integrity verify SESSION --level content --json
 ```
 
 Verification levels are cumulative:
@@ -115,8 +115,8 @@ Offline verification cannot prove historical storage behavior. A valid unsigned 
 Verify content before creating a detached OpenSSH receipt:
 
 ```bash
-termtrace sign SESSION --key SSH_KEY --signer BUILD_IDENTITY
-termtrace verify SESSION \
+termtrace integrity sign SESSION --key SSH_KEY --signer BUILD_IDENTITY
+termtrace integrity verify SESSION \
   --level signature \
   --allowed-signers ALLOWED_SIGNERS \
   --json
@@ -129,7 +129,7 @@ Cryptographic validity and trusted identity are separate results. Authenticity i
 Public JSON Schemas are checked into `schemas/` and generated from Rust types:
 
 ```bash
-termtrace schemas --out schemas
+termtrace tooling schemas --out schemas
 ```
 
 Tests require generated output to match the checked-in files and validate fixtures against the schemas. Schema validity describes structure, not trust or safety.

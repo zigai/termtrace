@@ -1,6 +1,6 @@
 # Python and TypeScript clients
 
-The Python and TypeScript packages own the subprocess lifecycle and expose matching `Terminal`, `Session`, `Screen`, `Keyboard`, `Pointer`, semantic, event, and evidence namespaces. They communicate with `termtrace driver` through versioned newline-delimited JSON.
+The Python and TypeScript packages own the subprocess lifecycle and expose matching `Terminal`, `Session`, `Screen`, `Keyboard`, `Pointer`, semantic, event, and evidence namespaces. They communicate with `termtrace tooling driver` through versioned newline-delimited JSON.
 
 ## Contract architecture
 
@@ -69,14 +69,14 @@ The package ships precompiled standalone Ajv validators. Ajv is a development de
 Release installations include both client packages as managed assets. Check discovery and runtime availability with:
 
 ```bash
-termtrace client status
+termtrace tooling client status
 ```
 
 Then execute a file or standard input directly:
 
 ```bash
-termtrace client python workflow.py -- --workflow-argument
-termtrace client typescript - <<'TS'
+termtrace tooling client python workflow.py -- --workflow-argument
+termtrace tooling client typescript - <<'TS'
 import { Termtrace } from "@termtrace/test";
 console.log(typeof Termtrace.create);
 TS
@@ -96,7 +96,7 @@ identical payload required by `safe_same_request_id` recovery.
 After changing a Rust driver type, regenerate the checked-in schemas and clients:
 
 ```bash
-termtrace schemas --out schemas
+termtrace tooling schemas --out schemas
 scripts/generate-client-protocol.sh
 bun run --cwd packages/typescript build
 ```

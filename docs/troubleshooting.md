@@ -3,7 +3,7 @@
 Start with the capability report and the diagnostic code from the failing command:
 
 ```bash
-termtrace doctor --explain
+termtrace tooling doctor --explain
 ```
 
 ## Build cannot find the semantic library
@@ -21,7 +21,7 @@ It initializes the submodule, installs the pinned Zig toolchain, and builds the 
 Check that the session is still live:
 
 ```bash
-termtrace ping SESSION
+termtrace control ping SESSION
 termtrace status SESSION
 ```
 
@@ -30,8 +30,8 @@ termtrace status SESSION
 If a friendly name is involved, inspect all registry states:
 
 ```bash
-termtrace list --all --json
-termtrace resolve NAME --json
+termtrace registry list --all --json
+termtrace registry resolve NAME --json
 ```
 
 ## A wait times out
@@ -54,7 +54,7 @@ Recover the longest valid prefix into a new directory:
 
 ```bash
 mkdir -m 700 recovered
-termtrace recover \
+termtrace integrity recover \
   --event-log SESSION/events.jsonl \
   --out recovered/events.jsonl
 ```
@@ -71,7 +71,7 @@ termtrace stop SESSION --wait
 termtrace status SESSION --wait-complete
 ```
 
-Then run `index` again. Use `index --live-snapshot` only when an explicitly incomplete prefix is intended. Native capture requires completed evidence.
+Then run `analyze index` again. Use `analyze index --live-snapshot` only when an explicitly incomplete prefix is intended. Native capture requires completed evidence.
 
 For ranged capture, first create an index with exactly the same `--from` and `--to` values or marker selectors.
 
@@ -109,7 +109,7 @@ Inspect `working_directory` in `session.json` to see the resolved value.
 
 Native video runs at 24 FPS, so a frame spans about 41.7 ms. Semantic replay is not frame-limited: brief states remain in `states.jsonl.zst` and can be inspected or rendered separately.
 
-States hidden by synchronized output are retained with `presented: false`. Use `index --presented-only` when they are not needed.
+States hidden by synchronized output are retained with `presented: false`. Use `analyze index --presented-only` when they are not needed.
 
 Semantic video also uses a fixed frame rate and honestly reports presentation-eligible states that receive no sampled frame. Use the semantic timeline or render an exact state screenshot when every brief transition matters; increasing `--fps` can reduce, but not eliminate, sampling loss.
 
@@ -118,7 +118,7 @@ Semantic video also uses a fixed frame rate and honestly reports presentation-el
 Check the independent semantic-video and presentation capabilities:
 
 ```bash
-termtrace doctor --require semantic-video,presentation --explain
+termtrace tooling doctor --require semantic-video,presentation --explain
 ```
 
 Semantic source failures retain `semantic-source-ffmpeg.log` in the failed presentation staging directory when available. They do not modify canonical evidence or silently retry with native capture.

@@ -275,12 +275,149 @@ Options:
   -h, --help                     Print help
 ```
 
-## `output`
+## `stop`
+
+```text
+Request graceful termination of a live session child
+
+Usage: termtrace stop [OPTIONS] <SESSION>
+
+Arguments:
+  <SESSION>  Live session name or canonical path
+
+Options:
+      --log <LOG>
+          [env: TERMTRACE_LOG=] [default: warn]
+      --wait
+          Wait for and validate durable completion after stop is acknowledged
+      --timeout-ms <TIMEOUT_MS>
+          Maximum completion wait in milliseconds [default: 30000]
+      --if-state <EXPECTED_PRESENTED_STATE_HASH>
+          Apply only if the actor's latest presented state has this BLAKE3 hash
+  -h, --help
+          Print help
+```
+
+## `test`
+
+```text
+Execute one strict evidence-native terminal scenario
+
+Usage: termtrace test [OPTIONS] [SCENARIO]...
+
+Arguments:
+  [SCENARIO]...  One or more strict versioned scenario JSON documents
+
+Options:
+      --artifacts <ARTIFACTS>      Owner-only result, failure, and canonical evidence root [default: termtrace-results]
+      --log <LOG>                  [env: TERMTRACE_LOG=] [default: warn]
+      --update-snapshots           Explicitly replace normalized semantic frame baselines
+      --junit <JUNIT>              New JUnit XML result path
+      --jobs <JOBS>                Maximum concurrent fresh-session workers [default: 1]
+      --shard-index <SHARD_INDEX>  Zero-based deterministic shard index
+      --shard-count <SHARD_COUNT>  Total deterministic shard count
+      --reruns <RERUNS>            Fresh-session reruns after a failed attempt [default: 0]
+  -h, --help                       Print help
+```
+
+## `control`
+
+```text
+Live session control commands
+
+Usage: termtrace control [OPTIONS] <COMMAND>
+
+Commands:
+  ping      Verify that a live session control socket is responsive
+  keys      Print the accepted symbolic key and modifier grammar
+  focus     Report terminal-window focus when the application opted in
+  pointer   Send cell-addressed mouse input using live tracking modes
+  activate  Resolve visible text and click its center from one actor state
+  resize    Resize a live child PTY
+  signal    Signal a live child process group
+  mark      Add a marker to a live session timeline
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
+  -h, --help       Print help
+```
+
+## `control pointer`
+
+```text
+Send cell-addressed mouse input using live tracking modes
+
+Usage: termtrace control pointer [OPTIONS] <SESSION> <COMMAND>
+
+Commands:
+  click        Press and release one button at a zero-based cell
+  multi-click  Repeat a complete click two through four times
+  drag         Press, emit bounded motion samples, and release at a destination cell
+  scroll       Emit signed vertical wheel ticks at a zero-based cell
+  help         Print this message or the help of the given subcommand(s)
+
+Arguments:
+  <SESSION>  Live session name or canonical path
+
+Options:
+      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
+  -h, --help       Print help
+```
+
+## `control mark`
+
+```text
+Add a marker to a live session timeline
+
+Usage: termtrace control mark [OPTIONS] --label <LABEL> <SESSION>
+
+Arguments:
+  <SESSION>  Live session name or canonical path
+
+Options:
+      --label <LABEL>
+          Marker label
+      --log <LOG>
+          [env: TERMTRACE_LOG=] [default: warn]
+      --if-state <EXPECTED_PRESENTED_STATE_HASH>
+          Apply only if the actor's latest presented state has this BLAKE3 hash
+  -h, --help
+          Print help
+```
+
+## `analyze`
+
+```text
+Replay, inspect, compare, and diagnose terminal evidence
+
+Usage: termtrace analyze [OPTIONS] <COMMAND>
+
+Commands:
+  index     Replay canonical events and build semantic state artifacts
+  inspect   Reconstruct one semantic state as JSON or text
+  timeline  List canonical operations and semantic state transitions in order
+  diff      Compare two canonical semantic state points
+  explain   Explain exact VT and semantic evidence around one state point
+  diagnose  Run conservative evidence-backed rendering diagnostics
+  review    Navigate validated evidence in a read-only semantic terminal UI
+  output    Write exact canonical child PTY output bytes
+  events    Stream filtered canonical event projections as JSONL
+  markers   List canonical marker positions and nominal source frames
+  cache     Inspect or clear bounded disposable replay checkpoints
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
+  -h, --help       Print help
+```
+
+## `analyze output`
 
 ```text
 Write exact canonical child PTY output bytes
 
-Usage: termtrace output [OPTIONS] <--raw|--strip-controls> <SESSION>
+Usage: termtrace analyze output [OPTIONS] <--raw|--strip-controls> <SESSION>
 
 Arguments:
   <SESSION>  Completed session name or canonical path
@@ -312,12 +449,12 @@ Options:
           Print help
 ```
 
-## `events`
+## `analyze events`
 
 ```text
 Stream filtered canonical event projections as JSONL
 
-Usage: termtrace events [OPTIONS] <SESSION>
+Usage: termtrace analyze events [OPTIONS] <SESSION>
 
 Arguments:
   <SESSION>  Completed session name or canonical path
@@ -353,33 +490,12 @@ Options:
           Print help
 ```
 
-## `mark`
-
-```text
-Add a marker to a live session timeline
-
-Usage: termtrace mark [OPTIONS] --label <LABEL> <SESSION>
-
-Arguments:
-  <SESSION>  Live session name or canonical path
-
-Options:
-      --label <LABEL>
-          Marker label
-      --log <LOG>
-          [env: TERMTRACE_LOG=] [default: warn]
-      --if-state <EXPECTED_PRESENTED_STATE_HASH>
-          Apply only if the actor's latest presented state has this BLAKE3 hash
-  -h, --help
-          Print help
-```
-
-## `timeline`
+## `analyze timeline`
 
 ```text
 List canonical operations and semantic state transitions in order
 
-Usage: termtrace timeline [OPTIONS] <SESSION>
+Usage: termtrace analyze timeline [OPTIONS] <SESSION>
 
 Arguments:
   <SESSION>  Completed session name or canonical path
@@ -399,12 +515,12 @@ Options:
   -h, --help                 Print help
 ```
 
-## `diff`
+## `analyze diff`
 
 ```text
 Compare two canonical semantic state points
 
-Usage: termtrace diff [OPTIONS] <--from-state <FROM_STATE>|--from-state-hash <FROM_STATE_HASH>|--from-event-seq <FROM_EVENT_SEQ>|--from-at <FROM_AT>|--from-marker <FROM_MARKER>> <--to-state <TO_STATE>|--to-state-hash <TO_STATE_HASH>|--to-event-seq <TO_EVENT_SEQ>|--to-at <TO_AT>|--to-marker <TO_MARKER>> <SESSION>
+Usage: termtrace analyze diff [OPTIONS] <--from-state <FROM_STATE>|--from-state-hash <FROM_STATE_HASH>|--from-event-seq <FROM_EVENT_SEQ>|--from-at <FROM_AT>|--from-marker <FROM_MARKER>> <--to-state <TO_STATE>|--to-state-hash <TO_STATE_HASH>|--to-event-seq <TO_EVENT_SEQ>|--to-at <TO_AT>|--to-marker <TO_MARKER>> <SESSION>
 
 Arguments:
   <SESSION>  Completed session name or canonical path
@@ -440,12 +556,12 @@ Options:
           Print help
 ```
 
-## `explain`
+## `analyze explain`
 
 ```text
 Explain exact VT and semantic evidence around one state point
 
-Usage: termtrace explain [OPTIONS] <--state <STATE>|--state-hash <STATE_HASH>|--event-seq <EVENT_SEQ>|--at <AT>|--marker <MARKER>> <SESSION>
+Usage: termtrace analyze explain [OPTIONS] <--state <STATE>|--state-hash <STATE_HASH>|--event-seq <EVENT_SEQ>|--at <AT>|--marker <MARKER>> <SESSION>
 
 Arguments:
   <SESSION>  Completed session name or canonical path
@@ -465,12 +581,12 @@ Options:
   -h, --help                     Print help
 ```
 
-## `diagnose`
+## `analyze diagnose`
 
 ```text
 Run conservative evidence-backed rendering diagnostics
 
-Usage: termtrace diagnose [OPTIONS] <SESSION>
+Usage: termtrace analyze diagnose [OPTIONS] <SESSION>
 
 Arguments:
   <SESSION>  Completed session name or canonical path
@@ -496,12 +612,87 @@ Options:
           Print help
 ```
 
-## `screenshot`
+## `analyze review`
+
+```text
+Navigate validated evidence in a read-only semantic terminal UI
+
+Usage: termtrace analyze review [OPTIONS] [SESSION]
+
+Arguments:
+  [SESSION]  Completed canonical session or registered name
+
+Options:
+      --around-marker <AROUND_MARKER>  Start at the first semantic state at or after this unique marker
+      --log <LOG>                      [env: TERMTRACE_LOG=] [default: warn]
+      --search <SEARCH>                Exact semantic viewport substring to find and navigate with n/N
+      --export-state <EXPORT_STATE>    Export one exact semantic state to a new owner-only directory
+      --state <STATE>                  Exact state identifier for `--export-state`
+      --commands                       Print scriptable reviewer commands and safety policy
+      --json                           Print a validated read-only source summary without opening a TUI
+  -h, --help                           Print help
+```
+
+## `analyze markers`
+
+```text
+List canonical marker positions and nominal source frames
+
+Usage: termtrace analyze markers [OPTIONS] <SESSION>
+
+Arguments:
+  <SESSION>  Completed canonical session
+
+Options:
+      --fps <FPS>  Nominal frame rate used only for source-time mapping [default: 24]
+      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
+  -h, --help       Print help
+```
+
+## `analyze cache`
+
+```text
+Inspect or clear bounded disposable replay checkpoints
+
+Usage: termtrace analyze cache [OPTIONS] <COMMAND>
+
+Commands:
+  status  Report retained compressed checkpoint count and byte limits
+  prune   Delete disposable checkpoints while preserving canonical evidence
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
+  -h, --help       Print help
+```
+
+## `artifact`
+
+```text
+Render, capture, and publish terminal artifacts
+
+Usage: termtrace artifact [OPTIONS] <COMMAND>
+
+Commands:
+  capture     Capture actual Ghostty pixels on a private headless display
+  save        Atomically publish representations of one semantic state
+  screenshot  Render one deterministic semantic screenshot artifact directory
+  video       Plan or export presentation edits; native Ghostty pixels are the default source
+  bundle      Publish or inspect a deterministic sensitivity-labeled handoff
+  asciicast   Export a lossy UTF-8 asciinema v2 interoperability cast
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
+  -h, --help       Print help
+```
+
+## `artifact screenshot`
 
 ```text
 Render one deterministic semantic screenshot artifact directory
 
-Usage: termtrace screenshot [OPTIONS] --out <OUT> <SESSION>
+Usage: termtrace artifact screenshot [OPTIONS] --out <OUT> <SESSION>
 
 Arguments:
   <SESSION>  Completed session name or canonical path
@@ -523,142 +714,12 @@ Options:
   -h, --help                     Print help
 ```
 
-## `stop`
-
-```text
-Request graceful termination of a live session child
-
-Usage: termtrace stop [OPTIONS] <SESSION>
-
-Arguments:
-  <SESSION>  Live session name or canonical path
-
-Options:
-      --log <LOG>
-          [env: TERMTRACE_LOG=] [default: warn]
-      --wait
-          Wait for and validate durable completion after stop is acknowledged
-      --timeout-ms <TIMEOUT_MS>
-          Maximum completion wait in milliseconds [default: 30000]
-      --if-state <EXPECTED_PRESENTED_STATE_HASH>
-          Apply only if the actor's latest presented state has this BLAKE3 hash
-  -h, --help
-          Print help
-```
-
-## `verify`
-
-```text
-Verify a completed session's structure and evidence bindings offline
-
-Usage: termtrace verify [OPTIONS] <SESSION>
-
-Arguments:
-  <SESSION>  Completed canonical session directory
-
-Options:
-      --level <LEVEL>
-          Verification depth [default: content] [possible values: structure, content, durability-record, signature]
-      --log <LOG>
-          [env: TERMTRACE_LOG=] [default: warn]
-      --json
-          Emit the stable machine-readable report
-      --allowed-signers <ALLOWED_SIGNERS>
-          OpenSSH allowed-signers file used to establish signer trust
-      --limit <LIMIT>
-          Maximum matching records returned by default [default: 100]
-      --offset <OFFSET>
-          Zero-based matching-record offset for deterministic pagination [default: 0]
-      --all
-          Return every matching record; explicit potentially-large output
-  -h, --help
-          Print help
-```
-
-## `bundle`
-
-```text
-Publish a deterministic sensitivity-labeled handoff directory
-
-Usage: termtrace bundle [OPTIONS] --out <OUT> <SESSION>
-
-Arguments:
-  <SESSION>  Completed canonical session
-
-Options:
-      --log <LOG>          [env: TERMTRACE_LOG=] [default: warn]
-      --profile <PROFILE>  Fixed content and sensitivity policy [default: screen] [possible values: screen, debug, forensic]
-      --out <OUT>          New owner-only destination directory
-      --dry-run            Print the selected paths and sensitivities without writing
-      --archive            Publish a deterministic compressed archive instead of a directory
-  -h, --help               Print help
-```
-
-## `test`
-
-```text
-Execute one strict evidence-native terminal scenario
-
-Usage: termtrace test [OPTIONS] [SCENARIO]...
-
-Arguments:
-  [SCENARIO]...  One or more strict versioned scenario JSON documents
-
-Options:
-      --artifacts <ARTIFACTS>      Owner-only result, failure, and canonical evidence root [default: termtrace-results]
-      --log <LOG>                  [env: TERMTRACE_LOG=] [default: warn]
-      --update-snapshots           Explicitly replace normalized semantic frame baselines
-      --junit <JUNIT>              New JUnit XML result path
-      --jobs <JOBS>                Maximum concurrent fresh-session workers [default: 1]
-      --shard-index <SHARD_INDEX>  Zero-based deterministic shard index
-      --shard-count <SHARD_COUNT>  Total deterministic shard count
-      --reruns <RERUNS>            Fresh-session reruns after a failed attempt [default: 0]
-  -h, --help                       Print help
-```
-
-## `review`
-
-```text
-Navigate validated evidence in a read-only semantic terminal UI
-
-Usage: termtrace review [OPTIONS] [SESSION]
-
-Arguments:
-  [SESSION]  Completed canonical session or registered name
-
-Options:
-      --around-marker <AROUND_MARKER>  Start at the first semantic state at or after this unique marker
-      --log <LOG>                      [env: TERMTRACE_LOG=] [default: warn]
-      --search <SEARCH>                Exact semantic viewport substring to find and navigate with n/N
-      --export-state <EXPORT_STATE>    Export one exact semantic state to a new owner-only directory
-      --state <STATE>                  Exact state identifier for `--export-state`
-      --commands                       Print scriptable reviewer commands and safety policy
-      --json                           Print a validated read-only source summary without opening a TUI
-  -h, --help                           Print help
-```
-
-## `markers`
-
-```text
-List canonical marker positions and nominal source frames
-
-Usage: termtrace markers [OPTIONS] <SESSION>
-
-Arguments:
-  <SESSION>  Completed canonical session
-
-Options:
-      --fps <FPS>  Nominal frame rate used only for source-time mapping [default: 24]
-      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
-  -h, --help       Print help
-```
-
-## `video`
+## `artifact video`
 
 ```text
 Plan or export presentation edits; native Ghostty pixels are the default source
 
-Usage: termtrace video [OPTIONS] <COMMAND>
+Usage: termtrace artifact video [OPTIONS] <COMMAND>
 
 Commands:
   plan     Resolve clips, speeds, and holds without rendering
@@ -671,12 +732,12 @@ Options:
   -h, --help       Print help
 ```
 
-## `video plan`
+## `artifact video plan`
 
 ```text
 Resolve clips, speeds, and holds without rendering
 
-Usage: termtrace video plan [OPTIONS] --edit <EDIT> <SESSION>
+Usage: termtrace artifact video plan [OPTIONS] --edit <EDIT> <SESSION>
 
 Arguments:
   <SESSION>
@@ -706,12 +767,12 @@ Options:
           Print help (see a summary with '-h')
 ```
 
-## `video preview`
+## `artifact video preview`
 
 ```text
 Render an atomic contact sheet and low-resolution review video
 
-Usage: termtrace video preview [OPTIONS] --edit <EDIT> --out <OUT> <SESSION>
+Usage: termtrace artifact video preview [OPTIONS] --edit <EDIT> --out <OUT> <SESSION>
 
 Arguments:
   <SESSION>
@@ -767,12 +828,12 @@ Options:
           Print help (see a summary with '-h')
 ```
 
-## `video export`
+## `artifact video export`
 
 ```text
 Export an H.264 MP4 and frame provenance into a new directory
 
-Usage: termtrace video export [OPTIONS] --edit <EDIT> --out <OUT> <SESSION>
+Usage: termtrace artifact video export [OPTIONS] --edit <EDIT> --out <OUT> <SESSION>
 
 Arguments:
   <SESSION>
@@ -803,4 +864,176 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
+```
+
+## `artifact bundle`
+
+```text
+Publish or inspect a deterministic sensitivity-labeled handoff
+
+Usage: termtrace artifact bundle [OPTIONS] <COMMAND>
+
+Commands:
+  create  Publish a deterministic sensitivity-labeled handoff directory
+  verify  Verify every manifested bundle member and included evidence
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
+  -h, --help       Print help
+```
+
+## `artifact bundle create`
+
+```text
+Publish a deterministic sensitivity-labeled handoff directory
+
+Usage: termtrace artifact bundle create [OPTIONS] --out <OUT> <SESSION>
+
+Arguments:
+  <SESSION>  Completed canonical session
+
+Options:
+      --log <LOG>          [env: TERMTRACE_LOG=] [default: warn]
+      --profile <PROFILE>  Fixed content and sensitivity policy [default: screen] [possible values: screen, debug, forensic]
+      --out <OUT>          New owner-only destination directory
+      --dry-run            Print the selected paths and sensitivities without writing
+      --archive            Publish a deterministic compressed archive instead of a directory
+  -h, --help               Print help
+```
+
+## `artifact bundle verify`
+
+```text
+Verify every manifested bundle member and included evidence
+
+Usage: termtrace artifact bundle verify [OPTIONS] <BUNDLE>
+
+Arguments:
+  <BUNDLE>  Published bundle directory
+
+Options:
+      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
+  -h, --help       Print help
+```
+
+## `registry`
+
+```text
+Register and manage friendly session names
+
+Usage: termtrace registry [OPTIONS] <COMMAND>
+
+Commands:
+  register  Register a friendly name for an existing canonical session
+  resolve   Resolve a friendly name to its canonical session directory
+  list      List registered sessions and their derived lifecycle
+  remove    Remove only a friendly registry binding, preserving evidence
+  gc        Plan or apply safe retention for completed unregistered managed recordings
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
+  -h, --help       Print help
+```
+
+## `registry list`
+
+```text
+List registered sessions and their derived lifecycle
+
+Usage: termtrace registry list [OPTIONS]
+
+Options:
+      --all        Include completed, incomplete, stale, and unhealthy entries
+      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
+      --json       Emit the complete listing as JSON
+  -h, --help       Print help
+```
+
+## `integrity`
+
+```text
+Verify, sign, and recover canonical evidence
+
+Usage: termtrace integrity [OPTIONS] <COMMAND>
+
+Commands:
+  verify   Verify a completed session's structure and evidence bindings offline
+  sign     Create a detached OpenSSH receipt for verified evidence roots
+  recover  Copy the longest integrity-checked event prefix without modifying source
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
+  -h, --help       Print help
+```
+
+## `integrity verify`
+
+```text
+Verify a completed session's structure and evidence bindings offline
+
+Usage: termtrace integrity verify [OPTIONS] <SESSION>
+
+Arguments:
+  <SESSION>  Completed canonical session directory
+
+Options:
+      --level <LEVEL>
+          Verification depth [default: content] [possible values: structure, content, durability-record, signature]
+      --log <LOG>
+          [env: TERMTRACE_LOG=] [default: warn]
+      --json
+          Emit the stable machine-readable report
+      --allowed-signers <ALLOWED_SIGNERS>
+          OpenSSH allowed-signers file used to establish signer trust
+      --limit <LIMIT>
+          Maximum matching records returned by default [default: 100]
+      --offset <OFFSET>
+          Zero-based matching-record offset for deterministic pagination [default: 0]
+      --all
+          Return every matching record; explicit potentially-large output
+  -h, --help
+          Print help
+```
+
+## `tooling`
+
+```text
+Runtime, SDK, and shell integration tools
+
+Usage: termtrace tooling [OPTIONS] <COMMAND>
+
+Commands:
+  doctor        Probe built-in and optional host capabilities
+  capabilities  Report the current bounded capability inventory
+  client        Run Python or TypeScript client code from managed SDK assets without project files
+  driver        Serve the versioned language-neutral JSONL process protocol
+  schemas       Generate JSON Schemas for public events, controls, and artifacts
+  completions   Generate a shell completion script from the current command graph
+  version       Report build and runtime component versions
+  help          Print this message or the help of the given subcommand(s)
+
+Options:
+      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
+  -h, --help       Print help
+```
+
+## `tooling client`
+
+```text
+Run Python or TypeScript client code from managed SDK assets without project files
+
+Usage: termtrace tooling client [OPTIONS] <COMMAND>
+
+Commands:
+  status      Report SDK asset discovery and available managed runtimes
+  python      Run a Python file, or `-` for standard input, in an isolated uv environment
+  typescript  Run a TypeScript file, or `-` for standard input, with an installed import mapping
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+      --log <LOG>  [env: TERMTRACE_LOG=] [default: warn]
+  -h, --help       Print help
 ```

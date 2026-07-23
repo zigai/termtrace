@@ -7,13 +7,13 @@ transcripts.
 Check discovery without changing the project:
 
 ```sh
-termtrace client status
+termtrace tooling client status
 ```
 
 Run a Python program from standard input:
 
 ```sh
-termtrace client python - <<'PY'
+termtrace tooling client python - <<'PY'
 from pathlib import Path
 from termtrace import KeyAtom, Terminal, TextAtom
 
@@ -30,7 +30,7 @@ PY
 Run the corresponding TypeScript form:
 
 ```sh
-termtrace client typescript - <<'TS'
+termtrace tooling client typescript - <<'TS'
 import { Termtrace } from "@termtrace/test";
 
 await using terminal = await Termtrace.create({

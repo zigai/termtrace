@@ -72,7 +72,7 @@ Use fitted geometry when the recording will become a native screenshot or video:
 termtrace record --out SESSION --geometry fit --viewport 1920x1080 COMMAND
 ```
 
-This probes the installed terminal application and records the measured grid, cell size, viewport, and effective configuration hash. It requires the native capture dependencies reported by `termtrace doctor`.
+This probes the installed terminal application and records the measured grid, cell size, viewport, and effective configuration hash. It requires the native capture dependencies reported by `termtrace tooling doctor`.
 
 Use `--ghostty-config` to select a configuration file. Font, padding, foreground, and background flags override that file. The flattened effective configuration is saved in the session so later capture uses the same profile. Referenced fonts, shaders, and images remain external dependencies.
 
@@ -123,9 +123,9 @@ Use `termtrace status SESSION --wait-complete` to wait without sending a signal.
 After completion:
 
 ```bash
-termtrace index --session SESSION
-termtrace capture --session SESSION
-termtrace verify SESSION --level content --json
+termtrace analyze index --session SESSION
+termtrace artifact capture --session SESSION
+termtrace integrity verify SESSION --level content --json
 ```
 
 Normal indexing and capture require `completion.json`. Use `index --live-snapshot` only when an explicitly incomplete, hash-addressed snapshot is intended.

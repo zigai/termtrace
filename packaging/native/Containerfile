@@ -30,7 +30,7 @@ RUN apt-get update \
 COPY ${TERMTRACE_BINARY} /usr/local/bin/termtrace
 COPY packaging/native/entrypoint.sh /usr/local/bin/termtrace-native-entrypoint
 RUN chmod 0555 /usr/local/bin/termtrace /usr/local/bin/termtrace-native-entrypoint \
-    && termtrace doctor --require semantic
+    && termtrace tooling doctor --require semantic
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/termtrace-native-entrypoint"]
-CMD ["doctor", "--require", "semantic,native-screenshot,presentation"]
+CMD ["tooling", "doctor", "--require", "semantic,native-screenshot,presentation"]

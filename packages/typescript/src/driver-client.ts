@@ -30,7 +30,7 @@ export class DriverClient {
   #closed = false;
 
   constructor(binaryPath: string) {
-    this.#process = spawn(binaryPath, ["driver"], { stdio: ["pipe", "pipe", "pipe"] });
+    this.#process = spawn(binaryPath, ["tooling", "driver"], { stdio: ["pipe", "pipe", "pipe"] });
     this.#process.stderr.resume();
     this.#lines = createInterface({ input: this.#process.stdout, crlfDelay: Infinity });
     this.#lines.on("line", (line) => this.#acceptLine(line));
