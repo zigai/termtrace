@@ -5,6 +5,7 @@ repository=${TERMTRACE_REPOSITORY:-zigai/termtrace}
 version=${TERMTRACE_VERSION:-latest}
 download_base=${TERMTRACE_DOWNLOAD_BASE:-}
 client_dir=${TERMTRACE_CLIENT_DIR:-}
+
 if [[ -n "${TERMTRACE_INSTALL_DIR:-}" ]]; then
     install_dir=$TERMTRACE_INSTALL_DIR
 elif [[ -n "${HOME:-}" ]]; then
@@ -32,21 +33,30 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version)
-            [[ $# -ge 2 ]] || { echo "--version requires a value" >&2; exit 2; }
+            if [[ $# -lt 2 ]]; then
+                echo "--version requires a value" >&2
+                exit 2
+            fi
             version=$2
             shift 2
             ;;
         --install-dir)
-            [[ $# -ge 2 ]] || { echo "--install-dir requires a value" >&2; exit 2; }
+            if [[ $# -lt 2 ]]; then
+                echo "--install-dir requires a value" >&2
+                exit 2
+            fi
             install_dir=$2
             shift 2
             ;;
         --client-dir)
-            [[ $# -ge 2 ]] || { echo "--client-dir requires a value" >&2; exit 2; }
+            if [[ $# -lt 2 ]]; then
+                echo "--client-dir requires a value" >&2
+                exit 2
+            fi
             client_dir=$2
             shift 2
             ;;
-        -h|--help)
+        -h | --help)
             usage
             exit 0
             ;;
@@ -62,17 +72,29 @@ if [[ -z "$client_dir" ]]; then
     client_dir="$(dirname "$install_dir")/share/termtrace/clients"
 fi
 
-[[ "$(uname -s)" == Linux ]] || { echo "Termtrace currently supports Linux only" >&2; exit 2; }
+if [[ "$(uname -s)" != Linux ]]; then
+    echo "Termtrace currently supports Linux only" >&2
+    exit 2
+fi
+
 for musl_loader in /lib/ld-musl-*.so.1; do
     if [[ -e "$musl_loader" ]]; then
         echo "Termtrace prebuilt releases currently require glibc 2.28 or newer; musl is not yet supported" >&2
         exit 2
     fi
 done
+
 case "$(uname -m)" in
-    x86_64|amd64) target=x86_64-unknown-linux-gnu ;;
-    aarch64|arm64) target=aarch64-unknown-linux-gnu ;;
-    *) echo "unsupported architecture: $(uname -m)" >&2; exit 2 ;;
+    x86_64 | amd64)
+        target=x86_64-unknown-linux-gnu
+        ;;
+    aarch64 | arm64)
+        target=aarch64-unknown-linux-gnu
+        ;;
+    *)
+        echo "unsupported architecture: $(uname -m)" >&2
+        exit 2
+        ;;
 esac
 
 archive="termtrace-${target}.tar.gz"
@@ -82,8 +104,10 @@ candidate=
 client_candidate=
 client_backup=
 client_published=false
+
 cleanup() {
     status=$?
+
     if [[ $status -ne 0 && -n "$client_backup" ]]; then
         if [[ "$client_published" == true ]]; then
             rm -rf "$client_dir"
@@ -92,23 +116,31 @@ cleanup() {
             mv "$client_backup" "$client_dir"
         fi
     fi
+
     rm -rf "$work"
+
     if [[ -n "$candidate" ]]; then
         rm -f "$candidate"
     fi
+
     if [[ -n "$client_candidate" ]]; then
         rm -rf "$client_candidate"
     fi
+
     return "$status"
 }
+
 trap cleanup EXIT HUP INT TERM
 
 download_with_curl() {
     local base=$1
+
     curl --fail --location --retry 3 --silent --show-error \
-        "${base}/${archive}" --output "${work}/${archive}" \
-        && curl --fail --location --retry 3 --silent --show-error \
-            "${base}/${checksum}" --output "${work}/${checksum}"
+        "${base}/${archive}" \
+        --output "${work}/${archive}" || return
+    curl --fail --location --retry 3 --silent --show-error \
+        "${base}/${checksum}" \
+        --output "${work}/${checksum}"
 }
 
 download_release() {
@@ -121,9 +153,17 @@ download_release() {
     if [[ "$version" == latest ]]; then
         base="https://github.com/${repository}/releases/latest/download"
     else
-        case "$version" in v*) tag=$version ;; *) tag="v${version}" ;; esac
+        case "$version" in
+            v*)
+                tag=$version
+                ;;
+            *)
+                tag="v${version}"
+                ;;
+        esac
         base="https://github.com/${repository}/releases/download/${tag}"
     fi
+
     if download_with_curl "$base"; then
         return
     fi
@@ -132,11 +172,21 @@ download_release() {
         echo "release download failed; private repositories require an authenticated gh command" >&2
         exit 1
     fi
+
     rm -f "${work}/${archive}" "${work}/${checksum}"
+
     if [[ "$version" == latest ]]; then
-        gh release download --repo "$repository" --pattern "$archive" --pattern "$checksum" --dir "$work"
+        gh release download \
+            --repo "$repository" \
+            --pattern "$archive" \
+            --pattern "$checksum" \
+            --dir "$work"
     else
-        gh release download "$tag" --repo "$repository" --pattern "$archive" --pattern "$checksum" --dir "$work"
+        gh release download "$tag" \
+            --repo "$repository" \
+            --pattern "$archive" \
+            --pattern "$checksum" \
+            --dir "$work"
     fi
 }
 
@@ -145,13 +195,19 @@ verify_checksum() {
         (cd "$work" && sha256sum --check "$checksum")
         return
     fi
+
     if command -v shasum >/dev/null 2>&1; then
         local expected actual
+
         expected=$(awk '{print $1}' "${work}/${checksum}")
         actual=$(shasum -a 256 "${work}/${archive}" | awk '{print $1}')
-        [[ "$actual" == "$expected" ]] || { echo "SHA-256 checksum mismatch" >&2; exit 1; }
+        if [[ "$actual" != "$expected" ]]; then
+            echo "SHA-256 checksum mismatch" >&2
+            exit 1
+        fi
         return
     fi
+
     echo "sha256sum or shasum is required to verify the release" >&2
     exit 2
 }
@@ -161,37 +217,65 @@ verify_checksum
 tar -xzf "${work}/${archive}" -C "$work"
 binary="${work}/termtrace-${target}/termtrace"
 clients="${work}/termtrace-${target}/clients"
-[[ -x "$binary" ]] || { echo "release archive contains no executable termtrace binary" >&2; exit 1; }
-[[ -f "$clients/python/pyproject.toml" ]] || { echo "release archive contains no Python client assets" >&2; exit 1; }
-[[ -f "$clients/typescript/lib/index.js" ]] || { echo "release archive contains no TypeScript client assets" >&2; exit 1; }
+
+if [[ ! -x "$binary" ]]; then
+    echo "release archive contains no executable termtrace binary" >&2
+    exit 1
+fi
+if [[ ! -f "$clients/python/pyproject.toml" ]]; then
+    echo "release archive contains no Python client assets" >&2
+    exit 1
+fi
+if [[ ! -f "$clients/typescript/lib/index.js" ]]; then
+    echo "release archive contains no TypeScript client assets" >&2
+    exit 1
+fi
 
 mkdir -p "$install_dir"
-[[ -w "$install_dir" ]] || { echo "install directory is not writable: $install_dir" >&2; exit 1; }
+if [[ ! -w "$install_dir" ]]; then
+    echo "install directory is not writable: $install_dir" >&2
+    exit 1
+fi
+
 destination="${install_dir}/termtrace"
 candidate=$(mktemp "${install_dir}/.termtrace.XXXXXX")
 install -m 0555 "$binary" "$candidate"
 
-"$candidate" doctor --require core,semantic >/dev/null
+"$candidate" tooling doctor --require core,semantic >/dev/null
+
 mkdir -p "$(dirname "$client_dir")"
 client_candidate=$(mktemp -d "$(dirname "$client_dir")/.termtrace-clients.XXXXXX")
 cp -R "$clients/." "$client_candidate/"
-TERMTRACE_CLIENT_ASSETS="$client_candidate" "$candidate" client status >/dev/null
+TERMTRACE_CLIENT_ASSETS="$client_candidate" "$candidate" tooling client status >/dev/null
+
 client_backup="${client_dir}.old.$$"
-[[ ! -e "$client_backup" ]] || { echo "temporary client backup already exists: $client_backup" >&2; exit 1; }
+if [[ -e "$client_backup" ]]; then
+    echo "temporary client backup already exists: $client_backup" >&2
+    exit 1
+fi
+
 if [[ -e "$client_dir" ]]; then
     mv "$client_dir" "$client_backup"
 fi
+
 mv "$client_candidate" "$client_dir"
 client_candidate=
 client_published=true
+
 mv -f "$candidate" "$destination"
 candidate=
+
 rm -rf "$client_backup"
 client_backup=
 client_published=false
+
 printf 'Termtrace installed at %s\n' "$destination"
 printf 'Termtrace client assets installed at %s\n' "$client_dir"
+
 case ":${PATH}:" in
-    *:"$install_dir":*) ;;
-    *) printf 'Add %s to PATH, then run: termtrace tooling doctor --explain\n' "$install_dir" ;;
+    *:"$install_dir":*)
+        ;;
+    *)
+        printf 'Add %s to PATH, then run: termtrace tooling doctor --explain\n' "$install_dir"
+        ;;
 esac

@@ -10,9 +10,12 @@ archive=$(realpath "$1")
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 case "$archive" in
-    *.tar.gz|*.tgz) tar -xzf "$archive" -C "$work" ;;
+    *.tar.gz | *.tgz) tar -xzf "$archive" -C "$work" ;;
     *.tar.zst) tar --zstd -xf "$archive" -C "$work" ;;
-    *) echo "unsupported release archive: $archive" >&2; exit 2 ;;
+    *)
+        echo "unsupported release archive: $archive" >&2
+        exit 2
+        ;;
 esac
 binary=$(find "$work" -type f -name termtrace -perm -u+x -print -quit)
 if [[ -z "$binary" ]]; then
@@ -23,10 +26,10 @@ archive_root=$(dirname "$binary")
 test -f "$archive_root/clients/python/pyproject.toml"
 test -f "$archive_root/clients/typescript/lib/index.js"
 
-"$binary" version --json | python3 -c 'import json,sys; value=json.load(sys.stdin); assert value["termtrace_version"] and value["build_revision"]'
-"$binary" doctor --require core,semantic
-"$binary" client status
+"$binary" tooling version --json | python3 -c 'import json,sys; value=json.load(sys.stdin); assert value["termtrace_version"] and value["build_revision"]'
+"$binary" tooling doctor --require core,semantic
+"$binary" tooling client status
 session="$work/install-smoke.termtrace"
 "$binary" record --no-input --out "$session" -- /bin/sh -c 'printf RELEASE-SMOKE'
-"$binary" verify "$session" --level content --json >/dev/null
+"$binary" integrity verify "$session" --level content --json >/dev/null
 test "$("$binary" show "$session" --format text | tr -d ' ')" = "RELEASE-SMOKE"

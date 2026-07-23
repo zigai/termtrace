@@ -24,4 +24,4 @@ docker build \
     --tag "$image" \
     .
 
-docker run --rm "$image" doctor --require semantic,native-screenshot,presentation
+docker run --rm "$image" tooling doctor --require semantic,native-screenshot,presentation

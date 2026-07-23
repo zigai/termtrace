@@ -10,8 +10,11 @@ binary=$(realpath "$1")
 os=$2
 arch=$3
 case "$os/$arch" in
-    linux/x64|linux/arm64) ;;
-    *) echo "unsupported npm platform: $os/$arch" >&2; exit 2 ;;
+    linux/x64 | linux/arm64) ;;
+    *)
+        echo "unsupported npm platform: $os/$arch" >&2
+        exit 2
+        ;;
 esac
 version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
 staging="packages/npm-staging/cli-$os-$arch"
@@ -22,7 +25,7 @@ trap cleanup EXIT
 rm -rf "$staging"
 mkdir -p "$staging/bin" dist/npm
 install -m 0555 "$binary" "$staging/bin/termtrace"
-"$staging/bin/termtrace" doctor --require semantic
+"$staging/bin/termtrace" tooling doctor --require semantic
 python3 - "$staging/package.json" "$version" "$os" "$arch" <<'PY'
 import json
 import pathlib
