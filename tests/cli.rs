@@ -1062,25 +1062,26 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
 }
 
 #[test]
-fn agent_skill_command_reference_matches_the_tested_cli_graph() {
+fn agent_skill_command_discovery_uses_live_help() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let skill = root.join("skills/termtrace");
-    let temporary = TempDir::new().expect("temporary directory");
-    let generated = temporary.path().join("commands.md");
-    let status = StdCommand::new("python3")
-        .arg(skill.join("scripts/generate-command-reference.py"))
-        .arg("--binary")
-        .arg(env!("CARGO_BIN_EXE_termtrace"))
-        .arg("--out")
-        .arg(&generated)
-        .status()
-        .expect("generate skill command reference");
-    assert!(status.success());
-    assert_eq!(
-        fs_err::read(generated).expect("generated command reference"),
-        fs_err::read(skill.join("references/commands.md")).expect("checked command reference")
-    );
     let instructions = fs_err::read_to_string(skill.join("SKILL.md")).expect("skill instructions");
+    assert!(instructions.contains("termtrace --help"));
+    assert!(instructions.contains("termtrace COMMAND --help"));
+    assert!(instructions.contains("termtrace COMMAND SUBCOMMAND --help"));
+    assert!(instructions.contains("termtrace COMMAND SUBCOMMAND ACTION --help"));
+    assert!(!instructions.contains("Usage: termtrace"));
+    assert!(!instructions.contains("Generated Termtrace command reference"));
+
+    let root_help = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
+        .arg("--help")
+        .output()
+        .expect("read live root help");
+    assert!(root_help.status.success());
+    assert!(
+        String::from_utf8_lossy(&root_help.stdout)
+            .contains("Run `termtrace <command> --help` for more details.")
+    );
     assert!(!instructions.contains("TODO"));
 }
 
