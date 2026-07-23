@@ -266,8 +266,8 @@
         "geometry": {
           "$ref": "#/$defs/ScenarioGeometry",
           "default": {
-            "cols": 80,
-            "rows": 24
+            "cols": 160,
+            "rows": 45
           },
           "description": "Initial terminal grid."
         },

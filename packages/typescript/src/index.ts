@@ -146,7 +146,7 @@ export class Termtrace implements AsyncDisposable {
     if (evidenceRoot === undefined) {
       throw new TypeError("launch requires evidenceRoot on Termtrace or this call");
     }
-    const viewport = options.viewport ?? { cols: 80, rows: 24 };
+    const viewport = options.viewport ?? { cols: 160, rows: 45 };
     const command = options.command.map((argument) => Buffer.from(argument).toString("base64"));
     const data = await this.#driver.request(
       method({
@@ -286,8 +286,8 @@ export class Session implements AsyncDisposable {
       command: "resize",
       cols: viewport.cols,
       rows: viewport.rows,
-      pixel_width: viewport.pixelWidth ?? viewport.cols * 8,
-      pixel_height: viewport.pixelHeight ?? viewport.rows * 16,
+      pixel_width: viewport.pixelWidth ?? viewport.cols * 12,
+      pixel_height: viewport.pixelHeight ?? viewport.rows * 24,
     }, options);
   }
 

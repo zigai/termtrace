@@ -738,10 +738,10 @@ struct ShowArgs {
     #[arg(long)]
     record_out: Option<PathBuf>,
     /// ANSI stream columns.
-    #[arg(long, default_value_t = 80)]
+    #[arg(long, default_value_t = 160)]
     cols: u16,
     /// ANSI stream rows.
-    #[arg(long, default_value_t = 24)]
+    #[arg(long, default_value_t = 45)]
     rows: u16,
     /// One-off command to record to completion, following `--`.
     #[arg(last = true, num_args = 1..)]
@@ -1142,12 +1142,9 @@ struct ScreenshotArgs {
     /// Semantic state renderer or actual Ghostty native frame.
     #[arg(long, value_enum, default_value_t = ShowRenderer::Semantic)]
     renderer: ShowRenderer,
-    /// Strict whole native viewport as `WIDTHxHEIGHT`.
-    #[arg(long, value_parser = parse_capture_target, conflicts_with = "fit_viewport")]
+    /// Strict whole native viewport as `WIDTHxHEIGHT`; omit to solve the exact recorded grid.
+    #[arg(long, value_parser = parse_capture_target)]
     viewport: Option<CaptureTarget>,
-    /// Explicitly request the default exact-grid viewport solver.
-    #[arg(long, conflicts_with = "viewport")]
-    fit_viewport: bool,
     /// Emphasize that a supplied viewport is an exact evidentiary assertion.
     #[arg(long, requires = "viewport")]
     strict: bool,
@@ -1293,10 +1290,10 @@ struct CaptureArgs {
     /// Indexed source session directory.
     #[arg(long)]
     session: PathBuf,
-    /// Whole capture viewport width; defaults to recorded viewport or 1280.
+    /// Whole capture viewport width; omit both dimensions to use the recorded target or solve the exact grid.
     #[arg(long, requires = "height")]
     width: Option<u16>,
-    /// Whole capture viewport height; defaults to recorded viewport or 720.
+    /// Whole capture viewport height; omit both dimensions to use the recorded target or solve the exact grid.
     #[arg(long, requires = "width")]
     height: Option<u16>,
     /// Video frame rate; native capture currently requires 24.
@@ -1464,10 +1461,10 @@ struct ResizeArgs {
     /// Terminal rows.
     #[arg(long)]
     rows: u16,
-    /// Total pixel width; defaults to columns multiplied by 9.
+    /// Total pixel width; defaults to columns multiplied by 12.
     #[arg(long)]
     pixel_width: Option<u16>,
-    /// Total pixel height; defaults to rows multiplied by 18.
+    /// Total pixel height; defaults to rows multiplied by 24.
     #[arg(long)]
     pixel_height: Option<u16>,
     /// Apply only if the actor's latest presented state has this BLAKE3 hash.
@@ -1969,15 +1966,15 @@ struct RecordingArgs {
     cols: u16,
 
     /// Terminal rows used by manual geometry.
-    #[arg(long, default_value_t = 40)]
+    #[arg(long, default_value_t = 45)]
     rows: u16,
 
     /// Manual cell width, or inherited-geometry fallback, in pixels.
-    #[arg(long, default_value_t = 9)]
+    #[arg(long, default_value_t = 12)]
     cell_width: u16,
 
     /// Manual cell height, or inherited-geometry fallback, in pixels.
-    #[arg(long, default_value_t = 18)]
+    #[arg(long, default_value_t = 24)]
     cell_height: u16,
 
     /// Terminal identity exposed to the child.
@@ -4431,7 +4428,7 @@ fn run_screenshot(arguments: ScreenshotArgs) -> Result<ExitCode> {
             "presentation_evidence": "post_endpoint_stable_capture",
         }));
     }
-    if arguments.viewport.is_some() || arguments.fit_viewport || arguments.strict {
+    if arguments.viewport.is_some() || arguments.strict {
         return Err(miette::miette!(
             "native viewport options require --renderer native"
         ));
@@ -6008,11 +6005,11 @@ fn run_keys() -> Result<ExitCode> {
 fn run_resize(arguments: ResizeArgs) -> Result<ExitCode> {
     let pixel_width = arguments
         .pixel_width
-        .or_else(|| return arguments.cols.checked_mul(9))
+        .or_else(|| return arguments.cols.checked_mul(12))
         .ok_or_else(|| miette::miette!("pixel width overflow; pass --pixel-width explicitly"))?;
     let pixel_height = arguments
         .pixel_height
-        .or_else(|| return arguments.rows.checked_mul(18))
+        .or_else(|| return arguments.rows.checked_mul(24))
         .ok_or_else(|| miette::miette!("pixel height overflow; pass --pixel-height explicitly"))?;
     return run_control_guarded(
         arguments.session,

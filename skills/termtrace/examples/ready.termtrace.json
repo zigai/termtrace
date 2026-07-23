@@ -14,7 +14,7 @@
       "unset": [],
       "color": "never"
     },
-    "geometry": { "cols": 80, "rows": 24 },
+    "geometry": { "cols": 160, "rows": 45 },
     "outputByteBudget": 1048576,
     "timeoutMs": 5000
   },

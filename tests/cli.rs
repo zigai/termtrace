@@ -75,6 +75,20 @@ fn root_help_groups_commands_by_workflow() {
 }
 
 #[test]
+fn native_screenshot_help_uses_the_solver_without_a_noop_flag() {
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+
+    command
+        .args(["artifact", "screenshot", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "omit to solve the exact recorded grid",
+        ))
+        .stdout(predicate::str::contains("--fit-viewport").not());
+}
+
+#[test]
 fn nested_command_paths_dispatch() {
     let mut version = Command::cargo_bin("termtrace").expect("binary should build");
     version
@@ -1982,7 +1996,7 @@ fn restart_applies_only_explicit_successor_overrides() {
             manifest.geometry.pixel_width,
             manifest.geometry.pixel_height
         ),
-        (700, 432)
+        (700, 576)
     );
     assert_eq!(
         manifest
@@ -4084,10 +4098,15 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
     assert!(svg.contains("data-truth-layer=\"semantic_rendering\""));
     assert!(svg.contains("data:font/ttf;base64,"));
     assert!(svg.contains(">S</text>") && svg.contains(">D</text>"));
-    assert!(
-        fs_err::read(destination.join("screen.png"))
-            .expect("saved PNG")
-            .starts_with(b"\x89PNG\r\n\x1a\n")
+    let png = fs_err::read(destination.join("screen.png")).expect("saved PNG");
+    assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+    assert_eq!(
+        (
+            u32::from_be_bytes(png[16..20].try_into().expect("PNG width")),
+            u32::from_be_bytes(png[20..24].try_into().expect("PNG height")),
+        ),
+        (1920, 1080),
+        "the default semantic screenshot must match the default 1080p recording canvas"
     );
     for file in manifest["files"].as_array().expect("manifested files") {
         let path = destination.join(file["path"].as_str().expect("relative path"));
@@ -4570,7 +4589,7 @@ fn diff_reports_complete_cell_changes_and_enforces_expectations() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("termtrace-semantic-diff-svg-v1"))
+        .stdout(predicate::str::contains("termtrace-semantic-diff-svg-v2"))
         .stdout(predicate::str::contains("#ff3b30"));
 
     let mut rejected = Command::cargo_bin("termtrace").expect("binary should build");
@@ -5143,6 +5162,17 @@ fn index_replays_every_distinct_state_deterministically() {
         .success();
 
     let event_log = EventLog::read(session.join("events.jsonl")).expect("valid event log");
+    let manifest = read_manifest(&session).expect("session manifest");
+    assert_eq!(
+        (
+            manifest.geometry.cols,
+            manifest.geometry.rows,
+            manifest.geometry.pixel_width,
+            manifest.geometry.pixel_height,
+        ),
+        (160, 45, 1920, 1080),
+        "default recording geometry must retain a 1080p 16:9 semantic canvas"
+    );
     let cast = temporary.path().join("session.cast");
     let mut export = Command::cargo_bin("termtrace").expect("binary should build");
     export
@@ -5213,7 +5243,7 @@ fn index_replays_every_distinct_state_deterministically() {
         presented_states
             .first()
             .and_then(|state| return state.delta.geometry),
-        Some((160, 40)),
+        Some((160, 45)),
         "first retained state must be independently reconstructable"
     );
     let mut inspect_text = Command::cargo_bin("termtrace").expect("binary should build");

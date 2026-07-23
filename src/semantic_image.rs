@@ -19,9 +19,9 @@ use crate::{
 };
 
 /// Stable semantic SVG renderer identity.
-pub const SEMANTIC_SVG_RENDERER: &str = "termtrace-semantic-svg-v1";
+pub const SEMANTIC_SVG_RENDERER: &str = "termtrace-semantic-svg-v2";
 /// Stable semantic PNG rasterizer identity.
-pub const SEMANTIC_PNG_RENDERER: &str = "termtrace-semantic-png-resvg-v1";
+pub const SEMANTIC_PNG_RENDERER: &str = "termtrace-semantic-png-resvg-v2";
 /// Bundled deterministic font family.
 pub const SEMANTIC_FONT_FAMILY: &str = "Termtrace Fira Code";
 const SEMANTIC_RASTER_FONT_FAMILY: &str = "Fira Code";
@@ -31,9 +31,11 @@ pub const SEMANTIC_FONT_SOURCE: &str = "vendor/ghostty/pkg/freetype/res/FiraCode
 pub const SEMANTIC_FONT_BYTES: &[u8] =
     include_bytes!("../vendor/ghostty/pkg/freetype/res/FiraCode-Regular.ttf");
 /// Deterministic semantic cell width in pixels.
-pub const SEMANTIC_CELL_WIDTH: u16 = 10;
+pub const SEMANTIC_CELL_WIDTH: u16 = 12;
 /// Deterministic semantic cell height in pixels.
-pub const SEMANTIC_CELL_HEIGHT: u16 = 20;
+pub const SEMANTIC_CELL_HEIGHT: u16 = 24;
+/// Deterministic semantic text size in pixels.
+pub const SEMANTIC_FONT_SIZE: u16 = 19;
 
 /// Render a complete semantic state as a deterministic SVG scene.
 #[must_use]
@@ -49,7 +51,7 @@ fn render_svg_scene(
 ) -> Vec<u8> {
     const CELL_WIDTH: u32 = SEMANTIC_CELL_WIDTH as u32;
     const CELL_HEIGHT: u32 = SEMANTIC_CELL_HEIGHT as u32;
-    const BASELINE: u32 = 15;
+    const BASELINE: u32 = 18;
     let width = u32::from(canvas_cols).saturating_mul(CELL_WIDTH);
     let height = u32::from(canvas_rows).saturating_mul(CELL_HEIGHT);
     let mut svg = format!(
@@ -111,7 +113,7 @@ fn render_svg_scene(
             let text_y = y.saturating_add(BASELINE);
             let _ = writeln!(
                 svg,
-                "<text x=\"{x}\" y=\"{text_y}\" fill=\"{}\" font-family=\"{font_family}\" font-size=\"16\" font-weight=\"{weight}\" font-style=\"{font_style}\" opacity=\"{opacity}\" text-decoration=\"{decoration}\" xml:space=\"preserve\">{escaped}</text>",
+                "<text x=\"{x}\" y=\"{text_y}\" fill=\"{}\" font-family=\"{font_family}\" font-size=\"{SEMANTIC_FONT_SIZE}\" font-weight=\"{weight}\" font-style=\"{font_style}\" opacity=\"{opacity}\" text-decoration=\"{decoration}\" xml:space=\"preserve\">{escaped}</text>",
                 color_hex(foreground)
             );
         }
@@ -200,8 +202,8 @@ pub fn render_diff_svg(
     after: &SemanticState,
     difference: &SemanticDiff,
 ) -> Vec<u8> {
-    const CELL_WIDTH: u32 = 10;
-    const CELL_HEIGHT: u32 = 20;
+    const CELL_WIDTH: u32 = SEMANTIC_CELL_WIDTH as u32;
+    const CELL_HEIGHT: u32 = SEMANTIC_CELL_HEIGHT as u32;
     const HEADER: u32 = 30;
     let before_width = u32::from(before.cols).saturating_mul(CELL_WIDTH);
     let after_width = u32::from(after.cols).saturating_mul(CELL_WIDTH);
@@ -213,7 +215,7 @@ pub fn render_diff_svg(
     let after_svg = STANDARD.encode(render_svg(after));
     let font = STANDARD.encode(SEMANTIC_FONT_BYTES);
     let mut svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" data-truth-layer=\"semantic_rendering\" data-renderer=\"termtrace-semantic-diff-svg-v1\">\n<style>@font-face{{font-family:'{SEMANTIC_FONT_FAMILY}';src:url(data:font/ttf;base64,{font}) format('truetype');font-weight:normal;font-style:normal}}text{{font-family:'{SEMANTIC_FONT_FAMILY}'}}</style>\n<rect width=\"100%\" height=\"100%\" fill=\"#202020\"/>\n<text x=\"4\" y=\"20\" fill=\"white\" font-size=\"14\">before</text>\n<text x=\"{}\" y=\"20\" fill=\"white\" font-size=\"14\">after</text>\n<image x=\"0\" y=\"{HEADER}\" width=\"{before_width}\" href=\"data:image/svg+xml;base64,{before_svg}\"/>\n<image x=\"{before_width}\" y=\"{HEADER}\" width=\"{after_width}\" href=\"data:image/svg+xml;base64,{after_svg}\"/>\n",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" data-truth-layer=\"semantic_rendering\" data-renderer=\"termtrace-semantic-diff-svg-v2\">\n<style>@font-face{{font-family:'{SEMANTIC_FONT_FAMILY}';src:url(data:font/ttf;base64,{font}) format('truetype');font-weight:normal;font-style:normal}}text{{font-family:'{SEMANTIC_FONT_FAMILY}'}}</style>\n<rect width=\"100%\" height=\"100%\" fill=\"#202020\"/>\n<text x=\"4\" y=\"20\" fill=\"white\" font-size=\"14\">before</text>\n<text x=\"{}\" y=\"20\" fill=\"white\" font-size=\"14\">after</text>\n<image x=\"0\" y=\"{HEADER}\" width=\"{before_width}\" href=\"data:image/svg+xml;base64,{before_svg}\"/>\n<image x=\"{before_width}\" y=\"{HEADER}\" width=\"{after_width}\" href=\"data:image/svg+xml;base64,{after_svg}\"/>\n",
         before_width.saturating_add(4),
     );
     for row in &difference.rows {

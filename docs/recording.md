@@ -48,6 +48,8 @@ Termtrace refuses to reuse an existing output path.
 
 Geometry affects line wrapping and every derived terminal state.
 
+Default recordings use a portable `160×45` grid with `12×24` px cells: an exact `1920×1080` (16:9) semantic canvas. Use fitted geometry when the native Ghostty viewport itself must be measured and bound.
+
 ### Inherit the current terminal
 
 Use this for interactive recordings:

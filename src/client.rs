@@ -55,8 +55,8 @@ impl Terminal {
         return SessionBuilder {
             terminal: self.clone(),
             command: command.into_iter().collect(),
-            cols: 80,
-            rows: 24,
+            cols: 160,
+            rows: 45,
             working_directory: None,
             startup_timeout: Duration::from_secs(10),
             environment: EnvironmentSpec::default(),

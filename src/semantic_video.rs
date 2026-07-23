@@ -33,7 +33,7 @@ use crate::{
 
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 /// Current semantic-video source format.
-pub const SEMANTIC_VIDEO_VERSION: u32 = 1;
+pub const SEMANTIC_VIDEO_VERSION: u32 = 2;
 
 /// Fixed canvas used for every frame of one semantic video source.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -850,8 +850,8 @@ mod tests {
                 rows: 2,
                 cell_width: SEMANTIC_CELL_WIDTH,
                 cell_height: SEMANTIC_CELL_HEIGHT,
-                width: 20,
-                height: 40,
+                width: 24,
+                height: 48,
                 policy: "max_grid_top_left_v1".to_owned(),
             },
             renderer: SEMANTIC_PNG_RENDERER.to_owned(),
@@ -898,12 +898,15 @@ mod tests {
         drop(rendered_sender);
         let (hash_sender, hash_receiver) = sync_channel(1);
         let mut bytes = Vec::new();
+        let frame_bytes = usize::from(source.canvas.width)
+            .saturating_mul(usize::from(source.canvas.height))
+            .saturating_mul(4);
         let collected =
-            collect_rendered_frames(rendered_receiver, hash_sender, &mut bytes, 20 * 40 * 4)
+            collect_rendered_frames(rendered_receiver, hash_sender, &mut bytes, frame_bytes)
                 .expect("collect rendered frame");
         let pixel_stream_hash = hash_pixel_stream(hash_receiver).expect("hash pixel stream");
 
-        assert_eq!(bytes.len(), 20 * 40 * 4 * 2);
+        assert_eq!(bytes.len(), frame_bytes * 2);
         assert_eq!(collected.written_frames, 2);
         assert_eq!(collected.rendered_state_count, 1);
         assert_eq!(scheduled.suppressed_state_count, 0);

@@ -248,7 +248,10 @@ pub struct ScenarioGeometry {
 
 impl Default for ScenarioGeometry {
     fn default() -> Self {
-        return Self { cols: 80, rows: 24 };
+        return Self {
+            cols: 160,
+            rows: 45,
+        };
     }
 }
 

@@ -16,8 +16,9 @@ use crate::{
     },
     replay::{inspect_many, inspect_with_formats},
     semantic_image::{
-        SEMANTIC_FONT_BYTES, SEMANTIC_FONT_FAMILY, SEMANTIC_FONT_SOURCE, SEMANTIC_PNG_RENDERER,
-        SEMANTIC_SVG_RENDERER, render_png, render_svg, semantic_font_hash,
+        SEMANTIC_CELL_HEIGHT, SEMANTIC_CELL_WIDTH, SEMANTIC_FONT_BYTES, SEMANTIC_FONT_FAMILY,
+        SEMANTIC_FONT_SIZE, SEMANTIC_FONT_SOURCE, SEMANTIC_PNG_RENDERER, SEMANTIC_SVG_RENDERER,
+        render_png, render_svg, semantic_font_hash,
     },
     session::{read_manifest, validate_completed_log},
 };
@@ -468,9 +469,9 @@ fn semantic_image_resources() -> Vec<SemanticImageResource> {
         font_byte_count: u64::try_from(SEMANTIC_FONT_BYTES.len()).unwrap_or(u64::MAX),
         font_blake3: semantic_font_hash(),
         fallback_policy: "bundled_font_only_missing_glyph_box".to_owned(),
-        font_size: 16,
-        cell_width: 10,
-        cell_height: 20,
+        font_size: SEMANTIC_FONT_SIZE,
+        cell_width: SEMANTIC_CELL_WIDTH,
+        cell_height: SEMANTIC_CELL_HEIGHT,
         padding: 0,
         background_policy: "opaque_terminal_background".to_owned(),
     }];
