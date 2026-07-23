@@ -1,11 +1,15 @@
 //! Deterministic semantic-state SVG rendering.
 
-use std::{fmt::Write as _, mem};
+use std::{
+    fmt::Write as _,
+    mem,
+    sync::{Arc, OnceLock},
+};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use resvg::{
     tiny_skia::{Pixmap, Transform},
-    usvg::{Options, Tree},
+    usvg::{Options, Tree, fontdb::Database},
 };
 
 use crate::{
@@ -34,15 +38,20 @@ pub const SEMANTIC_CELL_HEIGHT: u16 = 20;
 /// Render a complete semantic state as a deterministic SVG scene.
 #[must_use]
 pub fn render_svg(state: &SemanticState) -> Vec<u8> {
-    return render_svg_scene(state, true);
+    return render_svg_scene(state, state.cols, state.rows, true);
 }
 
-fn render_svg_scene(state: &SemanticState, embed_font: bool) -> Vec<u8> {
+fn render_svg_scene(
+    state: &SemanticState,
+    canvas_cols: u16,
+    canvas_rows: u16,
+    embed_font: bool,
+) -> Vec<u8> {
     const CELL_WIDTH: u32 = SEMANTIC_CELL_WIDTH as u32;
     const CELL_HEIGHT: u32 = SEMANTIC_CELL_HEIGHT as u32;
     const BASELINE: u32 = 15;
-    let width = u32::from(state.cols).saturating_mul(CELL_WIDTH);
-    let height = u32::from(state.rows).saturating_mul(CELL_HEIGHT);
+    let width = u32::from(canvas_cols).saturating_mul(CELL_WIDTH);
+    let height = u32::from(canvas_rows).saturating_mul(CELL_HEIGHT);
     let mut svg = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" role=\"img\" data-truth-layer=\"semantic_rendering\" data-renderer=\"{SEMANTIC_SVG_RENDERER}\">\n"
     );
@@ -155,7 +164,7 @@ fn render_svg_scene(state: &SemanticState, embed_font: bool) -> Vec<u8> {
 ///
 /// Returns an error when the SVG cannot be parsed or the PNG cannot be encoded.
 pub fn render_png(state: &SemanticState) -> Result<Vec<u8>> {
-    let svg = render_svg_scene(state, false);
+    let svg = render_svg_scene(state, state.cols, state.rows, false);
     return rasterize_svg(&svg);
 }
 
@@ -180,10 +189,7 @@ pub fn render_video_rgba(
             state.cols, state.rows
         )));
     }
-    let mut canvas = state.clone();
-    canvas.cols = canvas_cols;
-    canvas.rows = canvas_rows;
-    let pixmap = rasterize_svg_pixmap(&render_svg_scene(&canvas, false))?;
+    let pixmap = rasterize_svg_pixmap(&render_svg_scene(state, canvas_cols, canvas_rows, false))?;
     return Ok(pixmap.data().to_vec());
 }
 
@@ -244,10 +250,10 @@ fn rasterize_svg(svg: &[u8]) -> Result<Vec<u8>> {
 }
 
 fn rasterize_svg_pixmap(svg: &[u8]) -> Result<Pixmap> {
-    let mut options = Options::default();
-    options
-        .fontdb_mut()
-        .load_font_data(SEMANTIC_FONT_BYTES.to_vec());
+    let options = Options {
+        fontdb: Arc::clone(semantic_font_database()),
+        ..Options::default()
+    };
     let tree = Tree::from_data(svg, &options).map_err(|error| {
         return image_error(format!("parse deterministic SVG: {error}"));
     })?;
@@ -256,6 +262,15 @@ fn rasterize_svg_pixmap(svg: &[u8]) -> Result<Pixmap> {
         .ok_or_else(|| return image_error("allocate semantic PNG surface"))?;
     resvg::render(&tree, Transform::default(), &mut pixmap.as_mut());
     return Ok(pixmap);
+}
+
+fn semantic_font_database() -> &'static Arc<Database> {
+    static DATABASE: OnceLock<Arc<Database>> = OnceLock::new();
+    return DATABASE.get_or_init(|| {
+        let mut database = Database::new();
+        database.load_font_data(SEMANTIC_FONT_BYTES.to_vec());
+        return Arc::new(database);
+    });
 }
 
 /// BLAKE3 identity of the exact bundled semantic font.

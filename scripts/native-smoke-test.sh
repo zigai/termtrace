@@ -15,9 +15,9 @@ target/debug/termtrace record --no-input --geometry fit --viewport 640x360 \
   --foreground '#e6e6e6' --background '#101010' --out "$output" -- /bin/sh -c \
   'printf "\033[2J\033[H\033[38;2;255;0;0mLong preroll\033[0m\n"; sleep 12; printf "\033[38;2;0;255;0mSelected range\033[0m\n"; sleep 0.5; printf "excluded tail\n"'
 rm -f "$profile"
-target/debug/termtrace index --session "$output"
-target/debug/termtrace capture --session "$output" --fps 24
-target/debug/termtrace screenshot "$output" --renderer native \
+target/debug/termtrace analyze index --session "$output"
+target/debug/termtrace artifact capture --session "$output" --fps 24
+target/debug/termtrace artifact screenshot "$output" --renderer native \
   --at 12.2s --viewport 640x360 --strict --out "$output/native-single"
 
 readonly range_from=11000000000
@@ -25,10 +25,10 @@ readonly range_to=12350000000
 readonly range_suffix="range-${range_from}-${range_to}"
 readonly range_derived="$output/derived-$range_suffix"
 readonly range_visual="$output/visual-$range_suffix"
-target/debug/termtrace index --session "$output" \
+target/debug/termtrace analyze index --session "$output" \
   --from "${range_from}ns" --to "${range_to}ns"
 readonly range_capture_started="$(date +%s%N)"
-target/debug/termtrace capture --session "$output" --fps 24 \
+target/debug/termtrace artifact capture --session "$output" --fps 24 \
   --from "${range_from}ns" --to "${range_to}ns"
 readonly range_capture_elapsed_ns="$(( $(date +%s%N) - range_capture_started ))"
 test "$range_capture_elapsed_ns" -lt "$range_from"
@@ -41,7 +41,7 @@ jq -e '
   .height == 360 and
   .video_probe.streams[0].codec_name == "h264" and
   .video_probe.streams[0].avg_frame_rate == "24/1" and
-  (.video_probe.streams[0].nb_read_frames | tonumber) > 0 and
+  (.video_probe.streams[0].nb_read_packets | tonumber) > 0 and
   .screenshot_probe.streams[0].codec_name == "png" and
   .screenshot_probe.streams[0].width == 640 and
   .screenshot_probe.streams[0].height == 360
@@ -53,7 +53,7 @@ jq -e --argjson from "$range_from" --argjson to "$range_to" '
   .source_range.end_monotonic_ns == $to and
   .fps == 24 and
   .video_probe.streams[0].avg_frame_rate == "24/1" and
-  (.video_probe.streams[0].nb_read_frames | tonumber) > 0 and
+  (.video_probe.streams[0].nb_read_packets | tonumber) > 0 and
   .screenshot_probe.streams[0].codec_name == "png"
 ' "$range_manifest" >/dev/null
 jq -s -e --argjson from "$range_from" --argjson to "$range_to" '

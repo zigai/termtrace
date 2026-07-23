@@ -7,6 +7,7 @@ use std::{
     os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _},
     path::{Component, Path, PathBuf},
     result::Result as StdResult,
+    thread,
 };
 
 use nix::{
@@ -128,25 +129,63 @@ pub fn collect_artifact_members(directory: &Path) -> Result<Vec<ArtifactMember>>
     let mut paths = Vec::new();
     collect_member_paths(directory, directory, &mut paths)?;
     paths.sort();
-    let mut members = Vec::with_capacity(paths.len());
+    let mut payloads = Vec::with_capacity(paths.len());
     for relative in paths {
         let normalized = normalized_relative_path(&relative)?;
         if normalized == "manifest.json" {
             continue;
         }
-        let path = directory.join(&relative);
-        let (byte_length, hash) = hash_regular_file(&path)?;
-        members.push(ArtifactMember {
-            media_type: member_media_type(&normalized).to_owned(),
-            schema_type: member_schema_type(&normalized).map(str::to_owned),
-            sensitivity: ArtifactSensitivity::SensitiveTerminalData,
-            relationship: member_relationship(&normalized).to_owned(),
-            path: normalized,
-            byte_length,
-            blake3: hash,
-        });
+        payloads.push((directory.join(relative), normalized));
     }
-    return Ok(members);
+    let worker_count = available_workers(payloads.len());
+    let mut indexed = thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(worker_count);
+        for worker in 0..worker_count {
+            let payloads = &payloads;
+            handles.push(
+                scope.spawn(move || -> Result<Vec<(usize, ArtifactMember)>> {
+                    let mut members = Vec::new();
+                    for index in (worker..payloads.len()).step_by(worker_count) {
+                        let (path, normalized) = payloads.get(index).ok_or_else(|| {
+                            return invalid_artifact("artifact hashing index is outside payloads");
+                        })?;
+                        let (byte_length, hash) = hash_regular_file(path)?;
+                        members.push((
+                            index,
+                            ArtifactMember {
+                                media_type: member_media_type(normalized).to_owned(),
+                                schema_type: member_schema_type(normalized).map(str::to_owned),
+                                sensitivity: ArtifactSensitivity::SensitiveTerminalData,
+                                relationship: member_relationship(normalized).to_owned(),
+                                path: normalized.clone(),
+                                byte_length,
+                                blake3: hash,
+                            },
+                        ));
+                    }
+                    return Ok(members);
+                }),
+            );
+        }
+        let mut indexed = Vec::with_capacity(payloads.len());
+        for handle in handles {
+            let mut members = handle
+                .join()
+                .map_err(|_panic| return invalid_artifact("artifact hashing worker panicked"))??;
+            indexed.append(&mut members);
+        }
+        return Ok(indexed);
+    })?;
+    indexed.sort_by_key(|(index, _)| return *index);
+    return Ok(indexed
+        .into_iter()
+        .map(|(_, member)| return member)
+        .collect());
+}
+
+fn available_workers(item_count: usize) -> usize {
+    let available = thread::available_parallelism().map_or(1, usize::from);
+    return available.min(4).min(item_count.max(1));
 }
 
 /// Verify every manifested member and reject unmanifested payload files.
@@ -464,7 +503,7 @@ fn normalized_relative_path(path: &Path) -> Result<String> {
     return Ok(normalized.to_owned());
 }
 
-fn hash_regular_file(path: &Path) -> Result<(u64, String)> {
+pub(crate) fn hash_regular_file(path: &Path) -> Result<(u64, String)> {
     let metadata = fs_err::symlink_metadata(path).map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),
@@ -801,6 +840,26 @@ mod tests {
         fs_err::remove_file(artifact.join("extra.log")).expect("remove extra member");
         fs_err::write(artifact.join("final.txt"), b"changed").expect("change member");
         assert!(verify_artifact_members(&artifact, &members).is_err());
+    }
+
+    #[test]
+    fn parallel_member_hashing_preserves_canonical_path_order() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let artifact = temporary.path().join("artifact");
+        fs_err::create_dir(&artifact).expect("artifact directory");
+        for name in ["z.txt", "a.txt", "m.txt", "b.txt", "y.txt", "c.txt"] {
+            fs_err::write(artifact.join(name), name.as_bytes()).expect("artifact member");
+        }
+
+        let members = collect_artifact_members(&artifact).expect("collect members");
+        assert_eq!(
+            members
+                .iter()
+                .map(|member| return member.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a.txt", "b.txt", "c.txt", "m.txt", "y.txt", "z.txt"]
+        );
+        verify_artifact_members(&artifact, &members).expect("ordered members should verify");
     }
 
     #[test]

@@ -17,7 +17,7 @@ use crate::{
     Error, Result,
     event::{Event, OperationStatus},
     event_log::EventLog,
-    geometry::{query_terminal, resize_and_query},
+    geometry::{TerminalGeometryReport, query_terminal, resize_and_query},
     session::{GeometrySource, read_manifest},
     terminal_mode::{RawTerminalGuard, TerminalInputDrain},
     timeline::{SourceRange, resolve_source_range},
@@ -56,6 +56,8 @@ pub struct PlaybackOptions {
     pub timing_file: PathBuf,
     /// Failure handshake JSON path.
     pub error_file: PathBuf,
+    /// Geometry measured in the playback terminal before replay begins.
+    pub geometry_file: PathBuf,
     /// File created after all canonical events are emitted.
     pub ready_file: PathBuf,
     /// Delay before source-range start (or event time zero for full playback).
@@ -111,14 +113,18 @@ fn playback_inner(options: &PlaybackOptions) -> Result<()> {
         });
     }
     let mut terminal_mode = RawTerminalGuard::enter(true)?;
-    if let Err(error) = prepare_terminal_geometry(options) {
+    let reported = match prepare_terminal_geometry(options) {
+        Ok(reported) => reported,
+        Err(error) => return finish_with_cleanup(Err(error), terminal_mode.restore()),
+    };
+    if let Err(error) = write_create_new_json(&options.geometry_file, &reported) {
         return finish_with_cleanup(Err(error), terminal_mode.restore());
     }
     let result = playback_with_raw_input(options, terminal_mode.is_active());
     return finish_with_cleanup(result, terminal_mode.restore());
 }
 
-fn prepare_terminal_geometry(options: &PlaybackOptions) -> Result<()> {
+fn prepare_terminal_geometry(options: &PlaybackOptions) -> Result<TerminalGeometryReport> {
     let manifest = read_manifest(&options.session_directory)?;
     let expected = manifest.geometry;
     let reported = resize_and_query(expected.cols, expected.rows)?;
@@ -144,7 +150,7 @@ fn prepare_terminal_geometry(options: &PlaybackOptions) -> Result<()> {
             ),
         });
     }
-    return Ok(());
+    return Ok(reported);
 }
 
 fn playback_with_raw_input(options: &PlaybackOptions, input_is_terminal: bool) -> Result<()> {

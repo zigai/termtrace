@@ -762,24 +762,6 @@ fn capture_staged(
     wait_for_x_socket(&lease, &mut xvfb, Duration::from_secs(5))?;
     let geometry_path = staging.join("geometry-preflight.json");
     let overrides = ghostty_overrides();
-    let mut geometry_probe = spawn_geometry_probe(
-        staging,
-        &display,
-        &geometry_path,
-        &overrides,
-        &profile_root,
-        "geometry-preflight",
-    )?;
-    let geometry_report: TerminalGeometryReport =
-        wait_for_json(&geometry_path, &mut geometry_probe, Duration::from_secs(20))?;
-    wait_for_success(&mut geometry_probe, Duration::from_secs(5), staging)?;
-    validate_capture_geometry(
-        session_manifest.geometry,
-        session_manifest.geometry_provenance.source,
-        geometry_report,
-        options.width,
-        options.height,
-    )?;
     let timing_file = staging.join("playback-timing.json");
     let error_file = staging.join("playback-error.json");
     let ready_file = staging.join("playback-ready");
@@ -789,9 +771,19 @@ fn capture_staged(
         &display,
         &timing_file,
         &error_file,
+        &geometry_path,
         &ready_file,
         &overrides,
         Some(&profile_root),
+    )?;
+    let geometry_report: TerminalGeometryReport =
+        wait_for_json(&geometry_path, &mut ghostty, Duration::from_secs(20))?;
+    validate_capture_geometry(
+        session_manifest.geometry,
+        session_manifest.geometry_provenance.source,
+        geometry_report,
+        options.width,
+        options.height,
     )?;
     let timing: PlaybackTiming = wait_for_playback_handshake(
         &timing_file,
@@ -1114,6 +1106,7 @@ fn spawn_ghostty(
     display: &str,
     timing_file: &Path,
     error_file: &Path,
+    geometry_file: &Path,
     ready_file: &Path,
     overrides: &[String],
     profile_root: Option<&Path>,
@@ -1137,6 +1130,8 @@ fn spawn_ghostty(
         .arg(timing_file)
         .arg("--error-file")
         .arg(error_file)
+        .arg("--geometry-file")
+        .arg(geometry_file)
         .arg("--ready-file")
         .arg(ready_file)
         .arg("--start-delay-ms")
@@ -1338,7 +1333,7 @@ fn probe_video(path: &Path, fps: u16, width: u16, height: u16) -> Result<serde_j
         .args([
             "-v",
             "error",
-            "-count_frames",
+            "-count_packets",
             "-show_streams",
             "-show_format",
             "-of",
@@ -1358,8 +1353,8 @@ fn probe_video(path: &Path, fps: u16, width: u16, height: u16) -> Result<serde_j
         .and_then(serde_json::Value::as_array)
         .and_then(|streams| return streams.first())
         .ok_or_else(|| return invalid_probe("video has no stream"))?;
-    let frame_count = stream
-        .get("nb_read_frames")
+    let packet_count = stream
+        .get("nb_read_packets")
         .and_then(serde_json::Value::as_str)
         .and_then(|value| return value.parse::<u64>().ok())
         .unwrap_or(0);
@@ -1372,10 +1367,10 @@ fn probe_video(path: &Path, fps: u16, width: u16, height: u16) -> Result<serde_j
     if actual_rate != expected
         || actual_width != Some(u64::from(width))
         || actual_height != Some(u64::from(height))
-        || frame_count == 0
+        || packet_count == 0
     {
         return Err(invalid_probe(&format!(
-            "video probe expected {width}x{height} at {expected} with frames, got {}x{} at {actual_rate} with {frame_count} frames",
+            "video probe expected {width}x{height} at {expected} with packets, got {}x{} at {actual_rate} with {packet_count} packets",
             actual_width.map_or_else(|| return "?".to_owned(), |value| return value.to_string()),
             actual_height.map_or_else(|| return "?".to_owned(), |value| return value.to_string())
         )));
@@ -1425,7 +1420,7 @@ fn read_state_index(
         });
         return Err(Error::InvalidReplay {
             reason: format!(
-                "matching semantic index is missing; run `termtrace index --session {}{range_flags}` first",
+                "matching semantic index is missing; run `termtrace analyze index --session {}{range_flags}` first",
                 session.display()
             ),
         });
@@ -1525,7 +1520,7 @@ fn validate_replay_manifest(
     if !mismatches.is_empty() {
         return Err(Error::InvalidReplay {
             reason: format!(
-                "semantic index does not match the capture request ({}); remove the matching derived directory and run `termtrace index` after recording completion",
+                "semantic index does not match the capture request ({}); remove the matching derived directory and run `termtrace analyze index` after recording completion",
                 mismatches.join(", ")
             ),
         });
