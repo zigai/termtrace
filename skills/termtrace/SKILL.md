@@ -14,14 +14,13 @@ or `--all` only when the next decision needs them.
 ## Choose the interface first
 
 - Use one CLI command for one observation, wait, mutation, or artifact.
-- Use `termtrace tooling client python -` or `termtrace tooling client typescript -` when the
-  workflow has more than three actions, branching, repeated observations, or
-  caller-owned retry IDs. These runners use installed SDK assets and managed
-  runtime caches; they create no package, config, or generated source in the
-  working tree. Read [client workflows](references/client-workflows.md).
 - Use `termtrace test` for a repeatable assertion workflow or regression. Start
   from [the tested scenario example](examples/ready.termtrace.json) and read
   [repeatable testing](references/testing.md).
+- Use a reviewable `.py` or `.ts` file with `termtrace tooling client` when the
+  workflow genuinely needs branching, loops, repeated observations, multiple
+  sessions, or caller-owned retry IDs. Use standard input only for a short,
+  disposable snippet. Read [client workflows](references/client-workflows.md).
 - Use the supplied canonical session directly for review. Never relaunch an
   application merely to inspect existing evidence.
 

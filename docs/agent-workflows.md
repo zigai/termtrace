@@ -177,22 +177,25 @@ For managed recordings under the Termtrace state root, `termtrace registry gc` r
 Scenario launches accept `environment` and `outputByteBudget`. Snapshot matching uses the same atomic stable-screen primitive; it no longer waits and then races a second snapshot. Environment values are redacted from copied failure scenarios.
 
 ```bash
-termtrace test tests/scenarios/login.json --jobs 4 --reruns 1
+termtrace test SCENARIO.json --jobs 4 --reruns 1
 ```
 
 Snapshot files change only with `--update-snapshots`. Each rerun receives a new session; failed attempts are retained.
 
 For language integrations, keep one `termtrace tooling driver` process and begin with `hello`. Typed Python, TypeScript, and Rust clients wrap the same screen, keyboard, pointer, event, completion, and evidence contracts. Driver handles are process-local; canonical session IDs and paths remain stable across driver restarts.
 
-For an ad hoc multi-step agent workflow, run installed clients without generating a project:
+For branching, retries, loops, or multi-session orchestration, run a reviewable
+client script without generating a project:
 
 ```bash
 termtrace tooling client status
 termtrace tooling client python workflow.py -- --workflow-argument
-termtrace tooling client typescript - < workflow.ts
+termtrace tooling client typescript workflow.ts -- --workflow-argument
 ```
 
 The managed runners use private temporary import mappings and runtime caches. They do not create package manifests, lockfiles, virtual environments, generated source, or `node_modules` in the caller's working directory.
+Use standard input only for short disposable snippets; use `termtrace test` for
+repeatable assertions.
 
 ## Hand off evidence
 

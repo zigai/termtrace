@@ -44,8 +44,8 @@ termtrace show app
 termtrace stop app --wait
 ```
 
-Use `termtrace tooling client python -` or
-`termtrace tooling client typescript -` for longer workflows.
+Use `termtrace tooling client python workflow.py` or the corresponding
+`typescript workflow.ts` form for branching and repeated workflows.
 
 ## Artifacts and tests
 

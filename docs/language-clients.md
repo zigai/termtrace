@@ -64,7 +64,7 @@ if (!frame.viewport_text.includes("Commands")) throw new Error("commands missing
 
 The package ships precompiled standalone Ajv validators. Ajv is a development dependency and is not initialized at client startup.
 
-## Run an ad hoc client without project scaffolding
+## Run a client script without project scaffolding
 
 Release installations include both client packages as managed assets. Check discovery and runtime availability with:
 
@@ -72,15 +72,17 @@ Release installations include both client packages as managed assets. Check disc
 termtrace tooling client status
 ```
 
-Then execute a file or standard input directly:
+Run a reviewable script file for branching, retries, loops, or multi-session
+workflows:
 
 ```bash
 termtrace tooling client python workflow.py -- --workflow-argument
-termtrace tooling client typescript - <<'TS'
-import { Termtrace } from "@termtrace/test";
-console.log(typeof Termtrace.create);
-TS
+termtrace tooling client typescript workflow.ts -- --workflow-argument
 ```
+
+The `-` source reads a program from standard input, but is intended only for
+short disposable snippets. Use `termtrace test` for repeatable assertions and a
+normal package dependency for permanent application integrations.
 
 Python uses an isolated uv environment backed by uv's cache, with a Python/PYTHONPATH fallback for already provisioned hosts. TypeScript uses Bun with a private temporary package mapping. Neither path writes dependency metadata, generated source, a virtual environment, or `node_modules` into the current working directory. `TERMTRACE_CLIENT_ASSETS` can point development builds at an explicit asset root.
 

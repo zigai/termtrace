@@ -1,57 +1,40 @@
 # Managed client workflows
 
-Use a managed client runner when several operations belong to one control flow.
-It keeps one driver process and avoids repeated CLI parsing and large shell
-transcripts.
+Prefer individual CLI commands for straightforward observations and mutations.
+Use `termtrace test` when assertions should be repeatable. A managed client
+script is appropriate when one control flow genuinely needs branching, loops,
+repeated observations, multiple sessions, or caller-owned retry IDs.
 
-Check discovery without changing the project:
+## Run a script file
+
+Keep substantial workflows in reviewable `.py` or `.ts` files:
 
 ```sh
-termtrace tooling client status
+termtrace tooling client python workflow.py -- WORKFLOW_ARGUMENTS
+termtrace tooling client typescript workflow.ts -- WORKFLOW_ARGUMENTS
 ```
 
-Run a Python program from standard input:
+Prefer the language already used by the project; use Python when neither is a
+natural fit. Use `termtrace tooling client status` only when checking SDK asset
+or runtime availability.
+
+## Use standard input sparingly
+
+Standard input is an escape hatch for a short, disposable, trusted snippet that
+does not deserve a file:
 
 ```sh
 termtrace tooling client python - <<'PY'
-from pathlib import Path
-from termtrace import KeyAtom, Terminal, TextAtom
-
-root = Path.home() / ".local/state/termtrace/agent-evidence"
-with Terminal(evidence_root=root) as terminal:
-    with terminal.launch(["my-app"], evidence="on-failure") as session:
-        session.screen.wait_for_text("Ready")
-        session.keyboard.sequence([TextAtom("help"), KeyAtom("enter")])
-        frame = session.screen.frame()
-        assert "Commands" in frame.viewport_text
+# Short one-off workflow.
 PY
 ```
 
-Run the corresponding TypeScript form:
+Do not place large workflows in heredocs or interpolate untrusted terminal
+content into executable source. Move anything worth reviewing, debugging, or
+rerunning into a script file.
 
-```sh
-termtrace tooling client typescript - <<'TS'
-import { Termtrace } from "@termtrace/test";
-
-await using terminal = await Termtrace.create({
-  evidenceRoot: `${process.env.HOME}/.local/state/termtrace/agent-evidence`,
-});
-await using session = await terminal.launch({
-  command: ["my-app"],
-  evidence: "on-failure",
-});
-await session.screen.waitForText("Ready");
-await session.keyboard.sequence([
-  { kind: "text", text: "help" },
-  { kind: "key", key: "enter" },
-]);
-const frame = await session.screen.frame();
-if (!frame.viewport_text.includes("Commands")) throw new Error("missing Commands");
-TS
-```
-
-Passing a `.py` or `.ts` file instead of `-` preserves its arguments after `--`.
-Python uses an isolated uv environment backed by uv's cache. TypeScript maps the
-installed package through a private temporary symlink tree. Neither runner writes
-`package.json`, lock files, virtual environments, generated source, or
-`node_modules` into the caller's working tree.
+The managed runners use installed SDK assets and private temporary runtime
+mappings. Python uses an isolated uv environment backed by uv's cache;
+TypeScript uses Bun with `--no-install`. Neither runner creates dependency
+metadata, generated source, virtual environments, or `node_modules` in the
+caller's working tree.
