@@ -36,8 +36,18 @@ or `--all` only when the next decision needs them.
   [artifact branches](references/artifacts.md).
 
 Read [live control](references/live-control.md) before state-dependent input.
-Read [the command reference](references/commands.md) only for the command family
-being used; it is generated from the tested command graph.
+Use the installed binary's live, version-specific `--help` output to discover
+commands, descending only as far as the workflow requires:
+
+```text
+termtrace --help
+termtrace COMMAND --help
+termtrace COMMAND SUBCOMMAND --help
+termtrace COMMAND SUBCOMMAND ACTION --help
+```
+
+Choose each placeholder from the preceding help output. If a path is invalid or
+unfamiliar, move up one level; do not infer it from an older command name.
 
 ## Live workflow
 
@@ -72,4 +82,4 @@ being used; it is generated from the tested command graph.
 - Return the canonical session path and any preserved failure artifact path.
 
 After changing the CLI or skill examples, follow
-[reference maintenance](references/maintenance.md).
+[skill maintenance](references/maintenance.md).

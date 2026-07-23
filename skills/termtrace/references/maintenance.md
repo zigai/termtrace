@@ -1,11 +1,13 @@
-# Command reference maintenance
+# Skill maintenance
 
-After the CLI graph changes, run this from the skill directory:
+After the CLI graph changes:
 
-```sh
-python3 scripts/generate-command-reference.py --binary PATH --out references/commands.md
-```
+- Update every skill example that invokes a changed path.
+- Keep only the live `--help` discovery ladder in the skill instructions. Do not
+  copy generated command listings or option text into the skill.
+- Verify the affected root, group, and leaf `--help` paths against the built
+  binary.
+- Run the repository's focused skill/CLI test and then the normal test suite.
 
-The refresh is complete only when the checked reference matches generated
-`--help`, its example commands pass, and the repository tests succeed. Commit the
-regenerated reference only after this criterion is met.
+The refresh is complete only when examples invoke the tested CLI graph and the
+skill tells agents to consult the installed binary for version-specific details.
