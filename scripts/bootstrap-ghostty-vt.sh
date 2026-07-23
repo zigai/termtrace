@@ -7,28 +7,28 @@ readonly ghostty="$root/vendor/ghostty"
 readonly tools="$root/.tools"
 
 if [[ "$(uname -s)" != Linux ]]; then
-  echo "libghostty-vt bootstrap currently supports Linux only" >&2
-  exit 2
+    echo "libghostty-vt bootstrap currently supports Linux only" >&2
+    exit 2
 fi
 
 case "$(uname -m)" in
-  x86_64)
-    readonly zig_arch=x86_64
-    readonly zig_sha256=02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
-    ;;
-  aarch64)
-    readonly zig_arch=aarch64
-    readonly zig_sha256=958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f
-    ;;
-  *)
-    echo "unsupported architecture: $(uname -m)" >&2
-    exit 2
-    ;;
+    x86_64)
+        readonly zig_arch=x86_64
+        readonly zig_sha256=02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
+        ;;
+    aarch64)
+        readonly zig_arch=aarch64
+        readonly zig_sha256=958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f
+        ;;
+    *)
+        echo "unsupported architecture: $(uname -m)" >&2
+        exit 2
+        ;;
 esac
 
 if [[ ! -f "$ghostty/build.zig" ]]; then
-  echo "Ghostty submodule is missing; run: git submodule update --init --recursive" >&2
-  exit 2
+    echo "Ghostty submodule is missing; run: git submodule update --init --recursive" >&2
+    exit 2
 fi
 
 readonly archive_name="zig-${zig_arch}-linux-${zig_version}.tar.xz"
@@ -38,22 +38,22 @@ readonly zig="$zig_root/zig"
 mkdir -p "$tools/downloads"
 
 if [[ ! -x "$zig" ]]; then
-  curl --fail --location --retry 3 \
-    --output "$archive" \
-    "https://ziglang.org/download/${zig_version}/${archive_name}"
-  printf '%s  %s\n' "$zig_sha256" "$archive" | sha256sum --check --status
-  tar --extract --xz --directory "$tools" --file "$archive"
+    curl --fail --location --retry 3 \
+        --output "$archive" \
+        "https://ziglang.org/download/${zig_version}/${archive_name}"
+    printf '%s  %s\n' "$zig_sha256" "$archive" | sha256sum --check --status
+    tar --extract --xz --directory "$tools" --file "$archive"
 fi
 
 if [[ "$($zig version)" != "$zig_version" ]]; then
-  echo "unexpected Zig version from $zig" >&2
-  exit 2
+    echo "unexpected Zig version from $zig" >&2
+    exit 2
 fi
 
 cd "$ghostty"
 target_args=()
 if [[ -n "${TERMTRACE_ZIG_TARGET:-}" ]]; then
-  target_args+=("-Dtarget=${TERMTRACE_ZIG_TARGET}")
+    target_args+=("-Dtarget=${TERMTRACE_ZIG_TARGET}")
 fi
 
 "$zig" build -Demit-lib-vt=true -Doptimize=ReleaseFast "${target_args[@]}"

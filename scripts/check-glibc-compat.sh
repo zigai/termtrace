@@ -18,10 +18,10 @@ if ! command -v objdump >/dev/null 2>&1; then
 fi
 
 required=$(
-    objdump -T "$binary" \
-        | sed -n 's/.*GLIBC_\([0-9][0-9.]*\).*/\1/p' \
-        | sort -Vu \
-        | tail -n 1
+    objdump -T "$binary" |
+        sed -n 's/.*GLIBC_\([0-9][0-9.]*\).*/\1/p' |
+        sort -Vu |
+        tail -n 1
 )
 if [[ -z "$required" ]]; then
     echo "no GLIBC symbol versions found in $binary" >&2

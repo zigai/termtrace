@@ -10,44 +10,44 @@ readonly output="$root/src/ghostty_vt/bindings.rs"
 temporary_output=""
 
 cleanup() {
-  if [[ -n "$temporary_output" ]]; then
-    rm -f "$temporary_output"
-  fi
+    if [[ -n "$temporary_output" ]]; then
+        rm -f "$temporary_output"
+    fi
 }
 
 trap cleanup EXIT
 
 if [[ ! -f "$header" ]]; then
-  echo "Ghostty submodule is missing; run scripts/bootstrap.sh" >&2
-  exit 2
+    echo "Ghostty submodule is missing; run scripts/bootstrap.sh" >&2
+    exit 2
 fi
 
 if [[ "$(git -C "$ghostty" rev-parse HEAD)" != "$ghostty_revision" ]]; then
-  echo "refusing to generate bindings from an unpinned Ghostty revision" >&2
-  exit 2
+    echo "refusing to generate bindings from an unpinned Ghostty revision" >&2
+    exit 2
 fi
 
 if ! command -v bindgen >/dev/null 2>&1; then
-  echo "bindgen is required only to upgrade bindings" >&2
-  echo "install it with: cargo install bindgen-cli --version $bindgen_version --locked" >&2
-  exit 2
+    echo "bindgen is required only to upgrade bindings" >&2
+    echo "install it with: cargo install bindgen-cli --version $bindgen_version --locked" >&2
+    exit 2
 fi
 
 if [[ "$(bindgen --version)" != "bindgen $bindgen_version" ]]; then
-  echo "bindgen $bindgen_version is required" >&2
-  exit 2
+    echo "bindgen $bindgen_version is required" >&2
+    exit 2
 fi
 
 temporary_output="$(mktemp "${output}.XXXXXX")"
 bindgen "$header" \
-  --allowlist-function 'ghostty_.*' \
-  --allowlist-type 'Ghostty.*' \
-  --allowlist-var 'GHOSTTY_.*' \
-  --with-derive-default \
-  --no-layout-tests \
-  --output "$temporary_output" \
-  -- \
-  "-I$ghostty/include"
+    --allowlist-function 'ghostty_.*' \
+    --allowlist-type 'Ghostty.*' \
+    --allowlist-var 'GHOSTTY_.*' \
+    --with-derive-default \
+    --no-layout-tests \
+    --output "$temporary_output" \
+    -- \
+    "-I$ghostty/include"
 
 chmod 0644 "$temporary_output"
 mv "$temporary_output" "$output"
