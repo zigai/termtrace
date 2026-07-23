@@ -23,7 +23,7 @@
     },
     {
       "id": "bounded-timeline",
-      "command": "timeline SESSION --jsonl",
+      "command": "analyze timeline SESSION --jsonl",
       "maximum_stdout_bytes": 49152,
       "maximum_commands": 1,
       "required_default_limit": 100

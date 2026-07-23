@@ -6,6 +6,7 @@ readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly repetitions="${REPETITIONS:-30}"
 readonly payload_bytes="${PAYLOAD_BYTES:-1048576}"
 readonly output="${OUTPUT:-$root/benchmarks/results/durability.jsonl}"
+readonly binary="${TERMTRACE_BINARY:-$root/target/release/termtrace}"
 readonly sessions="$(mktemp -d)"
 
 cleanup() {
@@ -22,13 +23,19 @@ mkdir -p "$(dirname "$output")"
 : >"$output"
 
 cd "$root"
-cargo build --release --all-features
+if [[ ! -x "$binary" ]]; then
+    cargo build --release --all-features --manifest-path "$root/Cargo.toml"
+fi
+if [[ ! -x "$binary" ]]; then
+    printf 'Termtrace binary is not executable: %s\n' "$binary" >&2
+    exit 2
+fi
 
 for mode in strict bounded throughput; do
     for ((iteration = 1; iteration <= repetitions; iteration += 1)); do
         session="$sessions/$mode-$iteration.termtrace"
         started_ns="$(date +%s%N)"
-        target/release/termtrace record --no-input --durability "$mode" \
+        "$binary" record --no-input --durability "$mode" \
             --out "$session" -- /bin/sh -c 'head -c "$1" /dev/zero' sh "$payload_bytes" \
             >/dev/null &
         recorder_pid="$!"

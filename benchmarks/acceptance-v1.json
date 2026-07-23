@@ -79,7 +79,7 @@
     {
       "id": "cli-command-count-parity",
       "kind": "ergonomics",
-      "workflows": ["start", "send", "wait", "show", "resize", "restart", "stop", "screenshot", "scenario-test", "edited-video"],
+      "workflows": ["start", "send", "wait", "show", "control resize", "restart", "stop", "artifact screenshot", "test", "artifact video export"],
       "maximum_commands_per_workflow": 1,
       "maximum_required_identifiers_per_workflow": 1
     },
@@ -141,7 +141,7 @@
       "id": "large-live-independence",
       "kind": "complexity",
       "fixture": "million-event-1gib",
-      "operations": ["show", "wait", "events --follow"],
+      "operations": ["show", "wait", "analyze events --follow"],
       "requirement": "latency and resident memory are independent of total canonical log length"
     },
     {
