@@ -26,7 +26,7 @@ jobs:
           components: clippy,rustfmt
       - name: Install headless Ghostty config fixture
         run: echo "$GITHUB_WORKSPACE/tests/fixtures/bin" >> "$GITHUB_PATH"
-      - run: bash -n install.sh scripts/*.sh demos/*.sh demos/apps/*.sh
+      - run: bash -n install.sh benchmarks/*.sh scripts/*.sh demos/*.sh demos/apps/*.sh
       - run: bash tests/install.sh
       - run: python3 -m py_compile demos/apps/terminal_showcase.py
       - run: scripts/bootstrap.sh
