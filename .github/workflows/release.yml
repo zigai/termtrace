@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
-      - uses: dtolnay/rust-toolchain@1.91.1
+      - uses: dtolnay/rust-toolchain@1.97.1
         with:
           components: clippy,rustfmt
           targets: ${{ matrix.target }}

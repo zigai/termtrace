@@ -106,7 +106,7 @@ Set `TERMTRACE_GHOSTTY_PREFIX` only when intentionally testing a compatible exte
 
 ## Source build requirements
 
-- Rust 1.91.1, selected by `rust-toolchain.toml`
+- Rust 1.97.1, selected by `rust-toolchain.toml`
 - Git with submodule support
 - curl, tar, xz, and SHA-256 utilities
 

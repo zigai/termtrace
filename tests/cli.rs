@@ -5169,12 +5169,9 @@ fn index_replays_every_distinct_state_deterministically() {
             .as_ref()
             .is_some_and(|modes| return modes.alternate_screen);
     }));
-    assert!(
-        first
-            .states
-            .windows(2)
-            .all(|pair| return pair[0].state_hash != pair[1].state_hash)
-    );
+    assert!(first.states.array_windows().all(|[before, after]| {
+        return before.state_hash != after.state_hash;
+    }));
 
     let mut index = Command::cargo_bin("termtrace").expect("binary should build");
     index

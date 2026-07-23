@@ -545,10 +545,7 @@ fn detect_transients(states: &[StateRecord], findings: &mut Vec<DiagnosticFindin
         .iter()
         .filter(|state| return state.presented)
         .collect::<Vec<_>>();
-    for window in presented.windows(3) {
-        let [before, transient, after] = window else {
-            continue;
-        };
+    for [before, transient, after] in presented.array_windows() {
         if before.state_hash == after.state_hash && transient.state_hash != before.state_hash {
             let duration_fact = if transient.monotonic_ns < after.monotonic_ns {
                 format!(
