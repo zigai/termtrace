@@ -30,6 +30,11 @@ The first line is a header that binds the exact session manifest and terminal de
 
 Input, resize, and signal mutations have intent/result pairs. A missing result means the outcome is uncertain.
 
+Offline readers fail closed at 64 MiB per JSONL line, 1,000,000 events,
+512 MiB of encoded log data, and 256 MiB of decoded byte payloads. Initial
+and resize geometry is limited to 1,000 columns, 1,000 rows, and 250,000
+cells. These limits apply equally to complete and prefix readers.
+
 ### `completion.json`
 
 The completion manifest binds the session and event roots, final exit event, event and output counts, exit outcome, durability record, and optional resource-limit trigger. A complete session ends in `Exit` and has no pending mutation. The current completion version is 4.
@@ -139,5 +144,10 @@ Tests require generated output to match the checked-in files and validate fixtur
 `export-asciicast` creates a lossy UTF-8 interoperability view. Invalid bytes, exact timing, and advanced semantic state cannot be preserved, so the cast is never canonical evidence.
 
 `save`, `screenshot`, and `bundle` publish owner-only, no-replace artifact directories with manifests. Use a bundle profile appropriate to the data being shared and verify the bundle after copying it.
+
+Bundle manifests are limited to 1 MiB and 10,000 payload members. Bundle
+verification requires the caller's expected source session and profile; member
+sensitivity, relationship, and schema labels are derived by the verifier rather
+than accepted from the bundle.
 
 Terminal content remains untrusted and potentially sensitive in every representation.

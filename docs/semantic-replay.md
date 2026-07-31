@@ -9,6 +9,12 @@ termtrace analyze inspect --session SESSION --format text
 
 Replay validates the event chain and uses the exact pinned semantic engine. The same recording therefore produces byte-for-byte deterministic state artifacts when the engine and schema versions are unchanged.
 
+Imported replay is bounded to 256 MiB of output, 2,000,000 capture attempts,
+100,000 distinct states, 2,000,000,000 cell-work units, 512 MiB of emitted
+artifact data, and 60 seconds. Geometry is independently capped at 1,000
+columns, 1,000 rows, and 250,000 cells. Crossing any ceiling returns an error
+and prevents artifact publication.
+
 ## State boundaries
 
 A state is emitted when visible or semantic terminal content changes, including:

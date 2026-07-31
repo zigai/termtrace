@@ -204,7 +204,9 @@ Preview the files and sensitivity labels before creating a bundle:
 ```bash
 termtrace artifact bundle create SESSION --profile screen --out BUNDLE --dry-run
 termtrace artifact bundle create SESSION --profile screen --out BUNDLE
-termtrace artifact bundle verify BUNDLE
+termtrace artifact bundle verify BUNDLE --source SESSION --profile screen
 ```
 
 Use `screen` for a small state handoff, `debug` for redacted event metadata, and `forensic` only when raw input and output are explicitly required. Bundles are never uploaded automatically.
+Verification requires the expected source and profile so an untrusted manifest
+cannot choose its own provenance or sensitivity policy.
