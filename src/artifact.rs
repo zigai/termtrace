@@ -2,17 +2,19 @@
 
 use std::{
     collections::BTreeSet,
-    fs::{DirBuilder, File, Metadata, OpenOptions, Permissions},
+    ffi::OsStr,
+    fs::File,
     io::{BufRead as _, BufReader, BufWriter, Error as IoError, ErrorKind, Read as _, Write as _},
-    os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _},
+    os::fd::{AsFd, OwnedFd},
     path::{Component, Path, PathBuf},
-    result::Result as StdResult,
     thread,
 };
 
 use nix::{
     errno::Errno,
-    fcntl::{Flock, FlockArg, RenameFlags, renameat2},
+    fcntl::{Flock, FlockArg, OFlag, OpenHow, RenameFlags, ResolveFlag, open, openat2, renameat2},
+    sys::stat::{Mode, SFlag, fstat, mkdirat},
+    unistd::{Uid, fsync},
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -126,8 +128,22 @@ struct ArtifactMemberEnvelope {
 ///
 /// Returns an error when traversal or hashing fails, or a member is unsafe.
 pub fn collect_artifact_members(directory: &Path) -> Result<Vec<ArtifactMember>> {
+    return collect_artifact_members_bounded(directory, usize::MAX);
+}
+
+pub(crate) fn collect_artifact_members_bounded(
+    directory: &Path,
+    maximum_tree_entries: usize,
+) -> Result<Vec<ArtifactMember>> {
     let mut paths = Vec::new();
-    collect_member_paths(directory, directory, &mut paths)?;
+    let mut tree_entries = 0_usize;
+    collect_member_paths(
+        directory,
+        directory,
+        &mut paths,
+        &mut tree_entries,
+        maximum_tree_entries,
+    )?;
     paths.sort();
     let mut payloads = Vec::with_capacity(paths.len());
     for relative in paths {
@@ -231,29 +247,37 @@ pub fn append_artifact_root(
         .strip_prefix(session)
         .map_err(|_| return invalid_artifact("artifact directory is outside its source session"))?;
     let directory_name = normalized_relative_path(directory_name)?;
+    let session_fd = open_directory_path(session, false)?;
+    validate_private_directory_fd(&session_fd, session)?;
     let lock_path = session.join(ARTIFACT_ROOT_LOCK);
-    let lock_file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .open(&lock_path)
-        .map_err(|source| {
+    let lock_fd = open_file_at(
+        &session_fd,
+        OsStr::new(ARTIFACT_ROOT_LOCK),
+        OFlag::O_RDWR | OFlag::O_CREAT | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::from_bits_truncate(0o600),
+        &lock_path,
+    )?;
+    validate_private_regular_file_fd(&lock_fd, &lock_path)?;
+    sync_fd(&session_fd, session)?;
+    let lock =
+        Flock::lock(File::from(lock_fd), FlockArg::LockExclusive).map_err(|(_, error)| {
             return Error::Filesystem {
-                path: lock_path.clone(),
-                source,
+                path: lock_path,
+                source: IoError::from_raw_os_error(error as i32),
             };
         })?;
-    sync_parent_directory(&lock_path)?;
-    let lock = Flock::lock(lock_file, FlockArg::LockExclusive).map_err(|(_, error)| {
-        return Error::Filesystem {
-            path: lock_path,
-            source: IoError::from_raw_os_error(error as i32),
-        };
-    })?;
     let catalog_path = session.join(ARTIFACT_ROOT_LOG);
-    let records = read_artifact_roots(&catalog_path)?;
+    let catalog_fd = open_file_at(
+        &session_fd,
+        OsStr::new(ARTIFACT_ROOT_LOG),
+        OFlag::O_RDWR | OFlag::O_APPEND | OFlag::O_CREAT | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::from_bits_truncate(0o600),
+        &catalog_path,
+    )?;
+    validate_private_regular_file_fd(&catalog_fd, &catalog_path)?;
+    sync_fd(&session_fd, session)?;
+    let mut catalog = File::from(catalog_fd);
+    let records = read_artifact_roots_from(&mut catalog, &catalog_path)?;
     if records
         .iter()
         .any(|record| return record.artifact_directory == directory_name)
@@ -300,17 +324,6 @@ pub fn append_artifact_root(
     let mut encoded = serde_json::to_vec(&record)
         .map_err(|source| return json_error(catalog_path.clone(), source))?;
     encoded.push(b'\n');
-    let mut catalog = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .mode(0o600)
-        .open(&catalog_path)
-        .map_err(|source| {
-            return Error::Filesystem {
-                path: catalog_path.clone(),
-                source,
-            };
-        })?;
     catalog
         .write_all(&encoded)
         .and_then(|()| return catalog.sync_data())
@@ -320,7 +333,7 @@ pub fn append_artifact_root(
                 source,
             };
         })?;
-    sync_parent_directory(&catalog_path)?;
+    sync_fd(&session_fd, session)?;
     drop(lock);
     return Ok(record);
 }
@@ -331,15 +344,28 @@ pub fn append_artifact_root(
 ///
 /// Returns an error for malformed JSON, gaps, or hash disagreement.
 pub fn read_artifact_roots(path: &Path) -> Result<Vec<ArtifactRootRecord>> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let reader = BufReader::new(File::open(path).map_err(|source| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        };
-    })?);
+    let parent = open_parent_directory(path, false)?;
+    let leaf = safe_file_name(path)?;
+    let fd = match open_file_at(
+        &parent,
+        leaf,
+        OFlag::O_RDONLY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::empty(),
+        path,
+    ) {
+        Ok(fd) => fd,
+        Err(Error::Filesystem { source, .. }) if source.kind() == ErrorKind::NotFound => {
+            return Ok(Vec::new());
+        }
+        Err(error) => return Err(error),
+    };
+    validate_private_regular_file_fd(&fd, path)?;
+    let mut file = File::from(fd);
+    return read_artifact_roots_from(&mut file, path);
+}
+
+fn read_artifact_roots_from(file: &mut File, path: &Path) -> Result<Vec<ArtifactRootRecord>> {
+    let reader = BufReader::new(file);
     let mut records = Vec::new();
     let mut previous_hash = "0".repeat(64);
     for (index, line) in reader.lines().enumerate() {
@@ -440,21 +466,34 @@ pub fn verify_session_artifacts(
     return Ok(u64::try_from(records.len()).unwrap_or(u64::MAX));
 }
 
-fn collect_member_paths(root: &Path, directory: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
-    let mut entries = fs_err::read_dir(directory)
-        .map_err(|source| {
-            return Error::Filesystem {
-                path: directory.to_path_buf(),
-                source,
-            };
-        })?
-        .collect::<StdResult<Vec<_>, _>>()
-        .map_err(|source| {
+fn collect_member_paths(
+    root: &Path,
+    directory: &Path,
+    paths: &mut Vec<PathBuf>,
+    tree_entries: &mut usize,
+    maximum_tree_entries: usize,
+) -> Result<()> {
+    let mut entries = Vec::new();
+    for entry in fs_err::read_dir(directory).map_err(|source| {
+        return Error::Filesystem {
+            path: directory.to_path_buf(),
+            source,
+        };
+    })? {
+        let entry = entry.map_err(|source| {
             return Error::Filesystem {
                 path: directory.to_path_buf(),
                 source,
             };
         })?;
+        *tree_entries = tree_entries.saturating_add(1);
+        if *tree_entries > maximum_tree_entries {
+            return Err(invalid_artifact(format!(
+                "artifact tree exceeds {maximum_tree_entries} entry limit"
+            )));
+        }
+        entries.push(entry);
+    }
     entries.sort_by_key(fs_err::DirEntry::file_name);
     for entry in entries {
         let path = entry.path();
@@ -468,7 +507,7 @@ fn collect_member_paths(root: &Path, directory: &Path, paths: &mut Vec<PathBuf>)
             return Err(invalid_artifact("artifact payload contains a symlink"));
         }
         if metadata.is_dir() {
-            collect_member_paths(root, &path, paths)?;
+            collect_member_paths(root, &path, paths, tree_entries, maximum_tree_entries)?;
         } else if metadata.is_file() {
             paths.push(
                 path.strip_prefix(root)
@@ -504,22 +543,9 @@ fn normalized_relative_path(path: &Path) -> Result<String> {
 }
 
 pub(crate) fn hash_regular_file(path: &Path) -> Result<(u64, String)> {
-    let metadata = fs_err::symlink_metadata(path).map_err(|source| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        };
-    })?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return Err(invalid_artifact("artifact member is not a regular file"));
-    }
-    let mut file = File::open(path).map_err(|source| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        };
-    })?;
+    let (mut file, _size) = open_regular_file_nofollow(path)?;
     let mut hasher = blake3::Hasher::new();
+    let mut byte_length = 0_u64;
     let mut buffer = [0_u8; 16 * 1024];
     loop {
         let read = file.read(&mut buffer).map_err(|source| {
@@ -531,11 +557,33 @@ pub(crate) fn hash_regular_file(path: &Path) -> Result<(u64, String)> {
         if read == 0 {
             break;
         }
+        byte_length = byte_length
+            .checked_add(u64::try_from(read).unwrap_or(u64::MAX))
+            .ok_or_else(|| return invalid_artifact("artifact member byte length overflow"))?;
         hasher.update(buffer.get(..read).ok_or_else(|| {
             return invalid_artifact("artifact hashing buffer bounds are invalid");
         })?);
     }
-    return Ok((metadata.len(), hasher.finalize().to_hex().to_string()));
+    return Ok((byte_length, hasher.finalize().to_hex().to_string()));
+}
+
+pub(crate) fn open_regular_file_nofollow(path: &Path) -> Result<(File, u64)> {
+    let parent = open_parent_directory(path, false)?;
+    let leaf = safe_file_name(path)?;
+    let fd = open_file_at(
+        &parent,
+        leaf,
+        OFlag::O_RDONLY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::empty(),
+        path,
+    )?;
+    let stat = fstat(&fd).map_err(|error| return nix_filesystem(path, error))?;
+    if !SFlag::from_bits_truncate(stat.st_mode).contains(SFlag::S_IFREG) || stat.st_size < 0 {
+        return Err(invalid_artifact("artifact member is not a regular file"));
+    }
+    let size = u64::try_from(stat.st_size)
+        .map_err(|_error| return invalid_artifact("artifact member size is invalid"))?;
+    return Ok((File::from(fd), size));
 }
 
 fn member_media_type(path: &str) -> &'static str {
@@ -613,22 +661,17 @@ fn invalid_artifact(reason: impl Into<String>) -> Error {
 }
 
 pub(crate) fn create_private_directory(path: &Path) -> Result<()> {
-    ensure_private_parent_directories(path)?;
-    let mut builder = DirBuilder::new();
-    builder.mode(0o700);
-    builder.create(path).map_err(|source| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        };
+    let parent = open_parent_directory(path, true)?;
+    let leaf = safe_file_name(path)?;
+    mkdirat(&parent, leaf, Mode::from_bits_truncate(0o700)).map_err(|error| {
+        return nix_filesystem(path, error);
     })?;
-    fs_err::set_permissions(path, Permissions::from_mode(0o700)).map_err(|source| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        };
-    })?;
-    return sync_parent_directory(path);
+    let directory = open_directory_at(&parent, leaf, path)?;
+    validate_private_directory_fd(&directory, path)?;
+    return sync_fd(
+        &parent,
+        path.parent().unwrap_or_else(|| return Path::new(".")),
+    );
 }
 
 pub(crate) fn secure_writer(path: &Path) -> Result<BufWriter<File>> {
@@ -636,93 +679,165 @@ pub(crate) fn secure_writer(path: &Path) -> Result<BufWriter<File>> {
 }
 
 pub(crate) fn secure_file(path: &Path) -> Result<File> {
-    ensure_private_parent_directories(path)?;
-    return OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|source| {
-            return Error::Filesystem {
-                path: path.to_path_buf(),
-                source,
-            };
-        });
+    let parent = open_parent_directory(path, true)?;
+    let leaf = safe_file_name(path)?;
+    let file = open_file_at(
+        &parent,
+        leaf,
+        OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::from_bits_truncate(0o600),
+        path,
+    )?;
+    validate_private_regular_file_fd(&file, path)?;
+    sync_fd(
+        &parent,
+        path.parent().unwrap_or_else(|| return Path::new(".")),
+    )?;
+    return Ok(File::from(file));
 }
 
-fn ensure_private_parent_directories(path: &Path) -> Result<()> {
+fn open_parent_directory(path: &Path, create_missing: bool) -> Result<OwnedFd> {
     let Some(parent) = path.parent() else {
         return Err(Error::Filesystem {
             path: path.to_path_buf(),
             source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
         });
     };
-    if parent.as_os_str().is_empty() {
-        return Ok(());
-    }
-    let directories = parent
-        .ancestors()
-        .filter(|directory| return !directory.as_os_str().is_empty())
-        .collect::<Vec<_>>();
-    for directory in directories.into_iter().rev() {
-        match fs_err::symlink_metadata(directory) {
-            Ok(metadata) => {
-                ensure_real_directory(directory, &metadata)?;
-                continue;
-            }
-            Err(error) if error.kind() == ErrorKind::NotFound => {}
-            Err(source) => {
+    return open_directory_path(parent, create_missing);
+}
+
+fn open_directory_path(path: &Path, create_missing: bool) -> Result<OwnedFd> {
+    let starting_path = if path.is_absolute() { "/" } else { "." };
+    let mut directory = open(
+        starting_path,
+        OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|error| return nix_filesystem(Path::new(starting_path), error))?;
+    let mut traversed = PathBuf::from(starting_path);
+    for component in path.components() {
+        let name = match component {
+            Component::RootDir | Component::CurDir => continue,
+            Component::Normal(name) => name,
+            Component::ParentDir | Component::Prefix(_) => {
                 return Err(Error::Filesystem {
-                    path: directory.to_path_buf(),
-                    source,
+                    path: path.to_path_buf(),
+                    source: IoError::new(
+                        ErrorKind::InvalidInput,
+                        "artifact path contains an unsupported parent or prefix component",
+                    ),
                 });
             }
-        }
-        let mut builder = DirBuilder::new();
-        builder.mode(0o700);
-        match builder.create(directory) {
-            Ok(()) => {
-                fs_err::set_permissions(directory, Permissions::from_mode(0o700)).map_err(
-                    |source| {
-                        return Error::Filesystem {
-                            path: directory.to_path_buf(),
-                            source,
-                        };
-                    },
+        };
+        traversed.push(name);
+        let mut created_or_raced = false;
+        let next = match open_directory_at(&directory, name, &traversed) {
+            Ok(next) => next,
+            Err(Error::Filesystem { source, .. })
+                if create_missing && source.kind() == ErrorKind::NotFound =>
+            {
+                created_or_raced = true;
+                match mkdirat(&directory, name, Mode::from_bits_truncate(0o700)) {
+                    Ok(()) | Err(Errno::EEXIST) => {}
+                    Err(error) => return Err(nix_filesystem(&traversed, error)),
+                }
+                let next = open_directory_at(&directory, name, &traversed)?;
+                sync_fd(
+                    &directory,
+                    traversed.parent().unwrap_or_else(|| return Path::new(".")),
                 )?;
-                sync_parent_directory(directory)?;
+                next
             }
-            Err(source) if source.kind() == ErrorKind::AlreadyExists => {
-                let metadata = fs_err::symlink_metadata(directory).map_err(|source| {
-                    return Error::Filesystem {
-                        path: directory.to_path_buf(),
-                        source,
-                    };
-                })?;
-                ensure_real_directory(directory, &metadata)?;
-            }
-            Err(source) => {
-                return Err(Error::Filesystem {
-                    path: directory.to_path_buf(),
-                    source,
-                });
-            }
+            Err(error) => return Err(error),
+        };
+        if created_or_raced {
+            validate_private_directory_fd(&next, &traversed)?;
         }
+        directory = next;
+    }
+    return Ok(directory);
+}
+
+fn open_directory_at(parent: &OwnedFd, name: &OsStr, path: &Path) -> Result<OwnedFd> {
+    return openat2(
+        parent,
+        name,
+        OpenHow::new()
+            .flags(OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW)
+            .resolve(ResolveFlag::RESOLVE_BENEATH | ResolveFlag::RESOLVE_NO_SYMLINKS),
+    )
+    .map_err(|error| return nix_filesystem(path, error));
+}
+
+fn open_file_at(
+    parent: &OwnedFd,
+    name: &OsStr,
+    flags: OFlag,
+    mode: Mode,
+    path: &Path,
+) -> Result<OwnedFd> {
+    return openat2(
+        parent,
+        name,
+        OpenHow::new()
+            .flags(flags)
+            .mode(mode)
+            .resolve(ResolveFlag::RESOLVE_BENEATH | ResolveFlag::RESOLVE_NO_SYMLINKS),
+    )
+    .map_err(|error| return nix_filesystem(path, error));
+}
+
+fn safe_file_name(path: &Path) -> Result<&OsStr> {
+    return path.file_name().ok_or_else(|| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source: IoError::new(ErrorKind::InvalidInput, "artifact path has no file name"),
+        };
+    });
+}
+
+fn validate_private_directory_fd(directory: &OwnedFd, path: &Path) -> Result<()> {
+    let stat = fstat(directory).map_err(|error| return nix_filesystem(path, error))?;
+    let kind = SFlag::from_bits_truncate(stat.st_mode);
+    let mode = stat.st_mode & 0o777;
+    if !kind.contains(SFlag::S_IFDIR) || stat.st_uid != Uid::effective().as_raw() || mode != 0o700 {
+        return Err(Error::InsecureArtifactDirectory {
+            path: path.to_path_buf(),
+            owner_uid: stat.st_uid,
+            mode,
+        });
     }
     return Ok(());
 }
 
-fn ensure_real_directory(path: &Path, metadata: &Metadata) -> Result<()> {
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+fn validate_private_regular_file_fd(file: &OwnedFd, path: &Path) -> Result<()> {
+    let stat = fstat(file).map_err(|error| return nix_filesystem(path, error))?;
+    let kind = SFlag::from_bits_truncate(stat.st_mode);
+    let mode = stat.st_mode & 0o777;
+    if !kind.contains(SFlag::S_IFREG) || stat.st_uid != Uid::effective().as_raw() || mode != 0o600 {
         return Err(Error::Filesystem {
             path: path.to_path_buf(),
             source: IoError::new(
-                ErrorKind::NotADirectory,
-                "artifact parent is not a real directory",
+                ErrorKind::PermissionDenied,
+                format!(
+                    "artifact file must be owner-only regular file (owner={}, mode={mode:o})",
+                    stat.st_uid
+                ),
             ),
         });
     }
     return Ok(());
+}
+
+fn sync_fd(fd: &impl AsFd, path: &Path) -> Result<()> {
+    return fsync(fd).map_err(|error| return nix_filesystem(path, error));
+}
+
+fn nix_filesystem(path: &Path, error: Errno) -> Error {
+    return Error::Filesystem {
+        path: path.to_path_buf(),
+        source: IoError::from_raw_os_error(error as i32),
+    };
 }
 
 pub(crate) fn finish_writer(mut writer: BufWriter<File>, path: &Path) -> Result<()> {
@@ -759,14 +874,8 @@ pub fn write_secure(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 pub(crate) fn sync_directory(path: &Path) -> Result<()> {
-    return File::open(path)
-        .and_then(|directory| return directory.sync_all())
-        .map_err(|source| {
-            return Error::Filesystem {
-                path: path.to_path_buf(),
-                source,
-            };
-        });
+    let directory = open_directory_path(path, false)?;
+    return sync_fd(&directory, path);
 }
 
 pub(crate) fn sync_parent_directory(path: &Path) -> Result<()> {
@@ -776,16 +885,17 @@ pub(crate) fn sync_parent_directory(path: &Path) -> Result<()> {
             source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
         };
     })?;
-    return sync_directory(parent);
+    let directory = open_directory_path(parent, false)?;
+    return sync_fd(&directory, parent);
 }
 
 pub(crate) fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> Result<()> {
-    let directory = File::open(session).map_err(|source| {
-        return Error::Filesystem {
-            path: session.to_path_buf(),
-            source,
-        };
-    })?;
+    if staging.parent() != Some(session) || destination.parent() != Some(session) {
+        return Err(invalid_artifact(
+            "staging and destination directories must be direct session children",
+        ));
+    }
+    let directory = open_directory_path(session, false)?;
     let staging_name = staging.file_name().ok_or_else(|| {
         return Error::InvalidReplay {
             reason: "staging directory has no basename".to_owned(),
@@ -815,12 +925,15 @@ pub(crate) fn commit_directory(session: &Path, staging: &Path, destination: &Pat
             };
         }
     })?;
-    return sync_directory(session);
+    return sync_fd(&directory, session);
 }
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::{PermissionsExt as _, symlink};
+    use std::{
+        io::Write as _,
+        os::unix::fs::{PermissionsExt as _, symlink},
+    };
 
     use tempfile::TempDir;
 
@@ -916,5 +1029,104 @@ mod tests {
 
         assert!(write_secure(&link.join("existing/nested/report.json"), b"{}\n").is_err());
         assert!(!outside.join("existing/nested").exists());
+    }
+
+    #[test]
+    fn retained_parent_descriptor_prevents_create_redirection() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let parent = temporary.path().join("parent");
+        let moved = temporary.path().join("moved-parent");
+        let outside = temporary.path().join("outside");
+        create_private_directory(&parent).expect("private parent");
+        create_private_directory(&outside).expect("outside directory");
+
+        let target = parent.join("artifact.json");
+        let parent_fd = open_parent_directory(&target, false).expect("retain parent descriptor");
+        fs_err::rename(&parent, &moved).expect("replace pathname after validation");
+        symlink(&outside, &parent).expect("redirect original pathname");
+
+        let fd = open_file_at(
+            &parent_fd,
+            OsStr::new("artifact.json"),
+            OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+            Mode::from_bits_truncate(0o600),
+            &target,
+        )
+        .expect("descriptor-relative create");
+        File::from(fd).write_all(b"safe").expect("write artifact");
+
+        assert_eq!(
+            fs_err::read(moved.join("artifact.json")).expect("bound output"),
+            b"safe"
+        );
+        assert!(!outside.join("artifact.json").exists());
+    }
+
+    #[test]
+    fn artifact_catalog_rejects_session_lock_and_catalog_symlinks() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let outside = temporary.path().join("outside");
+        create_private_directory(&outside).expect("outside directory");
+
+        let real_session = temporary.path().join("real-session");
+        create_private_directory(&real_session).expect("real session");
+        let linked_session = temporary.path().join("linked-session");
+        symlink(&real_session, &linked_session).expect("session symlink");
+        let error = append_artifact_root(
+            &linked_session,
+            &linked_session.join("derived"),
+            "semantic_index",
+            b"{}",
+            &"0".repeat(64),
+            None,
+            None,
+        )
+        .expect_err("session symlink must be rejected");
+        assert!(matches!(error, Error::Filesystem { .. }));
+
+        let lock_session = temporary.path().join("lock-session");
+        create_private_directory(&lock_session).expect("lock session");
+        let outside_lock = outside.join("lock");
+        fs_err::write(&outside_lock, b"sentinel").expect("outside lock");
+        symlink(&outside_lock, lock_session.join(ARTIFACT_ROOT_LOCK)).expect("lock symlink");
+        assert!(
+            append_artifact_root(
+                &lock_session,
+                &lock_session.join("derived"),
+                "semantic_index",
+                b"{}",
+                &"0".repeat(64),
+                None,
+                None,
+            )
+            .is_err()
+        );
+        assert_eq!(
+            fs_err::read(&outside_lock).expect("unchanged lock"),
+            b"sentinel"
+        );
+
+        let catalog_session = temporary.path().join("catalog-session");
+        create_private_directory(&catalog_session).expect("catalog session");
+        let outside_catalog = outside.join("catalog");
+        fs_err::write(&outside_catalog, b"sentinel").expect("outside catalog");
+        symlink(&outside_catalog, catalog_session.join(ARTIFACT_ROOT_LOG))
+            .expect("catalog symlink");
+        assert!(
+            append_artifact_root(
+                &catalog_session,
+                &catalog_session.join("derived"),
+                "semantic_index",
+                b"{}",
+                &"0".repeat(64),
+                None,
+                None,
+            )
+            .is_err()
+        );
+        assert_eq!(
+            fs_err::read(&outside_catalog).expect("unchanged catalog"),
+            b"sentinel"
+        );
     }
 }

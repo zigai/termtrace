@@ -4306,9 +4306,78 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     verify
         .args(["artifact", "bundle", "verify"])
         .arg(&bundle)
+        .arg("--source")
+        .arg(&session)
+        .args(["--profile", "forensic"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""valid":true"#));
+
+    let mut wrong_profile = Command::cargo_bin("termtrace").expect("binary should build");
+    wrong_profile
+        .args(["artifact", "bundle", "verify"])
+        .arg(&bundle)
+        .arg("--source")
+        .arg(&session)
+        .args(["--profile", "screen"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("expected profile"));
+
+    let other_session = temporary.path().join("other-bundle-session");
+    let mut record_other = Command::cargo_bin("termtrace").expect("binary should build");
+    record_other
+        .args(["record", "--no-input", "--out"])
+        .arg(&other_session)
+        .args(["--", "/bin/sh", "-c", "printf 'OTHER'"])
+        .assert()
+        .success();
+    let mut wrong_source = Command::cargo_bin("termtrace").expect("binary should build");
+    wrong_source
+        .args(["artifact", "bundle", "verify"])
+        .arg(&bundle)
+        .arg("--source")
+        .arg(&other_session)
+        .args(["--profile", "forensic"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("canonical source identity"));
+
+    let manifest_path = bundle.join("manifest.json");
+    let original_manifest = fs_err::read(&manifest_path).expect("original bundle manifest");
+    let mut attacker_manifest: serde_json::Value =
+        serde_json::from_slice(&original_manifest).expect("bundle manifest JSON");
+    attacker_manifest["members"][0]["sensitivity"] =
+        serde_json::Value::String("operational_metadata".to_owned());
+    fs_err::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&attacker_manifest).expect("attacker manifest bytes"),
+    )
+    .expect("write attacker policy metadata");
+    let mut reject_policy_metadata = Command::cargo_bin("termtrace").expect("binary should build");
+    reject_policy_metadata
+        .args(["artifact", "bundle", "verify"])
+        .arg(&bundle)
+        .arg("--source")
+        .arg(&session)
+        .args(["--profile", "forensic"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("semantic metadata"));
+    fs_err::write(&manifest_path, &original_manifest).expect("restore bundle manifest");
+
+    fs_err::write(&manifest_path, vec![b' '; 1024 * 1024 + 1]).expect("write oversized manifest");
+    let mut reject_large_manifest = Command::cargo_bin("termtrace").expect("binary should build");
+    reject_large_manifest
+        .args(["artifact", "bundle", "verify"])
+        .arg(&bundle)
+        .arg("--source")
+        .arg(&session)
+        .args(["--profile", "forensic"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("1048576 byte limit"));
+    fs_err::write(&manifest_path, &original_manifest).expect("restore bounded manifest");
 
     let archive = temporary.path().join("forensic.termtrace-bundle.tar.zst");
     let archive_copy = temporary
@@ -4341,6 +4410,9 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     verify_archive
         .args(["artifact", "bundle", "verify"])
         .arg(&archive)
+        .arg("--source")
+        .arg(&session)
+        .args(["--profile", "forensic"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""valid":true"#));
@@ -4354,6 +4426,9 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     reject_archive
         .args(["artifact", "bundle", "verify"])
         .arg(&archive_copy)
+        .arg("--source")
+        .arg(&session)
+        .args(["--profile", "forensic"])
         .assert()
         .failure();
 
@@ -4362,9 +4437,14 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     tampered
         .args(["artifact", "bundle", "verify"])
         .arg(&bundle)
+        .arg("--source")
+        .arg(&session)
+        .args(["--profile", "forensic"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("payload members do not match"));
+        .stderr(predicate::str::contains(
+            "payload members or semantic metadata",
+        ));
 }
 
 #[test]

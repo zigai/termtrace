@@ -1119,7 +1119,7 @@ pub fn observe_one_off_session(
     return Ok(observation);
 }
 
-fn frame_from_state(state: &SemanticState) -> ObservationFrame {
+pub(crate) fn frame_from_state(state: &SemanticState) -> ObservationFrame {
     return ObservationFrame {
         viewport_text: viewport_text(state),
         cols: state.cols,
@@ -1152,7 +1152,7 @@ fn viewport_text(state: &SemanticState) -> String {
     return output;
 }
 
-fn frame_hash(frame: &ObservationFrame) -> Result<String> {
+pub(crate) fn frame_hash(frame: &ObservationFrame) -> Result<String> {
     let bytes = serde_json::to_vec(frame).map_err(|source| {
         return Error::InvalidJson {
             path: PathBuf::from("<observation-frame>"),

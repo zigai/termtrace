@@ -32,8 +32,9 @@ use termtrace::{
     },
     artifact::write_secure,
     bundle::{
-        BundleProfile, archive as archive_bundle, create as create_bundle, plan as plan_bundle,
-        verify as verify_bundle, verify_archive as verify_bundle_archive,
+        BundleProfile, BundleVerificationPolicy, archive as archive_bundle,
+        create as create_bundle, plan as plan_bundle, verify as verify_bundle,
+        verify_archive as verify_bundle_archive,
     },
     capability::{CapabilityReport, CapabilityStatus, probe_capabilities},
     control::{
@@ -506,6 +507,12 @@ struct BundleArgs {
 struct BundleVerifyArgs {
     /// Published bundle directory.
     bundle: PathBuf,
+    /// Trusted canonical source session whose identity and final hash are expected.
+    #[arg(long)]
+    source: PathBuf,
+    /// Exact content and sensitivity policy expected by the verifier.
+    #[arg(long, value_enum)]
+    profile: BundleProfileArg,
 }
 
 impl From<VerifyLevelArg> for VerificationLevel {
@@ -4524,7 +4531,8 @@ fn run_bundle(arguments: BundleArgs) -> Result<ExitCode> {
             .ok_or_else(|| return miette::miette!("bundle archive path has no parent"))?;
         let staging = parent.join(format!(".bundle-source-{}.tmp", uuid::Uuid::now_v7()));
         let manifest = create_bundle(&session, &staging, profile)?;
-        let result = archive_bundle(&staging, &arguments.out);
+        let policy = BundleVerificationPolicy::new(&session, profile);
+        let result = archive_bundle(&staging, &arguments.out, &policy);
         let _cleanup = fs_err::remove_dir_all(&staging);
         result?;
         return write_json_line(&serde_json::json!({
@@ -4544,10 +4552,12 @@ fn run_bundle(arguments: BundleArgs) -> Result<ExitCode> {
 }
 
 fn run_bundle_verify(arguments: BundleVerifyArgs) -> Result<ExitCode> {
+    let source = resolve_session_ref(arguments.source)?;
+    let policy = BundleVerificationPolicy::new(source, arguments.profile.into());
     let manifest = if arguments.bundle.is_dir() {
-        verify_bundle(&arguments.bundle)?
+        verify_bundle(&arguments.bundle, &policy)?
     } else {
-        verify_bundle_archive(&arguments.bundle)?
+        verify_bundle_archive(&arguments.bundle, &policy)?
     };
     return write_json_line(&serde_json::json!({
         "kind": "bundle_verification",
