@@ -15,6 +15,12 @@ artifact data, and 60 seconds. Geometry is independently capped at 1,000
 columns, 1,000 rows, and 250,000 cells. Crossing any ceiling returns an error
 and prevents artifact publication.
 
+The pinned Ghostty submodule is a read-only dependency. Termtrace applies its
+own embedder policy before semantic replay crosses the FFI boundary: OSC and
+APC strings are capped at 1 MiB, and Kitty graphics storage is disabled because
+semantic artifacts do not represent image pixels. Native capture continues to
+use the installed Ghostty application for renderer- and image-specific evidence.
+
 ## State boundaries
 
 A state is emitted when visible or semantic terminal content changes, including:
