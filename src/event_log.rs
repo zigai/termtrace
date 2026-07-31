@@ -22,11 +22,30 @@ use crate::{
         EVENT_LOG_FORMAT, EVENT_LOG_VERSION, Event, EventBody, EventLogHeader, EventRecord,
         OperationStatus,
     },
+    ghostty_vt::{
+        MAX_TERMINAL_CELLS, MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS, supported_geometry_cell_count,
+    },
 };
 
 const OWNER_DIRECTORY_MODE: u32 = 0o700;
 const OWNER_FILE_MODE: u32 = 0o600;
 const MAX_LINE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_EVENT_COUNT: u64 = 1_000_000;
+const MAX_EVENT_LOG_ENCODED_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_EVENT_LOG_DECODED_PAYLOAD_BYTES: u64 = 256 * 1024 * 1024;
+
+#[derive(Clone, Copy)]
+struct EventLogLimits {
+    event_count: u64,
+    encoded_bytes: u64,
+    decoded_payload_bytes: u64,
+}
+
+const DEFAULT_EVENT_LOG_LIMITS: EventLogLimits = EventLogLimits {
+    event_count: MAX_EVENT_COUNT,
+    encoded_bytes: MAX_EVENT_LOG_ENCODED_BYTES,
+    decoded_payload_bytes: MAX_EVENT_LOG_DECODED_PAYLOAD_BYTES,
+};
 
 /// Output persistence behavior selected for one canonical recording.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -392,6 +411,7 @@ impl EventLogWriter {
             });
         }
         let seq = self.next_seq;
+        validate_event_geometry(&self.path, seq.saturating_add(2), &event)?;
         let next_seq = seq.checked_add(1).ok_or_else(|| {
             return Error::InvalidEventLog {
                 path: self.path.clone(),
@@ -589,6 +609,7 @@ pub struct PendingOperationReport {
     pub expected_bytes: Option<u64>,
 }
 
+#[derive(Debug)]
 struct ParsedEventLog {
     log: EventLog,
     valid_lines: u64,
@@ -678,6 +699,7 @@ struct LogValidation {
 impl LogValidation {
     fn validate_record(&mut self, path: &Path, line: u64, bytes: &[u8]) -> Result<EventRecord> {
         let record: EventRecord = parse_json_line(path, line, bytes)?;
+        validate_event_geometry(path, line, &record.event)?;
         if record.seq != self.expected_seq {
             return Err(invalid_log(
                 path,
@@ -736,6 +758,25 @@ fn parse_event_log(
     recover_tail: bool,
     event_limit: Option<u64>,
 ) -> Result<ParsedEventLog> {
+    return parse_event_log_with_limits(path, recover_tail, event_limit, DEFAULT_EVENT_LOG_LIMITS);
+}
+
+fn parse_event_log_with_limits(
+    path: &Path,
+    recover_tail: bool,
+    event_limit: Option<u64>,
+    limits: EventLogLimits,
+) -> Result<ParsedEventLog> {
+    if event_limit.is_some_and(|limit| return limit > limits.event_count) {
+        return Err(invalid_log(
+            path,
+            1,
+            format!(
+                "requested event prefix exceeds {} event limit",
+                limits.event_count
+            ),
+        ));
+    }
     let file = File::open(path).map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),
@@ -745,6 +786,19 @@ fn parse_event_log(
     let mut reader = BufReader::new(file);
     let header_bytes = read_line(&mut reader, path, 1)?
         .ok_or_else(|| return invalid_log(path, 1, "missing header"))?;
+    let mut encoded_bytes = u64::try_from(header_bytes.len())
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    if encoded_bytes > limits.encoded_bytes {
+        return Err(invalid_log(
+            path,
+            1,
+            format!(
+                "event log exceeds {} encoded-byte limit",
+                limits.encoded_bytes
+            ),
+        ));
+    }
     let header: EventLogHeader = parse_json_line(path, 1, &header_bytes)?;
     validate_header(path, &header)?;
     let mut validation = LogValidation {
@@ -755,6 +809,7 @@ fn parse_event_log(
         pending_operations: HashMap::new(),
     };
     let mut events = Vec::new();
+    let mut decoded_payload_bytes = 0_u64;
     let mut line_number = 2_u64;
     let issue = loop {
         if event_limit == Some(u64::try_from(events.len()).unwrap_or(u64::MAX)) {
@@ -778,8 +833,55 @@ fn parse_event_log(
             Err(error) if recover_tail => break Some(recovery_issue(&error, line_number)),
             Err(error) => return Err(error),
         };
+        let line_bytes = u64::try_from(line.len())
+            .unwrap_or(u64::MAX)
+            .saturating_add(1);
+        encoded_bytes = encoded_bytes.saturating_add(line_bytes);
+        if encoded_bytes > limits.encoded_bytes {
+            let error = invalid_log(
+                path,
+                line_number,
+                format!(
+                    "event log exceeds {} encoded-byte limit",
+                    limits.encoded_bytes
+                ),
+            );
+            if recover_tail {
+                break Some(recovery_issue(&error, line_number));
+            }
+            return Err(error);
+        }
+        if u64::try_from(events.len()).unwrap_or(u64::MAX) >= limits.event_count {
+            let error = invalid_log(
+                path,
+                line_number,
+                format!("event log exceeds {} event limit", limits.event_count),
+            );
+            if recover_tail {
+                break Some(recovery_issue(&error, line_number));
+            }
+            return Err(error);
+        }
         match validation.validate_record(path, line_number, &line) {
-            Ok(record) => events.push(record),
+            Ok(record) => {
+                decoded_payload_bytes =
+                    decoded_payload_bytes.saturating_add(record.event.decoded_payload_bytes());
+                if decoded_payload_bytes > limits.decoded_payload_bytes {
+                    let error = invalid_log(
+                        path,
+                        line_number,
+                        format!(
+                            "event log exceeds {} decoded-payload-byte limit",
+                            limits.decoded_payload_bytes
+                        ),
+                    );
+                    if recover_tail {
+                        break Some(recovery_issue(&error, line_number));
+                    }
+                    return Err(error);
+                }
+                events.push(record);
+            }
             Err(error) if recover_tail => break Some(recovery_issue(&error, line_number)),
             Err(error) => return Err(error),
         }
@@ -1126,8 +1228,8 @@ fn validate_header(path: &Path, header: &EventLogHeader) -> Result<()> {
             format!("unsupported format version {}", header.version),
         ));
     }
-    if header.cols == 0 || header.rows == 0 {
-        return Err(invalid_log(path, 1, "terminal dimensions must be nonzero"));
+    if supported_geometry_cell_count(header.cols, header.rows).is_none() {
+        return Err(invalid_log(path, 1, geometry_limit_reason("initial")));
     }
     if header.session_manifest_hash.len() != 64
         || !header
@@ -1157,6 +1259,22 @@ fn validate_header(path: &Path, header: &EventLogHeader) -> Result<()> {
             1,
             "terminal palette must be empty or contain exactly 256 colors",
         ));
+    }
+    return Ok(());
+}
+
+fn geometry_limit_reason(kind: &str) -> String {
+    return format!(
+        "{kind} terminal geometry exceeds limits of {MAX_TERMINAL_COLUMNS} columns, \
+         {MAX_TERMINAL_ROWS} rows, and {MAX_TERMINAL_CELLS} cells"
+    );
+}
+
+fn validate_event_geometry(path: &Path, line: u64, event: &Event) -> Result<()> {
+    if let Event::ResizeIntent { cols, rows, .. } = event
+        && supported_geometry_cell_count(*cols, *rows).is_none()
+    {
+        return Err(invalid_log(path, line, geometry_limit_reason("resize")));
     }
     return Ok(());
 }
@@ -1621,5 +1739,112 @@ mod tests {
             }
             other => panic!("unexpected error: {other}"),
         }
+    }
+
+    #[test]
+    fn rejects_geometry_outside_the_shared_terminal_policy() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let directory = temporary.path().join("session");
+        secure_directory(&directory);
+        let path = directory.join("events.jsonl");
+        let clock = SessionClock::now().expect("valid clock");
+        let mut oversized = header(&clock);
+        oversized.cols = MAX_TERMINAL_COLUMNS.saturating_add(1);
+        let error = EventLogWriter::create(&path, &oversized, clock)
+            .expect_err("oversized header must fail before file creation");
+        assert!(matches!(error, Error::InvalidEventLog { line: 1, .. }));
+        assert!(!path.exists());
+
+        let clock = SessionClock::now().expect("valid clock");
+        let mut writer =
+            EventLogWriter::create(&path, &header(&clock), clock).expect("create valid log");
+        let error = writer
+            .append_at(
+                1,
+                Event::ResizeIntent {
+                    operation_id: Uuid::now_v7(),
+                    cols: MAX_TERMINAL_COLUMNS.saturating_add(1),
+                    rows: 1,
+                    pixel_width: 1,
+                    pixel_height: 1,
+                },
+            )
+            .expect_err("oversized live resize must fail before persistence");
+        assert!(matches!(error, Error::InvalidEventLog { line: 2, .. }));
+    }
+
+    #[test]
+    fn enforces_aggregate_event_log_limits_before_retention() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let directory = temporary.path().join("session");
+        secure_directory(&directory);
+        let path = directory.join("events.jsonl");
+        let clock = SessionClock::now().expect("valid clock");
+        let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("create log");
+        writer
+            .append_at(
+                1,
+                Event::Output {
+                    data: ByteString::from(&b"abc"[..]),
+                },
+            )
+            .expect("append first output");
+        writer
+            .append_at(
+                2,
+                Event::Output {
+                    data: ByteString::from(&b"def"[..]),
+                },
+            )
+            .expect("append second output");
+        drop(writer);
+
+        let count_error = parse_event_log_with_limits(
+            &path,
+            false,
+            None,
+            EventLogLimits {
+                event_count: 1,
+                ..DEFAULT_EVENT_LOG_LIMITS
+            },
+        )
+        .expect_err("aggregate event count must be bounded");
+        assert!(count_error.to_string().contains("event limit"));
+
+        let payload_error = parse_event_log_with_limits(
+            &path,
+            false,
+            None,
+            EventLogLimits {
+                decoded_payload_bytes: 5,
+                ..DEFAULT_EVENT_LOG_LIMITS
+            },
+        )
+        .expect_err("aggregate decoded payload must be bounded");
+        assert!(payload_error.to_string().contains("decoded-payload-byte"));
+
+        let encoded_error = parse_event_log_with_limits(
+            &path,
+            false,
+            None,
+            EventLogLimits {
+                encoded_bytes: 1,
+                ..DEFAULT_EVENT_LOG_LIMITS
+            },
+        )
+        .expect_err("aggregate encoded bytes must be bounded");
+        assert!(encoded_error.to_string().contains("encoded-byte"));
+
+        let prefix_error = parse_event_log_with_limits(
+            &path,
+            false,
+            Some(2),
+            EventLogLimits {
+                event_count: 1,
+                ..DEFAULT_EVENT_LOG_LIMITS
+            },
+        )
+        .expect_err("prefix readers must share the count policy");
+        assert!(prefix_error.to_string().contains("prefix exceeds"));
     }
 }

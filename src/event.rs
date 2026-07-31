@@ -447,6 +447,23 @@ pub enum Event {
     },
 }
 
+impl Event {
+    /// Total decoded bytes owned by byte-bearing fields in this event.
+    pub(crate) fn decoded_payload_bytes(&self) -> u64 {
+        let length = match self {
+            Self::Output { data } | Self::InputIntent { data, .. } => data.as_bytes().len(),
+            Self::QueryResponse {
+                query, response, ..
+            } => query
+                .as_bytes()
+                .len()
+                .saturating_add(response.as_bytes().len()),
+            _ => 0,
+        };
+        return u64::try_from(length).unwrap_or(u64::MAX);
+    }
+}
+
 /// Integrity-chained event persisted as one JSON line.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]

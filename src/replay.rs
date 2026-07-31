@@ -3,9 +3,10 @@
 use std::{
     collections::HashMap,
     fmt::Write as _,
-    io::Write,
+    io::{Result as IoResult, Write},
     path::{Path, PathBuf},
     slice,
+    time::{Duration, Instant},
 };
 
 use schemars::JsonSchema;
@@ -24,7 +25,7 @@ use crate::{
     event_log::EventLog,
     ghostty_vt::{
         CellState, CellStyle, ColorState, CursorState, DirtyState, Format, GhosttyVt, ModeState,
-        SemanticState, TerminalMetadata,
+        SemanticState, TerminalMetadata, supported_geometry_cell_count,
     },
     session::validate_completed_log,
     timeline::{SourceRange, resolve_source_range},
@@ -36,6 +37,32 @@ pub const GHOSTTY_REVISION: &str = "55a3e33ab26a23d75b274b23c7f76d837db00578";
 pub const STATE_FORMAT_VERSION: u32 = 3;
 /// Relative directory containing replay-derived artifacts.
 pub const DERIVED_DIRECTORY: &str = "derived";
+
+const MAX_REPLAY_OUTPUT_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_REPLAY_CAPTURE_ATTEMPTS: u64 = 2_000_000;
+const MAX_REPLAY_STATE_COUNT: u64 = 100_000;
+const MAX_REPLAY_CELL_WORK: u64 = 2_000_000_000;
+const MAX_REPLAY_EMITTED_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_REPLAY_ELAPSED: Duration = Duration::from_secs(60);
+
+#[derive(Clone, Copy)]
+struct ReplayLimits {
+    output_bytes: u64,
+    capture_attempts: u64,
+    state_count: u64,
+    cell_work: u64,
+    emitted_bytes: u64,
+    elapsed: Duration,
+}
+
+const DEFAULT_REPLAY_LIMITS: ReplayLimits = ReplayLimits {
+    output_bytes: MAX_REPLAY_OUTPUT_BYTES,
+    capture_attempts: MAX_REPLAY_CAPTURE_ATTEMPTS,
+    state_count: MAX_REPLAY_STATE_COUNT,
+    cell_work: MAX_REPLAY_CELL_WORK,
+    emitted_bytes: MAX_REPLAY_EMITTED_BYTES,
+    elapsed: MAX_REPLAY_ELAPSED,
+};
 
 /// Semantic states retained in one derived index.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -239,6 +266,18 @@ struct ReplayBuilder {
     previous_hash: Option<String>,
     state_count: u64,
     row_hashes: Vec<blake3::Hash>,
+    budget: ReplayBudget,
+}
+
+struct ReplayBudget {
+    limits: ReplayLimits,
+    started: Instant,
+    output_bytes: u64,
+    capture_attempts: u64,
+    state_count: u64,
+    cell_work: u64,
+    emitted_bytes: u64,
+    current_cells: u64,
 }
 
 #[derive(Serialize)]
@@ -395,9 +434,18 @@ fn state_selector_matches(selector: &StateSelector, record: &StateRecord) -> boo
 fn replay_with(
     log: &EventLog,
     source_range: Option<SourceRange>,
+    state_sink: impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<()>,
+) -> Result<ReplayArtifacts> {
+    return replay_with_limits(log, source_range, DEFAULT_REPLAY_LIMITS, state_sink);
+}
+
+fn replay_with_limits(
+    log: &EventLog,
+    source_range: Option<SourceRange>,
+    limits: ReplayLimits,
     mut state_sink: impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<()>,
 ) -> Result<ReplayArtifacts> {
-    let mut builder = ReplayBuilder::new(log)?;
+    let mut builder = ReplayBuilder::new(log, limits)?;
     let mut resize_intents = HashMap::new();
     if source_range.is_none() {
         builder.capture(None, None, 0, &mut state_sink)?;
@@ -426,7 +474,11 @@ fn replay_with(
         }
         match &record.event {
             Event::Output { data } => {
+                builder.budget.charge_output(data.as_bytes().len())?;
                 for (offset, byte) in data.as_bytes().iter().enumerate() {
+                    if offset % 4_096 == 0 {
+                        builder.budget.check_elapsed()?;
+                    }
                     builder.engine.write(slice::from_ref(byte));
                     drop(builder.engine.take_responses());
                     if emit {
@@ -470,6 +522,7 @@ fn replay_with(
                     cell_size(geometry.pixel_width, geometry.cols),
                     cell_size(geometry.pixel_height, geometry.rows),
                 )?;
+                builder.budget.set_geometry(geometry.cols, geometry.rows)?;
                 if emit {
                     builder.capture(
                         Some(record.seq),
@@ -494,17 +547,26 @@ fn replay_with(
         .previous_hash
         .clone()
         .ok_or_else(|| return invalid_replay("replay produced no initial state"))?;
+    let final_text = builder.engine.format(Format::Plain)?;
+    let final_vt = builder.engine.format(Format::Vt)?;
+    let final_html = builder.engine.format(Format::Html)?;
+    builder.budget.charge_emitted(
+        final_text
+            .len()
+            .saturating_add(final_vt.len())
+            .saturating_add(final_html.len()),
+    )?;
     return Ok(ReplayArtifacts {
         state_count: builder.state_count,
         final_state_hash,
-        final_text: builder.engine.format(Format::Plain)?,
-        final_vt: builder.engine.format(Format::Vt)?,
-        final_html: builder.engine.format(Format::Html)?,
+        final_text,
+        final_vt,
+        final_html,
     });
 }
 
 impl ReplayBuilder {
-    fn new(log: &EventLog) -> Result<Self> {
+    fn new(log: &EventLog, limits: ReplayLimits) -> Result<Self> {
         let mut engine = GhosttyVt::new(log.header.cols, log.header.rows, 100_000)?;
         engine.apply_terminal_colors(&log.header.colors)?;
         return Ok(Self {
@@ -513,6 +575,7 @@ impl ReplayBuilder {
             previous_hash: None,
             state_count: 0,
             row_hashes: Vec::new(),
+            budget: ReplayBudget::new(log.header.cols, log.header.rows, limits)?,
         });
     }
 
@@ -523,6 +586,7 @@ impl ReplayBuilder {
         monotonic_ns: u64,
         sink: &mut impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<()>,
     ) -> Result<()> {
+        self.budget.charge_capture()?;
         let Some(state) = self.engine.snapshot_if_changed()? else {
             return Ok(());
         };
@@ -534,6 +598,7 @@ impl ReplayBuilder {
         monotonic_ns: u64,
         sink: &mut impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<()>,
     ) -> Result<()> {
+        self.budget.charge_capture()?;
         let state = self.engine.snapshot()?;
         // Keep the warmed Ghostty engine, but forget emission history. The first
         // ranged record must be a complete delta with dense state ID 0; carrying
@@ -569,6 +634,7 @@ impl ReplayBuilder {
             ghostty_dirty_rows: state.dirty_rows.clone(),
             delta,
         };
+        self.budget.charge_state(&record)?;
         sink(record, &state, &self.engine)?;
         self.state_count = self
             .state_count
@@ -619,6 +685,115 @@ impl ReplayBuilder {
             hash.update(row_hash.as_bytes());
         }
         return Ok(hash.finalize().to_hex().to_string());
+    }
+}
+
+impl ReplayBudget {
+    fn new(cols: u16, rows: u16, limits: ReplayLimits) -> Result<Self> {
+        let current_cells = supported_geometry_cell_count(cols, rows)
+            .ok_or_else(|| return invalid_replay("terminal geometry exceeds replay limits"))?;
+        return Ok(Self {
+            limits,
+            started: Instant::now(),
+            output_bytes: 0,
+            capture_attempts: 0,
+            state_count: 0,
+            cell_work: 0,
+            emitted_bytes: 0,
+            current_cells: u64::from(current_cells),
+        });
+    }
+
+    fn check_elapsed(&self) -> Result<()> {
+        if self.started.elapsed() > self.limits.elapsed {
+            return Err(invalid_replay(format!(
+                "replay exceeded {:?} elapsed-time limit",
+                self.limits.elapsed
+            )));
+        }
+        return Ok(());
+    }
+
+    fn charge_output(&mut self, bytes: usize) -> Result<()> {
+        self.output_bytes = self
+            .output_bytes
+            .saturating_add(u64::try_from(bytes).unwrap_or(u64::MAX));
+        if self.output_bytes > self.limits.output_bytes {
+            return Err(invalid_replay(format!(
+                "replay exceeded {} output-byte limit",
+                self.limits.output_bytes
+            )));
+        }
+        return self.check_elapsed();
+    }
+
+    fn set_geometry(&mut self, cols: u16, rows: u16) -> Result<()> {
+        self.current_cells = u64::from(
+            supported_geometry_cell_count(cols, rows)
+                .ok_or_else(|| return invalid_replay("resize geometry exceeds replay limits"))?,
+        );
+        return self.check_elapsed();
+    }
+
+    fn charge_capture(&mut self) -> Result<()> {
+        self.capture_attempts = self.capture_attempts.saturating_add(1);
+        self.cell_work = self.cell_work.saturating_add(self.current_cells);
+        if self.capture_attempts > self.limits.capture_attempts {
+            return Err(invalid_replay(format!(
+                "replay exceeded {} capture-attempt limit",
+                self.limits.capture_attempts
+            )));
+        }
+        if self.cell_work > self.limits.cell_work {
+            return Err(invalid_replay(format!(
+                "replay exceeded {} cell-work limit",
+                self.limits.cell_work
+            )));
+        }
+        return self.check_elapsed();
+    }
+
+    fn charge_state(&mut self, record: &StateRecord) -> Result<()> {
+        self.state_count = self.state_count.saturating_add(1);
+        if self.state_count > self.limits.state_count {
+            return Err(invalid_replay(format!(
+                "replay exceeded {} semantic-state limit",
+                self.limits.state_count
+            )));
+        }
+        let mut counter = CountingWriter::default();
+        serde_json::to_writer(&mut counter, record)
+            .map_err(|source| return json_error(PathBuf::from("<replay-budget>"), source))?;
+        return self.charge_emitted(counter.bytes);
+    }
+
+    fn charge_emitted(&mut self, bytes: usize) -> Result<()> {
+        self.emitted_bytes = self
+            .emitted_bytes
+            .saturating_add(u64::try_from(bytes).unwrap_or(u64::MAX));
+        if self.emitted_bytes > self.limits.emitted_bytes {
+            return Err(invalid_replay(format!(
+                "replay exceeded {} emitted-byte limit",
+                self.limits.emitted_bytes
+            )));
+        }
+        return self.check_elapsed();
+    }
+}
+
+#[derive(Default)]
+struct CountingWriter {
+    bytes: usize,
+}
+
+impl Write for CountingWriter {
+    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+        self.bytes = self.bytes.saturating_add(buf.len());
+        return Ok(buf.len());
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        return Ok(());
     }
 }
 
@@ -980,4 +1155,77 @@ fn invalid_replay(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::event::{ByteString, EventLogHeader, EventRecord};
+
+    fn output_log(data: &[u8]) -> EventLog {
+        return EventLog {
+            header: EventLogHeader::new(
+                Uuid::now_v7(),
+                "0".repeat(64),
+                0,
+                80,
+                24,
+                800,
+                480,
+                "xterm-ghostty",
+            ),
+            events: vec![EventRecord {
+                seq: 0,
+                monotonic_ns: 1,
+                prev_hash: "0".repeat(64),
+                hash: "1".repeat(64),
+                event: Event::Output {
+                    data: ByteString::from(data),
+                },
+            }],
+            pending_operations: Vec::new(),
+        };
+    }
+
+    #[test]
+    fn replay_enforces_output_and_capture_work_budgets() {
+        let log = output_log(b"abc");
+        let output_error = replay_with_limits(
+            &log,
+            None,
+            ReplayLimits {
+                output_bytes: 2,
+                ..DEFAULT_REPLAY_LIMITS
+            },
+            |_, _, _| return Ok(()),
+        )
+        .expect_err("output budget must reject before byte replay");
+        assert!(output_error.to_string().contains("output-byte limit"));
+
+        let capture_error = replay_with_limits(
+            &log,
+            None,
+            ReplayLimits {
+                capture_attempts: 1,
+                ..DEFAULT_REPLAY_LIMITS
+            },
+            |_, _, _| return Ok(()),
+        )
+        .expect_err("capture budget must reject byte-granular amplification");
+        assert!(capture_error.to_string().contains("capture-attempt limit"));
+
+        let cell_work_error = replay_with_limits(
+            &log,
+            None,
+            ReplayLimits {
+                cell_work: 1_919,
+                ..DEFAULT_REPLAY_LIMITS
+            },
+            |_, _, _| return Ok(()),
+        )
+        .expect_err("cell work must be charged before snapshot capture");
+        assert!(cell_work_error.to_string().contains("cell-work limit"));
+    }
 }

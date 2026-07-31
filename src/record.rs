@@ -59,6 +59,7 @@ use crate::{
     event_log::{DurabilityPolicy, EventLogWriter, SessionClock},
     ghostty_vt::{
         FocusEvent, GhosttyVt, MouseAction, MouseButton, NamedKey, SemanticState, encode_focus,
+        supported_geometry_cell_count,
     },
     profile::ResolvedGhosttyProfile,
     provenance::{ProvenancePolicy, collect_execution_provenance},
@@ -665,8 +666,7 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
         .rows
         .checked_mul(options.cell_height_px)
         .ok_or_else(|| return invalid_geometry(options))?;
-    if options.cols == 0
-        || options.rows == 0
+    if supported_geometry_cell_count(options.cols, options.rows).is_none()
         || options.cell_width_px == 0
         || options.cell_height_px == 0
     {
@@ -1372,9 +1372,7 @@ fn write_control_response(stream: &mut UnixStream, response: &ControlResponse) -
 }
 
 fn geometry_from_winsize(size: Winsize, fallback: TerminalGeometry) -> Option<TerminalGeometry> {
-    if size.ws_col == 0 || size.ws_row == 0 {
-        return None;
-    }
+    supported_geometry_cell_count(size.ws_col, size.ws_row)?;
     let cell_width = fallback.pixel_width.checked_div(fallback.cols)?.max(1);
     let cell_height = fallback.pixel_height.checked_div(fallback.rows)?.max(1);
     return Some(TerminalGeometry {
@@ -2746,14 +2744,13 @@ fn validate_control_input(data: &[u8], intent: Option<&str>) -> Result<()> {
 }
 
 fn validate_control_geometry(geometry: TerminalGeometry) -> Result<()> {
-    if geometry.cols == 0
-        || geometry.rows == 0
+    if supported_geometry_cell_count(geometry.cols, geometry.rows).is_none()
         || geometry.pixel_width == 0
         || geometry.pixel_height == 0
     {
         return Err(control_rejected(
             "invalid_geometry",
-            "columns, rows, pixel width, and pixel height must be non-zero",
+            "terminal geometry exceeds the supported row, column, or cell limit, or has zero pixels",
         ));
     }
     return Ok(());

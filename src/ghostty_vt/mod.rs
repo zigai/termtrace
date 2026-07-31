@@ -25,6 +25,25 @@ use crate::{
 
 mod sys;
 
+/// Largest supported terminal width at any trusted or imported boundary.
+pub const MAX_TERMINAL_COLUMNS: u16 = 1_000;
+/// Largest supported terminal height at any trusted or imported boundary.
+pub const MAX_TERMINAL_ROWS: u16 = 1_000;
+/// Largest supported viewport allocation, independent of aspect ratio.
+pub const MAX_TERMINAL_CELLS: u32 = 250_000;
+
+/// Return the cell count when a terminal geometry satisfies the shared policy.
+#[must_use]
+pub fn supported_geometry_cell_count(cols: u16, rows: u16) -> Option<u32> {
+    let cells = u32::from(cols).checked_mul(u32::from(rows))?;
+    return (cols > 0
+        && rows > 0
+        && cols <= MAX_TERMINAL_COLUMNS
+        && rows <= MAX_TERMINAL_ROWS
+        && cells <= MAX_TERMINAL_CELLS)
+        .then_some(cells);
+}
+
 /// RGB color independent of libghostty's unstable ABI.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Rgb {
@@ -381,7 +400,7 @@ impl GhosttyVt {
     ///
     /// Returns an error when libghostty-vt cannot allocate either handle.
     pub fn new(cols: u16, rows: u16, max_scrollback: usize) -> Result<Self> {
-        if cols == 0 || rows == 0 {
+        if supported_geometry_cell_count(cols, rows).is_none() {
             return Err(Error::GhosttyVt {
                 operation: "validate geometry",
                 result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
@@ -702,6 +721,12 @@ impl GhosttyVt {
         cell_width_px: u32,
         cell_height_px: u32,
     ) -> Result<()> {
+        if supported_geometry_cell_count(cols, rows).is_none() {
+            return Err(Error::GhosttyVt {
+                operation: "validate geometry",
+                result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
+            });
+        }
         return check("resize terminal", unsafe {
             sys::ghostty_terminal_resize(self.terminal, cols, rows, cell_width_px, cell_height_px)
         });
@@ -1682,6 +1707,20 @@ mod tests {
         terminal.resize(10, 3, 9, 18).expect("resize");
         let resized = terminal.snapshot().expect("resized snapshot");
         assert_eq!((resized.cols, resized.rows), (10, 3));
+    }
+
+    #[test]
+    fn rejects_impractical_terminal_geometry_before_ffi_allocation() {
+        assert!(supported_geometry_cell_count(MAX_TERMINAL_COLUMNS.saturating_add(1), 1).is_none());
+        assert!(supported_geometry_cell_count(501, 500).is_none());
+        assert!(GhosttyVt::new(MAX_TERMINAL_COLUMNS.saturating_add(1), 1, 0).is_err());
+
+        let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
+        assert!(
+            terminal
+                .resize(MAX_TERMINAL_COLUMNS.saturating_add(1), 1, 1, 1)
+                .is_err()
+        );
     }
 
     #[test]
