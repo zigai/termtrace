@@ -32,6 +32,11 @@ pub const MAX_TERMINAL_ROWS: u16 = 1_000;
 /// Largest supported viewport allocation, independent of aspect ratio.
 pub const MAX_TERMINAL_CELLS: u32 = 250_000;
 
+// Keep allocating control strings below the same ceiling as explanation framing.
+const MAX_OSC_SEQUENCE_BYTES: usize = 1024 * 1024;
+const MAX_APC_SEQUENCE_BYTES: usize = 1024 * 1024;
+const TERMINAL_WRITE_CHUNK_BYTES: usize = 4 * 1024;
+
 /// Return the cell count when a terminal geometry satisfies the shared policy.
 #[must_use]
 pub fn supported_geometry_cell_count(cols: u16, rows: u16) -> Option<u32> {
@@ -386,11 +391,199 @@ pub struct GhosttyVt {
     render: sys::GhosttyRenderState,
     last_snapshot: Option<SemanticState>,
     responses: Box<ResponseState>,
+    input_limiter: VtInputLimiter,
 }
 
 #[derive(Default)]
 struct ResponseState {
     pending: Vec<Vec<u8>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum VtInputState {
+    #[default]
+    Ground,
+    Escape,
+    Osc,
+    OscEscape,
+}
+
+#[derive(Debug)]
+struct VtInputLimiter {
+    state: VtInputState,
+    sequence: Vec<u8>,
+    discarding: bool,
+    max_osc_bytes: usize,
+    utf8_continuations: u8,
+}
+
+impl Default for VtInputLimiter {
+    fn default() -> Self {
+        return Self::new(MAX_OSC_SEQUENCE_BYTES);
+    }
+}
+
+impl VtInputLimiter {
+    fn new(max_osc_bytes: usize) -> Self {
+        return Self {
+            state: VtInputState::Ground,
+            sequence: Vec::new(),
+            discarding: false,
+            max_osc_bytes,
+            utf8_continuations: 0,
+        };
+    }
+
+    fn write(&mut self, bytes: &[u8], mut emit: impl FnMut(&[u8])) {
+        let mut output = [0_u8; TERMINAL_WRITE_CHUNK_BYTES];
+        let mut output_len = 0;
+
+        for &byte in bytes {
+            if self.state == VtInputState::Ground && self.utf8_continuations > 0 {
+                if (0x80..=0xbf).contains(&byte) {
+                    self.utf8_continuations -= 1;
+                    push_output(byte, &mut output, &mut output_len, &mut emit);
+                    continue;
+                }
+                self.utf8_continuations = 0;
+            }
+            match self.state {
+                VtInputState::Ground => match byte {
+                    0x1b => {
+                        flush_output(&output, &mut output_len, &mut emit);
+                        self.sequence.clear();
+                        self.discarding = false;
+                        let _ = self.push_sequence(byte);
+                        self.state = VtInputState::Escape;
+                    }
+                    0x9d => {
+                        flush_output(&output, &mut output_len, &mut emit);
+                        self.begin_osc(byte);
+                    }
+                    value => {
+                        self.utf8_continuations = match value {
+                            0xc2..=0xdf => 1,
+                            0xe0..=0xef => 2,
+                            0xf0..=0xf4 => 3,
+                            _ => 0,
+                        };
+                        push_output(byte, &mut output, &mut output_len, &mut emit);
+                    }
+                },
+                VtInputState::Escape => match byte {
+                    b']' => {
+                        let _ = self.push_sequence(byte);
+                        self.state = VtInputState::Osc;
+                    }
+                    0x1b => {
+                        self.sequence.clear();
+                        self.discarding = false;
+                        push_output(0x1b, &mut output, &mut output_len, &mut emit);
+                        let _ = self.push_sequence(byte);
+                    }
+                    _ => {
+                        self.sequence.clear();
+                        self.discarding = false;
+                        push_output(0x1b, &mut output, &mut output_len, &mut emit);
+                        push_output(byte, &mut output, &mut output_len, &mut emit);
+                        self.state = VtInputState::Ground;
+                    }
+                },
+                VtInputState::Osc | VtInputState::OscEscape => {
+                    self.consume_osc(byte, &mut emit);
+                }
+            }
+        }
+
+        flush_output(&output, &mut output_len, &mut emit);
+    }
+
+    fn begin_osc(&mut self, introducer: u8) {
+        self.sequence.clear();
+        self.discarding = false;
+        let _ = self.push_sequence(introducer);
+        self.state = VtInputState::Osc;
+    }
+
+    fn consume_osc(&mut self, byte: u8, emit: &mut impl FnMut(&[u8])) {
+        let terminated =
+            matches!(byte, 0x07 | 0x9c) || (self.state == VtInputState::OscEscape && byte == b'\\');
+        let canceled = matches!(byte, 0x18 | 0x1a);
+        let was_discarding = self.discarding;
+        let overflowed = self.push_sequence(byte);
+        if overflowed {
+            // Ghostty may be inside an earlier partial control. CAN returns its
+            // parser to ground without executing the discarded OSC payload.
+            emit(&[0x18]);
+        }
+
+        if terminated {
+            if !self.discarding {
+                emit(&self.sequence);
+            }
+            self.reset();
+        } else if canceled {
+            if !was_discarding && !overflowed {
+                emit(&[byte]);
+            }
+            self.reset();
+        } else {
+            self.state = if byte == 0x1b {
+                VtInputState::OscEscape
+            } else {
+                VtInputState::Osc
+            };
+        }
+    }
+
+    fn push_sequence(&mut self, byte: u8) -> bool {
+        if self.discarding {
+            return false;
+        }
+        if self.sequence.len() >= self.max_osc_bytes {
+            self.sequence.clear();
+            self.discarding = true;
+            return true;
+        }
+        self.sequence.push(byte);
+        return false;
+    }
+
+    fn reset(&mut self) {
+        self.state = VtInputState::Ground;
+        self.sequence.clear();
+        self.discarding = false;
+        self.utf8_continuations = 0;
+    }
+}
+
+fn push_output(
+    byte: u8,
+    output: &mut [u8; TERMINAL_WRITE_CHUNK_BYTES],
+    output_len: &mut usize,
+    emit: &mut impl FnMut(&[u8]),
+) {
+    if *output_len == output.len() {
+        flush_output(output, output_len, emit);
+    }
+    if let Some(slot) = output.get_mut(*output_len) {
+        *slot = byte;
+        *output_len += 1;
+    }
+}
+
+fn flush_output(
+    output: &[u8; TERMINAL_WRITE_CHUNK_BYTES],
+    output_len: &mut usize,
+    emit: &mut impl FnMut(&[u8]),
+) {
+    if *output_len == 0 {
+        return;
+    }
+    if let Some(bytes) = output.get(..*output_len) {
+        emit(bytes);
+    }
+    *output_len = 0;
 }
 
 impl GhosttyVt {
@@ -418,6 +611,10 @@ impl GhosttyVt {
                 },
             )
         })?;
+        if let Err(error) = configure_terminal_resource_policy(terminal) {
+            unsafe { sys::ghostty_terminal_free(terminal) };
+            return Err(error);
+        }
         let mut responses = Box::<ResponseState>::default();
         let userdata = (&raw mut *responses).cast::<c_void>();
         if let Err(error) = check("set terminal callback userdata", unsafe {
@@ -457,12 +654,18 @@ impl GhosttyVt {
             render,
             last_snapshot: None,
             responses,
+            input_limiter: VtInputLimiter::default(),
         });
     }
 
-    /// Feed exact PTY output bytes through Ghostty's VT parser.
+    /// Feed PTY output through the bounded host policy and Ghostty's VT parser.
+    ///
+    /// Oversized OSC strings are ignored before crossing the FFI boundary.
     pub fn write(&mut self, bytes: &[u8]) {
-        unsafe { sys::ghostty_terminal_vt_write(self.terminal, bytes.as_ptr(), bytes.len()) };
+        let terminal = self.terminal;
+        self.input_limiter.write(bytes, |bounded| unsafe {
+            sys::ghostty_terminal_vt_write(terminal, bounded.as_ptr(), bounded.len());
+        });
     }
 
     /// Encode a typed key using the terminal's current keyboard protocol modes.
@@ -1494,6 +1697,26 @@ fn check(operation: &'static str, result: sys::GhosttyResult) -> Result<()> {
     }
 }
 
+fn configure_terminal_resource_policy(terminal: sys::GhosttyTerminal) -> Result<()> {
+    let kitty_storage_bytes = 0_u64;
+    check("disable Kitty graphics storage", unsafe {
+        sys::ghostty_terminal_set(
+            terminal,
+            sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT,
+            (&raw const kitty_storage_bytes).cast::<c_void>(),
+        )
+    })?;
+
+    let apc_max_bytes = MAX_APC_SEQUENCE_BYTES;
+    return check("limit APC sequence buffering", unsafe {
+        sys::ghostty_terminal_set(
+            terminal,
+            sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_APC_MAX_BYTES,
+            (&raw const apc_max_bytes).cast::<c_void>(),
+        )
+    });
+}
+
 fn ffi_rgb([r, g, b]: [u8; 3]) -> sys::GhosttyColorRgb {
     return sys::GhosttyColorRgb { r, g, b };
 }
@@ -1721,6 +1944,69 @@ mod tests {
                 .resize(MAX_TERMINAL_COLUMNS.saturating_add(1), 1, 1, 1)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn bounds_osc_strings_before_the_ffi_boundary() {
+        let mut limiter = VtInputLimiter::new(12);
+        let mut forwarded = Vec::new();
+        for chunk in [
+            b"before\x1b]52;0123456789abcdef".as_slice(),
+            b"\x07after\x1b".as_slice(),
+            b"]2;ok\x07".as_slice(),
+        ] {
+            limiter.write(chunk, |bytes| forwarded.extend_from_slice(bytes));
+        }
+        assert_eq!(forwarded, b"before\x18after\x1b]2;ok\x07");
+    }
+
+    #[test]
+    fn preserves_utf8_continuations_that_match_c1_controls() {
+        let mut limiter = VtInputLimiter::new(12);
+        let mut forwarded = Vec::new();
+        for byte in "ѝ".as_bytes() {
+            limiter.write(slice::from_ref(byte), |bytes| {
+                forwarded.extend_from_slice(bytes);
+            });
+        }
+        assert_eq!(forwarded, "ѝ".as_bytes());
+    }
+
+    #[test]
+    fn applies_embedder_resource_policy_to_ghostty() {
+        let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
+        let mut kitty_storage_bytes = u64::MAX;
+        check("read Kitty graphics storage limit", unsafe {
+            sys::ghostty_terminal_get(
+                terminal.terminal,
+                sys::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT,
+                (&raw mut kitty_storage_bytes).cast::<c_void>(),
+            )
+        })
+        .expect("read Kitty storage policy");
+        assert_eq!(kitty_storage_bytes, 0);
+
+        terminal.write(b"\x1b");
+        terminal.write(b"]2;bounded\x07");
+        assert_eq!(
+            terminal
+                .snapshot()
+                .expect("snapshot")
+                .metadata
+                .title
+                .as_bytes(),
+            b"bounded"
+        );
+    }
+
+    #[test]
+    fn oversized_osc_cancels_partial_parser_state() {
+        let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
+        terminal.input_limiter = VtInputLimiter::new(12);
+        terminal.write(b"\x1b(");
+        terminal.write(b"\x1b]52;0123456789abcdef\x07ok");
+        let plain = terminal.format(Format::Plain).expect("plain format");
+        assert!(plain.windows(2).any(|window| return window == b"ok"));
     }
 
     #[test]
