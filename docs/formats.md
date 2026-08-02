@@ -43,6 +43,9 @@ The completion manifest binds the session and event roots, final exit event, eve
 
 Atomic input sequences and structured retry details use JSONL driver protocol version 3 and control protocol version 13. Scenario files that use the isolation launch contract have scenario version 2; legacy version 1 files remain accepted when they do not use those fields. Checked-in JSON Schemas are authoritative for each shape.
 
+CLI result fields ending in `*_display` are lossy human-readable path
+conveniences. The adjacent byte-safe path fields remain authoritative.
+
 ## Supporting canonical data
 
 `ghostty-profile.ghostty` contains the exact flattened input Termtrace chose for replay. Termtrace may derive those bytes from Ghostty's reported normalization of the selected configuration and overrides. Ghostty guarantees that reported configuration remains valid replayable input with equivalent behavior, although another load-and-report cycle need not produce identical bytes. The profile is not a bundle of every dependency: fonts, shaders, images, and other referenced resources remain external.
@@ -150,7 +153,9 @@ structure, not trust or safety.
 
 ## Export and handoff
 
-`export-asciicast` creates a lossy UTF-8 interoperability view. Invalid bytes, exact timing, and advanced semantic state cannot be preserved, so the cast is never canonical evidence.
+`termtrace artifact asciicast` creates a lossy UTF-8 interoperability view.
+Invalid bytes, exact timing, and advanced semantic state cannot be preserved, so
+the cast is never canonical evidence.
 
 `save`, `screenshot`, and `bundle` publish owner-only, no-replace artifact directories with manifests. Use a bundle profile appropriate to the data being shared and verify the bundle after copying it.
 
