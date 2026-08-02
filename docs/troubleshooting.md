@@ -81,6 +81,7 @@ Termtrace preserves a `visual-failed-*` directory. Inspect the structured geomet
 
 - `geometry-preflight.json`
 - `playback-error.json`
+- `ghostty-effective-config.txt`
 - `ghostty.stderr.log`
 - `xvfb.log`
 - `ffmpeg-video.log`
@@ -93,7 +94,7 @@ If geometry does not match, record with a fitted viewport:
 termtrace record --out SESSION --geometry fit --viewport 1920x1080 COMMAND
 ```
 
-`--width` and `--height` refer to the complete capture viewport, not only the text grid. Fitted recordings preserve their flattened terminal configuration, but external fonts, shaders, and images must still be installed.
+`--width` and `--height` refer to the complete capture viewport, not only the text grid. Fitted recordings preserve the flattened replay profile as `ghostty-profile.ghostty`, but external fonts, shaders, and images must still be installed. When the effective-output fingerprint differs, inspect `ghostty-effective-config.txt` to see what Ghostty reported for that visual attempt.
 
 ## The command starts in the wrong directory
 

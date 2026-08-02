@@ -10,7 +10,7 @@ SESSION/
 ├── events.jsonl
 ├── completion.json
 ├── requests.jsonl
-├── ghostty-config.txt
+├── ghostty-profile.ghostty
 ├── derived/
 ├── visual/
 └── artifact-roots.jsonl
@@ -22,7 +22,7 @@ Only the first three files are required canonical evidence. Other entries appear
 
 ### `session.json`
 
-The immutable session manifest records the command, working directory, initial geometry, terminal profile, build identity, value-free child-environment policy and effective digest, sensitivity-aware provenance, durability policy, and resource limits. It is published before the event log. The current session-manifest version is 9.
+The immutable session manifest records the command, working directory, initial geometry, terminal profile, build identity, value-free child-environment policy and effective digest, sensitivity-aware provenance, durability policy, and resource limits. It is published before the event log. The current session-manifest version is 10. Version 10 intentionally separates the flattened replay profile from the fingerprint of Ghostty's reported effective output.
 
 ### `events.jsonl`
 
@@ -45,7 +45,9 @@ Atomic input sequences and structured retry details use JSONL driver protocol ve
 
 ## Supporting canonical data
 
-`ghostty-config.txt` is the flattened effective terminal profile used by fitted geometry and native capture. External fonts, shaders, and images are referenced rather than copied.
+`ghostty-profile.ghostty` contains the exact flattened input Termtrace chose for replay. Termtrace may derive those bytes from Ghostty's reported normalization of the selected configuration and overrides. Ghostty guarantees that reported configuration remains valid replayable input with equivalent behavior, although another load-and-report cycle need not produce identical bytes. The profile is not a bundle of every dependency: fonts, shaders, images, and other referenced resources remain external.
+
+After Ghostty loads those chosen replay bytes, the session separately binds a fingerprint of the effective output Ghostty reports. Native capture retains this subsequent report as the visual diagnostic `visual/ghostty-effective-config.txt`. Keeping the chosen input and subsequent output distinct verifies how the profile resolves even when their serialized bytes differ.
 
 `requests.jsonl` stores mutation outcomes so retries remain idempotent after in-memory cache eviction. It is disposable acceleration, not an evidence root. Verification reports journal damage separately from canonical validity.
 
@@ -75,9 +77,13 @@ Running `termtrace artifact capture --session SESSION` creates:
 | `visual/session.mkv` | lossless RGB H.264 video at 24 FPS |
 | `visual/final.png` | stable final native frame |
 | `visual/video-map.jsonl` | semantic-state to nominal-frame mapping |
-| `visual/manifest.json` | source, geometry, configuration, clocks, probes, and member hashes |
+| `visual/ghostty-effective-config.txt` | Ghostty-reported effective output retained for fingerprint diagnostics |
+| `visual/manifest.json` | source, geometry, effective-output fingerprint, clocks, probes, and member hashes |
 
 Native capture is a separate capability. It never silently falls back to semantic rendering.
+The current native visual-manifest version is 5. Its version bump is intentional:
+the manifest identifies the effective output reported after loading the chosen
+replay input as a distinct representation.
 
 ## Presentation artifacts
 

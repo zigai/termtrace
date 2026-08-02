@@ -74,9 +74,11 @@ Use fitted geometry when the recording will become a native screenshot or video:
 termtrace record --out SESSION --geometry fit --viewport 1920x1080 COMMAND
 ```
 
-This probes the installed terminal application and records the measured grid, cell size, viewport, and effective configuration hash. It requires the native capture dependencies reported by `termtrace tooling doctor`.
+This probes the installed terminal application and records the measured grid, cell size, viewport, and a fingerprint of the effective output Ghostty reports. It requires the native capture dependencies reported by `termtrace tooling doctor`.
 
-Use `--ghostty-config` to select a configuration file. Font, padding, foreground, and background flags override that file. The flattened effective configuration is saved in the session so later capture uses the same profile. Referenced fonts, shaders, and images remain external dependencies.
+Use `--ghostty-config` to select a configuration file. Font, padding, foreground, and background flags override that file. Termtrace saves the exact flattened input chosen for replay as `ghostty-profile.ghostty` at the session root. Those bytes may come from Ghostty's reported normalization. Ghostty guarantees that reported configuration remains replayable with equivalent behavior, even if repeating the load-and-report cycle changes its serialized bytes. The flattened replay profile still references external fonts, shaders, images, and other resources; it does not copy them into the session.
+
+After loading the exact stored profile, Termtrace separately fingerprints the effective output Ghostty reports. Native capture verifies that fingerprint and saves this subsequent report as `visual/ghostty-effective-config.txt` for diagnosis. The diagnostic and the chosen replay input have distinct roles and need not have identical bytes.
 
 ## Working directory
 
