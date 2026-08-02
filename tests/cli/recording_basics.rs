@@ -1,0 +1,183 @@
+//! recording basics CLI integration tests.
+
+use crate::support::*;
+
+#[test]
+fn record_mirrors_output_persists_events_and_propagates_exit_code() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("session");
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+
+    command
+        .args(["record", "--out"])
+        .arg(&session)
+        .args(["--viewport", "800x600"])
+        .args(["--", "/bin/sh", "-c", "printf recorded; exit 7"])
+        .assert()
+        .code(7)
+        .stdout("recorded")
+        .stderr(predicate::str::contains("recording:"));
+
+    let event_log = session.join("events.jsonl");
+    assert!(event_log.is_file(), "event log should be persisted");
+    let recording = EventLog::read(event_log).expect("valid event log");
+    assert!(matches!(
+        recording.events.last().map(|record| return &record.event),
+        Some(Event::Exit { code: Some(7), .. })
+    ));
+    let manifest = read_manifest(&session).expect("session manifest");
+    assert_eq!(manifest.geometry_provenance.source, GeometrySource::Manual);
+    assert_eq!(
+        manifest.geometry_provenance.capture_target,
+        Some(CaptureTarget {
+            width: 800,
+            height: 600,
+        })
+    );
+}
+
+#[test]
+fn semantic_record_without_ghostty_has_stable_nonwarning_stderr() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("semantic-only-session");
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+    let recorded = command
+        .env("PATH", "")
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf SEMANTIC_ONLY"])
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&recorded.get_output().stderr);
+    assert!(
+        stderr.contains("recording:"),
+        "missing success diagnostic: {stderr}"
+    );
+    assert!(!stderr.contains("WARN"), "unexpected warning: {stderr}");
+    assert!(
+        !stderr.contains("Ghostty is unavailable"),
+        "unexpected optional-host warning: {stderr}"
+    );
+    assert!(
+        !stderr.lines().any(has_rfc3339_log_prefix),
+        "unexpected timestamped log line: {stderr}"
+    );
+    let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+    assert_eq!(log.header.colors.source, "libghostty_builtin");
+}
+
+#[test]
+fn custom_provenance_policy_hashes_without_retaining_values() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("custom-provenance");
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+
+    command
+        .args([
+            "record",
+            "--no-input",
+            "--provenance",
+            "custom",
+            "--provenance-env",
+            "TERM=hash",
+            "--provenance-env",
+            "PRIVATE_TOKEN=not-captured",
+            "--out",
+        ])
+        .arg(&session)
+        .args(["--", "/bin/true"])
+        .assert()
+        .success();
+
+    let manifest = read_manifest(&session).expect("session manifest");
+    assert_eq!(
+        manifest.execution_provenance.policy.kind,
+        ProvenancePolicyKind::Custom
+    );
+    let terminal = manifest
+        .execution_provenance
+        .environment
+        .get("TERM")
+        .expect("TERM inventory");
+    assert_eq!(terminal.capture, ProvenanceCapture::Hash);
+    assert!(terminal.value.is_none());
+    assert_eq!(
+        terminal.value_hash.as_deref(),
+        Some(blake3::hash(b"xterm-ghostty").to_hex().as_str())
+    );
+    let private = manifest
+        .execution_provenance
+        .environment
+        .get("PRIVATE_TOKEN")
+        .expect("private inventory");
+    assert_eq!(private.capture, ProvenanceCapture::NotCaptured);
+    assert_eq!(
+        private.sensitivity,
+        ProvenanceSensitivity::PotentiallySensitive
+    );
+    assert!(private.value.is_none() && private.value_hash.is_none());
+}
+
+#[test]
+fn record_inherits_and_persists_effective_working_directory() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let workspace = temporary.path().join("workspace");
+    fs_err::create_dir_all(&workspace).expect("workspace directory");
+    let inherited_session = temporary.path().join("inherited-session");
+    let mut inherited = Command::cargo_bin("termtrace").expect("binary should build");
+
+    inherited
+        .current_dir(&workspace)
+        .args(["record", "--no-input", "--out"])
+        .arg(&inherited_session)
+        .args(["--", "/bin/pwd"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(workspace.display().to_string()));
+
+    let inherited_manifest = read_manifest(&inherited_session).expect("inherited manifest");
+    assert_eq!(
+        inherited_manifest
+            .working_directory
+            .expect("effective working directory")
+            .as_bytes(),
+        workspace.as_os_str().as_bytes()
+    );
+
+    let override_directory = temporary.path().join("override");
+    fs_err::create_dir_all(&override_directory).expect("override directory");
+    let override_session = temporary.path().join("override-session");
+    let mut overridden = Command::cargo_bin("termtrace").expect("binary should build");
+    overridden
+        .current_dir(temporary.path())
+        .args(["record", "--no-input", "--cwd", "override", "--out"])
+        .arg(&override_session)
+        .args(["--", "/bin/pwd"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            override_directory.display().to_string(),
+        ));
+
+    let override_manifest = read_manifest(&override_session).expect("override manifest");
+    assert_eq!(
+        override_manifest
+            .working_directory
+            .expect("overridden working directory")
+            .as_bytes(),
+        override_directory.as_os_str().as_bytes()
+    );
+}
+
+fn has_rfc3339_log_prefix(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    let Some(prefix) = bytes.get(..19) else {
+        return false;
+    };
+    return prefix.iter().enumerate().all(|(index, byte)| match index {
+        4 | 7 => return *byte == b'-',
+        10 => return *byte == b'T',
+        13 | 16 => return *byte == b':',
+        _ => return byte.is_ascii_digit(),
+    });
+}

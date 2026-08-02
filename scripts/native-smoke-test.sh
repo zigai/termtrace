@@ -35,6 +35,8 @@ test "$range_capture_elapsed_ns" -lt "$range_from"
 
 readonly manifest="$output/visual/manifest.json"
 jq -e '
+  .version == 5 and
+  (.effective_config_hash | type == "string" and length == 64) and
   .fps == 24 and
   .source_range == null and
   .width == 640 and
@@ -72,24 +74,29 @@ readonly range_duration="$(jq -r '.video_probe.format.duration | tonumber' "$ran
 awk -v full="$full_duration" -v range="$range_duration" 'BEGIN { exit !(range + 5 < full) }'
 
 jq -e '
+  .version == 10 and
   .ghostty_visual.source_config != null and
   .ghostty_visual.overrides.font_size == "13" and
   .ghostty_visual.overrides.padding_x == 6 and
   .ghostty_visual.overrides.padding_y == 4 and
   .ghostty_visual.overrides.foreground == "#e6e6e6" and
   .ghostty_visual.overrides.background == "#101010" and
-  .ghostty_visual.effective_config == "ghostty-config.txt"
+  .ghostty_visual.replay_profile == "ghostty-profile.ghostty" and
+  (.ghostty_visual.replay_profile_hash | type == "string" and length == 64) and
+  (.ghostty_visual.effective_config_hash | type == "string" and length == 64)
 ' "$output/session.json" >/dev/null
 test "$(jq -r '.ghostty_visual.effective_config_hash' "$output/session.json")" = \
-    "$(jq -r '.ghostty_config_hash' "$manifest")"
+    "$(jq -r '.effective_config_hash' "$manifest")"
 test ! -e "$profile"
-test -s "$output/ghostty-config.txt"
-! grep -Eq '^config-(file|default-files)[[:space:]]*=' "$output/ghostty-config.txt"
+test -s "$output/ghostty-profile.ghostty"
+! grep -Eq '^config-(file|default-files)[[:space:]]*=' "$output/ghostty-profile.ghostty"
+test -s "$output/visual/ghostty-effective-config.txt"
 
 test -s "$output/visual/session.mkv"
 test -s "$output/visual/final.png"
 test -s "$output/visual/video-map.jsonl"
 test -s "$output/native-single/final.png"
+test -s "$output/native-single/ghostty-effective-config.txt"
 test ! -e "$output/native-single/session.mkv"
 jq -e '
   .capture_kind == "screenshot" and
@@ -103,6 +110,7 @@ jq -e '
 ' "$output/native-single/manifest.json" >/dev/null
 test -s "$range_visual/session.mkv"
 test -s "$range_visual/final.png"
+test -s "$range_visual/ghostty-effective-config.txt"
 test -s "$range_visual/video-map.jsonl"
 ! cmp -s "$output/visual/final.png" "$range_visual/final.png"
 awk -v elapsed="$range_capture_elapsed_ns" -v preroll="$range_from" \
