@@ -1012,6 +1012,24 @@ pub fn semantic_state_for_session(
     point: &StatePoint,
     include_hidden: bool,
 ) -> Result<SemanticState> {
+    let (state, _) = semantic_state_with_hash_for_session(session, point, include_hidden)?;
+    return Ok(state);
+}
+
+/// Resolve a complete semantic state with the exact hash assigned by its source.
+///
+/// The paired hash preserves the source's hash contract: completed evidence uses
+/// its canonical replay hash, while a live actor returns its snapshot hash.
+///
+/// # Errors
+///
+/// Returns an error when the source is invalid, the selector is unsupported for
+/// a live actor, or hidden-state permission is absent.
+pub fn semantic_state_with_hash_for_session(
+    session: &Path,
+    point: &StatePoint,
+    include_hidden: bool,
+) -> Result<(SemanticState, String)> {
     let canonical = session.canonicalize().map_err(|source| {
         return Error::Filesystem {
             path: session.to_path_buf(),
@@ -1028,7 +1046,7 @@ pub fn semantic_state_for_session(
                 "selected semantic state is hidden; pass explicit hidden-state permission",
             ));
         }
-        return Ok(inspection.state);
+        return Ok((inspection.state, inspection.record.state_hash));
     }
     if point != &StatePoint::LatestPresented || include_hidden {
         return Err(observation_error(
@@ -1037,6 +1055,7 @@ pub fn semantic_state_for_session(
     }
     let ControlData::Snapshot {
         semantic_state_zstd,
+        state_hash,
         ..
     } = request(&canonical, ControlCommand::Snapshot)?
     else {
@@ -1052,13 +1071,14 @@ pub fn semantic_state_for_session(
             "live semantic snapshot exceeds the 32 MiB decoded limit",
         ));
     }
-    return serde_json::from_slice(&decoded).map_err(|source| {
+    let state = serde_json::from_slice(&decoded).map_err(|source| {
         return Error::InvalidJson {
             path: PathBuf::from("<live-semantic-snapshot>"),
             json_path: "$".to_owned(),
             source,
         };
-    });
+    })?;
+    return Ok((state, state_hash));
 }
 
 /// Interpret an ANSI/VT stream into one complete semantic state.

@@ -20,6 +20,7 @@ use uuid::Uuid;
 use crate::{
     Error, Result,
     artifact::write_secure,
+    capability::{SEMANTIC_VIDEO_CAPABILITY, require_capability},
     event::{Event, OperationStatus},
     event_log::EventLog,
     ghostty_vt::SemanticState,
@@ -212,6 +213,7 @@ pub fn materialize(
             "semantic video canonical source changed after presentation planning",
         ));
     }
+    require_capability(SEMANTIC_VIDEO_CAPABILITY)?;
 
     let output = directory.join("semantic-source.mkv");
     let stderr_path = directory.join("semantic-source-ffmpeg.log");

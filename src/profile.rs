@@ -15,16 +15,45 @@ use crate::{
     event::ByteString,
     event::TerminalColors,
     ghostty_vt::{GhosttyVt, Rgb},
-    session::{GhosttyVisualOverrides, GhosttyVisualProvenance},
+    session::{GHOSTTY_REPLAY_PROFILE_NAME, GhosttyVisualOverrides, GhosttyVisualProvenance},
 };
 
 /// Canonical Ghostty configuration resolved for one recording.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedGhosttyProfile {
-    /// Flattened effective Ghostty configuration bytes.
+    /// Exact configuration bytes chosen as the replay input.
+    pub replay_config: Vec<u8>,
+    /// Exact effective configuration bytes Ghostty reports after loading the replay profile.
     pub effective_config: Vec<u8>,
     /// Persisted source and convenience-override provenance.
     pub provenance: GhosttyVisualProvenance,
+}
+
+impl ResolvedGhosttyProfile {
+    /// BLAKE3 of the exact effective configuration observed from Ghostty.
+    pub fn effective_config_hash(&self) -> String {
+        return blake3::hash(&self.effective_config).to_hex().to_string();
+    }
+
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.provenance.replay_profile != GHOSTTY_REPLAY_PROFILE_NAME {
+            return Err(profile_error(format!(
+                "recorded Ghostty replay profile must be the canonical root artifact {GHOSTTY_REPLAY_PROFILE_NAME}"
+            )));
+        }
+        let replay_hash = blake3::hash(&self.replay_config).to_hex().to_string();
+        if replay_hash != self.provenance.replay_profile_hash {
+            return Err(profile_error(
+                "recorded Ghostty replay profile hash does not match provenance",
+            ));
+        }
+        if self.effective_config_hash() != self.provenance.effective_config_hash {
+            return Err(profile_error(
+                "recorded Ghostty effective configuration hash does not match provenance",
+            ));
+        }
+        return Ok(());
+    }
 }
 
 /// Resolve a custom Ghostty config and focused overrides into one profile.
@@ -59,18 +88,56 @@ pub fn resolve_ghostty_profile(
     } else {
         (query_default_config()?, None)
     };
-    let mut combined = flatten_config(&base);
-    append_overrides(&mut combined, &overrides);
-    let effective_config = flatten_config(&query_isolated_config(&combined)?);
-    let effective_config_hash = blake3::hash(&effective_config).to_hex().to_string();
+    let mut replay_config = flatten_config(&base);
+    append_overrides(&mut replay_config, &overrides);
+    return resolve_replay_config(
+        replay_config,
+        source_config,
+        overrides,
+        query_isolated_config,
+    );
+}
+
+/// Restore and validate a profile persisted in a canonical recording.
+///
+/// # Errors
+///
+/// Returns an error when the replay profile no longer matches its provenance or
+/// Ghostty cannot resolve it.
+pub fn restore_ghostty_profile(
+    replay_config: Vec<u8>,
+    provenance: GhosttyVisualProvenance,
+) -> Result<ResolvedGhosttyProfile> {
+    return restore_replay_config(replay_config, provenance, query_isolated_config);
+}
+
+fn restore_replay_config(
+    replay_config: Vec<u8>,
+    provenance: GhosttyVisualProvenance,
+    query: impl FnOnce(&[u8]) -> Result<Vec<u8>>,
+) -> Result<ResolvedGhosttyProfile> {
+    if provenance.replay_profile != GHOSTTY_REPLAY_PROFILE_NAME {
+        return Err(profile_error(format!(
+            "recorded Ghostty replay profile must be the canonical root artifact `{GHOSTTY_REPLAY_PROFILE_NAME}`"
+        )));
+    }
+    let actual_hash = blake3::hash(&replay_config).to_hex().to_string();
+    if actual_hash != provenance.replay_profile_hash {
+        return Err(profile_error(
+            "recorded Ghostty replay profile hash does not match provenance",
+        ));
+    }
+    let effective_config = query(&replay_config)?;
+    let actual_effective_hash = blake3::hash(&effective_config).to_hex().to_string();
+    if actual_effective_hash != provenance.effective_config_hash {
+        return Err(profile_error(
+            "recorded Ghostty effective configuration hash does not match provenance",
+        ));
+    }
     return Ok(ResolvedGhosttyProfile {
+        replay_config,
         effective_config,
-        provenance: GhosttyVisualProvenance {
-            source_config,
-            overrides,
-            effective_config: "ghostty-config.txt".to_owned(),
-            effective_config_hash,
-        },
+        provenance,
     });
 }
 
@@ -85,9 +152,31 @@ pub fn terminal_colors_for_profile(profile: &ResolvedGhosttyProfile) -> Result<T
     apply_config(&mut colors, &profile.effective_config)?;
     colors.source = format!(
         "ghostty_show_config_blake3:{}",
-        profile.provenance.effective_config_hash
+        profile.effective_config_hash()
     );
     return Ok(colors);
+}
+
+fn resolve_replay_config(
+    replay_config: Vec<u8>,
+    source_config: Option<ByteString>,
+    overrides: GhosttyVisualOverrides,
+    query: impl FnOnce(&[u8]) -> Result<Vec<u8>>,
+) -> Result<ResolvedGhosttyProfile> {
+    let effective_config = query(&replay_config)?;
+    let replay_profile_hash = blake3::hash(&replay_config).to_hex().to_string();
+    let effective_config_hash = blake3::hash(&effective_config).to_hex().to_string();
+    return Ok(ResolvedGhosttyProfile {
+        replay_config,
+        effective_config,
+        provenance: GhosttyVisualProvenance {
+            source_config,
+            overrides,
+            replay_profile: GHOSTTY_REPLAY_PROFILE_NAME.to_owned(),
+            replay_profile_hash,
+            effective_config_hash,
+        },
+    });
 }
 
 pub(crate) fn materialize_profile(root: &Path, config: &[u8]) -> Result<PathBuf> {
@@ -106,12 +195,15 @@ pub(crate) fn materialize_profile(root: &Path, config: &[u8]) -> Result<PathBuf>
 /// if a successful Ghostty configuration contains malformed explicit colors.
 pub fn resolved_terminal_colors() -> Result<TerminalColors> {
     let mut colors = builtin_terminal_colors()?;
-    let Ok(output) = Command::new("ghostty").arg("+show-config").output() else {
-        tracing::warn!("Ghostty is unavailable; recording pinned libghostty default colors");
-        return Ok(colors);
+    let output = match Command::new("ghostty").arg("+show-config").output() {
+        Ok(output) => output,
+        Err(error) => {
+            tracing::debug!(%error, "Ghostty is unavailable; recording pinned libghostty default colors");
+            return Ok(colors);
+        }
     };
     if !output.status.success() {
-        tracing::warn!(status = %output.status, "Ghostty config query failed; recording pinned libghostty default colors");
+        tracing::debug!(status = %output.status, "Ghostty config query failed; recording pinned libghostty default colors");
         return Ok(colors);
     }
     apply_config(&mut colors, &output.stdout)?;
@@ -354,6 +446,151 @@ mod tests {
         let text = String::from_utf8(config).expect("valid UTF-8 config");
         assert!(text.ends_with(
             "font-family = \"\"\nfont-family = \"Example Mono\"\nfont-size = 15.5\nwindow-padding-x = 8\nwindow-padding-y = 6\nforeground = #f0f0f0\nbackground = #010203\n"
+        ));
+    }
+
+    #[test]
+    fn replays_valid_config_without_reusing_non_idempotent_output_as_input() {
+        fn escape_backslashes(config: &[u8]) -> Result<Vec<u8>> {
+            let mut output = Vec::with_capacity(config.len().saturating_mul(2));
+            for byte in config {
+                output.push(*byte);
+                if *byte == b'\\' {
+                    output.push(*byte);
+                }
+            }
+            return Ok(output);
+        }
+
+        let replay_config = b"background = #000000\nkeybind = alt+f24=text:\\x1b\\x1b[24;2~\n";
+        let profile = resolve_replay_config(
+            replay_config.to_vec(),
+            None,
+            GhosttyVisualOverrides::default(),
+            escape_backslashes,
+        )
+        .expect("valid replay profile");
+        let second_generation =
+            escape_backslashes(&profile.effective_config).expect("second serialized generation");
+
+        assert_eq!(profile.replay_config, replay_config);
+        assert_ne!(profile.effective_config, profile.replay_config);
+        assert_ne!(second_generation, profile.effective_config);
+        assert_eq!(
+            profile.provenance.replay_profile,
+            GHOSTTY_REPLAY_PROFILE_NAME
+        );
+        assert_eq!(
+            profile.provenance.replay_profile_hash,
+            blake3::hash(replay_config).to_hex().to_string()
+        );
+        assert_eq!(
+            profile.provenance.effective_config_hash,
+            blake3::hash(&profile.effective_config).to_hex().to_string()
+        );
+
+        let restored = restore_replay_config(
+            profile.replay_config.clone(),
+            profile.provenance.clone(),
+            escape_backslashes,
+        )
+        .expect("restored replay profile");
+        assert_eq!(restored, profile);
+    }
+
+    #[test]
+    fn preserves_and_hashes_exact_effective_query_bytes() {
+        let replay_config = b"background = #000000\n".to_vec();
+        let effective_config =
+            b"config-file = /isolated/config\nconfig-default-files = false\nbackground = #000000"
+                .to_vec();
+        let profile = resolve_replay_config(
+            replay_config,
+            None,
+            GhosttyVisualOverrides::default(),
+            |_| return Ok(effective_config.clone()),
+        )
+        .expect("valid replay profile");
+
+        assert_eq!(profile.effective_config, effective_config);
+        assert_eq!(
+            profile.provenance.effective_config_hash,
+            blake3::hash(&effective_config).to_hex().to_string()
+        );
+    }
+
+    #[test]
+    fn constructed_profile_validation_binds_both_byte_sequences() {
+        let profile = resolve_replay_config(
+            b"background = #000000\n".to_vec(),
+            None,
+            GhosttyVisualOverrides::default(),
+            |config| {
+                let mut effective = config.to_vec();
+                effective.extend_from_slice(b"foreground = #ffffff\n");
+                return Ok(effective);
+            },
+        )
+        .expect("valid replay profile");
+        profile.validate().expect("valid byte commitments");
+
+        let mut tampered_replay = profile.clone();
+        tampered_replay.replay_config.push(b' ');
+        assert!(tampered_replay.validate().is_err());
+
+        let mut tampered_effective = profile.clone();
+        tampered_effective.effective_config.push(b' ');
+        assert!(tampered_effective.validate().is_err());
+
+        let mut relocated = profile;
+        relocated.provenance.replay_profile = "nested/profile.ghostty".to_owned();
+        assert!(relocated.validate().is_err());
+    }
+
+    #[test]
+    fn restore_rejects_tampered_replay_profile_before_querying_ghostty() {
+        let profile = resolve_replay_config(
+            b"background = #000000\n".to_vec(),
+            None,
+            GhosttyVisualOverrides::default(),
+            |config| return Ok(config.to_vec()),
+        )
+        .expect("valid replay profile");
+        let mut tampered = profile.replay_config;
+        tampered.extend_from_slice(b"foreground = #ffffff\n");
+
+        let error = restore_replay_config(tampered, profile.provenance, |_| -> Result<Vec<u8>> {
+            panic!("Ghostty query must not run for unauthenticated replay bytes");
+        })
+        .expect_err("tampered replay profile must fail");
+
+        assert!(matches!(
+            error,
+            Error::TerminalOperation { reason, .. }
+                if reason == "recorded Ghostty replay profile hash does not match provenance"
+        ));
+    }
+
+    #[test]
+    fn restore_rejects_changed_effective_ghostty_output() {
+        let replay_config = b"background = #000000\n".to_vec();
+        let profile = resolve_replay_config(
+            replay_config.clone(),
+            None,
+            GhosttyVisualOverrides::default(),
+            |_| return Ok(b"background = #000000\n".to_vec()),
+        )
+        .expect("valid replay profile");
+
+        let error = restore_replay_config(replay_config, profile.provenance, |_| {
+            return Ok(b"background = #ffffff\n".to_vec());
+        })
+        .expect_err("changed effective output must fail");
+
+        assert!(matches!(
+            error,
+            Error::TerminalOperation { reason, .. }
+                if reason == "recorded Ghostty effective configuration hash does not match provenance"
         ));
     }
 }

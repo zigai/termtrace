@@ -20,6 +20,7 @@ use crate::{
     analysis::{DiagnoseReport, DiagnosticCheck, diagnose},
     artifact::sync_directory,
     bundle::{BundleManifest, BundleProfile, create as create_bundle},
+    capability::{NATIVE_SCREENSHOT_CAPABILITY, require_capability},
     client::Terminal,
     control::{
         CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlErrorDetails, ControlRequest,
@@ -876,6 +877,9 @@ impl Driver {
                                     Some(path.clone()),
                                 );
                             })?;
+                            require_capability(NATIVE_SCREENSHOT_CAPABILITY).map_err(|error| {
+                                return driver_failure_from_error(error, Some(path.clone()));
+                            })?;
                             let (target, geometry_solver) = native_capture_target(path, *viewport)
                                 .map_err(|error| {
                                     return driver_failure_from_error(error, Some(path.clone()));
@@ -1078,11 +1082,22 @@ fn resolve_reference(reference: &Path) -> Result<PathBuf> {
 }
 
 fn driver_failure_from_error(error: Error, evidence: Option<PathBuf>) -> Box<DriverResult> {
-    let code = match &error {
-        Error::ControlRejected { code, .. } => code.clone(),
-        _ => "operation_failed".to_owned(),
+    let (code, message) = match &error {
+        Error::CapabilityBlocked {
+            id,
+            code,
+            detail,
+            remediation,
+        } => (
+            "capability_blocked".to_owned(),
+            format!(
+                "required capability `{id}` is blocked ({code}): {detail}; fix: {remediation}; inspect with `termtrace tooling doctor --require {id} --explain`"
+            ),
+        ),
+        Error::ControlRejected { code, .. } => (code.clone(), error.to_string()),
+        _ => ("operation_failed".to_owned(), error.to_string()),
     };
-    return driver_failure(&code, error.to_string(), evidence);
+    return driver_failure(&code, message, evidence);
 }
 
 fn driver_control_failure_from_error(
@@ -1211,6 +1226,30 @@ mod tests {
     use std::{collections::BTreeMap, io::Cursor};
 
     use super::*;
+
+    #[test]
+    fn blocked_capability_retains_remediation_in_driver_protocol() {
+        let result = driver_failure_from_error(
+            Error::CapabilityBlocked {
+                id: "native-screenshot".to_owned(),
+                code: "native_host_tools_missing".to_owned(),
+                detail: "missing host tools: ghostty".to_owned(),
+                remediation: "install Ghostty GTK".to_owned(),
+            },
+            None,
+        );
+        assert!(matches!(
+            result.as_ref(),
+            DriverResult::Error {
+                code,
+                message,
+                ..
+            } if code == "capability_blocked"
+                && message.contains("native_host_tools_missing")
+                && message.contains("fix: install Ghostty GTK")
+                && message.contains("--require native-screenshot --explain")
+        ));
+    }
 
     #[test]
     fn large_valid_frame_is_streamed_and_followed_by_another_request() {

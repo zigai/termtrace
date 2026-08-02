@@ -21,7 +21,9 @@ use crate::{
 /// Session manifest format identifier.
 pub const SESSION_MANIFEST_FORMAT: &str = "termtrace-session";
 /// Session manifest schema version.
-pub const SESSION_MANIFEST_VERSION: u32 = 9;
+pub const SESSION_MANIFEST_VERSION: u32 = 10;
+/// Canonical root-level Ghostty replay-profile artifact.
+pub const GHOSTTY_REPLAY_PROFILE_NAME: &str = "ghostty-profile.ghostty";
 /// Completion manifest format identifier.
 pub const SESSION_COMPLETION_FORMAT: &str = "termtrace-completion";
 /// Completion manifest schema version.
@@ -181,17 +183,17 @@ pub struct CaptureTarget {
 
 /// Provenance for automatic terminal geometry selection.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct GeometryProvenance {
     /// How the initial geometry was selected.
     pub source: GeometrySource,
     /// Intended native-capture viewport, when selected during recording.
     pub capture_target: Option<CaptureTarget>,
-    /// Effective Ghostty configuration hash used for a fitted measurement.
-    pub ghostty_config_hash: Option<String>,
 }
 
 /// Focused Termtrace overrides applied to a Ghostty visual profile.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct GhosttyVisualOverrides {
     /// Regular terminal font family.
     pub font_family: Option<String>,
@@ -221,14 +223,17 @@ impl GhosttyVisualOverrides {
 
 /// Persisted provenance for a canonical per-recording Ghostty profile.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct GhosttyVisualProvenance {
     /// Original custom configuration path bytes, when supplied.
     pub source_config: Option<ByteString>,
     /// Focused overrides applied after resolving the source configuration.
     pub overrides: GhosttyVisualOverrides,
-    /// Relative canonical effective-configuration artifact.
-    pub effective_config: String,
-    /// BLAKE3 of the canonical effective configuration.
+    /// Relative canonical replay-profile artifact.
+    pub replay_profile: String,
+    /// BLAKE3 of the exact replay-profile input bytes.
+    pub replay_profile_hash: String,
+    /// BLAKE3 of the exact effective configuration bytes freshly reported by Ghostty.
     pub effective_config_hash: String,
 }
 
@@ -813,6 +818,40 @@ fn validate_manifest(manifest: &SessionManifest) -> Result<()> {
             reason: "session manifest names an unsupported mutation journal path".to_owned(),
         });
     }
+    if let Some(profile) = &manifest.ghostty_visual {
+        if profile.replay_profile != GHOSTTY_REPLAY_PROFILE_NAME {
+            return Err(Error::InvalidReplay {
+                reason: format!(
+                    "session manifest Ghostty replay profile must be the canonical root artifact `{GHOSTTY_REPLAY_PROFILE_NAME}`"
+                ),
+            });
+        }
+        if !is_lowercase_blake3_hash(&profile.replay_profile_hash) {
+            return Err(Error::InvalidReplay {
+                reason: "session manifest Ghostty replay profile hash must be exactly 64 lowercase hexadecimal characters"
+                    .to_owned(),
+            });
+        }
+        if !is_lowercase_blake3_hash(&profile.effective_config_hash) {
+            return Err(Error::InvalidReplay {
+                reason: "session manifest Ghostty effective configuration hash must be exactly 64 lowercase hexadecimal characters"
+                    .to_owned(),
+            });
+        }
+    }
+    if manifest.geometry_provenance.source == GeometrySource::GhosttyFit {
+        if manifest.geometry_provenance.capture_target.is_none() {
+            return Err(Error::InvalidReplay {
+                reason: "Ghostty-fitted geometry requires a canonical capture target".to_owned(),
+            });
+        }
+        if manifest.ghostty_visual.is_none() {
+            return Err(Error::InvalidReplay {
+                reason: "Ghostty-fitted geometry requires recorded Ghostty profile provenance"
+                    .to_owned(),
+            });
+        }
+    }
     manifest.durability_policy.validate()?;
     if manifest.resource_limits.output_bytes == Some(0) {
         return Err(Error::InvalidReplay {
@@ -825,6 +864,13 @@ fn validate_manifest(manifest: &SessionManifest) -> Result<()> {
         };
     })?;
     return Ok(());
+}
+
+fn is_lowercase_blake3_hash(value: &str) -> bool {
+    return value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| return byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
 }
 
 fn validate_completion_format(completion: &SessionCompletion) -> Result<()> {
@@ -993,6 +1039,158 @@ mod tests {
         .expect("write completion");
         let log = EventLog::read(session.join("events.jsonl")).expect("read event log");
         return (temporary, log);
+    }
+
+    #[test]
+    fn ghostty_profile_provenance_uses_the_version_ten_split_hash_contract() {
+        assert_eq!(SESSION_MANIFEST_VERSION, 10);
+        assert_eq!(GHOSTTY_REPLAY_PROFILE_NAME, "ghostty-profile.ghostty");
+
+        let provenance = GhosttyVisualProvenance {
+            source_config: None,
+            overrides: GhosttyVisualOverrides::default(),
+            replay_profile: GHOSTTY_REPLAY_PROFILE_NAME.to_owned(),
+            replay_profile_hash: "replay-hash".to_owned(),
+            effective_config_hash: "effective-hash".to_owned(),
+        };
+        let encoded = serde_json::to_value(&provenance).expect("profile provenance JSON");
+        assert_eq!(
+            encoded.get("replay_profile"),
+            Some(&serde_json::json!(GHOSTTY_REPLAY_PROFILE_NAME))
+        );
+        assert_eq!(
+            encoded.get("replay_profile_hash"),
+            Some(&serde_json::json!("replay-hash"))
+        );
+        assert_eq!(
+            encoded.get("effective_config_hash"),
+            Some(&serde_json::json!("effective-hash"))
+        );
+        assert!(encoded.get("effective_config").is_none());
+
+        let legacy = serde_json::json!({
+            "source_config": null,
+            "overrides": GhosttyVisualOverrides::default(),
+            "effective_config": "ghostty-config.txt",
+            "effective_config_hash": "legacy-overloaded-hash"
+        });
+        assert!(serde_json::from_value::<GhosttyVisualProvenance>(legacy).is_err());
+
+        let misspelled_override = serde_json::json!({
+            "source_config": null,
+            "overrides": {
+                "font_family": null,
+                "font_size": null,
+                "padding_x": null,
+                "padding_y": null,
+                "foreground": null,
+                "backround": "#000000"
+            },
+            "replay_profile": GHOSTTY_REPLAY_PROFILE_NAME,
+            "replay_profile_hash": "a".repeat(64),
+            "effective_config_hash": "b".repeat(64)
+        });
+        assert!(serde_json::from_value::<GhosttyVisualProvenance>(misspelled_override).is_err());
+    }
+
+    #[test]
+    fn geometry_provenance_has_no_visual_hash_authority() {
+        let provenance = GeometryProvenance {
+            source: GeometrySource::GhosttyFit,
+            capture_target: Some(CaptureTarget {
+                width: 1280,
+                height: 720,
+            }),
+        };
+        let encoded = serde_json::to_value(&provenance).expect("geometry provenance JSON");
+        assert!(encoded.get("effective_config_hash").is_none());
+        assert!(encoded.get("ghostty_config_hash").is_none());
+
+        for obsolete_field in ["ghostty_config_hash", "effective_config_hash"] {
+            let mut legacy = serde_json::json!({
+                "source": "ghostty_fit",
+                "capture_target": null
+            });
+            legacy
+                .as_object_mut()
+                .expect("geometry object")
+                .insert(obsolete_field.to_owned(), serde_json::json!("legacy-hash"));
+            assert!(serde_json::from_value::<GeometryProvenance>(legacy).is_err());
+        }
+    }
+
+    #[test]
+    fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
+        let (temporary, _) = completed_fixture(Vec::new());
+        let session = temporary.path().join("session");
+        let mut manifest = read_manifest(&session).expect("session manifest");
+        manifest.ghostty_visual = Some(GhosttyVisualProvenance {
+            source_config: None,
+            overrides: GhosttyVisualOverrides::default(),
+            replay_profile: GHOSTTY_REPLAY_PROFILE_NAME.to_owned(),
+            replay_profile_hash: "a".repeat(64),
+            effective_config_hash: "0".repeat(64),
+        });
+        validate_manifest(&manifest).expect("canonical Ghostty profile contract");
+
+        let mut fitted = manifest.clone();
+        fitted.geometry_provenance = GeometryProvenance {
+            source: GeometrySource::GhosttyFit,
+            capture_target: Some(CaptureTarget {
+                width: 1280,
+                height: 720,
+            }),
+        };
+        validate_manifest(&fitted).expect("complete fitted-geometry provenance");
+
+        let mut missing_target = fitted.clone();
+        missing_target.geometry_provenance.capture_target = None;
+        assert!(matches!(
+            validate_manifest(&missing_target),
+            Err(Error::InvalidReplay { reason }) if reason.contains("capture target")
+        ));
+
+        let mut missing_profile = fitted;
+        missing_profile.ghostty_visual = None;
+        assert!(matches!(
+            validate_manifest(&missing_profile),
+            Err(Error::InvalidReplay { reason }) if reason.contains("profile provenance")
+        ));
+
+        let mut invalid_path = manifest.clone();
+        invalid_path
+            .ghostty_visual
+            .as_mut()
+            .expect("Ghostty provenance")
+            .replay_profile = "nested/ghostty-profile.ghostty".to_owned();
+        assert!(matches!(
+            validate_manifest(&invalid_path),
+            Err(Error::InvalidReplay { reason })
+                if reason.contains("canonical root artifact")
+        ));
+
+        let mut invalid_replay_hash = manifest.clone();
+        invalid_replay_hash
+            .ghostty_visual
+            .as_mut()
+            .expect("Ghostty provenance")
+            .replay_profile_hash = "A".repeat(64);
+        assert!(matches!(
+            validate_manifest(&invalid_replay_hash),
+            Err(Error::InvalidReplay { reason })
+                if reason.contains("replay profile hash")
+        ));
+
+        manifest
+            .ghostty_visual
+            .as_mut()
+            .expect("Ghostty provenance")
+            .effective_config_hash = "f".repeat(63);
+        assert!(matches!(
+            validate_manifest(&manifest),
+            Err(Error::InvalidReplay { reason })
+                if reason.contains("effective configuration hash")
+        ));
     }
 
     #[test]

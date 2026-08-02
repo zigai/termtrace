@@ -4,7 +4,7 @@ use std::{
     env,
     ffi::OsString,
     fs::{OpenOptions, Permissions},
-    io::Write as _,
+    io::{ErrorKind, Write as _},
     os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -360,15 +360,20 @@ fn run_ssh_verification(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| return receipt_error("launch OpenSSH verifier", error.to_string()))?;
-    child
+    let write_result = child
         .stdin
         .take()
         .ok_or_else(|| return receipt_error("verify evidence receipt", "verifier stdin missing"))?
-        .write_all(payload)
-        .map_err(|error| return receipt_error("write verifier payload", error.to_string()))?;
+        .write_all(payload);
     let status = child
         .wait()
         .map_err(|error| return receipt_error("wait for OpenSSH verifier", error.to_string()))?;
+    if let Err(error) = write_result {
+        if error.kind() == ErrorKind::BrokenPipe && !status.success() {
+            return Ok(false);
+        }
+        return Err(receipt_error("write verifier payload", error.to_string()));
+    }
     return Ok(status.success());
 }
 

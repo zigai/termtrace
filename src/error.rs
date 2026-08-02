@@ -301,6 +301,23 @@ pub enum Error {
         reason: String,
     },
 
+    /// A bounded runtime capability probe rejected an optional operation.
+    #[error("required capability `{id}` is blocked ({code}): {detail}")]
+    #[diagnostic(
+        code(termtrace::capability_blocked),
+        help("{remediation}; inspect with `termtrace tooling doctor --require {id} --explain`")
+    )]
+    CapabilityBlocked {
+        /// Stable capability identifier.
+        id: String,
+        /// Stable probe diagnostic code.
+        code: String,
+        /// Human-readable probe result.
+        detail: String,
+        /// Focused remediation copied from the capability report.
+        remediation: String,
+    },
+
     /// A required external runtime command failed.
     #[error("external command `{program}` failed: {reason}")]
     #[diagnostic(code(termtrace::external_command))]

@@ -193,6 +193,7 @@
   },
   "$id": "https://github.com/zigai/termtrace/schemas/visual-manifest.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Provenance and probe evidence for native visual artifacts.",
   "properties": {
     "capture_kind": {
@@ -204,6 +205,10 @@
       "format": "uint128",
       "minimum": 0,
       "type": "integer"
+    },
+    "effective_config_hash": {
+      "description": "BLAKE3 of the exact effective configuration captured as a manifest member.",
+      "type": "string"
     },
     "endpoint_event_byte_offset": {
       "description": "Inclusive endpoint byte offset within an output event.",
@@ -247,10 +252,6 @@
     "geometry_report": {
       "$ref": "#/$defs/TerminalGeometryReport",
       "description": "Parent-side Ghostty geometry preflight at the capture viewport."
-    },
-    "ghostty_config_hash": {
-      "description": "BLAKE3 of Ghostty's resolved configuration.",
-      "type": "string"
     },
     "ghostty_overrides": {
       "description": "Exact headless launch overrides.",
@@ -364,7 +365,7 @@
     "height",
     "capture_started_unix_ns",
     "replay_origin_unix_ns",
-    "ghostty_config_hash",
+    "effective_config_hash",
     "ghostty_version",
     "ghostty_overrides",
     "screenshot_probe",

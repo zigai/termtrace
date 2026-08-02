@@ -17,7 +17,8 @@ use crate::{
     observation::StatePoint,
     pagination::OutputPage,
     replay::{StateRecord, replay},
-    visual::{VideoMapEntry, VisualManifest},
+    session::read_manifest,
+    visual::{VideoMapEntry, VisualManifest, validate_visual_manifest_binding},
     vt_framer::{VtToken, frame_event_log},
 };
 
@@ -713,6 +714,8 @@ pub fn native_correlations(
     session_id: Uuid,
 ) -> Result<BTreeMap<u64, Vec<NativeCorrelation>>> {
     let mut correlations = BTreeMap::<u64, Vec<NativeCorrelation>>::new();
+    let session_manifest = read_manifest(session)?;
+    let canonical_log = EventLog::read(session.join(&session_manifest.event_log))?;
     for entry in fs_err::read_dir(session).map_err(|source| {
         return Error::Filesystem {
             path: session.to_path_buf(),
@@ -750,6 +753,18 @@ pub fn native_correlations(
         let Ok(manifest) = serde_json::from_slice::<VisualManifest>(&bytes) else {
             continue;
         };
+        if validate_visual_manifest_binding(
+            &manifest,
+            session_manifest
+                .ghostty_visual
+                .as_ref()
+                .map(|profile| return profile.effective_config_hash.as_str()),
+            &canonical_log.header.colors.source,
+        )
+        .is_err()
+        {
+            continue;
+        }
         if manifest.session_id != session_id {
             continue;
         }

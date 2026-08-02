@@ -16,7 +16,7 @@ pkg-fmt = "tgz"
 [dependencies]
 base64 = "0.22.1"
 blake3 = "1.8.2"
-clap = { version = "4.5.51", features = ["derive", "env"] }
+clap = { version = "4.5.51", features = ["derive", "env", "wrap_help"] }
 clap_complete = "4.5.61"
 crossterm = "0.28.1"
 fs-err = "3.2.0"

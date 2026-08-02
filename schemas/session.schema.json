@@ -315,6 +315,7 @@
       "type": "object"
     },
     "GeometryProvenance": {
+      "additionalProperties": false,
       "description": "Provenance for automatic terminal geometry selection.",
       "properties": {
         "capture_target": {
@@ -327,13 +328,6 @@
             }
           ],
           "description": "Intended native-capture viewport, when selected during recording."
-        },
-        "ghostty_config_hash": {
-          "description": "Effective Ghostty configuration hash used for a fitted measurement.",
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "source": {
           "$ref": "#/$defs/GeometrySource",
@@ -366,6 +360,7 @@
       ]
     },
     "GhosttyVisualOverrides": {
+      "additionalProperties": false,
       "description": "Focused Termtrace overrides applied to a Ghostty visual profile.",
       "properties": {
         "background": {
@@ -420,19 +415,24 @@
       "type": "object"
     },
     "GhosttyVisualProvenance": {
+      "additionalProperties": false,
       "description": "Persisted provenance for a canonical per-recording Ghostty profile.",
       "properties": {
-        "effective_config": {
-          "description": "Relative canonical effective-configuration artifact.",
-          "type": "string"
-        },
         "effective_config_hash": {
-          "description": "BLAKE3 of the canonical effective configuration.",
+          "description": "BLAKE3 of the exact effective configuration bytes freshly reported by Ghostty.",
           "type": "string"
         },
         "overrides": {
           "$ref": "#/$defs/GhosttyVisualOverrides",
           "description": "Focused overrides applied after resolving the source configuration."
+        },
+        "replay_profile": {
+          "description": "Relative canonical replay-profile artifact.",
+          "type": "string"
+        },
+        "replay_profile_hash": {
+          "description": "BLAKE3 of the exact replay-profile input bytes.",
+          "type": "string"
         },
         "source_config": {
           "anyOf": [
@@ -448,7 +448,8 @@
       },
       "required": [
         "overrides",
-        "effective_config",
+        "replay_profile",
+        "replay_profile_hash",
         "effective_config_hash"
       ],
       "type": "object"
@@ -831,7 +832,6 @@
       "$ref": "#/$defs/GeometryProvenance",
       "default": {
         "capture_target": null,
-        "ghostty_config_hash": null,
         "source": "manual"
       },
       "description": "Selection source and optional capture target for the initial geometry."
