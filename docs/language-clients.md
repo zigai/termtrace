@@ -103,6 +103,9 @@ scripts/generate-client-protocol.sh
 bun run --cwd packages/typescript build
 ```
 
+Schema generation replaces existing files with known generated schema names and
+leaves unrelated files in the destination untouched.
+
 Generation pins `datamodel-code-generator`, `json-schema-to-typescript`, and Ajv versions. CI regenerates both packages and rejects any diff. Shared valid and invalid responses in `fixtures/protocol/driver-responses.json` are exercised by both language test suites.
 
 The generated Python request model uses a dictionary representation only for the Rust `NamedKey` union because that union mixes scalar strings with untagged object variants, which `msgspec` cannot decode as one typed union. The Rust driver still performs exact request validation, including the `NamedKey` variants.

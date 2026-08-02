@@ -143,7 +143,10 @@ Public JSON Schemas are checked into `schemas/` and generated from Rust types:
 termtrace tooling schemas --out schemas
 ```
 
-Tests require generated output to match the checked-in files and validate fixtures against the schemas. Schema validity describes structure, not trust or safety.
+Generation replaces existing files with known generated schema names and leaves
+unrelated files untouched. Tests require generated output to match the checked-in
+files and validate fixtures against the schemas. Schema validity describes
+structure, not trust or safety.
 
 ## Export and handoff
 
