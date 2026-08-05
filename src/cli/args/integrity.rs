@@ -1,13 +1,13 @@
 use super::*;
 
 #[derive(Debug, Args)]
-pub(super) struct IntegrityArgs {
+pub(in crate::cli) struct IntegrityArgs {
     #[command(subcommand)]
-    pub(super) command: IntegritySubcommand,
+    pub(in crate::cli) command: IntegritySubcommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub(super) enum IntegritySubcommand {
+pub(in crate::cli) enum IntegritySubcommand {
     /// Verify a completed session's structure and evidence bindings offline.
     Verify(VerifyArgs),
     /// Create a detached OpenSSH receipt for verified evidence roots.
@@ -17,7 +17,7 @@ pub(super) enum IntegritySubcommand {
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
-pub(super) enum VerifyLevelArg {
+pub(in crate::cli) enum VerifyLevelArg {
     Structure,
     Content,
     DurabilityRecord,
@@ -36,40 +36,40 @@ impl From<VerifyLevelArg> for VerificationLevel {
 }
 
 #[derive(Debug, Args)]
-pub(super) struct VerifyArgs {
+pub(in crate::cli) struct VerifyArgs {
     /// Completed canonical session directory.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// Verification depth.
     #[arg(long, value_enum, default_value_t = VerifyLevelArg::Content)]
-    pub(super) level: VerifyLevelArg,
+    pub(in crate::cli) level: VerifyLevelArg,
     /// Emit the stable machine-readable report.
     #[arg(long)]
-    pub(super) json: bool,
+    pub(in crate::cli) json: bool,
     /// OpenSSH allowed-signers file used to establish signer trust.
     #[arg(long)]
-    pub(super) allowed_signers: Option<PathBuf>,
+    pub(in crate::cli) allowed_signers: Option<PathBuf>,
     #[command(flatten)]
-    pub(super) page: PageArgs,
+    pub(in crate::cli) page: PageArgs,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct SignArgs {
+pub(in crate::cli) struct SignArgs {
     /// Completed canonical session directory.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// OpenSSH private key, or public key backed by an available signing agent.
     #[arg(long)]
-    pub(super) key: PathBuf,
+    pub(in crate::cli) key: PathBuf,
     /// Identity that an allowed-signers policy will bind to this key.
     #[arg(long)]
-    pub(super) signer: String,
+    pub(in crate::cli) signer: String,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct RecoverArgs {
+pub(in crate::cli) struct RecoverArgs {
     /// Damaged or truncated source event log.
     #[arg(long)]
-    pub(super) event_log: PathBuf,
+    pub(in crate::cli) event_log: PathBuf,
     /// New recovered event-log path in an owner-only directory.
     #[arg(long)]
-    pub(super) out: PathBuf,
+    pub(in crate::cli) out: PathBuf,
 }

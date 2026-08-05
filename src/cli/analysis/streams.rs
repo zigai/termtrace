@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn run_output(arguments: OutputArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_output(arguments: OutputArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
     if arguments.follow {
         if arguments.manifest.is_some() {
@@ -202,7 +202,7 @@ fn follow_output(
     }
 }
 
-pub(super) fn run_events(arguments: EventsArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_events(arguments: EventsArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
     if arguments.follow {
         if arguments.range.from_marker.is_some()

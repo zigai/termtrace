@@ -1,13 +1,13 @@
 use super::*;
 
 #[derive(Debug, Args)]
-pub(super) struct AnalyzeArgs {
+pub(in crate::cli) struct AnalyzeArgs {
     #[command(subcommand)]
-    pub(super) command: AnalyzeSubcommand,
+    pub(in crate::cli) command: AnalyzeSubcommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub(super) enum AnalyzeSubcommand {
+pub(in crate::cli) enum AnalyzeSubcommand {
     /// Replay canonical events and build semantic state artifacts.
     Index(IndexArgs),
     /// Reconstruct one semantic state as JSON or text.
@@ -33,7 +33,7 @@ pub(super) enum AnalyzeSubcommand {
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
-pub(super) enum InspectFormat {
+pub(in crate::cli) enum InspectFormat {
     Json,
     JsonCompact,
     Text,
@@ -45,38 +45,38 @@ pub(super) enum InspectFormat {
         .multiple(false)
         .args(["state", "state_hash", "event_seq", "monotonic_ns"])
 ))]
-pub(super) struct InspectArgs {
+pub(in crate::cli) struct InspectArgs {
     /// Source session directory.
     #[arg(long)]
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// Exact semantic state identifier.
     #[arg(long)]
-    pub(super) state: Option<u64>,
+    pub(in crate::cli) state: Option<u64>,
     /// Exact content-addressed semantic state hash.
     #[arg(long, value_parser = parse_state_hash)]
-    pub(super) state_hash: Option<String>,
+    pub(in crate::cli) state_hash: Option<String>,
     /// Latest state at or before this event sequence.
     #[arg(long)]
-    pub(super) event_seq: Option<u64>,
+    pub(in crate::cli) event_seq: Option<u64>,
     /// Latest state at or before this monotonic nanosecond timestamp.
     #[arg(long)]
-    pub(super) monotonic_ns: Option<u64>,
+    pub(in crate::cli) monotonic_ns: Option<u64>,
     /// Output representation.
     #[arg(long, value_enum, default_value_t = InspectFormat::Json)]
-    pub(super) format: InspectFormat,
+    pub(in crate::cli) format: InspectFormat,
     /// Restrict output to one zero-based row; JSON includes complete cell data.
     #[arg(long)]
-    pub(super) row: Option<u16>,
+    pub(in crate::cli) row: Option<u16>,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct CacheArgs {
+pub(in crate::cli) struct CacheArgs {
     #[command(subcommand)]
-    pub(super) command: CacheCommand,
+    pub(in crate::cli) command: CacheCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub(super) enum CacheCommand {
+pub(in crate::cli) enum CacheCommand {
     /// Report retained compressed checkpoint count and byte limits.
     Status(SessionArgs),
     /// Delete disposable checkpoints while preserving canonical evidence.
@@ -84,7 +84,7 @@ pub(super) enum CacheCommand {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub(super) enum ShowFormat {
+pub(in crate::cli) enum ShowFormat {
     Text,
     Json,
     JsonCompact,
@@ -96,7 +96,7 @@ pub(super) enum ShowFormat {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub(super) enum ShowRenderer {
+pub(in crate::cli) enum ShowRenderer {
     Semantic,
     Native,
 }
@@ -113,101 +113,101 @@ pub(super) enum ShowRenderer {
         .multiple(false)
         .args(["state", "state_hash", "event_seq", "at", "at_marker"])
 ))]
-pub(super) struct ShowArgs {
+pub(in crate::cli) struct ShowArgs {
     /// Live session name or canonical completed session path.
-    pub(super) session: Option<PathBuf>,
+    pub(in crate::cli) session: Option<PathBuf>,
     /// ANSI/VT byte stream path, or `-` for standard input.
     #[arg(long)]
-    pub(super) input: Option<PathBuf>,
+    pub(in crate::cli) input: Option<PathBuf>,
     /// Promote an ANSI input stream into a new canonical import session.
     #[arg(long)]
-    pub(super) record_out: Option<PathBuf>,
+    pub(in crate::cli) record_out: Option<PathBuf>,
     /// ANSI stream columns.
     #[arg(long, default_value_t = 160)]
-    pub(super) cols: u16,
+    pub(in crate::cli) cols: u16,
     /// ANSI stream rows.
     #[arg(long, default_value_t = 45)]
-    pub(super) rows: u16,
+    pub(in crate::cli) rows: u16,
     /// One-off command to record to completion, following `--`.
     #[arg(last = true, num_args = 1..)]
-    pub(super) command: Vec<OsString>,
+    pub(in crate::cli) command: Vec<OsString>,
     /// New canonical evidence path for a one-off command.
     #[arg(long)]
-    pub(super) out: Option<PathBuf>,
+    pub(in crate::cli) out: Option<PathBuf>,
     /// Remove auto-allocated one-off evidence only after successful output.
     #[arg(long, conflicts_with = "out")]
-    pub(super) discard_evidence: bool,
+    pub(in crate::cli) discard_evidence: bool,
     /// Exact semantic state identifier.
     #[arg(long)]
-    pub(super) state: Option<u64>,
+    pub(in crate::cli) state: Option<u64>,
     /// Exact content-addressed semantic state hash.
     #[arg(long, value_parser = parse_state_hash)]
-    pub(super) state_hash: Option<String>,
+    pub(in crate::cli) state_hash: Option<String>,
     /// Latest state at or before this event sequence.
     #[arg(long)]
-    pub(super) event_seq: Option<u64>,
+    pub(in crate::cli) event_seq: Option<u64>,
     /// Latest state at or before this session offset.
     #[arg(long, value_parser = parse_time_offset_ns)]
-    pub(super) at: Option<u64>,
+    pub(in crate::cli) at: Option<u64>,
     /// State at a unique marker label.
     #[arg(long)]
-    pub(super) at_marker: Option<String>,
+    pub(in crate::cli) at_marker: Option<String>,
     /// Permit an explicitly selected synchronized-output hidden state.
     #[arg(long)]
-    pub(super) include_hidden: bool,
+    pub(in crate::cli) include_hidden: bool,
     /// Require an unchanged live presented state for this duration.
     #[arg(long, value_parser = parse_pace_duration, default_value = "0ms")]
-    pub(super) stable_for: Duration,
+    pub(in crate::cli) stable_for: Duration,
     /// Server-side deadline for a live stability request.
     #[arg(long, default_value_t = 30_000)]
-    pub(super) timeout_ms: u64,
+    pub(in crate::cli) timeout_ms: u64,
     /// Write a concise provenance header to standard error.
     #[arg(long)]
-    pub(super) metadata: bool,
+    pub(in crate::cli) metadata: bool,
     /// Renderer used by image formats; native never falls back to semantic.
     #[arg(long, value_enum, default_value_t = ShowRenderer::Semantic)]
-    pub(super) renderer: ShowRenderer,
+    pub(in crate::cli) renderer: ShowRenderer,
     /// Optional no-replace sidecar manifest for binary image output.
     #[arg(long)]
-    pub(super) manifest: Option<PathBuf>,
+    pub(in crate::cli) manifest: Option<PathBuf>,
     /// Explicitly observe an integrity-checked incomplete event prefix offline.
     #[arg(long)]
-    pub(super) recover_prefix: bool,
+    pub(in crate::cli) recover_prefix: bool,
     /// For one-off commands, capture when exact presented text appears, then stop.
     #[arg(long, conflicts_with = "wait_regex")]
-    pub(super) wait: Option<String>,
+    pub(in crate::cli) wait: Option<String>,
     /// For one-off commands, capture when a bounded presented regex matches, then stop.
     #[arg(long, conflicts_with = "wait")]
-    pub(super) wait_regex: Option<String>,
+    pub(in crate::cli) wait_regex: Option<String>,
     /// Explicitly leave a one-off recorder running and return its canonical path.
     #[arg(long)]
-    pub(super) detach: bool,
+    pub(in crate::cli) detach: bool,
     /// Output representation.
     #[arg(long, value_enum, default_value_t = ShowFormat::Text)]
-    pub(super) format: ShowFormat,
+    pub(in crate::cli) format: ShowFormat,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct TimelineArgs {
+pub(in crate::cli) struct TimelineArgs {
     /// Completed session name or canonical path.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// Include synchronized-output states that were not presentation eligible.
     #[arg(long)]
-    pub(super) all_states: bool,
+    pub(in crate::cli) all_states: bool,
     /// Include lossless framed VT controls and printable runs.
     #[arg(long)]
-    pub(super) controls: bool,
+    pub(in crate::cli) controls: bool,
     /// Emit one stable JSON object per line.
     #[arg(long)]
-    pub(super) jsonl: bool,
+    pub(in crate::cli) jsonl: bool,
     #[command(flatten)]
-    pub(super) page: PageArgs,
+    pub(in crate::cli) page: PageArgs,
     #[command(flatten)]
-    pub(super) range: TimeRangeArgs,
+    pub(in crate::cli) range: TimeRangeArgs,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
-pub(super) enum DiffFormat {
+pub(in crate::cli) enum DiffFormat {
     Text,
     Json,
     JsonCompact,
@@ -231,49 +231,49 @@ pub(super) enum DiffFormat {
 #[command(
     override_usage = "termtrace analyze diff [OPTIONS] <SESSION> <FROM_SELECTION> <TO_SELECTION>"
 )]
-pub(super) struct DiffArgs {
+pub(in crate::cli) struct DiffArgs {
     /// Completed session name or canonical path.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// Earlier exact semantic state identifier.
     #[arg(long, help_heading = "From selection")]
-    pub(super) from_state: Option<u64>,
+    pub(in crate::cli) from_state: Option<u64>,
     /// Earlier exact content-addressed semantic state hash.
     #[arg(long, value_parser = parse_state_hash, help_heading = "From selection")]
-    pub(super) from_state_hash: Option<String>,
+    pub(in crate::cli) from_state_hash: Option<String>,
     /// Earlier state at or before this event sequence.
     #[arg(long, help_heading = "From selection")]
-    pub(super) from_event_seq: Option<u64>,
+    pub(in crate::cli) from_event_seq: Option<u64>,
     /// Earlier state at or before this session offset.
     #[arg(long, value_parser = parse_time_offset_ns, help_heading = "From selection")]
-    pub(super) from_at: Option<u64>,
+    pub(in crate::cli) from_at: Option<u64>,
     /// Earlier state at a unique marker.
     #[arg(long, help_heading = "From selection")]
-    pub(super) from_marker: Option<String>,
+    pub(in crate::cli) from_marker: Option<String>,
     /// Later exact semantic state identifier.
     #[arg(long, help_heading = "To selection")]
-    pub(super) to_state: Option<u64>,
+    pub(in crate::cli) to_state: Option<u64>,
     /// Later exact content-addressed semantic state hash.
     #[arg(long, value_parser = parse_state_hash, help_heading = "To selection")]
-    pub(super) to_state_hash: Option<String>,
+    pub(in crate::cli) to_state_hash: Option<String>,
     /// Later state at or before this event sequence.
     #[arg(long, help_heading = "To selection")]
-    pub(super) to_event_seq: Option<u64>,
+    pub(in crate::cli) to_event_seq: Option<u64>,
     /// Later state at or before this session offset.
     #[arg(long, value_parser = parse_time_offset_ns, help_heading = "To selection")]
-    pub(super) to_at: Option<u64>,
+    pub(in crate::cli) to_at: Option<u64>,
     /// Later state at a unique marker.
     #[arg(long, help_heading = "To selection")]
-    pub(super) to_marker: Option<String>,
+    pub(in crate::cli) to_marker: Option<String>,
     /// Fail when any semantic or presentation value changed.
     #[arg(long)]
-    pub(super) expect_no_change: bool,
+    pub(in crate::cli) expect_no_change: bool,
     /// Output representation.
     #[arg(long, value_enum, default_value_t = DiffFormat::Text)]
-    pub(super) format: DiffFormat,
+    pub(in crate::cli) format: DiffFormat,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
-pub(super) enum ExplainFormat {
+pub(in crate::cli) enum ExplainFormat {
     Text,
     Json,
     JsonCompact,
@@ -287,76 +287,76 @@ pub(super) enum ExplainFormat {
         .args(["state", "state_hash", "event_seq", "at", "marker"])
 ))]
 #[command(override_usage = "termtrace analyze explain [OPTIONS] <SESSION> <TARGET_SELECTION>")]
-pub(super) struct ExplainArgs {
+pub(in crate::cli) struct ExplainArgs {
     /// Completed session name or canonical path.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// Exact semantic state identifier.
     #[arg(long, help_heading = "Target selection")]
-    pub(super) state: Option<u64>,
+    pub(in crate::cli) state: Option<u64>,
     /// Exact content-addressed semantic state hash.
     #[arg(long, value_parser = parse_state_hash, help_heading = "Target selection")]
-    pub(super) state_hash: Option<String>,
+    pub(in crate::cli) state_hash: Option<String>,
     /// Latest state at or before this event sequence.
     #[arg(long, help_heading = "Target selection")]
-    pub(super) event_seq: Option<u64>,
+    pub(in crate::cli) event_seq: Option<u64>,
     /// Latest state at or before this session offset.
     #[arg(long, value_parser = parse_time_offset_ns, help_heading = "Target selection")]
-    pub(super) at: Option<u64>,
+    pub(in crate::cli) at: Option<u64>,
     /// State at a unique marker.
     #[arg(long, help_heading = "Target selection")]
-    pub(super) marker: Option<String>,
+    pub(in crate::cli) marker: Option<String>,
     /// Canonical event radius before and after the target.
     #[arg(long, default_value_t = 8)]
-    pub(super) context: u64,
+    pub(in crate::cli) context: u64,
     /// Output representation.
     #[arg(long, value_enum, default_value_t = ExplainFormat::Text)]
-    pub(super) format: ExplainFormat,
+    pub(in crate::cli) format: ExplainFormat,
     #[command(flatten)]
-    pub(super) page: PageArgs,
+    pub(in crate::cli) page: PageArgs,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct DiagnoseArgs {
+pub(in crate::cli) struct DiagnoseArgs {
     /// Completed session name or canonical path.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// Comma-separated detector groups; omit to run every detector.
     #[arg(long, value_delimiter = ',', value_parser = parse_diagnostic_check)]
-    pub(super) check: Vec<DiagnosticCheck>,
+    pub(in crate::cli) check: Vec<DiagnosticCheck>,
     /// Minimum changed-cell percentage for a broad repaint.
     #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u8).range(1..=100))]
-    pub(super) broad_change_percent: u8,
+    pub(in crate::cli) broad_change_percent: u8,
     /// Emit one stable structured report.
     #[arg(long)]
-    pub(super) json: bool,
+    pub(in crate::cli) json: bool,
     /// Exit unsuccessfully when at least one finding is emitted.
     #[arg(long)]
-    pub(super) fail_on_finding: bool,
+    pub(in crate::cli) fail_on_finding: bool,
     #[command(flatten)]
-    pub(super) page: PageArgs,
+    pub(in crate::cli) page: PageArgs,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct ReviewArgs {
+pub(in crate::cli) struct ReviewArgs {
     /// Completed canonical session or registered name.
-    pub(super) session: Option<PathBuf>,
+    pub(in crate::cli) session: Option<PathBuf>,
     /// Start at the first semantic state at or after this unique marker.
     #[arg(long)]
-    pub(super) around_marker: Option<String>,
+    pub(in crate::cli) around_marker: Option<String>,
     /// Exact semantic viewport substring to find and navigate with n/N.
     #[arg(long)]
-    pub(super) search: Option<String>,
+    pub(in crate::cli) search: Option<String>,
     /// Export one exact semantic state to a new owner-only directory.
     #[arg(long, requires = "state")]
-    pub(super) export_state: Option<PathBuf>,
+    pub(in crate::cli) export_state: Option<PathBuf>,
     /// Exact state identifier for `--export-state`.
     #[arg(long, requires = "export_state")]
-    pub(super) state: Option<u64>,
+    pub(in crate::cli) state: Option<u64>,
     /// Print scriptable reviewer commands and safety policy.
     #[arg(long, conflicts_with = "json")]
-    pub(super) commands: bool,
+    pub(in crate::cli) commands: bool,
     /// Print a validated read-only source summary without opening a TUI.
     #[arg(long, conflicts_with = "commands")]
-    pub(super) json: bool,
+    pub(in crate::cli) json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -365,148 +365,148 @@ pub(super) struct ReviewArgs {
         .required(true)
         .args(["raw", "strip_controls"])
 ))]
-pub(super) struct OutputArgs {
+pub(in crate::cli) struct OutputArgs {
     /// Completed session name or canonical path.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// Write exact concatenated child PTY bytes without decoding.
     #[arg(long)]
-    pub(super) raw: bool,
+    pub(in crate::cli) raw: bool,
     /// Emit a named lossy projection retaining printable bytes and line controls.
     #[arg(long)]
-    pub(super) strip_controls: bool,
+    pub(in crate::cli) strip_controls: bool,
     /// New no-replace JSON report path; unavailable while following.
     #[arg(long)]
-    pub(super) manifest: Option<PathBuf>,
+    pub(in crate::cli) manifest: Option<PathBuf>,
     /// Continue emitting newly durable output until the session completes.
     #[arg(long)]
-    pub(super) follow: bool,
+    pub(in crate::cli) follow: bool,
     /// Inclusive canonical event sequence.
     #[arg(long, conflicts_with_all = ["start_monotonic_ns", "from_marker"])]
-    pub(super) from_event_seq: Option<u64>,
+    pub(in crate::cli) from_event_seq: Option<u64>,
     /// Exclusive canonical event sequence.
     #[arg(long, conflicts_with_all = ["end_monotonic_ns", "to_marker"])]
-    pub(super) to_event_seq: Option<u64>,
+    pub(in crate::cli) to_event_seq: Option<u64>,
     #[command(flatten)]
-    pub(super) range: TimeRangeArgs,
+    pub(in crate::cli) range: TimeRangeArgs,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct EventsArgs {
+pub(in crate::cli) struct EventsArgs {
     /// Completed session name or canonical path.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// Comma-separated canonical event variant names.
     #[arg(long = "type", value_delimiter = ',', value_parser = parse_event_type)]
-    pub(super) event_types: Vec<String>,
+    pub(in crate::cli) event_types: Vec<String>,
     /// Elide exact byte payloads while retaining their lengths and hashes.
     #[arg(long)]
-    pub(super) metadata_only: bool,
+    pub(in crate::cli) metadata_only: bool,
     /// Continue streaming newly durable records until completion.
     #[arg(long)]
-    pub(super) follow: bool,
+    pub(in crate::cli) follow: bool,
     /// Inclusive canonical event sequence.
     #[arg(long, conflicts_with_all = ["start_monotonic_ns", "from_marker"])]
-    pub(super) from_event_seq: Option<u64>,
+    pub(in crate::cli) from_event_seq: Option<u64>,
     /// Exclusive canonical event sequence.
     #[arg(long, conflicts_with_all = ["end_monotonic_ns", "to_marker"])]
-    pub(super) to_event_seq: Option<u64>,
+    pub(in crate::cli) to_event_seq: Option<u64>,
     #[command(flatten)]
-    pub(super) page: PageArgs,
+    pub(in crate::cli) page: PageArgs,
     #[command(flatten)]
-    pub(super) range: TimeRangeArgs,
+    pub(in crate::cli) range: TimeRangeArgs,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct PageArgs {
+pub(in crate::cli) struct PageArgs {
     /// Maximum matching records returned by default.
     #[arg(long, default_value_t = 100, value_parser = parse_page_limit)]
-    pub(super) limit: usize,
+    pub(in crate::cli) limit: usize,
     /// Zero-based matching-record offset for deterministic pagination.
     #[arg(long, default_value_t = 0)]
-    pub(super) offset: usize,
+    pub(in crate::cli) offset: usize,
     /// Return every matching record; explicit potentially-large output.
     #[arg(long)]
-    pub(super) all: bool,
+    pub(in crate::cli) all: bool,
 }
 
 #[derive(Clone, Debug, Default, Args)]
-pub(super) struct TimeRangeArgs {
+pub(in crate::cli) struct TimeRangeArgs {
     /// Inclusive source offset, such as `90s`, `2m`, or `00:01:30.5`.
     #[arg(long = "from", value_name = "OFFSET", value_parser = parse_time_offset_ns, conflicts_with = "from_marker")]
-    pub(super) start_monotonic_ns: Option<u64>,
+    pub(in crate::cli) start_monotonic_ns: Option<u64>,
     /// Inclusive source marker; the label must occur exactly once.
     #[arg(long, value_name = "LABEL", conflicts_with = "start_monotonic_ns")]
-    pub(super) from_marker: Option<String>,
+    pub(in crate::cli) from_marker: Option<String>,
     /// Exclusive source offset, in the same format as `--from`.
     #[arg(long = "to", value_name = "OFFSET", value_parser = parse_time_offset_ns, conflicts_with = "to_marker")]
-    pub(super) end_monotonic_ns: Option<u64>,
+    pub(in crate::cli) end_monotonic_ns: Option<u64>,
     /// Exclusive source marker; the label must occur exactly once.
     #[arg(long, value_name = "LABEL", conflicts_with = "end_monotonic_ns")]
-    pub(super) to_marker: Option<String>,
+    pub(in crate::cli) to_marker: Option<String>,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct IndexArgs {
+pub(in crate::cli) struct IndexArgs {
     /// Source session directory.
     #[arg(long)]
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// Index a hash-addressed prefix when the recording is still active.
     #[arg(long)]
-    pub(super) live_snapshot: bool,
+    pub(in crate::cli) live_snapshot: bool,
     /// Retain only states eligible for native terminal presentation.
     #[arg(long)]
-    pub(super) presented_only: bool,
+    pub(in crate::cli) presented_only: bool,
     #[command(flatten)]
-    pub(super) range: TimeRangeArgs,
+    pub(in crate::cli) range: TimeRangeArgs,
 }
 
 #[derive(Debug, Args)]
 #[command(
     override_usage = "termtrace playback [OPTIONS] --session <SESSION>\n       --timing-file <TIMING_FILE> --error-file <ERROR_FILE>\n       --geometry-file <GEOMETRY_FILE> --ready-file <READY_FILE>"
 )]
-pub(super) struct PlaybackArgs {
+pub(in crate::cli) struct PlaybackArgs {
     /// Source session directory.
     #[arg(long)]
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// Playback clock handshake path.
     #[arg(long)]
-    pub(super) timing_file: PathBuf,
+    pub(in crate::cli) timing_file: PathBuf,
     /// Structured failure handshake path.
     #[arg(long)]
-    pub(super) error_file: PathBuf,
+    pub(in crate::cli) error_file: PathBuf,
     /// Playback-terminal geometry handshake path.
     #[arg(long)]
-    pub(super) geometry_file: PathBuf,
+    pub(in crate::cli) geometry_file: PathBuf,
     /// Final-frame readiness path.
     #[arg(long)]
-    pub(super) ready_file: PathBuf,
+    pub(in crate::cli) ready_file: PathBuf,
     /// Delay before event time zero.
     #[arg(long)]
-    pub(super) start_delay_ms: u64,
+    pub(in crate::cli) start_delay_ms: u64,
     /// Final-frame hold duration.
     #[arg(long)]
-    pub(super) final_hold_ms: u64,
+    pub(in crate::cli) final_hold_ms: u64,
     /// Inclusive source offset used by ranged native capture.
     #[arg(long)]
-    pub(super) from_ns: Option<u64>,
+    pub(in crate::cli) from_ns: Option<u64>,
     /// Exclusive source offset used by ranged native capture.
     #[arg(long)]
-    pub(super) to_ns: Option<u64>,
+    pub(in crate::cli) to_ns: Option<u64>,
     /// Exact endpoint event used by native single-state capture.
     #[arg(long)]
-    pub(super) endpoint_event_seq: Option<u64>,
+    pub(in crate::cli) endpoint_event_seq: Option<u64>,
     /// Inclusive byte offset within the endpoint output event.
     #[arg(long)]
-    pub(super) endpoint_event_byte_offset: Option<u64>,
+    pub(in crate::cli) endpoint_event_byte_offset: Option<u64>,
     /// Disable source-time sleeps while replaying an exact endpoint.
     #[arg(long)]
-    pub(super) instant: bool,
+    pub(in crate::cli) instant: bool,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct MarkersArgs {
+pub(in crate::cli) struct MarkersArgs {
     /// Completed canonical session.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// Nominal frame rate used only for source-time mapping.
     #[arg(long, default_value_t = 24)]
-    pub(super) fps: u16,
+    pub(in crate::cli) fps: u16,
 }

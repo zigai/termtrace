@@ -1,13 +1,13 @@
 use super::*;
 
 #[derive(Debug, Args)]
-pub(super) struct RegistryArgs {
+pub(in crate::cli) struct RegistryArgs {
     #[command(subcommand)]
-    pub(super) command: RegistrySubcommand,
+    pub(in crate::cli) command: RegistrySubcommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub(super) enum RegistrySubcommand {
+pub(in crate::cli) enum RegistrySubcommand {
     /// Register a friendly name for an existing canonical session.
     Register(RegisterArgs),
     /// Resolve a friendly name to its canonical session directory.
@@ -21,48 +21,48 @@ pub(super) enum RegistrySubcommand {
 }
 
 #[derive(Debug, Args)]
-pub(super) struct RegisterArgs {
+pub(in crate::cli) struct RegisterArgs {
     /// Friendly session name.
-    pub(super) name: String,
+    pub(in crate::cli) name: String,
     /// Existing owner-only canonical session directory.
     #[arg(long)]
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct ResolveArgs {
+pub(in crate::cli) struct ResolveArgs {
     /// Friendly session name.
-    pub(super) name: String,
+    pub(in crate::cli) name: String,
     /// Emit the complete registry entry as JSON.
     #[arg(long)]
-    pub(super) json: bool,
+    pub(in crate::cli) json: bool,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct ListArgs {
+pub(in crate::cli) struct ListArgs {
     /// Include completed, incomplete, stale, and unhealthy entries.
     #[arg(long)]
-    pub(super) all: bool,
+    pub(in crate::cli) all: bool,
     /// Emit the complete listing as JSON.
     #[arg(long)]
-    pub(super) json: bool,
+    pub(in crate::cli) json: bool,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct RemoveArgs {
+pub(in crate::cli) struct RemoveArgs {
     /// Friendly session name to unbind.
-    pub(super) name: String,
+    pub(in crate::cli) name: String,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct GcArgs {
+pub(in crate::cli) struct GcArgs {
     /// Consider only recordings completed at least this many days ago.
     #[arg(long, default_value_t = 30)]
-    pub(super) older_than_days: u64,
+    pub(in crate::cli) older_than_days: u64,
     /// Always retain this many newest completed unregistered recordings.
     #[arg(long, default_value_t = 20)]
-    pub(super) keep_latest: u64,
+    pub(in crate::cli) keep_latest: u64,
     /// Apply the reported deletions; omission is a read-only dry run.
     #[arg(long)]
-    pub(super) apply: bool,
+    pub(in crate::cli) apply: bool,
 }

@@ -1,11 +1,11 @@
 use super::*;
 
-pub(super) fn run_markers(arguments: MarkersArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_markers(arguments: MarkersArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
     return write_json_line(&list_markers(session, arguments.fps)?);
 }
 
-pub(super) fn run_review(arguments: ReviewArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_review(arguments: ReviewArgs) -> Result<ExitCode> {
     if arguments.commands {
         return write_json_line(&ReviewerCapabilities::default());
     }
@@ -33,7 +33,7 @@ pub(super) fn run_review(arguments: ReviewArgs) -> Result<ExitCode> {
     return Ok(ExitCode::SUCCESS);
 }
 
-pub(super) fn run_index(arguments: IndexArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_index(arguments: IndexArgs) -> Result<ExitCode> {
     if !arguments.live_snapshot && !arguments.session.join("completion.json").is_file() {
         return Err(Error::SessionIncomplete {
             session: arguments.session,
@@ -62,7 +62,7 @@ pub(super) fn run_index(arguments: IndexArgs) -> Result<ExitCode> {
     }));
 }
 
-pub(super) fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> {
     playback(&PlaybackOptions {
         session_directory: arguments.session,
         timing_file: arguments.timing_file,
@@ -80,7 +80,7 @@ pub(super) fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> {
     return Ok(ExitCode::SUCCESS);
 }
 
-pub(super) fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
     let selector = match (
         arguments.state,
         arguments.state_hash,
@@ -144,7 +144,7 @@ pub(super) fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
     }
 }
 
-pub(super) fn run_cache(arguments: CacheArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_cache(arguments: CacheArgs) -> Result<ExitCode> {
     return match arguments.command {
         CacheCommand::Status(arguments) => {
             let session = resolve_session_ref(arguments.session)?;

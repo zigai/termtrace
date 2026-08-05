@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn run_timeline(arguments: TimelineArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_timeline(arguments: TimelineArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
     let log = EventLog::read(session.join("events.jsonl"))?;
     validate_completed_log(&session, &log)?;
@@ -40,7 +40,7 @@ pub(super) fn run_timeline(arguments: TimelineArgs) -> Result<ExitCode> {
     return write_stdout(output);
 }
 
-pub(super) fn run_diff(arguments: DiffArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_diff(arguments: DiffArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
     let log = EventLog::read(session.join("events.jsonl"))?;
     validate_completed_log(&session, &log)?;
@@ -88,7 +88,7 @@ pub(super) fn run_diff(arguments: DiffArgs) -> Result<ExitCode> {
     return Ok(ExitCode::SUCCESS);
 }
 
-pub(super) fn run_explain(arguments: ExplainArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_explain(arguments: ExplainArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
     let log = EventLog::read(session.join("events.jsonl"))?;
     validate_completed_log(&session, &log)?;
@@ -140,7 +140,7 @@ pub(super) fn run_explain(arguments: ExplainArgs) -> Result<ExitCode> {
     };
 }
 
-pub(super) fn run_diagnose(arguments: DiagnoseArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_diagnose(arguments: DiagnoseArgs) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
     let log = EventLog::read(session.join("events.jsonl"))?;
     validate_completed_log(&session, &log)?;

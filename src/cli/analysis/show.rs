@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
     let image_format = matches!(arguments.format, ShowFormat::Svg | ShowFormat::Png);
     if !image_format && arguments.renderer == ShowRenderer::Native {
         return Err(miette::miette!(

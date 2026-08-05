@@ -1,13 +1,13 @@
 use super::*;
 
 #[derive(Debug, Args)]
-pub(super) struct ToolingArgs {
+pub(in crate::cli) struct ToolingArgs {
     #[command(subcommand)]
-    pub(super) command: ToolingSubcommand,
+    pub(in crate::cli) command: ToolingSubcommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub(super) enum ToolingSubcommand {
+pub(in crate::cli) enum ToolingSubcommand {
     /// Probe built-in and optional host capabilities.
     Doctor(DoctorArgs),
     /// Run Python or TypeScript client code from managed SDK assets without project files.
@@ -23,40 +23,40 @@ pub(super) enum ToolingSubcommand {
 }
 
 #[derive(Debug, Args)]
-pub(super) struct VersionArgs {
+pub(in crate::cli) struct VersionArgs {
     /// Emit stable structured component/build metadata.
     #[arg(long)]
-    pub(super) json: bool,
+    pub(in crate::cli) json: bool,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct DoctorArgs {
+pub(in crate::cli) struct DoctorArgs {
     /// Emit the stable structured capability report.
     #[arg(long)]
-    pub(super) json: bool,
+    pub(in crate::cli) json: bool,
     /// Comma-separated capabilities that must be ready.
     #[arg(long, value_delimiter = ',', value_parser = parse_capability_id)]
-    pub(super) require: Vec<String>,
+    pub(in crate::cli) require: Vec<String>,
     /// Include focused remediation for blocked capabilities in text output.
     #[arg(long)]
-    pub(super) explain: bool,
+    pub(in crate::cli) explain: bool,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct SchemaArgs {
+pub(in crate::cli) struct SchemaArgs {
     /// Destination directory; existing files with generated schema names are replaced.
     #[arg(long)]
-    pub(super) out: PathBuf,
+    pub(in crate::cli) out: PathBuf,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct ClientArgs {
+pub(in crate::cli) struct ClientArgs {
     #[command(subcommand)]
-    pub(super) command: ClientCommand,
+    pub(in crate::cli) command: ClientCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub(super) enum ClientCommand {
+pub(in crate::cli) enum ClientCommand {
     /// Report SDK asset discovery and available managed runtimes.
     Status,
     /// Run a Python file, or `-` for standard input, in an isolated uv environment.
@@ -66,17 +66,17 @@ pub(super) enum ClientCommand {
 }
 
 #[derive(Debug, Args)]
-pub(super) struct ClientRunArgs {
+pub(in crate::cli) struct ClientRunArgs {
     /// Client source file, or `-` to read the program from standard input.
-    pub(super) script: PathBuf,
+    pub(in crate::cli) script: PathBuf,
     /// Arguments passed to the client program after `--`.
     #[arg(last = true, allow_hyphen_values = true)]
-    pub(super) arguments: Vec<OsString>,
+    pub(in crate::cli) arguments: Vec<OsString>,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct CompletionsArgs {
+pub(in crate::cli) struct CompletionsArgs {
     /// Target shell.
     #[arg(value_enum)]
-    pub(super) shell: Shell,
+    pub(in crate::cli) shell: Shell,
 }

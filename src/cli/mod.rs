@@ -122,28 +122,8 @@ use tracing_subscriber::{
     EnvFilter, fmt, layer::SubscriberExt, registry as tracing_registry, util::SubscriberInitExt,
 };
 
-mod args_analysis;
-mod args_artifacts;
-mod args_control;
-mod args_integrity;
-mod args_recording;
-mod args_registry;
-mod args_scenario;
-mod args_tooling;
-
-use args_analysis::*;
-use args_artifacts::*;
-use args_control::*;
-use args_integrity::*;
-use args_recording::*;
-use args_registry::*;
-use args_scenario::*;
-use args_tooling::*;
-
-mod analysis_replay;
-mod analysis_reports;
-mod analysis_show;
-mod analysis_streams;
+mod analysis;
+mod args;
 mod artifacts;
 mod control;
 mod dispatch;
@@ -157,10 +137,8 @@ mod session_helpers;
 mod tmux;
 mod tooling;
 
-use analysis_replay::*;
-use analysis_reports::*;
-use analysis_show::*;
-use analysis_streams::*;
+use analysis::*;
+use args::*;
 use artifacts::*;
 use control::*;
 use integrity::*;

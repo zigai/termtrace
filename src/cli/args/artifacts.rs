@@ -1,13 +1,13 @@
 use super::*;
 
 #[derive(Debug, Args)]
-pub(super) struct ArtifactArgs {
+pub(in crate::cli) struct ArtifactArgs {
     #[command(subcommand)]
-    pub(super) command: ArtifactSubcommand,
+    pub(in crate::cli) command: ArtifactSubcommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub(super) enum ArtifactSubcommand {
+pub(in crate::cli) enum ArtifactSubcommand {
     /// Capture actual Ghostty pixels on a private headless display.
     Capture(CaptureArgs),
     /// Atomically publish representations of one semantic state.
@@ -23,13 +23,13 @@ pub(super) enum ArtifactSubcommand {
 }
 
 #[derive(Debug, Args)]
-pub(super) struct ArtifactBundleArgs {
+pub(in crate::cli) struct ArtifactBundleArgs {
     #[command(subcommand)]
-    pub(super) command: ArtifactBundleSubcommand,
+    pub(in crate::cli) command: ArtifactBundleSubcommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub(super) enum ArtifactBundleSubcommand {
+pub(in crate::cli) enum ArtifactBundleSubcommand {
     /// Publish a deterministic sensitivity-labeled handoff directory.
     Create(BundleArgs),
     /// Verify every manifested bundle member and included evidence.
@@ -37,7 +37,7 @@ pub(super) enum ArtifactBundleSubcommand {
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
-pub(super) enum BundleProfileArg {
+pub(in crate::cli) enum BundleProfileArg {
     Screen,
     Debug,
     Forensic,
@@ -54,47 +54,47 @@ impl From<BundleProfileArg> for BundleProfile {
 }
 
 #[derive(Debug, Args)]
-pub(super) struct BundleArgs {
+pub(in crate::cli) struct BundleArgs {
     /// Completed canonical session.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// Fixed content and sensitivity policy.
     #[arg(long, value_enum, default_value_t = BundleProfileArg::Screen)]
-    pub(super) profile: BundleProfileArg,
+    pub(in crate::cli) profile: BundleProfileArg,
     /// New owner-only destination directory.
     #[arg(long)]
-    pub(super) out: PathBuf,
+    pub(in crate::cli) out: PathBuf,
     /// Print the selected paths and sensitivities without writing.
     #[arg(long)]
-    pub(super) dry_run: bool,
+    pub(in crate::cli) dry_run: bool,
     /// Publish a deterministic compressed archive instead of a directory.
     #[arg(long)]
-    pub(super) archive: bool,
+    pub(in crate::cli) archive: bool,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct BundleVerifyArgs {
+pub(in crate::cli) struct BundleVerifyArgs {
     /// Published bundle directory.
-    pub(super) bundle: PathBuf,
+    pub(in crate::cli) bundle: PathBuf,
     /// Trusted canonical source session whose identity and final hash are expected.
     #[arg(long)]
-    pub(super) source: PathBuf,
+    pub(in crate::cli) source: PathBuf,
     /// Exact content and sensitivity policy expected by the verifier.
     #[arg(long, value_enum)]
-    pub(super) profile: BundleProfileArg,
+    pub(in crate::cli) profile: BundleProfileArg,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct ExportArgs {
+pub(in crate::cli) struct ExportArgs {
     /// Source session directory.
     #[arg(long)]
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// New asciicast v2 output path.
     #[arg(long)]
-    pub(super) out: PathBuf,
+    pub(in crate::cli) out: PathBuf,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
-pub(super) enum SaveFormatArg {
+pub(in crate::cli) enum SaveFormatArg {
     Txt,
     Json,
     DeepJson,
@@ -124,33 +124,33 @@ impl From<SaveFormatArg> for SaveFormat {
         .multiple(false)
         .args(["state", "state_hash", "event_seq", "at", "at_marker"])
 ))]
-pub(super) struct SaveArgs {
+pub(in crate::cli) struct SaveArgs {
     /// Completed session name or canonical path.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// New destination directory.
     #[arg(long)]
-    pub(super) out: PathBuf,
+    pub(in crate::cli) out: PathBuf,
     /// One or more comma-separated representations.
     #[arg(long, value_enum, value_delimiter = ',', required = true)]
-    pub(super) format: Vec<SaveFormatArg>,
+    pub(in crate::cli) format: Vec<SaveFormatArg>,
     /// Exact semantic state identifier.
     #[arg(long)]
-    pub(super) state: Option<u64>,
+    pub(in crate::cli) state: Option<u64>,
     /// Exact content-addressed semantic state hash.
     #[arg(long, value_parser = parse_state_hash)]
-    pub(super) state_hash: Option<String>,
+    pub(in crate::cli) state_hash: Option<String>,
     /// Latest state at or before this event sequence.
     #[arg(long)]
-    pub(super) event_seq: Option<u64>,
+    pub(in crate::cli) event_seq: Option<u64>,
     /// Latest state at or before this session offset.
     #[arg(long, value_parser = parse_time_offset_ns)]
-    pub(super) at: Option<u64>,
+    pub(in crate::cli) at: Option<u64>,
     /// State at a unique marker.
     #[arg(long)]
-    pub(super) at_marker: Option<String>,
+    pub(in crate::cli) at_marker: Option<String>,
     /// Permit an explicitly selected synchronized-output hidden state.
     #[arg(long)]
-    pub(super) include_hidden: bool,
+    pub(in crate::cli) include_hidden: bool,
 }
 
 #[derive(Debug, Args)]
@@ -159,79 +159,79 @@ pub(super) struct SaveArgs {
         .multiple(false)
         .args(["state", "state_hash", "event_seq", "at", "at_marker"])
 ))]
-pub(super) struct ScreenshotArgs {
+pub(in crate::cli) struct ScreenshotArgs {
     /// Completed session name or canonical path.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// New artifact directory containing `screen.svg` and its manifest.
     #[arg(long)]
-    pub(super) out: PathBuf,
+    pub(in crate::cli) out: PathBuf,
     /// Exact semantic state identifier.
     #[arg(long)]
-    pub(super) state: Vec<u64>,
+    pub(in crate::cli) state: Vec<u64>,
     /// Exact content-addressed semantic state hash.
     #[arg(long, value_parser = parse_state_hash)]
-    pub(super) state_hash: Vec<String>,
+    pub(in crate::cli) state_hash: Vec<String>,
     /// Latest state at or before this event sequence.
     #[arg(long)]
-    pub(super) event_seq: Vec<u64>,
+    pub(in crate::cli) event_seq: Vec<u64>,
     /// Latest state at or before this session offset.
     #[arg(long, value_parser = parse_time_offset_ns)]
-    pub(super) at: Vec<u64>,
+    pub(in crate::cli) at: Vec<u64>,
     /// State at a unique marker.
     #[arg(long)]
-    pub(super) at_marker: Vec<String>,
+    pub(in crate::cli) at_marker: Vec<String>,
     /// Permit an explicitly selected synchronized-output hidden state.
     #[arg(long)]
-    pub(super) include_hidden: bool,
+    pub(in crate::cli) include_hidden: bool,
     /// Semantic image representation.
     #[arg(long, value_enum, default_value_t = ScreenshotFormat::Png)]
-    pub(super) format: ScreenshotFormat,
+    pub(in crate::cli) format: ScreenshotFormat,
     /// Semantic state renderer or actual Ghostty native frame.
     #[arg(long, value_enum, default_value_t = ShowRenderer::Semantic)]
-    pub(super) renderer: ShowRenderer,
+    pub(in crate::cli) renderer: ShowRenderer,
     /// Strict whole native viewport as `WIDTHxHEIGHT`; omit to solve the exact recorded grid.
     #[arg(long, value_parser = parse_capture_target)]
-    pub(super) viewport: Option<CaptureTarget>,
+    pub(in crate::cli) viewport: Option<CaptureTarget>,
     /// Emphasize that a supplied viewport is an exact evidentiary assertion.
     #[arg(long, requires = "viewport")]
-    pub(super) strict: bool,
+    pub(in crate::cli) strict: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub(super) enum ScreenshotFormat {
+pub(in crate::cli) enum ScreenshotFormat {
     Svg,
     Png,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct CaptureArgs {
+pub(in crate::cli) struct CaptureArgs {
     /// Indexed source session directory.
     #[arg(long)]
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     /// Whole capture viewport width; omit both dimensions to use the recorded target or solve the exact grid.
     #[arg(long, requires = "height")]
-    pub(super) width: Option<u16>,
+    pub(in crate::cli) width: Option<u16>,
     /// Whole capture viewport height; omit both dimensions to use the recorded target or solve the exact grid.
     #[arg(long, requires = "width")]
-    pub(super) height: Option<u16>,
+    pub(in crate::cli) height: Option<u16>,
     /// Video frame rate; native capture currently requires 24.
     #[arg(long, default_value_t = 24)]
-    pub(super) fps: u16,
+    pub(in crate::cli) fps: u16,
     /// Use a matching index containing only terminal-presentable states.
     #[arg(long)]
-    pub(super) presented_only: bool,
+    pub(in crate::cli) presented_only: bool,
     #[command(flatten)]
-    pub(super) range: TimeRangeArgs,
+    pub(in crate::cli) range: TimeRangeArgs,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct VideoArgs {
+pub(in crate::cli) struct VideoArgs {
     #[command(subcommand)]
-    pub(super) command: VideoCommand,
+    pub(in crate::cli) command: VideoCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub(super) enum VideoCommand {
+pub(in crate::cli) enum VideoCommand {
     /// Resolve clips, speeds, and holds without rendering.
     Plan(VideoPlanArgs),
     /// Render an atomic contact sheet and low-resolution review video.
@@ -241,7 +241,7 @@ pub(super) enum VideoCommand {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub(super) enum VideoSourceArg {
+pub(in crate::cli) enum VideoSourceArg {
     /// Verified pixels captured from the real Ghostty renderer.
     Native,
     /// Deterministic pixels generated from canonical semantic replay.
@@ -249,65 +249,65 @@ pub(super) enum VideoSourceArg {
 }
 
 #[derive(Debug, Args)]
-pub(super) struct VideoSourceArgs {
+pub(in crate::cli) struct VideoSourceArgs {
     /// Presentation source; native Ghostty pixels remain the default.
     #[arg(long, value_enum, default_value_t = VideoSourceArg::Native)]
-    pub(super) source: VideoSourceArg,
+    pub(in crate::cli) source: VideoSourceArg,
     /// Semantic source frame rate; invalid for native capture.
     #[arg(long)]
-    pub(super) fps: Option<u16>,
+    pub(in crate::cli) fps: Option<u16>,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct VideoPreviewArgs {
+pub(in crate::cli) struct VideoPreviewArgs {
     /// Completed session; native source additionally requires a verified capture.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     #[command(flatten)]
-    pub(super) source: VideoSourceArgs,
+    pub(in crate::cli) source: VideoSourceArgs,
     /// Strict versioned edit-plan JSON.
     #[arg(long)]
-    pub(super) edit: PathBuf,
+    pub(in crate::cli) edit: PathBuf,
     /// New no-replace preview artifact directory.
     #[arg(long)]
-    pub(super) out: PathBuf,
+    pub(in crate::cli) out: PathBuf,
     /// Storyboard tile columns.
     #[arg(long, default_value_t = 4)]
-    pub(super) columns: u8,
+    pub(in crate::cli) columns: u8,
     /// Width of each storyboard tile.
     #[arg(long, default_value_t = 320)]
-    pub(super) tile_width: u16,
+    pub(in crate::cli) tile_width: u16,
     /// Maximum storyboard frames.
     #[arg(long, default_value_t = 12)]
-    pub(super) max_frames: u16,
+    pub(in crate::cli) max_frames: u16,
     /// Retain only frames carrying configured change visualization.
     #[arg(long)]
-    pub(super) change_only: bool,
+    pub(in crate::cli) change_only: bool,
     /// Low-resolution preview width.
     #[arg(long, default_value_t = 640)]
-    pub(super) preview_width: u16,
+    pub(in crate::cli) preview_width: u16,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct VideoPlanArgs {
+pub(in crate::cli) struct VideoPlanArgs {
     /// Completed session; native source additionally requires a verified capture.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     #[command(flatten)]
-    pub(super) source: VideoSourceArgs,
+    pub(in crate::cli) source: VideoSourceArgs,
     /// Strict versioned edit-plan JSON.
     #[arg(long)]
-    pub(super) edit: PathBuf,
+    pub(in crate::cli) edit: PathBuf,
 }
 
 #[derive(Debug, Args)]
-pub(super) struct VideoExportArgs {
+pub(in crate::cli) struct VideoExportArgs {
     /// Completed session; native source additionally requires a verified capture.
-    pub(super) session: PathBuf,
+    pub(in crate::cli) session: PathBuf,
     #[command(flatten)]
-    pub(super) source: VideoSourceArgs,
+    pub(in crate::cli) source: VideoSourceArgs,
     /// Strict versioned edit-plan JSON.
     #[arg(long)]
-    pub(super) edit: PathBuf,
+    pub(in crate::cli) edit: PathBuf,
     /// New no-replace presentation artifact directory.
     #[arg(long)]
-    pub(super) out: PathBuf,
+    pub(in crate::cli) out: PathBuf,
 }
