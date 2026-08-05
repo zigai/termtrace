@@ -50,7 +50,6 @@ from termtrace.models import (
     encode_driver_request,
 )
 
-
 ResponseDataT = TypeVar("ResponseDataT", bound=msgspec.Struct)
 
 
@@ -67,6 +66,7 @@ class AsyncTerminal:
         self._stdout = process.stdout
         self._lock = asyncio.Lock()
         self._evidence_root = evidence_root
+        self._closed = False
 
     @classmethod
     async def create(
@@ -157,26 +157,51 @@ class AsyncTerminal:
         response_type: type[ResponseDataT],
         request_id: str | None = None,
     ) -> ResponseDataT:
+        if self._closed:
+            raise TermtraceProtocolError("driver is closed")
         correlation_id = request_id or str(uuid.uuid4())
         payload = encode_driver_request(method, correlation_id)
         async with self._lock:
+            if self._closed:
+                raise TermtraceProtocolError("driver is closed")
             self._stdin.write(payload + b"\n")
-            await self._stdin.drain()
-            line = await self._stdout.readline()
+            try:
+                await self._stdin.drain()
+                line = await self._stdout.readline()
+            except asyncio.CancelledError:
+                self._abort_transport()
+                raise
         if not line:
             raise TermtraceProtocolError("driver closed before its correlated response")
         return decode_driver_response(line, correlation_id, response_type)
 
-    async def close(self) -> None:
+    def _abort_transport(self) -> None:
+        self._closed = True
+        self._stdin.close()
         if self._process.returncode is not None:
             return
+        try:
+            self._process.terminate()
+        except ProcessLookupError:
+            return
+
+    async def close(self) -> None:
+        self._closed = True
         self._stdin.close()
-        await self._stdin.wait_closed()
+        try:
+            await self._stdin.wait_closed()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        if self._process.returncode is not None:
+            return
         try:
             async with asyncio.timeout(5):
                 await self._process.wait()
         except TimeoutError:
-            self._process.terminate()
+            try:
+                self._process.terminate()
+            except ProcessLookupError:
+                return
             await self._process.wait()
 
     async def __aenter__(self) -> Self:

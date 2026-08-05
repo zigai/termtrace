@@ -3,12 +3,12 @@ import math
 import sys
 
 import pytest
-
 from termtrace import BytesAtom, KeyAtom, PasteAtom, TextAtom
-from termtrace.atoms import encode_input_sequence
 from termtrace.async_client import AsyncSession, AsyncTerminal
+from termtrace.atoms import encode_input_sequence
 from termtrace.client import DriverTransport, Session
-from termtrace.models import encode_driver_request
+from termtrace.errors import TermtraceProtocolError
+from termtrace.models import DriverHelloData, encode_driver_request
 
 
 @pytest.mark.parametrize(
@@ -40,6 +40,42 @@ def test_screen_waits_reject_invalid_durations_before_driver_io(
         session.screen.wait_for_text("ready", timeout=duration)
     with pytest.raises(ValueError, match="duration"):
         asyncio.run(async_session.screen.wait_for_text("ready", timeout=duration))
+
+
+def test_async_request_cancellation_closes_desynchronized_transport() -> None:
+    async def exercise() -> None:
+        script = (
+            "import sys, time\n"
+            "sys.stdin.buffer.readline()\n"
+            "sys.stderr.write('received\\n')\n"
+            "sys.stderr.flush()\n"
+            "time.sleep(60)\n"
+        )
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            script,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        terminal = AsyncTerminal(process, None)
+        request = asyncio.create_task(
+            terminal.request({"method": "hello"}, DriverHelloData)
+        )
+        assert process.stderr is not None
+        assert await process.stderr.readline() == b"received\n"
+
+        request.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+        with pytest.raises(TermtraceProtocolError, match="driver is closed"):
+            await terminal.request({"method": "hello"}, DriverHelloData)
+
+        await terminal.close()
+        assert process.returncode is not None
+
+    asyncio.run(exercise())
 
 
 def test_atomic_input_sequence_builder_is_typed_bounded_and_correlated() -> None:
