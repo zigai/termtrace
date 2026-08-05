@@ -289,3 +289,40 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
             .is_empty()
     );
 }
+
+#[test]
+fn rust_facade_attach_retains_the_canonical_session_path() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let terminal = ClientTerminal::new(
+        env!("CARGO_BIN_EXE_termtrace"),
+        temporary.path().join("evidence"),
+    );
+    let mut recording = terminal
+        .launch([
+            OsString::from("/bin/sh"),
+            OsString::from("-c"),
+            OsString::from("sleep .2"),
+        ])
+        .start()
+        .expect("launch completed recording");
+    recording
+        .complete(Duration::from_secs(5))
+        .expect("complete recording");
+    let canonical = recording
+        .path()
+        .canonicalize()
+        .expect("canonical recording path");
+    drop(recording);
+
+    let reference = temporary.path().join("session-link");
+    symlink(&canonical, &reference).expect("link session");
+    let attached = terminal.attach(&reference).expect("attach through symlink");
+    fs::remove_file(&reference).expect("remove original link");
+    symlink(temporary.path(), &reference).expect("retarget session link");
+
+    assert_eq!(attached.path(), canonical);
+    attached
+        .semantic()
+        .inspect(StatePoint::LatestPresented, false)
+        .expect("inspect original attached session");
+}

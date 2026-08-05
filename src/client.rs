@@ -66,7 +66,13 @@ impl Terminal {
 
     /// Attach a high-level handle without changing the session.
     pub fn attach(&self, session: impl AsRef<Path>) -> Result<Session> {
-        return Session::open(session.as_ref().to_path_buf(), None);
+        let path = session.as_ref().canonicalize().map_err(|source| {
+            return Error::Filesystem {
+                path: session.as_ref().to_path_buf(),
+                source,
+            };
+        })?;
+        return Session::open(path, None);
     }
 }
 
