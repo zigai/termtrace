@@ -1,9 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::{File, OpenOptions},
-    io::{BufRead, BufReader, BufWriter, Write},
+    io::{BufRead, BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write},
     os::unix::fs::OpenOptionsExt as _,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use blake3::Hash;
@@ -21,7 +21,7 @@ use super::{
         RecoveryReport,
     },
     validation::{
-        OWNER_FILE_MODE, chained_hash, invalid_log, parse_json_line, read_line,
+        MAX_LINE_BYTES, OWNER_FILE_MODE, chained_hash, invalid_log, parse_json_line, read_line,
         validate_event_geometry, validate_header, validate_parent_directory,
     },
 };
@@ -48,6 +48,17 @@ pub(super) struct ParsedEventLog {
     log: EventLog,
     valid_lines: u64,
     issue: Option<RecoveryIssue>,
+}
+
+pub(crate) struct EventLogCursor {
+    path: PathBuf,
+    file: File,
+    validation: LogValidation,
+    line_number: u64,
+    encoded_bytes: u64,
+    decoded_payload_bytes: u64,
+    buffer: Vec<u8>,
+    buffer_start: usize,
 }
 
 impl EventLog {
@@ -184,6 +195,173 @@ impl LogValidation {
             .checked_add(1)
             .ok_or_else(|| return invalid_log(path, line, "event sequence overflow"))?;
         return Ok(record);
+    }
+}
+
+impl EventLogCursor {
+    pub(crate) fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let file = File::open(&path).map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+        let mut reader = BufReader::new(file);
+        let header_bytes = read_line(&mut reader, &path, 1)?
+            .ok_or_else(|| return invalid_log(&path, 1, "missing header"))?;
+        let encoded_bytes = u64::try_from(header_bytes.len())
+            .unwrap_or(u64::MAX)
+            .saturating_add(1);
+        if encoded_bytes > DEFAULT_EVENT_LOG_LIMITS.encoded_bytes {
+            return Err(invalid_log(
+                &path,
+                1,
+                format!(
+                    "event log exceeds {} encoded-byte limit",
+                    DEFAULT_EVENT_LOG_LIMITS.encoded_bytes
+                ),
+            ));
+        }
+        let header: EventLogHeader = parse_json_line(&path, 1, &header_bytes)?;
+        validate_header(&path, &header)?;
+        let position = reader.stream_position().map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+        let mut file = reader.into_inner();
+        file.seek(SeekFrom::Start(position)).map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+        return Ok(Self {
+            path,
+            file,
+            validation: LogValidation {
+                previous_hash: blake3::hash(&header_bytes),
+                previous_time: 0,
+                expected_seq: 0,
+                seen_operations: HashSet::new(),
+                pending_operations: HashMap::new(),
+            },
+            line_number: 2,
+            encoded_bytes,
+            decoded_payload_bytes: 0,
+            buffer: Vec::new(),
+            buffer_start: 0,
+        });
+    }
+
+    pub(crate) fn next_record(&mut self) -> Result<Option<EventRecord>> {
+        loop {
+            let buffered = self.buffer.get(self.buffer_start..).ok_or_else(|| {
+                return invalid_log(&self.path, self.line_number, "invalid cursor");
+            })?;
+            if let Some(relative_end) = buffered.iter().position(|byte| return *byte == b'\n') {
+                let line_end = self.buffer_start.saturating_add(relative_end);
+                if u64::try_from(relative_end).unwrap_or(u64::MAX) > MAX_LINE_BYTES {
+                    return Err(invalid_log(
+                        &self.path,
+                        self.line_number,
+                        "line exceeds 64 MiB limit",
+                    ));
+                }
+                if self.validation.expected_seq >= DEFAULT_EVENT_LOG_LIMITS.event_count {
+                    return Err(invalid_log(
+                        &self.path,
+                        self.line_number,
+                        format!(
+                            "event log exceeds {} event limit",
+                            DEFAULT_EVENT_LOG_LIMITS.event_count
+                        ),
+                    ));
+                }
+                let record = self.validation.validate_record(
+                    &self.path,
+                    self.line_number,
+                    self.buffer
+                        .get(self.buffer_start..line_end)
+                        .ok_or_else(|| {
+                            return invalid_log(
+                                &self.path,
+                                self.line_number,
+                                "invalid cursor range",
+                            );
+                        })?,
+                )?;
+                let decoded_payload_bytes = self
+                    .decoded_payload_bytes
+                    .saturating_add(record.event.decoded_payload_bytes());
+                if decoded_payload_bytes > DEFAULT_EVENT_LOG_LIMITS.decoded_payload_bytes {
+                    return Err(invalid_log(
+                        &self.path,
+                        self.line_number,
+                        format!(
+                            "event log exceeds {} decoded-payload-byte limit",
+                            DEFAULT_EVENT_LOG_LIMITS.decoded_payload_bytes
+                        ),
+                    ));
+                }
+                self.decoded_payload_bytes = decoded_payload_bytes;
+                self.buffer_start = line_end.saturating_add(1);
+                self.line_number = self.line_number.saturating_add(1);
+                if self.buffer_start == self.buffer.len() {
+                    self.buffer.clear();
+                    self.buffer_start = 0;
+                }
+                return Ok(Some(record));
+            }
+            if u64::try_from(buffered.len()).unwrap_or(u64::MAX) > MAX_LINE_BYTES {
+                return Err(invalid_log(
+                    &self.path,
+                    self.line_number,
+                    "line exceeds 64 MiB limit",
+                ));
+            }
+            if self.buffer_start > 0 {
+                self.buffer.drain(..self.buffer_start);
+                self.buffer_start = 0;
+            }
+            let mut chunk = [0_u8; 8192];
+            let count = match self.file.read(&mut chunk) {
+                Ok(count) => count,
+                Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+                Err(source) => {
+                    return Err(Error::Filesystem {
+                        path: self.path.clone(),
+                        source,
+                    });
+                }
+            };
+            if count == 0 {
+                return Ok(None);
+            }
+            self.encoded_bytes = self
+                .encoded_bytes
+                .saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
+            if self.encoded_bytes > DEFAULT_EVENT_LOG_LIMITS.encoded_bytes {
+                return Err(invalid_log(
+                    &self.path,
+                    self.line_number,
+                    format!(
+                        "event log exceeds {} encoded-byte limit",
+                        DEFAULT_EVENT_LOG_LIMITS.encoded_bytes
+                    ),
+                ));
+            }
+            self.buffer
+                .extend_from_slice(chunk.get(..count).ok_or_else(|| {
+                    return invalid_log(&self.path, self.line_number, "invalid read length");
+                })?);
+        }
+    }
+
+    pub(crate) fn incomplete_line(&self) -> Option<u64> {
+        return (!self.buffer.is_empty()).then_some(self.line_number);
     }
 }
 

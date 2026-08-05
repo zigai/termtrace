@@ -13,7 +13,7 @@ use crate::{
     Error, Result,
     control::{ActorBoundaries, ControlCommand, ControlData, ScreenPredicate, request},
     event::Event,
-    event_log::EventLog,
+    event_log::{EventLog, EventLogCursor},
     ghostty_vt::SemanticState,
     replay::{StateInspection, StateSelector, inspect},
     session::{SessionCompletion, validate_completed_log},
@@ -168,28 +168,44 @@ pub fn wait_for_output(
     let session = session_directory.as_ref();
     let event_path = session.join("events.jsonl");
     let deadline = Instant::now() + timeout;
+    let mut cursor = EventLogCursor::open(&event_path)?;
+    let mut matcher = OutputMatcher::new(needle);
     loop {
         let control_available = request(session, ControlCommand::Status).is_ok();
-        match EventLog::read(&event_path) {
-            Ok(log) => {
-                if let Some(outcome) = find_output(&log, needle) {
-                    return Ok(outcome);
-                }
-                if log
-                    .events
-                    .last()
-                    .is_some_and(|record| matches!(record.event, Event::Exit { .. }))
+        loop {
+            let Some(record) = cursor.next_record()? else {
+                if let Some(line) = cursor.incomplete_line()
+                    && !control_available
                 {
-                    return Err(wait_error("child exited before output matched"));
+                    return Err(Error::InvalidEventLog {
+                        path: event_path,
+                        line,
+                        reason: "truncated line without newline terminator".to_owned(),
+                    });
                 }
+                break;
+            };
+            if let Event::Output { data } = &record.event
+                && let Some(output_end_offset) = matcher.push(data.as_bytes())
+            {
+                return Ok(WaitOutcome {
+                    event_seq: record.seq,
+                    output_end_offset,
+                    monotonic_ns: record.monotonic_ns,
+                });
             }
-            Err(Error::InvalidEventLog { .. }) if control_available => {}
-            Err(error) => return Err(error),
+            if matches!(record.event, Event::Exit { .. }) {
+                return Err(wait_error("child exited before output matched"));
+            }
+            if Instant::now() >= deadline {
+                return Err(wait_error("timed out before output matched"));
+            }
         }
-        if Instant::now() >= deadline {
+        let now = Instant::now();
+        if now >= deadline {
             return Err(wait_error("timed out before output matched"));
         }
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(50).min(deadline.saturating_duration_since(now)));
     }
 }
 
@@ -218,27 +234,61 @@ pub fn wait_for_completion(
     }
 }
 
-fn find_output(log: &EventLog, needle: &[u8]) -> Option<WaitOutcome> {
-    let mut output = Vec::new();
-    for record in &log.events {
-        if let Event::Output { data } = &record.event {
-            output.extend_from_slice(data.as_bytes());
-            if let Some(offset) = find_subslice(&output, needle) {
-                return Some(WaitOutcome {
-                    event_seq: record.seq,
-                    output_end_offset: u64::try_from(offset + needle.len()).unwrap_or(u64::MAX),
-                    monotonic_ns: record.monotonic_ns,
-                });
-            }
-        }
-    }
-    return None;
+struct OutputMatcher<'needle> {
+    needle: &'needle [u8],
+    prefix_lengths: Vec<usize>,
+    matched: usize,
+    output_offset: u64,
 }
 
-fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    return haystack
-        .windows(needle.len())
-        .position(|window| return window == needle);
+impl<'needle> OutputMatcher<'needle> {
+    fn new(needle: &'needle [u8]) -> Self {
+        let mut prefix_lengths: Vec<usize> = vec![0; needle.len()];
+        let mut matched = 0;
+        for index in 1..needle.len() {
+            let Some(byte) = needle.get(index).copied() else {
+                break;
+            };
+            while matched > 0 && needle.get(matched).copied() != Some(byte) {
+                matched = prefix_lengths
+                    .get(matched.saturating_sub(1))
+                    .copied()
+                    .unwrap_or(0);
+            }
+            if needle.get(matched).copied() == Some(byte) {
+                matched = matched.saturating_add(1);
+            }
+            if let Some(length) = prefix_lengths.get_mut(index) {
+                *length = matched;
+            }
+        }
+        return Self {
+            needle,
+            prefix_lengths,
+            matched: 0,
+            output_offset: 0,
+        };
+    }
+
+    fn push(&mut self, bytes: &[u8]) -> Option<u64> {
+        for byte in bytes {
+            while self.matched > 0 && self.needle.get(self.matched) != Some(byte) {
+                self.matched = self
+                    .prefix_lengths
+                    .get(self.matched.saturating_sub(1))
+                    .copied()
+                    .unwrap_or(0);
+            }
+            if self.needle.get(self.matched) == Some(byte) {
+                self.matched = self.matched.saturating_add(1);
+            }
+            self.output_offset = self.output_offset.saturating_add(1);
+            if self.matched == self.needle.len() {
+                return Some(self.output_offset);
+            }
+        }
+        return None;
+    }
 }
 
 fn wait_error(message: &str) -> Error {
@@ -254,7 +304,11 @@ mod tests {
 
     #[test]
     fn finds_matches_across_output_chunks() {
-        assert_eq!(find_subslice(b"split across", b"it ac"), Some(3));
-        assert_eq!(find_subslice(b"missing", b"other"), None);
+        let mut matching = OutputMatcher::new(b"it ac");
+        assert_eq!(matching.push(b"split "), None);
+        assert_eq!(matching.push(b"across"), Some(8));
+
+        let mut missing = OutputMatcher::new(b"other");
+        assert_eq!(missing.push(b"missing"), None);
     }
 }

@@ -6,6 +6,7 @@ mod types;
 mod validation;
 mod writer;
 
+pub(crate) use reader::EventLogCursor;
 pub use types::{
     CanonicalBoundary, DurabilityMode, DurabilityPolicy, DurabilityRecord, EventLog, OperationKind,
     PendingOperation, PendingOperationReport, RecoveryIssue, RecoveryReport, SessionClock,

@@ -6,7 +6,9 @@ use uuid::Uuid;
 use crate::{
     Error,
     event::{ByteString, Event, InputDescriptor, InputKind, InputSource, OperationStatus},
-    event_log::{EventLog, EventLogWriter, OperationKind, PendingOperation, SessionClock},
+    event_log::{
+        EventLog, EventLogCursor, EventLogWriter, OperationKind, PendingOperation, SessionClock,
+    },
 };
 
 use super::{
@@ -97,6 +99,47 @@ fn round_trip_preserves_binary_events_and_integrity_chain() {
         & 0o777;
     assert_eq!(directory_mode, OWNER_DIRECTORY_MODE);
     assert_eq!(file_mode, OWNER_FILE_MODE);
+}
+
+#[test]
+fn live_cursor_reads_each_appended_event_once() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let path = temporary.path().join("session/events.jsonl");
+    secure_directory(path.parent().expect("parent"));
+    let clock = SessionClock::now().expect("valid clock");
+    let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("create log");
+    let mut cursor = EventLogCursor::open(&path).expect("open live cursor");
+    assert!(cursor.next_record().expect("empty cursor").is_none());
+
+    writer
+        .append_at(
+            1,
+            Event::Output {
+                data: ByteString::from(&b"first"[..]),
+            },
+        )
+        .expect("append first output");
+    assert!(matches!(
+        cursor.next_record().expect("first cursor event"),
+        Some(record)
+            if matches!(&record.event, Event::Output { data } if data.as_bytes() == b"first")
+    ));
+    assert!(cursor.next_record().expect("cursor caught up").is_none());
+
+    writer
+        .append_at(
+            2,
+            Event::Output {
+                data: ByteString::from(&b"second"[..]),
+            },
+        )
+        .expect("append second output");
+    assert!(matches!(
+        cursor.next_record().expect("second cursor event"),
+        Some(record)
+            if record.seq == 1
+                && matches!(&record.event, Event::Output { data } if data.as_bytes() == b"second")
+    ));
 }
 
 #[test]

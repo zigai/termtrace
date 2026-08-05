@@ -17,7 +17,7 @@ use crate::{
 
 pub(super) const OWNER_DIRECTORY_MODE: u32 = 0o700;
 pub(super) const OWNER_FILE_MODE: u32 = 0o600;
-const MAX_LINE_BYTES: u64 = 64 * 1024 * 1024;
+pub(super) const MAX_LINE_BYTES: u64 = 64 * 1024 * 1024;
 
 pub(super) fn validate_parent_directory(path: &Path) -> Result<()> {
     let parent = path.parent().ok_or_else(|| {
