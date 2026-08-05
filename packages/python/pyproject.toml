@@ -19,6 +19,7 @@ termtrace = "termtrace.binary:main"
 
 [dependency-groups]
 codegen = ["datamodel-code-generator==0.68.1"]
+dev = ["mypy==2.3.0", "pytest==9.1.1", "ruff==0.15.7"]
 
 [project.entry-points.pytest11]
 termtrace = "termtrace.pytest_plugin"

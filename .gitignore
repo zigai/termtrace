@@ -22,7 +22,6 @@ __pycache__/
 .venv/
 dist/
 *.egg-info/
-/packages/python/uv.lock
 /packages/python/src/termtrace/bin/
 
 # JavaScript and TypeScript package outputs
