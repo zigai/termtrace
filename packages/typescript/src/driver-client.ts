@@ -34,8 +34,11 @@ export class DriverClient {
     this.#process.stderr.resume();
     this.#lines = createInterface({ input: this.#process.stdout, crlfDelay: Infinity });
     this.#lines.on("line", (line) => this.#acceptLine(line));
-    this.#process.once("error", (cause) => this.#rejectAll(cause));
-    this.#process.once("exit", () => this.#rejectAll(new TermtraceProtocolError("driver exited")));
+    this.#process.once("error", (cause) => this.#closeWithError(cause));
+    this.#process.once("exit", () =>
+      this.#closeWithError(new TermtraceProtocolError("driver exited")),
+    );
+    this.#process.stdin.on("error", (cause) => this.#closeWithError(cause));
   }
 
   request<Kind extends DriverDataKind>(
@@ -88,6 +91,11 @@ export class DriverClient {
     } catch (cause: unknown) {
       pending.reject(cause);
     }
+  }
+
+  #closeWithError(cause: unknown): void {
+    this.#closed = true;
+    this.#rejectAll(cause);
   }
 
   #rejectAll(cause: unknown): void {
