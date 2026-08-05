@@ -4,7 +4,8 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Pattern, cast
+from re import Pattern
+from typing import cast
 
 import msgspec
 

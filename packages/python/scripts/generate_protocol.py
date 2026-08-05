@@ -8,7 +8,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_ROOT = PACKAGE_ROOT.parents[1]
 GENERATED_ROOT = PACKAGE_ROOT / "src" / "termtrace" / "_generated"

@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from termtrace.binary import resolve_binary
 
 

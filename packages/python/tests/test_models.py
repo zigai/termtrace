@@ -17,7 +17,6 @@ from termtrace.models import (
     encode_driver_request,
 )
 
-
 FIXTURES = Path(__file__).parents[3] / "fixtures" / "protocol" / "driver-responses.json"
 
 

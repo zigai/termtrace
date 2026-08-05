@@ -9,8 +9,8 @@ import msgspec
 from termtrace._generated.driver_request import DriverRequest as WireDriverRequest
 from termtrace._generated.driver_response import (
     BundleManifest,
-    ControlErrorDetails,
     ControlData,
+    ControlErrorDetails,
     ControlStableSnapshotData,
     DiagnoseReport,
     DriverArtifactData,
@@ -28,7 +28,6 @@ from termtrace._generated.driver_response import (
     DriverHelloData,
     DriverObservationData,
     DriverOutputWaitData,
-    DriverResponse as WireDriverResponse,
     DriverTimelineData,
     DriverVerificationData,
     EventProjection,
@@ -40,6 +39,9 @@ from termtrace._generated.driver_response import (
     TimelineEntry,
     VerificationReport,
     WaitOutcome,
+)
+from termtrace._generated.driver_response import (
+    DriverResponse as WireDriverResponse,
 )
 from termtrace.errors import TermtraceOperationError, TermtraceProtocolError
 
@@ -123,8 +125,8 @@ __all__ = [
     "BundleManifest",
     "BundleResult",
     "Completion",
-    "ControlResult",
     "ControlErrorDetails",
+    "ControlResult",
     "ControlStableSnapshotData",
     "DiagnosticReport",
     "DriverArtifactData",

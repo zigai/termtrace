@@ -16,6 +16,8 @@ from termtrace.binary import resolve_binary
 from termtrace.duration import seconds_to_milliseconds, seconds_to_nanoseconds
 from termtrace.environment import (
     EnvironmentOptions as EnvironmentOptions,
+)
+from termtrace.environment import (
     encode_environment,
 )
 from termtrace.errors import TermtraceOperationError, TermtraceProtocolError
@@ -53,7 +55,6 @@ from termtrace.models import (
     decode_driver_response,
     encode_driver_request,
 )
-
 
 ResponseDataT = TypeVar("ResponseDataT", bound=msgspec.Struct)
 
