@@ -1191,4 +1191,46 @@ mod tests {
         drop(pending);
         client.join().expect("join control client");
     }
+
+    #[test]
+    fn control_server_accepts_a_second_request_while_the_first_is_pending() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let worker = spawn_control_server(temporary.path(), sender).expect("control server");
+        let socket = temporary.path().join(CONTROL_SOCKET_NAME);
+        let first_socket = socket.clone();
+        let first_client = thread::spawn(move || {
+            let mut stream = UnixStream::connect(first_socket).expect("connect first client");
+            let request = ControlRequest::new(ControlCommand::Ping);
+            serde_json::to_writer(&mut stream, &request).expect("encode first request");
+            stream.write_all(b"\n").expect("terminate first request");
+            let mut response = Vec::new();
+            stream
+                .read_to_end(&mut response)
+                .expect("read first shutdown");
+        });
+        let first = receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("first inflight request");
+
+        let second_client = thread::spawn(move || {
+            let mut stream = UnixStream::connect(socket).expect("connect second client");
+            let request = ControlRequest::new(ControlCommand::Ping);
+            serde_json::to_writer(&mut stream, &request).expect("encode second request");
+            stream.write_all(b"\n").expect("terminate second request");
+            let mut response = Vec::new();
+            stream
+                .read_to_end(&mut response)
+                .expect("read second shutdown");
+        });
+        let second = receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("second concurrent request");
+
+        worker.stop().expect("cancel control server");
+        drop(first);
+        drop(second);
+        first_client.join().expect("join first client");
+        second_client.join().expect("join second client");
+    }
 }

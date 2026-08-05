@@ -7,7 +7,10 @@ use std::{
     os::unix::fs::PermissionsExt as _,
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -36,6 +39,18 @@ pub(in crate::record) struct ControlWorker {
     cancel: OwnedFd,
     socket_path: PathBuf,
     thread: thread::JoinHandle<()>,
+}
+
+const MAX_CONTROL_CONNECTIONS: usize = 256;
+
+struct ConnectionPermit<'counter> {
+    active: &'counter AtomicUsize,
+}
+
+impl Drop for ConnectionPermit<'_> {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 pub(in crate::record) fn spawn_control_server(
@@ -116,39 +131,55 @@ fn control_server_loop(
     cancel: &OwnedFd,
     sender: &mpsc::SyncSender<RuntimeMessage>,
 ) -> Result<()> {
-    loop {
-        let (listener_ready, cancel_ready) = {
-            let mut descriptors = [
-                PollFd::new(listener.as_fd(), PollFlags::POLLIN),
-                PollFd::new(cancel.as_fd(), PollFlags::POLLIN),
-            ];
-            match poll(&mut descriptors, PollTimeout::NONE) {
-                Ok(_) => (poll_ready(&descriptors[0]), poll_ready(&descriptors[1])),
-                Err(Errno::EINTR) => continue,
-                Err(error) => return Err(terminal_error("poll control socket", error.to_string())),
-            }
-        };
-        if cancel_ready {
-            return Ok(());
-        }
-        if !listener_ready {
-            continue;
-        }
+    let active = AtomicUsize::new(0);
+    return thread::scope(|scope| {
         loop {
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    let _ = handle_control_connection(stream, sender, cancel);
+            let (listener_ready, cancel_ready) = {
+                let mut descriptors = [
+                    PollFd::new(listener.as_fd(), PollFlags::POLLIN),
+                    PollFd::new(cancel.as_fd(), PollFlags::POLLIN),
+                ];
+                match poll(&mut descriptors, PollTimeout::NONE) {
+                    Ok(_) => (poll_ready(&descriptors[0]), poll_ready(&descriptors[1])),
+                    Err(Errno::EINTR) => continue,
+                    Err(error) => {
+                        return Err(terminal_error("poll control socket", error.to_string()));
+                    }
                 }
-                Err(error) if error.kind() == ErrorKind::WouldBlock => break,
-                Err(error) => {
-                    return Err(terminal_error(
-                        "accept control connection",
-                        error.to_string(),
-                    ));
+            };
+            if cancel_ready {
+                return Ok(());
+            }
+            if !listener_ready {
+                continue;
+            }
+            loop {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let permit =
+                            active.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                                return (count < MAX_CONTROL_CONNECTIONS).then_some(count + 1);
+                            });
+                        if permit.is_err() {
+                            continue;
+                        }
+                        let active = &active;
+                        scope.spawn(move || {
+                            let _permit = ConnectionPermit { active };
+                            let _result = handle_control_connection(stream, sender, cancel);
+                        });
+                    }
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => break,
+                    Err(error) => {
+                        return Err(terminal_error(
+                            "accept control connection",
+                            error.to_string(),
+                        ));
+                    }
                 }
             }
         }
-    }
+    });
 }
 
 fn handle_control_connection(
