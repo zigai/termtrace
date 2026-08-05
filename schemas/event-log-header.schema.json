@@ -79,21 +79,6 @@
   "properties": {
     "colors": {
       "$ref": "#/$defs/TerminalColors",
-      "default": {
-        "background": [
-          0,
-          0,
-          0
-        ],
-        "cursor": null,
-        "foreground": [
-          255,
-          255,
-          255
-        ],
-        "palette": [],
-        "source": "libghostty_builtin"
-      },
       "description": "Default colors presented by the emulated terminal host."
     },
     "cols": {
@@ -164,7 +149,8 @@
     "rows",
     "pixel_width",
     "pixel_height",
-    "term"
+    "term",
+    "colors"
   ],
   "title": "EventLogHeader",
   "type": "object"

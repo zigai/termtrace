@@ -41,7 +41,7 @@ The completion manifest binds the session and event roots, final exit event, eve
 
 ## API contract versions
 
-Atomic input sequences and structured retry details use JSONL driver protocol version 3 and control protocol version 13. Scenario files that use the isolation launch contract have scenario version 2; legacy version 1 files remain accepted when they do not use those fields. Checked-in JSON Schemas are authoritative for each shape.
+Atomic input sequences and structured retry details use JSONL driver protocol version 3 and control protocol version 13. Scenario files require scenario version 2. Checked-in JSON Schemas are authoritative for each shape.
 
 CLI result fields ending in `*_display` are lossy human-readable path
 conveniences. The adjacent byte-safe path fields remain authoritative.

@@ -17,6 +17,25 @@ use super::{
 };
 
 #[test]
+fn rejects_header_without_terminal_colors() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let path = temporary.path().join("session/events.jsonl");
+    secure_directory(path.parent().expect("parent"));
+    let clock = SessionClock::now().expect("valid clock");
+    let mut value = serde_json::to_value(header(&clock)).expect("header JSON");
+    value
+        .as_object_mut()
+        .expect("header object")
+        .remove("colors");
+    let mut encoded = serde_json::to_vec(&value).expect("encoded header");
+    encoded.push(b'\n');
+    fs_err::write(&path, encoded).expect("write incomplete header");
+
+    let error = EventLog::read(&path).expect_err("missing terminal colors must fail");
+    assert!(matches!(error, Error::InvalidEventLog { line: 1, .. }));
+}
+
+#[test]
 fn round_trip_preserves_binary_events_and_integrity_chain() {
     let temporary = TempDir::new().expect("temporary directory");
     let path = temporary.path().join("session/events.jsonl");

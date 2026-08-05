@@ -221,7 +221,7 @@ impl SourceRange {
 ///
 /// `start` is inclusive and defaults to zero. `end` is exclusive and defaults
 /// to one nanosecond after the final event so that the final event is included.
-/// An entirely absent request preserves legacy full-session behavior.
+/// An entirely absent request selects the complete session.
 ///
 /// # Errors
 ///

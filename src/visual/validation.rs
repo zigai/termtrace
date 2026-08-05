@@ -94,15 +94,15 @@ mod tests {
         let mut manifest = valid_manifest();
         validate_visual_manifest(&manifest).expect("valid native visual manifest");
 
-        let mut legacy = serde_json::to_value(&manifest).expect("visual manifest JSON");
-        legacy
+        let mut obsolete = serde_json::to_value(&manifest).expect("visual manifest JSON");
+        obsolete
             .as_object_mut()
             .expect("visual manifest object")
             .insert(
                 "ghostty_config_hash".to_owned(),
                 serde_json::json!("a".repeat(64)),
             );
-        assert!(serde_json::from_value::<VisualManifest>(legacy).is_err());
+        assert!(serde_json::from_value::<VisualManifest>(obsolete).is_err());
 
         manifest.version = VISUAL_MANIFEST_VERSION - 1;
         assert!(validate_visual_manifest(&manifest).is_err());

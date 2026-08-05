@@ -11,8 +11,8 @@
             "kind": "hello",
             "driver_protocol_version": 3,
             "control_protocol_version": 13,
-            "event_log_version": 1,
-            "state_format_version": 1,
+            "event_log_version": 5,
+            "state_format_version": 3,
             "methods": ["hello", "launch", "attach"],
             "max_message_bytes": 0
           }
@@ -107,8 +107,8 @@
             "kind": "hello",
             "driver_protocol_version": 3,
             "control_protocol_version": 13,
-            "event_log_version": 1,
-            "state_format_version": 1,
+            "event_log_version": 5,
+            "state_format_version": 3,
             "methods": []
           }
         }

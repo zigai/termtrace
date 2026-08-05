@@ -115,7 +115,6 @@ pub struct EventLogHeader {
     /// Terminal identity exposed to the child process.
     pub term: String,
     /// Default colors presented by the emulated terminal host.
-    #[serde(default)]
     pub colors: TerminalColors,
 }
 

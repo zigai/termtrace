@@ -38,6 +38,7 @@ pub const SCENARIO_VERSION: u32 = 2;
 #[serde(deny_unknown_fields)]
 pub struct Scenario {
     /// Scenario schema version.
+    #[schemars(range(equal = SCENARIO_VERSION))]
     pub version: u32,
     /// Stable human-readable scenario name.
     pub name: String,
@@ -72,19 +73,11 @@ impl Scenario {
     }
 
     fn validate(&self) -> Result<()> {
-        if !matches!(self.version, 1 | SCENARIO_VERSION) {
+        if self.version != SCENARIO_VERSION {
             return Err(scenario_error(format!(
-                "scenario version {} is unsupported; expected 1 or {SCENARIO_VERSION}",
+                "scenario version {} is unsupported; expected {SCENARIO_VERSION}",
                 self.version
             )));
-        }
-        if self.version == 1
-            && (self.launch.environment != EnvironmentSpec::default()
-                || self.launch.output_byte_budget.is_some())
-        {
-            return Err(scenario_error(
-                "scenario environment and output budgets require version 2",
-            ));
         }
         if self.name.trim().is_empty() || self.launch.command.is_empty() || self.steps.is_empty() {
             return Err(scenario_error(
@@ -1017,16 +1010,14 @@ mod tests {
     }
 
     #[test]
-    fn legacy_scenario_remains_valid_but_isolation_fields_require_version_two() {
-        let mut scenario: Scenario = serde_json::from_value(serde_json::json!({
+    fn scenario_version_one_is_rejected() {
+        let scenario: Scenario = serde_json::from_value(serde_json::json!({
             "version": 1,
-            "name": "legacy",
+            "name": "obsolete",
             "launch": { "command": ["/bin/true"] },
             "steps": [{ "stop": {} }]
         }))
-        .expect("legacy scenario JSON");
-        scenario.validate().expect("legacy scenario");
-        scenario.launch.output_byte_budget = Some(1024);
+        .expect("version one scenario JSON");
         assert!(scenario.validate().is_err());
     }
 

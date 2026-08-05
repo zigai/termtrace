@@ -533,7 +533,8 @@
     "version": {
       "description": "Scenario schema version.",
       "format": "uint32",
-      "minimum": 0,
+      "maximum": 2,
+      "minimum": 2,
       "type": "integer"
     }
   },
