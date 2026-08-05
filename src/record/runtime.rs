@@ -728,8 +728,10 @@ mod tests {
         );
         options.resource_limits.output_bytes = Some(1024);
 
-        let outcome = record(&options).expect("budgeted recording");
+        let mut mirrored_output = Vec::new();
+        let outcome = record_to(&options, &mut mirrored_output).expect("budgeted recording");
         assert!(outcome.output_bytes > 1024);
+        assert_eq!(mirrored_output.len() as u64, outcome.output_bytes);
         let completion: SessionCompletion = serde_json::from_slice(
             &fs_err::read(session.join("completion.json")).expect("completion"),
         )
