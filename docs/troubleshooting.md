@@ -34,6 +34,28 @@ termtrace registry list --all --json
 termtrace registry resolve NAME --json
 ```
 
+## A tmux pane is not recorded
+
+Audit the active server before changing it:
+
+```bash
+termtrace tmux status
+termtrace tmux status --json
+```
+
+`enabled=false` means the server did not load the generated configuration and
+has not received `termtrace tmux enable`. An enabled server can still show
+older panes as unrecorded because live enable is intentionally non-retroactive.
+New direct pane commands must use `termtrace tmux run -- COMMAND` in strict
+mode. See [Native tmux recording](tmux.md) for setup and explicit-command
+examples.
+
+Check `termtrace tmux scope` when only some panes are meant to record. A
+session, window, or pane selection applies to future pane root processes. It
+cannot attach to the PTY of a process that is already running. Use
+`termtrace tmux run --force` when one new pane must record the saved default
+command outside the selected scope.
+
 ## A wait times out
 
 Choose the predicate that matches the evidence you need:

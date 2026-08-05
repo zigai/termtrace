@@ -41,10 +41,10 @@ use termtrace::{
         NATIVE_VIDEO_CAPABILITY, probe_capabilities, require_capability,
     },
     control::{
-        ActorBoundaries, CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest,
-        ControlResult, InputSequenceAtom, PointerOperation, ProcessSignal, ScreenMode,
-        ScreenPredicate, ScreenRegion, StableCaptureQuality, StateHashComparison, request,
-        send_request, send_request_response,
+        ActorBoundaries, CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME, ControlCommand,
+        ControlData, ControlRequest, ControlResult, InputSequenceAtom, PointerOperation,
+        ProcessSignal, ScreenMode, ScreenPredicate, ScreenRegion, StableCaptureQuality,
+        StateHashComparison, request, send_request, send_request_response,
     },
     diff::{SemanticDiff, diff_states_with_semantic_states, inspect_point},
     driver::serve as serve_driver,
@@ -105,7 +105,8 @@ use termtrace::{
     session::{
         CaptureTarget, GHOSTTY_REPLAY_PROFILE_NAME, GeometryProvenance, GeometrySource,
         GhosttyVisualOverrides, ImportProvenance, ResourceLimits, SessionGeometry, SessionLineage,
-        SessionManifest, VerificationLevel, manifest_hash, read_manifest, validate_completed_log,
+        SessionManifest, TMUX_PANE_PROVENANCE_VERSION, TmuxPaneLaunchKind, TmuxPaneProvenance,
+        VerificationLevel, manifest_hash, read_manifest, validate_completed_log,
         verify_session_with_trust,
     },
     session_registry::{DetachedSessionPaths, RegistryEntry, SessionRegistry},
@@ -153,6 +154,7 @@ mod recording;
 mod registry;
 mod scenario;
 mod session_helpers;
+mod tmux;
 mod tooling;
 
 use analysis_replay::*;
@@ -168,6 +170,7 @@ use recording::*;
 use registry::*;
 use scenario::*;
 use session_helpers::*;
+use tmux::*;
 use tooling::*;
 
 const ROOT_HELP_TEMPLATE: &str = "\
@@ -179,7 +182,10 @@ Options:
 ";
 
 const ROOT_COMMAND_GROUPS: &[(&str, &[&str])] = &[
-    ("Recording", &["record", "test", "start", "restart", "stop"]),
+    (
+        "Recording",
+        &["record", "test", "start", "restart", "stop", "tmux"],
+    ),
     (
         "Live workflow",
         &["status", "send", "wait", "wait-idle", "show"],
@@ -227,6 +233,8 @@ enum Command {
     Send(SendArgs),
     /// Request graceful termination of a live session child.
     Stop(StopArgs),
+    /// Record managed tmux panes for their full lifetime.
+    Tmux(TmuxArgs),
     /// Live session control commands.
     Control(ControlArgs),
     /// Replay, inspect, compare, and diagnose terminal evidence.
@@ -281,6 +289,8 @@ enum CompletionCommand {
     Restart(RestartArgs),
     /// Request graceful termination of a live session child.
     Stop(StopArgs),
+    /// Record managed tmux panes for their full lifetime.
+    Tmux(TmuxArgs),
     /// Print machine-readable live session status.
     Status(StatusArgs),
     /// Send text or file bytes to a live child PTY.

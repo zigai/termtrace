@@ -24,7 +24,38 @@ fn root_help_groups_commands_by_workflow() {
         .stdout(predicate::str::contains("export-asciicast").not())
         .stdout(predicate::str::contains(
             "Run `termtrace <command> --help` for more details.",
+        ))
+        .stdout(predicate::str::contains(
+            "tmux       Record managed tmux panes for their full lifetime",
         ));
+}
+
+#[test]
+fn tmux_help_exposes_setup_audit_and_pane_commands() {
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = command
+        .args(["tmux", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let help = String::from_utf8(output).expect("UTF-8 help");
+    for subcommand in ["config", "enable", "disable", "status", "scope", "run"] {
+        assert!(
+            help.lines()
+                .any(|line| return line.trim_start().starts_with(subcommand)),
+            "tmux help omitted `{subcommand}`: {help}"
+        );
+    }
+    assert!(
+        !help.contains("guard"),
+        "hidden guard leaked into help: {help}"
+    );
+    assert!(
+        !help.contains("supervise"),
+        "hidden supervisor leaked into help: {help}"
+    );
 }
 
 #[test]
@@ -64,6 +95,27 @@ fn complex_selector_help_stays_within_one_hundred_columns() {
         (
             &["artifact", "screenshot", "--help"][..],
             "termtrace artifact screenshot",
+            &[][..],
+        ),
+        (&["tmux", "--help"][..], "termtrace tmux", &[][..]),
+        (
+            &["tmux", "config", "--help"][..],
+            "termtrace tmux config",
+            &[][..],
+        ),
+        (
+            &["tmux", "enable", "--help"][..],
+            "termtrace tmux enable",
+            &[][..],
+        ),
+        (
+            &["tmux", "scope", "--help"][..],
+            "termtrace tmux scope",
+            &[][..],
+        ),
+        (
+            &["tmux", "run", "--help"][..],
+            "termtrace tmux run",
             &[][..],
         ),
     ] {

@@ -225,6 +225,11 @@ impl SessionRegistry {
         });
     }
 
+    /// Return the secured state root used for managed session allocation.
+    pub fn state_root(&self) -> &Path {
+        return &self.state_root;
+    }
+
     /// Register a new alias without replacing an existing binding.
     ///
     /// # Errors
@@ -1049,6 +1054,7 @@ mod tests {
             creation_alias: None,
             lineage: None,
             import_provenance: None,
+            tmux_pane: None,
             command: vec![OsString::from("/bin/true")],
             working_directory: None,
             cols: 80,
@@ -1061,6 +1067,7 @@ mod tests {
             environment: EnvironmentSpec::default(),
             colors: TerminalColors::default(),
             forward_stdin: false,
+            continue_after_output_mirror_closes: false,
             durability_policy: DurabilityPolicy::default(),
             provenance_policy: ProvenancePolicy::default(),
             resource_limits: ResourceLimits::default(),

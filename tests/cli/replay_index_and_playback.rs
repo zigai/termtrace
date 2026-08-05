@@ -486,6 +486,7 @@ fn playback_does_not_echo_terminal_query_responses() {
         creation_alias: None,
         lineage: None,
         import_provenance: None,
+        tmux_pane: None,
         started_unix_ns: header.started_unix_ns,
         command: Vec::new(),
         working_directory: None,

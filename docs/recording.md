@@ -44,6 +44,10 @@ Restart verifies the reconstructed environment against the predecessor commitmen
 
 Termtrace refuses to reuse an existing output path.
 
+To apply this recording model automatically to all or selected panes in a tmux
+server, use the [native tmux integration](tmux.md). It owns the pane's child
+PTY and is not based on `pipe-pane` output copying.
+
 ## Choose terminal geometry
 
 Geometry affects line wrapping and every derived terminal state.

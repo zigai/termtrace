@@ -20,13 +20,13 @@ use nix::{
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use rustix::termios::{Winsize, tcgetwinsize};
 use signal_hook::{
-    consts::signal::SIGWINCH,
+    consts::signal::{SIGHUP, SIGINT, SIGTERM, SIGWINCH},
     iterator::{Handle, Signals},
 };
 
 use crate::{
-    Error, Result, artifact::sync_parent_directory, environment::EffectiveEnvironment,
-    ghostty_vt::supported_geometry_cell_count,
+    Error, Result, artifact::sync_parent_directory, control::ProcessSignal,
+    environment::EffectiveEnvironment, ghostty_vt::supported_geometry_cell_count,
 };
 
 use super::{
@@ -131,6 +131,31 @@ fn spawn_resize(
     return Ok(Some(ResizeWorker { handle, thread }));
 }
 
+fn spawn_host_signals(sender: mpsc::SyncSender<RuntimeMessage>) -> Result<SignalWorker> {
+    let mut signals = Signals::new([SIGHUP, SIGINT, SIGTERM])
+        .map_err(|error| return terminal_error("listen for recorder signals", error.to_string()))?;
+    let handle = signals.handle();
+    let thread = thread::Builder::new()
+        .name("termtrace-signal-listener".to_owned())
+        .spawn(move || {
+            for signal in signals.forever() {
+                let signal = match signal {
+                    SIGHUP => ProcessSignal::Hangup,
+                    SIGINT => ProcessSignal::Interrupt,
+                    SIGTERM => ProcessSignal::Terminate,
+                    _ => continue,
+                };
+                if sender.send(RuntimeMessage::HostSignal(signal)).is_err() {
+                    return;
+                }
+            }
+        })
+        .map_err(|error| {
+            return terminal_error("spawn recorder-signal listener", error.to_string());
+        })?;
+    return Ok(SignalWorker { handle, thread });
+}
+
 fn geometry_from_winsize(size: Winsize, fallback: TerminalGeometry) -> Option<TerminalGeometry> {
     supported_geometry_cell_count(size.ws_col, size.ws_row)?;
     let cell_width = fallback.pixel_width.checked_div(fallback.cols)?.max(1);
@@ -204,10 +229,16 @@ pub(super) struct ResizeWorker {
     pub(super) thread: thread::JoinHandle<()>,
 }
 
+pub(super) struct SignalWorker {
+    pub(super) handle: Handle,
+    pub(super) thread: thread::JoinHandle<()>,
+}
+
 pub(super) struct RuntimeWorkers {
     reader: thread::JoinHandle<()>,
     input: Option<InputWorker>,
     resize: Option<ResizeWorker>,
+    signals: SignalWorker,
     control: ControlWorker,
 }
 
@@ -310,6 +341,15 @@ impl ResizeWorker {
     }
 }
 
+impl SignalWorker {
+    fn stop(self) -> Result<()> {
+        self.handle.close();
+        return self.thread.join().map_err(|_| {
+            return terminal_error("join recorder-signal listener", "signal thread panicked");
+        });
+    }
+}
+
 impl RuntimeWorkers {
     pub(super) fn start(
         reader: Box<dyn Read + Send>,
@@ -318,10 +358,17 @@ impl RuntimeWorkers {
         initial_geometry: TerminalGeometry,
         session_directory: &Path,
     ) -> Result<Self> {
-        let control = spawn_control_server(session_directory, sender.clone())?;
+        let signals = spawn_host_signals(sender.clone())?;
+        let control = match spawn_control_server(session_directory, sender.clone()) {
+            Ok(worker) => worker,
+            Err(error) => return finish_with_cleanup(Err(error), signals.stop()),
+        };
         let resize = match spawn_resize(sender.clone(), initial_geometry) {
             Ok(worker) => worker,
-            Err(error) => return finish_with_cleanup(Err(error), control.stop()),
+            Err(error) => {
+                let cleanup = finish_with_cleanup(signals.stop(), control.stop());
+                return finish_with_cleanup(Err(error), cleanup);
+            }
         };
         let input = match forward_stdin
             .then(|| return spawn_input(sender.clone()))
@@ -331,6 +378,7 @@ impl RuntimeWorkers {
             Err(error) => {
                 let cleanup =
                     finish_with_cleanup(resize.map_or(Ok(()), ResizeWorker::stop), control.stop());
+                let cleanup = finish_with_cleanup(cleanup, signals.stop());
                 return finish_with_cleanup(Err(error), cleanup);
             }
         };
@@ -342,6 +390,7 @@ impl RuntimeWorkers {
                     resize.map_or(Ok(()), ResizeWorker::stop),
                 );
                 let cleanup = finish_with_cleanup(cleanup, control.stop());
+                let cleanup = finish_with_cleanup(cleanup, signals.stop());
                 return finish_with_cleanup(Err(error), cleanup);
             }
         };
@@ -349,6 +398,7 @@ impl RuntimeWorkers {
             reader,
             input,
             resize,
+            signals,
             control,
         });
     }
@@ -357,6 +407,7 @@ impl RuntimeWorkers {
         let control_stop = self.control.stop();
         let input_stop = self.input.map_or(Ok(()), InputWorker::stop);
         let resize_stop = self.resize.map_or(Ok(()), ResizeWorker::stop);
+        let signals_stop = self.signals.stop();
         let reader_join = self
             .reader
             .join()
@@ -364,6 +415,7 @@ impl RuntimeWorkers {
         let result = finish_with_cleanup(primary, control_stop);
         let result = finish_with_cleanup(result, input_stop);
         let result = finish_with_cleanup(result, resize_stop);
+        let result = finish_with_cleanup(result, signals_stop);
         return finish_with_cleanup(result, reader_join);
     }
 }

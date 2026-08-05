@@ -771,6 +771,143 @@
         "reason"
       ],
       "type": "object"
+    },
+    "TmuxPaneLaunchKind": {
+      "description": "How the native tmux wrapper selected the command running in its child PTY.",
+      "oneOf": [
+        {
+          "const": "default_shell",
+          "description": "tmux created an ordinary pane and Termtrace restored its configured login shell.",
+          "type": "string"
+        },
+        {
+          "const": "default_command",
+          "description": "tmux had a nonempty default command which Termtrace preserved through its configured shell.",
+          "type": "string"
+        },
+        {
+          "const": "explicit_argv",
+          "description": "The caller supplied an exact executable and argument vector.",
+          "type": "string"
+        },
+        {
+          "const": "shell_command",
+          "description": "The caller supplied one command interpreted by `/bin/sh -c`.",
+          "type": "string"
+        }
+      ]
+    },
+    "TmuxPaneProvenance": {
+      "additionalProperties": false,
+      "description": "Immutable tmux identity captured before a Termtrace-owned pane child is spawned.",
+      "properties": {
+        "launch_kind": {
+          "$ref": "#/$defs/TmuxPaneLaunchKind",
+          "description": "How the wrapper selected the recorded child command."
+        },
+        "pane_height": {
+          "description": "tmux pane height inherited by the child PTY.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pane_id": {
+          "description": "Stable tmux pane identifier.",
+          "type": "string"
+        },
+        "pane_index": {
+          "description": "Pane index within the window at launch.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pane_pid": {
+          "description": "Outer pane process identifier assigned to the Termtrace wrapper.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pane_start_command": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact tmux start-command display captured for diagnostics."
+        },
+        "pane_width": {
+          "description": "tmux pane width inherited by the child PTY.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "server_pid": {
+          "description": "tmux server process identifier.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_created_unix_seconds": {
+          "description": "Unix timestamp in seconds at which tmux created the session.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "description": "Stable tmux session identifier at pane launch.",
+          "type": "string"
+        },
+        "session_name": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Session label at pane launch; labels may change later."
+        },
+        "socket_path": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact tmux server socket path bytes."
+        },
+        "tmux_version": {
+          "description": "tmux version reported by the server.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Version of this tmux pane provenance contract.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "window_id": {
+          "description": "Stable tmux window identifier at pane launch.",
+          "type": "string"
+        },
+        "window_index": {
+          "description": "Window index at pane launch.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "window_name": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Window label at pane launch; labels may change later."
+        }
+      },
+      "required": [
+        "version",
+        "tmux_version",
+        "socket_path",
+        "server_pid",
+        "session_id",
+        "session_name",
+        "session_created_unix_seconds",
+        "window_id",
+        "window_index",
+        "window_name",
+        "pane_id",
+        "pane_index",
+        "pane_pid",
+        "pane_width",
+        "pane_height",
+        "pane_start_command",
+        "launch_kind"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/session.schema.json",
@@ -898,6 +1035,18 @@
       "description": "Termtrace package version.",
       "type": "string"
     },
+    "tmux_pane": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TmuxPaneProvenance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "tmux pane identity when this command was launched through native tmux recording."
+    },
     "version": {
       "description": "Schema version.",
       "format": "uint32",
@@ -913,7 +1062,7 @@
           "type": "null"
         }
       ],
-      "description": "Exact effective working-directory bytes; absent only in legacy sessions."
+      "description": "Exact effective working-directory bytes, when the launch context can provide them."
     }
   },
   "required": [

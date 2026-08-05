@@ -22,7 +22,7 @@ Only the first three files are required canonical evidence. Other entries appear
 
 ### `session.json`
 
-The immutable session manifest records the command, working directory, initial geometry, terminal profile, build identity, value-free child-environment policy and effective digest, sensitivity-aware provenance, durability policy, and resource limits. It is published before the event log. The current session-manifest version is 10. Version 10 intentionally separates the flattened replay profile from the fingerprint of Ghostty's reported effective output.
+The immutable session manifest records the command, working directory, initial geometry, terminal profile, build identity, value-free child-environment policy and effective digest, sensitivity-aware provenance, durability policy, resource limits, and optional stable tmux pane provenance. It is published before the event log. The current session-manifest version is 11. Version 11 adds the tmux server, session, window, pane, geometry, start-command, and launch-kind provenance captured by native tmux recording. Version 10 previously separated the flattened replay profile from the fingerprint of Ghostty's reported effective output.
 
 ### `events.jsonl`
 

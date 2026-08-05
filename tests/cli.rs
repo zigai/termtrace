@@ -33,3 +33,5 @@ mod session_registry_and_lifecycle;
 mod show_workflows;
 #[path = "cli/timeline_analysis.rs"]
 mod timeline_analysis;
+#[path = "cli/tmux_recording.rs"]
+mod tmux_recording;

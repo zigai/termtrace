@@ -156,6 +156,7 @@ pub(super) fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         creation_alias: session_alias,
         lineage: None,
         import_provenance,
+        tmux_pane: None,
         command: arguments.command,
         working_directory: arguments.cwd,
         cols: geometry.cols,
@@ -168,6 +169,7 @@ pub(super) fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         environment,
         colors,
         forward_stdin: !no_input,
+        continue_after_output_mirror_closes: false,
         durability_policy,
         provenance_policy,
         resource_limits: ResourceLimits {
@@ -483,6 +485,7 @@ fn restarted_record_options(
             reason: "restart".to_owned(),
         }),
         import_provenance: None,
+        tmux_pane: None,
         command: manifest
             .command
             .iter()
@@ -501,6 +504,7 @@ fn restarted_record_options(
         environment,
         colors: event_log.header.colors,
         forward_stdin: false,
+        continue_after_output_mirror_closes: false,
         durability_policy: manifest.durability_policy,
         provenance_policy: manifest.execution_provenance.policy,
         resource_limits: ResourceLimits {

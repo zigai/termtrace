@@ -47,6 +47,30 @@ termtrace stop app --wait
 Use `termtrace tooling client python workflow.py` or the corresponding
 `typescript workflow.ts` form for branching and repeated workflows.
 
+## Record tmux panes automatically
+
+Generate the tmux integration once and source it from your tmux configuration:
+
+```sh
+mkdir -p ~/.config/termtrace
+termtrace tmux config > ~/.config/termtrace/tmux.conf
+```
+
+```tmux
+source-file ~/.config/termtrace/tmux.conf
+```
+
+Each pane created by a new tmux server then runs through the same canonical PTY
+recorder as `termtrace record`. Input, output, resize, signal, exit, semantic
+state, tmux identity, and the optional Ghostty profile are retained for later
+analysis or video rendering. Use `termtrace tmux enable` to cover future panes
+in an already-running server. Use `termtrace tmux scope` to select all panes,
+specific sessions, windows, or panes, or explicit launches only. Use
+`termtrace tmux status` to audit coverage.
+
+See [Native tmux recording](docs/tmux.md) for strict-mode behavior, explicit
+pane commands, storage, and exact fidelity boundaries.
+
 ## Artifacts and tests
 
 ```sh
@@ -62,6 +86,7 @@ Use `termtrace tooling doctor --explain` to check optional native dependencies.
 
 - [Installation](docs/installation.md)
 - [Recording](docs/recording.md)
+- [Native tmux recording](docs/tmux.md)
 - [Live workflows](docs/agent-workflows.md)
 - [Semantic replay](docs/semantic-replay.md)
 - [Artifacts and verification](docs/formats.md)

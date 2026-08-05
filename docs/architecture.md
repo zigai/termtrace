@@ -31,9 +31,16 @@ completed event log ─> semantic replay
 
 The session actor orders child output, control requests, and terminal-generated replies. State-changing requests are recorded before their effects are acknowledged. Read-only operations such as `ping`, `status`, `show`, and waits do not change the event log.
 
+The tmux integration installs Termtrace as the root process for each managed
+pane. Termtrace creates an inner PTY for the configured shell or explicit
+command, forwards the outer pane's input and output, propagates resize and
+lifecycle signals, and sends every event through the same session actor. A
+small per-server supervisor audits the pane root processes so direct tmux
+commands and respawns cannot silently bypass recording in strict mode.
+
 ## Canonical recording
 
-`session.json` fixes the command, working directory, geometry, terminal profile, value-free child-environment policy and effective-environment commitment, provenance policy, durability policy, and resource limits. `events.jsonl` contains the integrity-chained execution. `completion.json` closes the recording, records any resource trigger, and rejects pending mutations.
+`session.json` fixes the command, working directory, geometry, terminal profile, value-free child-environment policy and effective-environment commitment, provenance policy, durability policy, resource limits, and optional stable tmux pane provenance. `events.jsonl` contains the integrity-chained execution. `completion.json` closes the recording, records any resource trigger, and rejects pending mutations.
 
 Input, resize, and signal operations use intent/result pairs. Multi-atom input is admitted under one state guard and retains one pair per atom plus an exact attempted-prefix result if PTY delivery stops. If recording stops between a pair, delivery is uncertain. Termtrace does not retry an uncertain mutation automatically.
 

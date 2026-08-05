@@ -56,6 +56,7 @@ use super::{
 
 const DESCENDANT_GRACE_PERIOD: Duration = Duration::from_millis(250);
 const DESCENDANT_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+const HOST_SIGNAL_GRACE_PERIOD: Duration = Duration::from_secs(2);
 const MUTATION_CACHE_CAPACITY: usize = 256;
 
 struct RuntimeOutcome {
@@ -66,6 +67,7 @@ struct RuntimeOutcome {
 
 struct RuntimeProgress {
     output_closed: bool,
+    mirror_open: bool,
     output_bytes: u64,
     resource_limit: Option<ResourceLimitOutcome>,
 }
@@ -149,6 +151,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         &mut event_log,
         output,
         options.forward_stdin,
+        options.continue_after_output_mirror_closes,
         TerminalGeometry::from(pty_size),
         &options.output_directory,
         &options.colors,
@@ -218,6 +221,7 @@ fn write_session_manifest(
         creation_alias: options.creation_alias.clone(),
         lineage: options.lineage.clone(),
         import_provenance: options.import_provenance.clone(),
+        tmux_pane: options.tmux_pane.clone(),
         started_unix_ns,
         command: options
             .command
@@ -315,6 +319,7 @@ fn consume_runtime(
     event_log: &mut EventLogWriter,
     output: &mut impl Write,
     forward_stdin: bool,
+    continue_after_output_mirror_closes: bool,
     initial_geometry: TerminalGeometry,
     session_directory: &Path,
     colors: &TerminalColors,
@@ -352,6 +357,7 @@ fn consume_runtime(
 
     let mut progress = RuntimeProgress {
         output_closed: false,
+        mirror_open: true,
         output_bytes: 0,
         resource_limit: None,
     };
@@ -359,6 +365,7 @@ fn consume_runtime(
     let mut drain_deadline: Option<Instant> = None;
     let mut process_group_killed = false;
     let mut resource_kill_deadline: Option<Instant> = None;
+    let mut host_signal_kill_deadline: Option<Instant> = None;
     let result = (|| {
         while !progress.output_closed || exit_status.is_none() {
             match receiver.recv_timeout(Duration::from_millis(10)) {
@@ -367,10 +374,12 @@ fn consume_runtime(
                     spawned,
                     event_log,
                     output,
+                    continue_after_output_mirror_closes,
                     &mut progress,
                     &mut mutation_history,
                     &mut live_terminal,
                     &mut screen_waiters,
+                    &mut host_signal_kill_deadline,
                 )?,
                 Err(RecvTimeoutError::Disconnected) if !progress.output_closed => {
                     return Err(terminal_error(
@@ -446,6 +455,19 @@ fn consume_runtime(
                 terminate_process_group(spawned.pid);
                 process_group_killed = true;
             }
+            if exit_status.is_none()
+                && host_signal_kill_deadline
+                    .is_some_and(|deadline| return Instant::now() >= deadline)
+                && !process_group_killed
+            {
+                event_log.append(Event::HostError {
+                    code: "recorder_signal_force_kill".to_owned(),
+                    message: "child did not exit after a signal delivered to the recorder; process group was killed"
+                        .to_owned(),
+                })?;
+                terminate_process_group(spawned.pid);
+                process_group_killed = true;
+            }
             if drain_deadline.is_some_and(|deadline| return Instant::now() >= deadline)
                 && !progress.output_closed
             {
@@ -494,10 +516,12 @@ fn process_runtime_message(
     spawned: &mut SpawnedCommand,
     event_log: &mut EventLogWriter,
     output: &mut impl Write,
+    continue_after_output_mirror_closes: bool,
     progress: &mut RuntimeProgress,
     mutation_history: &mut MutationHistory,
     live: &mut LiveTerminal,
     screen_waiters: &mut Vec<ScreenWaiter>,
+    host_signal_kill_deadline: &mut Option<Instant>,
 ) -> Result<()> {
     match message {
         RuntimeMessage::Output(data) => {
@@ -507,15 +531,23 @@ fn process_runtime_message(
             event_log.append_output(Event::Output {
                 data: ByteString::from(data.as_slice()),
             })?;
-            output
-                .write_all(&data)
-                .and_then(|()| return output.flush())
-                .map_err(|source| {
-                    return Error::Filesystem {
+            if progress.mirror_open
+                && let Err(source) = output.write_all(&data).and_then(|()| return output.flush())
+            {
+                if !continue_after_output_mirror_closes {
+                    return Err(Error::Filesystem {
                         path: PathBuf::from("<stdout>"),
                         source,
-                    };
+                    });
+                }
+                progress.mirror_open = false;
+                event_log.append(Event::HostError {
+                    code: "output_mirror_closed".to_owned(),
+                    message: format!(
+                        "presentation output closed while canonical PTY recording continued: {source}"
+                    ),
                 })?;
+            }
             process_semantic_output(live, spawned.writer.as_mut(), event_log, &data)?;
             let latest = live.semantic.snapshot()?;
             if !latest.modes.synchronized_output {
@@ -567,6 +599,18 @@ fn process_runtime_message(
         }
         RuntimeMessage::ResizeFailed(reason) => {
             return Err(terminal_error("read terminal geometry", reason));
+        }
+        RuntimeMessage::HostSignal(signal) => {
+            event_log.append(Event::HostError {
+                code: "recorder_signal_received".to_owned(),
+                message: format!(
+                    "recorder received {signal:?}; forwarding it to the child process group"
+                ),
+            })?;
+            apply_signal(spawned.pid, event_log, Uuid::now_v7(), signal, true)?;
+            if host_signal_kill_deadline.is_none() {
+                *host_signal_kill_deadline = Some(Instant::now() + HOST_SIGNAL_GRACE_PERIOD);
+            }
         }
         RuntimeMessage::Control { request, response } => {
             handle_control_request(
@@ -648,6 +692,7 @@ mod tests {
             creation_alias: None,
             lineage: None,
             import_provenance: None,
+            tmux_pane: None,
             command,
             working_directory: None,
             cols: 80,
@@ -660,6 +705,7 @@ mod tests {
             environment: EnvironmentSpec::default(),
             colors: TerminalColors::default(),
             forward_stdin: false,
+            continue_after_output_mirror_closes: false,
             durability_policy: DurabilityPolicy::default(),
             provenance_policy: ProvenancePolicy::default(),
             resource_limits: ResourceLimits::default(),
@@ -864,6 +910,7 @@ mod tests {
             creation_alias: None,
             lineage: None,
             import_provenance: None,
+            tmux_pane: None,
             command: vec![
                 OsString::from("/bin/sh"),
                 OsString::from("-c"),
@@ -880,6 +927,7 @@ mod tests {
             environment: EnvironmentSpec::default(),
             colors: TerminalColors::default(),
             forward_stdin: false,
+            continue_after_output_mirror_closes: false,
             durability_policy: DurabilityPolicy::default(),
             provenance_policy: ProvenancePolicy::default(),
             resource_limits: ResourceLimits::default(),
@@ -967,6 +1015,7 @@ mod tests {
             creation_alias: None,
             lineage: None,
             import_provenance: None,
+            tmux_pane: None,
             command: vec![OsString::from("true")],
             working_directory: None,
             cols: 80,
@@ -979,6 +1028,7 @@ mod tests {
             environment: EnvironmentSpec::default(),
             colors: TerminalColors::default(),
             forward_stdin: false,
+            continue_after_output_mirror_closes: false,
             durability_policy: DurabilityPolicy::default(),
             provenance_policy: ProvenancePolicy::default(),
             resource_limits: ResourceLimits::default(),
@@ -996,6 +1046,7 @@ mod tests {
             creation_alias: None,
             lineage: None,
             import_provenance: None,
+            tmux_pane: None,
             command: vec![
                 OsString::from("/bin/sh"),
                 OsString::from("-c"),
@@ -1012,6 +1063,7 @@ mod tests {
             environment: EnvironmentSpec::default(),
             colors: TerminalColors::default(),
             forward_stdin: false,
+            continue_after_output_mirror_closes: false,
             durability_policy: DurabilityPolicy::default(),
             provenance_policy: ProvenancePolicy::default(),
             resource_limits: ResourceLimits::default(),
@@ -1037,6 +1089,7 @@ mod tests {
             creation_alias: None,
             lineage: None,
             import_provenance: None,
+            tmux_pane: None,
             command: vec![
                 OsString::from("/usr/bin/python3"),
                 OsString::from("-c"),
@@ -1055,6 +1108,7 @@ mod tests {
             environment: EnvironmentSpec::default(),
             colors: TerminalColors::default(),
             forward_stdin: false,
+            continue_after_output_mirror_closes: false,
             durability_policy: DurabilityPolicy::default(),
             provenance_policy: ProvenancePolicy::default(),
             resource_limits: ResourceLimits::default(),
@@ -1087,6 +1141,7 @@ mod tests {
             creation_alias: None,
             lineage: None,
             import_provenance: None,
+            tmux_pane: None,
             command: vec![
                 OsString::from("/usr/bin/python3"),
                 OsString::from("-c"),
@@ -1105,6 +1160,7 @@ mod tests {
             environment: EnvironmentSpec::default(),
             colors: TerminalColors::default(),
             forward_stdin: false,
+            continue_after_output_mirror_closes: false,
             durability_policy: DurabilityPolicy::default(),
             provenance_policy: ProvenancePolicy::default(),
             resource_limits: ResourceLimits::default(),

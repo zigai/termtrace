@@ -15,6 +15,7 @@ For a working example, run the [end-to-end demo](../demos/README.md).
 | Topic | Use it when you want to |
 | --- | --- |
 | [Recording](recording.md) | choose geometry, provenance, and durability settings |
+| [Native tmux recording](tmux.md) | record all or selected panes from launch through exit |
 | [Test isolation](test-isolation.md) | control child environment, limits, and atomic idle capture |
 | [Live control](agent-workflows.md) | send input, wait for state, inspect changes, or automate a session |
 | [Language clients](language-clients.md) | use the typed Python and TypeScript APIs or regenerate their contracts |

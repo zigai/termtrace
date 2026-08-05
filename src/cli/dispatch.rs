@@ -9,6 +9,7 @@ pub(super) fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Status(arguments) => return run_status(arguments),
         Command::Send(arguments) => return run_send(arguments),
         Command::Stop(arguments) => return run_stop(arguments),
+        Command::Tmux(arguments) => return dispatch_tmux(arguments.command),
         Command::Control(arguments) => return dispatch_control(arguments.command),
         Command::Analyze(arguments) => return dispatch_analyze(arguments.command),
         Command::Artifact(arguments) => return dispatch_artifact(arguments.command),
@@ -24,6 +25,19 @@ pub(super) fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Wait(arguments) => return run_wait(arguments),
         Command::WaitIdle(arguments) => return run_wait_idle(arguments),
     }
+}
+
+pub(super) fn dispatch_tmux(command: TmuxSubcommand) -> Result<ExitCode> {
+    return match command {
+        TmuxSubcommand::Config(arguments) => run_tmux_config(arguments),
+        TmuxSubcommand::Enable(arguments) => run_tmux_enable(arguments),
+        TmuxSubcommand::Disable(arguments) => run_tmux_disable(arguments),
+        TmuxSubcommand::Status(arguments) => run_tmux_status(arguments),
+        TmuxSubcommand::Scope(arguments) => run_tmux_scope(arguments),
+        TmuxSubcommand::Run(arguments) => run_tmux_pane(arguments),
+        TmuxSubcommand::Guard(arguments) => run_tmux_guard(arguments),
+        TmuxSubcommand::Supervise => run_tmux_supervisor(),
+    };
 }
 
 pub(super) fn dispatch_control(command: ControlSubcommand) -> Result<ExitCode> {

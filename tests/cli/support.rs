@@ -44,7 +44,10 @@ pub(crate) use termtrace::{
         derived_directory_name, index_session_range, index_session_with_options, replay,
     },
     request_journal::read_mutation_journal,
-    session::{CaptureTarget, GeometrySource, SessionCompletion, SessionManifest, read_manifest},
+    session::{
+        CaptureTarget, GeometrySource, SessionCompletion, SessionManifest, TmuxPaneLaunchKind,
+        read_manifest, validate_completed_log,
+    },
     timeline::SourceRange,
 };
 pub(crate) use zstd::stream::{decode_all, read::Decoder};

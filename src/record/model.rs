@@ -8,13 +8,15 @@ use std::{
 };
 
 use crate::{
-    control::{ControlRequest, ControlResponse},
+    control::{ControlRequest, ControlResponse, ProcessSignal},
     environment::EnvironmentSpec,
     event::TerminalColors,
     event_log::DurabilityPolicy,
     profile::ResolvedGhosttyProfile,
     provenance::ProvenancePolicy,
-    session::{GeometryProvenance, ImportProvenance, ResourceLimits, SessionLineage},
+    session::{
+        GeometryProvenance, ImportProvenance, ResourceLimits, SessionLineage, TmuxPaneProvenance,
+    },
 };
 use portable_pty::{Child, MasterPty, PtySize};
 
@@ -37,6 +39,8 @@ pub struct RecordOptions {
     pub lineage: Option<SessionLineage>,
     /// Chain-bound provenance for an imported ANSI byte stream.
     pub import_provenance: Option<ImportProvenance>,
+    /// Immutable tmux pane identity when the recorder owns a tmux pane child PTY.
+    pub tmux_pane: Option<TmuxPaneProvenance>,
     /// Executable and arguments.
     pub command: Vec<OsString>,
     /// Child working directory.
@@ -61,6 +65,8 @@ pub struct RecordOptions {
     pub colors: TerminalColors,
     /// Forward standard input to the child PTY.
     pub forward_stdin: bool,
+    /// Continue canonical recording when the presentation output sink disappears.
+    pub continue_after_output_mirror_closes: bool,
     /// Output persistence policy committed into canonical provenance.
     pub durability_policy: DurabilityPolicy,
     /// Sensitivity-aware execution provenance collection policy.
@@ -91,6 +97,7 @@ pub(super) enum RuntimeMessage {
     InputFailed(String),
     Resize(TerminalGeometry),
     ResizeFailed(String),
+    HostSignal(ProcessSignal),
     Control {
         request: ControlRequest,
         response: mpsc::SyncSender<ControlResponse>,

@@ -126,6 +126,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         child_environment: environment.policy().clone(),
         execution_provenance,
         import_provenance: None,
+        tmux_pane: None,
         termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
         operating_system: env::consts::OS.to_owned(),
         architecture: env::consts::ARCH.to_owned(),
