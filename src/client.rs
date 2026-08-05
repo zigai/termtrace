@@ -354,7 +354,7 @@ impl Session {
     pub fn stop(&mut self, timeout: Option<Duration>) -> Result<Option<SessionCompletion>> {
         send_request(&self.path, &ControlRequest::new(ControlCommand::Stop))?;
         if let Some(timeout) = timeout {
-            return wait_for_completion(&self.path, timeout).map(Some);
+            return self.complete(timeout).map(Some);
         }
         return Ok(None);
     }
@@ -362,7 +362,7 @@ impl Session {
     /// Wait for and validate immutable completion evidence.
     pub fn complete(&mut self, timeout: Duration) -> Result<SessionCompletion> {
         let completion = wait_for_completion(&self.path, timeout)?;
-        if let Some(child) = &mut self.recorder {
+        if let Some(mut child) = self.recorder.take() {
             let _status = child.wait();
         }
         return Ok(completion);
@@ -370,8 +370,14 @@ impl Session {
 
     /// Detach without stopping the independently valid recording.
     pub fn detach(mut self) -> PathBuf {
-        self.recorder.take();
-        return self.path.clone();
+        if let Some(mut child) = self.recorder.take() {
+            thread::spawn(move || {
+                if let Err(error) = child.wait() {
+                    tracing::warn!(%error, "failed to reap detached recorder");
+                }
+            });
+        }
+        return self.path;
     }
 }
 
@@ -632,4 +638,33 @@ fn client_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
     };
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detach_reaps_the_recorder_after_it_exits() {
+        let child = Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .expect("spawn recorder stand-in");
+        let process_path = PathBuf::from(format!("/proc/{}", child.id()));
+        let session = Session {
+            path: PathBuf::from("/unused"),
+            session_id: Uuid::now_v7(),
+            recorder: Some(child),
+        };
+
+        let _path = session.detach();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while process_path.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(
+            !process_path.exists(),
+            "detached recorder remained as an unreaped process"
+        );
+    }
 }
