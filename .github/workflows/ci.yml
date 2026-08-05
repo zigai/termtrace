@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 permissions:
@@ -12,29 +14,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
-    runs-on: ubuntu-latest
+  rust:
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.3.14
-      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
       - uses: dtolnay/rust-toolchain@46511b1c83438f0dd37c02d843619ece5a4abb5b # 1.97.1
         with:
           components: clippy,rustfmt
       - name: Install headless Ghostty config fixture
         run: echo "$GITHUB_WORKSPACE/tests/fixtures/bin" >> "$GITHUB_PATH"
-      - run: bash -n install.sh benchmarks/*.sh scripts/*.sh demos/*.sh demos/apps/*.sh
-      - run: bash tests/install.sh
-      - run: python3 -m py_compile demos/apps/terminal_showcase.py
-      - run: scripts/bootstrap.sh
-      - run: cargo fmt --all -- --check
-      - run: bash scripts/check-github-action-pins.sh
-      - run: cargo metadata --no-deps --format-version 1 >/dev/null
-      - run: cargo test --locked --all-features
-      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: scripts/ci-rust.sh
 
   clients:
     runs-on: ubuntu-24.04
@@ -45,20 +35,4 @@ jobs:
         with:
           bun-version: 1.3.14
       - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
-      - run: bun install --frozen-lockfile
-        working-directory: packages/typescript
-      - run: scripts/generate-client-protocol.sh
-      - name: Check generated client contracts
-        run: git diff --exit-code -- packages/python/src/termtrace/_generated packages/typescript/src/generated
-      - run: bun test
-        working-directory: packages/typescript
-      - run: node --check bin/termtrace.js
-        working-directory: packages/typescript
-      - run: bunx tsc -p tsconfig.json --noEmit
-        working-directory: packages/typescript
-      - run: bunx tsc -p tsconfig.test.json --noEmit
-        working-directory: packages/typescript
-      - run: uv run --project packages/python --with pytest pytest -q packages/python/tests
-      - run: uv run --project packages/python --with mypy --with pytest mypy packages/python/src packages/python/tests
-      - run: uv run --project packages/python --with ruff ruff check packages/python/src/termtrace packages/python/scripts packages/python/tests --exclude packages/python/src/termtrace/_generated
-      - run: uv run --project packages/python --with ruff ruff format --check packages/python/src/termtrace packages/python/scripts packages/python/tests --exclude packages/python/src/termtrace/_generated
+      - run: scripts/ci-clients.sh
