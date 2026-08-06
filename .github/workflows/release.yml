@@ -41,7 +41,7 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: sudo apt-get update && sudo apt-get install --yes b3sum
-      - run: cargo install cargo-zigbuild --version 0.23.0 --locked
+      - run: cargo +1.97.1 install cargo-zigbuild --version 0.23.0 --locked
       - run: scripts/bootstrap.sh
         env:
           TERMTRACE_ZIG_TARGET: ${{ matrix.zig_target }}
@@ -121,7 +121,7 @@ jobs:
         run: find dist/python dist/npm -type f -print0 | sort -z | xargs -0 sha256sum > "dist/termtrace-${{ matrix.target }}-packages.sha256"
       - name: Generate CycloneDX SBOM
         run: |
-          cargo install cargo-cyclonedx --locked
+          cargo +1.97.1 install cargo-cyclonedx --locked
           cargo cyclonedx --format json --override-filename "termtrace-${{ matrix.target }}.cdx"
           mv "termtrace-${{ matrix.target }}.cdx.json" dist/
       - uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
