@@ -29,7 +29,7 @@ fi
 
 if ! command -v bindgen >/dev/null 2>&1; then
     echo "bindgen is required only to upgrade bindings" >&2
-    echo "install it with: cargo install bindgen-cli --version $bindgen_version --locked" >&2
+    echo "install it with: cargo +1.97.1 install bindgen-cli --version $bindgen_version --locked" >&2
     exit 2
 fi
 
