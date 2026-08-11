@@ -1,91 +1,111 @@
 # Live control and inspection
 
-Every active recording exposes an owner-only control socket. Use it to observe the terminal, send input, resize the PTY, add markers, or stop the child.
+Every active recording exposes an owner-only control socket. Use it to observe
+the terminal, act on a guarded state, resize the PTY, add markers, or stop the
+child.
 
-## Start a detached session
+## Use the response protocol
 
-`start` creates a recording under the per-user state directory and publishes its name only after the control socket is ready:
+Pass `--response agent` in automation. Agent mode writes exactly one compact,
+versioned JSON object to stdout; logs and progress stay on stderr. Human mode is
+concise prose, `full` exposes forensic internals, and `quiet` communicates only
+through the exit status. `auto` selects human output on a terminal and agent
+output otherwise. `TERMTRACE_RESPONSE=agent` sets the same default.
 
-```bash
-termtrace start demo --cols 120 --rows 36 your-command
-termtrace control ping demo
-termtrace status demo
+Do not redirect normal responses to temporary files and extract fields with
+shell text filters. Select a response profile, screen encoding, or
+`--fields cursor,modes,boundary,timing` at the Termtrace command boundary.
+
+## Start and synchronize
+
+`start` creates a recording under the per-user state directory and publishes its
+name after readiness. Add a startup postcondition so the first action begins
+from an observed state:
+
+```sh
+termtrace --response agent start demo --cols 120 --rows 36 --until-screen Ready -- your-command
+termtrace --response agent start demo --until-idle 250ms -- your-command
 ```
 
-Use `record --no-input --out SESSION` when the evidence path must be chosen explicitly.
+Use `record --no-input --out SESSION` when the evidence path must be chosen
+explicitly.
 
-## Inspect the screen
+## Inspect the presented screen
 
-`show` is the simplest view of the latest presented terminal state:
+`screen` observes the latest presentation-eligible viewport:
 
-```bash
-termtrace show demo
-termtrace show demo --format json-compact
+```sh
+termtrace --response agent screen demo
+termtrace --response agent screen demo --since STATE
 ```
 
-For completed sessions, select a specific point:
+Pass the `state` from one response to `--since`. If the presented viewport has
+not changed, the response says it is unchanged instead of retransmitting it.
+Choose `--screen exact|text|sparse|diff|none` to control the representation;
+`diff` requires `--since`.
 
-```bash
+For completed sessions, `show` remains the point-selection interface:
+
+```sh
 termtrace show SESSION --state 42
 termtrace show SESSION --state-hash HASH
 termtrace show SESSION --event-seq 120
 termtrace show SESSION --at-marker before-build
 ```
 
-`inspect` returns the complete reconstructed state, including cells, styles, colors, cursor, modes, and source boundaries:
+`analyze inspect` returns the complete reconstructed state, including cells,
+styles, colors, cursor, modes, and source boundaries:
 
-```bash
+```sh
 termtrace analyze inspect --session SESSION --state 42 --format json
 termtrace analyze inspect --session SESSION --state 42 --row 16 --format json-compact
 ```
 
-Use `analyze output SESSION --raw` only for the original child-output byte stream. Output history is not the same thing as the visible viewport.
+Use `analyze output SESSION --raw` only for original child-output byte history.
+Output history is not the presented viewport and cannot satisfy a screen
+requirement.
 
 ## Wait for state
 
-Wait for presented screen text:
-
-```bash
-termtrace wait demo 'Ready' --stable-for 250ms --timeout-ms 30000
-```
-
-Use `--output TEXT` when you need historical output rather than the current screen. Other predicates can test rows, regions, cursor properties, terminal modes, and state changes. See `termtrace wait --help` for the full predicate grammar.
-
-Waits are observations. They do not append events to the recording.
-
-When the next action needs the exact state that became idle, do not issue a wait followed by `show`; the state can change between calls. Use the actor-atomic operation:
+Name the truth source explicitly:
 
 ```sh
-termtrace wait-idle demo --stable-for 250ms --timeout-ms 30000
+termtrace --response agent wait demo --screen Ready --stable-for 250ms --timeout-ms 30000
+termtrace --response agent wait demo --screen-regex 'Ready|Done' --timeout-ms 30000
+termtrace --response agent wait demo --output 'earlier diagnostic' --timeout-ms 30000
 ```
 
-The default response contains the viewport text, state hash, geometry, cursor, modes, and one compact canonical boundary from the exact actor state. It deliberately omits the large compressed semantic-state blob; add `--full-state` only when a consumer will decode the complete cell model. The default accepts only `stable`. `--allow-incomplete` returns typed `child_completed`, `output_closed`, or `deadline` snapshots for explicit inspection.
+`--screen` and `--screen-regex` inspect the current presented viewport.
+`--output` searches canonical output history. Other predicates test rows,
+regions, cursor properties, terminal modes, and state changes. Waits are
+observations and do not append events.
 
-## Send input
+## Act on the observed state
 
-`send` accepts text, paste, named keys, raw bytes, and files:
+`act` combines input with its postcondition in one actor operation:
 
-```bash
-termtrace send demo text:'build' enter
-termtrace send demo up up enter
-termtrace send demo paste:'multiple lines'
-termtrace send demo raw-file:input.bin
-termtrace send demo ctrl+f q enter
+```sh
+termtrace --response agent act demo text:build enter --until-idle 250ms --if-state STATE
+termtrace --response agent act demo enter --until-screen 'Build complete'
 ```
 
-The complete atom list is admitted under one optimistic guard and one request ID. Use `--pace 35ms` to delay between atoms. Named keys are encoded from the application's live terminal modes, common `ctrl`/`shift`/`alt`/`super` combinations accept `+` or `-`, and a single printable character is text. `termtrace control keys` prints the accepted grammar. Paste input respects bracketed-paste mode and rejects unsafe delimiter injection. Add `--verbose` only when per-atom event coordinates are needed.
+This avoids the race and ambiguity of `send` followed by a separate wait. It
+also reports input application separately from postcondition success. Treat
+`applied`, `retry`, and `session_state` as authoritative. A failed postcondition
+does not undo applied input and is not permission to resend it.
 
-Every mutation has a request ID and a durable outcome. A transport failure labeled `safe_same_request_id` must be retried with the identical ID and payload. Deterministic actor rejections require a corrected request. An `input_sequence_incomplete` response reports the exact applied prefix, failed atom, partial byte count, and first unattempted suffix; never resend the whole sequence under a new ID. Library clients preserve these structured details.
+Input atoms include text, paste, named keys, raw bytes, and files:
+`text:build`, `paste:multiple-lines`, `enter`, `ctrl+f`, `raw:1b`, and
+`raw-file:input.bin`. Run `termtrace control keys` for the complete grammar.
+Use `--pace 35ms` only when the application requires paced input.
 
-## Guard a mutation
+Every mutation has a request ID and a durable outcome. Follow the returned
+`retry` instruction exactly. An uncertain outcome may require the identical
+request ID and payload; deterministic actor rejection requires a corrected
+request. Never resend a whole sequence merely because its postcondition failed.
 
-Structured observations include a presented `state_hash`. Pass it back with `--if-state` when an action is valid only for that state:
-
-```bash
-termtrace send demo enter --if-state HASH
-```
-
-If the screen changed first, Termtrace returns `stale_observation` without sending input. Inspect again before deciding what to do.
+For an unguarded mutation with no postcondition, the compatibility `send`
+command remains available.
 
 ## Focus and pointer input
 
@@ -125,16 +145,31 @@ Allowed signals are `interrupt`, `terminate`, `hangup`, `user1`, and `user2`. `s
 
 ## Review changes
 
-Start with a timeline, then narrow the interesting range:
+Start with the task-level last-action reports:
+
+```bash
+termtrace inspect SESSION --last-action
+termtrace diagnose SESSION --since-last-action
+```
+
+These commands derive the complete latest input request from its canonical
+intent/result pairs. Inspection returns changed rows, cursor and mode movement,
+generated output, presentation eligibility, and bounded warnings. Diagnostics
+are restricted to the same action range.
+
+Use the advanced analysis group only when the task needs explicit selectors:
 
 ```bash
 termtrace analyze timeline SESSION
 termtrace analyze diff SESSION --from-marker before-build --to-marker after-build
 termtrace analyze explain SESSION --event-seq 120 --context 8
-termtrace analyze diagnose SESSION --check full-redraw,flicker,stale-cells
+termtrace analyze diagnose SESSION --check full-redraw,transient,dirty
 ```
 
-The timeline combines canonical operations with semantic state changes. `diff` compares complete cell values. `explain` associates VT tokens with nearby states. Diagnostics are conservative findings, not guesses about pixels that were never observed.
+The timeline combines canonical operations with semantic state changes. `diff`
+compares complete cell values. `explain` associates VT tokens with nearby
+states. Diagnostics are conservative findings, not guesses about pixels that
+were never observed.
 
 Potentially large report commands return at most 200 matching records by default. Continue deterministically with `--offset NEXT --limit N`, or request intentionally large output with `--all`. JSONL commands append a typed `output_page` record only when the result is partial.
 
@@ -182,7 +217,11 @@ termtrace test SCENARIO.json --jobs 4 --reruns 1
 
 Snapshot files change only with `--update-snapshots`. Each rerun receives a new session; failed attempts are retained.
 
-For language integrations, keep one `termtrace tooling driver` process and begin with `hello`. Typed Python, TypeScript, and Rust clients wrap the same screen, keyboard, pointer, event, completion, and evidence contracts. Driver handles are process-local; canonical session IDs and paths remain stable across driver restarts.
+For more than two or three actions, keep one `termtrace agent` process and begin
+the JSONL protocol with `hello`; `rpc` is an equivalent alias. Typed Python,
+TypeScript, and Rust clients wrap the same screen, keyboard, pointer, event,
+completion, and evidence contracts. Driver handles are process-local; canonical
+session IDs and paths remain stable across driver restarts.
 
 For branching, retries, loops, or multi-session orchestration, run a reviewable
 client script without generating a project:

@@ -59,7 +59,7 @@ Ranged manifests retain absolute source times and the exact selected bounds. Inv
 
 Completed sessions can resolve a state, event, time, or marker:
 
-```bash
+```sh
 termtrace show SESSION --state 42
 termtrace show SESSION --state-hash HASH
 termtrace show SESSION --event-seq 120
@@ -69,7 +69,9 @@ termtrace show SESSION --at-marker ready
 
 The default selects the latest presented state. Explicit hidden states require `--include-hidden`.
 
-A state hash selects semantic content across `inspect`, `show`, `save`, `screenshot`, `diff`, and `explain`. When the same content recurs, the latest matching canonical occurrence supplies the source boundary.
+A state hash selects semantic content across `inspect`, `show`, `save`,
+`screenshot`, `diff`, and `explain`. When the same content recurs, the latest
+matching canonical occurrence supplies the source boundary.
 
 One-off completed observations publish compressed disposable checkpoints. They are bounded to 32 entries and 64 MiB per session and never replace canonical evidence:
 

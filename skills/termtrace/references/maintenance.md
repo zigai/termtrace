@@ -3,11 +3,14 @@
 After the CLI graph changes:
 
 - Update every skill example that invokes a changed path.
-- Keep only the live `--help` discovery ladder in the skill instructions. Do not
-  copy generated command listings or option text into the skill.
-- Verify the affected root, group, and leaf `--help` paths against the built
-  binary.
-- Run the repository's focused skill/CLI test and then the normal test suite.
+- Keep discovery shallow: root help and the direct leaf help for the workflow.
+  Do not copy generated command listings into the skill.
+- Verify affected root and direct leaf help against the built binary. Do not
+  recursively traverse help or pipe it through shell text filters.
+- Run the repository's focused skill/CLI check when it is lightweight. Run
+  broader tests once at the repository level rather than as part of a skill
+  refresh.
 
 The refresh is complete only when examples invoke the tested CLI graph and the
-skill tells agents to consult the installed binary for version-specific details.
+skill explains response profiles, presented-screen truth, persistent-driver
+selection, and mutation/retry authority.

@@ -1,8 +1,10 @@
 # Termtrace
 
 Termtrace is a Linux terminal flight recorder for debugging and automating
-terminal applications. It preserves exact PTY events and reconstructs the
-semantic screens that applications presented.
+terminal applications. It preserves canonical PTY input and output while
+reconstructing the presentation-eligible screens that applications displayed.
+Those are separate truth sources: output history is not proof that text was
+presented in the viewport.
 
 ## Features
 
@@ -20,12 +22,12 @@ curl -LsSf https://github.com/zigai/termtrace/raw/main/install.sh | bash
 
 ## Quick start
 
-Record a command, inspect its final screen, browse its timeline, and verify the
-evidence:
+Record a command, inspect its final presented screen, browse its timeline, and
+verify the evidence:
 
 ```sh
 termtrace record --out ./app.termtrace --geometry inherit -- my-terminal-app
-termtrace show ./app.termtrace
+termtrace screen ./app.termtrace
 termtrace analyze timeline ./app.termtrace
 termtrace integrity verify ./app.termtrace
 ```
@@ -36,64 +38,72 @@ replaced.
 ## Live sessions
 
 ```sh
-termtrace start app --cols 120 --rows 36 -- my-terminal-app
-termtrace wait app 'Ready' --stable-for 250ms
-termtrace send app text:'help' enter
-termtrace wait-idle app --stable-for 250ms
-termtrace show app
-termtrace stop app --wait
+termtrace --response agent start app --cols 120 --rows 36 --until-screen Ready -- my-terminal-app
+termtrace --response agent act app text:help enter --until-idle 250ms
+termtrace --response agent screen app --since STATE
+termtrace --response agent stop app --wait
 ```
 
-Use `termtrace tooling client python workflow.py` or the corresponding
-`typescript workflow.ts` form for branching and repeated workflows.
+`start --until-*` synchronizes the initial screen. `act` applies input and checks
+its postcondition atomically; its `applied`, `retry`, and `session_state` fields
+remain authoritative even if the postcondition fails. Pass the state returned by
+one observation to `screen --since` to avoid retransmitting an unchanged screen.
+Keep a persistent `termtrace agent` driver when more than two or three actions
+are expected.
 
-## Record tmux panes automatically
+## Record a complete tmux session
 
-Generate the tmux integration once and source it from your tmux configuration:
+Record the composite tmux client screen and its individual pane tracks under one
+aggregate manifest:
 
 ```sh
-mkdir -p ~/.config/termtrace
-termtrace tmux config > ~/.config/termtrace/tmux.conf
+termtrace tmux record work --new -- tmux new-session -s work
+termtrace tmux status work
+termtrace tmux stop work --wait
+termtrace tmux video work --out work.mp4
 ```
 
-```tmux
-source-file ~/.config/termtrace/tmux.conf
-```
+The composite track retains borders, status lines, layouts, zoom, copy mode, and
+window or pane changes for faithful video. Pane tracks retain clean canonical
+PTY evidence for inspection. Coverage gaps warn by default; select
+`--coverage strict` only when Termtrace is explicitly permitted to terminate an
+uncovered pane.
 
-Each pane created by a new tmux server then runs through the same canonical PTY
-recorder as `termtrace record`. Input, output, resize, signal, exit, semantic
-state, tmux identity, and the optional Ghostty profile are retained for later
-analysis or video rendering. Use `termtrace tmux enable` to cover future panes
-in an already-running server. Use `termtrace tmux scope` to select all panes,
-specific sessions, windows, or panes, or explicit launches only. Use
-`termtrace tmux status` to audit coverage.
+For automatic pane recording outside an aggregate workflow, generate and source
+`termtrace tmux config`, or use `termtrace tmux enable` for future panes in an
+already-running server. See [Full tmux recording](docs/tmux.md) for setup,
+scope selection, storage, and exact fidelity boundaries.
 
-See [Native tmux recording](docs/tmux.md) for strict-mode behavior, explicit
-pane commands, storage, and exact fidelity boundaries.
-
-## Artifacts and tests
+## Debugging, artifacts, and tests
 
 ```sh
-termtrace analyze index --session ./app.termtrace
-termtrace artifact screenshot ./app.termtrace --out ./app-screenshot
-termtrace artifact capture --session ./app.termtrace
+termtrace inspect ./app.termtrace --last-action
+termtrace diagnose ./app.termtrace --since-last-action
+termtrace screenshot ./app.termtrace -o ./app.png
+termtrace bundle ./app.termtrace -o ./app-bundle
+termtrace bug-report ./app.termtrace -o ./bug-report --screenshot
+termtrace video ./app.termtrace -o ./app.mp4 --preset docs --renderer semantic
 termtrace test SCENARIO.json
 ```
 
+The top-level debugging and handoff commands are the normal task interface.
+Use the nested `analyze` and `artifact` command groups only for advanced
+selectors, forensic reports, batch rendering, or non-default bundle profiles.
 Use `termtrace tooling doctor --explain` to check optional native dependencies.
 
 ## Documentation
 
 - [Installation](docs/installation.md)
 - [Recording](docs/recording.md)
-- [Native tmux recording](docs/tmux.md)
+- [Full tmux recording](docs/tmux.md)
 - [Live workflows](docs/agent-workflows.md)
 - [Semantic replay](docs/semantic-replay.md)
 - [Artifacts and verification](docs/formats.md)
 - [Language clients](docs/language-clients.md)
 - [Troubleshooting](docs/troubleshooting.md)
 
-Run `termtrace --help` for the current command tree and options.
+Run `termtrace --help` for the normal workflow and direct command help for exact
+options. Avoid recursively traversing deep help or shell-filtering it.
 
 ## License
 

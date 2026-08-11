@@ -1,9 +1,16 @@
 # Managed client workflows
 
-Prefer individual CLI commands for straightforward observations and mutations.
-Use `termtrace test` when assertions should be repeatable. A managed client
-script is appropriate when one control flow genuinely needs branching, loops,
-repeated observations, multiple sessions, or caller-owned retry IDs.
+Use individual `--response agent` CLI commands when a workflow will finish in
+two or three actions. Beyond that, keep one `termtrace agent` JSONL driver
+process so repeated observations and actions do not pay process startup and
+discovery costs. Use `termtrace test` when assertions should be repeatable. A
+managed client script is appropriate for branching, loops, multiple sessions,
+or caller-owned retry IDs.
+
+The `agent` command is the public alias for the persistent driver; `rpc` is an
+equivalent compatibility alias. Begin the protocol with `hello`. Driver handles
+are process-local, while canonical session IDs and paths remain valid after a
+driver restart.
 
 ## Run a script file
 

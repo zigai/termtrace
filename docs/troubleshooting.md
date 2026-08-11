@@ -25,7 +25,7 @@ termtrace control ping SESSION
 termtrace status SESSION
 ```
 
-`control.sock` disappears after the child exits. The socket also rejects clients owned by a different user.
+Each live session uses a bounded Linux abstract socket derived from its session ID, so deeply nested evidence paths remain controllable. The endpoint closes with the recorder and rejects clients owned by a different user.
 
 If a friendly name is involved, inspect all registry states:
 
@@ -44,11 +44,12 @@ termtrace tmux status --json
 ```
 
 `enabled=false` means the server did not load the generated configuration and
-has not received `termtrace tmux enable`. An enabled server can still show
-older panes as unrecorded because live enable is intentionally non-retroactive.
-New direct pane commands must use `termtrace tmux run -- COMMAND` in strict
-mode. See [Native tmux recording](tmux.md) for setup and explicit-command
-examples.
+has not received `termtrace tmux enable`. An enabled server can still show older
+panes as unrecorded because live enable is intentionally non-retroactive.
+Coverage warns without terminating panes by default. If `--coverage strict` was
+explicitly selected, new direct pane commands must use
+`termtrace tmux run -- COMMAND`. See [Full tmux recording](tmux.md) for setup
+and explicit-command examples.
 
 Check `termtrace tmux scope` when only some panes are meant to record. A
 session, window, or pane selection applies to future pane root processes. It
@@ -60,15 +61,18 @@ command outside the selected scope.
 
 Choose the predicate that matches the evidence you need:
 
-```bash
+```sh
 # Current presented screen
-termtrace wait SESSION 'Ready' --stable-for 250ms
+termtrace wait SESSION --screen Ready --stable-for 250ms
 
 # Any canonical output history
 termtrace wait SESSION --output 'earlier diagnostic'
 ```
 
-Screen waits ignore hidden synchronized-output states. Output waits search the event history, including text split across PTY reads.
+Screen waits inspect only the latest presentation-eligible viewport and ignore
+hidden synchronized-output states. Output waits search canonical child-output
+history, including text split across PTY reads. Output text does not prove that
+the application presented it.
 
 ## The event log has a damaged tail
 
@@ -130,7 +134,7 @@ Inspect `working_directory` in `session.json` to see the resolved value.
 
 ## Video misses a brief state
 
-Native video runs at 24 FPS, so a frame spans about 41.7 ms. Semantic replay is not frame-limited: brief states remain in `states.jsonl.zst` and can be inspected or rendered separately.
+Native video supports 24, 30, and 60 FPS (about 41.7, 33.3, and 16.7 ms per frame respectively) and defaults to 24 FPS. Select the capture rate with `termtrace artifact capture --fps`. Semantic replay is not frame-limited: brief states remain in `states.jsonl.zst` and can be inspected or rendered separately.
 
 States hidden by synchronized output are retained with `presented: false`. Use `analyze index --presented-only` when they are not needed.
 

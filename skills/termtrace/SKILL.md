@@ -4,66 +4,78 @@ description: Flight recorder for terminal applications through Termtrace. Use wh
 disable-model-invocation: false
 user-invocable: true
 ---
-
-# Termtrace
-
-Use the smallest evidence-producing workflow that answers the task. Termtrace's
-normal CLI output is already compact; request full state, verbose atom outcomes,
-or `--all` only when the next decision needs them.
+Use the smallest evidence-producing workflow that answers the task. Pass
+`--response agent` for a single compact, versioned JSON response. Use
+`--response full` only when debugging Termtrace itself requires forensic
+internals. Never redirect a normal response to a temporary file and parse it
+with `rg`, `sed`, `jq`, or similar shell filters; select the response profile,
+screen encoding, or `--fields cursor,modes,boundary,timing` at the command
+boundary instead.
 
 ## Choose the interface first
 
-- Use one CLI command for one observation, wait, mutation, or artifact.
+- Use `start --until-*` for initial synchronization, `act` for input plus its
+  postcondition, and `screen --since STATE` for repeated observations. After
+  completion, use `inspect --last-action` and `diagnose --since-last-action`
+  before descending into advanced analysis selectors.
+- Keep a persistent `termtrace agent` driver after two or three expected
+  actions, or whenever the workflow needs branching, loops, repeated
+  observations, multiple sessions, or caller-owned retry IDs. Read
+  [client workflows](references/client-workflows.md).
 - Use `termtrace test` for a repeatable assertion workflow or regression. Start
   from [the tested scenario example](examples/ready.termtrace.json) and read
   [repeatable testing](references/testing.md).
-- Use a reviewable `.py` or `.ts` file with `termtrace tooling client` when the
-  workflow genuinely needs branching, loops, repeated observations, multiple
-  sessions, or caller-owned retry IDs. Use standard input only for a short,
-  disposable snippet. Read [client workflows](references/client-workflows.md).
 - Use the supplied canonical session directly for review. Never relaunch an
   application merely to inspect existing evidence.
 
 ## Choose the truth source
 
-- Presented UI requirement: `wait SESSION --screen ...`, `wait-idle`, or `show`.
-- Exact child byte-history requirement: `wait SESSION --output ...` or `analyze output`.
-- Semantic transition: `analyze timeline`, `analyze diff`, then `analyze explain` as needed.
+- Presented UI requirement: `screen`, `wait --screen`, or an `--until-screen`
+  postcondition. The presented screen is the latest presentation-eligible
+  viewport, not a transcript.
+- Exact child byte-history requirement: `wait --output` or `analyze output`.
+- Semantic transition: start with `inspect SESSION --last-action` or
+  `diagnose SESSION --since-last-action`; use `analyze timeline`, `analyze diff`,
+  and `analyze explain` only when explicit endpoints or forensic detail are
+  needed.
 - Native pixels: request native screenshot/video explicitly; semantic images do
   not become native evidence.
-- Handoff or publication: use a manifested save, screenshot, or bundle and read
-  [artifact branches](references/artifacts.md).
+- Handoff or publication: use top-level `screenshot`, `bundle`, or `bug-report`
+  and read [artifact branches](references/artifacts.md).
 
 Read [live control](references/live-control.md) before state-dependent input.
-Use the installed binary's live, version-specific `--help` output to discover
-commands, descending only as far as the workflow requires:
+The root help explains the ordinary workflow:
 
 ```text
 termtrace --help
 termtrace COMMAND --help
-termtrace COMMAND SUBCOMMAND --help
-termtrace COMMAND SUBCOMMAND ACTION --help
 ```
 
-Choose each placeholder from the preceding help output. If a path is invalid or
-unfamiliar, move up one level; do not infer it from an older command name.
+Consult only the direct command help needed for the task. Do not recursively
+traverse the command tree or shell-filter help text. Never infer a path or flag
+from an older command name.
 
 ## Live workflow
 
-1. Start fresh evidence or resolve the supplied session.
-2. Synchronize on the presented screen unless exact output history is the real
-   requirement. Use `wait-idle` when the action must use the exact stable state it
-   returns; do not split that into a wait followed by a second observation.
-3. Guard state-dependent input with the returned presented-state hash. A hash
-   emitted by `show` or `wait-idle` can be used directly with `--state-hash` for
-   completed-state commands.
-4. Mark meaningful workflow milestones only: phase entry, failure boundary, or
-   a point requested by the user. Do not mark before and after every mutation;
-   canonical input intents/results already identify those operations.
-5. On a transport failure marked uncertain, retry only the identical payload
-   with the identical request ID. On `input_sequence_incomplete`, use its exact
-   attempted-prefix details; never resend the whole sequence with a new ID.
-6. Stop with completion waiting, then verify or publish the required artifact.
+1. Start fresh evidence with `--until-screen` or `--until-idle`, or resolve the
+   supplied session. This combines readiness with initial synchronization.
+2. Use `act` to combine state-guarded input and the next screen or idle
+   postcondition. Do not split it into `send` followed by a wait.
+3. Use the returned presented-state hash with `screen --since STATE` to receive
+   only a changed screen. Pass it through `--if-state` when an action is valid
+   only for that exact presentation.
+4. After two or three actions, keep one persistent `termtrace agent` process
+   instead of repeatedly starting CLI processes.
+5. Mark meaningful workflow milestones only: phase entry, failure boundary, or
+   a point requested by the user. Canonical input intents and results already
+   identify mutations.
+6. Treat response fields `applied`, `retry`, and `session_state` as
+   authoritative. Never infer mutation success from a postcondition failure.
+   Retry only as directed: uncertain mutations commonly require the identical
+   request ID and payload, while deterministic rejection requires a corrected
+   request.
+7. Stop with completion waiting. Inspect or diagnose the last action, then
+   publish the smallest sufficient `screenshot`, `bundle`, or `bug-report`.
    Preserve failed and incomplete evidence.
 
 ## Evidence invariants

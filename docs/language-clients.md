@@ -1,6 +1,10 @@
 # Python and TypeScript clients
 
-The Python and TypeScript packages own the subprocess lifecycle and expose matching `Terminal`, `Session`, `Screen`, `Keyboard`, `Pointer`, semantic, event, and evidence namespaces. They communicate with `termtrace tooling driver` through versioned newline-delimited JSON.
+The Python and TypeScript packages own the subprocess lifecycle and expose
+matching `Terminal`, `Session`, `Screen`, `Keyboard`, `Pointer`, semantic,
+event, and evidence namespaces. They communicate with the persistent
+`termtrace agent` driver (`rpc` is an equivalent alias) through versioned
+newline-delimited JSON.
 
 ## Contract architecture
 
@@ -64,9 +68,12 @@ if (!frame.viewport_text.includes("Commands")) throw new Error("commands missing
 
 The package ships precompiled standalone Ajv validators. Ajv is a development dependency and is not initialized at client startup.
 
-## Run a client script without project scaffolding
+## Run a persistent workflow without project scaffolding
 
-Release installations include both client packages as managed assets. Check discovery and runtime availability with:
+For more than two or three actions, use one persistent driver or a managed
+client instead of repeatedly invoking CLI processes. Release installations
+include both client packages as managed assets. Check discovery and runtime
+availability with:
 
 ```bash
 termtrace tooling client status

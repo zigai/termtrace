@@ -29,7 +29,10 @@ completed event log ─> semantic replay
                     └> native capture on a private display (default video source)
 ```
 
-The session actor orders child output, control requests, and terminal-generated replies. State-changing requests are recorded before their effects are acknowledged. Read-only operations such as `ping`, `status`, `show`, and waits do not change the event log.
+The session actor orders child output, control requests, and terminal-generated
+replies. State-changing requests are recorded before their effects are
+acknowledged. Read-only operations such as `ping`, `status`, `screen`, and waits
+do not change the event log.
 
 The tmux integration installs Termtrace as the root process for each managed
 pane. Termtrace creates an inner PTY for the configured shell or explicit
@@ -55,9 +58,16 @@ The pinned semantic engine runs while recording. It answers terminal queries and
 
 They differ during synchronized output. Screen observations and waits use the presented state so hidden intermediate changes do not masquerade as visible UI.
 
-`capture_stable` is registered and completed inside this actor. Stability timing, semantic bytes and text, the state hash, terminal modes, and source boundaries therefore describe one state. The routine CLI view omits compressed semantic bytes while preserving the coherent viewport and source boundary; protocol and `--full-state` consumers can request the complete payload. Typed deadline/output-close/completion outcomes prevent clients from silently treating an incomplete observation as stable.
+`capture_stable` is registered and completed inside this actor. Stability
+timing, semantic bytes and text, the state hash, terminal modes, and source
+boundaries therefore describe one state. Agent responses project that state
+into a compact task result; `--response full` exposes forensic internals. Typed
+deadline, output-close, and completion outcomes keep input application,
+postcondition status, retry policy, and session lifecycle distinct.
 
-Mutations may carry an expected state hash. The actor checks this immediately before writing to the PTY and rejects stale actions without creating an input intent.
+Mutations may carry an expected state hash. The actor checks it immediately
+before writing to the PTY and rejects stale actions without creating an input
+intent.
 
 ## Replay and capture
 

@@ -22,7 +22,7 @@ Only the first three files are required canonical evidence. Other entries appear
 
 ### `session.json`
 
-The immutable session manifest records the command, working directory, initial geometry, terminal profile, build identity, value-free child-environment policy and effective digest, sensitivity-aware provenance, durability policy, resource limits, and optional stable tmux pane provenance. It is published before the event log. The current session-manifest version is 11. Version 11 adds the tmux server, session, window, pane, geometry, start-command, and launch-kind provenance captured by native tmux recording. Version 10 previously separated the flattened replay profile from the fingerprint of Ghostty's reported effective output.
+The immutable session manifest records the command, working directory, initial geometry, terminal profile, build identity, value-free child-environment policy and effective digest, sensitivity-aware provenance, durability policy, resource limits, and optional stable tmux pane provenance. It is published before the event log. The current session-manifest version is 12. Version 12 adds chain-bound provenance for imported ANSI streams. Version 11 added the tmux server, session, window, pane, geometry, start-command, and launch-kind provenance captured by native tmux recording. Version 10 previously separated the flattened replay profile from the fingerprint of Ghostty's reported effective output.
 
 ### `events.jsonl`
 
@@ -37,11 +37,24 @@ cells. These limits apply equally to complete and prefix readers.
 
 ### `completion.json`
 
-The completion manifest binds the session and event roots, final exit event, event and output counts, exit outcome, durability record, and optional resource-limit trigger. A complete session ends in `Exit` and has no pending mutation. The current completion version is 4.
+The completion manifest binds the session and event roots, final exit event, event and output counts, exit outcome, durability record, and optional resource-limit trigger. A complete session ends in `Exit` and has no pending mutation. The current completion version is 5.
 
 ## API contract versions
 
-Atomic input sequences and structured retry details use JSONL driver protocol version 3 and control protocol version 13. Scenario files require scenario version 2. Checked-in JSON Schemas are authoritative for each shape.
+Atomic input sequences and structured retry details use JSONL driver protocol
+version 4 and control protocol version 14. Scenario files require scenario
+version 2. Checked-in JSON Schemas are authoritative for each shape.
+
+`schemas/cli-response.schema.json` defines CLI agent response version 1. Agent
+mode writes exactly one object, bounded to 64 KiB, with required `v`, `ok`, and
+`type` fields. Failures also require `code`, `applied`, `retry`, and
+`session_state`. These fields are authoritative: a failed postcondition can
+coexist with applied input, and callers must not invent a retry policy from the
+process exit code. Logs and progress are written to stderr.
+
+`schemas/tmux-recording-manifest.schema.json` defines aggregate tmux recording
+version 2: the composite client track, linked pane tracks, observed lifecycle,
+layout and focus transitions, and explicit coverage gaps.
 
 CLI result fields ending in `*_display` are lossy human-readable path
 conveniences. The adjacent byte-safe path fields remain authoritative.
@@ -77,20 +90,31 @@ Running `termtrace artifact capture --session SESSION` creates:
 
 | File | Contents |
 | --- | --- |
-| `visual/session.mkv` | lossless RGB H.264 video at 24 FPS |
+| `visual/session.mkv` | lossless RGB H.264 video at the configured 24, 30, or 60 FPS (24 FPS by default) |
 | `visual/final.png` | stable final native frame |
 | `visual/video-map.jsonl` | semantic-state to nominal-frame mapping |
 | `visual/ghostty-effective-config.txt` | Ghostty-reported effective output retained for fingerprint diagnostics |
 | `visual/manifest.json` | source, geometry, effective-output fingerprint, clocks, probes, and member hashes |
 
-Native capture is a separate capability. It never silently falls back to semantic rendering.
-The current native visual-manifest version is 5. Its version bump is intentional:
-the manifest identifies the effective output reported after loading the chosen
-replay input as a distinct representation.
+Native capture is a separate capability. It never silently falls back to
+semantic rendering. The current native visual-manifest version is 5. Its
+version bump is intentional: the manifest identifies the effective output
+reported after loading the chosen replay input as a distinct representation.
 
 ## Presentation artifacts
 
-`termtrace artifact video export` publishes `presentation.mp4`, a normalized plan, an output probe, a per-frame presentation map, and a manifest. Native Ghostty capture is the default presentation source.
+`termtrace video SESSION --out FILE.mp4` is the normal facade. It writes the new
+MP4 and retains a manifested `.termtrace` sidecar containing the resolved render
+configuration and provenance. Presets are `docs`, `social`, and `lossless`.
+`--renderer native` is the default, requires a verified native capture, and
+never falls back to semantic rendering. Select `--renderer semantic` explicitly
+when deterministic semantic replay is the intended source. Frame rate,
+resolution or scale, marker range, idle trimming, endpoint holds, and cursor
+treatment can be selected explicitly.
+
+The advanced `termtrace artifact video export` workflow publishes
+`presentation.mp4`, a normalized plan, an output probe, a per-frame presentation
+map, and a manifest. Native Ghostty capture is the default presentation source.
 
 With `--source semantic`, the same directory also retains:
 
@@ -157,11 +181,19 @@ structure, not trust or safety.
 Invalid bytes, exact timing, and advanced semantic state cannot be preserved, so
 the cast is never canonical evidence.
 
-`save`, `screenshot`, and `bundle` publish owner-only, no-replace artifact directories with manifests. Use a bundle profile appropriate to the data being shared and verify the bundle after copying it.
+`termtrace screenshot SESSION -o FILE` writes one owner-only semantic PNG.
+`termtrace bundle SESSION -o DIRECTORY` publishes the least-sensitive manifested
+screen handoff. `termtrace bug-report SESSION -o DIRECTORY [--screenshot]`
+publishes a bounded manifest containing redacted metadata, the last screen,
+last-action analysis, diagnostics, and a canonical session reference. It omits
+raw input/output event streams by default.
 
-Bundle manifests are limited to 1 MiB and 10,000 payload members. Bundle
-verification requires the caller's expected source session and profile; member
-sensitivity, relationship, and schema labels are derived by the verifier rather
-than accepted from the bundle.
+The advanced `artifact save`, `artifact screenshot`, and `artifact bundle`
+commands provide multi-format directories, exact selectors, native capture, and
+non-default bundle profiles. Bundle manifests are limited to 1 MiB and 10,000
+payload members. Bundle verification requires the caller's expected source
+session and profile; member sensitivity, relationship, and schema labels are
+derived by the verifier rather than accepted from the bundle.
 
-Terminal content remains untrusted and potentially sensitive in every representation.
+Terminal content remains untrusted and potentially sensitive in every
+representation.

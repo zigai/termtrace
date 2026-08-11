@@ -1,13 +1,44 @@
-# Native tmux recording
+# Full tmux recording
 
-Termtrace can record all panes, selected sessions, windows, or stable panes, or
-only panes that you start explicitly. Each recording begins when its pane
-command starts and ends when that command exits, the pane is closed, or the
-tmux server stops.
+Termtrace can record a tmux session at two levels:
 
-This integration does not use `pipe-pane`. Termtrace is the pane's root
-process and owns an inner PTY for the real shell or command. It therefore uses
-the same canonical recording path as `termtrace record`:
+- a composite client track containing the full screen a tmux client presented,
+  including pane borders, status lines, layout, zoom, copy mode, prompts, and
+  active-pane changes;
+- individual pane tracks containing clean canonical PTY evidence and semantic
+  state for each recorded pane.
+
+The composite track is the faithful video source. Pane tracks support
+pane-specific inspection and command provenance. An aggregate manifest links
+the composite session, pane recordings, stable tmux identities, lifecycle and
+layout observations, and any coverage gaps.
+
+## Record a complete tmux workflow
+
+```sh
+termtrace tmux record work --new -- tmux new-session -s work
+termtrace tmux status work
+termtrace tmux stop work --wait
+termtrace tmux video work --out work.mp4 --preset docs
+```
+
+`record` runs the exact trailing tmux client command as the composite track and
+configures pane recording for the same aggregate. With `--new`, an omitted
+`-L`/`-S` connection allocates a unique socket so an existing default server is
+never reused. Omit `--new` when the command attaches to an existing server.
+`video` renders the composite client track; choose
+`--renderer semantic|native`. Omit `--fps` to use the preset rate, or select
+24, 30, or 60 FPS explicitly.
+
+Hidden and detached panes continue their individual recording. The composite
+track, like any terminal recording, exists only for the lifetime of the client
+command.
+
+## Pane recording model
+
+The pane integration does not use `pipe-pane`. Termtrace is each recorded pane's
+root process and owns an inner PTY for the real shell or command. It therefore
+uses the same canonical recording path as `termtrace record`:
 
 - exact PTY output bytes and timing;
 - human input forwarded through the pane;
@@ -19,8 +50,7 @@ the same canonical recording path as `termtrace record`:
 - the resolved Ghostty profile when available;
 - stable tmux server, session, window, and pane identity.
 
-Hidden and detached panes continue recording. No Ghostty window or GPU is
-needed during recording.
+No Ghostty window or GPU is needed during pane recording.
 
 ## Enable recording from tmux startup
 
@@ -62,7 +92,7 @@ termtrace tmux status
 Existing panes remain alive but cannot be recorded retroactively. `enable`
 reports their count, and `status` labels them `recorded=false`. They are
 grandfathered only for their current root process. If an existing pane is
-respawned after enable, strict enforcement applies to the replacement.
+respawned after enable, the selected coverage policy applies to the replacement.
 
 Select a non-default tmux server with the same connection forms as tmux:
 
@@ -138,17 +168,25 @@ tmux new-window "$(tmux show-option -gv @termtrace-executable)" \
 scope. An explicit command after `--` is always selected. Neither form can
 attach retroactively to a command that is already running.
 
-## Strict coverage
+## Coverage policy
 
-Strict mode is the default. Creation hooks check new sessions, windows, and
-splits, while one lightweight supervisor audits pane root processes for the
-life of the tmux server. Inside the selected scope, a direct command that
-bypasses the wrapper is closed after a short startup grace period instead of
-being silently left unrecorded. Excluded processes are allowed to run normally.
-The supervisor also detects direct `respawn-pane` replacements in scope.
+`warn` is the default. Creation hooks and the lightweight supervisor report an
+uncovered selected pane without terminating it. This preserves the application
+while making the coverage gap explicit in status and aggregate evidence.
+
+Select `--coverage strict` only when the recording policy explicitly permits
+Termtrace to close an uncovered selected pane after the startup grace period:
+
+```sh
+termtrace tmux config --coverage strict > ~/.config/termtrace/tmux.conf
+termtrace tmux enable --coverage strict
+```
+
+Excluded processes run normally under either policy. The supervisor also
+detects direct `respawn-pane` replacements in scope.
 
 Ordinary tmux key bindings need no changes. If a command or plugin supplies an
-explicit pane command, wrap that command explicitly:
+explicit pane command, wrap it explicitly:
 
 ```sh
 tmux new-window "$(tmux show-option -gv @termtrace-executable)" \
@@ -158,12 +196,8 @@ tmux split-window "$(tmux show-option -gv @termtrace-executable)" \
 ```
 
 The first form preserves an exact executable and argument vector. The second
-form deliberately uses `/bin/sh -c` for shell syntax.
-
-Use `termtrace tmux config --allow-unrecorded` or
-`termtrace tmux enable --allow-unrecorded` only when silent bypasses are an
-accepted tradeoff. `termtrace tmux status --json` is suitable for a periodic
-coverage audit.
+form deliberately uses `/bin/sh -c` for shell syntax. `termtrace tmux
+status --json` is suitable for periodic coverage audits.
 
 ## Find and use recordings
 
@@ -189,22 +223,29 @@ semantic replay is needed.
 
 ## Fidelity boundary
 
-The result has the same fidelity as a normal Termtrace PTY recording. It can
-reconstruct the terminal states that the pane application produced, including
-brief states and resizes. It does not record tmux status lines, borders,
-popups, copy-mode overlays, another pane's compositing, or the original
-Ghostty framebuffer. Those belong to the outer tmux or Ghostty user interface,
-not to the pane PTY stream.
+The composite client track records the terminal screen produced by the outer
+tmux client, so it includes status lines, borders, popups, copy-mode overlays,
+layouts, and pane compositing. It is not a capture of the original Ghostty
+framebuffer or monitor. Native video is a later replay through Ghostty and still
+depends on external fonts, shaders, images, and other profile resources.
 
-Native video is a later replay through Ghostty. It can reproduce the recorded
-grid and terminal behavior with the saved profile, but it is not a screen
-capture of the original monitor. External fonts, shaders, images, and other
-profile dependencies must still exist when native artifacts are rendered.
+The aggregate manifest indexes observed session, window, and pane lifecycle;
+layout; active window and pane; zoom; copy mode; pane moves; and pane-track
+linkage. Changes shorter than the supervisor polling interval may not receive a
+separate indexed transition. Tmux messages and prompts remain visible in the
+composite track but are not separately indexed.
 
-If the pane closes, Termtrace records the received hangup, forwards it to the
-child, and closes canonical evidence. A sudden power loss can leave an
-incomplete but integrity-checkable prefix, subject to the configured durability
-window.
+Coverage-gap history remains in the manifest after a gap resolves, with its
+first observation, last observation, and resolution time. Matching lifecycle
+events record when pane coverage gaps open and resolve.
+
+Each pane track has the same fidelity as a normal Termtrace PTY recording. It
+reconstructs the terminal states that the pane application produced, including
+brief states and resizes, but it does not include tmux compositing. If a pane
+closes, Termtrace records the received hangup, forwards it to the child, and
+closes canonical pane evidence. A sudden power loss can leave incomplete but
+integrity-checkable composite or pane prefixes, subject to the configured
+durability window.
 
 ## Resource and data costs
 
