@@ -140,6 +140,53 @@ fn presentation_map_distinguishes_retimed_and_hold_frames() {
 }
 
 #[test]
+fn failed_export_removes_its_staging_directory() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let source = temporary.path().join("invalid.mkv");
+    fs_err::write(&source, b"not a video").expect("invalid source fixture");
+    let plan = PresentationPlan {
+        version: PRESENTATION_FORMAT_VERSION,
+        edit_plan_hash: "a".repeat(64),
+        source: PresentationSource::Native {
+            video_hash: hash_file(&source).expect("source hash"),
+            video: source,
+        },
+        fps: 24,
+        clips: vec![NormalizedClip {
+            source_range: SourceRange {
+                start_monotonic_ns: 0,
+                end_monotonic_ns: 1,
+            },
+            source_start_frame: 0,
+            source_end_frame: 1,
+            output_start_frame: 0,
+            output_end_frame: 1,
+            retimed_frame_count: 1,
+            hold_frame_count: 0,
+            speed: RationalSpeed::default(),
+            caption: None,
+        }],
+        output_frame_count: 1,
+        ..PresentationPlan::default()
+    };
+    let destination = temporary.path().join("presentation");
+    pipeline::export_with_capability_check(&plan, &destination, false)
+        .expect_err("invalid source video should fail export");
+    assert!(!destination.exists());
+    let staging = fs_err::read_dir(temporary.path())
+        .expect("temporary directory entries")
+        .map(|entry| return entry.expect("temporary directory entry").file_name())
+        .filter(|name| {
+            return name.as_encoded_bytes().starts_with(b".presentation-");
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        staging.is_empty(),
+        "failed export leaked staging: {staging:?}"
+    );
+}
+
+#[test]
 #[ignore = "requires FFmpeg with libx264"]
 fn exports_multi_clip_h264_presentation_atomically() {
     let temporary = tempfile::tempdir().expect("temporary directory");
@@ -350,6 +397,61 @@ fn transform_geometry_is_ordered_bounded_and_even() {
         ..EditPlan::default()
     };
     assert!(validate_transform_geometry(&invalid, 80, 40, false).is_err());
+}
+
+#[test]
+fn facade_render_configuration_survives_normalization_inputs() {
+    let edit = EditPlan {
+        version: EDIT_PLAN_VERSION,
+        clips: vec![EditClip {
+            from: EditSelector {
+                monotonic_ns: Some(0),
+                ..EditSelector::default()
+            },
+            to: EditSelector {
+                monotonic_ns: Some(1_000_000_000),
+                ..EditSelector::default()
+            },
+            speed: RationalSpeed::default(),
+            hold_ms: 1_000,
+            caption: None,
+        }],
+        delivery: PresentationDelivery {
+            codec: "h264_rgb".to_owned(),
+            pixel_format: "rgb24".to_owned(),
+            crf: 0,
+            encoder_preset: "veryslow".to_owned(),
+        },
+        transforms: vec![PixelTransform::Resize {
+            width: 1_920,
+            height: 1_080,
+        }],
+        render_config: Some(VideoRenderConfig {
+            preset: "lossless".to_owned(),
+            renderer: "semantic".to_owned(),
+            fps: 60,
+            resolution: Some([1_920, 1_080]),
+            scale: None,
+            start_marker: Some("demo".to_owned()),
+            end_marker: Some("done".to_owned()),
+            trim_idle: true,
+            idle_threshold_ms: Some(2_000),
+            hold_start_ms: 500,
+            hold_end_ms: 1_000,
+            cursor_style: "hidden".to_owned(),
+        }),
+        ..EditPlan::default()
+    };
+    edit.validate().expect("facade edit plan should validate");
+    assert_eq!(
+        validate_transform_geometry(&edit, 800, 600, false).expect("resize should be exact"),
+        (1_920, 1_080)
+    );
+    let encoded = serde_json::to_value(&edit).expect("serialize facade edit plan");
+    assert_eq!(encoded["render_config"]["preset"], "lossless");
+    assert_eq!(encoded["render_config"]["renderer"], "semantic");
+    assert_eq!(encoded["delivery"]["crf"], 0);
+    assert_eq!(encoded["delivery"]["pixel_format"], "rgb24");
 }
 
 #[test]

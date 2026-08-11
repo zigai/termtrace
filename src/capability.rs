@@ -2,7 +2,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{env, ffi::OsStr, path::PathBuf, process::Command};
+use std::{env, ffi::OsStr, path::PathBuf, process::Command, result::Result as StdResult};
 
 use crate::{Error, Result, ghostty_vt::GhosttyVt, replay::GHOSTTY_REVISION};
 
@@ -183,6 +183,11 @@ pub fn probe_capabilities() -> CapabilityReport {
         missing(&["ghostty", "Xvfb", "dbus-run-session", "ffmpeg", "ffprobe"]);
     let missing_video = missing(&["ffmpeg", "ffprobe"]);
     let encoder = ffmpeg_has_encoder("libx264rgb");
+    let semantic_video_probe = if missing_video.is_empty() {
+        ffmpeg_semantic_video_probe()
+    } else {
+        Err("probe was not run because FFmpeg or FFprobe is missing".to_owned())
+    };
     let (native_screenshot, native_video) = native_capabilities(
         cfg!(target_os = "linux"),
         &missing_native_screenshot,
@@ -190,27 +195,28 @@ pub fn probe_capabilities() -> CapabilityReport {
         encoder,
     );
     let semantic_video = if semantic_capability.status == CapabilityStatus::Ready
-        && missing_video.is_empty()
-        && encoder
+        && semantic_video_probe.is_ok()
     {
         ready(
             SEMANTIC_VIDEO_CAPABILITY,
             "semantic_video_tools_ready",
-            "the semantic engine, FFmpeg/FFprobe, and libx264rgb are ready; native display tools are not required",
+            "the semantic engine and a bounded libx264rgb encode probe completed; native display tools are not required",
         )
     } else {
         blocked(
             SEMANTIC_VIDEO_CAPABILITY,
             "semantic_video_dependency_missing",
             format!(
-                "semantic engine: {}; missing tools: {}; libx264rgb encoder: {}",
+                "semantic engine: {}; missing tools: {}; encode probe: {}",
                 if semantic_capability.status == CapabilityStatus::Ready {
                     "ready"
                 } else {
                     "blocked"
                 },
                 missing_video.join(", "),
-                if encoder { "available" } else { "unavailable" }
+                semantic_video_probe
+                    .as_ref()
+                    .map_or_else(|error| return error.as_str(), |()| return "ready")
             ),
             "install FFmpeg/FFprobe with libx264rgb and use a build containing the pinned semantic engine",
         )
@@ -374,6 +380,44 @@ fn ffmpeg_has_encoder(encoder: &str) -> bool {
             return output.status.success()
                 && String::from_utf8_lossy(&output.stdout).contains(encoder);
         });
+}
+
+fn ffmpeg_semantic_video_probe() -> StdResult<(), String> {
+    let ffmpeg = executable("ffmpeg").ok_or_else(|| return "FFmpeg is unavailable".to_owned())?;
+    let output = Command::new(ffmpeg)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=16x16:d=0.04",
+            "-frames:v",
+            "1",
+            "-vf",
+            "format=rgb24",
+            "-c:v",
+            "libx264rgb",
+            "-crf",
+            "0",
+            "-preset",
+            "medium",
+            "-f",
+            "null",
+            "-",
+        ])
+        .output()
+        .map_err(|error| return format!("could not execute FFmpeg: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let detail: String = String::from_utf8_lossy(&output.stderr)
+        .chars()
+        .take(1_024)
+        .collect();
+    return Err(format!("FFmpeg semantic-video encode failed: {detail}"));
 }
 
 fn ffmpeg_has_filter(filter: &str) -> bool {

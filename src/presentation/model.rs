@@ -43,6 +43,9 @@ pub struct EditPlan {
     /// Explicit visibly labeled pixel transforms.
     #[serde(default)]
     pub transforms: Vec<PixelTransform>,
+    /// User-facing video facade settings retained in the final manifest.
+    #[serde(default)]
+    pub render_config: Option<VideoRenderConfig>,
 }
 
 impl EditPlan {
@@ -116,9 +119,22 @@ impl EditPlan {
         if let Some(change) = &self.change_visualization {
             change.validate()?;
         }
-        if self.delivery != PresentationDelivery::default() {
+        let delivery_format_valid = matches!(
+            (
+                self.delivery.codec.as_str(),
+                self.delivery.pixel_format.as_str()
+            ),
+            ("h264", "yuv420p" | "yuv444p") | ("h264_rgb", "rgb24")
+        );
+        if !delivery_format_valid
+            || self.delivery.crf > 51
+            || !matches!(
+                self.delivery.encoder_preset.as_str(),
+                "medium" | "slow" | "veryslow"
+            )
+        {
             return Err(plan_error(
-                "delivery currently requires codec `h264` and pixel format `yuv420p`",
+                "delivery requires H.264 with a compatible pixel format, CRF 0-51, and a supported encoder preset",
             ));
         }
         if self.layout.branding.as_ref().is_some_and(|branding| {
@@ -148,6 +164,35 @@ pub struct EditClip {
     pub hold_ms: u64,
     /// Optional human presentation caption.
     pub caption: Option<String>,
+}
+/// Effective user-facing video facade settings.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VideoRenderConfig {
+    /// Named delivery preset.
+    pub preset: String,
+    /// Requested renderer without fallback.
+    pub renderer: String,
+    /// Effective output frame rate.
+    pub fps: u16,
+    /// Exact requested output resolution.
+    pub resolution: Option<[u16; 2]>,
+    /// Requested integer scale factor.
+    pub scale: Option<u16>,
+    /// Optional inclusive marker.
+    pub start_marker: Option<String>,
+    /// Optional exclusive marker.
+    pub end_marker: Option<String>,
+    /// Whether long gaps without child output were removed.
+    pub trim_idle: bool,
+    /// Idle gap threshold used by trimming.
+    pub idle_threshold_ms: Option<u64>,
+    /// Generated opening hold.
+    pub hold_start_ms: u64,
+    /// Generated closing hold.
+    pub hold_end_ms: u64,
+    /// Effective cursor presentation style.
+    pub cursor_style: String,
 }
 
 /// Unique marker or exact canonical monotonic timestamp.
@@ -532,6 +577,12 @@ pub struct PresentationDelivery {
     pub codec: String,
     /// Stable output pixel format.
     pub pixel_format: String,
+    /// libx264 constant-rate-factor quality.
+    #[serde(default = "default_delivery_crf")]
+    pub crf: u8,
+    /// libx264 speed/compression preset.
+    #[serde(default = "default_delivery_preset")]
+    pub encoder_preset: String,
 }
 
 impl Default for PresentationDelivery {
@@ -539,8 +590,18 @@ impl Default for PresentationDelivery {
         return Self {
             codec: "h264".to_owned(),
             pixel_format: "yuv420p".to_owned(),
+            crf: default_delivery_crf(),
+            encoder_preset: default_delivery_preset(),
         };
     }
+}
+
+fn default_delivery_crf() -> u8 {
+    return 23;
+}
+
+fn default_delivery_preset() -> String {
+    return "medium".to_owned();
 }
 
 /// Explicit presentation-only pixel transform.
@@ -567,6 +628,13 @@ pub enum PixelTransform {
         /// Scale denominator.
         denominator: u16,
     },
+    /// Resize to an exact presentation canvas.
+    Resize {
+        /// Output width in pixels.
+        width: u16,
+        /// Output height in pixels.
+        height: u16,
+    },
     /// Draw a visibly labeled rectangular callout.
     Callout {
         /// Left callout pixel.
@@ -589,6 +657,18 @@ impl PixelTransform {
                 if *width == 0 || *height == 0 =>
             {
                 return Err(plan_error("crop/callout dimensions must be nonzero"));
+            }
+            Self::Resize { width, height }
+                if *width < 2
+                    || *height < 2
+                    || *width > 8192
+                    || *height > 8192
+                    || *width % 2 != 0
+                    || *height % 2 != 0 =>
+            {
+                return Err(plan_error(
+                    "resize dimensions must be even values from 2 through 8192",
+                ));
             }
             Self::Zoom {
                 numerator,
@@ -786,6 +866,8 @@ pub struct PresentationPlan {
     pub output_width: u16,
     /// Final presentation canvas height after footer and transforms.
     pub output_height: u16,
+    /// Effective user-facing render settings retained from the facade.
+    pub render_config: Option<VideoRenderConfig>,
     /// Caller-ordered resolved clips.
     pub clips: Vec<NormalizedClip>,
     /// Canonical markers mapped onto native source frames.
@@ -968,6 +1050,8 @@ pub struct MarkerRecord {
     pub nominal_frame: u64,
     /// Total occurrences of this label.
     pub occurrence_count: u64,
+    /// One-based position of this marker among occurrences of the same label.
+    pub occurrence_index: u64,
     /// Latest presentation-eligible semantic state at or before the marker.
     pub semantic_state_id: Option<u64>,
     /// Complete hash of the associated semantic state.

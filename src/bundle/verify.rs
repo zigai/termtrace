@@ -91,10 +91,16 @@ fn verify_bound_payloads(
             != Some(trusted.canonical.as_os_str().as_encoded_bytes())
         || !observation.source_completed
         || observation.state_point != StatePoint::LatestPresented
-        || observation.state_id != Some(inspection.record.state_id)
+        || observation
+            .state_id
+            .is_some_and(|state_id| return state_id != inspection.record.state_id)
         || observation.state_hash != inspection.record.state_hash
-        || observation.event_seq != inspection.record.event_seq
-        || observation.monotonic_ns != Some(inspection.record.monotonic_ns)
+        || observation
+            .event_seq
+            .is_some_and(|event_seq| return Some(event_seq) != inspection.record.event_seq)
+        || observation
+            .monotonic_ns
+            .is_some_and(|monotonic_ns| return monotonic_ns != inspection.record.monotonic_ns)
         || !observation.presented
         || observation.boundary.next_event_seq != trusted.completion.event_count
         || observation.boundary.event_hash != trusted.completion.final_event_hash

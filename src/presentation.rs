@@ -14,7 +14,7 @@ pub use model::{
     PixelTransform, PresentationDelivery, PresentationLayout, PresentationManifest,
     PresentationMapEntry, PresentationOutcome, PresentationPlan, PresentationPreviewManifest,
     PresentationPreviewOutcome, PresentationSource, PresentationSourceRequest, PreviewOptions,
-    RationalSpeed, SubtitleTrack, TextAnnotation,
+    RationalSpeed, SubtitleTrack, TextAnnotation, VideoRenderConfig,
 };
 pub use pipeline::{export, preview};
 pub use planning::{markers, plan, plan_with_source};

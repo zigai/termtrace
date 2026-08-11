@@ -3,6 +3,7 @@ use super::*;
 #[derive(Deserialize)]
 struct ArtifactMemberEnvelope {
     members: Vec<ArtifactMember>,
+    source_event_hash: Option<String>,
     source_range: Option<ArtifactSourceRange>,
 }
 
@@ -163,6 +164,11 @@ pub fn verify_session_artifacts(
         if manifest.source_range != record.source_range {
             return Err(invalid_artifact(
                 "artifact catalog source range does not match its manifest",
+            ));
+        }
+        if manifest.source_event_hash != record.source_event_hash {
+            return Err(invalid_artifact(
+                "artifact catalog source event hash does not match its manifest",
             ));
         }
         verify_artifact_members(&directory, &manifest.members)?;

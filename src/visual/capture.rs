@@ -112,6 +112,10 @@ pub fn capture(options: &CaptureOptions) -> Result<CaptureOutcome> {
                 event_byte_offset: *event_byte_offset,
                 monotonic_ns: selected.record.monotonic_ns,
                 presented: true,
+                checkpoint: false,
+                timeline_rank: None,
+                control_index_offset: None,
+                control_rank: None,
             }]
         }
     };
@@ -518,10 +522,43 @@ fn capture_staged(
 }
 
 fn validate_options(options: &CaptureOptions) -> Result<()> {
-    if options.width < 320 || options.height < 200 || options.fps != 24 {
+    if options.width < 320 || options.height < 200 || !matches!(options.fps, 24 | 30 | 60) {
         return Err(Error::InvalidReplay {
-            reason: "native capture requires at least 320x200 pixels and exactly 24 FPS".to_owned(),
+            reason: "native capture requires at least 320x200 pixels and 24, 30, or 60 FPS"
+                .to_owned(),
         });
     }
     return Ok(());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::path::PathBuf;
+
+    use crate::replay::StateSelection;
+
+    fn options(fps: u16) -> CaptureOptions {
+        return CaptureOptions {
+            session_directory: PathBuf::from("/unused"),
+            width: 640,
+            height: 480,
+            fps,
+            start_monotonic_ns: None,
+            end_monotonic_ns: None,
+            state_selection: StateSelection::Presented,
+            geometry_solver: None,
+            kind: CaptureKind::Video,
+            destination: None,
+        };
+    }
+
+    #[test]
+    fn native_capture_accepts_public_video_frame_rates_only() {
+        for fps in [24, 30, 60] {
+            validate_options(&options(fps)).expect("public native FPS should validate");
+        }
+        assert!(validate_options(&options(25)).is_err());
+    }
 }

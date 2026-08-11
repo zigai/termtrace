@@ -48,7 +48,7 @@ pub fn export(
     return export_with_capability_check(plan, destination.as_ref(), true);
 }
 
-fn export_with_capability_check(
+pub(super) fn export_with_capability_check(
     plan: &PresentationPlan,
     destination: &Path,
     check_capabilities: bool,
@@ -76,6 +76,7 @@ fn export_with_capability_check(
     })?;
     let staging = parent.join(format!(".presentation-{}.tmp", uuid::Uuid::now_v7()));
     create_private_directory(&staging)?;
+    let _staging_cleanup = DirectoryCleanup(staging.clone());
     export_staged(plan, &staging)?;
     commit_directory(parent, &staging, destination)?;
     return Ok(PresentationOutcome {
@@ -118,6 +119,7 @@ pub fn preview(
     let rendered = export_with_capability_check(plan, &composed, false)?;
     let staging = parent.join(format!(".preview-{}.tmp", uuid::Uuid::now_v7()));
     create_private_directory(&staging)?;
+    let _staging_cleanup = DirectoryCleanup(staging.clone());
     let selected_frames = select_preview_frames(plan, options)?;
     write_secure(
         &staging.join("selected-frames.json"),
@@ -331,13 +333,17 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
     }) {
         write_source_frame_hashes(plan, &source_video, staging)?;
     }
+    let encoder = match plan.delivery.codec.as_str() {
+        "h264_rgb" => "libx264rgb",
+        _ => "libx264",
+    };
     let ffmpeg_arguments = vec![
         "-hide_banner".to_owned(),
         "-nostdin".to_owned(),
         "-y".to_owned(),
         "-i".to_owned(),
         source_video.display().to_string(),
-        "-filter_complex_script".to_owned(),
+        "-/filter_complex".to_owned(),
         "filter.txt".to_owned(),
         "-map".to_owned(),
         "[outv]".to_owned(),
@@ -347,9 +353,13 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
         "-frames:v".to_owned(),
         plan.output_frame_count.to_string(),
         "-c:v".to_owned(),
-        "libx264".to_owned(),
+        encoder.to_owned(),
+        "-preset".to_owned(),
+        plan.delivery.encoder_preset.clone(),
+        "-crf".to_owned(),
+        plan.delivery.crf.to_string(),
         "-pix_fmt".to_owned(),
-        "yuv420p".to_owned(),
+        plan.delivery.pixel_format.clone(),
         "-movflags".to_owned(),
         "+faststart".to_owned(),
         "presentation.mp4".to_owned(),

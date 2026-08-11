@@ -40,8 +40,10 @@ fn marker_records(
     let mut occurrence_counts = HashMap::new();
     for record in &log.events {
         if let Event::Marker { label, .. } = &record.event {
-            let count = occurrence_counts.entry(label.as_str()).or_insert(0_u64);
-            *count = count.saturating_add(1);
+            let occurrence = occurrence_counts
+                .entry(label.as_str())
+                .or_insert((0_u64, 0_u64));
+            occurrence.0 = occurrence.0.saturating_add(1);
         }
     }
     let presented_states = states
@@ -53,7 +55,11 @@ fn marker_records(
         let Event::Marker { label, .. } = &record.event else {
             continue;
         };
-        let occurrence_count = occurrence_counts.get(label.as_str()).copied().unwrap_or(0);
+        let occurrence = occurrence_counts
+            .get_mut(label.as_str())
+            .ok_or_else(|| return plan_error("marker occurrence accounting is inconsistent"))?;
+        occurrence.1 = occurrence.1.saturating_add(1);
+        let (occurrence_count, occurrence_index) = *occurrence;
         let state_index = presented_states
             .partition_point(|state| return state.monotonic_ns <= record.monotonic_ns);
         let semantic_state = state_index
@@ -65,6 +71,7 @@ fn marker_records(
             monotonic_ns: record.monotonic_ns,
             nominal_frame: frame_floor(record.monotonic_ns.saturating_sub(capture_start_ns), fps),
             occurrence_count,
+            occurrence_index,
             semantic_state_id: semantic_state.map(|state| return state.state_id),
             semantic_state_hash: semantic_state.map(|state| return state.state_hash.clone()),
             presentation_eligible: semantic_state.is_some(),
@@ -322,6 +329,7 @@ pub fn plan_with_source(
         source_geometry,
         output_width,
         output_height,
+        render_config: edit.render_config.clone(),
         clips,
         markers: marker_records(&log, &states, fps, capture_start)?,
         annotations,
@@ -678,7 +686,7 @@ pub(super) fn validate_transform_geometry(
         match transform {
             PixelTransform::CursorMask if spatial_transform_seen => {
                 return Err(plan_error(
-                    "cursor_mask must precede crop and zoom transforms",
+                    "cursor_mask must precede crop, zoom, and resize transforms",
                 ));
             }
             PixelTransform::CursorMask => {}
@@ -703,6 +711,14 @@ pub(super) fn validate_transform_geometry(
                 spatial_transform_seen = true;
                 width = scaled_even_dimension(width, *numerator, *denominator)?;
                 height = scaled_even_dimension(height, *numerator, *denominator)?;
+            }
+            PixelTransform::Resize {
+                width: resize_width,
+                height: resize_height,
+            } => {
+                spatial_transform_seen = true;
+                width = *resize_width;
+                height = *resize_height;
             }
             PixelTransform::Callout {
                 x,

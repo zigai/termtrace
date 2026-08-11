@@ -44,6 +44,37 @@ fn parallel_member_hashing_preserves_canonical_path_order() {
 }
 
 #[test]
+fn session_artifact_verification_binds_manifest_source_event_hash() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("session");
+    let artifact = session.join("derived");
+    create_private_directory(&artifact).expect("artifact directory");
+    write_secure(&artifact.join("final.txt"), b"state").expect("artifact member");
+    let members = collect_artifact_members(&artifact).expect("collect members");
+    let manifest_bytes = serde_json::to_vec(&serde_json::json!({
+        "members": members,
+        "source_event_hash": "wrong-source",
+        "source_range": null
+    }))
+    .expect("manifest JSON");
+    write_secure(&artifact.join("manifest.json"), &manifest_bytes).expect("artifact manifest");
+    append_artifact_root(
+        &session,
+        &artifact,
+        "semantic_index",
+        &manifest_bytes,
+        "session-manifest",
+        Some("canonical-source"),
+        None,
+    )
+    .expect("artifact root");
+
+    let error = verify_session_artifacts(&session, "session-manifest", Some("canonical-source"))
+        .expect_err("manifest source event hash must bind its catalog");
+    assert!(error.to_string().contains("source event hash"));
+}
+
+#[test]
 fn member_collection_rejects_symlinks() {
     let temporary = TempDir::new().expect("temporary directory");
     let artifact = temporary.path().join("artifact");

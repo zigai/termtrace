@@ -19,6 +19,7 @@ pub fn archive(
         return Err(bundle_error("archive parent directory does not exist"));
     }
     let staging = parent.join(format!(".bundle-archive-{}.tmp", Uuid::now_v7()));
+    let _staging_cleanup = FileCleanup(staging.clone());
     let file = secure_file(&staging)?;
     let mut encoder = zstd::stream::write::Encoder::new(file, 9).map_err(|source| {
         return Error::Filesystem {
@@ -76,6 +77,14 @@ pub fn verify_archive(archive: &Path, policy: &BundleVerificationPolicy) -> Resu
     })();
     let _cleanup = fs_err::remove_dir_all(&staging);
     return result;
+}
+
+struct FileCleanup(PathBuf);
+
+impl Drop for FileCleanup {
+    fn drop(&mut self) {
+        let _result = fs_err::remove_file(&self.0);
+    }
 }
 
 pub(super) fn collect_bundle_files(

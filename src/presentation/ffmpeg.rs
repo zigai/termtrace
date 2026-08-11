@@ -338,6 +338,19 @@ pub(super) fn append_pixel_transforms(
                 prior = next;
                 sequence += 1;
             }
+            PixelTransform::Resize {
+                width: resize_width,
+                height: resize_height,
+            } => {
+                width = u32::from(*resize_width);
+                height = u32::from(*resize_height);
+                let next = format!("transform{sequence}");
+                filters.push(format!(
+                    "[{prior}]scale={width}:{height}:flags=lanczos[{next}]"
+                ));
+                prior = next;
+                sequence += 1;
+            }
             PixelTransform::Callout {
                 x,
                 y,

@@ -129,6 +129,7 @@ fn transform_name(transform: &PixelTransform) -> String {
         PixelTransform::CursorMask => "cursor_mask",
         PixelTransform::Crop { .. } => "crop",
         PixelTransform::Zoom { .. } => "zoom",
+        PixelTransform::Resize { .. } => "resize",
         PixelTransform::Callout { .. } => "callout",
     }
     .to_owned();
