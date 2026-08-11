@@ -102,7 +102,7 @@ fn output_follow_emits_each_durable_prefix_once_until_completion() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn recorder");
-    wait_for_path(&session.join("control.sock"));
+    wait_for_control(&session);
     let follower = StdCommand::new(binary)
         .args(["analyze", "output"])
         .arg(&session)
@@ -202,7 +202,7 @@ fn events_follow_resumes_filtered_durable_records_without_duplicates() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn recorder");
-    wait_for_path(&session.join("control.sock"));
+    wait_for_control(&session);
     let follower = StdCommand::new(binary)
         .args(["analyze", "events"])
         .arg(&session)
@@ -262,7 +262,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn live recorder");
-    wait_for_path(&session.join("control.sock"));
+    wait_for_control(&session);
 
     let mut marker = Command::cargo_bin("termtrace").expect("binary should build");
     marker
@@ -341,4 +341,59 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
         .arg(&session)
         .assert()
         .success();
+}
+
+#[test]
+fn marker_listing_distinguishes_each_repeated_label_occurrence() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("repeated-markers");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let child = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; while :; do sleep 0.1; done",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn marker fixture");
+    wait_for_control(&session);
+
+    for _ in 0..2 {
+        send_request(
+            &session,
+            &ControlRequest::new(ControlCommand::Mark {
+                label: "repeated".to_owned(),
+            }),
+        )
+        .expect("record repeated marker");
+    }
+    send_request(&session, &ControlRequest::new(ControlCommand::Stop))
+        .expect("stop marker fixture");
+    let output = child.wait_with_output().expect("wait for marker fixture");
+    assert!(output.status.success(), "marker fixture failed: {output:?}");
+
+    let markers = Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .args(["--response", "full", "analyze", "markers"])
+        .arg(&session)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let markers: Vec<serde_json::Value> =
+        serde_json::from_slice(&markers).expect("marker listing JSON");
+    assert_eq!(markers.len(), 2);
+    assert!(
+        markers
+            .iter()
+            .all(|marker| return marker["occurrence_count"] == 2)
+    );
+    assert_eq!(markers[0]["occurrence_index"], 1);
+    assert_eq!(markers[1]["occurrence_index"], 2);
 }

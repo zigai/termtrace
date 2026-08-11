@@ -7,21 +7,31 @@ pub(super) fn dispatch(command: Command) -> Result<ExitCode> {
         Command::Start(arguments) => return run_start(arguments),
         Command::Restart(arguments) => return run_restart(arguments),
         Command::Status(arguments) => return run_status(arguments),
+        Command::Act(arguments) => return run_act(arguments),
         Command::Send(arguments) => return run_send(arguments),
         Command::Stop(arguments) => return run_stop(arguments),
         Command::Tmux(arguments) => return dispatch_tmux(arguments.command),
         Command::Control(arguments) => return dispatch_control(arguments.command),
         Command::Analyze(arguments) => return dispatch_analyze(arguments.command),
         Command::Artifact(arguments) => return dispatch_artifact(arguments.command),
+        Command::Inspect(arguments) => return run_inspect_facade(arguments),
+        Command::Diagnose(arguments) => return run_diagnose_facade(arguments),
+        Command::Screenshot(arguments) => return run_screenshot_facade(arguments),
+        Command::Bundle(arguments) => return run_bundle_facade(arguments),
+        Command::BugReport(arguments) => return run_bug_report_facade(arguments),
+        Command::Video(arguments) => return run_video_facade(arguments),
         Command::Registry(arguments) => return dispatch_registry(arguments.command),
         Command::Integrity(arguments) => return dispatch_integrity(arguments.command),
         Command::Tooling(arguments) => return dispatch_tooling(arguments.command),
+        Command::Capabilities(arguments) => return run_doctor(arguments),
+        Command::Agent => return run_driver(),
         Command::Playback(arguments) => return run_playback(arguments),
         Command::GeometryProbe(arguments) => {
             run_probe(&arguments.out)?;
             return Ok(ExitCode::SUCCESS);
         }
         Command::Show(arguments) => return run_show(arguments),
+        Command::Screen(arguments) => return run_screen(arguments),
         Command::Wait(arguments) => return run_wait(arguments),
         Command::WaitIdle(arguments) => return run_wait_idle(arguments),
     }
@@ -29,10 +39,14 @@ pub(super) fn dispatch(command: Command) -> Result<ExitCode> {
 
 pub(super) fn dispatch_tmux(command: TmuxSubcommand) -> Result<ExitCode> {
     return match command {
+        TmuxSubcommand::Record(arguments) => run_tmux_record(arguments),
+        TmuxSubcommand::Status(arguments) => run_tmux_status(arguments),
+        TmuxSubcommand::Stop(arguments) => run_tmux_stop(arguments),
+        TmuxSubcommand::Video(arguments) => run_tmux_video(arguments),
+        TmuxSubcommand::Bundle(arguments) => run_tmux_bundle(arguments),
         TmuxSubcommand::Config(arguments) => run_tmux_config(arguments),
         TmuxSubcommand::Enable(arguments) => run_tmux_enable(arguments),
         TmuxSubcommand::Disable(arguments) => run_tmux_disable(arguments),
-        TmuxSubcommand::Status(arguments) => run_tmux_status(arguments),
         TmuxSubcommand::Scope(arguments) => run_tmux_scope(arguments),
         TmuxSubcommand::Run(arguments) => run_tmux_pane(arguments),
         TmuxSubcommand::Guard(arguments) => run_tmux_guard(arguments),
@@ -54,6 +68,7 @@ pub(super) fn dispatch_control(command: ControlSubcommand) -> Result<ExitCode> {
                     strict: arguments.strict,
                 },
                 arguments.expected_presented_state_hash,
+                arguments.request_id,
             );
         }
         ControlSubcommand::Pointer(arguments) => return run_pointer(arguments),
@@ -66,6 +81,7 @@ pub(super) fn dispatch_control(command: ControlSubcommand) -> Result<ExitCode> {
                     strict: arguments.strict,
                 },
                 arguments.expected_presented_state_hash,
+                arguments.request_id,
             );
         }
         ControlSubcommand::Resize(arguments) => return run_resize(arguments),
@@ -76,6 +92,7 @@ pub(super) fn dispatch_control(command: ControlSubcommand) -> Result<ExitCode> {
                     signal: arguments.signal.into(),
                 },
                 arguments.expected_presented_state_hash,
+                arguments.request_id,
             );
         }
         ControlSubcommand::Mark(arguments) => {
@@ -85,6 +102,7 @@ pub(super) fn dispatch_control(command: ControlSubcommand) -> Result<ExitCode> {
                     label: arguments.label,
                 },
                 arguments.expected_presented_state_hash,
+                arguments.request_id,
             );
         }
     }

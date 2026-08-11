@@ -1,6 +1,21 @@
 use super::*;
 
 pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
+    if arguments.screen.is_some() || arguments.since.is_some() {
+        let session = arguments.session.clone().ok_or_else(|| {
+            return miette::miette!("compact show requires a canonical session source");
+        })?;
+        if arguments.input.is_some() || !arguments.command.is_empty() {
+            return Err(miette::miette!(
+                "compact show accepts only a canonical session source"
+            ));
+        }
+        return run_screen(ScreenArgs {
+            session,
+            screen: arguments.screen.unwrap_or(ScreenEncoding::Text),
+            since: arguments.since,
+        });
+    }
     let image_format = matches!(arguments.format, ShowFormat::Svg | ShowFormat::Png);
     if !image_format && arguments.renderer == ShowRenderer::Native {
         return Err(miette::miette!(
@@ -397,8 +412,7 @@ fn render_show_image(state: &SemanticState, format: ShowFormat) -> Result<Vec<u8
 }
 
 fn ensure_direct_observation_state(observation: &Observation, state: &SemanticState) -> Result<()> {
-    let bytes = serde_json::to_vec(state).into_diagnostic()?;
-    let state_hash = blake3::hash(&bytes).to_hex().to_string();
+    let state_hash = semantic_state_hash(state)?;
     return ensure_observation_state_hash(observation, &state_hash);
 }
 
@@ -623,10 +637,12 @@ fn run_one_off_command(
         .stderr(Stdio::from(stderr))
         .spawn()
         .into_diagnostic()?;
-    let socket = paths.session.join("control.sock");
     let started = Instant::now();
     let deadline = started + timeout;
-    while !socket.exists() {
+    loop {
+        if control_endpoint_is_reachable(&paths.session) {
+            break;
+        }
         if let Some(status) = child.try_wait().into_diagnostic()? {
             if paths.session.join("completion.json").is_file() {
                 let mut observation =

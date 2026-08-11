@@ -124,54 +124,51 @@ fn run_typescript_client(assets: &Path, arguments: ClientRunArgs) -> Result<Exit
         ));
     }
     let temporary = create_client_temp_directory()?;
-    let scope = temporary.path.join("node_modules/@termtrace");
-    fs_err::create_dir_all(&scope).into_diagnostic()?;
-    fs_err::set_permissions(&scope, Permissions::from_mode(0o700)).into_diagnostic()?;
-    symlink(assets.join("typescript"), scope.join("test")).into_diagnostic()?;
-    let source_link = temporary.path.join("source");
+    let package = temporary.path.join("node_modules/@termtrace/test");
+    fs_err::create_dir_all(&package).into_diagnostic()?;
+    fs_err::set_permissions(&package, Permissions::from_mode(0o700)).into_diagnostic()?;
+    write_secure(
+        &package.join("package.json"),
+        br#"{"type":"module","exports":"./index.js"}"#,
+    )?;
+    let package_entry = assets
+        .join("typescript/lib/index.js")
+        .canonicalize()
+        .into_diagnostic()?;
+    let package_entry = package_entry.to_str().ok_or_else(|| {
+        return miette::miette!("TypeScript client assets path is not valid UTF-8");
+    })?;
+    let package_entry = serde_json::to_string(package_entry).into_diagnostic()?;
+    write_secure(
+        &package.join("index.js"),
+        format!("export * from {package_entry};\n").as_bytes(),
+    )?;
     let script = if arguments.script.as_os_str() == OsStr::new("-") {
-        fs_err::create_dir(&source_link).into_diagnostic()?;
-        fs_err::set_permissions(&source_link, Permissions::from_mode(0o700)).into_diagnostic()?;
-        let path = source_link.join("client.ts");
+        let source = temporary.path.join("source");
+        fs_err::create_dir(&source).into_diagnostic()?;
+        fs_err::set_permissions(&source, Permissions::from_mode(0o700)).into_diagnostic()?;
+        let path = source.join("client.ts");
         write_secure(&path, &read_client_stdin()?)?;
         path
     } else {
-        let script = arguments.script.canonicalize().into_diagnostic()?;
-        let root = typescript_source_root(&script)?;
-        symlink(&root, &source_link).into_diagnostic()?;
-        let relative = script.strip_prefix(&root).map_err(|_| {
-            return miette::miette!("TypeScript script is outside its resolved source root");
-        })?;
-        source_link.join(relative)
+        arguments.script.canonicalize().into_diagnostic()?
     };
+    let node_modules = temporary.path.join("node_modules");
+    let mut node_paths: Vec<PathBuf> = vec![node_modules];
+    if let Some(existing) = env::var_os("NODE_PATH") {
+        node_paths.extend(env::split_paths(&existing));
+    }
+    let node_path = env::join_paths(node_paths).into_diagnostic()?;
     let binary = env::current_exe().into_diagnostic()?;
     let status = ProcessCommand::new("bun")
-        .arg("--preserve-symlinks")
-        .arg("--preserve-symlinks-main")
         .arg("--no-install")
         .arg(&script)
         .args(&arguments.arguments)
+        .env("NODE_PATH", node_path)
         .env("TERMTRACE_BINARY", binary)
         .status()
         .into_diagnostic()?;
     return process_exit_code(status);
-}
-
-fn typescript_source_root(script: &Path) -> Result<PathBuf> {
-    let parent = script
-        .parent()
-        .ok_or_else(|| return miette::miette!("TypeScript script has no parent directory"))?;
-    for directory in parent.ancestors() {
-        if directory.join("package.json").is_file()
-            || directory.join("bun.lock").is_file()
-            || directory.join("bun.lockb").is_file()
-            || directory.join("tsconfig.json").is_file()
-            || directory.join(".git").exists()
-        {
-            return Ok(directory.to_path_buf());
-        }
-    }
-    return Ok(parent.to_path_buf());
 }
 
 struct ClientTempDirectory {
@@ -287,13 +284,9 @@ fn process_exit_code(status: ExitStatus) -> Result<ExitCode> {
 
 pub(super) fn run_completions(arguments: CompletionsArgs) -> Result<ExitCode> {
     let mut command = CompletionCli::command();
-    generate(
-        arguments.shell,
-        &mut command,
-        "termtrace",
-        &mut io::stdout(),
-    );
-    return Ok(ExitCode::SUCCESS);
+    let mut output = Vec::new();
+    generate(arguments.shell, &mut command, "termtrace", &mut output);
+    return write_stdout(output);
 }
 
 pub(super) fn run_driver() -> Result<ExitCode> {

@@ -1,0 +1,12 @@
+{
+  "format": "termtrace-executable-regression-workflow",
+  "version": 1,
+  "id": "pi-extension-audit",
+  "program": "import os,sys,tty; tty.setraw(0); os.write(1,b'\\x1b[?1hPI_AUDIT_READY'); data=os.read(0,1); os.write(1,b'\\r\\nPI_AUDIT_DONE:'+data)",
+  "ready": "PI_AUDIT_READY",
+  "done": "PI_AUDIT_DONE:x",
+  "accepted_input": "x",
+  "reject_before_accept": false,
+  "run_as_scenario": true,
+  "generate_index": false
+}

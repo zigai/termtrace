@@ -111,12 +111,37 @@ pub(super) fn parse_diagnostic_check(value: &str) -> StdResult<DiagnosticCheck, 
     };
 }
 
-pub(super) fn parse_pace_duration(value: &str) -> StdResult<Duration, String> {
-    let nanoseconds = parse_time_offset_ns(value)?;
-    if nanoseconds > 60_000_000_000 {
-        return Err("pace must not exceed 60s".to_owned());
-    }
+fn parse_duration(value: &str, domain: &str) -> StdResult<Duration, String> {
+    let nanoseconds =
+        parse_time_offset_ns(value).map_err(|error| return format!("{domain} {error}"))?;
     return Ok(Duration::from_nanos(nanoseconds));
+}
+
+pub(super) fn parse_pace_duration(value: &str) -> StdResult<Duration, String> {
+    let duration = parse_duration(value, "pace duration")?;
+    if duration > Duration::from_secs(60) {
+        return Err("pace duration must not exceed 60s".to_owned());
+    }
+    return Ok(duration);
+}
+
+pub(super) fn parse_stability_duration(value: &str) -> StdResult<Duration, String> {
+    return parse_duration(value, "stability duration");
+}
+
+pub(super) fn parse_wait_deadline_duration(value: &str) -> StdResult<Duration, String> {
+    return parse_duration(value, "wait deadline");
+}
+
+pub(super) fn parse_media_hold_duration(value: &str) -> StdResult<Duration, String> {
+    return parse_duration(value, "media hold duration");
+}
+
+pub(super) fn parse_video_fps(value: &str) -> StdResult<u16, String> {
+    return match value.parse::<u16>() {
+        Ok(fps @ (24 | 30 | 60)) => Ok(fps),
+        _ => Err("video FPS must be 24, 30, or 60".to_owned()),
+    };
 }
 
 pub(super) fn parse_scenario_jobs(value: &str) -> StdResult<usize, String> {
@@ -213,4 +238,42 @@ pub(super) fn parse_rgb_color(value: &str) -> StdResult<String, String> {
         return Err("color must use #RRGGBB syntax".to_owned());
     }
     return Ok(format!("#{}", hex.to_ascii_lowercase()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duration_parsers_enforce_domain_limits_and_wording() {
+        assert_eq!(parse_pace_duration("60s"), Ok(Duration::from_secs(60)));
+        assert_eq!(
+            parse_pace_duration("61s"),
+            Err("pace duration must not exceed 60s".to_owned())
+        );
+        assert_eq!(parse_stability_duration("90s"), Ok(Duration::from_secs(90)));
+        assert_eq!(
+            parse_wait_deadline_duration("2m"),
+            Ok(Duration::from_secs(120))
+        );
+        assert_eq!(
+            parse_media_hold_duration("01:30"),
+            Ok(Duration::from_secs(90))
+        );
+        assert!(
+            parse_stability_duration("invalid")
+                .expect_err("invalid stability duration")
+                .starts_with("stability duration ")
+        );
+        assert!(
+            parse_wait_deadline_duration("invalid")
+                .expect_err("invalid wait deadline")
+                .starts_with("wait deadline ")
+        );
+        assert!(
+            parse_media_hold_duration("invalid")
+                .expect_err("invalid media hold")
+                .starts_with("media hold duration ")
+        );
+    }
 }

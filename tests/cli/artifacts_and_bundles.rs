@@ -138,6 +138,37 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
 }
 
 #[test]
+fn screenshots_serialize_non_utf8_output_paths_without_panicking() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("non-utf8-screenshot-session");
+    Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf SCREENSHOT"])
+        .assert()
+        .success();
+    let filename = OsString::from_vec(b"screenshot-\xff.png".to_vec());
+    let destination = temporary.path().join(filename);
+    let output = Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .args(["--response", "full", "screenshot"])
+        .arg(&session)
+        .arg("--out")
+        .arg(&destination)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let response: serde_json::Value =
+        serde_json::from_slice(&output).expect("non-UTF-8 screenshot response JSON");
+    assert_eq!(response["kind"], "semantic_screenshot");
+    assert_eq!(response["file_display"], destination.display().to_string());
+    assert!(destination.is_file());
+}
+
+#[test]
 fn state_hash_selectors_reach_every_exact_state_workflow() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("hash-selector-session");
@@ -246,7 +277,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
 
     let mut dry_run = Command::cargo_bin("termtrace").expect("binary should build");
     dry_run
-        .args(["artifact", "bundle", "create"])
+        .args(["--response", "full", "artifact", "bundle", "create"])
         .arg(&session)
         .args(["--profile", "debug", "--out"])
         .arg(temporary.path().join("unused"))

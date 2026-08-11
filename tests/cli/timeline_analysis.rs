@@ -106,7 +106,7 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn recorder");
-    wait_for_path(&session.join("control.sock"));
+    wait_for_control(&session);
     for index in 0..205 {
         send_request(
             &session,

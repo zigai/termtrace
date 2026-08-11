@@ -12,7 +12,7 @@ pub(crate) use std::{
         fs::{PermissionsExt, symlink},
     },
     path::{Path, PathBuf},
-    process::{Command as StdCommand, Stdio},
+    process::{Command as StdCommand, Output, Stdio},
     thread,
     time::{Duration, Instant},
 };
@@ -23,8 +23,8 @@ pub(crate) use termtrace::{
     client::Terminal as ClientTerminal,
     control::{
         ControlCommand, ControlData, ControlRequest, ControlResult, ScreenMode, ScreenPredicate,
-        ScreenRegion, StableCaptureQuality, StateHashComparison, send_request,
-        send_request_response,
+        ScreenRegion, StableCaptureQuality, StateHashComparison, control_endpoint_is_reachable,
+        control_socket_name, send_request, send_request_response,
     },
     environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},
     event::{
@@ -33,7 +33,7 @@ pub(crate) use termtrace::{
     },
     event_log::EventLog,
     ghostty_vt::{KeyModifiers, NamedKey},
-    inspection::{inspect_session, wait_for_output, wait_for_screen},
+    inspection::{inspect_session, wait_for_completion, wait_for_output, wait_for_screen},
     observation::StatePoint,
     provenance::{
         ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind, ProvenanceSensitivity,
@@ -51,6 +51,17 @@ pub(crate) use termtrace::{
     timeline::SourceRange,
 };
 pub(crate) use zstd::stream::{decode_all, read::Decoder};
+
+pub(crate) fn wait_for_control(session: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !control_endpoint_is_reachable(session) {
+        assert!(
+            Instant::now() < deadline,
+            "recorder control endpoint did not become reachable"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
 
 #[allow(
     clippy::expect_used,
@@ -82,6 +93,55 @@ pub(crate) fn wait_for_path(path: &Path) {
         "path did not become ready: {}",
         path.display()
     );
+}
+
+#[allow(
+    clippy::expect_used,
+    reason = "integration helper must stop when the generated checkpoint is invalid"
+)]
+pub(crate) fn assert_late_checkpoint_inspection(session: &Path) {
+    let mut index = Command::cargo_bin("termtrace").expect("binary should build");
+    index
+        .args(["analyze", "index", "--session"])
+        .arg(session)
+        .assert()
+        .success();
+    let entries =
+        fs_err::read_to_string(session.join("derived/state-index.jsonl")).expect("state index");
+    let entries = entries
+        .lines()
+        .map(|line| return serde_json::from_str::<serde_json::Value>(line).expect("index entry"))
+        .collect::<Vec<_>>();
+    let late_state = entries
+        .last()
+        .and_then(|entry| return entry["state_id"].as_u64())
+        .expect("late state id");
+    let checkpoint = entries
+        .iter()
+        .filter(|entry| return entry["checkpoint"] == true)
+        .filter_map(|entry| return entry["state_id"].as_u64())
+        .max()
+        .expect("periodic checkpoint");
+    assert!(
+        checkpoint > 0 && checkpoint <= late_state,
+        "late inspection requires a nonzero checkpoint: checkpoint={checkpoint} late={late_state}"
+    );
+
+    let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
+    inspect
+        .args(["analyze", "inspect", "--session"])
+        .arg(session)
+        .args([
+            "--state",
+            &late_state.to_string(),
+            "--format",
+            "json-compact",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            r#""state_id":{late_state}"#
+        )));
 }
 
 #[allow(

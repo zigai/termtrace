@@ -32,6 +32,30 @@ pub(in crate::cli) enum AnalyzeSubcommand {
     Cache(CacheArgs),
 }
 
+#[derive(Debug, Args)]
+pub(in crate::cli) struct InspectFacadeArgs {
+    /// Completed session name or canonical path.
+    pub(in crate::cli) session: PathBuf,
+    /// Derive the diff from the latest canonical input intent/result pair.
+    #[arg(long, required = true)]
+    pub(in crate::cli) last_action: bool,
+    /// Minimum changed-cell percentage for a broad repaint warning.
+    #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u8).range(1..=100))]
+    pub(in crate::cli) broad_change_percent: u8,
+}
+
+#[derive(Debug, Args)]
+pub(in crate::cli) struct DiagnoseFacadeArgs {
+    /// Completed session name or canonical path.
+    pub(in crate::cli) session: PathBuf,
+    /// Restrict diagnostics to evidence after the latest canonical input action.
+    #[arg(long, required = true)]
+    pub(in crate::cli) since_last_action: bool,
+    /// Minimum changed-cell percentage for a broad repaint finding.
+    #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u8).range(1..=100))]
+    pub(in crate::cli) broad_change_percent: u8,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum InspectFormat {
     Json,
@@ -156,7 +180,7 @@ pub(in crate::cli) struct ShowArgs {
     #[arg(long)]
     pub(in crate::cli) include_hidden: bool,
     /// Require an unchanged live presented state for this duration.
-    #[arg(long, value_parser = parse_pace_duration, default_value = "0ms")]
+    #[arg(long, value_parser = parse_stability_duration, default_value = "0ms")]
     pub(in crate::cli) stable_for: Duration,
     /// Server-side deadline for a live stability request.
     #[arg(long, default_value_t = 30_000)]
@@ -185,6 +209,12 @@ pub(in crate::cli) struct ShowArgs {
     /// Output representation.
     #[arg(long, value_enum, default_value_t = ShowFormat::Text)]
     pub(in crate::cli) format: ShowFormat,
+    /// Use the compact public screen representation instead of an advanced show format.
+    #[arg(long, value_enum)]
+    pub(in crate::cli) screen: Option<ScreenEncoding>,
+    /// Prior presented-state hash for compact unchanged or diff responses.
+    #[arg(long, value_parser = parse_state_hash)]
+    pub(in crate::cli) since: Option<String>,
 }
 
 #[derive(Debug, Args)]

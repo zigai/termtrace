@@ -1,5 +1,8 @@
 use super::*;
 
+const DEFAULT_DURABILITY_MAX_INTERVAL_MS: u64 = 50;
+const DEFAULT_DURABILITY_MAX_UNCOMMITTED_BYTES: u64 = 65_536;
+
 pub(super) fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
     let RecordArgs {
         out,
@@ -92,20 +95,9 @@ pub(super) fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
             &overrides,
             supplied_environment,
         )?;
-        return report_record_outcome(record(&options)?);
+        return report_record_outcome(record_for_response(&options)?);
     }
-    if matches!(arguments.durability, DurabilityModeArg::Bounded)
-        && (arguments.durability_max_interval_ms == 0
-            || arguments.durability_max_uncommitted_bytes == 0)
-    {
-        return Err(miette::miette!(
-            "bounded durability thresholds must be greater than zero"
-        ));
-    }
-    let durability_policy = arguments.durability.policy(
-        arguments.durability_max_interval_ms,
-        arguments.durability_max_uncommitted_bytes,
-    );
+    let durability_policy = durability_policy_for(&arguments)?;
     if !matches!(arguments.provenance, ProvenancePolicyArg::Custom)
         && !arguments.provenance_environment.is_empty()
     {
@@ -151,7 +143,7 @@ pub(super) fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
         || return resolved_terminal_colors(),
         |profile| return terminal_colors_for_profile(profile),
     )?;
-    let outcome = record(&RecordOptions {
+    let outcome = record_for_response(&RecordOptions {
         output_directory: out,
         creation_alias: session_alias,
         lineage: None,
@@ -179,8 +171,38 @@ pub(super) fn run_record(arguments: RecordArgs) -> Result<ExitCode> {
     return report_record_outcome(outcome);
 }
 
+fn durability_policy_for(arguments: &RecordingArgs) -> Result<DurabilityPolicy> {
+    let has_threshold = arguments.durability_max_interval_ms.is_some()
+        || arguments.durability_max_uncommitted_bytes.is_some();
+    if !matches!(arguments.durability, DurabilityModeArg::Bounded) && has_threshold {
+        return Err(miette::miette!(
+            "--durability-max-interval-ms and --durability-max-uncommitted-bytes require --durability bounded"
+        ));
+    }
+    let interval = arguments
+        .durability_max_interval_ms
+        .unwrap_or(DEFAULT_DURABILITY_MAX_INTERVAL_MS);
+    let bytes = arguments
+        .durability_max_uncommitted_bytes
+        .unwrap_or(DEFAULT_DURABILITY_MAX_UNCOMMITTED_BYTES);
+    if matches!(arguments.durability, DurabilityModeArg::Bounded) && (interval == 0 || bytes == 0) {
+        return Err(miette::miette!(
+            "bounded durability thresholds must be greater than zero"
+        ));
+    }
+    return Ok(arguments.durability.policy(interval, bytes));
+}
+
+fn record_for_response(options: &RecordOptions) -> Result<RecordOutcome> {
+    let mut output = response_output();
+    return Ok(record_with_output(options, &mut output)?);
+}
+
 fn report_record_outcome(outcome: RecordOutcome) -> Result<ExitCode> {
     writeln!(io::stderr(), "recording: {}", outcome.event_log.display()).into_diagnostic()?;
+    if outcome.resource_limit.is_some() {
+        return Ok(ExitCode::FAILURE);
+    }
     return match (outcome.exit_code, outcome.signal_name) {
         (Some(code), None) => u8::try_from(code).map(ExitCode::from).into_diagnostic(),
         _ => Ok(ExitCode::FAILURE),
@@ -191,20 +213,26 @@ pub(super) fn run_start(arguments: StartArgs) -> Result<ExitCode> {
     let StartArgs {
         name,
         startup_timeout_ms,
+        until_idle,
+        until_screen,
+        until_screen_regex,
+        timeout,
         recording,
     } = arguments;
+    let synchronization = StartSynchronization {
+        until_idle,
+        until_screen,
+        until_screen_regex,
+        timeout,
+    };
     if startup_timeout_ms == 0 {
         return Err(miette::miette!(
             "--startup-timeout-ms must be greater than zero"
         ));
     }
+    let _durability_policy = durability_policy_for(&recording)?;
     let registry = SessionRegistry::open_default()?;
-    registry.ensure_available(&name)?;
-    let paths = registry.allocate_detached_paths()?;
-    let stdout = open_detached_log(&paths.stdout_log)?;
-    let stderr = open_detached_log(&paths.stderr_log)?;
     let executable = env::current_exe().into_diagnostic()?;
-    let record_arguments = detached_record_arguments(&name, &paths.session, &recording);
     let environment_stdin = if recording.environment_spec_stdin {
         let mut bytes = Vec::new();
         io::stdin()
@@ -215,6 +243,24 @@ pub(super) fn run_start(arguments: StartArgs) -> Result<ExitCode> {
     } else {
         None
     };
+    let paths = registry.allocate_detached_paths()?;
+    let lease = Duration::from_millis(startup_timeout_ms).saturating_add(Duration::from_secs(5));
+    let reservation = registry.reserve(&name, &paths.session, lease)?;
+    let stdout = match open_detached_log(&paths.stdout_log) {
+        Ok(stdout) => stdout,
+        Err(error) => {
+            release_start_reservation(&registry, &reservation);
+            return Err(error);
+        }
+    };
+    let stderr = match open_detached_log(&paths.stderr_log) {
+        Ok(stderr) => stderr,
+        Err(error) => {
+            release_start_reservation(&registry, &reservation);
+            return Err(error);
+        }
+    };
+    let record_arguments = detached_record_arguments(&name, &paths.session, &recording);
     let mut command = ProcessCommand::new("setsid");
     command
         .arg(executable)
@@ -226,7 +272,13 @@ pub(super) fn run_start(arguments: StartArgs) -> Result<ExitCode> {
         })
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
-    let mut recorder = command.spawn().into_diagnostic()?;
+    let mut recorder = match command.spawn() {
+        Ok(recorder) => recorder,
+        Err(source) => {
+            release_start_reservation(&registry, &reservation);
+            return Err(source).into_diagnostic();
+        }
+    };
     if let Some(bytes) = environment_stdin {
         let mut stdin = recorder
             .stdin
@@ -236,34 +288,34 @@ pub(super) fn run_start(arguments: StartArgs) -> Result<ExitCode> {
         drop(stdin);
     }
     let deadline = Instant::now() + Duration::from_millis(startup_timeout_ms);
+    let mut ready_since: Option<Instant> = None;
     loop {
+        if paths.session.join("completion.json").is_file() {
+            return promote_completed_start(&registry, &reservation, &paths, &synchronization);
+        }
         if paths.session.join("session.json").is_file()
             && registry.recorder_identity(&paths.session).is_some()
         {
-            let entry = registry.register(&name, &paths.session).map_err(|error| {
-                return miette::miette!(
-                    "recorder became ready but alias publication failed; recoverable orphan: {}; stdout log: {}; stderr log: {}; {error}",
-                    paths.session.display(),
-                    paths.stdout_log.display(),
-                    paths.stderr_log.display(),
-                );
-            })?;
-            let canonical_session_display = entry.session_path().display().to_string();
-            return write_json_line(&serde_json::json!({
-                "alias": entry.alias,
-                "canonical_session": entry.canonical_session,
-                "canonical_session_display": canonical_session_display,
-                "session_id": entry.session_id,
-                "recorder_pid": entry.recorder_pid,
-                "recorder_process_start_ticks": entry.recorder_process_start_ticks,
-                "stdout_log": paths.stdout_log,
-                "stderr_log": paths.stderr_log,
-                "ready": true,
-            }));
+            let ready_at = ready_since.get_or_insert_with(Instant::now);
+            if ready_at.elapsed() >= Duration::from_millis(30) {
+                let entry = registry.promote(&reservation).map_err(|error| {
+                    return miette::miette!(
+                        "recorder became ready but owned alias promotion failed; reservation remains for {}; stdout log: {}; stderr log: {}; {error}",
+                        paths.session.display(),
+                        paths.stdout_log.display(),
+                        paths.stderr_log.display(),
+                    );
+                })?;
+                return report_start_outcome(&entry, &paths, None, &synchronization);
+            }
         }
         if let Some(status) = recorder.try_wait().into_diagnostic()? {
+            if paths.session.join("completion.json").is_file() {
+                return promote_completed_start(&registry, &reservation, &paths, &synchronization);
+            }
+            release_start_reservation(&registry, &reservation);
             return Err(miette::miette!(
-                "detached recorder exited before readiness with {status}; recoverable session candidate: {}; stdout log: {}; stderr log: {}",
+                "detached recorder exited before publishing valid completion evidence with {status}; session candidate: {}; stdout log: {}; stderr log: {}",
                 paths.session.display(),
                 paths.stdout_log.display(),
                 paths.stderr_log.display(),
@@ -271,7 +323,7 @@ pub(super) fn run_start(arguments: StartArgs) -> Result<ExitCode> {
         }
         if Instant::now() >= deadline {
             return Err(miette::miette!(
-                "detached recorder did not become ready within {startup_timeout_ms} ms; it was left running as recoverable orphan: {}; stdout log: {}; stderr log: {}",
+                "detached recorder did not become ready within {startup_timeout_ms} ms; its owned alias reservation and pending session remain recoverable: {}; stdout log: {}; stderr log: {}",
                 paths.session.display(),
                 paths.stdout_log.display(),
                 paths.stderr_log.display(),
@@ -279,6 +331,198 @@ pub(super) fn run_start(arguments: StartArgs) -> Result<ExitCode> {
         }
         thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn release_start_reservation(registry: &SessionRegistry, reservation: &AliasReservation) {
+    if let Err(error) = registry.release(reservation) {
+        tracing::warn!(%error, alias = %reservation.alias, "failed to release startup reservation");
+    }
+}
+
+#[derive(Debug)]
+struct StartSynchronization {
+    until_idle: Option<Duration>,
+    until_screen: Option<String>,
+    until_screen_regex: Option<String>,
+    timeout: Duration,
+}
+
+impl StartSynchronization {
+    fn requested(&self) -> bool {
+        return self.until_idle.is_some()
+            || self.until_screen.is_some()
+            || self.until_screen_regex.is_some();
+    }
+}
+
+fn promote_completed_start(
+    registry: &SessionRegistry,
+    reservation: &AliasReservation,
+    paths: &DetachedSessionPaths,
+    synchronization: &StartSynchronization,
+) -> Result<ExitCode> {
+    let completion = wait_for_completion(&paths.session, Duration::ZERO)?;
+    let entry = registry.promote(reservation).map_err(|error| {
+        return miette::miette!(
+            "recorder completed but owned alias promotion failed; reservation remains for {}; stdout log: {}; stderr log: {}; {error}",
+            paths.session.display(),
+            paths.stdout_log.display(),
+            paths.stderr_log.display(),
+        );
+    })?;
+    return report_start_outcome(&entry, paths, Some(&completion), synchronization);
+}
+
+fn report_start_outcome(
+    entry: &RegistryEntry,
+    paths: &DetachedSessionPaths,
+    completion: Option<&SessionCompletion>,
+    synchronization: &StartSynchronization,
+) -> Result<ExitCode> {
+    let startup_state = match completion {
+        None => "live",
+        Some(completion) if completion.exit_code == Some(0) && completion.signal_name.is_none() => {
+            "completed_success"
+        }
+        Some(_) => "completed_failure",
+    };
+    let canonical_session_display = entry.session_path().display().to_string();
+    let mut output = serde_json::json!({
+        "kind": "started",
+        "startup_state": startup_state,
+        "alias": entry.alias,
+        "canonical_session": entry.canonical_session,
+        "canonical_session_display": canonical_session_display,
+        "session_id": entry.session_id,
+        "recorder_pid": entry.recorder_pid,
+        "recorder_process_start_ticks": entry.recorder_process_start_ticks,
+        "stdout_log": paths.stdout_log,
+        "stderr_log": paths.stderr_log,
+        "ready": completion.is_none(),
+        "completion": completion,
+    });
+    let mut synchronization_ok = true;
+    if synchronization.requested() {
+        let postcondition = if completion.is_some() {
+            synchronization_ok = false;
+            serde_json::json!({
+                "matched": false,
+                "ended": true,
+                "quality": "completed_before_match",
+            })
+        } else {
+            match start_postcondition(&entry.session_path(), synchronization) {
+                Ok(postcondition) => {
+                    synchronization_ok = postcondition
+                        .get("matched")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false);
+                    postcondition
+                }
+                Err(error) => {
+                    synchronization_ok = false;
+                    serde_json::json!({
+                        "matched": false,
+                        "ended": entry.session_path().join("completion.json").is_file(),
+                        "error": error.to_string(),
+                    })
+                }
+            }
+        };
+        output
+            .as_object_mut()
+            .ok_or_else(|| miette::miette!("start response is not an object"))?
+            .insert("postcondition".to_owned(), postcondition);
+    }
+    write_json_line(&output)?;
+    if !synchronization_ok {
+        return Ok(ExitCode::FAILURE);
+    }
+    let Some(completion) = completion else {
+        return Ok(ExitCode::SUCCESS);
+    };
+    return Ok(match (completion.exit_code, &completion.signal_name) {
+        (Some(code), None) => u8::try_from(code).map_or(ExitCode::FAILURE, ExitCode::from),
+        _ => ExitCode::FAILURE,
+    });
+}
+
+fn start_postcondition(
+    session: &Path,
+    synchronization: &StartSynchronization,
+) -> Result<serde_json::Value> {
+    if let Some(stable_for) = synchronization.until_idle {
+        let data = send_request(
+            session,
+            &ControlRequest::new(ControlCommand::CaptureStable {
+                stable_for_ns: u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX),
+                timeout_ns: u64::try_from(synchronization.timeout.as_nanos()).unwrap_or(u64::MAX),
+            }),
+        )?;
+        let ControlData::StableSnapshot {
+            viewport_text,
+            state_hash,
+            cols,
+            rows,
+            quality,
+            ..
+        } = data
+        else {
+            return Err(miette::miette!(
+                "recording actor returned an unexpected stable-capture payload"
+            ));
+        };
+        return Ok(serde_json::json!({
+            "matched": quality == StableCaptureQuality::Stable,
+            "kind": "idle",
+            "state": state_hash,
+            "quality": quality,
+            "size": [cols, rows],
+            "screen": viewport_text,
+        }));
+    }
+    let (kind, predicate) = match (
+        &synchronization.until_screen,
+        &synchronization.until_screen_regex,
+    ) {
+        (Some(text), None) => ("screen", ScreenPredicate::Contains { text: text.clone() }),
+        (None, Some(pattern)) => (
+            "screen_regex",
+            ScreenPredicate::MatchesRegex {
+                pattern: pattern.clone(),
+            },
+        ),
+        _ => {
+            return Err(miette::miette!(
+                "exactly one start postcondition is required"
+            ));
+        }
+    };
+    let matched = wait_for_screen(session, predicate, Duration::ZERO, synchronization.timeout)?;
+    let mut postcondition = serde_json::json!({
+        "matched": true,
+        "kind": kind,
+        "state": matched.state_hash,
+        "quality": matched.completion_quality,
+        "size": [matched.cols, matched.rows],
+        "ended": matched.child_completed,
+    });
+    if let Ok(ControlData::Snapshot {
+        viewport_text,
+        state_hash,
+        ..
+    }) = request(session, ControlCommand::Snapshot)
+        && state_hash == matched.state_hash
+    {
+        postcondition
+            .as_object_mut()
+            .ok_or_else(|| miette::miette!("start postcondition is not an object"))?
+            .insert(
+                "screen".to_owned(),
+                serde_json::Value::String(viewport_text),
+            );
+    }
+    return Ok(postcondition);
 }
 
 pub(super) fn run_restart(arguments: RestartArgs) -> Result<ExitCode> {
@@ -650,6 +894,14 @@ fn apply_restart_overrides(
         ));
     }
     if let Some(mode) = overrides.durability {
+        if !matches!(mode, DurabilityModeArg::Bounded)
+            && (overrides.durability_max_interval_ms.is_some()
+                || overrides.durability_max_uncommitted_bytes.is_some())
+        {
+            return Err(miette::miette!(
+                "durability thresholds require --durability bounded"
+            ));
+        }
         let interval = overrides
             .durability_max_interval_ms
             .or(options.durability_policy.maximum_interval_ms)
@@ -802,16 +1054,20 @@ fn detached_record_arguments(
             DurabilityModeArg::Throughput => "throughput",
         }),
     );
-    push_record_option(
-        &mut arguments,
-        "--durability-max-interval-ms",
-        OsStr::new(&recording.durability_max_interval_ms.to_string()),
-    );
-    push_record_option(
-        &mut arguments,
-        "--durability-max-uncommitted-bytes",
-        OsStr::new(&recording.durability_max_uncommitted_bytes.to_string()),
-    );
+    if let Some(value) = recording.durability_max_interval_ms {
+        push_record_option(
+            &mut arguments,
+            "--durability-max-interval-ms",
+            OsStr::new(&value.to_string()),
+        );
+    }
+    if let Some(value) = recording.durability_max_uncommitted_bytes {
+        push_record_option(
+            &mut arguments,
+            "--durability-max-uncommitted-bytes",
+            OsStr::new(&value.to_string()),
+        );
+    }
     push_record_option(
         &mut arguments,
         "--provenance",

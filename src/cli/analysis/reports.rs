@@ -11,8 +11,41 @@ pub(in crate::cli) fn run_timeline(arguments: TimelineArgs) -> Result<ExitCode> 
         arguments.range.from_marker.as_deref(),
         arguments.range.to_marker.as_deref(),
     )?;
-    let entries = build_timeline(&log, arguments.all_states, arguments.controls, range)?;
-    let (entries, page, partial) = paginate(entries, &arguments.page);
+    let (entries, page, partial) = if arguments.page.all {
+        let entries = build_timeline(&log, arguments.all_states, arguments.controls, range)?;
+        paginate(entries, &arguments.page)
+    } else {
+        let limit = u16::try_from(arguments.page.limit)
+            .map_err(|_| return miette::miette!("timeline page limit exceeds 65535"))?;
+        let timeline_page = build_timeline_page(
+            &log,
+            arguments.all_states,
+            arguments.controls,
+            range,
+            u64::try_from(arguments.page.offset).unwrap_or(u64::MAX),
+            limit,
+        )?;
+        let returned = timeline_page.entries.len();
+        let next_offset = timeline_page
+            .next_offset
+            .and_then(|offset| return usize::try_from(offset).ok());
+        let truncated = next_offset.is_some();
+        let total = (!truncated && (arguments.page.offset == 0 || returned > 0))
+            .then(|| return arguments.page.offset.saturating_add(returned));
+        let page = OutputPage {
+            offset: arguments.page.offset,
+            limit: Some(arguments.page.limit),
+            total,
+            returned,
+            truncated,
+            next_offset,
+        };
+        (
+            timeline_page.entries,
+            page,
+            arguments.page.offset != 0 || truncated,
+        )
+    };
     if arguments.jsonl {
         for entry in entries {
             write_json_line(&entry)?;
@@ -172,6 +205,30 @@ pub(in crate::cli) fn run_diagnose(arguments: DiagnoseArgs) -> Result<ExitCode> 
         return Ok(ExitCode::FAILURE);
     }
     return Ok(ExitCode::SUCCESS);
+}
+
+pub(in crate::cli) fn run_inspect_facade(arguments: InspectFacadeArgs) -> Result<ExitCode> {
+    let resolved = resolve_session(arguments.session)?;
+    if resolved.lifecycle != RegistryLifecycle::Completed {
+        return write_session_lifecycle(&resolved, "inspect_last_action", ExitCode::FAILURE);
+    }
+    let log = EventLog::read(resolved.path.join("events.jsonl"))?;
+    validate_completed_log(&resolved.path, &log)?;
+    let analysis = analyze_last_action(&resolved.path, &log, arguments.broad_change_percent)?;
+    let _last_action = arguments.last_action;
+    return write_json_line(&analysis.inspection);
+}
+
+pub(in crate::cli) fn run_diagnose_facade(arguments: DiagnoseFacadeArgs) -> Result<ExitCode> {
+    let resolved = resolve_session(arguments.session)?;
+    if resolved.lifecycle != RegistryLifecycle::Completed {
+        return write_session_lifecycle(&resolved, "diagnose_since_last_action", ExitCode::FAILURE);
+    }
+    let log = EventLog::read(resolved.path.join("events.jsonl"))?;
+    validate_completed_log(&resolved.path, &log)?;
+    let analysis = analyze_last_action(&resolved.path, &log, arguments.broad_change_percent)?;
+    let _since_last_action = arguments.since_last_action;
+    return write_json_line(&analysis.diagnostics);
 }
 
 fn explain_text(report: &ExplainReport) -> Result<String> {
@@ -365,18 +422,24 @@ fn canonical_event_text(event: &Event) -> Result<String> {
             source,
             input_kind,
             data,
-            intent,
+            semantic_input,
+            caller_intent,
             ..
         } => {
-            let intent = match intent {
-                Some(value) => format!(" intent={}", quoted_text(value)?),
+            let semantic = match semantic_input {
+                Some(value) => format!(" semantic_input={}", quoted_text(value)?),
+                None => String::new(),
+            };
+            let intent = match caller_intent {
+                Some(value) => format!(" caller_intent={}", quoted_text(value)?),
                 None => String::new(),
             };
             format!(
-                "input {}/{} bytes={}{}",
+                "input {}/{} bytes={}{}{}",
                 stable_enum_label(source)?,
                 stable_enum_label(input_kind)?,
                 data.as_bytes().len(),
+                semantic,
                 intent,
             )
         }

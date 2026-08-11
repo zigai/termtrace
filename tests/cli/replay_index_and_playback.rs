@@ -376,6 +376,7 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
     );
     for file in [
         "states.jsonl.zst",
+        "checkpoints.jsonl.zst",
         "state-index.jsonl",
         "final.txt",
         "final.vt",
@@ -416,6 +417,10 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
     validate_json_lines(
         "state-index-entry.schema.json",
         &derived.join("state-index.jsonl"),
+    );
+    validate_json_lines_text(
+        "semantic-replay-checkpoint.schema.json",
+        &read_zstd_text(&derived.join("checkpoints.jsonl.zst")),
     );
     let event_log = fs_err::read_to_string(session.join("events.jsonl")).expect("event log");
     let mut event_lines = event_log.lines();
@@ -509,7 +514,7 @@ fn playback_does_not_echo_terminal_query_responses() {
         operating_system: "linux".to_owned(),
         architecture: "test".to_owned(),
         event_log: "events.jsonl".to_owned(),
-        control_socket: "control.sock".to_owned(),
+        control_socket: control_socket_name(header.session_id),
         request_journal: "requests.jsonl".to_owned(),
         contains_sensitive_terminal_data: true,
         durability_policy: DurabilityPolicy::default(),

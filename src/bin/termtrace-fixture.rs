@@ -13,6 +13,7 @@ use clap::{Args, Parser, Subcommand};
 use miette::{IntoDiagnostic as _, Result};
 use termtrace::{
     artifact::write_secure,
+    control::control_socket_name,
     environment::EnvironmentSpec,
     event::{ByteString, Event, EventLogHeader},
     event_log::{DurabilityMode, DurabilityPolicy, EventLog, EventLogWriter, SessionClock},
@@ -131,7 +132,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         operating_system: env::consts::OS.to_owned(),
         architecture: env::consts::ARCH.to_owned(),
         event_log: "events.jsonl".to_owned(),
-        control_socket: "control.sock".to_owned(),
+        control_socket: control_socket_name(session_id),
         request_journal: "requests.jsonl".to_owned(),
         contains_sensitive_terminal_data: true,
         durability_policy: durability.clone(),
@@ -178,6 +179,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         terminal_event_seq,
         durability: writer.durability_record(),
         resource_limit: None,
+        failure: None,
     };
     drop(writer);
     write_secure(

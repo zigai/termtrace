@@ -36,8 +36,11 @@ pub mod semantic_image;
 pub mod semantic_video;
 pub mod session;
 pub mod session_registry;
+pub mod task_facade;
 mod terminal_mode;
 pub mod timeline;
+pub mod tmux_bundle;
+pub mod tmux_recording;
 pub mod visual;
 pub mod vt_framer;
 

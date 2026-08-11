@@ -1,0 +1,12 @@
+{
+  "format": "termtrace-executable-regression-workflow",
+  "version": 1,
+  "id": "pi-extension-input-survival",
+  "program": "import os,tty; tty.setraw(0); os.write(1,b'\\x1b[?1049h\\x1b[?2004hPI_INPUT_READY'); data=os.read(0,1); os.write(1,b'\\r\\nPI_INPUT_DONE:'+data)",
+  "ready": "PI_INPUT_READY",
+  "done": "PI_INPUT_DONE:y",
+  "accepted_input": "y",
+  "reject_before_accept": true,
+  "run_as_scenario": false,
+  "generate_index": false
+}

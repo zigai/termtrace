@@ -55,6 +55,25 @@ pub(in crate::cli) struct StartArgs {
     #[arg(long, default_value_t = 10_000)]
     pub(in crate::cli) startup_timeout_ms: u64,
 
+    /// Wait until the first presented screen remains unchanged for this duration.
+    #[arg(
+        long,
+        value_parser = parse_stability_duration,
+        num_args = 0..=1,
+        default_missing_value = "100ms",
+        conflicts_with_all = ["until_screen", "until_screen_regex"]
+    )]
+    pub(in crate::cli) until_idle: Option<Duration>,
+    /// Wait until the first presented screen contains this text.
+    #[arg(long, conflicts_with_all = ["until_idle", "until_screen_regex"])]
+    pub(in crate::cli) until_screen: Option<String>,
+    /// Wait until the first presented screen matches this bounded regular expression.
+    #[arg(long, conflicts_with_all = ["until_idle", "until_screen"])]
+    pub(in crate::cli) until_screen_regex: Option<String>,
+    /// Maximum start-time synchronization duration.
+    #[arg(long, value_parser = parse_wait_deadline_duration, default_value = "30s")]
+    pub(in crate::cli) timeout: Duration,
+
     #[command(flatten)]
     pub(in crate::cli) recording: RecordingArgs,
 }
@@ -246,13 +265,13 @@ pub(in crate::cli) struct RecordingArgs {
     #[arg(long, value_enum, default_value_t = DurabilityModeArg::Bounded)]
     pub(in crate::cli) durability: DurabilityModeArg,
 
-    /// Maximum unsynchronized interval in bounded mode.
-    #[arg(long, default_value_t = 50)]
-    pub(in crate::cli) durability_max_interval_ms: u64,
+    /// Maximum unsynchronized interval in bounded mode (default: 50).
+    #[arg(long)]
+    pub(in crate::cli) durability_max_interval_ms: Option<u64>,
 
-    /// Maximum unsynchronized PTY bytes in bounded mode.
-    #[arg(long, default_value_t = 65_536)]
-    pub(in crate::cli) durability_max_uncommitted_bytes: u64,
+    /// Maximum unsynchronized PTY bytes in bounded mode (default: 65536).
+    #[arg(long)]
+    pub(in crate::cli) durability_max_uncommitted_bytes: Option<u64>,
 
     /// Execution provenance collection policy.
     #[arg(long, value_enum, default_value_t = ProvenancePolicyArg::Minimal)]

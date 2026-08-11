@@ -36,6 +36,36 @@ pub(in crate::cli) enum ArtifactBundleSubcommand {
     Verify(BundleVerifyArgs),
 }
 
+#[derive(Debug, Args)]
+pub(in crate::cli) struct ScreenshotFacadeArgs {
+    /// Completed session name or canonical path.
+    pub(in crate::cli) session: PathBuf,
+    /// New PNG output file.
+    #[arg(short = 'o', long)]
+    pub(in crate::cli) out: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub(in crate::cli) struct BundleFacadeArgs {
+    /// Completed session name or canonical path.
+    pub(in crate::cli) session: PathBuf,
+    /// New owner-only bundle directory.
+    #[arg(short = 'o', long)]
+    pub(in crate::cli) out: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub(in crate::cli) struct BugReportFacadeArgs {
+    /// Completed session name or canonical path.
+    pub(in crate::cli) session: PathBuf,
+    /// New owner-only bug-report directory.
+    #[arg(short = 'o', long)]
+    pub(in crate::cli) out: PathBuf,
+    /// Include a semantic PNG screenshot of the last presented screen.
+    #[arg(long)]
+    pub(in crate::cli) screenshot: bool,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum BundleProfileArg {
     Screen,
@@ -214,8 +244,8 @@ pub(in crate::cli) struct CaptureArgs {
     /// Whole capture viewport height; omit both dimensions to use the recorded target or solve the exact grid.
     #[arg(long, requires = "width")]
     pub(in crate::cli) height: Option<u16>,
-    /// Video frame rate; native capture currently requires 24.
-    #[arg(long, default_value_t = 24)]
+    /// Video frame rate: 24, 30, or 60 FPS.
+    #[arg(long, value_parser = parse_video_fps, default_value_t = 24)]
     pub(in crate::cli) fps: u16,
     /// Use a matching index containing only terminal-presentable states.
     #[arg(long)]
@@ -246,6 +276,65 @@ pub(in crate::cli) enum VideoSourceArg {
     Native,
     /// Deterministic pixels generated from canonical semantic replay.
     Semantic,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(in crate::cli) enum VideoPresetArg {
+    /// Crisp, compact H.264 suitable for documentation.
+    Docs,
+    /// High-motion H.264 suitable for social publishing.
+    Social,
+    /// Lossless H.264 encoding with full chroma.
+    Lossless,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(in crate::cli) enum VideoCursorStyleArg {
+    /// Preserve the cursor captured in the source.
+    Recorded,
+    /// Mask the cursor using canonical cursor geometry.
+    Hidden,
+}
+
+#[derive(Debug, Args)]
+pub(in crate::cli) struct VideoFacadeArgs {
+    /// Completed session name or canonical path.
+    pub(in crate::cli) session: PathBuf,
+    /// New MP4 output file; a manifested `.termtrace` sidecar is retained.
+    #[arg(short, long)]
+    pub(in crate::cli) out: PathBuf,
+    /// Delivery quality and default timing policy.
+    #[arg(long, value_enum, default_value_t = VideoPresetArg::Docs)]
+    pub(in crate::cli) preset: VideoPresetArg,
+    /// Exact output frame rate; native capture must match.
+    #[arg(long, value_parser = parse_video_fps)]
+    pub(in crate::cli) fps: Option<u16>,
+    /// Semantic replay or verified native pixels; native never falls back.
+    #[arg(long, value_enum, default_value_t = VideoSourceArg::Native)]
+    pub(in crate::cli) renderer: VideoSourceArg,
+    /// Exact even output dimensions as `WIDTHxHEIGHT`.
+    #[arg(long, value_parser = parse_capture_target, conflicts_with = "scale")]
+    pub(in crate::cli) resolution: Option<CaptureTarget>,
+    /// Integer output scale from 1 through 8.
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..=8), conflicts_with = "resolution")]
+    pub(in crate::cli) scale: Option<u16>,
+    /// Begin at this unique marker.
+    #[arg(long)]
+    pub(in crate::cli) start_marker: Option<String>,
+    /// End at this unique marker.
+    #[arg(long)]
+    pub(in crate::cli) end_marker: Option<String>,
+    /// Remove child-output gaps longer than two seconds.
+    #[arg(long)]
+    pub(in crate::cli) trim_idle: bool,
+    /// Hold the first frame; defaults are preset-specific.
+    #[arg(long, value_parser = parse_media_hold_duration)]
+    pub(in crate::cli) hold_start: Option<Duration>,
+    /// Hold the final frame; defaults are preset-specific.
+    #[arg(long, value_parser = parse_media_hold_duration)]
+    pub(in crate::cli) hold_end: Option<Duration>,
+    /// Preserve or hide the recorded cursor.
+    #[arg(long, value_enum, default_value_t = VideoCursorStyleArg::Recorded)]
+    pub(in crate::cli) cursor_style: VideoCursorStyleArg,
 }
 
 #[derive(Debug, Args)]

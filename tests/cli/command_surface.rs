@@ -31,6 +31,19 @@ fn root_help_groups_commands_by_workflow() {
 }
 
 #[test]
+fn commands_subcommand_is_removed() {
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+
+    command
+        .args(["--response", "full", "commands"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "unrecognized subcommand 'commands'",
+        ));
+}
+
+#[test]
 fn tmux_help_exposes_setup_audit_and_pane_commands() {
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
     let output = command
@@ -71,6 +84,122 @@ fn native_screenshot_help_uses_the_solver_without_a_noop_flag() {
         .stdout(predicate::str::contains("--fit-viewport").not());
 }
 
+#[test]
+fn top_level_debug_and_handoff_facades_are_directly_discoverable() {
+    for (command_name, required_option) in [
+        ("inspect", "--last-action"),
+        ("diagnose", "--since-last-action"),
+        ("screenshot", "--out <OUT>"),
+        ("bundle", "--out <OUT>"),
+        ("bug-report", "--out <OUT>"),
+    ] {
+        let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+        let output = command
+            .args([command_name, "--help"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let help = String::from_utf8(output).expect("UTF-8 help");
+        assert!(
+            help.contains(required_option),
+            "{command_name} help omitted `{required_option}`:\n{help}"
+        );
+        assert!(
+            help.contains("<SESSION>"),
+            "{command_name} help omitted the session operand:\n{help}"
+        );
+    }
+
+    let mut bug_report = Command::cargo_bin("termtrace").expect("binary should build");
+    bug_report
+        .args(["bug-report", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--screenshot"));
+}
+
+#[test]
+fn top_level_video_exposes_complete_manifested_workflow() {
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = command
+        .args(["video", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let help = String::from_utf8(output).expect("UTF-8 help");
+    assert!(help.contains("Usage: termtrace video [OPTIONS] --out <OUT> <SESSION>"));
+    for option in [
+        "--preset",
+        "--fps",
+        "--renderer",
+        "--resolution",
+        "--scale",
+        "--start-marker",
+        "--end-marker",
+        "--trim-idle",
+        "--hold-start",
+        "--hold-end",
+        "--cursor-style",
+    ] {
+        assert!(
+            help.contains(option),
+            "video help omitted `{option}`:\n{help}"
+        );
+    }
+    assert!(help.contains("docs"));
+    assert!(help.contains("social"));
+    assert!(help.contains("lossless"));
+    assert!(help.contains("native never falls back"));
+}
+
+#[test]
+fn top_level_video_rejects_non_presentation_frame_rates_before_session_access() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let output = temporary.path().join("video.mp4");
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+    command
+        .args(["video", "missing-session", "--fps", "25", "-o"])
+        .arg(output)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("video FPS must be 24, 30, or 60"));
+}
+
+#[test]
+fn top_level_video_never_falls_back_from_native_to_semantic() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("session");
+    let output = temporary.path().join("native.mp4");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf native"])
+        .assert()
+        .success();
+
+    let mut video = Command::cargo_bin("termtrace").expect("binary should build");
+    video
+        .arg("video")
+        .arg(&session)
+        .args(["-o"])
+        .arg(&output)
+        .args(["--renderer", "native"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "explicitly choose `--renderer semantic`",
+        ));
+    assert!(!output.exists(), "native failure must not publish a video");
+    assert!(
+        !temporary.path().join("native.mp4.termtrace").exists(),
+        "native failure must not publish a semantic sidecar"
+    );
+}
 #[test]
 fn complex_selector_help_stays_within_one_hundred_columns() {
     for (arguments, synopsis, headings) in [

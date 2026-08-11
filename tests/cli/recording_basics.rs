@@ -37,6 +37,101 @@ fn record_mirrors_output_persists_events_and_propagates_exit_code() {
 }
 
 #[test]
+fn durability_thresholds_are_only_accepted_in_bounded_mode() {
+    let temporary = TempDir::new().expect("temporary directory");
+    for (mode, threshold, value) in [
+        ("strict", "--durability-max-interval-ms", "1"),
+        ("throughput", "--durability-max-uncommitted-bytes", "1024"),
+    ] {
+        let session = temporary.path().join(format!("{mode}-rejected"));
+        let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+        command
+            .args(["record", "--no-input", "--out"])
+            .arg(&session)
+            .args(["--durability", mode, threshold, value, "--", "/bin/true"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("require --durability bounded"));
+        assert!(
+            !session.exists(),
+            "invalid durability options created evidence"
+        );
+    }
+
+    let session = temporary.path().join("bounded-defaults");
+    let mut bounded = Command::cargo_bin("termtrace").expect("binary should build");
+    bounded
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--durability", "bounded", "--", "/bin/true"])
+        .assert()
+        .success();
+    let manifest = read_manifest(&session).expect("bounded manifest");
+    assert_eq!(manifest.durability_policy.maximum_interval_ms, Some(50));
+    assert_eq!(
+        manifest.durability_policy.maximum_uncommitted_bytes,
+        Some(65_536)
+    );
+}
+
+#[test]
+fn output_budget_exhaustion_returns_failure_after_fast_child_exit() {
+    let temporary = TempDir::new().expect("temporary directory");
+    for attempt in 0..8 {
+        let session = temporary.path().join(format!("budget-{attempt}"));
+        Command::cargo_bin("termtrace")
+            .expect("binary should build")
+            .args([
+                "record",
+                "--no-input",
+                "--output-byte-budget",
+                "4095",
+                "--out",
+            ])
+            .arg(&session)
+            .args([
+                "--",
+                "/usr/bin/python3",
+                "-c",
+                "import os; os.write(1, b'x' * 4096)",
+            ])
+            .assert()
+            .failure();
+        let completion: serde_json::Value = serde_json::from_slice(
+            &fs_err::read(session.join("completion.json")).expect("completion"),
+        )
+        .expect("completion JSON");
+        assert_eq!(completion["resource_limit"]["kind"], "output_bytes");
+        assert_eq!(completion["resource_limit"]["limit"], 4095);
+        assert!(
+            completion["resource_limit"]["observed"]
+                .as_u64()
+                .is_some_and(|observed| return observed >= 4096)
+        );
+    }
+}
+
+#[test]
+fn agent_record_stdout_is_one_json_response() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("agent-record");
+    let output = Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .args(["--response", "agent", "record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/printf", "CHILD_OUTPUT"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let response = compact_json_line(&output);
+    assert_eq!(response["ok"], true);
+    assert_eq!(response["type"], "record");
+    assert_eq!(response["output"], "CHILD_OUTPUT");
+}
+
+#[test]
 fn semantic_record_without_ghostty_has_stable_nonwarning_stderr() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("semantic-only-session");

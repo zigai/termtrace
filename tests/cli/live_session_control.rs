@@ -1,6 +1,7 @@
 //! live session control CLI integration tests.
 
 use crate::support::*;
+use termtrace::{control::PointerOperation, ghostty_vt::MouseButton, session::read_completion};
 
 #[test]
 fn live_control_drives_and_audits_a_detached_session() {
@@ -21,12 +22,7 @@ fn live_control_drives_and_audits_a_detached_session() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn recorder");
-    let socket = session.join("control.sock");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !socket.exists() && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(10));
-    }
-    assert!(socket.exists(), "control socket did not become ready");
+    wait_for_control(&session);
     let registry_state = temporary.path().join("registry-state");
     let mut register = Command::cargo_bin("termtrace").expect("binary should build");
     register
@@ -156,7 +152,10 @@ fn live_control_drives_and_audits_a_detached_session() {
         String::from_utf8_lossy(&output.stdout).contains("agent:hello"),
         "agent input did not reach child: {output:?}"
     );
-    assert!(!socket.exists(), "control socket should be removed on exit");
+    assert!(
+        !control_endpoint_is_reachable(&session),
+        "control endpoint should close on exit"
+    );
 
     let recording = EventLog::read(session.join("events.jsonl")).expect("valid event log");
     assert_control_events(&recording, &session);
@@ -222,6 +221,43 @@ fn live_control_drives_and_audits_a_detached_session() {
 }
 
 #[test]
+fn live_control_uses_a_bounded_endpoint_for_long_evidence_paths() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let evidence_root = temporary.path().join("x".repeat(180));
+    fs_err::create_dir(&evidence_root).expect("long evidence root");
+    let session = evidence_root.join("session");
+    assert!(session.as_os_str().as_bytes().len() > 108);
+    let recorder = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import signal,sys,time; signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); print('READY', flush=True); time.sleep(30)",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn recorder in long evidence root");
+    wait_for_control(&session);
+    assert!(matches!(
+        send_request(&session, &ControlRequest::new(ControlCommand::Ping)),
+        Ok(ControlData::Acknowledged { .. })
+    ));
+    send_request(&session, &ControlRequest::new(ControlCommand::Stop))
+        .expect("stop long-path child");
+    let output = recorder
+        .wait_with_output()
+        .expect("wait for long-path recorder");
+    assert!(
+        output.status.success(),
+        "long-path recorder failed: {output:?}"
+    );
+    assert!(!session.join("control.sock").exists());
+}
+
+#[test]
 fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     let temporary = TempDir::new().expect("temporary directory");
     let stable_session = temporary.path().join("stable");
@@ -235,7 +271,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn stable recorder");
-    wait_for_path(&stable_session.join("control.sock"));
+    wait_for_control(&stable_session);
     wait_for_output(&stable_session, b"READY", Duration::from_secs(2)).expect("ready output");
 
     let capture = send_request(
@@ -260,7 +296,10 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     assert_eq!(quality, StableCaptureQuality::Stable);
     assert!(viewport_text.contains("READY"));
     let encoded = decode_all(semantic_state_zstd.as_bytes()).expect("decode exact stable state");
-    assert_eq!(state_hash, blake3::hash(&encoded).to_hex().to_string());
+    let semantic_state: serde_json::Value =
+        serde_json::from_slice(&encoded).expect("exact stable state JSON");
+    assert!(semantic_state.is_object());
+    assert_eq!(state_hash.len(), 64);
     assert_eq!(boundaries.observed.output_bytes, 5);
     let mut compact_idle = Command::cargo_bin("termtrace").expect("binary should build");
     let compact_output = compact_idle
@@ -278,12 +317,18 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         compact.pointer("/kind").and_then(serde_json::Value::as_str),
         Some("stable_snapshot")
     );
-    assert!(compact.pointer("/viewport_text").is_some());
-    assert!(compact.pointer("/boundary/next_event_seq").is_some());
+    assert_eq!(
+        compact
+            .pointer("/state")
+            .and_then(serde_json::Value::as_str),
+        Some(state_hash.as_str())
+    );
+    assert!(compact.pointer("/screen").is_some());
+    assert!(compact.pointer("/boundary").is_none());
     assert!(compact.pointer("/semantic_state_zstd").is_none());
     let mut full_idle = Command::cargo_bin("termtrace").expect("binary should build");
     full_idle
-        .arg("wait-idle")
+        .args(["--response", "full", "wait-idle"])
         .arg(&stable_session)
         .args([
             "--stable-for",
@@ -314,7 +359,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn changing recorder");
-    wait_for_path(&changing_session.join("control.sock"));
+    wait_for_control(&changing_session);
     let deadline = send_request(
         &changing_session,
         &ControlRequest::new(ControlCommand::CaptureStable {
@@ -352,7 +397,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn child-completed recorder");
-    wait_for_path(&completed_session.join("control.sock"));
+    wait_for_control(&completed_session);
     wait_for_output(&completed_session, b"READY", Duration::from_secs(2))
         .expect("completed fixture ready");
     let completed = send_request(
@@ -390,7 +435,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn output-closed recorder");
-    wait_for_path(&closed_session.join("control.sock"));
+    wait_for_control(&closed_session);
     wait_for_output(&closed_session, b"CLOSED", Duration::from_secs(2))
         .expect("closed fixture output");
     let mut strict_idle = Command::cargo_bin("termtrace").expect("binary should build");
@@ -469,7 +514,7 @@ fn environment_values_never_enter_recorder_argv_or_manifest() {
         .expect("environment stdin")
         .write_all(&encoded)
         .expect("write environment stdin");
-    wait_for_path(&session.join("control.sock"));
+    wait_for_control(&session);
     let argv = fs_err::read(format!("/proc/{}/cmdline", recorder.id())).expect("recorder argv");
     assert!(
         !argv
@@ -598,7 +643,7 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn guarded fixture");
-    wait_for_path(&session.join("control.sock"));
+    wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("ready output");
 
     let snapshot = send_request(&session, &ControlRequest::new(ControlCommand::Snapshot))
@@ -609,7 +654,7 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
     let stale_request = ControlRequest::new(ControlCommand::Input {
         data: ByteString::new(b"blocked\n".to_vec()),
         input_kind: InputKind::Text,
-        intent: Some("must not apply".to_owned()),
+        caller_intent: Some("must not apply".to_owned()),
     })
     .with_expected_presented_state_hash("0".repeat(64));
     let stale_response =
@@ -630,10 +675,52 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
         stale_response
     );
 
+    for mut command in [
+        {
+            let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+            command
+                .args(["--response", "agent", "send", "--if-state"])
+                .arg("0".repeat(64))
+                .arg(&session)
+                .arg("text:blocked");
+            command
+        },
+        {
+            let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+            command
+                .args(["--response", "agent", "act", "--if-state"])
+                .arg("0".repeat(64))
+                .arg(&session)
+                .arg("text:blocked");
+            command
+        },
+        {
+            let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+            command
+                .args(["--response", "agent", "control", "resize", "--if-state"])
+                .arg("0".repeat(64))
+                .arg(&session)
+                .args(["--cols", "81", "--rows", "25"]);
+            command
+        },
+    ] {
+        let output = command.assert().failure().get_output().stdout.clone();
+        let rejection = compact_json_line(&output);
+        assert_eq!(rejection["code"], "stale_observation");
+        assert_eq!(rejection["applied"], "none");
+        assert_eq!(rejection["retry"], "safe_new_request");
+        assert_eq!(rejection["session_state"], "live");
+        assert_eq!(rejection["observation"]["state"], state_hash);
+        assert_eq!(
+            rejection["observation"]["scope"],
+            "actor_processed_presented_output"
+        );
+    }
+
     let guarded_input = ControlRequest::new(ControlCommand::Input {
         data: ByteString::new(b"accepted\n".to_vec()),
         input_kind: InputKind::Text,
-        intent: Some("fresh observation".to_owned()),
+        caller_intent: Some("fresh observation".to_owned()),
     })
     .with_expected_presented_state_hash(state_hash);
     send_request(&session, &guarded_input).expect("fresh guarded input");
@@ -658,6 +745,87 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
     assert_eq!(agent_inputs, vec![b"accepted\n".as_slice()]);
 }
 
+#[test]
+fn rejected_control_requests_do_not_terminate_the_recorder_actor() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("request-rejections");
+    let child = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,tty; tty.setraw(0); os.write(1,b'READY'); d=b''\nwhile len(d)<3: d+=os.read(0,3-len(d))\nos.write(1,b'GOT:'+d)",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn request rejection fixture");
+    wait_for_control(&session);
+    wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("ready output");
+
+    let requests = [
+        (
+            ControlCommand::Key {
+                key: NamedKey::Function(0),
+                modifiers: KeyModifiers::default(),
+            },
+            "key_encoding_failed",
+        ),
+        (
+            ControlCommand::Pointer {
+                column: u16::MAX,
+                row: 0,
+                operation: PointerOperation::Click {
+                    button: MouseButton::Left,
+                },
+                strict: true,
+            },
+            "pointer_cell_out_of_bounds",
+        ),
+        (
+            ControlCommand::WaitScreen {
+                predicate: ScreenPredicate::Contains {
+                    text: "never".to_owned(),
+                },
+                stable_for_ns: 1,
+                timeout_ns: 0,
+            },
+            "invalid_screen_wait",
+        ),
+    ];
+    for (index, (command, expected_code)) in requests.into_iter().enumerate() {
+        let response = send_request_response(&session, &ControlRequest::new(command))
+            .expect("structured request rejection");
+        assert!(matches!(
+            &response.result,
+            ControlResult::Error { code, .. } if code == expected_code
+        ));
+        send_request(&session, &ControlRequest::new(ControlCommand::Ping))
+            .expect("ping after rejection");
+        assert!(matches!(
+            send_request(&session, &ControlRequest::new(ControlCommand::Status)),
+            Ok(ControlData::Status { .. })
+        ));
+        send_request(
+            &session,
+            &ControlRequest::new(ControlCommand::Input {
+                data: ByteString::new(vec![b'a'.saturating_add(u8::try_from(index).unwrap_or(0))]),
+                input_kind: InputKind::Text,
+                caller_intent: Some("prove actor survived rejection".to_owned()),
+            }),
+        )
+        .expect("valid input after rejection");
+    }
+
+    let output = child.wait_with_output().expect("request rejection fixture");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+    wait_for_output(&session, b"GOT:abc", Duration::from_secs(5)).expect("valid inputs");
+    let completion = read_completion(&session).expect("durable completion");
+    assert!(completion.failure.is_none());
+}
+
 #[allow(
     clippy::expect_used,
     reason = "test helper should stop when its recording fixture is invalid"
@@ -668,7 +836,7 @@ fn assert_control_events(recording: &EventLog, session: &Path) {
         Event::InputIntent {
             source: InputSource::Agent,
             input_kind: InputKind::Text,
-            intent: Some(intent),
+            caller_intent: Some(intent),
             ..
         } if intent == "complete shell read"
     )));

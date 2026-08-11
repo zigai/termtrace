@@ -111,7 +111,40 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
     assert_eq!(report["cases"].as_array().expect("cases").len(), 2);
     let attempt = &report["cases"][0]["attempts"][0]["report"];
     assert_eq!(attempt["steps"].as_array().expect("steps").len(), 8);
-    assert!(Path::new(attempt["canonical_session"].as_str().expect("path")).is_dir());
+    let canonical = PathBuf::from(attempt["canonical_session"].as_str().expect("path"));
+    assert!(canonical.is_dir());
+    let log = EventLog::read(canonical.join("events.jsonl")).expect("scenario event log");
+    validate_completed_log(&canonical, &log).expect("scenario completion closure");
+    let replayed = replay(&log).expect("scenario final replay");
+    assert!(
+        replayed.states.last().is_some(),
+        "final state must be inspectable"
+    );
+    for step in attempt["steps"].as_array().expect("steps") {
+        let Some(state_hash) = step["state_hash"].as_str() else {
+            continue;
+        };
+        let mut show = Command::cargo_bin("termtrace").expect("binary should build");
+        show.arg("show")
+            .arg(&canonical)
+            .args(["--state-hash", state_hash, "--format", "json-compact"])
+            .assert()
+            .success();
+    }
+    let mut timeline = Command::cargo_bin("termtrace").expect("binary should build");
+    timeline
+        .args(["analyze", "timeline"])
+        .arg(&canonical)
+        .args(["--limit", "1", "--jsonl"])
+        .assert()
+        .success();
+    assert!(
+        fs_err::read_dir(canonical.join("derived-cache"))
+            .expect("scenario replay checkpoints")
+            .next()
+            .is_some(),
+        "closure must checkpoint an asserted endpoint"
+    );
 }
 
 #[test]

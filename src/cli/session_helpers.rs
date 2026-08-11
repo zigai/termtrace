@@ -1,29 +1,101 @@
 use super::*;
 
-pub(super) fn resolve_session_ref(target: PathBuf) -> Result<PathBuf> {
+pub(super) struct ResolvedSessionRef {
+    pub(super) path: PathBuf,
+    pub(super) lifecycle: RegistryLifecycle,
+    pub(super) diagnostic: Option<String>,
+}
+
+pub(super) fn resolve_session(target: PathBuf) -> Result<ResolvedSessionRef> {
     let bytes = target.as_os_str().as_bytes();
     if let Some(path) = bytes.strip_prefix(b"path:") {
         if path.is_empty() {
             return Err(miette::miette!("path: session reference is empty"));
         }
-        return Ok(PathBuf::from(OsString::from_vec(path.to_vec())));
+        let path = PathBuf::from(OsString::from_vec(path.to_vec()));
+        return Ok(resolve_path_lifecycle(path));
     }
     if let Some(name) = bytes.strip_prefix(b"name:") {
         let name = str::from_utf8(name)
             .map_err(|_| miette::miette!("name: session reference must be valid UTF-8"))?;
-        return Ok(SessionRegistry::open_default()?
-            .resolve(name)?
-            .session_path());
+        let resolved = SessionRegistry::open_default()?.resolve_lifecycle(name)?;
+        return Ok(ResolvedSessionRef {
+            path: resolved.session,
+            lifecycle: resolved.lifecycle,
+            diagnostic: resolved.diagnostic,
+        });
     }
     if bytes.contains(&b'/') || bytes.starts_with(b".") {
-        return Ok(target);
+        return Ok(resolve_path_lifecycle(target));
     }
     let name = target
         .to_str()
         .ok_or_else(|| miette::miette!("non-UTF-8 session paths require the path: prefix"))?;
-    return Ok(SessionRegistry::open_default()?
-        .resolve(name)?
-        .session_path());
+    let resolved = SessionRegistry::open_default()?.resolve_lifecycle(name)?;
+    return Ok(ResolvedSessionRef {
+        path: resolved.session,
+        lifecycle: resolved.lifecycle,
+        diagnostic: resolved.diagnostic,
+    });
+}
+
+pub(super) fn resolve_session_ref(target: PathBuf) -> Result<PathBuf> {
+    return Ok(resolve_session(target)?.path);
+}
+
+pub(super) fn write_session_lifecycle(
+    resolved: &ResolvedSessionRef,
+    operation: &'static str,
+    exit_code: ExitCode,
+) -> Result<ExitCode> {
+    write_json_line(&serde_json::json!({
+        "kind": "session_lifecycle",
+        "operation": operation,
+        "lifecycle": resolved.lifecycle.as_str(),
+        "session": ByteString::from(resolved.path.as_os_str().as_bytes()),
+        "session_display": resolved.path.display().to_string(),
+        "diagnostic": resolved.diagnostic,
+    }))?;
+    return Ok(exit_code);
+}
+
+fn resolve_path_lifecycle(path: PathBuf) -> ResolvedSessionRef {
+    if !path.is_dir() {
+        return ResolvedSessionRef {
+            path,
+            lifecycle: RegistryLifecycle::MissingEvidence,
+            diagnostic: Some("session directory is missing or unreadable".to_owned()),
+        };
+    }
+    if path.join("completion.json").is_file() {
+        return ResolvedSessionRef {
+            path,
+            lifecycle: RegistryLifecycle::Completed,
+            diagnostic: None,
+        };
+    }
+    if !path.join("session.json").is_file() {
+        return ResolvedSessionRef {
+            path,
+            lifecycle: RegistryLifecycle::Incomplete,
+            diagnostic: Some("session manifest has not been published".to_owned()),
+        };
+    }
+    if control_endpoint_is_reachable(&path) {
+        return ResolvedSessionRef {
+            path,
+            lifecycle: RegistryLifecycle::Live,
+            diagnostic: None,
+        };
+    }
+    return ResolvedSessionRef {
+        path,
+        lifecycle: RegistryLifecycle::Stale,
+        diagnostic: Some(
+            "session has no completion evidence and its abstract control endpoint is unreachable"
+                .to_owned(),
+        ),
+    };
 }
 
 pub(super) fn resolve_cli_range(

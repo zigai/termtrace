@@ -1,0 +1,16 @@
+{
+  "format": "termtrace-executable-regression-workflow",
+  "version": 1,
+  "id": "omp-extensions-tmux",
+  "program": "import os,tty,time\ntty.setraw(0)\nfor i in range(400):\n os.write(1,f'{i:04d}\\r\\n'.encode()); time.sleep(.001)\nos.write(1,b'OMP_'+b'TMUX_READY')\ndata=os.read(0,1)\nos.write(1,b'\\r\\nOMP_'+b'TMUX_DONE:'+data)",
+  "ready": "OMP_TMUX_READY",
+  "done": "OMP_TMUX_DONE:z",
+  "accepted_input": "z",
+  "reject_before_accept": false,
+  "run_as_scenario": false,
+  "generate_index": true,
+  "tmux_coverage": {
+    "warn_setup_args": [],
+    "strict_setup_args": ["--coverage", "strict"]
+  }
+}

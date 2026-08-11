@@ -44,7 +44,7 @@ pub(in crate::cli) struct DoctorArgs {
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct SchemaArgs {
-    /// Destination directory; existing files with generated schema names are replaced.
+    /// existing files with generated schema names are replaced.
     #[arg(long)]
     pub(in crate::cli) out: PathBuf,
 }

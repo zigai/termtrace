@@ -23,6 +23,8 @@ mod output_events_and_postprocessing;
 mod recording_basics;
 #[path = "cli/replay_index_and_playback.rs"]
 mod replay_index_and_playback;
+#[path = "cli/response_contract.rs"]
+mod response_contract;
 #[path = "cli/scenario_and_reviewer_workflows.rs"]
 mod scenario_and_reviewer_workflows;
 #[path = "cli/semantic_input.rs"]
@@ -31,7 +33,11 @@ mod semantic_input;
 mod session_registry_and_lifecycle;
 #[path = "cli/show_workflows.rs"]
 mod show_workflows;
+#[path = "cli/task_oriented_workflows.rs"]
+mod task_oriented_workflows;
 #[path = "cli/timeline_analysis.rs"]
 mod timeline_analysis;
 #[path = "cli/tmux_recording.rs"]
 mod tmux_recording;
+#[path = "cli/workflow_regression_gates.rs"]
+mod workflow_regression_gates;
