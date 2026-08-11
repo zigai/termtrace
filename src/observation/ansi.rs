@@ -9,14 +9,7 @@ pub fn observe_ansi_stream(bytes: &[u8], cols: u16, rows: u16) -> Result<Observa
     let mut terminal = GhosttyVt::new(cols, rows, 0)?;
     terminal.write(bytes);
     let state = terminal.snapshot()?;
-    let state_bytes = serde_json::to_vec(&state).map_err(|source| {
-        return Error::InvalidJson {
-            path: PathBuf::from("<ansi-state>"),
-            json_path: "$".to_owned(),
-            source,
-        };
-    })?;
-    let state_hash = blake3::hash(&state_bytes).to_hex().to_string();
+    let state_hash = semantic_state_hash(&state)?;
     let frame = frame_from_state(&state);
     let payload_hash = frame_hash(&frame)?;
     return Ok(Observation {
@@ -64,4 +57,21 @@ pub fn format_ansi_stream(bytes: &[u8], cols: u16, rows: u16, format: Format) ->
     let mut terminal = GhosttyVt::new(cols, rows, 0)?;
     terminal.write(bytes);
     return terminal.format(format);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ansi_observation_uses_replay_semantic_hash_contract() {
+        let bytes = b"\x1b[31msemantic";
+        let observation = observe_ansi_stream(bytes, 20, 4).expect("ANSI observation");
+        let state = semantic_state_from_ansi(bytes, 20, 4).expect("ANSI semantic state");
+
+        assert_eq!(
+            observation.state_hash,
+            semantic_state_hash(&state).expect("replay semantic hash")
+        );
+    }
 }

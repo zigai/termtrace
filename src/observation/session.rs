@@ -170,41 +170,134 @@ fn observe_completed(
     include_hidden: bool,
 ) -> Result<Observation> {
     let completion = read_completion(session)?;
-    if let Some(inspection) = load_checkpoint(session, &point, &completion)? {
-        if !inspection.record.presented && !include_hidden {
-            return Err(observation_error(
-                "selected semantic state is hidden; pass explicit hidden-state permission",
-            ));
-        }
-        return completed_observation_from_inspection(
-            session,
-            session_id,
-            point,
-            &completion,
-            &inspection,
-            ObservationResolution::ValidatedCheckpoint,
-        );
-    }
-    let log = EventLog::read(session.join("events.jsonl"))?;
-    let completion = validate_completed_log(session, &log)?;
-    let selector = state_selector(&log, &point)?;
-    let inspection = inspect(&log, selector)?;
-    if !inspection.record.presented && !include_hidden {
-        return Err(observation_error(
-            "selected semantic state is hidden; pass explicit hidden-state permission",
-        ));
-    }
-    if let Err(error) = publish_checkpoint(session, &point, &completion, &inspection) {
-        tracing::warn!(%error, "could not publish disposable replay checkpoint");
-    }
-    return completed_observation_from_inspection(
+    let (state, resolution) = resolve_completed_state(session, &point, &completion)?;
+    return completed_observation_from_cached(
         session,
         session_id,
         point,
         &completion,
-        &inspection,
-        ObservationResolution::CanonicalReplay,
+        &state,
+        include_hidden,
+        resolution,
     );
+}
+
+fn resolve_completed_state(
+    session: &Path,
+    point: &StatePoint,
+    completion: &SessionCompletion,
+) -> Result<(CachedSemanticState, ObservationResolution)> {
+    if let Some(state) = load_checkpoint(session, point, completion)? {
+        return Ok((state, ObservationResolution::ValidatedCheckpoint));
+    }
+    if matches!(point, StatePoint::StateHash { .. })
+        && let Some(state) = load_checkpoint(session, &StatePoint::LatestPresented, completion)?
+        && state_hash_matches_point(&state, point)
+    {
+        return Ok((state, ObservationResolution::ValidatedCheckpoint));
+    }
+    let log = EventLog::read(session.join("events.jsonl"))?;
+    validate_completed_log(session, &log)?;
+    if matches!(
+        point,
+        StatePoint::LatestPresented | StatePoint::StateHash { .. }
+    ) {
+        let endpoint = inspect_latest_presented_fast(&log)?;
+        if let Err(error) = publish_endpoint_checkpoint(
+            session,
+            &StatePoint::LatestPresented,
+            completion,
+            &endpoint,
+        ) {
+            tracing::warn!(%error, "could not publish endpoint replay checkpoint");
+        }
+        if matches!(point, StatePoint::LatestPresented)
+            || endpoint_hash_matches_point(&endpoint, point)
+        {
+            return Ok((
+                cached_state_from_endpoint(endpoint),
+                ObservationResolution::CanonicalReplay,
+            ));
+        }
+    }
+    let selector = state_selector(&log, point)?;
+    let inspection = inspect(&log, selector)?;
+    if let Err(error) = publish_checkpoint(session, point, completion, &inspection) {
+        tracing::warn!(%error, "could not publish disposable replay checkpoint");
+    }
+    return Ok((
+        CachedSemanticState {
+            state_id: Some(inspection.record.state_id),
+            event_seq: inspection.record.event_seq,
+            event_byte_offset: inspection.record.event_byte_offset,
+            monotonic_ns: Some(inspection.record.monotonic_ns),
+            state_hash: inspection.record.state_hash,
+            presented: inspection.record.presented,
+            state: inspection.state,
+        },
+        ObservationResolution::CanonicalReplay,
+    ));
+}
+
+fn state_hash_matches_point(state: &CachedSemanticState, point: &StatePoint) -> bool {
+    return matches!(point, StatePoint::StateHash { state_hash } if state.state_hash == *state_hash);
+}
+
+fn endpoint_hash_matches_point(state: &EndpointInspection, point: &StatePoint) -> bool {
+    return matches!(point, StatePoint::StateHash { state_hash } if state.state_hash == *state_hash);
+}
+
+fn cached_state_from_endpoint(state: EndpointInspection) -> CachedSemanticState {
+    return CachedSemanticState {
+        state_id: None,
+        event_seq: state.event_seq,
+        event_byte_offset: state.event_byte_offset,
+        monotonic_ns: state.monotonic_ns,
+        state_hash: state.state_hash,
+        presented: state.presented,
+        state: state.state,
+    };
+}
+
+fn completed_observation_from_cached(
+    session: &Path,
+    session_id: Uuid,
+    point: StatePoint,
+    completion: &SessionCompletion,
+    state: &CachedSemanticState,
+    include_hidden: bool,
+    resolution: ObservationResolution,
+) -> Result<Observation> {
+    if !state.presented && !include_hidden {
+        return Err(observation_error(
+            "selected semantic state is hidden; pass explicit hidden-state permission",
+        ));
+    }
+    let frame = frame_from_state(&state.state);
+    let payload_hash = frame_hash(&frame)?;
+    return Ok(Observation {
+        source_kind: ObservationSourceKind::CompletedSession,
+        session_id: Some(session_id),
+        canonical_session: Some(ByteString::from(session.as_os_str().as_bytes())),
+        source_completed: true,
+        state_point: point,
+        state_id: state.state_id,
+        state_hash: state.state_hash.clone(),
+        event_seq: state.event_seq,
+        monotonic_ns: state.monotonic_ns,
+        presented: state.presented,
+        boundary: CanonicalBoundary {
+            next_event_seq: completion.event_count,
+            event_hash: completion.final_event_hash.clone(),
+            output_bytes: completion.output_bytes,
+        },
+        capture_quality: CaptureQuality::Completed,
+        truth_layer: TruthLayer::Semantic,
+        integrity: ObservationIntegrity::CanonicalChained,
+        resolution,
+        frame,
+        payload_hash,
+    });
 }
 
 pub(crate) fn completed_observation_from_inspection(
@@ -302,16 +395,14 @@ pub fn semantic_state_with_hash_for_session(
         };
     })?;
     if canonical.join("completion.json").is_file() {
-        let log = EventLog::read(canonical.join("events.jsonl"))?;
-        validate_completed_log(&canonical, &log)?;
-        let selector = state_selector(&log, point)?;
-        let inspection = inspect(&log, selector)?;
-        if !inspection.record.presented && !include_hidden {
+        let completion = read_completion(&canonical)?;
+        let (state, _) = resolve_completed_state(&canonical, point, &completion)?;
+        if !state.presented && !include_hidden {
             return Err(observation_error(
                 "selected semantic state is hidden; pass explicit hidden-state permission",
             ));
         }
-        return Ok((inspection.state, inspection.record.state_hash));
+        return Ok((state.state, state.state_hash));
     }
     if point != &StatePoint::LatestPresented || include_hidden {
         return Err(observation_error(

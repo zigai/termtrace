@@ -1,9 +1,9 @@
 //! Deterministic byte-granular replay and semantic state indexing.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fmt::Write as _,
-    io::{Result as IoResult, Write},
+    io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     slice,
     time::{Duration, Instant},
@@ -24,11 +24,12 @@ use crate::{
     event::{Event, OperationStatus},
     event_log::EventLog,
     ghostty_vt::{
-        CellState, CellStyle, ColorState, CursorState, DirtyState, Format, GhosttyVt, ModeState,
-        SemanticState, TerminalMetadata, supported_geometry_cell_count,
+        CellState, CellStyle, ColorSpec, ColorState, CursorState, DirtyState, Format, GhosttyVt,
+        ModeState, SemanticState, TerminalMetadata, supported_geometry_cell_count,
     },
     session::validate_completed_log,
-    timeline::{SourceRange, resolve_source_range},
+    timeline::{SourceRange, resolve_source_range, timeline_event},
+    vt_framer::{VtFramer, VtToken},
 };
 
 mod delta;
@@ -37,14 +38,25 @@ mod index;
 mod model;
 
 use delta::state_delta;
-use engine::replay_with;
-pub(crate) use engine::visit_states;
 #[cfg(test)]
-use engine::{DEFAULT_REPLAY_LIMITS, ReplayLimits, replay_with_limits};
+use engine::{
+    DEFAULT_REPLAY_LIMITS, ReplayLimits, replay_with, replay_with_limits,
+    replay_with_seed_and_limits,
+};
 pub use engine::{
     RenderedStateFormats, StateInspectionWithFormats, format_state, inspect, inspect_many,
-    inspect_with_formats, replay,
+    inspect_with_formats, replay, semantic_state_hash,
 };
+pub(crate) use engine::{
+    ReplaySeed, inspect_latest_presented_fast, visit_states, visit_states_range,
+    visit_states_range_while, visit_states_seeded_while,
+};
+use engine::{replay_for_index, validate_replay_seed};
+#[cfg(test)]
+pub(crate) use engine::{reset_test_replay_output_bytes, test_replay_output_bytes};
+pub(crate) use index::load_nearest_replay_seed;
+#[cfg(test)]
+pub(crate) use index::write_index;
 pub use index::{
     derived_directory_name, derived_directory_name_for, index_session, index_session_range,
     index_session_with_options,

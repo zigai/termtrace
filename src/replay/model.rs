@@ -1,9 +1,11 @@
 use super::*;
 
+use crate::event::ByteString;
+
 /// Pinned Ghostty source revision used by the semantic adapter.
 pub const GHOSTTY_REVISION: &str = "55a3e33ab26a23d75b274b23c7f76d837db00578";
 /// Derived artifact format version.
-pub const STATE_FORMAT_VERSION: u32 = 3;
+pub const STATE_FORMAT_VERSION: u32 = 4;
 /// Relative directory containing replay-derived artifacts.
 pub const DERIVED_DIRECTORY: &str = "derived";
 
@@ -97,6 +99,28 @@ pub struct StateIndexEntry {
     pub monotonic_ns: u64,
     /// Whether a native renderer could present this state.
     pub presented: bool,
+    /// Whether the checkpoint stream contains a full-state replay seed here.
+    #[serde(default)]
+    pub checkpoint: bool,
+    /// Combined semantic/canonical/control timeline rank for this checkpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeline_rank: Option<u64>,
+    /// Byte offset of the first control-index entry at or after this checkpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_index_offset: Option<u64>,
+    /// Number of control entries ordered before this checkpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_rank: Option<u64>,
+}
+
+/// Periodic full-state replay seed addressable from the compact state index.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticReplayCheckpoint {
+    /// Canonical state boundary represented by this seed.
+    pub inspection: StateInspection,
+    /// Ghostty VT reconstruction validated against the semantic state hash before use.
+    pub engine_vt: ByteString,
 }
 
 /// Summary of one deterministic replay.
@@ -147,6 +171,16 @@ pub struct StateInspection {
     pub record: StateRecord,
     /// Complete semantic state, not a delta.
     pub state: SemanticState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct EndpointInspection {
+    pub state: SemanticState,
+    pub state_hash: String,
+    pub event_seq: Option<u64>,
+    pub event_byte_offset: Option<u64>,
+    pub monotonic_ns: Option<u64>,
+    pub presented: bool,
 }
 
 /// Manifest committed with derived replay artifacts.

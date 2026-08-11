@@ -79,7 +79,7 @@ pub enum StatePoint {
     },
     /// Exact content-addressed semantic state hash.
     StateHash {
-        /// BLAKE3 hash of canonical semantic state JSON.
+        /// BLAKE3 hash of the complete normalized semantic state.
         state_hash: String,
     },
     /// Latest state at or before an event sequence.

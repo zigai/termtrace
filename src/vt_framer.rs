@@ -140,6 +140,26 @@ impl VtFramer {
         return Ok(emitted);
     }
 
+    pub(crate) fn feed_byte_at(
+        &mut self,
+        event_seq: u64,
+        monotonic_ns: u64,
+        byte_offset: u64,
+        value: u8,
+    ) -> Result<Vec<VtToken>> {
+        let mut emitted = Vec::new();
+        self.consume(
+            TaggedByte {
+                value,
+                event_seq,
+                byte_offset,
+                monotonic_ns,
+            },
+            &mut emitted,
+        )?;
+        return Ok(emitted);
+    }
+
     /// Finish the stream, emitting printable bytes and labeling open controls incomplete.
     ///
     /// # Errors

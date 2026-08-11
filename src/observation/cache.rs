@@ -1,6 +1,6 @@
 use super::*;
 
-/// Disposable full-state checkpoint bound to exact canonical source files.
+/// Disposable full-state checkpoint bound to exact canonical source bytes.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReplayCheckpoint {
@@ -20,10 +20,33 @@ pub struct ReplayCheckpoint {
     pub completion_blake3: String,
     /// Completion-bound final canonical event hash.
     pub final_event_hash: String,
-    /// Complete reconstructed state and provenance.
-    pub inspection: StateInspection,
+    /// Dense canonical state identifier when byte-granular replay established it.
+    pub state_id: Option<u64>,
+    /// Canonical event responsible for the state, when known.
+    pub event_seq: Option<u64>,
+    /// Byte offset inside the source output event, when known.
+    pub event_byte_offset: Option<u64>,
+    /// Monotonic source timestamp, when known.
+    pub monotonic_ns: Option<u64>,
+    /// BLAKE3 semantic-state hash.
+    pub state_hash: String,
+    /// Whether the state was eligible for terminal presentation.
+    pub presented: bool,
+    /// Complete semantic state.
+    pub state: SemanticState,
     /// BLAKE3 of canonical JSON for the complete cached semantic state.
-    pub inspection_state_blake3: String,
+    pub state_blake3: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct CachedSemanticState {
+    pub state_id: Option<u64>,
+    pub event_seq: Option<u64>,
+    pub event_byte_offset: Option<u64>,
+    pub monotonic_ns: Option<u64>,
+    pub state_hash: String,
+    pub presented: bool,
+    pub state: SemanticState,
 }
 
 /// Bounded disposable replay-cache inventory for one canonical session.
@@ -65,7 +88,7 @@ pub(super) fn load_checkpoint(
     session: &Path,
     point: &StatePoint,
     completion: &SessionCompletion,
-) -> Result<Option<StateInspection>> {
+) -> Result<Option<CachedSemanticState>> {
     let path = checkpoint_path(session, point, completion)?;
     match fs_err::symlink_metadata(&path) {
         Ok(_) => {}
@@ -74,7 +97,7 @@ pub(super) fn load_checkpoint(
             return Err(Error::Filesystem { path, source });
         }
     }
-    let validate = (|| -> Result<StateInspection> {
+    let validate = (|| -> Result<CachedSemanticState> {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(O_NOFOLLOW)
@@ -143,15 +166,16 @@ pub(super) fn load_checkpoint(
         })?;
         let event_path = session.join("events.jsonl");
         let (event_log_byte_count, event_log_blake3) = hash_file(&event_path)?;
-        let state_bytes = serde_json::to_vec(&checkpoint.inspection.state).map_err(|source| {
+        let state_bytes = serde_json::to_vec(&checkpoint.state).map_err(|source| {
             return Error::InvalidJson {
                 path: PathBuf::from("<checkpoint-state>"),
                 json_path: "$".to_owned(),
                 source,
             };
         })?;
-        let state_hash = blake3::hash(&state_bytes).to_hex().to_string();
-        if checkpoint.version != 1
+        let state_blake3 = blake3::hash(&state_bytes).to_hex().to_string();
+        let semantic_hash = semantic_state_hash(&checkpoint.state)?;
+        if checkpoint.version != 2
             || checkpoint.state_format_version != STATE_FORMAT_VERSION
             || checkpoint.ghostty_revision != GHOSTTY_REVISION
             || checkpoint.state_point != *point
@@ -159,16 +183,25 @@ pub(super) fn load_checkpoint(
             || checkpoint.completion_blake3 != blake3::hash(&completion_bytes).to_hex().to_string()
             || checkpoint.event_log_byte_count != event_log_byte_count
             || checkpoint.event_log_blake3 != event_log_blake3
-            || checkpoint.inspection_state_blake3 != state_hash
+            || checkpoint.state_blake3 != state_blake3
+            || checkpoint.state_hash != semantic_hash
         {
             return Err(observation_error(
                 "replay checkpoint does not match exact canonical source bytes",
             ));
         }
-        return Ok(checkpoint.inspection);
+        return Ok(CachedSemanticState {
+            state_id: checkpoint.state_id,
+            event_seq: checkpoint.event_seq,
+            event_byte_offset: checkpoint.event_byte_offset,
+            monotonic_ns: checkpoint.monotonic_ns,
+            state_hash: checkpoint.state_hash,
+            presented: checkpoint.presented,
+            state: checkpoint.state,
+        });
     })();
     return match validate {
-        Ok(inspection) => Ok(Some(inspection)),
+        Ok(state) => Ok(Some(state)),
         Err(error) => {
             tracing::warn!(path = %path.display(), %error, "rejected replay checkpoint");
             if let Err(remove_error) = fs_err::remove_file(&path) {
@@ -189,6 +222,42 @@ pub(super) fn publish_checkpoint(
     completion: &SessionCompletion,
     inspection: &StateInspection,
 ) -> Result<()> {
+    let state = CachedSemanticState {
+        state_id: Some(inspection.record.state_id),
+        event_seq: inspection.record.event_seq,
+        event_byte_offset: inspection.record.event_byte_offset,
+        monotonic_ns: Some(inspection.record.monotonic_ns),
+        state_hash: inspection.record.state_hash.clone(),
+        presented: inspection.record.presented,
+        state: inspection.state.clone(),
+    };
+    return publish_cached_checkpoint(session, point, completion, &state);
+}
+
+pub(crate) fn publish_endpoint_checkpoint(
+    session: &Path,
+    point: &StatePoint,
+    completion: &SessionCompletion,
+    inspection: &EndpointInspection,
+) -> Result<()> {
+    let state = CachedSemanticState {
+        state_id: None,
+        event_seq: inspection.event_seq,
+        event_byte_offset: inspection.event_byte_offset,
+        monotonic_ns: inspection.monotonic_ns,
+        state_hash: inspection.state_hash.clone(),
+        presented: inspection.presented,
+        state: inspection.state.clone(),
+    };
+    return publish_cached_checkpoint(session, point, completion, &state);
+}
+
+fn publish_cached_checkpoint(
+    session: &Path,
+    point: &StatePoint,
+    completion: &SessionCompletion,
+    state: &CachedSemanticState,
+) -> Result<()> {
     let path = checkpoint_path(session, point, completion)?;
     if path.exists() {
         return Ok(());
@@ -205,7 +274,7 @@ pub(super) fn publish_checkpoint(
         };
     })?;
     let (event_log_byte_count, event_log_blake3) = hash_file(&session.join("events.jsonl"))?;
-    let state_bytes = serde_json::to_vec(&inspection.state).map_err(|source| {
+    let state_bytes = serde_json::to_vec(&state.state).map_err(|source| {
         return Error::InvalidJson {
             path: PathBuf::from("<checkpoint-state>"),
             json_path: "$".to_owned(),
@@ -213,7 +282,7 @@ pub(super) fn publish_checkpoint(
         };
     })?;
     let checkpoint = ReplayCheckpoint {
-        version: 1,
+        version: 2,
         state_format_version: STATE_FORMAT_VERSION,
         ghostty_revision: GHOSTTY_REVISION.to_owned(),
         state_point: point.clone(),
@@ -221,8 +290,14 @@ pub(super) fn publish_checkpoint(
         event_log_blake3,
         completion_blake3: blake3::hash(&completion_bytes).to_hex().to_string(),
         final_event_hash: completion.final_event_hash.clone(),
-        inspection: inspection.clone(),
-        inspection_state_blake3: blake3::hash(&state_bytes).to_hex().to_string(),
+        state_id: state.state_id,
+        event_seq: state.event_seq,
+        event_byte_offset: state.event_byte_offset,
+        monotonic_ns: state.monotonic_ns,
+        state_hash: state.state_hash.clone(),
+        presented: state.presented,
+        state: state.state.clone(),
+        state_blake3: blake3::hash(&state_bytes).to_hex().to_string(),
     };
     let bytes = serde_json::to_vec(&checkpoint).map_err(|source| {
         return Error::InvalidJson {

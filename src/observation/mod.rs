@@ -23,7 +23,10 @@ use crate::{
     event::{ByteString, Event},
     event_log::{CanonicalBoundary, EventLog},
     ghostty_vt::{Format, GhosttyVt, ModeState, SemanticState},
-    replay::{GHOSTTY_REVISION, STATE_FORMAT_VERSION, StateInspection, StateSelector, inspect},
+    replay::{
+        EndpointInspection, GHOSTTY_REVISION, STATE_FORMAT_VERSION, StateInspection, StateSelector,
+        inspect, inspect_latest_presented_fast, semantic_state_hash,
+    },
     session::{SessionCompletion, read_completion, read_manifest, validate_completed_log},
 };
 
@@ -33,11 +36,12 @@ mod model;
 mod session;
 
 pub use ansi::{format_ansi_stream, observe_ansi_stream, semantic_state_from_ansi};
+pub(crate) use cache::publish_endpoint_checkpoint;
+use cache::{CachedSemanticState, load_checkpoint, publish_checkpoint};
 pub use cache::{
     ReplayCachePruneReport, ReplayCacheStatus, ReplayCheckpoint, prune_replay_cache,
     replay_cache_status,
 };
-use cache::{load_checkpoint, publish_checkpoint};
 use model::observation_error;
 pub use model::{
     CaptureQuality, FrameEnvelope, Observation, ObservationFrame, ObservationIntegrity,

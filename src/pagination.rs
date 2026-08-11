@@ -11,8 +11,8 @@ pub struct OutputPage {
     pub offset: usize,
     /// Requested maximum, or none when every remaining item was requested.
     pub limit: Option<usize>,
-    /// Complete matching collection length before pagination.
-    pub total: usize,
+    /// Complete matching collection length when pagination reaches closure.
+    pub total: Option<usize>,
     /// Number of items included in this response.
     pub returned: usize,
     /// Whether more matching items remain after this page.
