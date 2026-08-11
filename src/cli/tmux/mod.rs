@@ -8,6 +8,7 @@ use std::{
 
 use super::*;
 
+mod aggregate;
 mod args;
 mod client;
 mod recording;
@@ -15,6 +16,8 @@ mod scope;
 mod setup;
 mod supervisor;
 
+use aggregate::*;
+pub(super) use aggregate::{run_tmux_bundle, run_tmux_record, run_tmux_stop, run_tmux_video};
 pub(super) use args::*;
 use client::*;
 pub(super) use recording::run_tmux_pane;
@@ -39,6 +42,8 @@ const OPTION_PROFILE_MODE: &str = "@termtrace-ghostty-profile";
 const OPTION_GHOSTTY_CONFIG: &str = "@termtrace-ghostty-config";
 const OPTION_ALLOW_UNRECORDED: &str = "@termtrace-allow-unrecorded";
 const OPTION_CELL_WIDTH: &str = "@termtrace-cell-width";
+const OPTION_COVERAGE: &str = "@termtrace-coverage";
+const OPTION_AGGREGATE_MANIFEST: &str = "@termtrace-aggregate-manifest";
 const OPTION_CELL_HEIGHT: &str = "@termtrace-cell-height";
 const OPTION_TERM: &str = "@termtrace-term";
 const OPTION_SCOPE: &str = "@termtrace-scope";
@@ -67,6 +72,8 @@ const RESERVED_OPTIONS: &[&str] = &[
     OPTION_PROFILE_MODE,
     OPTION_GHOSTTY_CONFIG,
     OPTION_ALLOW_UNRECORDED,
+    OPTION_COVERAGE,
+    OPTION_AGGREGATE_MANIFEST,
     OPTION_CELL_WIDTH,
     OPTION_CELL_HEIGHT,
     OPTION_TERM,

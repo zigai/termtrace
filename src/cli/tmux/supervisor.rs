@@ -40,6 +40,9 @@ pub(super) struct PaneProcessRow {
 }
 
 pub(in crate::cli) fn run_tmux_status(arguments: TmuxStatusArgs) -> Result<ExitCode> {
+    if arguments.recording.is_some() {
+        return run_tmux_recording_status(arguments);
+    }
     let client = TmuxClient::from_connection(arguments.connection);
     let report = tmux_status_report(&client)?;
     if arguments.json {
@@ -126,16 +129,18 @@ pub(in crate::cli) fn run_tmux_guard(arguments: TmuxGuardArgs) -> Result<ExitCod
             Err(error) => return Err(error),
         }
     }
-    let allow_unrecorded = option_text(&client, OPTION_ALLOW_UNRECORDED)? == "1";
+    let coverage = coverage_from_options(&client)?;
     let message = format!(
-        "Termtrace blocked unrecorded pane {}; use `termtrace tmux run -- COMMAND` or `termtrace tmux run --force`",
-        arguments.pane
+        "Termtrace found unrecorded pane {} (coverage={})",
+        arguments.pane,
+        coverage.as_str(),
     );
-    let _display = client.run(["display-message", "-d", "5000", message.as_str()]);
-    if allow_unrecorded {
-        return Ok(ExitCode::SUCCESS);
+    if coverage == TmuxCoverageMode::Strict {
+        let _display = client.run(["display-message", "-d", "5000", message.as_str()]);
+        client.run(["kill-pane", "-t", arguments.pane.as_str()])?;
+    } else {
+        tracing::warn!(pane = %arguments.pane, "{message}");
     }
-    client.run(["kill-pane", "-t", arguments.pane.as_str()])?;
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -207,8 +212,9 @@ pub(super) fn supervise_tmux_panes(client: &TmuxClient, expected: &Path) -> Resu
         if version != TMUX_INTEGRATION_VERSION {
             return Ok(());
         }
-        if option_text(client, OPTION_ALLOW_UNRECORDED)? == "1" {
-            return Ok(());
+        let coverage = coverage_from_options(client)?;
+        if let Err(error) = refresh_configured_aggregate_manifest(client) {
+            tracing::warn!(%error, "could not refresh aggregate tmux manifest");
         }
         let policy = scope_from_options(client)?;
         let panes = match pane_process_rows(client) {
@@ -253,11 +259,16 @@ pub(super) fn supervise_tmux_panes(client: &TmuxClient, expected: &Path) -> Resu
                 continue;
             }
             let message = format!(
-                "Termtrace supervisor blocked unrecorded pane {} after its process changed",
-                pane.pane_id
+                "Termtrace found unrecorded pane {} after its process changed (coverage={})",
+                pane.pane_id,
+                coverage.as_str(),
             );
-            let _display = client.run(["display-message", "-d", "5000", message.as_str()]);
-            let _kill = client.run(["kill-pane", "-t", pane.pane_id.as_str()]);
+            if coverage == TmuxCoverageMode::Strict {
+                let _display = client.run(["display-message", "-d", "5000", message.as_str()]);
+                let _kill = client.run(["kill-pane", "-t", pane.pane_id.as_str()]);
+            } else {
+                tracing::warn!(pane = %pane.pane_id, "{message}");
+            }
             suspects.remove(&pane.pane_id);
         }
         thread::sleep(SUPERVISOR_INTERVAL);
@@ -361,7 +372,7 @@ pub(super) fn tmux_status_report(client: &TmuxClient) -> Result<TmuxStatusReport
     return Ok(TmuxStatusReport {
         integration_version: 1,
         enabled,
-        strict: enabled && option_text(client, OPTION_ALLOW_UNRECORDED)? != "1",
+        strict: enabled && coverage_from_options(client)? == TmuxCoverageMode::Strict,
         default_command_matches,
         configured_executable: configured_executable
             .map(|bytes| return ByteString::from(bytes.as_slice())),

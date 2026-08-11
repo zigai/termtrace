@@ -8,19 +8,27 @@ pub(in crate::cli) struct TmuxArgs {
 
 #[derive(Debug, Subcommand)]
 pub(in crate::cli) enum TmuxSubcommand {
+    /// Start one aggregate recording with a composite client and pane tracks.
+    Record(TmuxRecordArgs),
+    /// Report aggregate recording lifecycle, or audit a server when NAME is omitted.
+    Status(TmuxStatusArgs),
+    /// Stop an aggregate recording and its composite client track.
+    Stop(TmuxStopArgs),
+    /// Render the aggregate recording's composite client track.
+    Video(TmuxVideoArgs),
+    /// Bundle the aggregate manifest and every canonical track.
+    Bundle(TmuxBundleArgs),
     /// Print a tmux configuration fragment for recording from server startup.
     Config(TmuxConfigArgs),
     /// Enable recording for future panes in a running tmux server.
     Enable(TmuxEnableArgs),
     /// Restore the tmux options saved by enable.
     Disable(TmuxConnectionArgs),
-    /// Audit tmux configuration and current pane coverage.
-    Status(TmuxStatusArgs),
     /// Show or replace the recording scope for future pane processes.
     Scope(TmuxScopeArgs),
     /// Run one pane command through a full Termtrace-owned PTY recording.
     Run(TmuxRunArgs),
-    /// Enforce the configured no-bypass policy for one newly created pane.
+    /// Enforce the configured coverage policy for one newly created pane.
     #[command(hide = true)]
     Guard(TmuxGuardArgs),
     /// Audit pane ownership for the lifetime of one tmux server.
@@ -62,6 +70,23 @@ impl TmuxGhosttyProfileMode {
         };
     }
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub(in crate::cli) enum TmuxCoverageMode {
+    /// Report uncovered panes without terminating them.
+    Warn,
+    /// Permit Termtrace to terminate uncovered panes after the grace period.
+    Strict,
+}
+
+impl TmuxCoverageMode {
+    pub(in crate::cli) fn as_str(self) -> &'static str {
+        return match self {
+            Self::Warn => "warn",
+            Self::Strict => "strict",
+        };
+    }
+}
 
 #[derive(Clone, Debug, Args)]
 pub(in crate::cli) struct TmuxSetupArgs {
@@ -77,9 +102,13 @@ pub(in crate::cli) struct TmuxSetupArgs {
     #[arg(long)]
     pub(in crate::cli) ghostty_config: Option<PathBuf>,
 
-    /// Permit explicit tmux commands to bypass Termtrace instead of closing their panes.
-    #[arg(long)]
-    pub(in crate::cli) allow_unrecorded: bool,
+    /// Coverage behavior for unrecorded selected panes.
+    #[arg(long, value_enum, default_value_t = TmuxCoverageMode::Warn)]
+    pub(in crate::cli) coverage: TmuxCoverageMode,
+
+    /// Aggregate manifest updated by the supervisor.
+    #[arg(long, hide = true)]
+    pub(in crate::cli) aggregate_manifest: Option<PathBuf>,
 
     /// Record only panes launched explicitly through `tmux run`.
     #[arg(
@@ -134,12 +163,108 @@ pub(in crate::cli) struct TmuxEnableArgs {
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct TmuxStatusArgs {
+    /// Aggregate tmux recording name; omission audits the selected tmux server.
+    pub(in crate::cli) recording: Option<String>,
+
     #[command(flatten)]
     pub(in crate::cli) connection: TmuxConnectionArgs,
+
+    /// Managed state root containing aggregate tmux recordings.
+    #[arg(long)]
+    pub(in crate::cli) output_root: Option<PathBuf>,
 
     /// Emit a structured status report.
     #[arg(long)]
     pub(in crate::cli) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(in crate::cli) struct TmuxRecordArgs {
+    /// Stable aggregate recording name.
+    pub(in crate::cli) name: String,
+
+    /// Start a new tmux server using the generated recording configuration.
+    #[arg(long)]
+    pub(in crate::cli) new: bool,
+
+    #[command(flatten)]
+    pub(in crate::cli) connection: TmuxConnectionArgs,
+
+    #[command(flatten)]
+    pub(in crate::cli) setup: TmuxSetupArgs,
+
+    /// Exact tmux client command to record as the composite track.
+    #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
+    pub(in crate::cli) command: Vec<OsString>,
+}
+
+#[derive(Debug, Args)]
+pub(in crate::cli) struct TmuxStopArgs {
+    /// Aggregate tmux recording name.
+    pub(in crate::cli) name: String,
+
+    /// Managed state root containing aggregate tmux recordings.
+    #[arg(long)]
+    pub(in crate::cli) output_root: Option<PathBuf>,
+
+    /// Wait for durable completion of the composite track.
+    #[arg(long)]
+    pub(in crate::cli) wait: bool,
+
+    /// Maximum completion wait in milliseconds.
+    #[arg(long, default_value_t = 30_000)]
+    pub(in crate::cli) timeout_ms: u64,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(in crate::cli) enum TmuxVideoPreset {
+    Docs,
+    Social,
+    Lossless,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(in crate::cli) enum TmuxVideoRenderer {
+    Semantic,
+    Native,
+}
+
+#[derive(Debug, Args)]
+pub(in crate::cli) struct TmuxVideoArgs {
+    /// Aggregate tmux recording name.
+    pub(in crate::cli) name: String,
+
+    /// New video file.
+    #[arg(short = 'o', long)]
+    pub(in crate::cli) out: PathBuf,
+
+    /// Managed state root containing aggregate tmux recordings.
+    #[arg(long)]
+    pub(in crate::cli) output_root: Option<PathBuf>,
+
+    #[arg(long, value_enum, default_value_t = TmuxVideoPreset::Docs)]
+    pub(in crate::cli) preset: TmuxVideoPreset,
+
+    /// Optional exact video frame rate; presets choose their own default when omitted.
+    #[arg(long, value_parser = parse_video_fps)]
+    pub(in crate::cli) fps: Option<u16>,
+
+    #[arg(long, value_enum, default_value_t = TmuxVideoRenderer::Semantic)]
+    pub(in crate::cli) renderer: TmuxVideoRenderer,
+}
+
+#[derive(Debug, Args)]
+pub(in crate::cli) struct TmuxBundleArgs {
+    /// Aggregate tmux recording name.
+    pub(in crate::cli) name: String,
+
+    /// New complete aggregate evidence directory.
+    #[arg(short = 'o', long)]
+    pub(in crate::cli) out: PathBuf,
+
+    /// Managed state root containing aggregate tmux recordings.
+    #[arg(long)]
+    pub(in crate::cli) output_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

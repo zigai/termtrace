@@ -2,16 +2,17 @@ use super::*;
 
 #[derive(Clone, Debug)]
 pub(super) struct PreparedTmuxSetup {
-    termtrace: PathBuf,
-    tmux: PathBuf,
-    output_root: PathBuf,
-    profile_mode: TmuxGhosttyProfileMode,
-    ghostty_config: Option<PathBuf>,
-    allow_unrecorded: bool,
-    cell_width: u16,
-    cell_height: u16,
-    term: String,
-    scope: TmuxScopePolicy,
+    pub(super) termtrace: PathBuf,
+    pub(super) tmux: PathBuf,
+    pub(super) output_root: PathBuf,
+    pub(super) profile_mode: TmuxGhosttyProfileMode,
+    pub(super) ghostty_config: Option<PathBuf>,
+    pub(super) coverage: TmuxCoverageMode,
+    pub(super) aggregate_manifest: Option<PathBuf>,
+    pub(super) cell_width: u16,
+    pub(super) cell_height: u16,
+    pub(super) term: String,
+    pub(super) scope: TmuxScopePolicy,
 }
 
 pub(in crate::cli) fn run_tmux_config(arguments: TmuxConfigArgs) -> Result<ExitCode> {
@@ -21,22 +22,54 @@ pub(in crate::cli) fn run_tmux_config(arguments: TmuxConfigArgs) -> Result<ExitC
 
 pub(in crate::cli) fn run_tmux_enable(arguments: TmuxEnableArgs) -> Result<ExitCode> {
     let client = TmuxClient::from_connection(arguments.connection.clone());
-    let existing_version = option_text(&client, OPTION_VERSION)?;
-    if !existing_version.is_empty() {
-        if existing_version == TMUX_INTEGRATION_VERSION {
-            return write_json_line(&serde_json::json!({
-                "enabled": true,
-                "already_enabled": true,
-                "integration_version": 1,
-            }));
-        }
-        return Err(miette::miette!(
-            "tmux recording is already configured with unsupported integration version {existing_version}"
-        ));
-    }
     let mut setup = prepare_tmux_setup(arguments.setup, arguments.connection.tmux)?;
     setup.scope = resolve_live_scope(&client, &setup.scope)?;
+    let already_enabled = enable_prepared_tmux_setup(&client, &setup)?;
+    let report = tmux_status_report(&client)?;
+    return write_json_line(&serde_json::json!({
+        "enabled": true,
+        "already_enabled": already_enabled,
+        "integration_version": 1,
+        "coverage": setup.coverage,
+        "strict": setup.coverage == TmuxCoverageMode::Strict,
+        "output_root": ByteString::from(setup.output_root.as_os_str().as_bytes()),
+        "scope": setup.scope,
+        "existing_panes": report.pane_count,
+        "existing_unrecorded_panes": report.unrecorded_panes,
+        "retroactive": false,
+    }));
+}
 
+pub(super) fn enable_prepared_tmux_setup(
+    client: &TmuxClient,
+    setup: &PreparedTmuxSetup,
+) -> Result<bool> {
+    let existing_version = option_text(client, OPTION_VERSION)?;
+    if !existing_version.is_empty() {
+        if existing_version != TMUX_INTEGRATION_VERSION {
+            return Err(miette::miette!(
+                "tmux recording is already configured with unsupported integration version {existing_version}"
+            ));
+        }
+        client.set_option(OPTION_COVERAGE, OsStr::new(setup.coverage.as_str()))?;
+        client.set_option(
+            OPTION_ALLOW_UNRECORDED,
+            OsStr::new(if setup.coverage == TmuxCoverageMode::Strict {
+                "0"
+            } else {
+                "1"
+            }),
+        )?;
+        client.set_option(
+            OPTION_AGGREGATE_MANIFEST,
+            setup
+                .aggregate_manifest
+                .as_ref()
+                .map_or_else(|| return OsStr::new(""), |path| return path.as_os_str()),
+        )?;
+        client.run_shell_background(supervisor_shell_command(setup).as_os_str())?;
+        return Ok(true);
+    }
     let original_command = client.option("default-command")?;
     let original_shell = client.option("default-shell")?;
     if original_shell.is_empty() {
@@ -52,34 +85,18 @@ pub(in crate::cli) fn run_tmux_enable(arguments: TmuxEnableArgs) -> Result<ExitC
             ));
         }
     }
-
-    let apply = apply_tmux_setup(&client, &setup, &original_command, &original_shell);
-    if let Err(error) = apply {
-        let _rollback = rollback_tmux_setup(&client, &original_command);
+    if let Err(error) = apply_tmux_setup(client, setup, &original_command, &original_shell) {
+        let _rollback = rollback_tmux_setup(client, &original_command);
         return Err(error);
     }
-    if let Err(error) = grandfather_current_panes(&client).and_then(|()| {
-        if setup.allow_unrecorded {
-            return Ok(());
-        }
-        return client.run_shell_background(supervisor_shell_command(&setup).as_os_str());
+    if let Err(error) = grandfather_current_panes(client).and_then(|()| {
+        return client.run_shell_background(supervisor_shell_command(setup).as_os_str());
     }) {
-        let _cleanup = clear_managed_pane_options(&client);
-        let _rollback = rollback_tmux_setup(&client, &original_command);
+        let _cleanup = clear_managed_pane_options(client);
+        let _rollback = rollback_tmux_setup(client, &original_command);
         return Err(error);
     }
-    let report = tmux_status_report(&client)?;
-    return write_json_line(&serde_json::json!({
-        "enabled": true,
-        "already_enabled": false,
-        "integration_version": 1,
-        "strict": !setup.allow_unrecorded,
-        "output_root": ByteString::from(setup.output_root.as_os_str().as_bytes()),
-        "scope": setup.scope,
-        "existing_panes": report.pane_count,
-        "existing_unrecorded_panes": report.unrecorded_panes,
-        "retroactive": false,
-    }));
+    return Ok(false);
 }
 
 pub(in crate::cli) fn run_tmux_disable(connection: TmuxConnectionArgs) -> Result<ExitCode> {
@@ -178,7 +195,8 @@ pub(super) fn prepare_tmux_setup(setup: TmuxSetupArgs, tmux: PathBuf) -> Result<
         output_root,
         profile_mode: setup.ghostty_profile,
         ghostty_config,
-        allow_unrecorded: setup.allow_unrecorded,
+        coverage: setup.coverage,
+        aggregate_manifest: setup.aggregate_manifest,
         cell_width: setup.cell_width,
         cell_height: setup.cell_height,
         term: setup.term.unwrap_or_default(),
@@ -208,7 +226,11 @@ pub(super) fn setup_from_options(
             .ok_or_else(|| return miette::miette!("configured tmux output root is empty"))?,
         profile_mode,
         ghostty_config: option_path(client, OPTION_GHOSTTY_CONFIG)?,
-        allow_unrecorded: option_text(client, OPTION_ALLOW_UNRECORDED)? == "1",
+        coverage: match option_text(client, OPTION_COVERAGE)?.as_str() {
+            "strict" => TmuxCoverageMode::Strict,
+            _ => TmuxCoverageMode::Warn,
+        },
+        aggregate_manifest: option_path(client, OPTION_AGGREGATE_MANIFEST)?,
         cell_width: parse_option(client, OPTION_CELL_WIDTH)?,
         cell_height: parse_option(client, OPTION_CELL_HEIGHT)?,
         term: option_text(client, OPTION_TERM)?,
@@ -257,8 +279,25 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
     );
     append_config_option(
         &mut output,
+        OPTION_COVERAGE,
+        setup.coverage.as_str().as_bytes(),
+    );
+    append_config_option(
+        &mut output,
         OPTION_ALLOW_UNRECORDED,
-        if setup.allow_unrecorded { b"1" } else { b"0" },
+        if setup.coverage == TmuxCoverageMode::Strict {
+            b"0"
+        } else {
+            b"1"
+        },
+    );
+    append_config_option(
+        &mut output,
+        OPTION_AGGREGATE_MANIFEST,
+        setup
+            .aggregate_manifest
+            .as_ref()
+            .map_or(&[][..], |path| return path.as_os_str().as_bytes()),
     );
     append_config_option(
         &mut output,
@@ -281,13 +320,11 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
             tmux_config_quote(hook.as_bytes()),
         );
     }
-    if !setup.allow_unrecorded {
-        let _ = writeln!(
-            output,
-            "run-shell -b {}",
-            tmux_config_quote(supervisor_shell_command(setup).as_bytes()),
-        );
-    }
+    let _ = writeln!(
+        output,
+        "run-shell -b {}",
+        tmux_config_quote(supervisor_shell_command(setup).as_bytes()),
+    );
     return Ok(output.into_bytes());
 }
 
@@ -314,9 +351,21 @@ pub(super) fn apply_tmux_setup(
             .as_ref()
             .map_or_else(|| return OsStr::new(""), |path| return path.as_os_str()),
     )?;
+    client.set_option(OPTION_COVERAGE, OsStr::new(setup.coverage.as_str()))?;
     client.set_option(
         OPTION_ALLOW_UNRECORDED,
-        OsStr::new(if setup.allow_unrecorded { "1" } else { "0" }),
+        OsStr::new(if setup.coverage == TmuxCoverageMode::Strict {
+            "0"
+        } else {
+            "1"
+        }),
+    )?;
+    client.set_option(
+        OPTION_AGGREGATE_MANIFEST,
+        setup
+            .aggregate_manifest
+            .as_ref()
+            .map_or_else(|| return OsStr::new(""), |path| return path.as_os_str()),
     )?;
     client.set_option(OPTION_CELL_WIDTH, OsStr::new(&setup.cell_width.to_string()))?;
     client.set_option(
@@ -346,7 +395,7 @@ pub(super) fn rollback_tmux_setup(client: &TmuxClient, original_command: &[u8]) 
 }
 
 pub(super) fn tmux_wrapper_command(setup: &PreparedTmuxSetup) -> OsString {
-    let mut command = b"exec env ".to_vec();
+    let mut command = b"exec env TERMTRACE_RESPONSE=quiet ".to_vec();
     command.extend_from_slice(TMUX_WRAPPER_BINARY_ENV.as_bytes());
     command.push(b'=');
     command.extend_from_slice(&shell_quote(setup.tmux.as_os_str().as_bytes()));
@@ -358,12 +407,12 @@ pub(super) fn tmux_wrapper_command(setup: &PreparedTmuxSetup) -> OsString {
 
 pub(super) fn tmux_hook_command() -> OsString {
     return OsString::from(
-        "run-shell -b \"exec env TERMTRACE_TMUX_BINARY=#{q:@termtrace-tmux-executable} #{q:@termtrace-executable} tmux guard --pane '#{pane_id}'\"",
+        "run-shell -b \"exec env TERMTRACE_RESPONSE=quiet TERMTRACE_TMUX_BINARY=#{q:@termtrace-tmux-executable} #{q:@termtrace-executable} tmux guard --pane '#{pane_id}'\"",
     );
 }
 
 pub(super) fn supervisor_shell_command(setup: &PreparedTmuxSetup) -> OsString {
-    let mut command = b"exec env ".to_vec();
+    let mut command = b"exec env TERMTRACE_RESPONSE=quiet ".to_vec();
     command.extend_from_slice(TMUX_WRAPPER_BINARY_ENV.as_bytes());
     command.push(b'=');
     command.extend_from_slice(&shell_quote(setup.tmux.as_os_str().as_bytes()));

@@ -156,7 +156,7 @@ fn publish_pane_recording_when_ready(
         .name("termtrace-tmux-publication".to_owned())
         .spawn(move || {
             loop {
-                if session.join(CONTROL_SOCKET_NAME).exists() {
+                if control_endpoint_is_reachable(&session) {
                     return client.set_pane_option(&pane, OPTION_PANE_SESSION, session.as_os_str());
                 }
                 match cancellation.recv_timeout(Duration::from_millis(5)) {

@@ -2,9 +2,9 @@ use super::*;
 
 #[derive(Clone)]
 pub(super) struct TmuxClient {
-    executable: PathBuf,
-    socket_name: Option<OsString>,
-    socket_path: Option<PathBuf>,
+    pub(super) executable: PathBuf,
+    pub(super) socket_name: Option<OsString>,
+    pub(super) socket_path: Option<PathBuf>,
 }
 
 impl TmuxClient {
