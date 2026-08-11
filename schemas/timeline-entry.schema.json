@@ -51,6 +51,13 @@
           "additionalProperties": false,
           "description": "Durable intent to send bytes to the child PTY.",
           "properties": {
+            "caller_intent": {
+              "description": "Optional caller-supplied reason for applying the input.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "data": {
               "$ref": "#/$defs/Base64Bytes",
               "description": "Exact emitted bytes."
@@ -63,21 +70,28 @@
               "$ref": "#/$defs/InputKind",
               "description": "High-level input category."
             },
-            "intent": {
-              "description": "Optional symbolic intent such as `ctrl-c` or `paste`.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "operation_id": {
               "description": "Identifier paired with the corresponding result.",
               "format": "uuid",
               "type": "string"
             },
+            "semantic_input": {
+              "description": "Canonical symbolic input, such as `ctrl+u` or `paste`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "source": {
               "$ref": "#/$defs/InputSource",
               "description": "Input origin."
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical terminal modes used to encode this atom, when mode-aware.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "type": {
               "const": "input_intent",
@@ -469,7 +483,7 @@
               "type": "boolean"
             },
             "encoder": {
-              "description": "Pinned encoder identity.",
+              "description": "Stable encoder identity.",
               "type": "string"
             },
             "key": {

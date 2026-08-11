@@ -328,6 +328,12 @@
           "minimum": 0,
           "type": "integer"
         },
+        "occurrence_index": {
+          "description": "One-based position of this marker among occurrences of the same label.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "presentation_eligible": {
           "description": "Whether an associated presentation-eligible semantic state exists.",
           "type": "boolean"
@@ -355,6 +361,7 @@
         "monotonic_ns",
         "nominal_frame",
         "occurrence_count",
+        "occurrence_index",
         "presentation_eligible",
         "native_evidence_level"
       ],
@@ -666,6 +673,36 @@
         },
         {
           "additionalProperties": false,
+          "description": "Resize to an exact presentation canvas.",
+          "properties": {
+            "height": {
+              "description": "Output height in pixels.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "transform": {
+              "const": "resize",
+              "type": "string"
+            },
+            "width": {
+              "description": "Output width in pixels.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "transform",
+            "width",
+            "height"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Draw a visibly labeled rectangular callout.",
           "properties": {
             "height": {
@@ -725,6 +762,19 @@
       "properties": {
         "codec": {
           "description": "Stable delivery codec name.",
+          "type": "string"
+        },
+        "crf": {
+          "default": 23,
+          "description": "libx264 constant-rate-factor quality.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "encoder_preset": {
+          "default": "medium",
+          "description": "libx264 speed/compression preset.",
           "type": "string"
         },
         "pixel_format": {
@@ -1055,6 +1105,105 @@
         "text_height"
       ],
       "type": "object"
+    },
+    "VideoRenderConfig": {
+      "additionalProperties": false,
+      "description": "Effective user-facing video facade settings.",
+      "properties": {
+        "cursor_style": {
+          "description": "Effective cursor presentation style.",
+          "type": "string"
+        },
+        "end_marker": {
+          "description": "Optional exclusive marker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fps": {
+          "description": "Effective output frame rate.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hold_end_ms": {
+          "description": "Generated closing hold.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hold_start_ms": {
+          "description": "Generated opening hold.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "idle_threshold_ms": {
+          "description": "Idle gap threshold used by trimming.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "preset": {
+          "description": "Named delivery preset.",
+          "type": "string"
+        },
+        "renderer": {
+          "description": "Requested renderer without fallback.",
+          "type": "string"
+        },
+        "resolution": {
+          "description": "Exact requested output resolution.",
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "scale": {
+          "description": "Requested integer scale factor.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "start_marker": {
+          "description": "Optional inclusive marker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trim_idle": {
+          "description": "Whether long gaps without child output were removed.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "preset",
+        "renderer",
+        "fps",
+        "trim_idle",
+        "hold_start_ms",
+        "hold_end_ms",
+        "cursor_style"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/presentation-plan.schema.json",
@@ -1153,6 +1302,17 @@
       "maximum": 65535,
       "minimum": 0,
       "type": "integer"
+    },
+    "render_config": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VideoRenderConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Effective user-facing render settings retained from the facade."
     },
     "source": {
       "$ref": "#/$defs/PresentationSource",

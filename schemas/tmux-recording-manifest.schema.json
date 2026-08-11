@@ -1,0 +1,424 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "TmuxCompositeTrack": {
+      "description": "Link from an aggregate recording to its outer tmux client recording.",
+      "properties": {
+        "alias": {
+          "description": "Registry alias for the outer-client track.",
+          "type": "string"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/TmuxRecordingLifecycle",
+          "description": "Outer-client track lifecycle."
+        },
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Base64Bytes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Canonical Termtrace session path once linked."
+        },
+        "session_id": {
+          "description": "Canonical Termtrace session identity once linked.",
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "lifecycle"
+      ],
+      "type": "object"
+    },
+    "TmuxCoverageGap": {
+      "description": "One uncovered pane or explicit observation limitation.",
+      "properties": {
+        "detail": {
+          "description": "Human-readable limitation or uncovered-state description.",
+          "type": "string"
+        },
+        "first_observed_unix_ns": {
+          "default": 0,
+          "description": "First observation wall-clock time.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "description": "Stable gap category.",
+          "type": "string"
+        },
+        "last_observed_unix_ns": {
+          "default": 0,
+          "description": "Most recent observation wall-clock time.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pane_id": {
+          "description": "Related pane ID, or none for an aggregate limitation.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolved_unix_ns": {
+          "default": null,
+          "description": "Wall-clock time when the gap was first observed to be resolved.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "detail"
+      ],
+      "type": "object"
+    },
+    "TmuxLifecycleEvent": {
+      "description": "One lifecycle transition observed by the tmux supervisor.",
+      "properties": {
+        "kind": {
+          "description": "Stable lifecycle event kind.",
+          "type": "string"
+        },
+        "observed_unix_ns": {
+          "description": "Observation wall-clock time.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pane_id": {
+          "description": "Related stable tmux pane ID.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sequence": {
+          "description": "Monotonic sequence within this aggregate manifest.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "description": "Related stable tmux session ID.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "description": "Event-specific state or linked path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "window_id": {
+          "description": "Related stable tmux window ID.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "sequence",
+        "observed_unix_ns",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "TmuxPaneSnapshot": {
+      "description": "Latest supervisor observation for one tmux pane.",
+      "properties": {
+        "copy_mode": {
+          "description": "Whether the pane is in a tmux mode such as copy mode.",
+          "type": "boolean"
+        },
+        "layout": {
+          "description": "Current tmux window layout.",
+          "type": "string"
+        },
+        "pane_active": {
+          "description": "Whether this pane is active in its window.",
+          "type": "boolean"
+        },
+        "pane_id": {
+          "description": "Stable tmux pane ID.",
+          "type": "string"
+        },
+        "pane_mode": {
+          "description": "Mode name reported by tmux.",
+          "type": "string"
+        },
+        "recording_session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Base64Bytes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Canonical pane-specific Termtrace session path when covered."
+        },
+        "session_id": {
+          "description": "Stable tmux session ID.",
+          "type": "string"
+        },
+        "session_name": {
+          "description": "Human-readable tmux session name.",
+          "type": "string"
+        },
+        "window_active": {
+          "description": "Whether this pane belongs to the active window.",
+          "type": "boolean"
+        },
+        "window_id": {
+          "description": "Stable tmux window ID.",
+          "type": "string"
+        },
+        "window_index": {
+          "description": "Current tmux window index.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "zoomed": {
+          "description": "Whether the pane's window is zoomed.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "session_id",
+        "session_name",
+        "window_id",
+        "window_index",
+        "layout",
+        "window_active",
+        "zoomed",
+        "pane_id",
+        "pane_active",
+        "copy_mode",
+        "pane_mode"
+      ],
+      "type": "object"
+    },
+    "TmuxRecordingCoverage": {
+      "description": "Coverage policy committed by an aggregate tmux recording.",
+      "oneOf": [
+        {
+          "const": "warn",
+          "description": "Report uncovered panes without terminating them.",
+          "type": "string"
+        },
+        {
+          "const": "strict",
+          "description": "Permit termination of uncovered panes after the configured grace period.",
+          "type": "string"
+        }
+      ]
+    },
+    "TmuxRecordingLifecycle": {
+      "description": "Aggregate recording lifecycle.",
+      "oneOf": [
+        {
+          "const": "starting",
+          "description": "Aggregate identity exists while its composite client is starting.",
+          "type": "string"
+        },
+        {
+          "const": "live",
+          "description": "Composite and pane-track supervision are active.",
+          "type": "string"
+        },
+        {
+          "const": "stopping",
+          "description": "A stop request has been committed.",
+          "type": "string"
+        },
+        {
+          "const": "completed",
+          "description": "The composite client recording completed.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/tmux-recording-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Aggregate identity, links, lifecycle, and coverage for a full tmux recording.",
+  "properties": {
+    "composite_track": {
+      "$ref": "#/$defs/TmuxCompositeTrack",
+      "description": "Link to the composite outer-client recording."
+    },
+    "coverage": {
+      "$ref": "#/$defs/TmuxRecordingCoverage",
+      "description": "Coverage enforcement policy."
+    },
+    "coverage_gaps": {
+      "description": "Historical uncovered panes and limitations, including their resolution.",
+      "items": {
+        "$ref": "#/$defs/TmuxCoverageGap"
+      },
+      "type": "array"
+    },
+    "created_unix_ns": {
+      "description": "Creation wall-clock time.",
+      "format": "uint128",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "events": {
+      "description": "Observed pane, window, session, layout, focus, zoom, and mode transitions.",
+      "items": {
+        "$ref": "#/$defs/TmuxLifecycleEvent"
+      },
+      "type": "array"
+    },
+    "format": {
+      "description": "Stable format identifier.",
+      "type": "string"
+    },
+    "lifecycle": {
+      "$ref": "#/$defs/TmuxRecordingLifecycle",
+      "description": "Aggregate lifecycle."
+    },
+    "name": {
+      "description": "Friendly aggregate recording name.",
+      "type": "string"
+    },
+    "pane_tracks": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Base64Bytes"
+      },
+      "description": "Stable pane IDs linked to pane-specific Termtrace sessions.",
+      "type": "object"
+    },
+    "panes": {
+      "description": "Latest per-pane state observations.",
+      "items": {
+        "$ref": "#/$defs/TmuxPaneSnapshot"
+      },
+      "type": "array"
+    },
+    "recording_id": {
+      "description": "Immutable aggregate recording identity.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "server_pid": {
+      "description": "Immutable tmux server PID captured by the first successful snapshot.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "server_socket_device": {
+      "description": "Device containing the immutable tmux server socket.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "server_socket_inode": {
+      "description": "Inode of the immutable tmux server socket.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "server_socket_path": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Base64Bytes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Immutable tmux server socket path captured by the first successful snapshot."
+    },
+    "socket_name": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Base64Bytes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Configured tmux socket name bytes."
+    },
+    "socket_path": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Base64Bytes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Configured tmux socket path bytes."
+    },
+    "tmux_executable": {
+      "$ref": "#/$defs/Base64Bytes",
+      "description": "Exact tmux executable path bytes."
+    },
+    "updated_unix_ns": {
+      "description": "Last supervisor update wall-clock time.",
+      "format": "uint128",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "version": {
+      "description": "Manifest schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "recording_id",
+    "name",
+    "lifecycle",
+    "created_unix_ns",
+    "updated_unix_ns",
+    "coverage",
+    "tmux_executable",
+    "composite_track",
+    "panes",
+    "pane_tracks",
+    "events",
+    "coverage_gaps"
+  ],
+  "title": "TmuxRecordingManifest",
+  "type": "object"
+}

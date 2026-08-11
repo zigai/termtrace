@@ -1,5 +1,78 @@
 {
   "$defs": {
+    "ActionPostcondition": {
+      "description": "Presented-state condition retained under exclusive actor ordering after input.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Return immediately after the input sequence completes.",
+          "properties": {
+            "condition": {
+              "const": "none",
+              "type": "string"
+            }
+          },
+          "required": [
+            "condition"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Wait for one unchanged presentation-eligible state.",
+          "properties": {
+            "condition": {
+              "const": "idle",
+              "type": "string"
+            },
+            "stable_for_ns": {
+              "description": "Required unchanged presented-state interval.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "timeout_ns": {
+              "description": "Server-side monotonic deadline interval.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "condition",
+            "stable_for_ns",
+            "timeout_ns"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Wait for one presentation-eligible screen predicate.",
+          "properties": {
+            "condition": {
+              "const": "screen",
+              "type": "string"
+            },
+            "predicate": {
+              "$ref": "#/$defs/ScreenPredicate",
+              "description": "Exact screen predicate."
+            },
+            "timeout_ns": {
+              "description": "Server-side monotonic deadline interval.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "condition",
+            "predicate",
+            "timeout_ns"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Base64Bytes": {
       "contentEncoding": "base64",
       "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
@@ -179,6 +252,13 @@
           "additionalProperties": false,
           "description": "Send exact bytes to the child PTY.",
           "properties": {
+            "caller_intent": {
+              "description": "Optional caller-supplied reason for the operation.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "command": {
               "const": "input",
               "type": "string"
@@ -190,13 +270,6 @@
             "input_kind": {
               "$ref": "#/$defs/InputKind",
               "description": "Semantic category retained in the canonical input intent."
-            },
-            "intent": {
-              "description": "Optional human-readable intent.",
-              "type": [
-                "string",
-                "null"
-              ]
             }
           },
           "required": [
@@ -211,7 +284,7 @@
           "description": "Apply one admission-guarded, journaled sequence of keyboard input atoms.",
           "properties": {
             "atoms": {
-              "description": "Ordered input atoms resolved against the actor state at admission.",
+              "description": "Ordered input atoms encoded against actor state immediately before each write.",
               "items": {
                 "$ref": "#/$defs/InputSequenceAtom"
               },
@@ -237,6 +310,45 @@
             "atoms",
             "pace_ns",
             "include_atom_outcomes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Apply input and evaluate its postcondition as one actor-ordered operation.",
+          "properties": {
+            "atoms": {
+              "description": "Ordered input atoms encoded against actor state immediately before each write.",
+              "items": {
+                "$ref": "#/$defs/InputSequenceAtom"
+              },
+              "type": "array"
+            },
+            "command": {
+              "const": "act",
+              "type": "string"
+            },
+            "include_atom_outcomes": {
+              "description": "Retain per-atom identifiers and canonical event positions in the response.",
+              "type": "boolean"
+            },
+            "pace_ns": {
+              "description": "Delay between atoms, bounded together with the atom count.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "postcondition": {
+              "$ref": "#/$defs/ActionPostcondition",
+              "description": "Presented-state condition evaluated without releasing actor ordering."
+            }
+          },
+          "required": [
+            "command",
+            "atoms",
+            "pace_ns",
+            "include_atom_outcomes",
+            "postcondition"
           ],
           "type": "object"
         },
@@ -808,7 +920,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Build the completed canonical/semantic timeline.",
+          "description": "Build one bounded page of the completed canonical/semantic timeline.",
           "properties": {
             "all_states": {
               "description": "Include non-presented semantic states.",
@@ -823,16 +935,31 @@
               "format": "uuid",
               "type": "string"
             },
+            "limit": {
+              "description": "Maximum returned entries, from 1 through 4096.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
             "method": {
               "const": "timeline",
               "type": "string"
+            },
+            "offset": {
+              "description": "Zero-based entry offset.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
             }
           },
           "required": [
             "method",
             "handle",
             "all_states",
-            "controls"
+            "controls",
+            "offset",
+            "limit"
           ],
           "type": "object"
         },
@@ -1180,6 +1307,13 @@
           "additionalProperties": false,
           "description": "Exact caller bytes with an explicit semantic category.",
           "properties": {
+            "caller_intent": {
+              "description": "Optional caller-supplied reason retained separately from input semantics.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "data": {
               "$ref": "#/$defs/Base64Bytes",
               "description": "Bytes encoded as Base64 in JSON."
@@ -1191,13 +1325,6 @@
             "input_kind": {
               "$ref": "#/$defs/InputKind",
               "description": "Semantic category retained in canonical evidence."
-            },
-            "intent": {
-              "description": "Optional human-readable intent.",
-              "type": [
-                "string",
-                "null"
-              ]
             },
             "operation_id": {
               "description": "Caller-owned operation identifier retained in canonical events.",
@@ -1217,6 +1344,13 @@
           "additionalProperties": false,
           "description": "One symbolic key encoded against live terminal modes.",
           "properties": {
+            "caller_intent": {
+              "description": "Optional caller-supplied reason retained separately from the symbolic key.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "input": {
               "const": "key",
               "type": "string"
@@ -1247,6 +1381,13 @@
           "additionalProperties": false,
           "description": "UTF-8 paste encoded using live bracketed-paste mode.",
           "properties": {
+            "caller_intent": {
+              "description": "Optional caller-supplied reason retained separately from paste semantics.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "data": {
               "$ref": "#/$defs/Base64Bytes",
               "description": "Paste content before mode-dependent encoding."
@@ -1329,7 +1470,7 @@
       ]
     },
     "NamedKey": {
-      "description": "Layout-independent key accepted by the pinned terminal key encoder.",
+      "description": "Layout-independent key accepted by the terminal key encoder adapter.",
       "oneOf": [
         {
           "const": "enter",
@@ -2131,7 +2272,7 @@
               "type": "string"
             },
             "state_hash": {
-              "description": "BLAKE3 hash of canonical semantic state JSON.",
+              "description": "BLAKE3 hash of the complete normalized semantic state.",
               "type": "string"
             }
           },

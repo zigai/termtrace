@@ -210,10 +210,13 @@
           "type": "integer"
         },
         "total": {
-          "description": "Complete matching collection length before pagination.",
+          "description": "Complete matching collection length when pagination reaches closure.",
           "format": "uint",
           "minimum": 0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "truncated": {
           "description": "Whether more matching items remain after this page.",
@@ -222,7 +225,6 @@
       },
       "required": [
         "offset",
-        "total",
         "returned",
         "truncated"
       ],

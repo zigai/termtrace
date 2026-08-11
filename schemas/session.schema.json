@@ -935,7 +935,7 @@
       "type": "boolean"
     },
     "control_socket": {
-      "description": "Live control socket relative path.",
+      "description": "Linux abstract control-socket name for the live recorder.",
       "type": "string"
     },
     "creation_alias": {

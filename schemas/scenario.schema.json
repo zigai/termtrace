@@ -40,51 +40,8 @@
         }
       ]
     },
-    "EnvironmentSpec": {
-      "additionalProperties": false,
-      "description": "Caller-owned child-environment configuration.",
-      "properties": {
-        "base": {
-          "$ref": "#/$defs/EnvironmentBase",
-          "default": "inherit",
-          "description": "Whether resolution begins with the recorder's ambient environment."
-        },
-        "color": {
-          "$ref": "#/$defs/ColorPolicy",
-          "default": "auto",
-          "description": "Deterministic color-variable behavior."
-        },
-        "copy": {
-          "default": [],
-          "description": "Names copied from the recorder environment without placing values in arguments.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array",
-          "uniqueItems": true
-        },
-        "set": {
-          "additionalProperties": {
-            "$ref": "#/$defs/Base64Bytes"
-          },
-          "default": {},
-          "description": "Exact UTF-8-named values supplied by the caller.",
-          "type": "object"
-        },
-        "unset": {
-          "default": [],
-          "description": "Names removed from an inherited environment.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array",
-          "uniqueItems": true
-        }
-      },
-      "type": "object"
-    },
     "NamedKey": {
-      "description": "Layout-independent key accepted by the pinned terminal key encoder.",
+      "description": "Layout-independent key accepted by the terminal key encoder adapter.",
       "oneOf": [
         {
           "const": "enter",
@@ -189,6 +146,71 @@
         }
       ]
     },
+    "ScenarioEncodedBytes": {
+      "additionalProperties": false,
+      "description": "One arbitrary scenario environment value encoded as standard padded Base64.",
+      "properties": {
+        "base64": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact environment bytes."
+        }
+      },
+      "required": [
+        "base64"
+      ],
+      "type": "object"
+    },
+    "ScenarioEnvironment": {
+      "additionalProperties": false,
+      "description": "Public scenario environment with unambiguous text and byte value encodings.",
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/EnvironmentBase",
+          "default": "inherit",
+          "description": "Source environment used before overrides."
+        },
+        "color": {
+          "$ref": "#/$defs/ColorPolicy",
+          "default": "auto",
+          "description": "Deterministic color-variable behavior."
+        },
+        "copy": {
+          "default": [],
+          "description": "Names copied from the recorder environment.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "set": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "UTF-8 environment values.",
+          "type": "object"
+        },
+        "setBytes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ScenarioEncodedBytes"
+          },
+          "default": {},
+          "description": "Arbitrary environment values encoded explicitly as Base64.",
+          "type": "object"
+        },
+        "unset": {
+          "default": [],
+          "description": "Names removed from an inherited environment.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "type": "object"
+    },
     "ScenarioGeometry": {
       "additionalProperties": false,
       "description": "Initial scenario terminal grid.",
@@ -253,15 +275,16 @@
           "type": "array"
         },
         "environment": {
-          "$ref": "#/$defs/EnvironmentSpec",
+          "$ref": "#/$defs/ScenarioEnvironment",
           "default": {
             "base": "inherit",
             "color": "auto",
             "copy": [],
             "set": {},
+            "setBytes": {},
             "unset": []
           },
-          "description": "Deterministic child environment; values are redacted from failure artifacts."
+          "description": "Deterministic child environment; text values are UTF-8 and byte values are explicit Base64."
         },
         "geometry": {
           "$ref": "#/$defs/ScenarioGeometry",

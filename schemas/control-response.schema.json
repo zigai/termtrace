@@ -1,5 +1,191 @@
 {
   "$defs": {
+    "ActionInputResult": {
+      "additionalProperties": false,
+      "description": "Exact applied-input component of an actor-ordered action.",
+      "properties": {
+        "atom_count": {
+          "description": "Number of atoms applied completely.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "atoms": {
+          "description": "Optional per-atom outcomes requested by an explicit verbose caller.",
+          "items": {
+            "$ref": "#/$defs/InputSequenceAtomOutcome"
+          },
+          "type": "array"
+        },
+        "bytes_written": {
+          "description": "Total exact PTY bytes written across every atom.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "first_intent_event_seq": {
+          "description": "First canonical input-intent event in the sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "last_result_event_seq": {
+          "description": "Last canonical input-result event in the sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pace_ns": {
+          "description": "Requested delay between atoms.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sequence_id": {
+          "description": "Canonical sequence identifier (the action request ID).",
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sequence_id",
+        "atom_count",
+        "bytes_written",
+        "first_intent_event_seq",
+        "last_result_event_seq",
+        "pace_ns"
+      ],
+      "type": "object"
+    },
+    "ActionPostconditionResult": {
+      "description": "Exact postcondition result returned without releasing actor ordering.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "No presented-state postcondition was requested.",
+          "properties": {
+            "kind": {
+              "const": "none",
+              "type": "string"
+            },
+            "matched": {
+              "description": "Always true after complete input application.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "matched"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Final state of an idle postcondition.",
+          "properties": {
+            "cols": {
+              "description": "Terminal columns.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "idle",
+              "type": "string"
+            },
+            "matched": {
+              "description": "Whether the state remained unchanged for the requested interval.",
+              "type": "boolean"
+            },
+            "quality": {
+              "$ref": "#/$defs/StableCaptureQuality",
+              "description": "Typed stability quality."
+            },
+            "rows": {
+              "description": "Terminal rows.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state_hash": {
+              "description": "Normalized semantic hash for the returned state.",
+              "type": "string"
+            },
+            "viewport_text": {
+              "description": "Plain text for the exact presentation-eligible viewport.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "matched",
+            "viewport_text",
+            "state_hash",
+            "quality",
+            "cols",
+            "rows"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Final state of a screen or regular-expression postcondition.",
+          "properties": {
+            "child_completed": {
+              "description": "Whether child completion ended evaluation.",
+              "type": "boolean"
+            },
+            "cols": {
+              "description": "Terminal columns.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "completion_quality": {
+              "description": "Stable completion classification.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "screen",
+              "type": "string"
+            },
+            "matched": {
+              "description": "Whether the predicate matched before the deadline or child completion.",
+              "type": "boolean"
+            },
+            "rows": {
+              "description": "Terminal rows.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state_hash": {
+              "description": "Normalized semantic hash for the returned state.",
+              "type": "string"
+            },
+            "viewport_text": {
+              "description": "Plain text for the exact presentation-eligible viewport.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "matched",
+            "viewport_text",
+            "state_hash",
+            "completion_quality",
+            "cols",
+            "rows",
+            "child_completed"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ActorBoundaries": {
       "additionalProperties": false,
       "description": "Durable and latest actor-processed positions returned by live operations.",
@@ -193,6 +379,35 @@
             "first_intent_event_seq",
             "last_result_event_seq",
             "pace_ns",
+            "boundaries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Combined input and postcondition result from one actor-ordered action.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and observed positions after postcondition evaluation."
+            },
+            "input": {
+              "$ref": "#/$defs/ActionInputResult",
+              "description": "Exact result of the completely applied input prefix."
+            },
+            "kind": {
+              "const": "action_applied",
+              "type": "string"
+            },
+            "postcondition": {
+              "$ref": "#/$defs/ActionPostconditionResult",
+              "description": "Exact presented state that satisfied or ended the postcondition."
+            }
+          },
+          "required": [
+            "kind",
+            "input",
+            "postcondition",
             "boundaries"
           ],
           "type": "object"
@@ -421,7 +636,7 @@
               "description": "Zstandard-compressed canonical JSON for the complete semantic state."
             },
             "state_hash": {
-              "description": "BLAKE3 of canonical JSON for `state`.",
+              "description": "Normalized semantic hash assigned by deterministic replay.",
               "type": "string"
             },
             "viewport_text": {
@@ -525,7 +740,7 @@
               "type": "integer"
             },
             "state_hash": {
-              "description": "BLAKE3 of canonical JSON for this exact state.",
+              "description": "Normalized semantic hash assigned by deterministic replay.",
               "type": "string"
             },
             "viewport_text": {
@@ -906,7 +1121,7 @@
           "type": "integer"
         },
         "resume_from_atom_index": {
-          "description": "First atom not attempted; only this suffix is safe to submit independently.",
+          "description": "First atom safe to submit independently with a new request ID.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"

@@ -387,30 +387,6 @@
       ],
       "type": "object"
     },
-    "RowDiff": {
-      "description": "Fine-grained changes for one viewport row.",
-      "properties": {
-        "cells": {
-          "description": "Cells whose complete semantic value changed.",
-          "items": {
-            "$ref": "#/$defs/CellState"
-          },
-          "type": "array"
-        },
-        "row": {
-          "description": "Zero-based row.",
-          "format": "uint16",
-          "maximum": 65535,
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "row",
-        "cells"
-      ],
-      "type": "object"
-    },
     "RowState": {
       "description": "One viewport row.",
       "properties": {
@@ -513,118 +489,6 @@
       ],
       "type": "object"
     },
-    "StateDelta": {
-      "description": "Delta from the previous distinct state.",
-      "properties": {
-        "active_style": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CellStyle"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "New active SGR style when it changed."
-        },
-        "colors": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ColorState"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "New colors and palette when they changed."
-        },
-        "cursor": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CursorState"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "New cursor when it changed."
-        },
-        "geometry": {
-          "description": "New `(cols, rows)` when geometry changed.",
-          "maxItems": 2,
-          "minItems": 2,
-          "prefixItems": [
-            {
-              "format": "uint16",
-              "maximum": 65535,
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "format": "uint16",
-              "maximum": 65535,
-              "minimum": 0,
-              "type": "integer"
-            }
-          ],
-          "type": [
-            "array",
-            "null"
-          ]
-        },
-        "metadata": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TerminalMetadata"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "New terminal metadata when it changed."
-        },
-        "modes": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ModeState"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "New terminal modes when they changed."
-        },
-        "rows": {
-          "description": "Cell-level row deltas.",
-          "items": {
-            "$ref": "#/$defs/RowDiff"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "rows"
-      ],
-      "type": "object"
-    },
-    "StateInspection": {
-      "description": "One fully reconstructed state and its index metadata.",
-      "properties": {
-        "record": {
-          "$ref": "#/$defs/StateRecord",
-          "description": "State index metadata and delta provenance."
-        },
-        "state": {
-          "$ref": "#/$defs/SemanticState",
-          "description": "Complete semantic state, not a delta."
-        }
-      },
-      "required": [
-        "record",
-        "state"
-      ],
-      "type": "object"
-    },
     "StatePoint": {
       "description": "Shared state selection vocabulary.",
       "oneOf": [
@@ -672,7 +536,7 @@
               "type": "string"
             },
             "state_hash": {
-              "description": "BLAKE3 hash of canonical semantic state JSON.",
+              "description": "BLAKE3 hash of the complete normalized semantic state.",
               "type": "string"
             }
           },
@@ -745,77 +609,6 @@
         }
       ]
     },
-    "StateRecord": {
-      "description": "One distinct semantic state boundary.",
-      "properties": {
-        "delta": {
-          "$ref": "#/$defs/StateDelta",
-          "description": "Stable delta from the preceding distinct state."
-        },
-        "event_byte_offset": {
-          "description": "Zero-based byte offset inside an output event.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "event_seq": {
-          "description": "Canonical event responsible for this state; absent for an initial or range-baseline state.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "ghostty_dirty": {
-          "$ref": "#/$defs/DirtyState",
-          "description": "Ghostty's global dirty classification."
-        },
-        "ghostty_dirty_rows": {
-          "description": "Rows Ghostty marked dirty.",
-          "items": {
-            "format": "uint16",
-            "maximum": 65535,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "type": "array"
-        },
-        "monotonic_ns": {
-          "description": "Monotonic event timestamp in nanoseconds.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "presented": {
-          "description": "Whether this state was eligible for presentation.",
-          "type": "boolean"
-        },
-        "state_hash": {
-          "description": "BLAKE3 of the complete normalized semantic state.",
-          "type": "string"
-        },
-        "state_id": {
-          "description": "Dense zero-based state identifier.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "state_id",
-        "monotonic_ns",
-        "state_hash",
-        "presented",
-        "ghostty_dirty",
-        "ghostty_dirty_rows",
-        "delta"
-      ],
-      "type": "object"
-    },
     "TerminalMetadata": {
       "description": "Terminal metadata controlled by OSC sequences.",
       "properties": {
@@ -864,11 +657,20 @@
   "$id": "https://github.com/zigai/termtrace/schemas/replay-checkpoint.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Disposable full-state checkpoint bound to exact canonical source files.",
+  "description": "Disposable full-state checkpoint bound to exact canonical source bytes.",
   "properties": {
     "completion_blake3": {
       "description": "BLAKE3 of exact completion JSON bytes.",
       "type": "string"
+    },
+    "event_byte_offset": {
+      "description": "Byte offset inside the source output event, when known.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "event_log_blake3": {
       "description": "BLAKE3 of the complete canonical event-log file.",
@@ -880,6 +682,15 @@
       "minimum": 0,
       "type": "integer"
     },
+    "event_seq": {
+      "description": "Canonical event responsible for the state, when known.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "final_event_hash": {
       "description": "Completion-bound final canonical event hash.",
       "type": "string"
@@ -888,11 +699,24 @@
       "description": "Pinned semantic engine revision.",
       "type": "string"
     },
-    "inspection": {
-      "$ref": "#/$defs/StateInspection",
-      "description": "Complete reconstructed state and provenance."
+    "monotonic_ns": {
+      "description": "Monotonic source timestamp, when known.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
-    "inspection_state_blake3": {
+    "presented": {
+      "description": "Whether the state was eligible for terminal presentation.",
+      "type": "boolean"
+    },
+    "state": {
+      "$ref": "#/$defs/SemanticState",
+      "description": "Complete semantic state."
+    },
+    "state_blake3": {
       "description": "BLAKE3 of canonical JSON for the complete cached semantic state.",
       "type": "string"
     },
@@ -901,6 +725,19 @@
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
+    },
+    "state_hash": {
+      "description": "BLAKE3 semantic-state hash.",
+      "type": "string"
+    },
+    "state_id": {
+      "description": "Dense canonical state identifier when byte-granular replay established it.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "state_point": {
       "$ref": "#/$defs/StatePoint",
@@ -922,8 +759,10 @@
     "event_log_blake3",
     "completion_blake3",
     "final_event_hash",
-    "inspection",
-    "inspection_state_blake3"
+    "state_hash",
+    "presented",
+    "state",
+    "state_blake3"
   ],
   "title": "ReplayCheckpoint",
   "type": "object"

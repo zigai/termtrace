@@ -3,6 +3,29 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Compact event/video mapping information for one state.",
   "properties": {
+    "checkpoint": {
+      "default": false,
+      "description": "Whether the checkpoint stream contains a full-state replay seed here.",
+      "type": "boolean"
+    },
+    "control_index_offset": {
+      "description": "Byte offset of the first control-index entry at or after this checkpoint.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "control_rank": {
+      "description": "Number of control entries ordered before this checkpoint.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "event_byte_offset": {
       "description": "Source event byte offset.",
       "format": "uint64",
@@ -40,6 +63,15 @@
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "timeline_rank": {
+      "description": "Combined semantic/canonical/control timeline rank for this checkpoint.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     }
   },
   "required": [

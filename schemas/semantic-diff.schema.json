@@ -561,7 +561,7 @@
               "type": "string"
             },
             "state_hash": {
-              "description": "BLAKE3 hash of canonical semantic state JSON.",
+              "description": "BLAKE3 hash of the complete normalized semantic state.",
               "type": "string"
             }
           },

@@ -32,7 +32,9 @@ use crate::{
     },
     provenance::{EnvironmentProvenance, ExecutionProvenance, ProvenancePolicy},
     receipt::EvidenceReceipt,
-    replay::{ReplayManifest, StateIndexEntry, StateInspection, StateRecord},
+    replay::{
+        ReplayManifest, SemanticReplayCheckpoint, StateIndexEntry, StateInspection, StateRecord,
+    },
     request_journal::MutationJournalRecord,
     reviewer::{ReviewExportManifest, ReviewSearchResult, ReviewSummary, ReviewerCapabilities},
     save::{SaveManifest, ScreenshotBatchManifest},
@@ -41,6 +43,8 @@ use crate::{
     session::{SessionCompletion, SessionManifest, VerificationReport},
     session_registry::{RegistryEntry, RegistryListEntry},
     timeline::TimelineEntry,
+    tmux_bundle::TmuxBundleManifest,
+    tmux_recording::TmuxRecordingManifest,
     visual::{GeometrySolveReport, VideoMapEntry, VisualManifest},
     vt_framer::VtToken,
 };
@@ -93,6 +97,7 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<StateIndexEntry>("state-index-entry.schema.json")?,
         schema::<StateInspection>("state-inspection.schema.json")?,
         schema::<ReplayManifest>("replay-manifest.schema.json")?,
+        schema::<SemanticReplayCheckpoint>("semantic-replay-checkpoint.schema.json")?,
         schema::<ReviewSummary>("review-summary.schema.json")?,
         schema::<ReviewerCapabilities>("reviewer-capabilities.schema.json")?,
         schema::<ReviewSearchResult>("review-search-result.schema.json")?,
@@ -123,6 +128,8 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         schema::<SemanticVideoSourcePlan>("semantic-video-source-plan.schema.json")?,
         schema::<SemanticFrameSpan>("semantic-frame-span.schema.json")?,
         schema::<SemanticVideoSourceManifest>("semantic-video-source-manifest.schema.json")?,
+        schema::<TmuxRecordingManifest>("tmux-recording-manifest.schema.json")?,
+        schema::<TmuxBundleManifest>("tmux-bundle-manifest.schema.json")?,
     ]);
 }
 

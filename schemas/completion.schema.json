@@ -129,6 +129,25 @@
         "observed"
       ],
       "type": "object"
+    },
+    "SessionFailure": {
+      "additionalProperties": false,
+      "description": "Recorder failure retained when the child could not complete normally.",
+      "properties": {
+        "code": {
+          "description": "Stable failure category.",
+          "type": "string"
+        },
+        "message": {
+          "description": "Human-readable failure context.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/completion.schema.json",
@@ -157,6 +176,17 @@
         "integer",
         "null"
       ]
+    },
+    "failure": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SessionFailure"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Fatal recorder failure, absent for normal child completion."
     },
     "final_event_hash": {
       "description": "Hash of the final canonical event.",

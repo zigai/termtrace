@@ -36,6 +36,12 @@
       "minimum": 0,
       "type": "integer"
     },
+    "occurrence_index": {
+      "description": "One-based position of this marker among occurrences of the same label.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
     "presentation_eligible": {
       "description": "Whether an associated presentation-eligible semantic state exists.",
       "type": "boolean"
@@ -63,6 +69,7 @@
     "monotonic_ns",
     "nominal_frame",
     "occurrence_count",
+    "occurrence_index",
     "presentation_eligible",
     "native_evidence_level"
   ],
