@@ -37,7 +37,7 @@ class DriverResponseTests(unittest.TestCase):
             DriverAttachedData,
         )
 
-        self.assertEqual(parsed_hello.driver_protocol_version, 3)
+        self.assertEqual(parsed_hello.driver_protocol_version, 4)
         self.assertEqual(parsed_attached.canonical_session, "/tmp/example.termtrace")
 
     def test_rejects_uncorrelated_response(self) -> None:

@@ -54,6 +54,7 @@ from termtrace.models import (
     Observation,
     SemanticDiff,
     TimelineEntry,
+    TimelinePage,
     VerificationReport,
     WaitOutcome,
 )
@@ -103,6 +104,7 @@ __all__ = [
     "TermtraceProtocolError",
     "TextAtom",
     "TimelineEntry",
+    "TimelinePage",
     "VerificationReport",
     "WaitOutcome",
     "assert_cursor",

@@ -43,7 +43,7 @@ from termtrace.models import (
     JsonValue,
     Observation,
     SemanticDiff,
-    TimelineEntry,
+    TimelinePage,
     VerificationReport,
     WaitOutcome,
     decode_driver_response,
@@ -496,7 +496,12 @@ class AsyncKeyboard:
         self._session = session
 
     async def press(
-        self, key: str, *, request_id: str | None = None, if_state: str | None = None
+        self,
+        key: str,
+        *,
+        caller_intent: str | None = None,
+        request_id: str | None = None,
+        if_state: str | None = None,
     ) -> ControlResult:
         return await self._session.control(
             {
@@ -508,13 +513,19 @@ class AsyncKeyboard:
                     "alt": False,
                     "super_key": False,
                 },
+                "caller_intent": caller_intent,
             },
             request_id=request_id,
             if_state=if_state,
         )
 
     async def type(
-        self, text: str, *, request_id: str | None = None, if_state: str | None = None
+        self,
+        text: str,
+        *,
+        caller_intent: str | None = None,
+        request_id: str | None = None,
+        if_state: str | None = None,
     ) -> ControlResult:
         import base64
 
@@ -523,7 +534,7 @@ class AsyncKeyboard:
                 "command": "input",
                 "data": base64.b64encode(text.encode()).decode(),
                 "input_kind": "text",
-                "intent": None,
+                "caller_intent": caller_intent,
             },
             request_id=request_id,
             if_state=if_state,
@@ -533,6 +544,7 @@ class AsyncKeyboard:
         self,
         data: str | bytes | memoryview,
         *,
+        caller_intent: str | None = None,
         request_id: str | None = None,
         if_state: str | None = None,
     ) -> ControlResult:
@@ -540,7 +552,11 @@ class AsyncKeyboard:
 
         raw = data.encode() if isinstance(data, str) else bytes(data)
         return await self._session.control(
-            {"command": "paste", "data": base64.b64encode(raw).decode()},
+            {
+                "command": "paste",
+                "data": base64.b64encode(raw).decode(),
+                "caller_intent": caller_intent,
+            },
             request_id=request_id,
             if_state=if_state,
         )
@@ -707,17 +723,23 @@ class AsyncSemantic:
         return result.observation
 
     async def timeline(
-        self, *, all_states: bool = False, controls: bool = False
-    ) -> list[TimelineEntry]:
-        result = await self._session.request(
+        self,
+        *,
+        all_states: bool = False,
+        controls: bool = False,
+        offset: int = 0,
+        limit: int = 256,
+    ) -> TimelinePage:
+        return await self._session.request(
             {
                 "method": "timeline",
                 "all_states": all_states,
                 "controls": controls,
+                "offset": offset,
+                "limit": limit,
             },
             DriverTimelineData,
         )
-        return result.entries
 
     async def diff(self, from_point: JsonObject, to_point: JsonObject) -> SemanticDiff:
         result = await self._session.request(

@@ -173,6 +173,10 @@ export type Event =
     }
   | {
       /**
+       * Optional caller-supplied reason for applying the input.
+       */
+      caller_intent?: string | null;
+      /**
        * Exact emitted bytes.
        */
       data: string;
@@ -196,7 +200,7 @@ export type Event =
              */
             control: boolean;
             /**
-             * Pinned encoder identity.
+             * Stable encoder identity.
              */
             encoder: string;
             /**
@@ -350,17 +354,21 @@ export type Event =
        */
       input_kind: "raw" | "text" | "keys" | "paste" | "focus" | "pointer";
       /**
-       * Optional symbolic intent such as `ctrl-c` or `paste`.
-       */
-      intent?: string | null;
-      /**
        * Identifier paired with the corresponding result.
        */
       operation_id: string;
       /**
+       * Canonical symbolic input, such as `ctrl+u` or `paste`.
+       */
+      semantic_input?: string | null;
+      /**
        * Input origin.
        */
       source: "human" | "agent" | "host";
+      /**
+       * BLAKE3 of canonical terminal modes used to encode this atom, when mode-aware.
+       */
+      terminal_modes_hash?: string | null;
       type: "input_intent";
     }
   | {
@@ -546,9 +554,13 @@ export interface DriverResponse {
               event_log_version: number;
               kind: "hello";
               /**
-               * Maximum newline-framed request bytes, or zero when requests have no framing cap.
+               * Maximum newline-framed request bytes.
                */
-              max_message_bytes: number;
+              max_request_bytes: number;
+              /**
+               * Maximum newline-framed response bytes.
+               */
+              max_response_bytes: number;
               /**
                * Stable supported methods.
                */
@@ -648,6 +660,80 @@ export interface DriverResponse {
                   }
                 | {
                     boundaries: ActorBoundaries3;
+                    input: ActionInputResult;
+                    kind: "action_applied";
+                    /**
+                     * Exact presented state that satisfied or ended the postcondition.
+                     */
+                    postcondition:
+                      | {
+                          kind: "none";
+                          /**
+                           * Always true after complete input application.
+                           */
+                          matched: boolean;
+                        }
+                      | {
+                          /**
+                           * Terminal columns.
+                           */
+                          cols: number;
+                          kind: "idle";
+                          /**
+                           * Whether the state remained unchanged for the requested interval.
+                           */
+                          matched: boolean;
+                          /**
+                           * Typed stability quality.
+                           */
+                          quality: "stable" | "child_completed" | "output_closed" | "deadline";
+                          /**
+                           * Terminal rows.
+                           */
+                          rows: number;
+                          /**
+                           * Normalized semantic hash for the returned state.
+                           */
+                          state_hash: string;
+                          /**
+                           * Plain text for the exact presentation-eligible viewport.
+                           */
+                          viewport_text: string;
+                        }
+                      | {
+                          /**
+                           * Whether child completion ended evaluation.
+                           */
+                          child_completed: boolean;
+                          /**
+                           * Terminal columns.
+                           */
+                          cols: number;
+                          /**
+                           * Stable completion classification.
+                           */
+                          completion_quality: string;
+                          kind: "screen";
+                          /**
+                           * Whether the predicate matched before the deadline or child completion.
+                           */
+                          matched: boolean;
+                          /**
+                           * Terminal rows.
+                           */
+                          rows: number;
+                          /**
+                           * Normalized semantic hash for the returned state.
+                           */
+                          state_hash: string;
+                          /**
+                           * Plain text for the exact presentation-eligible viewport.
+                           */
+                          viewport_text: string;
+                        };
+                  }
+                | {
+                    boundaries: ActorBoundaries4;
                     /**
                      * Semantic input category.
                      */
@@ -663,7 +749,7 @@ export interface DriverResponse {
                     terminal_modes_hash: string;
                   }
                 | {
-                    boundaries: ActorBoundaries4;
+                    boundaries: ActorBoundaries5;
                     /**
                      * Number of bytes written completely.
                      */
@@ -711,7 +797,7 @@ export interface DriverResponse {
                     text: string;
                   }
                 | {
-                    boundaries: ActorBoundaries5;
+                    boundaries: ActorBoundaries6;
                     kind: "status";
                     /**
                      * Child process identifier when available.
@@ -719,7 +805,7 @@ export interface DriverResponse {
                     pid?: number | null;
                   }
                 | {
-                    boundaries: ActorBoundaries6;
+                    boundaries: ActorBoundaries7;
                     /**
                      * Terminal columns.
                      */
@@ -755,7 +841,7 @@ export interface DriverResponse {
                      */
                     semantic_state_zstd: string;
                     /**
-                     * BLAKE3 of canonical JSON for `state`.
+                     * Normalized semantic hash assigned by deterministic replay.
                      */
                     state_hash: string;
                     /**
@@ -764,7 +850,7 @@ export interface DriverResponse {
                     viewport_text: string;
                   }
                 | {
-                    boundaries: ActorBoundaries7;
+                    boundaries: ActorBoundaries8;
                     /**
                      * Terminal columns.
                      */
@@ -808,7 +894,7 @@ export interface DriverResponse {
                      */
                     stable_for_ns: number;
                     /**
-                     * BLAKE3 of canonical JSON for this exact state.
+                     * Normalized semantic hash assigned by deterministic replay.
                      */
                     state_hash: string;
                     /**
@@ -817,7 +903,7 @@ export interface DriverResponse {
                     viewport_text: string;
                   }
                 | {
-                    boundaries: ActorBoundaries8;
+                    boundaries: ActorBoundaries9;
                     /**
                      * Whether immutable child completion made the final matching state stable.
                      */
@@ -1004,7 +1090,7 @@ export interface DriverResponse {
                     state_hash: string;
                   }
                 | {
-                    boundaries: ActorBoundaries9;
+                    boundaries: ActorBoundaries10;
                     /**
                      * Canonical event sequence containing the marker.
                      */
@@ -1031,10 +1117,14 @@ export interface DriverResponse {
             }
           | {
               /**
-               * Complete requested entries.
+               * Requested entries in canonical order.
                */
               entries: TimelineEntry[];
               kind: "timeline";
+              /**
+               * Next zero-based entry offset, absent at the end.
+               */
+              next_offset?: number | null;
             }
           | {
               difference: SemanticDiff;
@@ -1215,30 +1305,70 @@ export interface ActorBoundaries2 {
   observed: CanonicalBoundary1;
 }
 /**
- * Durable and observed positions at evaluation.
+ * Durable and observed positions after postcondition evaluation.
  */
 export interface ActorBoundaries3 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
 /**
- * Durable and observed positions after application.
+ * Exact result of the completely applied input prefix.
+ */
+export interface ActionInputResult {
+  /**
+   * Number of atoms applied completely.
+   */
+  atom_count: number;
+  /**
+   * Optional per-atom outcomes requested by an explicit verbose caller.
+   */
+  atoms?: InputSequenceAtomOutcome[];
+  /**
+   * Total exact PTY bytes written across every atom.
+   */
+  bytes_written: number;
+  /**
+   * First canonical input-intent event in the sequence.
+   */
+  first_intent_event_seq: number;
+  /**
+   * Last canonical input-result event in the sequence.
+   */
+  last_result_event_seq: number;
+  /**
+   * Requested delay between atoms.
+   */
+  pace_ns: number;
+  /**
+   * Canonical sequence identifier (the action request ID).
+   */
+  sequence_id: string;
+}
+/**
+ * Durable and observed positions at evaluation.
  */
 export interface ActorBoundaries4 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
 /**
- * Durable and observed canonical positions at status evaluation.
+ * Durable and observed positions after application.
  */
 export interface ActorBoundaries5 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
 /**
- * Durable and observed source boundaries at observation time.
+ * Durable and observed canonical positions at status evaluation.
  */
 export interface ActorBoundaries6 {
+  durable: CanonicalBoundary;
+  observed: CanonicalBoundary1;
+}
+/**
+ * Durable and observed source boundaries at observation time.
+ */
+export interface ActorBoundaries7 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
@@ -1289,7 +1419,7 @@ export interface TerminalMode {
 /**
  * Actor-consistent canonical source boundaries for this exact state.
  */
-export interface ActorBoundaries7 {
+export interface ActorBoundaries8 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
@@ -1322,7 +1452,7 @@ export interface ModeState1 {
 /**
  * Actor-consistent canonical source boundaries.
  */
-export interface ActorBoundaries8 {
+export interface ActorBoundaries9 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
@@ -1371,7 +1501,7 @@ export interface ScreenRegion1 {
 /**
  * Durable and observed canonical positions after the marker.
  */
-export interface ActorBoundaries9 {
+export interface ActorBoundaries10 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
@@ -1410,6 +1540,10 @@ export interface SessionCompletion {
    * Normal exit code when available.
    */
   exit_code?: number | null;
+  /**
+   * Fatal recorder failure, absent for normal child completion.
+   */
+  failure?: SessionFailure | null;
   /**
    * Hash of the final canonical event.
    */
@@ -1489,6 +1623,19 @@ export interface DurabilityPolicy {
    * Selected persistence behavior.
    */
   mode: "strict" | "bounded" | "throughput";
+}
+/**
+ * Recorder failure retained when the child could not complete normally.
+ */
+export interface SessionFailure {
+  /**
+   * Stable failure category.
+   */
+  code: string;
+  /**
+   * Human-readable failure context.
+   */
+  message: string;
 }
 /**
  * Resource-limit trigger retained in immutable completion evidence.
@@ -1583,7 +1730,7 @@ export interface Observation {
     | {
         selector: "state_hash";
         /**
-         * BLAKE3 hash of canonical semantic state JSON.
+         * BLAKE3 hash of the complete normalized semantic state.
          */
         state_hash: string;
       }
@@ -1755,6 +1902,10 @@ export interface TimelineEntry {
             }
           | {
               /**
+               * Optional caller-supplied reason for applying the input.
+               */
+              caller_intent?: string | null;
+              /**
                * Exact emitted bytes.
                */
               data: string;
@@ -1778,7 +1929,7 @@ export interface TimelineEntry {
                      */
                     control: boolean;
                     /**
-                     * Pinned encoder identity.
+                     * Stable encoder identity.
                      */
                     encoder: string;
                     /**
@@ -1932,17 +2083,21 @@ export interface TimelineEntry {
                */
               input_kind: "raw" | "text" | "keys" | "paste" | "focus" | "pointer";
               /**
-               * Optional symbolic intent such as `ctrl-c` or `paste`.
-               */
-              intent?: string | null;
-              /**
                * Identifier paired with the corresponding result.
                */
               operation_id: string;
               /**
+               * Canonical symbolic input, such as `ctrl+u` or `paste`.
+               */
+              semantic_input?: string | null;
+              /**
                * Input origin.
                */
               source: "human" | "agent" | "host";
+              /**
+               * BLAKE3 of canonical terminal modes used to encode this atom, when mode-aware.
+               */
+              terminal_modes_hash?: string | null;
               type: "input_intent";
             }
           | {
@@ -2603,7 +2758,7 @@ export interface DiffEndpoint {
     | {
         selector: "state_hash";
         /**
-         * BLAKE3 hash of canonical semantic state JSON.
+         * BLAKE3 hash of the complete normalized semantic state.
          */
         state_hash: string;
       }
@@ -2957,7 +3112,7 @@ export interface DiffEndpoint1 {
     | {
         selector: "state_hash";
         /**
-         * BLAKE3 hash of canonical semantic state JSON.
+         * BLAKE3 hash of the complete normalized semantic state.
          */
         state_hash: string;
       }
@@ -3111,9 +3266,9 @@ export interface OutputPage {
    */
   returned: number;
   /**
-   * Complete matching collection length before pagination.
+   * Complete matching collection length when pagination reaches closure.
    */
-  total: number;
+  total?: number | null;
   /**
    * Whether more matching items remain after this page.
    */
@@ -3347,7 +3502,7 @@ export interface ArtifactMember {
  * Structured actor context attached to a rejected or incomplete request.
  */
 export interface ControlErrorDetails {
-  boundaries: ActorBoundaries10;
+  boundaries: ActorBoundaries11;
   /**
    * Latest presented-state hash at the actor ordering point.
    */
@@ -3364,7 +3519,7 @@ export interface ControlErrorDetails {
 /**
  * Durable and observed source positions at the failure boundary.
  */
-export interface ActorBoundaries10 {
+export interface ActorBoundaries11 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
@@ -3405,7 +3560,7 @@ export interface InputSequenceFailureDetails {
    */
   last_result_event_seq: number;
   /**
-   * First atom not attempted; only this suffix is safe to submit independently.
+   * First atom safe to submit independently with a new request ID.
    */
   resume_from_atom_index: number;
   /**

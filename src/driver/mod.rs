@@ -39,7 +39,7 @@ use crate::{
         read_completion, read_manifest, validate_completed_log, verify_session,
     },
     session_registry::SessionRegistry,
-    timeline::{TimelineEntry, build_timeline},
+    timeline::{TimelineEntry, build_timeline_page},
     visual::{CaptureKind, CaptureOptions, capture, native_capture_target},
 };
 

@@ -7,6 +7,20 @@ from typing import Annotated, TypeAlias
 
 from msgspec import UNSET, Meta, Struct, UnsetType, convert, field
 
+
+class ActionPostcondition1(Struct, forbid_unknown_fields=True, tag_field='condition', tag='none'):
+    pass
+
+
+class ActionPostcondition2(Struct, forbid_unknown_fields=True, tag_field='condition', tag='idle'):
+    stable_for_ns: Annotated[
+        int, Meta(description='Required unchanged presented-state interval.', ge=0)
+    ]
+    timeout_ns: Annotated[
+        int, Meta(description='Server-side monotonic deadline interval.', ge=0)
+    ]
+
+
 Base64Bytes: TypeAlias = Annotated[str, Meta(pattern='^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$')]
 
 
@@ -50,7 +64,7 @@ class ControlCommand5(Struct, forbid_unknown_fields=True, tag_field='command', t
     ]
 
 
-class ControlCommand9(Struct, forbid_unknown_fields=True, tag_field='command', tag='paste'):
+class ControlCommand10(Struct, forbid_unknown_fields=True, tag_field='command', tag='paste'):
     data: Annotated[
         Base64Bytes,
         Meta(
@@ -59,7 +73,7 @@ class ControlCommand9(Struct, forbid_unknown_fields=True, tag_field='command', t
     ]
 
 
-class ControlCommand10(Struct, forbid_unknown_fields=True, tag_field='command', tag='focus'):
+class ControlCommand11(Struct, forbid_unknown_fields=True, tag_field='command', tag='focus'):
     focused: Annotated[
         bool,
         Meta(
@@ -74,7 +88,7 @@ class ControlCommand10(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-class ControlCommand12(Struct, forbid_unknown_fields=True, tag_field='command', tag='activate'):
+class ControlCommand13(Struct, forbid_unknown_fields=True, tag_field='command', tag='activate'):
     strict: Annotated[
         bool,
         Meta(
@@ -90,7 +104,7 @@ class ControlCommand12(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-class ControlCommand13(Struct, forbid_unknown_fields=True, tag_field='command', tag='resize'):
+class ControlCommand14(Struct, forbid_unknown_fields=True, tag_field='command', tag='resize'):
     cols: Annotated[int, Meta(description='Terminal columns.', ge=0, le=65535)]
     pixel_height: Annotated[
         int, Meta(description='Total pixel height.', ge=0, le=65535)
@@ -99,11 +113,11 @@ class ControlCommand13(Struct, forbid_unknown_fields=True, tag_field='command', 
     rows: Annotated[int, Meta(description='Terminal rows.', ge=0, le=65535)]
 
 
-class ControlCommand15(Struct, forbid_unknown_fields=True, tag_field='command', tag='mark'):
+class ControlCommand16(Struct, forbid_unknown_fields=True, tag_field='command', tag='mark'):
     label: Annotated[str, Meta(description='Non-empty marker label.')]
 
 
-class ControlCommand16(Struct, forbid_unknown_fields=True, tag_field='command', tag='stop'):
+class ControlCommand17(Struct, forbid_unknown_fields=True, tag_field='command', tag='stop'):
     pass
 
 
@@ -162,6 +176,13 @@ class DriverMethod10(Struct, forbid_unknown_fields=True, tag_field='method', tag
     ]
     controls: Annotated[bool, Meta(description='Include exact lossless VT frames.')]
     handle: Annotated[str, Meta(description='Process-local session handle.')]
+    limit: Annotated[
+        int,
+        Meta(
+            description='Maximum returned entries, from 1 through 4096.', ge=0, le=65535
+        ),
+    ]
+    offset: Annotated[int, Meta(description='Zero-based entry offset.', ge=0)]
 
 
 class DriverMethod12(Struct, forbid_unknown_fields=True, tag_field='method', tag='diagnose'):
@@ -270,8 +291,11 @@ class InputSequenceAtom1(Struct, forbid_unknown_fields=True, tag_field='input', 
             description='Caller-owned operation identifier retained in canonical events.'
         ),
     ]
-    intent: (
-        Annotated[str, Meta(description='Optional human-readable intent.')]
+    caller_intent: (
+        Annotated[
+            str,
+            Meta(description='Optional caller-supplied reason retained separately from input semantics.'),
+        ]
         | None
         | UnsetType
     ) = UNSET
@@ -287,6 +311,14 @@ class InputSequenceAtom3(Struct, forbid_unknown_fields=True, tag_field='input', 
             description='Caller-owned operation identifier retained in canonical events.'
         ),
     ]
+    caller_intent: (
+        Annotated[
+            str,
+            Meta(description='Optional caller-supplied reason retained separately from paste semantics.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
 class KeyModifiers(Struct, forbid_unknown_fields=True):
@@ -492,7 +524,7 @@ class StatePoint2(Struct, forbid_unknown_fields=True, tag_field='selector', tag=
 
 class StatePoint3(Struct, forbid_unknown_fields=True, tag_field='selector', tag='state_hash'):
     state_hash: Annotated[
-        str, Meta(description='BLAKE3 hash of canonical semantic state JSON.')
+        str, Meta(description='BLAKE3 hash of the complete normalized semantic state.')
     ]
 
 
@@ -528,19 +560,22 @@ class ControlCommand6(Struct, forbid_unknown_fields=True, tag_field='command', t
         InputKind,
         Meta(description='Semantic category retained in the canonical input intent.'),
     ]
-    intent: (
-        Annotated[str, Meta(description='Optional human-readable intent.')]
+    caller_intent: (
+        Annotated[
+            str,
+            Meta(description='Optional caller-supplied reason for the operation.'),
+        ]
         | None
         | UnsetType
     ) = UNSET
 
 
-class ControlCommand8(Struct, forbid_unknown_fields=True, tag_field='command', tag='key'):
+class ControlCommand9(Struct, forbid_unknown_fields=True, tag_field='command', tag='key'):
     key: Annotated[NamedKey, Meta(description='Layout-independent key.')]
     modifiers: Annotated[KeyModifiers, Meta(description='Typed modifier state.')]
 
 
-class ControlCommand11(Struct, forbid_unknown_fields=True, tag_field='command', tag='pointer'):
+class ControlCommand12(Struct, forbid_unknown_fields=True, tag_field='command', tag='pointer'):
     column: Annotated[
         int, Meta(description='Zero-based viewport column.', ge=0, le=65535)
     ]
@@ -556,7 +591,7 @@ class ControlCommand11(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-class ControlCommand14(Struct, forbid_unknown_fields=True, tag_field='command', tag='signal'):
+class ControlCommand15(Struct, forbid_unknown_fields=True, tag_field='command', tag='signal'):
     signal: Annotated[ProcessSignal, Meta(description='Signal to send.')]
 
 
@@ -645,6 +680,14 @@ class InputSequenceAtom2(Struct, forbid_unknown_fields=True, tag_field='input', 
             description='Caller-owned operation identifier retained in canonical events.'
         ),
     ]
+    caller_intent: (
+        Annotated[
+            str,
+            Meta(description='Optional caller-supplied reason retained separately from the symbolic key.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
 InputSequenceAtom: TypeAlias = Annotated[InputSequenceAtom1 | InputSequenceAtom2 | InputSequenceAtom3, Meta(description='One input atom accepted inside an admission-guarded sequence.')]
@@ -675,7 +718,7 @@ class ControlCommand7(Struct, forbid_unknown_fields=True, tag_field='command', t
     atoms: Annotated[
         list[InputSequenceAtom],
         Meta(
-            description='Ordered input atoms resolved against the actor state at admission.'
+            description='Ordered input atoms encoded against actor state immediately before each write.'
         ),
     ]
     include_atom_outcomes: Annotated[
@@ -701,6 +744,16 @@ class DriverRequest(Struct, forbid_unknown_fields=True):
     version: Annotated[int, Meta(description='Driver protocol version.', ge=0)]
 
 
+class ActionPostcondition3(Struct, forbid_unknown_fields=True, tag_field='condition', tag='screen'):
+    predicate: Annotated[ScreenPredicate, Meta(description='Exact screen predicate.')]
+    timeout_ns: Annotated[
+        int, Meta(description='Server-side monotonic deadline interval.', ge=0)
+    ]
+
+
+ActionPostcondition: TypeAlias = Annotated[ActionPostcondition1 | ActionPostcondition2 | ActionPostcondition3, Meta(description='Presented-state condition retained under exclusive actor ordering after input.')]
+
+
 class ControlCommand4(Struct, forbid_unknown_fields=True, tag_field='command', tag='wait_screen'):
     predicate: Annotated[ScreenPredicate, Meta(description='Exact screen predicate.')]
     stable_for_ns: Annotated[
@@ -711,7 +764,35 @@ class ControlCommand4(Struct, forbid_unknown_fields=True, tag_field='command', t
     ]
 
 
-ControlCommand: TypeAlias = Annotated[ControlCommand1 | ControlCommand2 | ControlCommand3 | ControlCommand4 | ControlCommand5 | ControlCommand6 | ControlCommand7 | ControlCommand8 | ControlCommand9 | ControlCommand10 | ControlCommand11 | ControlCommand12 | ControlCommand13 | ControlCommand14 | ControlCommand15 | ControlCommand16, Meta(description='One command sent to the live session actor.')]
+class ControlCommand8(Struct, forbid_unknown_fields=True, tag_field='command', tag='act'):
+    atoms: Annotated[
+        list[InputSequenceAtom],
+        Meta(
+            description='Ordered input atoms encoded against actor state immediately before each write.'
+        ),
+    ]
+    include_atom_outcomes: Annotated[
+        bool,
+        Meta(
+            description='Retain per-atom identifiers and canonical event positions in the response.'
+        ),
+    ]
+    pace_ns: Annotated[
+        int,
+        Meta(
+            description='Delay between atoms, bounded together with the atom count.',
+            ge=0,
+        ),
+    ]
+    postcondition: Annotated[
+        ActionPostcondition,
+        Meta(
+            description='Presented-state condition evaluated without releasing actor ordering.'
+        ),
+    ]
+
+
+ControlCommand: TypeAlias = Annotated[ControlCommand1 | ControlCommand2 | ControlCommand3 | ControlCommand4 | ControlCommand5 | ControlCommand6 | ControlCommand7 | ControlCommand8 | ControlCommand9 | ControlCommand10 | ControlCommand11 | ControlCommand12 | ControlCommand13 | ControlCommand14 | ControlCommand15 | ControlCommand16 | ControlCommand17, Meta(description='One command sent to the live session actor.')]
 
 
 class DriverMethod4(Struct, forbid_unknown_fields=True, tag_field='method', tag='control'):

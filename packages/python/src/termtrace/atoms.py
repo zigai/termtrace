@@ -16,7 +16,7 @@ class TextAtom:
     """One UTF-8 text write in an atomic input sequence."""
 
     text: str
-    intent: str | None = None
+    caller_intent: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,7 +25,7 @@ class BytesAtom:
 
     data: bytes
     input_kind: Literal["raw", "text"] = "raw"
-    intent: str | None = None
+    caller_intent: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +37,7 @@ class KeyAtom:
     control: bool = False
     alt: bool = False
     super_key: bool = False
+    caller_intent: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +45,7 @@ class PasteAtom:
     """One paste resolved against bracketed-paste mode at sequence admission."""
 
     data: str | bytes
+    caller_intent: str | None = None
 
 
 KeyboardAtom: TypeAlias = TextAtom | BytesAtom | KeyAtom | PasteAtom
@@ -67,7 +69,7 @@ def encode_input_sequence(
     namespace = uuid.UUID(sequence_id) if sequence_id is not None else uuid.uuid4()
     encoded: list[JsonValue] = []
     for index, atom in enumerate(atoms):
-        operation_id = str(uuid.uuid5(namespace, f"termtrace-input-atom:{index}"))
+        operation_id = str(uuid.UUID(int=namespace.int ^ (index + 1)))
         if isinstance(atom, TextAtom):
             encoded.append(
                 {
@@ -75,7 +77,7 @@ def encode_input_sequence(
                     "operation_id": operation_id,
                     "data": base64.b64encode(atom.text.encode()).decode(),
                     "input_kind": "text",
-                    "intent": atom.intent,
+                    "caller_intent": atom.caller_intent,
                 }
             )
         elif isinstance(atom, BytesAtom):
@@ -85,7 +87,7 @@ def encode_input_sequence(
                     "operation_id": operation_id,
                     "data": base64.b64encode(atom.data).decode(),
                     "input_kind": atom.input_kind,
-                    "intent": atom.intent,
+                    "caller_intent": atom.caller_intent,
                 }
             )
         elif isinstance(atom, KeyAtom):
@@ -100,6 +102,7 @@ def encode_input_sequence(
                         "alt": atom.alt,
                         "super_key": atom.super_key,
                     },
+                    "caller_intent": atom.caller_intent,
                 }
             )
         else:
@@ -109,6 +112,7 @@ def encode_input_sequence(
                     "input": "paste",
                     "operation_id": operation_id,
                     "data": base64.b64encode(raw).decode(),
+                    "caller_intent": atom.caller_intent,
                 }
             )
     return {

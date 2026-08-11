@@ -58,8 +58,8 @@ ControlResult: TypeAlias = ControlData
 StableSnapshot: TypeAlias = ControlStableSnapshotData
 DiagnosticReport: TypeAlias = DiagnoseReport
 EventPage: TypeAlias = DriverEventsData
+TimelinePage: TypeAlias = DriverTimelineData
 Frame: TypeAlias = ObservationFrame
-Hello: TypeAlias = DriverHelloData
 
 ResponseDataT = TypeVar("ResponseDataT", bound=msgspec.Struct)
 _RESPONSE_DECODER = msgspec.json.Decoder(WireDriverResponse)
@@ -70,7 +70,7 @@ def encode_driver_request(method: JsonObject, request_id: str) -> bytes:
     """Encode and validate one client-authored request against the Rust contract."""
 
     encoded = msgspec.json.encode(
-        {"version": 3, "request_id": request_id, "method": method}
+        {"version": 4, "request_id": request_id, "method": method}
     )
     try:
         _REQUEST_DECODER.decode(encoded)
@@ -95,7 +95,7 @@ def decode_driver_response(
         raise TermtraceProtocolError(
             "driver response does not match the protocol schema"
         ) from None
-    if response.version != 3 or response.request_id != expected_request_id:
+    if response.version != 4 or response.request_id != expected_request_id:
         raise TermtraceProtocolError(
             "driver response version or request ID does not match"
         )
@@ -148,7 +148,6 @@ __all__ = [
     "EventPage",
     "EventProjection",
     "Frame",
-    "Hello",
     "InputSequenceFailureDetails",
     "JsonObject",
     "JsonValue",
@@ -157,6 +156,7 @@ __all__ = [
     "SessionCompletion",
     "StableSnapshot",
     "TimelineEntry",
+    "TimelinePage",
     "VerificationReport",
     "WaitOutcome",
     "decode_driver_response",

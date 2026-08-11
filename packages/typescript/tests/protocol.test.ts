@@ -99,7 +99,7 @@ describe("parseDriverResponse", () => {
     const requestId = "00000000-0000-0000-0000-000000000020";
 
     expect(JSON.parse(encodeDriverRequest({ method: "hello" }, requestId))).toEqual({
-      version: 3,
+      version: 4,
       request_id: requestId,
       method: { method: "hello" },
     });
@@ -126,8 +126,8 @@ describe("Keyboard.sequence", () => {
 
     await keyboard.sequence(
       [
-        { kind: "text", text: "go" },
-        { kind: "key", key: "enter", modifiers: { control: true } },
+        { kind: "text", text: "go", callerIntent: "submit text" },
+        { kind: "key", key: "enter", modifiers: { control: true }, callerIntent: "submit key" },
       ],
       { paceMs: 5, verbose: true, requestId: "00000000-0000-0000-0000-000000000020" },
     );
@@ -138,11 +138,19 @@ describe("Keyboard.sequence", () => {
       include_atom_outcomes: true,
     });
     expect(captured?.atoms).toHaveLength(2);
+    expect(captured?.atoms).toMatchObject([
+      { caller_intent: "submit text" },
+      { caller_intent: "submit key" },
+    ]);
+    expect(captured?.atoms).toMatchObject([
+      { operation_id: "00000000-0000-0000-0000-000000000021" },
+      { operation_id: "00000000-0000-0000-0000-000000000022" },
+    ]);
     const first = captured;
     await keyboard.sequence(
       [
-        { kind: "text", text: "go" },
-        { kind: "key", key: "enter", modifiers: { control: true } },
+        { kind: "text", text: "go", callerIntent: "submit text" },
+        { kind: "key", key: "enter", modifiers: { control: true }, callerIntent: "submit key" },
       ],
       { paceMs: 5, verbose: true, requestId: "00000000-0000-0000-0000-000000000020" },
     );

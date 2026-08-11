@@ -39,6 +39,7 @@ export type ControlResult = DriverDataOf<"control">["data"];
 export type Artifact = DriverDataOf<"artifact">;
 export type BundleResult = DriverDataOf<"bundle">;
 export type EventPage = DriverDataOf<"events">;
+export type TimelinePage = DriverDataOf<"timeline">;
 
 export type {
   ControlErrorDetails,
@@ -88,7 +89,7 @@ export function parseDriverResponse(input: unknown, expectedRequestId: string): 
   }
   // SAFETY: the generated Ajv validator has proved the complete generated wire contract.
   const root = input as WireDriverResponse;
-  if (root.version !== 3 || root.request_id !== expectedRequestId) {
+  if (root.version !== 4 || root.request_id !== expectedRequestId) {
     throw new TermtraceProtocolError("driver response version or request ID does not match");
   }
   if (root.result.status === "error") {
@@ -111,7 +112,7 @@ export function expectDriverData<Kind extends DriverDataKind>(
 
 /** Validate and serialize one client-authored request without exposing its payload in failures. */
 export function encodeDriverRequest(method: JsonObject, requestId: string): string {
-  const request = { version: 3, request_id: requestId, method };
+  const request = { version: 4, request_id: requestId, method };
   if (!validateDriverRequest(request)) {
     throw new TermtraceProtocolError("client request does not match the protocol schema");
   }

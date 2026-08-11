@@ -82,10 +82,10 @@ def test_atomic_input_sequence_builder_is_typed_bounded_and_correlated() -> None
     sequence_id = "00000000-0000-0000-0000-000000000020"
     command = encode_input_sequence(
         [
-            TextAtom("go", intent="submit"),
-            KeyAtom("enter", control=True),
-            PasteAtom("value"),
-            BytesAtom(b"\x00"),
+            TextAtom("go", caller_intent="submit text"),
+            KeyAtom("enter", control=True, caller_intent="submit key"),
+            PasteAtom("value", caller_intent="paste value"),
+            BytesAtom(b"\x00", caller_intent="raw byte"),
         ],
         pace_ms=5,
         verbose=True,
@@ -93,10 +93,10 @@ def test_atomic_input_sequence_builder_is_typed_bounded_and_correlated() -> None
     )
     retry = encode_input_sequence(
         [
-            TextAtom("go", intent="submit"),
-            KeyAtom("enter", control=True),
-            PasteAtom("value"),
-            BytesAtom(b"\x00"),
+            TextAtom("go", caller_intent="submit text"),
+            KeyAtom("enter", control=True, caller_intent="submit key"),
+            PasteAtom("value", caller_intent="paste value"),
+            BytesAtom(b"\x00", caller_intent="raw byte"),
         ],
         pace_ms=5,
         verbose=True,
@@ -111,6 +111,18 @@ def test_atomic_input_sequence_builder_is_typed_bounded_and_correlated() -> None
     assert len(atoms) == 4
     operation_ids = {atom["operation_id"] for atom in atoms if isinstance(atom, dict)}
     assert len(operation_ids) == 4
+    assert [atom["operation_id"] for atom in atoms if isinstance(atom, dict)] == [
+        "00000000-0000-0000-0000-000000000021",
+        "00000000-0000-0000-0000-000000000022",
+        "00000000-0000-0000-0000-000000000023",
+        "00000000-0000-0000-0000-000000000024",
+    ]
+    assert [atom["caller_intent"] for atom in atoms if isinstance(atom, dict)] == [
+        "submit text",
+        "submit key",
+        "paste value",
+        "raw byte",
+    ]
     assert retry == command
     encode_driver_request(
         {

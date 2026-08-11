@@ -27,7 +27,7 @@ fn blocked_capability_retains_remediation_in_driver_protocol() {
 }
 
 #[test]
-fn large_valid_frame_is_streamed_and_followed_by_another_request() {
+fn bounded_valid_frame_is_streamed_and_followed_by_another_request() {
     let large_request_id = Uuid::now_v7();
     let environment = EnvironmentSpec {
         set: BTreeMap::from([(
@@ -84,7 +84,8 @@ fn large_valid_frame_is_streamed_and_followed_by_another_request() {
         &responses[1].result,
         DriverResult::Ok {
             data: DriverData::Hello {
-                max_message_bytes: UNBOUNDED_MESSAGE_BYTES,
+                max_request_bytes: DRIVER_MAX_REQUEST_BYTES,
+                max_response_bytes: DRIVER_MAX_RESPONSE_BYTES,
                 ..
             }
         }
@@ -92,7 +93,7 @@ fn large_valid_frame_is_streamed_and_followed_by_another_request() {
 }
 
 #[test]
-fn large_malformed_frame_is_drained_before_the_next_request() {
+fn oversized_frame_is_rejected_and_drained_before_the_next_request() {
     let request_id = Uuid::now_v7();
     let request = serde_json::to_vec(&DriverRequest {
         version: DRIVER_PROTOCOL_VERSION,
@@ -100,7 +101,8 @@ fn large_malformed_frame_is_drained_before_the_next_request() {
         method: DriverMethod::Hello,
     })
     .expect("request JSON");
-    let mut input = vec![b'x'; 1024 * 1024 + 99];
+    let mut input =
+        vec![b'x'; usize::try_from(DRIVER_MAX_REQUEST_BYTES).expect("request cap") + 99];
     input.push(b'\n');
     input.extend_from_slice(&request);
     input.push(b'\n');
@@ -116,7 +118,7 @@ fn large_malformed_frame_is_drained_before_the_next_request() {
     assert_eq!(responses.len(), 2);
     assert!(matches!(
         &responses[0].result,
-        DriverResult::Error { code, .. } if code == "invalid_request"
+        DriverResult::Error { code, .. } if code == "request_too_large"
     ));
     assert_eq!(responses[1].request_id, request_id);
     assert!(matches!(
@@ -125,6 +127,69 @@ fn large_malformed_frame_is_drained_before_the_next_request() {
             data: DriverData::Hello { .. }
         }
     ));
+}
+
+#[test]
+fn oversized_response_is_replaced_with_a_bounded_error() {
+    let request_id = Uuid::now_v7();
+    let response =
+        DriverResponse {
+            version: DRIVER_PROTOCOL_VERSION,
+            request_id,
+            result: DriverResult::Ok {
+                data: DriverData::Hello {
+                    driver_protocol_version: DRIVER_PROTOCOL_VERSION,
+                    control_protocol_version: CONTROL_PROTOCOL_VERSION,
+                    event_log_version: EVENT_LOG_VERSION,
+                    state_format_version: STATE_FORMAT_VERSION,
+                    methods: vec!["x".repeat(
+                        usize::try_from(DRIVER_MAX_RESPONSE_BYTES).expect("response cap") + 1,
+                    )],
+                    max_request_bytes: DRIVER_MAX_REQUEST_BYTES,
+                    max_response_bytes: DRIVER_MAX_RESPONSE_BYTES,
+                },
+            },
+        };
+
+    let bounded = bounded_response(response);
+    assert_eq!(bounded.request_id, request_id);
+    assert!(serialized_size(&bounded).expect("bounded size") < 1024);
+    assert!(matches!(
+        bounded.result,
+        DriverResult::Error {
+            code,
+            retry_safety,
+            ..
+        } if code == "response_too_large" && retry_safety == "safe_same_request_id"
+    ));
+}
+
+#[test]
+fn response_cache_is_evicted_by_total_encoded_bytes() {
+    let mut driver = Driver::default();
+    let first = Uuid::now_v7();
+    let second = Uuid::now_v7();
+    let response = driver_error(first, "failure", "bounded", None);
+
+    driver.cache(
+        first,
+        "first".to_owned(),
+        response.clone(),
+        DRIVER_RESPONSE_CACHE_BYTES / 2 + 1,
+    );
+    driver.cache(
+        second,
+        "second".to_owned(),
+        DriverResponse {
+            request_id: second,
+            ..response
+        },
+        DRIVER_RESPONSE_CACHE_BYTES / 2 + 1,
+    );
+
+    assert!(!driver.cached.contains_key(&first));
+    assert!(driver.cached.contains_key(&second));
+    assert_eq!(driver.cached_bytes, DRIVER_RESPONSE_CACHE_BYTES / 2 + 1);
 }
 
 #[test]

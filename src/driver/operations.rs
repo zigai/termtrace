@@ -31,7 +31,8 @@ impl Driver {
                     .into_iter()
                     .map(str::to_owned)
                     .collect(),
-                    max_message_bytes: UNBOUNDED_MESSAGE_BYTES,
+                    max_request_bytes: DRIVER_MAX_REQUEST_BYTES,
+                    max_response_bytes: DRIVER_MAX_RESPONSE_BYTES,
                 }),
                 DriverMethod::Launch {
                     evidence_root,
@@ -187,11 +188,25 @@ impl Driver {
                     handle,
                     all_states,
                     controls,
+                    offset,
+                    limit,
                 } => {
                     let path = self.session_path(handle)?;
+                    if *limit == 0 || *limit > 4096 {
+                        return Err(driver_failure(
+                            "invalid_timeline_limit",
+                            "timeline limit must be from 1 through 4096",
+                            Some(path.clone()),
+                        ));
+                    }
                     let log = completed_driver_log(path)?;
-                    build_timeline(&log, *all_states, *controls, None)
-                        .map(|entries| return DriverData::Timeline { entries })
+                    build_timeline_page(&log, *all_states, *controls, None, *offset, *limit)
+                        .map(|page| {
+                            return DriverData::Timeline {
+                                entries: page.entries,
+                                next_offset: page.next_offset,
+                            };
+                        })
                         .map_err(|error| {
                             return driver_failure_from_error(error, Some(path.clone()));
                         })

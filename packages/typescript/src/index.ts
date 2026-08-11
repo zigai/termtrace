@@ -19,6 +19,7 @@ import {
   type SemanticDiff,
   type SessionCompletion,
   type TimelineEntry,
+  type TimelinePage,
   type VerificationReport,
   type WaitOutcome,
 } from "./protocol.js";
@@ -42,6 +43,7 @@ export {
   type SemanticDiff,
   type SessionCompletion,
   type TimelineEntry,
+  type TimelinePage,
   type VerificationReport,
   type WaitOutcome,
 } from "./protocol.js";
@@ -85,15 +87,16 @@ export type IdleWaitOptions = WaitOptions & {
 export type MutationOptions = {
   readonly requestId?: string;
   readonly ifState?: string;
+  readonly callerIntent?: string;
 };
 
 export type KeyboardAtom =
-  | { readonly kind: "text"; readonly text: string; readonly intent?: string }
+  | { readonly kind: "text"; readonly text: string; readonly callerIntent?: string }
   | {
       readonly kind: "bytes";
       readonly bytes: Uint8Array;
       readonly inputKind?: "raw" | "text";
-      readonly intent?: string;
+      readonly callerIntent?: string;
     }
   | {
       readonly kind: "key";
@@ -104,8 +107,9 @@ export type KeyboardAtom =
         readonly alt?: boolean;
         readonly superKey?: boolean;
       };
+      readonly callerIntent?: string;
     }
-  | { readonly kind: "paste"; readonly data: string | Uint8Array };
+  | { readonly kind: "paste"; readonly data: string | Uint8Array; readonly callerIntent?: string };
 
 export type InputSequenceOptions = MutationOptions & {
   readonly paceMs?: number;
@@ -447,6 +451,7 @@ export class Keyboard {
         command: "key",
         key,
         modifiers: { shift: false, control: false, alt: false, super_key: false },
+        caller_intent: options.callerIntent ?? null,
       },
       options,
     );
@@ -458,7 +463,11 @@ export class Keyboard {
 
   paste(text: string, options: MutationOptions = {}): Promise<ControlResult> {
     return this.session.control(
-      { command: "paste", data: Buffer.from(text).toString("base64") },
+      {
+        command: "paste",
+        data: Buffer.from(text).toString("base64"),
+        caller_intent: options.callerIntent ?? null,
+      },
       options,
     );
   }
@@ -466,7 +475,12 @@ export class Keyboard {
   bytes(bytes: Uint8Array, options: MutationOptions & { readonly inputKind?: "raw" | "text" } = {}): Promise<ControlResult> {
     const data = Buffer.from(bytes).toString("base64");
     return this.session.control(
-      { command: "input", data, input_kind: options.inputKind ?? "raw", intent: null },
+      {
+        command: "input",
+        data,
+        input_kind: options.inputKind ?? "raw",
+        caller_intent: options.callerIntent ?? null,
+      },
       options,
     );
   }
@@ -492,7 +506,7 @@ export class Keyboard {
             operation_id: operationId,
             data: Buffer.from(atom.text).toString("base64"),
             input_kind: "text",
-            intent: atom.intent ?? null,
+            caller_intent: atom.callerIntent ?? null,
           };
         case "bytes":
           return {
@@ -500,7 +514,7 @@ export class Keyboard {
             operation_id: operationId,
             data: Buffer.from(atom.bytes).toString("base64"),
             input_kind: atom.inputKind ?? "raw",
-            intent: atom.intent ?? null,
+            caller_intent: atom.callerIntent ?? null,
           };
         case "key":
           return {
@@ -513,12 +527,14 @@ export class Keyboard {
               alt: atom.modifiers?.alt ?? false,
               super_key: atom.modifiers?.superKey ?? false,
             },
+            caller_intent: atom.callerIntent ?? null,
           };
         case "paste":
           return {
             input: "paste",
             operation_id: operationId,
             data: Buffer.from(atom.data).toString("base64"),
+            caller_intent: atom.callerIntent ?? null,
           };
       }
     });
@@ -603,13 +619,19 @@ export class Semantic {
     return result.observation;
   }
 
-  async timeline(options: { readonly allStates?: boolean; readonly controls?: boolean } = {}): Promise<TimelineEntry[]> {
-    const result = await this.session.request({
+  async timeline(options: {
+    readonly allStates?: boolean;
+    readonly controls?: boolean;
+    readonly offset?: number;
+    readonly limit?: number;
+  } = {}): Promise<TimelinePage> {
+    return this.session.request({
       method: "timeline",
       all_states: options.allStates ?? false,
       controls: options.controls ?? false,
+      offset: options.offset ?? 0,
+      limit: options.limit ?? 256,
     }, "timeline");
-    return result.entries;
   }
 
   async diff(from: StatePoint, to: StatePoint): Promise<SemanticDiff> {

@@ -14,6 +14,12 @@ pub fn serve(mut input: impl BufRead, mut output: impl Write) -> Result<()> {
                 ),
                 None,
             ),
+            DriverFrame::TooLarge => driver_error(
+                Uuid::nil(),
+                "request_too_large",
+                format!("driver request exceeds the {DRIVER_MAX_REQUEST_BYTES}-byte frame limit"),
+                None,
+            ),
             DriverFrame::Unterminated => driver_error(
                 Uuid::nil(),
                 "invalid_request",
@@ -45,13 +51,15 @@ pub fn serve(mut input: impl BufRead, mut output: impl Write) -> Result<()> {
 pub(super) struct Driver {
     pub(super) sessions: HashMap<Uuid, PathBuf>,
     pub(super) launched: HashSet<Uuid>,
-    cached: HashMap<Uuid, CachedDriverResponse>,
+    pub(super) cached: HashMap<Uuid, CachedDriverResponse>,
     order: VecDeque<Uuid>,
+    pub(super) cached_bytes: usize,
 }
 
-struct CachedDriverResponse {
+pub(super) struct CachedDriverResponse {
     method_hash: String,
     response: DriverResponse,
+    encoded_bytes: usize,
 }
 
 impl Driver {
@@ -88,25 +96,97 @@ impl Driver {
         } else {
             self.execute(&request)
         };
-        if driver_response_is_cacheable(&response) {
-            self.cache(request.request_id, method_hash, response.clone());
+        let response = bounded_response(response);
+        if driver_response_is_cacheable(&response)
+            && let Ok(encoded_bytes) = serialized_size(&response)
+        {
+            self.cache(
+                request.request_id,
+                method_hash,
+                response.clone(),
+                encoded_bytes,
+            );
         }
         return response;
     }
 
-    fn cache(&mut self, request_id: Uuid, method_hash: String, response: DriverResponse) {
+    pub(super) fn cache(
+        &mut self,
+        request_id: Uuid,
+        method_hash: String,
+        response: DriverResponse,
+        encoded_bytes: usize,
+    ) {
+        self.cached_bytes = self.cached_bytes.saturating_add(encoded_bytes);
         self.cached.insert(
             request_id,
             CachedDriverResponse {
                 method_hash,
                 response,
+                encoded_bytes,
             },
         );
         self.order.push_back(request_id);
-        while self.cached.len() > DRIVER_RESPONSE_CACHE {
-            if let Some(evicted) = self.order.pop_front() {
-                self.cached.remove(&evicted);
+        while self.cached_bytes > DRIVER_RESPONSE_CACHE_BYTES {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(response) = self.cached.remove(&evicted) {
+                self.cached_bytes = self.cached_bytes.saturating_sub(response.encoded_bytes);
             }
         }
+    }
+}
+
+pub(super) fn bounded_response(response: DriverResponse) -> DriverResponse {
+    let Ok(encoded_bytes) = serialized_size(&response) else {
+        return driver_error(
+            response.request_id,
+            "response_encoding_failed",
+            "driver response could not be encoded",
+            None,
+        );
+    };
+    if u64::try_from(encoded_bytes).unwrap_or(u64::MAX) <= DRIVER_MAX_RESPONSE_BYTES {
+        return response;
+    }
+    return DriverResponse {
+        version: DRIVER_PROTOCOL_VERSION,
+        request_id: response.request_id,
+        result: *driver_failure_with_retry(
+            "response_too_large",
+            format!(
+                "driver response exceeds the {DRIVER_MAX_RESPONSE_BYTES}-byte limit; request a smaller page or metadata-only projection"
+            ),
+            None,
+            "safe_same_request_id",
+            false,
+            None,
+        ),
+    };
+}
+
+pub(super) fn serialized_size(value: &impl Serialize) -> StdResult<usize, serde_json::Error> {
+    let mut writer = CountingWriter::default();
+    serde_json::to_writer(&mut writer, value)?;
+    return Ok(writer.bytes);
+}
+
+#[derive(Default)]
+struct CountingWriter {
+    bytes: usize,
+}
+
+impl Write for CountingWriter {
+    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+        self.bytes = self
+            .bytes
+            .checked_add(buf.len())
+            .ok_or_else(|| return IoError::other("serialized driver response size overflow"))?;
+        return Ok(buf.len());
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        return Ok(());
     }
 }

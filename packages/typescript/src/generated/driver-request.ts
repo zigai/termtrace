@@ -162,6 +162,10 @@ export type ScreenPredicate =
 export type InputSequenceAtom =
   | {
       /**
+       * Optional caller-supplied reason retained separately from input semantics.
+       */
+      caller_intent?: string | null;
+      /**
        * Bytes encoded as Base64 in JSON.
        */
       data: string;
@@ -171,15 +175,15 @@ export type InputSequenceAtom =
        */
       input_kind: "raw" | "text" | "keys" | "paste" | "focus" | "pointer";
       /**
-       * Optional human-readable intent.
-       */
-      intent?: string | null;
-      /**
        * Caller-owned operation identifier retained in canonical events.
        */
       operation_id: string;
     }
   | {
+      /**
+       * Optional caller-supplied reason retained separately from the symbolic key.
+       */
+      caller_intent?: string | null;
       input: "key";
       /**
        * Layout-independent key.
@@ -212,6 +216,10 @@ export type InputSequenceAtom =
       operation_id: string;
     }
   | {
+      /**
+       * Optional caller-supplied reason retained separately from paste semantics.
+       */
+      caller_intent?: string | null;
       /**
        * Paste content before mode-dependent encoding.
        */
@@ -287,7 +295,7 @@ export interface DriverRequest {
           | {
               command: "wait_screen";
               /**
-               * Exact screen predicate.
+               * Exact predicate evaluated against the latest presented viewport.
                */
               predicate:
                 | {
@@ -458,6 +466,10 @@ export interface DriverRequest {
               timeout_ns: number;
             }
           | {
+              /**
+               * Optional caller-supplied reason for the operation.
+               */
+              caller_intent?: string | null;
               command: "input";
               /**
                * Raw bytes encoded as Base64 in JSON.
@@ -467,14 +479,10 @@ export interface DriverRequest {
                * Semantic category retained in the canonical input intent.
                */
               input_kind: "raw" | "text" | "keys" | "paste" | "focus" | "pointer";
-              /**
-               * Optional human-readable intent.
-               */
-              intent?: string | null;
             }
           | {
               /**
-               * Ordered input atoms resolved against the actor state at admission.
+               * Ordered input atoms encoded against actor state immediately before each write.
                */
               atoms: InputSequenceAtom[];
               command: "input_sequence";
@@ -486,6 +494,197 @@ export interface DriverRequest {
                * Delay between atoms, bounded together with the atom count.
                */
               pace_ns: number;
+            }
+          | {
+              /**
+               * Ordered input atoms encoded against actor state immediately before each write.
+               */
+              atoms: InputSequenceAtom[];
+              command: "act";
+              /**
+               * Retain per-atom identifiers and canonical event positions in the response.
+               */
+              include_atom_outcomes: boolean;
+              /**
+               * Delay between atoms, bounded together with the atom count.
+               */
+              pace_ns: number;
+              /**
+               * Presented-state condition evaluated without releasing actor ordering.
+               */
+              postcondition:
+                | {
+                    condition: "none";
+                  }
+                | {
+                    condition: "idle";
+                    /**
+                     * Required unchanged presented-state interval.
+                     */
+                    stable_for_ns: number;
+                    /**
+                     * Server-side monotonic deadline interval.
+                     */
+                    timeout_ns: number;
+                  }
+                | {
+                    condition: "screen";
+                    /**
+                     * Exact screen predicate.
+                     */
+                    predicate:
+                      | {
+                          predicate: "contains";
+                          /**
+                           * Exact UTF-8 substring.
+                           */
+                          text: string;
+                        }
+                      | {
+                          predicate: "absent";
+                          /**
+                           * Exact UTF-8 substring.
+                           */
+                          text: string;
+                        }
+                      | {
+                          /**
+                           * Rust-regex pattern, limited by the control service.
+                           */
+                          pattern: string;
+                          predicate: "matches_regex";
+                        }
+                      | {
+                          /**
+                           * Rust-regex pattern, limited by the control service.
+                           */
+                          pattern: string;
+                          predicate: "excludes_regex";
+                        }
+                      | {
+                          predicate: "row_contains";
+                          /**
+                           * Zero-based viewport row.
+                           */
+                          row: number;
+                          /**
+                           * Exact UTF-8 substring.
+                           */
+                          text: string;
+                        }
+                      | {
+                          predicate: "row_absent";
+                          /**
+                           * Zero-based viewport row.
+                           */
+                          row: number;
+                          /**
+                           * Exact UTF-8 substring.
+                           */
+                          text: string;
+                        }
+                      | {
+                          predicate: "region_contains";
+                          region: ScreenRegion;
+                          /**
+                           * Exact UTF-8 substring.
+                           */
+                          text: string;
+                        }
+                      | {
+                          predicate: "region_absent";
+                          region: ScreenRegion1;
+                          /**
+                           * Exact UTF-8 substring.
+                           */
+                          text: string;
+                        }
+                      | {
+                          /**
+                           * Optional zero-based viewport column.
+                           */
+                          column?: number | null;
+                          predicate: "cursor";
+                          /**
+                           * Optional zero-based viewport row.
+                           */
+                          row?: number | null;
+                          /**
+                           * Optional cursor shape requirement.
+                           */
+                          shape?: CursorStyle | null;
+                          /**
+                           * Optional cursor visibility requirement.
+                           */
+                          visible?: boolean | null;
+                        }
+                      | {
+                          /**
+                           * Required set/reset value.
+                           */
+                          enabled: boolean;
+                          /**
+                           * Stable mode selector.
+                           */
+                          mode:
+                            | {
+                                mode: "alternate_screen";
+                              }
+                            | {
+                                mode: "bracketed_paste";
+                              }
+                            | {
+                                mode: "wraparound";
+                              }
+                            | {
+                                mode: "synchronized_output";
+                              }
+                            | {
+                                mode: "ansi";
+                                /**
+                                 * Mode number.
+                                 */
+                                number: number;
+                              }
+                            | {
+                                mode: "dec";
+                                /**
+                                 * Mode number.
+                                 */
+                                number: number;
+                              };
+                          predicate: "mode";
+                        }
+                      | {
+                          /**
+                           * Equality relationship to require.
+                           */
+                          comparison: "unchanged" | "changed";
+                          /**
+                           * Lowercase BLAKE3 state hash.
+                           */
+                          hash: string;
+                          predicate: "state_hash";
+                        }
+                      | {
+                          predicate: "all";
+                          /**
+                           * Bounded non-empty predicate list.
+                           */
+                          predicates: ScreenPredicate[];
+                        }
+                      | {
+                          predicate: "any";
+                          /**
+                           * Bounded non-empty predicate list.
+                           */
+                          predicates: ScreenPredicate[];
+                        };
+                    /**
+                     * Server-side monotonic deadline interval.
+                     */
+                    timeout_ns: number;
+                  };
             }
           | {
               command: "key";
@@ -724,7 +923,7 @@ export interface DriverRequest {
           | {
               selector: "state_hash";
               /**
-               * BLAKE3 hash of canonical semantic state JSON.
+               * BLAKE3 hash of the complete normalized semantic state.
                */
               state_hash: string;
             }
@@ -763,7 +962,15 @@ export interface DriverRequest {
          * Process-local session handle.
          */
         handle: string;
+        /**
+         * Maximum returned entries, from 1 through 4096.
+         */
+        limit: number;
         method: "timeline";
+        /**
+         * Zero-based entry offset.
+         */
+        offset: number;
       }
     | {
         /**
@@ -783,7 +990,7 @@ export interface DriverRequest {
           | {
               selector: "state_hash";
               /**
-               * BLAKE3 hash of canonical semantic state JSON.
+               * BLAKE3 hash of the complete normalized semantic state.
                */
               state_hash: string;
             }
@@ -830,7 +1037,7 @@ export interface DriverRequest {
           | {
               selector: "state_hash";
               /**
-               * BLAKE3 hash of canonical semantic state JSON.
+               * BLAKE3 hash of the complete normalized semantic state.
                */
               state_hash: string;
             }
@@ -917,7 +1124,7 @@ export interface DriverRequest {
           | {
               selector: "state_hash";
               /**
-               * BLAKE3 hash of canonical semantic state JSON.
+               * BLAKE3 hash of the complete normalized semantic state.
                */
               state_hash: string;
             }

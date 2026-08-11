@@ -1,9 +1,12 @@
 use super::*;
 
 /// Current JSONL driver protocol version.
-pub const DRIVER_PROTOCOL_VERSION: u32 = 3;
-pub(super) const DRIVER_RESPONSE_CACHE: usize = 4096;
-pub(super) const UNBOUNDED_MESSAGE_BYTES: u64 = 0;
+pub const DRIVER_PROTOCOL_VERSION: u32 = 4;
+/// Maximum JSON bytes accepted in one newline-delimited request frame.
+pub const DRIVER_MAX_REQUEST_BYTES: u64 = 4 * 1024 * 1024;
+/// Maximum JSON bytes emitted in one newline-delimited response frame.
+pub const DRIVER_MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
+pub(super) const DRIVER_RESPONSE_CACHE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Explicit screenshot truth path; no fallback occurs between variants.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -101,7 +104,7 @@ pub enum DriverMethod {
         /// Permit explicitly selected hidden synchronized-output state.
         include_hidden: bool,
     },
-    /// Build the completed canonical/semantic timeline.
+    /// Build one bounded page of the completed canonical/semantic timeline.
     Timeline {
         /// Process-local session handle.
         handle: Uuid,
@@ -109,6 +112,10 @@ pub enum DriverMethod {
         all_states: bool,
         /// Include exact lossless VT frames.
         controls: bool,
+        /// Zero-based entry offset.
+        offset: u64,
+        /// Maximum returned entries, from 1 through 4096.
+        limit: u16,
     },
     /// Compare two completed semantic endpoints.
     Diff {
@@ -230,8 +237,10 @@ pub enum DriverData {
         state_format_version: u32,
         /// Stable supported methods.
         methods: Vec<String>,
-        /// Maximum newline-framed request bytes, or zero when requests have no framing cap.
-        max_message_bytes: u64,
+        /// Maximum newline-framed request bytes.
+        max_request_bytes: u64,
+        /// Maximum newline-framed response bytes.
+        max_response_bytes: u64,
     },
     /// Attached process-local handle and immutable identity.
     Attached {
@@ -264,10 +273,12 @@ pub enum DriverData {
         /// Shared observation envelope.
         observation: Box<Observation>,
     },
-    /// Ordered timeline projection.
+    /// Ordered timeline projection page.
     Timeline {
-        /// Complete requested entries.
+        /// Requested entries in canonical order.
         entries: Vec<TimelineEntry>,
+        /// Next zero-based entry offset, absent at the end.
+        next_offset: Option<u64>,
     },
     /// Complete semantic endpoint diff.
     Diff {

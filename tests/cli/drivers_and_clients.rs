@@ -16,12 +16,12 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
     let hello_id = "019f0000-0000-7000-8000-000000000001";
     let attach_id = "019f0000-0000-7000-8000-000000000002";
     let hello = serde_json::json!({
-        "version": 3,
+        "version": 4,
         "request_id": hello_id,
         "method": { "method": "hello" }
     });
     let attach = serde_json::json!({
-        "version": 3,
+        "version": 4,
         "request_id": attach_id,
         "method": { "method": "attach", "session": session }
     });
@@ -45,7 +45,7 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
     };
     assert_eq!(first, second);
     assert_eq!(first["result"]["data"]["kind"], "hello");
-    assert_eq!(first["result"]["data"]["driver_protocol_version"], 3);
+    assert_eq!(first["result"]["data"]["driver_protocol_version"], 4);
     assert_eq!(third["result"]["data"]["kind"], "attached");
     assert_eq!(third["result"]["data"]["completed"], true);
     assert!(third["result"]["data"]["handle"].is_string());
@@ -75,7 +75,7 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
     assert session.evidence.bundle(Path(sys.argv[3]) / "python-screen-bundle").directory
     assert isinstance(session.session_id, str)
     assert session.semantic.inspect().state_hash
-    assert isinstance(session.semantic.timeline(), list)
+    assert isinstance(session.semantic.timeline().entries, list)
     assert isinstance(session.semantic.diff({"selector": "state_id", "state_id": 0}, {"selector": "latest_presented"}).rows, list)
     assert isinstance(session.semantic.diagnose().findings, list)
     assert session.events.page(metadata_only=True).next_event_seq >= 0
@@ -143,7 +143,7 @@ async def main():
         assert (await session.evidence.bundle(Path(sys.argv[3]) / "async-screen-bundle")).directory
         assert isinstance(session.session_id, str)
         assert (await session.semantic.inspect()).state_hash
-        assert isinstance(await session.semantic.timeline(), list)
+        assert isinstance((await session.semantic.timeline()).entries, list)
         assert isinstance((await session.semantic.diff({"selector": "state_id", "state_id": 0}, {"selector": "latest_presented"})).rows, list)
         assert isinstance((await session.semantic.diagnose()).findings, list)
         assert (await session.events.page(metadata_only=True)).next_event_seq >= 0
@@ -212,7 +212,7 @@ if ((await attached.evidence.verify()).valid !== true) throw new Error("invalid 
 if (!(await attached.evidence.bundle(`${process.argv[4]}/typescript-screen-bundle`)).directory) throw new Error("missing bundle")
 if (typeof attached.sessionId !== "string") throw new Error("missing session identity")
 if (!(await attached.semantic.inspect()).state_hash) throw new Error("missing observation")
-if (!Array.isArray(await attached.semantic.timeline())) throw new Error("missing timeline")
+if (!Array.isArray((await attached.semantic.timeline()).entries)) throw new Error("missing timeline")
 if (!Array.isArray((await attached.semantic.diff({ selector: "state_id", state_id: 0 }, { selector: "latest_presented" })).rows)) throw new Error("missing diff")
 if (!Array.isArray((await attached.semantic.diagnose()).findings)) throw new Error("missing diagnosis")
 if ((await attached.events.page({ metadataOnly: true })).kind !== "events") throw new Error("missing events")
@@ -313,6 +313,28 @@ fn managed_client_runners_leave_the_callers_worktree_untouched() {
         .assert()
         .success()
         .stdout(predicate::str::contains("typescript-managed"));
+
+    let source = temporary.path().join("typescript-source");
+    fs_err::create_dir(&source).expect("TypeScript source directory");
+    fs_err::write(
+        source.join("helper.ts"),
+        "export const localMarker = 'local-import';\n",
+    )
+    .expect("TypeScript helper");
+    fs_err::write(
+        source.join("client.ts"),
+        "import { managedRunnerMarker } from '@termtrace/test';\nimport { localMarker } from './helper.ts';\nconsole.log(`${managedRunnerMarker}:${localMarker}`);\n",
+    )
+    .expect("TypeScript client file");
+    let mut typescript_file = Command::cargo_bin("termtrace").expect("binary should build");
+    typescript_file
+        .env("TERMTRACE_CLIENT_ASSETS", &assets)
+        .current_dir(&worktree)
+        .args(["tooling", "client", "typescript"])
+        .arg(source.join("client.ts"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("typescript-managed:local-import"));
 
     assert_eq!(
         fs_err::read_dir(&worktree)
