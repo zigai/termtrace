@@ -20,14 +20,16 @@ use crate::{
     analysis::{DiagnosticCheck, diagnose},
     client::{Session, Terminal},
     control::{ControlCommand, ControlData, ControlRequest, ScreenPredicate},
-    environment::EnvironmentSpec,
+    environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},
     event::{ByteString, Event, InputKind},
     event_log::EventLog,
     ghostty_vt::{KeyModifiers, NamedKey, SemanticState},
     inspection::{state_text, wait_for_screen},
+    observation::{StatePoint, observe_session_with_options},
     replay::{StateSelector, inspect, replay},
     semantic_image::render_png,
-    timeline::build_timeline,
+    session::validate_completed_log,
+    timeline::{build_timeline, build_timeline_page},
 };
 
 /// Current scenario document version.
@@ -61,13 +63,17 @@ impl Scenario {
                 source,
             };
         })?;
-        let scenario: Self = serde_json::from_slice(&encoded).map_err(|source| {
-            return Error::InvalidJson {
-                path: path.to_path_buf(),
-                json_path: "$".to_owned(),
-                source,
-            };
-        })?;
+        let mut deserializer = serde_json::Deserializer::from_slice(&encoded);
+        let scenario: Self =
+            serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+                let json_path = error.path().to_string();
+                let source = error.into_inner();
+                return Error::InvalidJson {
+                    path: path.to_path_buf(),
+                    json_path,
+                    source,
+                };
+            })?;
         scenario.validate()?;
         return Ok(scenario);
     }
@@ -94,7 +100,7 @@ impl Scenario {
                 "scenario timeout and configured resource budgets must be greater than zero",
             ));
         }
-        self.launch.environment.validate()?;
+        self.launch.environment.to_environment_spec()?.validate()?;
         for step in &self.steps {
             if let ScenarioStep::WaitScreen(wait_screen) = step {
                 if wait_screen.contains.as_deref().is_none_or(str::is_empty)
@@ -219,14 +225,72 @@ pub struct ScenarioLaunch {
     pub geometry: ScenarioGeometry,
     /// Optional child working directory.
     pub working_directory: Option<PathBuf>,
-    /// Deterministic child environment; values are redacted from failure artifacts.
+    /// Deterministic child environment; text values are UTF-8 and byte values are explicit Base64.
     #[serde(default)]
-    pub environment: EnvironmentSpec,
+    pub environment: ScenarioEnvironment,
     /// Soft output budget; all observed bytes remain canonical evidence.
     pub output_byte_budget: Option<u64>,
     /// Default deadline for waits and completion.
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
+}
+
+/// Public scenario environment with unambiguous text and byte value encodings.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScenarioEnvironment {
+    /// Source environment used before overrides.
+    #[serde(default)]
+    pub base: EnvironmentBase,
+    /// UTF-8 environment values.
+    #[serde(default)]
+    pub set: BTreeMap<String, String>,
+    /// Arbitrary environment values encoded explicitly as Base64.
+    #[serde(default)]
+    pub set_bytes: BTreeMap<String, ScenarioEncodedBytes>,
+    /// Names copied from the recorder environment.
+    #[serde(default)]
+    pub copy: BTreeSet<String>,
+    /// Names removed from an inherited environment.
+    #[serde(default)]
+    pub unset: BTreeSet<String>,
+    /// Deterministic color-variable behavior.
+    #[serde(default)]
+    pub color: ColorPolicy,
+}
+
+impl ScenarioEnvironment {
+    fn to_environment_spec(&self) -> Result<EnvironmentSpec> {
+        let mut set = self
+            .set
+            .iter()
+            .map(|(name, value)| {
+                return (name.clone(), ByteString::new(value.as_bytes().to_vec()));
+            })
+            .collect::<BTreeMap<_, _>>();
+        for (name, value) in &self.set_bytes {
+            if set.insert(name.clone(), value.base64.clone()).is_some() {
+                return Err(scenario_error(format!(
+                    "launch.environment.setBytes.{name} duplicates launch.environment.set.{name}"
+                )));
+            }
+        }
+        return Ok(EnvironmentSpec {
+            base: self.base,
+            set,
+            copy: self.copy.clone(),
+            unset: self.unset.clone(),
+            color: self.color,
+        });
+    }
+}
+
+/// One arbitrary scenario environment value encoded as standard padded Base64.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioEncodedBytes {
+    /// Exact environment bytes.
+    pub base64: ByteString,
 }
 
 /// Initial scenario terminal grid.
@@ -491,7 +555,7 @@ pub fn run(
         .launch(command)
         .geometry(scenario.launch.geometry.cols, scenario.launch.geometry.rows)
         .startup_timeout(Duration::from_millis(scenario.launch.timeout_ms))
-        .environment(scenario.launch.environment.clone());
+        .environment(scenario.launch.environment.to_environment_spec()?);
     if let Some(limit) = scenario.launch.output_byte_budget {
         builder = builder.output_byte_budget(limit);
     }
@@ -542,6 +606,26 @@ pub fn run(
     if !stopped {
         session.stop(Some(Duration::from_millis(scenario.launch.timeout_ms)))?;
     }
+    if let Err(error) = validate_replay_closure(session.path(), &steps) {
+        let failure_artifacts = failure_root.join(session.session_id().to_string());
+        let report = ScenarioReport {
+            version: SCENARIO_VERSION,
+            name: scenario.name.clone(),
+            status: ScenarioStatus::Failed,
+            session_id: session.session_id(),
+            canonical_session: session.path().to_path_buf(),
+            steps,
+            failure: Some(ScenarioFailure {
+                step_index: scenario.steps.len(),
+                step_kind: "replay_closure".to_owned(),
+                request_ids: Vec::new(),
+                message: error.to_string(),
+            }),
+            failure_artifacts: Some(failure_artifacts.clone()),
+        };
+        publish_failure(&failure_artifacts, scenario, &report, None)?;
+        return Ok(report);
+    }
     return Ok(ScenarioReport {
         version: SCENARIO_VERSION,
         name: scenario.name.clone(),
@@ -552,6 +636,44 @@ pub fn run(
         failure: None,
         failure_artifacts: None,
     });
+}
+
+fn validate_replay_closure(session: &Path, steps: &[ScenarioStepResult]) -> Result<()> {
+    let log = EventLog::read(session.join("events.jsonl"))?;
+    let completion = validate_completed_log(session, &log)?;
+    let asserted_hashes = steps
+        .iter()
+        .filter_map(|step| return step.state_hash.as_ref())
+        .collect::<BTreeSet<_>>();
+    for state_hash in asserted_hashes {
+        let observation = observe_session_with_options(
+            session,
+            StatePoint::StateHash {
+                state_hash: state_hash.clone(),
+            },
+            true,
+        )?;
+        if observation.state_hash != *state_hash {
+            return Err(scenario_error(format!(
+                "replay closure resolved asserted state hash `{state_hash}` as `{}`",
+                observation.state_hash
+            )));
+        }
+    }
+    let final_point = completion.event_count.checked_sub(1).map_or(
+        StatePoint::StateId { state_id: 0 },
+        |event_seq| {
+            return StatePoint::EventSeq { event_seq };
+        },
+    );
+    observe_session_with_options(session, final_point, true)?;
+    let page = build_timeline_page(&log, true, true, None, 0, 64)?;
+    if page.entries.is_empty() {
+        return Err(scenario_error(
+            "replay closure produced an empty timeline page",
+        ));
+    }
+    return Ok(());
 }
 
 fn execute_step(
@@ -601,7 +723,7 @@ fn execute_step(
                     ScenarioInput::Text(input) => ControlCommand::Input {
                         data: ByteString::new(input.text.as_bytes().to_vec()),
                         input_kind: InputKind::Text,
-                        intent: None,
+                        caller_intent: None,
                     },
                     ScenarioInput::Key(input) => ControlCommand::Key {
                         key: input.key,
@@ -904,7 +1026,10 @@ fn publish_failure(
     })?;
     let mut redacted_scenario = scenario.clone();
     for value in redacted_scenario.launch.environment.set.values_mut() {
-        *value = ByteString::from(b"<redacted>".as_slice());
+        *value = "<redacted>".to_owned();
+    }
+    for value in redacted_scenario.launch.environment.set_bytes.values_mut() {
+        value.base64 = ByteString::from(b"<redacted>".as_slice());
     }
     write_json(temporary.join("scenario.json"), &redacted_scenario)?;
     write_json(temporary.join("result.json"), report)?;
@@ -1060,5 +1185,91 @@ mod tests {
             })
             .collect::<BTreeSet<_>>();
         assert_eq!(names.len(), 4);
+    }
+    #[test]
+    fn scenario_environment_distinguishes_text_and_explicit_bytes() {
+        let scenario: Scenario = serde_json::from_value(serde_json::json!({
+            "version": 2,
+            "name": "environment",
+            "launch": {
+                "command": ["/bin/true"],
+                "environment": {
+                    "set": { "PI_SKIP_VERSION_CHECK": "1", "UNICODE": "λ" },
+                    "setBytes": { "BINARY": { "base64": "AQI=" } }
+                }
+            },
+            "steps": [{ "stop": {} }]
+        }))
+        .expect("scenario JSON");
+
+        assert_eq!(
+            scenario
+                .launch
+                .environment
+                .set
+                .get("PI_SKIP_VERSION_CHECK")
+                .expect("text value")
+                .as_bytes(),
+            b"1"
+        );
+        assert_eq!(
+            scenario
+                .launch
+                .environment
+                .set
+                .get("UNICODE")
+                .expect("UTF-8 value")
+                .as_bytes(),
+            "λ".as_bytes()
+        );
+        assert_eq!(
+            scenario
+                .launch
+                .environment
+                .set_bytes
+                .get("BINARY")
+                .expect("byte value")
+                .base64
+                .as_bytes(),
+            [1, 2]
+        );
+
+        let encoded = serde_json::to_value(&scenario).expect("serialized scenario");
+        assert_eq!(
+            encoded["launch"]["environment"]["set"]["PI_SKIP_VERSION_CHECK"],
+            "1"
+        );
+        assert_eq!(
+            encoded["launch"]["environment"]["setBytes"]["BINARY"]["base64"],
+            "AQI="
+        );
+    }
+
+    #[test]
+    fn scenario_read_reports_environment_value_path() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let path = temporary.path().join("invalid-scenario.json");
+        fs_err::write(
+            &path,
+            br#"{
+                "version": 2,
+                "name": "invalid environment",
+                "launch": {
+                    "command": ["/bin/true"],
+                    "environment": { "set": { "PI_SKIP_VERSION_CHECK": 1 } }
+                },
+                "steps": [{ "stop": {} }]
+            }"#,
+        )
+        .expect("write scenario");
+
+        let error = Scenario::read(&path).expect_err("invalid environment value");
+        let diagnostic = error.to_string();
+        assert!(matches!(
+            error,
+            Error::InvalidJson { json_path, .. }
+                if json_path == "launch.environment.set.PI_SKIP_VERSION_CHECK"
+        ));
+        assert!(diagnostic.contains("launch.environment.set.PI_SKIP_VERSION_CHECK"));
     }
 }

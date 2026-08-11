@@ -61,7 +61,9 @@ fn round_trip_preserves_binary_events_and_integrity_chain() {
                 input_kind: InputKind::Keys,
                 descriptor: InputDescriptor::Raw,
                 data: ByteString::from(&b"\x03"[..]),
-                intent: Some("ctrl-c".to_owned()),
+                terminal_modes_hash: None,
+                semantic_input: Some("ctrl+c".to_owned()),
+                caller_intent: None,
             },
         )
         .expect("append input");
@@ -179,7 +181,9 @@ fn reports_intent_without_result_as_uncertain() {
                 input_kind: InputKind::Text,
                 descriptor: InputDescriptor::Text,
                 data: ByteString::from(&b"hello"[..]),
-                intent: None,
+                terminal_modes_hash: None,
+                semantic_input: Some("text".to_owned()),
+                caller_intent: None,
             },
         )
         .expect("append intent");

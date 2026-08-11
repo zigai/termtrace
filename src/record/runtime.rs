@@ -2,6 +2,7 @@
 
 use std::{
     env::consts::{ARCH, OS},
+    ffi::OsStr,
     io::{self, Write},
     mem::replace,
     os::unix::ffi::OsStrExt as _,
@@ -10,36 +11,41 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use portable_pty::{ExitStatus, PtySize};
 use uuid::Uuid;
 
 use crate::{
     Error, Result,
     artifact::write_secure,
-    control::{CONTROL_SOCKET_NAME, ProcessSignal},
+    control::{ProcessSignal, control_socket_name},
     environment::EffectiveEnvironment,
     event::{
         ByteString, Event, EventLogHeader, InputDescriptor, InputKind, InputSource, LifecycleKind,
         TerminalColors,
     },
-    event_log::{EventLogWriter, SessionClock},
-    ghostty_vt::{GhosttyVt, supported_geometry_cell_count},
+    event_log::{CanonicalBoundary, EventLog, EventLogWriter, SessionClock},
+    ghostty_vt::{GhosttyVt, SemanticState, supported_geometry_cell_count},
+    observation::{StatePoint, publish_endpoint_checkpoint},
     provenance::collect_execution_provenance,
+    replay::{EndpointInspection, semantic_state_hash},
     request_journal::{MUTATION_JOURNAL_NAME, MutationJournal},
     session::{
         COMPLETION_VALIDATION_VERSION, GHOSTTY_REPLAY_PROFILE_NAME, ResourceLimitKind,
         ResourceLimitOutcome, ResourceLimits, SESSION_COMPLETION_FORMAT,
         SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
-        SessionCompletion, SessionGeometry, SessionManifest, canonical_manifest_bytes,
-        manifest_hash,
+        SessionCompletion, SessionFailure, SessionGeometry, SessionManifest,
+        canonical_manifest_bytes, manifest_hash, validate_completion_candidate,
     },
     terminal_mode::RawTerminalGuard,
 };
 
 use super::{
     control::{
-        MutationHistory, ScreenWaiter, apply_signal, evaluate_screen_waiters, fail_screen_waiters,
-        handle_control_request,
+        MutationHistory, PendingInputSequence, ScreenWaiter, advance_input_sequence, apply_signal,
+        evaluate_screen_waiters, fail_screen_waiters, handle_control_request,
     },
     input::{apply_input, apply_resize},
     model::{RecordOptions, RecordOutcome, RuntimeMessage, SpawnedCommand, TerminalGeometry},
@@ -58,11 +64,31 @@ const DESCENDANT_GRACE_PERIOD: Duration = Duration::from_millis(250);
 const DESCENDANT_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 const HOST_SIGNAL_GRACE_PERIOD: Duration = Duration::from_secs(2);
 const MUTATION_CACHE_CAPACITY: usize = 256;
+const SESSION_FAILURE_FORMAT: &str = "termtrace-session-failure";
+const SESSION_FAILURE_VERSION: u32 = 1;
+const SESSION_FAILURE_NAME: &str = "failure.json";
+#[cfg(test)]
+thread_local! {
+    static POISON_FATAL_APPEND: Cell<bool> = const { Cell::new(false) };
+}
+
+#[derive(serde::Serialize)]
+struct IncompleteSessionDiagnostic<'diagnostic> {
+    format: &'static str,
+    version: u32,
+    lifecycle: &'static str,
+    session_id: Uuid,
+    session_manifest_hash: &'diagnostic str,
+    failure: &'diagnostic SessionFailure,
+    closure_failure: Option<&'diagnostic SessionFailure>,
+    durable_boundary: Option<CanonicalBoundary>,
+}
 
 struct RuntimeOutcome {
     status: ExitStatus,
     output_bytes: u64,
     resource_limit: Option<ResourceLimitOutcome>,
+    final_presented: SemanticState,
 }
 
 struct RuntimeProgress {
@@ -80,9 +106,21 @@ struct RuntimeProgress {
 /// created, PTY setup or child execution fails, output cannot be mirrored, or
 /// the canonical event log cannot be durably committed.
 pub fn record(options: &RecordOptions) -> Result<RecordOutcome> {
-    let stdout = io::stdout();
+    let mut stdout = io::stdout();
+    return record_with_output(options, &mut stdout);
+}
+
+/// Record a command while sending mirrored PTY bytes to a caller-provided writer.
+///
+/// # Errors
+///
+/// Returns the same errors as [`record`], including failures from `output`.
+pub fn record_with_output(
+    options: &RecordOptions,
+    output: &mut impl Write,
+) -> Result<RecordOutcome> {
     let mut terminal_mode = RawTerminalGuard::enter(options.forward_stdin)?;
-    let result = record_to(options, &mut stdout.lock());
+    let result = record_to(options, output);
     return finish_with_cleanup(result, terminal_mode.restore());
 }
 
@@ -105,6 +143,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     }
     let clock = SessionClock::now()?;
     let session_id = Uuid::now_v7();
+    let control_socket = control_socket_name(session_id);
     let session_manifest_hash = write_session_manifest(
         options,
         &working_directory,
@@ -124,6 +163,14 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         &options.term,
     )
     .with_colors(options.colors.clone());
+    let header_bytes = serde_json::to_vec(&header).map_err(|source| {
+        return Error::InvalidJson {
+            path: options.output_directory.join("events.jsonl"),
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
+    let event_header_hash = blake3::hash(&header_bytes).to_hex().to_string();
     let event_log_path = options.output_directory.join("events.jsonl");
     let mut event_log = EventLogWriter::create_with_policy(
         &event_log_path,
@@ -132,19 +179,48 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         options.durability_policy.clone(),
     )?;
 
-    let mut spawned = spawn_command(
+    let mut spawned = match spawn_command(
         options,
         &working_directory,
         pty_size,
         &effective_environment,
-    )?;
+    ) {
+        Ok(spawned) => spawned,
+        Err(error) => {
+            let failure = SessionFailure {
+                code: recorder_failure_code(&error).to_owned(),
+                message: error.to_string(),
+            };
+            let closure_result = close_failed_recording(
+                options,
+                &mut event_log,
+                session_id,
+                &session_manifest_hash,
+                &event_header_hash,
+                &failure,
+            );
+            return finish_with_cleanup(Err(error), closure_result);
+        }
+    };
     if let Err(error) = event_log.append(Event::Lifecycle {
         lifecycle_kind: LifecycleKind::Spawned,
         pid: spawned.pid,
     }) {
         terminate_process_group(spawned.pid);
         let _ = spawned.child.kill();
-        return Err(error);
+        let failure = SessionFailure {
+            code: recorder_failure_code(&error).to_owned(),
+            message: error.to_string(),
+        };
+        let closure_result = close_failed_recording(
+            options,
+            &mut event_log,
+            session_id,
+            &session_manifest_hash,
+            &event_header_hash,
+            &failure,
+        );
+        return finish_with_cleanup(Err(error), closure_result);
     }
     let runtime = match consume_runtime(
         &mut spawned,
@@ -154,6 +230,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         options.continue_after_output_mirror_closes,
         TerminalGeometry::from(pty_size),
         &options.output_directory,
+        &control_socket,
         &options.colors,
         &options.resource_limits,
     ) {
@@ -161,47 +238,90 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         Err(error) => {
             terminate_process_group(spawned.pid);
             let _ = spawned.child.kill();
-            return Err(error);
+            let failure = SessionFailure {
+                code: recorder_failure_code(&error).to_owned(),
+                message: error.to_string(),
+            };
+            let closure_result = close_failed_recording(
+                options,
+                &mut event_log,
+                session_id,
+                &session_manifest_hash,
+                &event_header_hash,
+                &failure,
+            );
+            return finish_with_cleanup(Err(error), closure_result);
         }
     };
     let exit_code = i32::try_from(runtime.status.exit_code()).ok();
     let signal_name = runtime.status.signal().map(str::to_owned);
-    let terminal_event_seq = event_log.append(Event::Exit {
+    let terminal_event_seq = match event_log.append(Event::Exit {
         code: exit_code,
         signal: None,
         signal_name: signal_name.clone(),
-    })?;
-    let header_bytes = serde_json::to_vec(&header).map_err(|source| {
-        return Error::InvalidJson {
-            path: event_log_path.clone(),
-            json_path: "$".to_owned(),
-            source,
-        };
-    })?;
-    write_session_completion(
-        options,
-        &SessionCompletion {
-            format: SESSION_COMPLETION_FORMAT.to_owned(),
-            version: SESSION_COMPLETION_VERSION,
-            validation_version: COMPLETION_VALIDATION_VERSION,
-            session_id,
-            session_manifest_hash,
-            event_header_hash: blake3::hash(&header_bytes).to_hex().to_string(),
-            exit_code,
-            signal_name: signal_name.clone(),
-            output_bytes: runtime.output_bytes,
-            final_event_hash: event_log.current_hash(),
-            event_count: event_log.next_seq(),
-            terminal_event_seq,
-            durability: event_log.durability_record(),
-            resource_limit: runtime.resource_limit,
-        },
-    )?;
+    }) {
+        Ok(terminal_event_seq) => terminal_event_seq,
+        Err(error) => {
+            let failure = canonical_log_failure(&error);
+            let diagnostic_result = write_incomplete_session_diagnostic(
+                options,
+                session_id,
+                &session_manifest_hash,
+                &failure,
+                None,
+                Some(event_log.durable_boundary()),
+            );
+            return finish_with_cleanup(Err(error), diagnostic_result);
+        }
+    };
+
+    let completion = SessionCompletion {
+        format: SESSION_COMPLETION_FORMAT.to_owned(),
+        version: SESSION_COMPLETION_VERSION,
+        validation_version: COMPLETION_VALIDATION_VERSION,
+        session_id,
+        session_manifest_hash,
+        event_header_hash,
+        exit_code,
+        signal_name: signal_name.clone(),
+        output_bytes: runtime.output_bytes,
+        final_event_hash: event_log.current_hash(),
+        event_count: event_log.next_seq(),
+        terminal_event_seq,
+        durability: event_log.durability_record(),
+        resource_limit: runtime.resource_limit.clone(),
+        failure: None,
+    };
+    publish_session_completion(options, &completion)?;
+    match semantic_state_hash(&runtime.final_presented) {
+        Ok(final_state_hash) => {
+            let endpoint = EndpointInspection {
+                state: runtime.final_presented,
+                state_hash: final_state_hash,
+                event_seq: None,
+                event_byte_offset: None,
+                monotonic_ns: None,
+                presented: true,
+            };
+            if let Err(error) = publish_endpoint_checkpoint(
+                &options.output_directory,
+                &StatePoint::LatestPresented,
+                &completion,
+                &endpoint,
+            ) {
+                tracing::warn!(%error, "could not publish completion endpoint checkpoint");
+            }
+        }
+        Err(error) => {
+            tracing::warn!(%error, "could not hash completion endpoint checkpoint");
+        }
+    }
 
     return Ok(RecordOutcome {
         exit_code,
         signal_name,
         output_bytes: runtime.output_bytes,
+        resource_limit: runtime.resource_limit,
         event_log: event_log_path,
     });
 }
@@ -251,7 +371,7 @@ fn write_session_manifest(
         operating_system: OS.to_owned(),
         architecture: ARCH.to_owned(),
         event_log: "events.jsonl".to_owned(),
-        control_socket: CONTROL_SOCKET_NAME.to_owned(),
+        control_socket: control_socket_name(session_id),
         request_journal: MUTATION_JOURNAL_NAME.to_owned(),
         contains_sensitive_terminal_data: true,
         durability_policy: options.durability_policy.clone(),
@@ -263,11 +383,128 @@ fn write_session_manifest(
     return Ok(hash);
 }
 
-fn write_session_completion(options: &RecordOptions, completion: &SessionCompletion) -> Result<()> {
+fn publish_session_completion(
+    options: &RecordOptions,
+    completion: &SessionCompletion,
+) -> Result<()> {
+    let validation_result = (|| {
+        let log = EventLog::read(options.output_directory.join("events.jsonl"))?;
+        return validate_completion_candidate(&options.output_directory, &log, completion);
+    })();
+    if let Err(error) = validation_result {
+        let validation_failure = SessionFailure {
+            code: "completion_validation_failed".to_owned(),
+            message: error.to_string(),
+        };
+        let failure = completion.failure.as_ref().unwrap_or(&validation_failure);
+        let closure_failure = completion
+            .failure
+            .as_ref()
+            .map(|_| return &validation_failure);
+        let diagnostic_result = write_incomplete_session_diagnostic(
+            options,
+            completion.session_id,
+            &completion.session_manifest_hash,
+            failure,
+            closure_failure,
+            None,
+        );
+        return finish_with_cleanup(Err(error), diagnostic_result);
+    }
     return write_json_secure(
         &options.output_directory.join("completion.json"),
-        &completion,
+        completion,
     );
+}
+
+fn close_failed_recording(
+    options: &RecordOptions,
+    event_log: &mut EventLogWriter,
+    session_id: Uuid,
+    session_manifest_hash: &str,
+    event_header_hash: &str,
+    failure: &SessionFailure,
+) -> Result<()> {
+    let terminal_event_seq = match event_log
+        .append(Event::HostError {
+            code: failure.code.clone(),
+            message: failure.message.clone(),
+        })
+        .and_then(|_| {
+            #[cfg(test)]
+            POISON_FATAL_APPEND.with(|poison| {
+                if poison.replace(false) {
+                    event_log.poison_for_test();
+                }
+            });
+            return event_log.append(Event::Exit {
+                code: None,
+                signal: None,
+                signal_name: None,
+            });
+        }) {
+        Ok(terminal_event_seq) => terminal_event_seq,
+        Err(error) => {
+            let closure_failure = canonical_log_failure(&error);
+            let diagnostic_result = write_incomplete_session_diagnostic(
+                options,
+                session_id,
+                session_manifest_hash,
+                failure,
+                Some(&closure_failure),
+                Some(event_log.durable_boundary()),
+            );
+            return finish_with_cleanup(Err(error), diagnostic_result);
+        }
+    };
+    let completion = SessionCompletion {
+        format: SESSION_COMPLETION_FORMAT.to_owned(),
+        version: SESSION_COMPLETION_VERSION,
+        validation_version: COMPLETION_VALIDATION_VERSION,
+        session_id,
+        session_manifest_hash: session_manifest_hash.to_owned(),
+        event_header_hash: event_header_hash.to_owned(),
+        exit_code: None,
+        signal_name: None,
+        output_bytes: event_log.observed_boundary().output_bytes,
+        final_event_hash: event_log.current_hash(),
+        event_count: event_log.next_seq(),
+        terminal_event_seq,
+        durability: event_log.durability_record(),
+        resource_limit: None,
+        failure: Some(failure.clone()),
+    };
+    return publish_session_completion(options, &completion);
+}
+
+fn write_incomplete_session_diagnostic(
+    options: &RecordOptions,
+    session_id: Uuid,
+    session_manifest_hash: &str,
+    failure: &SessionFailure,
+    closure_failure: Option<&SessionFailure>,
+    durable_boundary: Option<CanonicalBoundary>,
+) -> Result<()> {
+    return write_json_secure(
+        &options.output_directory.join(SESSION_FAILURE_NAME),
+        &IncompleteSessionDiagnostic {
+            format: SESSION_FAILURE_FORMAT,
+            version: SESSION_FAILURE_VERSION,
+            lifecycle: "incomplete",
+            session_id,
+            session_manifest_hash,
+            failure,
+            closure_failure,
+            durable_boundary,
+        },
+    );
+}
+
+fn canonical_log_failure(error: &Error) -> SessionFailure {
+    return SessionFailure {
+        code: "canonical_log_failed".to_owned(),
+        message: error.to_string(),
+    };
 }
 
 fn write_json_secure(path: &Path, value: &impl serde::Serialize) -> Result<()> {
@@ -279,6 +516,25 @@ fn write_json_secure(path: &Path, value: &impl serde::Serialize) -> Result<()> {
         };
     })?;
     return write_secure(path, &encoded);
+}
+
+fn recorder_failure_code(error: &Error) -> &'static str {
+    return match error {
+        Error::EventLogPoisoned { .. } | Error::InvalidEventLog { .. } => "canonical_log_failed",
+        Error::Filesystem { path, .. }
+            if path
+                .file_name()
+                .is_some_and(|name| return name == OsStr::new("events.jsonl")) =>
+        {
+            "canonical_log_failed"
+        }
+        Error::TerminalOperation { operation, .. } if *operation == "spawn terminal command" => {
+            "spawn_failed"
+        }
+        Error::TerminalOperation { operation, .. } if operation.contains("PTY") => "pty_failed",
+        Error::GhosttyVt { .. } => "semantic_invariant_failed",
+        _ => "recorder_actor_failed",
+    };
 }
 
 fn validate_options(options: &RecordOptions) -> Result<PtySize> {
@@ -322,6 +578,7 @@ fn consume_runtime(
     continue_after_output_mirror_closes: bool,
     initial_geometry: TerminalGeometry,
     session_directory: &Path,
+    control_socket: &str,
     colors: &TerminalColors,
     resource_limits: &ResourceLimits,
 ) -> Result<RuntimeOutcome> {
@@ -345,13 +602,14 @@ fn consume_runtime(
     let journal = MutationJournal::create(session_directory)?;
     let mut mutation_history = MutationHistory::new(journal, MUTATION_CACHE_CAPACITY);
     let mut screen_waiters = Vec::new();
+    let mut pending_input_sequence: Option<PendingInputSequence> = None;
     let reader = replace(&mut spawned.reader, Box::new(io::empty()));
     let workers = RuntimeWorkers::start(
         reader,
         &sender,
         forward_stdin,
         initial_geometry,
-        session_directory,
+        control_socket,
     )?;
     drop(sender);
 
@@ -367,20 +625,34 @@ fn consume_runtime(
     let mut resource_kill_deadline: Option<Instant> = None;
     let mut host_signal_kill_deadline: Option<Instant> = None;
     let result = (|| {
-        while !progress.output_closed || exit_status.is_none() {
-            match receiver.recv_timeout(Duration::from_millis(10)) {
-                Ok(message) => process_runtime_message(
-                    message,
-                    spawned,
-                    event_log,
-                    output,
-                    continue_after_output_mirror_closes,
-                    &mut progress,
-                    &mut mutation_history,
-                    &mut live_terminal,
-                    &mut screen_waiters,
-                    &mut host_signal_kill_deadline,
-                )?,
+        while !progress.output_closed || exit_status.is_none() || pending_input_sequence.is_some() {
+            let receive_timeout =
+                pending_input_sequence
+                    .as_ref()
+                    .map_or(Duration::from_millis(10), |pending| {
+                        return pending
+                            .next_deadline()
+                            .saturating_duration_since(Instant::now())
+                            .min(Duration::from_millis(10));
+                    });
+            let mut received_output = false;
+            match receiver.recv_timeout(receive_timeout) {
+                Ok(message) => {
+                    received_output = matches!(&message, RuntimeMessage::Output(_));
+                    process_runtime_message(
+                        message,
+                        spawned,
+                        event_log,
+                        output,
+                        continue_after_output_mirror_closes,
+                        &mut progress,
+                        &mut mutation_history,
+                        &mut live_terminal,
+                        &mut screen_waiters,
+                        &mut pending_input_sequence,
+                        &mut host_signal_kill_deadline,
+                    )?;
+                }
                 Err(RecvTimeoutError::Disconnected) if !progress.output_closed => {
                     return Err(terminal_error(
                         "receive runtime event",
@@ -389,6 +661,15 @@ fn consume_runtime(
                 }
                 Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => {}
             }
+            advance_input_sequence(
+                spawned,
+                event_log,
+                &mut mutation_history,
+                &mut live_terminal,
+                &mut pending_input_sequence,
+                exit_status.is_some(),
+                progress.output_closed,
+            )?;
             event_log.flush_due()?;
             evaluate_screen_waiters(
                 event_log,
@@ -433,6 +714,9 @@ fn consume_runtime(
                 if exit_status.is_some() && !progress.output_closed {
                     drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
                 }
+            }
+            if received_output && exit_status.is_some() && !progress.output_closed {
+                drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
             }
             if exit_status.is_some() && !progress.output_closed {
                 evaluate_screen_waiters(
@@ -508,6 +792,7 @@ fn consume_runtime(
         status,
         output_bytes: progress.output_bytes,
         resource_limit: progress.resource_limit,
+        final_presented: live_terminal.presented,
     });
 }
 
@@ -521,6 +806,7 @@ fn process_runtime_message(
     mutation_history: &mut MutationHistory,
     live: &mut LiveTerminal,
     screen_waiters: &mut Vec<ScreenWaiter>,
+    pending_input_sequence: &mut Option<PendingInputSequence>,
     host_signal_kill_deadline: &mut Option<Instant>,
 ) -> Result<()> {
     match message {
@@ -581,6 +867,8 @@ fn process_runtime_message(
                 InputKind::Raw,
                 InputDescriptor::Raw,
                 None,
+                Some("raw".to_owned()),
+                None,
                 &data,
             )?;
         }
@@ -621,6 +909,7 @@ fn process_runtime_message(
                 mutation_history,
                 live,
                 screen_waiters,
+                pending_input_sequence,
             )?;
         }
         RuntimeMessage::ControlServerFailed(reason) => {
@@ -656,14 +945,17 @@ mod tests {
     use crate::{
         control::{
             ActorBoundaries, CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest,
-            ControlResponse, ControlResult,
+            ControlResponse, ControlResult, control_socket_address, control_socket_name,
         },
         environment::{EnvironmentBase, EnvironmentSpec},
         event::Event,
         event_log::{CanonicalBoundary, DurabilityPolicy, EventLog},
         provenance::ProvenancePolicy,
         request_journal::guarded_command_hash,
-        session::{GeometryProvenance, SessionCompletion, SessionManifest, validate_completed_log},
+        session::{
+            GeometryProvenance, SessionCompletion, SessionManifest, read_completion,
+            validate_completed_log,
+        },
     };
 
     fn cached_test_response(request_id: Uuid, next_event_seq: u64) -> ControlResponse {
@@ -710,6 +1002,141 @@ mod tests {
             provenance_policy: ProvenancePolicy::default(),
             resource_limits: ResourceLimits::default(),
         };
+    }
+
+    struct FailingOutput;
+
+    impl Write for FailingOutput {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                format!("rejected {} output bytes", buf.len()),
+            ));
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            return Ok(());
+        }
+    }
+
+    #[test]
+    fn fatal_actor_exit_writes_durable_failure_completion() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let session = temporary.path().join("actor-failure");
+        let options = isolated_options(
+            session.clone(),
+            vec![
+                OsString::from("/bin/sh"),
+                OsString::from("-c"),
+                OsString::from("printf fatal-output"),
+            ],
+        );
+
+        let result = record_to(&options, &mut FailingOutput);
+        assert!(result.is_err(), "failing output sink must stop the actor");
+        let completion = read_completion(&session).expect("failure completion");
+        let failure = completion.failure.as_ref().expect("recorder failure");
+        assert_eq!(failure.code, "recorder_actor_failed");
+        assert!(completion.durability.final_sync_completed);
+        assert!(!session.join(SESSION_FAILURE_NAME).exists());
+        let log = EventLog::read(session.join("events.jsonl")).expect("failure event log");
+        assert!(matches!(
+            log.events.last().map(|record| return &record.event),
+            Some(Event::Exit {
+                code: None,
+                signal_name: None,
+                ..
+            })
+        ));
+        assert!(log.events.iter().any(|record| matches!(
+            &record.event,
+            Event::HostError { code, .. } if code == "recorder_actor_failed"
+        )));
+        validate_completed_log(&session, &log).expect("valid durable failure completion");
+    }
+    #[test]
+    fn poisoned_terminal_exit_append_preserves_incomplete_failure_without_completion() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let session = temporary.path().join("poisoned-fatal-append");
+        let options = isolated_options(
+            session.clone(),
+            vec![
+                OsString::from("/bin/sh"),
+                OsString::from("-c"),
+                OsString::from("printf fatal-output"),
+            ],
+        );
+        POISON_FATAL_APPEND.with(|poison| poison.set(true));
+
+        let result = record_to(&options, &mut FailingOutput);
+
+        assert!(result.is_err(), "poisoned append must fail recording");
+        assert!(
+            !session.join("completion.json").exists(),
+            "an unclosed canonical log must not have completion"
+        );
+        let diagnostic: serde_json::Value = serde_json::from_slice(
+            &fs_err::read(session.join(SESSION_FAILURE_NAME)).expect("failure diagnostic"),
+        )
+        .expect("failure diagnostic JSON");
+        assert_eq!(diagnostic["lifecycle"], "incomplete");
+        assert_eq!(diagnostic["failure"]["code"], "recorder_actor_failed");
+        assert_eq!(
+            diagnostic["closure_failure"]["code"],
+            "canonical_log_failed"
+        );
+        assert!(diagnostic["durable_boundary"]["event_hash"].is_string());
+        let log = EventLog::read(session.join("events.jsonl")).expect("recoverable event prefix");
+        assert!(matches!(
+            log.events.last().map(|record| return &record.event),
+            Some(Event::HostError { code, .. }) if code == "recorder_actor_failed"
+        ));
+        assert_eq!(
+            diagnostic["durable_boundary"]["next_event_seq"].as_u64(),
+            Some(u64::try_from(log.events.len()).expect("event count"))
+        );
+        assert!(matches!(
+            validate_completed_log(&session, &log),
+            Err(Error::SessionIncomplete { .. })
+        ));
+    }
+
+    #[test]
+    fn spawn_failure_after_manifest_creation_writes_valid_fatal_closure() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let session = temporary.path().join("spawn-failure");
+        let options = isolated_options(
+            session.clone(),
+            vec![OsString::from("/definitely/missing/termtrace-command")],
+        );
+
+        let result = record_to(&options, &mut Vec::new());
+
+        assert!(result.is_err(), "missing command must fail to spawn");
+        assert!(session.join("session.json").is_file());
+        let completion = read_completion(&session).expect("spawn failure completion");
+        assert_eq!(
+            completion
+                .failure
+                .as_ref()
+                .map(|failure| return failure.code.as_str()),
+            Some("spawn_failed")
+        );
+        let log = EventLog::read(session.join("events.jsonl")).expect("spawn failure event log");
+        assert!(matches!(
+            log.events.last().map(|record| return &record.event),
+            Some(Event::Exit {
+                code: None,
+                signal_name: None,
+                ..
+            })
+        ));
+        assert!(log.events.iter().any(|record| matches!(
+            &record.event,
+            Event::HostError { code, .. } if code == "spawn_failed"
+        )));
+        validate_completed_log(&session, &log).expect("valid spawn failure completion");
+        assert!(!session.join(SESSION_FAILURE_NAME).exists());
     }
 
     #[test]
@@ -819,6 +1246,33 @@ mod tests {
             );
         }));
         validate_completed_log(&session, &log).expect("valid completed budget evidence");
+    }
+
+    #[test]
+    fn completed_output_burst_refreshes_the_pty_drain_deadline() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let session = temporary.path().join("completed-burst");
+        let options = isolated_options(
+            session.clone(),
+            vec![
+                OsString::from("/usr/bin/python3"),
+                OsString::from("-c"),
+                OsString::from(
+                    "import os; data=b''.join(b'\\x1b[2J\\x1b[HSTATE-%04d\\x1b[K\\x1b[?2026h\\x1b[?2026l'%i for i in range(1500)); os.write(1,data)",
+                ),
+            ],
+        );
+
+        let mut mirrored_output: Vec<u8> = Vec::new();
+        let outcome = record_to(&options, &mut mirrored_output).expect("completed burst recording");
+        assert_eq!(outcome.exit_code, Some(0));
+        assert!(mirrored_output.len() > 24_000);
+        let completion = read_completion(&session).expect("completed burst completion");
+        assert!(completion.failure.is_none());
+        assert_eq!(
+            completion.output_bytes,
+            u64::try_from(mirrored_output.len()).expect("output length")
+        );
     }
 
     #[test]
@@ -1227,12 +1681,12 @@ mod tests {
 
     #[test]
     fn control_shutdown_cancels_an_inflight_request() {
-        let temporary = TempDir::new().expect("temporary directory");
         let (sender, receiver) = mpsc::sync_channel(1);
-        let worker = spawn_control_server(temporary.path(), sender).expect("control server");
-        let socket = temporary.path().join(CONTROL_SOCKET_NAME);
+        let socket_name = control_socket_name(Uuid::now_v7());
+        let worker = spawn_control_server(&socket_name, sender).expect("control server");
+        let socket = control_socket_address(&socket_name).expect("control socket address");
         let client = thread::spawn(move || {
-            let mut stream = UnixStream::connect(socket).expect("connect control client");
+            let mut stream = UnixStream::connect_addr(&socket).expect("connect control client");
             let request = ControlRequest::new(ControlCommand::Ping);
             serde_json::to_writer(&mut stream, &request).expect("encode request");
             stream.write_all(b"\n").expect("terminate request");
@@ -1252,13 +1706,13 @@ mod tests {
 
     #[test]
     fn control_server_accepts_a_second_request_while_the_first_is_pending() {
-        let temporary = TempDir::new().expect("temporary directory");
         let (sender, receiver) = mpsc::sync_channel(1);
-        let worker = spawn_control_server(temporary.path(), sender).expect("control server");
-        let socket = temporary.path().join(CONTROL_SOCKET_NAME);
+        let socket_name = control_socket_name(Uuid::now_v7());
+        let worker = spawn_control_server(&socket_name, sender).expect("control server");
+        let socket = control_socket_address(&socket_name).expect("control socket address");
         let first_socket = socket.clone();
         let first_client = thread::spawn(move || {
-            let mut stream = UnixStream::connect(first_socket).expect("connect first client");
+            let mut stream = UnixStream::connect_addr(&first_socket).expect("connect first client");
             let request = ControlRequest::new(ControlCommand::Ping);
             serde_json::to_writer(&mut stream, &request).expect("encode first request");
             stream.write_all(b"\n").expect("terminate first request");
@@ -1272,7 +1726,7 @@ mod tests {
             .expect("first inflight request");
 
         let second_client = thread::spawn(move || {
-            let mut stream = UnixStream::connect(socket).expect("connect second client");
+            let mut stream = UnixStream::connect_addr(&socket).expect("connect second client");
             let request = ControlRequest::new(ControlCommand::Ping);
             serde_json::to_writer(&mut stream, &request).expect("encode second request");
             stream.write_all(b"\n").expect("terminate second request");

@@ -3,8 +3,8 @@
 use std::{
     collections::HashSet,
     io::{Error as IoError, ErrorKind, Write},
-    thread,
-    time::Duration,
+    mem::take,
+    time::{Duration, Instant},
 };
 
 use portable_pty::MasterPty;
@@ -15,7 +15,7 @@ use crate::{
     control::{ControlData, InputSequenceAtom, InputSequenceAtomOutcome},
     event::{ByteString, Event, InputDescriptor, InputKind, InputSource, OperationStatus},
     event_log::EventLogWriter,
-    ghostty_vt::{GhosttyVt, MouseButton, NamedKey},
+    ghostty_vt::{GhosttyVt, KeyModifiers, MouseButton, NamedKey},
 };
 
 use super::{
@@ -36,7 +36,9 @@ struct PreparedSequenceAtom {
     operation_id: Uuid,
     input_kind: InputKind,
     descriptor: InputDescriptor,
-    intent: Option<String>,
+    semantic_input: Option<String>,
+    terminal_modes_hash: String,
+    caller_intent: Option<String>,
     data: Vec<u8>,
 }
 pub(super) fn semantic_key_name(key: NamedKey) -> String {
@@ -58,6 +60,25 @@ pub(super) fn semantic_key_name(key: NamedKey) -> String {
         NamedKey::Function(number) => format!("f{number}"),
         NamedKey::Letter(letter) => letter.to_ascii_lowercase().to_string(),
     };
+}
+
+pub(super) fn semantic_key_input(key: NamedKey, modifiers: KeyModifiers) -> String {
+    let mut parts: Vec<&str> = Vec::with_capacity(5);
+    if modifiers.control {
+        parts.push("ctrl");
+    }
+    if modifiers.shift {
+        parts.push("shift");
+    }
+    if modifiers.alt {
+        parts.push("alt");
+    }
+    if modifiers.super_key {
+        parts.push("super");
+    }
+    let key = semantic_key_name(key);
+    parts.push(&key);
+    return parts.join("+");
 }
 
 pub(super) fn mouse_button_name(button: MouseButton) -> &'static str {
@@ -110,7 +131,9 @@ pub(super) fn apply_input(
     source: InputSource,
     input_kind: InputKind,
     descriptor: InputDescriptor,
-    intent: Option<String>,
+    terminal_modes_hash: Option<String>,
+    semantic_input: Option<String>,
+    caller_intent: Option<String>,
     data: &[u8],
 ) -> Result<InputApplication> {
     let intent_event_seq = event_log.append(Event::InputIntent {
@@ -119,7 +142,9 @@ pub(super) fn apply_input(
         input_kind,
         descriptor,
         data: ByteString::from(data),
-        intent,
+        terminal_modes_hash,
+        semantic_input,
+        caller_intent,
     })?;
     let (bytes_written, write_error) = write_input(writer, data);
     let status = if write_error.is_some() {
@@ -160,15 +185,154 @@ pub(super) fn apply_input(
     });
 }
 
-pub(super) fn apply_input_sequence(
-    writer: &mut dyn Write,
-    event_log: &mut EventLogWriter,
+pub(super) struct InputSequenceExecution {
     sequence_id: Uuid,
-    atoms: &[InputSequenceAtom],
+    atoms: Vec<InputSequenceAtom>,
     pace_ns: u64,
     include_atom_outcomes: bool,
-    semantic: &mut GhosttyVt,
-) -> Result<ControlData> {
+    next_atom_index: usize,
+    next_deadline: Instant,
+    outcomes: Vec<InputSequenceAtomOutcome>,
+    total_bytes_written: u64,
+    first_intent_event_seq: Option<u64>,
+    last_result_event_seq: Option<u64>,
+}
+
+impl InputSequenceExecution {
+    pub(super) fn new(
+        sequence_id: Uuid,
+        atoms: &[InputSequenceAtom],
+        pace_ns: u64,
+        include_atom_outcomes: bool,
+    ) -> Result<Self> {
+        validate_input_sequence(atoms, pace_ns)?;
+        return Ok(Self {
+            sequence_id,
+            atoms: atoms.to_vec(),
+            pace_ns,
+            include_atom_outcomes,
+            next_atom_index: 0,
+            next_deadline: Instant::now(),
+            outcomes: Vec::with_capacity(if include_atom_outcomes {
+                atoms.len()
+            } else {
+                0
+            }),
+            total_bytes_written: 0,
+            first_intent_event_seq: None,
+            last_result_event_seq: None,
+        });
+    }
+
+    pub(super) fn next_deadline(&self) -> Instant {
+        return self.next_deadline;
+    }
+
+    pub(super) fn advance(
+        &mut self,
+        writer: &mut dyn Write,
+        event_log: &mut EventLogWriter,
+        semantic: &mut GhosttyVt,
+    ) -> Result<Option<ControlData>> {
+        let source_atom = self.atoms.get(self.next_atom_index).ok_or_else(|| {
+            return terminal_error(
+                "advance input sequence",
+                "next atom index is outside the validated sequence",
+            );
+        })?;
+        let atom = match prepare_input_sequence_atom(source_atom, semantic) {
+            Ok(atom) => atom,
+            Err(error) if self.next_atom_index > 0 => {
+                return Err(Error::InputSequenceIncomplete {
+                    sequence_id: self.sequence_id,
+                    failed_atom_index: u32::try_from(self.next_atom_index).unwrap_or(u32::MAX),
+                    failed_operation_id: input_sequence_operation_id(source_atom),
+                    atoms_applied: u32::try_from(self.next_atom_index).unwrap_or(u32::MAX),
+                    bytes_written: self.total_bytes_written,
+                    failed_atom_bytes_written: 0,
+                    first_intent_event_seq: self
+                        .first_intent_event_seq
+                        .unwrap_or_else(|| return event_log.next_seq()),
+                    last_result_event_seq: self
+                        .last_result_event_seq
+                        .unwrap_or_else(|| return event_log.next_seq()),
+                    reason: format!("atom encoding failed before PTY delivery: {error}"),
+                });
+            }
+            Err(error) => return Err(error),
+        };
+        let applied = match apply_input(
+            writer,
+            event_log,
+            atom.operation_id,
+            InputSource::Agent,
+            atom.input_kind,
+            atom.descriptor,
+            Some(atom.terminal_modes_hash),
+            atom.semantic_input,
+            atom.caller_intent,
+            &atom.data,
+        ) {
+            Ok(applied) => applied,
+            Err(Error::InputWriteFailed {
+                operation_id,
+                bytes_written,
+                intent_event_seq,
+                result_event_seq,
+                reason,
+            }) => {
+                return Err(Error::InputSequenceIncomplete {
+                    sequence_id: self.sequence_id,
+                    failed_atom_index: u32::try_from(self.next_atom_index).unwrap_or(u32::MAX),
+                    failed_operation_id: operation_id,
+                    atoms_applied: u32::try_from(self.next_atom_index).unwrap_or(u32::MAX),
+                    bytes_written: self.total_bytes_written.saturating_add(bytes_written),
+                    failed_atom_bytes_written: bytes_written,
+                    first_intent_event_seq: self.first_intent_event_seq.unwrap_or(intent_event_seq),
+                    last_result_event_seq: result_event_seq,
+                    reason,
+                });
+            }
+            Err(error) => return Err(error),
+        };
+        self.first_intent_event_seq
+            .get_or_insert(applied.intent_event_seq);
+        self.last_result_event_seq = Some(applied.result_event_seq);
+        self.total_bytes_written = self
+            .total_bytes_written
+            .saturating_add(applied.bytes_written);
+        if self.include_atom_outcomes {
+            self.outcomes.push(InputSequenceAtomOutcome {
+                operation_id: atom.operation_id,
+                input_kind: atom.input_kind,
+                bytes_written: applied.bytes_written,
+                intent_event_seq: applied.intent_event_seq,
+                result_event_seq: applied.result_event_seq,
+            });
+        }
+        self.next_atom_index = self.next_atom_index.saturating_add(1);
+        if self.next_atom_index < self.atoms.len() {
+            self.next_deadline = Instant::now() + Duration::from_nanos(self.pace_ns);
+            return Ok(None);
+        }
+        return Ok(Some(ControlData::InputSequenceApplied {
+            sequence_id: self.sequence_id,
+            atom_count: u32::try_from(self.atoms.len()).unwrap_or(u32::MAX),
+            bytes_written: self.total_bytes_written,
+            first_intent_event_seq: self
+                .first_intent_event_seq
+                .unwrap_or_else(|| return event_log.next_seq()),
+            last_result_event_seq: self
+                .last_result_event_seq
+                .unwrap_or_else(|| return event_log.next_seq()),
+            pace_ns: self.pace_ns,
+            atoms: take(&mut self.outcomes),
+            boundaries: actor_boundaries(event_log),
+        }));
+    }
+}
+
+fn validate_input_sequence(atoms: &[InputSequenceAtom], pace_ns: u64) -> Result<()> {
     if atoms.is_empty() || atoms.len() > 4096 {
         return Err(control_rejected(
             "invalid_input_sequence",
@@ -188,168 +352,140 @@ pub(super) fn apply_input_sequence(
             "input sequence pacing may not exceed 60 seconds in total",
         ));
     }
-    let prepared = prepare_input_sequence(atoms, semantic)?;
-    let mut outcomes = Vec::with_capacity(if include_atom_outcomes {
-        prepared.len()
-    } else {
-        0
-    });
-    let mut total_bytes_written = 0_u64;
-    let mut first_intent_event_seq = None;
-    let mut last_result_event_seq = None;
-    for (index, atom) in prepared.into_iter().enumerate() {
-        if index != 0 && pace_ns != 0 {
-            thread::sleep(Duration::from_nanos(pace_ns));
-        }
-        let applied = match apply_input(
-            writer,
-            event_log,
-            atom.operation_id,
-            InputSource::Agent,
-            atom.input_kind,
-            atom.descriptor,
-            atom.intent,
-            &atom.data,
-        ) {
-            Ok(applied) => applied,
-            Err(Error::InputWriteFailed {
-                operation_id,
-                bytes_written,
-                intent_event_seq,
-                result_event_seq,
-                reason,
-            }) => {
-                let first_intent_event_seq = first_intent_event_seq.unwrap_or(intent_event_seq);
-                return Err(Error::InputSequenceIncomplete {
-                    sequence_id,
-                    failed_atom_index: u32::try_from(index).unwrap_or(u32::MAX),
-                    failed_operation_id: operation_id,
-                    atoms_applied: u32::try_from(index).unwrap_or(u32::MAX),
-                    bytes_written: total_bytes_written.saturating_add(bytes_written),
-                    failed_atom_bytes_written: bytes_written,
-                    first_intent_event_seq,
-                    last_result_event_seq: result_event_seq,
-                    reason,
-                });
-            }
-            Err(error) => return Err(error),
-        };
-        first_intent_event_seq.get_or_insert(applied.intent_event_seq);
-        last_result_event_seq = Some(applied.result_event_seq);
-        total_bytes_written = total_bytes_written.saturating_add(applied.bytes_written);
-        if include_atom_outcomes {
-            outcomes.push(InputSequenceAtomOutcome {
-                operation_id: atom.operation_id,
-                input_kind: atom.input_kind,
-                bytes_written: applied.bytes_written,
-                intent_event_seq: applied.intent_event_seq,
-                result_event_seq: applied.result_event_seq,
-            });
-        }
-    }
-    return Ok(ControlData::InputSequenceApplied {
-        sequence_id,
-        atom_count: u32::try_from(atoms.len()).unwrap_or(u32::MAX),
-        bytes_written: total_bytes_written,
-        first_intent_event_seq: first_intent_event_seq
-            .unwrap_or_else(|| return event_log.next_seq()),
-        last_result_event_seq: last_result_event_seq.unwrap_or_else(|| return event_log.next_seq()),
-        pace_ns,
-        atoms: outcomes,
-        boundaries: actor_boundaries(event_log),
-    });
-}
-
-fn prepare_input_sequence(
-    atoms: &[InputSequenceAtom],
-    semantic: &mut GhosttyVt,
-) -> Result<Vec<PreparedSequenceAtom>> {
     let mut operation_ids = HashSet::with_capacity(atoms.len());
-    let mut prepared = Vec::with_capacity(atoms.len());
     for atom in atoms {
-        let operation_id = input_sequence_operation_id(atom);
-        if !operation_ids.insert(operation_id) {
+        if !operation_ids.insert(input_sequence_operation_id(atom)) {
             return Err(control_rejected(
                 "invalid_input_sequence",
                 "input sequence operation identifiers must be unique",
             ));
         }
-        let value = match atom {
+        match atom {
             InputSequenceAtom::Bytes {
-                operation_id,
                 data,
-                input_kind,
-                intent,
+                caller_intent,
+                ..
+            } => validate_control_input(data.as_bytes(), caller_intent.as_deref())?,
+            InputSequenceAtom::Paste {
+                data,
+                caller_intent,
+                ..
             } => {
-                validate_control_input(data.as_bytes(), intent.as_deref())?;
-                PreparedSequenceAtom {
-                    operation_id: *operation_id,
-                    input_kind: *input_kind,
-                    descriptor: match input_kind {
-                        InputKind::Text => InputDescriptor::Text,
-                        InputKind::Raw
-                        | InputKind::Keys
-                        | InputKind::Paste
-                        | InputKind::Focus
-                        | InputKind::Pointer => InputDescriptor::Raw,
-                    },
-                    intent: intent.clone(),
-                    data: data.as_bytes().to_vec(),
-                }
+                validate_control_input(data.as_bytes(), caller_intent.as_deref())?;
+                encode_paste(data.as_bytes(), false)?;
             }
-            InputSequenceAtom::Key {
-                operation_id,
-                key,
-                modifiers,
-            } => {
-                let modes = semantic.snapshot()?.modes;
-                let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
-                    return terminal_error("serialize keyboard modes", error.to_string());
-                })?;
-                let encoded = semantic.encode_key(*key, *modifiers)?;
-                if encoded.data.as_bytes().is_empty() {
-                    return Err(control_rejected(
-                        "key_has_no_output",
-                        "the requested key press produced no terminal bytes",
-                    ));
-                }
-                PreparedSequenceAtom {
-                    operation_id: *operation_id,
-                    input_kind: InputKind::Keys,
-                    descriptor: InputDescriptor::Key {
-                        key: semantic_key_name(*key),
-                        shift: modifiers.shift,
-                        control: modifiers.control,
-                        alt: modifiers.alt,
-                        super_key: modifiers.super_key,
-                        encoder: encoded.encoder,
-                        terminal_modes_hash: blake3::hash(&mode_bytes).to_hex().to_string(),
-                    },
-                    intent: Some(semantic_key_name(*key)),
-                    data: encoded.data.as_bytes().to_vec(),
-                }
-            }
-            InputSequenceAtom::Paste { operation_id, data } => {
-                validate_control_input(data.as_bytes(), Some("paste"))?;
-                let modes = semantic.snapshot()?.modes;
-                let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
-                    return terminal_error("serialize paste modes", error.to_string());
-                })?;
-                PreparedSequenceAtom {
-                    operation_id: *operation_id,
-                    input_kind: InputKind::Paste,
-                    descriptor: InputDescriptor::Paste {
-                        bracketed: modes.bracketed_paste,
-                        terminal_modes_hash: blake3::hash(&mode_bytes).to_hex().to_string(),
-                    },
-                    intent: Some("paste".to_owned()),
-                    data: encode_paste(data.as_bytes(), modes.bracketed_paste)?,
-                }
-            }
-        };
-        prepared.push(value);
+            InputSequenceAtom::Key { .. } => {}
+        }
     }
-    return Ok(prepared);
+    return Ok(());
+}
+
+fn prepare_input_sequence_atom(
+    atom: &InputSequenceAtom,
+    semantic: &mut GhosttyVt,
+) -> Result<PreparedSequenceAtom> {
+    return match atom {
+        InputSequenceAtom::Bytes {
+            operation_id,
+            data,
+            input_kind,
+            caller_intent,
+        } => Ok(PreparedSequenceAtom {
+            operation_id: *operation_id,
+            input_kind: *input_kind,
+            descriptor: match input_kind {
+                InputKind::Text => InputDescriptor::Text,
+                InputKind::Raw
+                | InputKind::Keys
+                | InputKind::Paste
+                | InputKind::Focus
+                | InputKind::Pointer => InputDescriptor::Raw,
+            },
+            terminal_modes_hash: mode_hash(semantic)?,
+            semantic_input: Some(
+                match input_kind {
+                    InputKind::Text => "text",
+                    InputKind::Raw => "raw",
+                    InputKind::Keys => "keys",
+                    InputKind::Paste => "paste",
+                    InputKind::Focus => "focus",
+                    InputKind::Pointer => "pointer",
+                }
+                .to_owned(),
+            ),
+            caller_intent: caller_intent.clone(),
+            data: data.as_bytes().to_vec(),
+        }),
+        InputSequenceAtom::Key {
+            operation_id,
+            key,
+            modifiers,
+            caller_intent,
+        } => {
+            let modes = semantic.snapshot()?.modes;
+            let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
+                return terminal_error("serialize keyboard modes", error.to_string());
+            })?;
+            let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
+            let encoded = semantic.encode_key(*key, *modifiers).map_err(|error| {
+                return control_rejected("key_encoding_failed", &error.to_string());
+            })?;
+            if encoded.data.as_bytes().is_empty() {
+                return Err(control_rejected(
+                    "key_has_no_output",
+                    "the requested key press produced no terminal bytes",
+                ));
+            }
+            Ok(PreparedSequenceAtom {
+                operation_id: *operation_id,
+                input_kind: InputKind::Keys,
+                descriptor: InputDescriptor::Key {
+                    key: semantic_key_name(*key),
+                    shift: modifiers.shift,
+                    control: modifiers.control,
+                    alt: modifiers.alt,
+                    super_key: modifiers.super_key,
+                    encoder: encoded.encoder,
+                    terminal_modes_hash: terminal_modes_hash.clone(),
+                },
+                terminal_modes_hash,
+                semantic_input: Some(semantic_key_input(*key, *modifiers)),
+                caller_intent: caller_intent.clone(),
+                data: encoded.data.as_bytes().to_vec(),
+            })
+        }
+        InputSequenceAtom::Paste {
+            operation_id,
+            data,
+            caller_intent,
+        } => {
+            let modes = semantic.snapshot()?.modes;
+            let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
+                return terminal_error("serialize paste modes", error.to_string());
+            })?;
+            let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
+            Ok(PreparedSequenceAtom {
+                operation_id: *operation_id,
+                input_kind: InputKind::Paste,
+                descriptor: InputDescriptor::Paste {
+                    bracketed: modes.bracketed_paste,
+                    terminal_modes_hash: terminal_modes_hash.clone(),
+                },
+                terminal_modes_hash,
+                semantic_input: Some("paste".to_owned()),
+                caller_intent: caller_intent.clone(),
+                data: encode_paste(data.as_bytes(), modes.bracketed_paste)?,
+            })
+        }
+    };
+}
+
+fn mode_hash(semantic: &mut GhosttyVt) -> Result<String> {
+    let modes = semantic.snapshot()?.modes;
+    let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
+        return terminal_error("serialize input modes", error.to_string());
+    })?;
+    return Ok(blake3::hash(&mode_bytes).to_hex().to_string());
 }
 
 pub(super) fn input_sequence_operation_id(atom: &InputSequenceAtom) -> Uuid {

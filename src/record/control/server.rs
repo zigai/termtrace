@@ -1,12 +1,10 @@
 //! Authenticated control-socket transport and worker lifecycle.
 
 use std::{
-    fs::Permissions,
     io::{BufRead as _, BufReader, ErrorKind, Read as _, Write as _},
     os::fd::{AsFd as _, OwnedFd},
-    os::unix::fs::PermissionsExt as _,
     os::unix::net::{UnixListener, UnixStream},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc,
@@ -25,8 +23,9 @@ use nix::{
 use crate::{
     Error, Result,
     control::{
-        CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME, ControlRequest, ControlResponse,
-        ControlResult, MAX_CONTROL_MESSAGE_BYTES, control_response_timeout, validate_frame,
+        CONTROL_PROTOCOL_VERSION, ControlRequest, ControlResponse, ControlResult,
+        MAX_CONTROL_MESSAGE_BYTES, control_response_timeout, control_socket_address,
+        validate_frame,
     },
 };
 
@@ -37,7 +36,6 @@ use super::super::{
 
 pub(in crate::record) struct ControlWorker {
     cancel: OwnedFd,
-    socket_path: PathBuf,
     thread: thread::JoinHandle<()>,
 }
 
@@ -54,41 +52,19 @@ impl Drop for ConnectionPermit<'_> {
 }
 
 pub(in crate::record) fn spawn_control_server(
-    session_directory: &Path,
+    socket_name: &str,
     sender: mpsc::SyncSender<RuntimeMessage>,
 ) -> Result<ControlWorker> {
-    let socket_path = session_directory.join(CONTROL_SOCKET_NAME);
-    let listener = UnixListener::bind(&socket_path).map_err(|source| {
-        return Error::Filesystem {
-            path: socket_path.clone(),
-            source,
-        };
+    let address = control_socket_address(socket_name)?;
+    let listener = UnixListener::bind_addr(&address).map_err(|error| {
+        return terminal_error("bind abstract control socket", error.to_string());
     })?;
-    fs_err::set_permissions(&socket_path, Permissions::from_mode(0o600)).map_err(|source| {
-        return cleanup_failed_control_socket(
-            &socket_path,
-            Error::Filesystem {
-                path: socket_path.clone(),
-                source,
-            },
-        );
-    })?;
-    listener.set_nonblocking(true).map_err(|source| {
-        return cleanup_failed_control_socket(
-            &socket_path,
-            Error::Filesystem {
-                path: socket_path.clone(),
-                source,
-            },
-        );
+    listener.set_nonblocking(true).map_err(|error| {
+        return terminal_error("configure abstract control socket", error.to_string());
     })?;
     let (cancel_read, cancel) = pipe().map_err(|error| {
-        return cleanup_failed_control_socket(
-            &socket_path,
-            terminal_error("create control cancellation pipe", error.to_string()),
-        );
+        return terminal_error("create control cancellation pipe", error.to_string());
     })?;
-    let thread_socket_path = socket_path.clone();
     let thread = thread::Builder::new()
         .name("termtrace-control-server".to_owned())
         .spawn(move || {
@@ -96,34 +72,9 @@ pub(in crate::record) fn spawn_control_server(
                 let _ = sender.try_send(RuntimeMessage::ControlServerFailed(error.to_string()));
             }
         })
-        .map_err(|error| {
-            return cleanup_failed_control_socket(
-                &socket_path,
-                terminal_error("spawn control server", error.to_string()),
-            );
-        })?;
-    tracing::debug!(socket = %thread_socket_path.display(), "control socket ready");
-    return Ok(ControlWorker {
-        cancel,
-        socket_path,
-        thread,
-    });
-}
-
-fn cleanup_failed_control_socket(socket_path: &Path, primary: Error) -> Error {
-    match fs_err::remove_file(socket_path) {
-        Ok(()) => return primary,
-        Err(error) if error.kind() == ErrorKind::NotFound => return primary,
-        Err(source) => {
-            return Error::CleanupFailed {
-                primary: Box::new(primary),
-                cleanup: Box::new(Error::Filesystem {
-                    path: socket_path.to_path_buf(),
-                    source,
-                }),
-            };
-        }
-    }
+        .map_err(|error| return terminal_error("spawn control server", error.to_string()))?;
+    tracing::debug!(socket = socket_name, "abstract control socket ready");
+    return Ok(ControlWorker { cancel, thread });
 }
 
 fn control_server_loop(
@@ -328,15 +279,6 @@ impl ControlWorker {
             .thread
             .join()
             .map_err(|_| return terminal_error("join control server", "control thread panicked"));
-        let remove_result = match fs_err::remove_file(&self.socket_path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
-            Err(source) => Err(Error::Filesystem {
-                path: self.socket_path,
-                source,
-            }),
-        };
-        let result = finish_with_cleanup(cancel_result, join_result);
-        return finish_with_cleanup(result, remove_result);
+        return finish_with_cleanup(cancel_result, join_result);
     }
 }

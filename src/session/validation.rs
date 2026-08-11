@@ -1,4 +1,5 @@
 use super::*;
+use crate::control::control_socket_name;
 
 /// Verify that an event log is the exact immutable log named by completion.
 ///
@@ -14,6 +15,36 @@ pub fn validate_completed_log(
             session: session_directory.to_path_buf(),
         });
     }
+    let completion = read_completion(session_directory)?;
+    validate_completion_candidate(session_directory, log, &completion)?;
+    return Ok(completion);
+}
+
+pub(super) fn validate_replay_profile_file(
+    session_directory: &Path,
+    manifest: &SessionManifest,
+) -> Result<()> {
+    let Some(profile) = &manifest.ghostty_visual else {
+        return Ok(());
+    };
+    let profile_path = session_directory.join(&profile.replay_profile);
+    let (_, actual_hash) = hash_regular_file(&profile_path)?;
+    if actual_hash != profile.replay_profile_hash {
+        return Err(Error::InvalidReplay {
+            reason: format!(
+                "recorded Ghostty replay profile `{}` hash does not match session provenance",
+                profile_path.display()
+            ),
+        });
+    }
+    return Ok(());
+}
+
+pub(crate) fn validate_completion_candidate(
+    session_directory: &Path,
+    log: &EventLog,
+    completion: &SessionCompletion,
+) -> Result<()> {
     let manifest_path = session_directory.join("session.json");
     let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
         return Error::Filesystem {
@@ -28,8 +59,8 @@ pub fn validate_completed_log(
             reason: "session manifest bytes are not in the canonical serialization".to_owned(),
         });
     }
-    let completion = read_completion(session_directory)?;
-    validate_completion_format(&completion)?;
+    validate_replay_profile_file(session_directory, &manifest)?;
+    validate_completion_format(completion)?;
     let final_event_hash = log.events.last().map(|record| return record.hash.as_str());
     let event_count = u64::try_from(log.events.len()).unwrap_or(u64::MAX);
     let actual_manifest_hash = manifest_hash(&manifest_bytes);
@@ -184,7 +215,7 @@ pub fn validate_completed_log(
             });
         }
     }
-    return Ok(completion);
+    return Ok(());
 }
 
 pub(super) fn validate_manifest(manifest: &SessionManifest) -> Result<()> {
@@ -196,6 +227,11 @@ pub(super) fn validate_manifest(manifest: &SessionManifest) -> Result<()> {
     if manifest.version != SESSION_MANIFEST_VERSION {
         return Err(Error::InvalidReplay {
             reason: format!("unsupported session format version {}", manifest.version),
+        });
+    }
+    if manifest.control_socket != control_socket_name(manifest.session_id) {
+        return Err(Error::InvalidReplay {
+            reason: "session manifest control endpoint does not match its session ID".to_owned(),
         });
     }
     if manifest.request_journal != MUTATION_JOURNAL_NAME {

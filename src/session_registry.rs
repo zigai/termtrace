@@ -8,7 +8,6 @@ use std::{
     io::{ErrorKind, Read as _},
     os::unix::ffi::{OsStrExt as _, OsStringExt as _},
     os::unix::fs::{FileTypeExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
-    os::unix::net::UnixStream,
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -26,7 +25,7 @@ use uuid::Uuid;
 use crate::{
     Error, Result,
     artifact::{sync_directory, sync_parent_directory, write_secure},
-    control::{CONTROL_PROTOCOL_VERSION, CONTROL_SOCKET_NAME},
+    control::{CONTROL_PROTOCOL_VERSION, connect_session_control},
     event::ByteString,
     event_log::EventLog,
     session::{
@@ -40,6 +39,41 @@ pub const REGISTRY_ENTRY_FORMAT: &str = "termtrace-session-registry-entry";
 /// Registry-entry schema version.
 pub const REGISTRY_ENTRY_VERSION: u32 = 1;
 const REGISTRY_DIRECTORY: &str = "registry";
+const REGISTRY_RESERVATION_FORMAT: &str = "termtrace-session-registry-reservation";
+const REGISTRY_RESERVATION_VERSION: u32 = 1;
+
+/// Exclusive, leased ownership of an alias while detached startup is pending.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AliasReservation {
+    /// Stable reservation format identifier.
+    pub format: String,
+    /// Reservation schema version.
+    pub version: u32,
+    /// Validated friendly alias.
+    pub alias: String,
+    /// Unforgeable token required to promote or release this reservation.
+    pub owner_token: Uuid,
+    /// Reservation creation time from the local system clock.
+    pub created_unix_ns: u128,
+    /// Time after which another owner may reclaim the alias.
+    pub lease_expires_unix_ns: u128,
+    /// Exact path bytes allocated for the pending canonical session.
+    pub pending_session: ByteString,
+}
+
+impl AliasReservation {
+    /// Reconstruct the exact pending session path.
+    pub fn session_path(&self) -> PathBuf {
+        return PathBuf::from(OsString::from_vec(self.pending_session.as_bytes().to_vec()));
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum RegistryRecord {
+    Entry(RegistryEntry),
+    Reservation(AliasReservation),
+}
 
 /// One friendly name bound to an immutable canonical session identity.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -135,6 +169,17 @@ impl RegistryEntry {
     }
 }
 
+/// A named session path paired with the registry's evidence-derived lifecycle.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RegistrySessionResolution {
+    /// Exact registered or pending session path.
+    pub session: PathBuf,
+    /// Current lifecycle classification.
+    pub lifecycle: RegistryLifecycle,
+    /// Focused explanation for incomplete or unhealthy states.
+    pub diagnostic: Option<String>,
+}
+
 /// Secure storage boundary for named session aliases.
 #[derive(Clone, Debug)]
 pub struct SessionRegistry {
@@ -183,6 +228,8 @@ pub struct GarbageCollectionReport {
     pub protected_registered: u64,
     /// Live, incomplete, malformed, or non-directory entries never considered.
     pub skipped_non_completed: u64,
+    /// Malformed or insecure registry records isolated from this scan.
+    pub skipped_corrupt_registry_entries: u64,
     /// Exact eligible recordings, retained in the report even after deletion.
     pub candidates: Vec<GarbageCollectionCandidate>,
     /// Session directories removed when `applied` is true.
@@ -230,12 +277,12 @@ impl SessionRegistry {
         return &self.state_root;
     }
 
-    /// Register a new alias without replacing an existing binding.
+    /// Register a new alias without replacing an existing binding or reservation.
     ///
     /// # Errors
     ///
     /// Returns an error for an invalid alias, insecure or unreadable session,
-    /// schema/identity mismatch, or existing alias.
+    /// schema/identity mismatch, or existing alias reservation/binding.
     pub fn register(&self, alias: &str, session: &Path) -> Result<RegistryEntry> {
         let _lock = self.lock()?;
         return self.register_locked(alias, session);
@@ -243,10 +290,162 @@ impl SessionRegistry {
 
     fn register_locked(&self, alias: &str, session: &Path) -> Result<RegistryEntry> {
         validate_alias(alias)?;
+        if self.entry_path(alias).exists() {
+            return Err(registry_error(
+                "register session alias",
+                "alias is already reserved or registered",
+            ));
+        }
         let entry = self.entry_for(alias, session)?;
         let encoded = self.encode_entry(&entry)?;
         write_secure(&self.entry_path(alias), &encoded)?;
         return Ok(entry);
+    }
+
+    /// Atomically reserve an alias for one pending detached session.
+    ///
+    /// Expired reservations are reclaimed while holding the registry lock.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid aliases, zero leases, or a live reservation/binding.
+    pub fn reserve(
+        &self,
+        alias: &str,
+        pending_session: &Path,
+        lease: Duration,
+    ) -> Result<AliasReservation> {
+        validate_alias(alias)?;
+        if lease.is_zero() {
+            return Err(registry_error(
+                "reserve session alias",
+                "reservation lease must be greater than zero",
+            ));
+        }
+        let _lock = self.lock()?;
+        let now = system_time_unix_ns()?;
+        let path = self.entry_path(alias);
+        if path.exists() {
+            match read_registry_record_nofollow(&path)? {
+                RegistryRecord::Reservation(reservation)
+                    if valid_reservation(alias, &reservation)
+                        && reservation.lease_expires_unix_ns <= now =>
+                {
+                    fs_err::remove_file(&path).map_err(|source| {
+                        return Error::Filesystem {
+                            path: path.clone(),
+                            source,
+                        };
+                    })?;
+                    sync_parent_directory(&path)?;
+                }
+                RegistryRecord::Reservation(reservation)
+                    if !valid_reservation(alias, &reservation) =>
+                {
+                    return Err(registry_error(
+                        "reserve session alias",
+                        "existing alias reservation is incompatible",
+                    ));
+                }
+                RegistryRecord::Reservation(_) | RegistryRecord::Entry(_) => {
+                    return Err(registry_error(
+                        "reserve session alias",
+                        "alias is already reserved or registered",
+                    ));
+                }
+            }
+        }
+        let lease_expires_unix_ns = now.saturating_add(lease.as_nanos());
+        let reservation = AliasReservation {
+            format: REGISTRY_RESERVATION_FORMAT.to_owned(),
+            version: REGISTRY_RESERVATION_VERSION,
+            alias: alias.to_owned(),
+            owner_token: Uuid::now_v7(),
+            created_unix_ns: now,
+            lease_expires_unix_ns,
+            pending_session: ByteString::from(pending_session.as_os_str().as_bytes()),
+        };
+        let encoded = self.encode_reservation(&reservation)?;
+        write_secure(&path, &encoded)?;
+        return Ok(reservation);
+    }
+
+    /// Atomically replace an owned reservation with its validated session binding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error without changing the reservation when ownership changed or
+    /// pending session evidence is not ready for publication.
+    pub fn promote(&self, reservation: &AliasReservation) -> Result<RegistryEntry> {
+        let _lock = self.lock()?;
+        let path = self.entry_path(&reservation.alias);
+        let RegistryRecord::Reservation(current) = read_registry_record_nofollow(&path)? else {
+            return Err(registry_error(
+                "promote session alias",
+                "alias is no longer reserved",
+            ));
+        };
+        if !valid_reservation(&reservation.alias, &current)
+            || current.owner_token != reservation.owner_token
+            || current.created_unix_ns != reservation.created_unix_ns
+            || current.lease_expires_unix_ns != reservation.lease_expires_unix_ns
+            || current.pending_session != reservation.pending_session
+        {
+            return Err(registry_error(
+                "promote session alias",
+                "alias reservation owner changed before promotion",
+            ));
+        }
+        if current.lease_expires_unix_ns <= system_time_unix_ns()? {
+            return Err(registry_error(
+                "promote session alias",
+                "alias reservation lease expired before promotion",
+            ));
+        }
+        let entry = self.entry_for(&reservation.alias, &reservation.session_path())?;
+        let encoded = self.encode_entry(&entry)?;
+        let temporary =
+            self.directory
+                .join(format!(".{}.{}.tmp", reservation.alias, Uuid::now_v7()));
+        write_secure(&temporary, &encoded)?;
+        if let Err(source) = fs_err::rename(&temporary, &path) {
+            let _cleanup = fs_err::remove_file(&temporary);
+            return Err(Error::Filesystem { path, source });
+        }
+        sync_parent_directory(&path)?;
+        return Ok(entry);
+    }
+
+    /// Release a reservation only when its owner token still matches.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error without changing the alias when ownership changed.
+    pub fn release(&self, reservation: &AliasReservation) -> Result<()> {
+        let _lock = self.lock()?;
+        let path = self.entry_path(&reservation.alias);
+        let RegistryRecord::Reservation(current) = read_registry_record_nofollow(&path)? else {
+            return Err(registry_error(
+                "release session alias",
+                "alias is no longer reserved",
+            ));
+        };
+        if !valid_reservation(&reservation.alias, &current)
+            || current.owner_token != reservation.owner_token
+        {
+            return Err(registry_error(
+                "release session alias",
+                "alias reservation owner changed before release",
+            ));
+        }
+        fs_err::remove_file(&path).map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+        sync_parent_directory(&path)?;
+        return Ok(());
     }
 
     /// Atomically replace an alias only when it still names the expected predecessor.
@@ -292,11 +491,12 @@ impl SessionRegistry {
     /// Returns an error for invalid or already-published aliases.
     pub fn ensure_available(&self, alias: &str) -> Result<()> {
         validate_alias(alias)?;
+        let _lock = self.lock()?;
         let path = self.entry_path(alias);
         if path.exists() {
             return Err(registry_error(
                 "reserve session alias",
-                "alias is already registered",
+                "alias is already reserved or registered",
             ));
         }
         return Ok(());
@@ -355,6 +555,7 @@ impl SessionRegistry {
             keep_latest,
             protected_registered: 0,
             skipped_non_completed: 0,
+            skipped_corrupt_registry_entries: 0,
             candidates: Vec::new(),
             removed_sessions: 0,
             removed_supervisor_files: 0,
@@ -364,15 +565,11 @@ impl SessionRegistry {
             return Ok(report);
         }
         validate_owner_directory(&sessions)?;
-        let registered = self
-            .list(true)?
-            .into_iter()
-            .map(|entry| {
-                return PathBuf::from(OsString::from_vec(
-                    entry.canonical_session.as_bytes().to_vec(),
-                ));
-            })
-            .collect::<HashSet<_>>();
+        let (registered, corrupt_entries) = self.protected_session_paths()?;
+        report.skipped_corrupt_registry_entries = corrupt_entries;
+        if corrupt_entries != 0 {
+            return Ok(report);
+        }
         let mut completed_sessions = Vec::new();
         for item in fs_err::read_dir(&sessions).map_err(|source| {
             return Error::Filesystem {
@@ -503,7 +700,15 @@ impl SessionRegistry {
     pub fn resolve(&self, alias: &str) -> Result<RegistryEntry> {
         validate_alias(alias)?;
         let path = self.entry_path(alias);
-        let entry = read_entry_nofollow(&path)?;
+        let entry = match read_registry_record_nofollow(&path)? {
+            RegistryRecord::Entry(entry) => entry,
+            RegistryRecord::Reservation(_) => {
+                return Err(registry_error(
+                    "resolve registry entry",
+                    "alias startup reservation is still pending",
+                ));
+            }
+        };
         if entry.format != REGISTRY_ENTRY_FORMAT
             || entry.version != REGISTRY_ENTRY_VERSION
             || entry.alias != alias
@@ -539,6 +744,49 @@ impl SessionRegistry {
         return Ok(entry);
     }
 
+    /// Resolve a named session without discarding pending or unhealthy lifecycle state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the registry record itself is missing, insecure, or malformed.
+    pub fn resolve_lifecycle(&self, alias: &str) -> Result<RegistrySessionResolution> {
+        validate_alias(alias)?;
+        let record = read_registry_record_nofollow(&self.entry_path(alias))?;
+        return match record {
+            RegistryRecord::Entry(entry) => {
+                let row = inspect_entry(&entry);
+                Ok(RegistrySessionResolution {
+                    session: entry.session_path(),
+                    lifecycle: row.lifecycle,
+                    diagnostic: row.diagnostic,
+                })
+            }
+            RegistryRecord::Reservation(reservation) => {
+                if !valid_reservation(alias, &reservation) {
+                    return Ok(RegistrySessionResolution {
+                        session: reservation.session_path(),
+                        lifecycle: RegistryLifecycle::Incompatible,
+                        diagnostic: Some("alias startup reservation is incompatible".to_owned()),
+                    });
+                }
+                let expired = reservation.lease_expires_unix_ns <= system_time_unix_ns()?;
+                Ok(RegistrySessionResolution {
+                    session: reservation.session_path(),
+                    lifecycle: if expired {
+                        RegistryLifecycle::Stale
+                    } else {
+                        RegistryLifecycle::Incomplete
+                    },
+                    diagnostic: Some(if expired {
+                        "alias startup reservation lease expired before promotion".to_owned()
+                    } else {
+                        "alias startup reservation is pending promotion".to_owned()
+                    }),
+                })
+            }
+        };
+    }
+
     /// List live aliases, or every alias when `include_all` is true.
     ///
     /// # Errors
@@ -563,7 +811,18 @@ impl SessionRegistry {
             if path.extension() != Some(OsStr::new("json")) {
                 continue;
             }
-            let entry = read_entry_nofollow(&path)?;
+            let entry = match read_registry_record_nofollow(&path) {
+                Ok(RegistryRecord::Entry(entry)) => entry,
+                Ok(RegistryRecord::Reservation(_)) => continue,
+                Err(error) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        %error,
+                        "isolating corrupt registry entry from list"
+                    );
+                    continue;
+                }
+            };
             let row = inspect_entry(&entry);
             if include_all || row.lifecycle == RegistryLifecycle::Live {
                 rows.push(row);
@@ -602,6 +861,43 @@ impl SessionRegistry {
 
     fn entry_path(&self, alias: &str) -> PathBuf {
         return self.directory.join(format!("{alias}.json"));
+    }
+
+    fn protected_session_paths(&self) -> Result<(HashSet<PathBuf>, u64)> {
+        let mut paths = HashSet::new();
+        let mut corrupt_entries = 0_u64;
+        for item in fs_err::read_dir(&self.directory).map_err(|source| {
+            return Error::Filesystem {
+                path: self.directory.clone(),
+                source,
+            };
+        })? {
+            let item = item.map_err(|source| {
+                return Error::Filesystem {
+                    path: self.directory.clone(),
+                    source,
+                };
+            })?;
+            let path = item.path();
+            if path.extension() != Some(OsStr::new("json")) {
+                continue;
+            }
+            let session = match read_registry_record_nofollow(&path) {
+                Ok(RegistryRecord::Entry(entry)) => entry.session_path(),
+                Ok(RegistryRecord::Reservation(reservation)) => reservation.session_path(),
+                Err(error) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        %error,
+                        "isolating corrupt registry entry from garbage collection"
+                    );
+                    corrupt_entries = corrupt_entries.saturating_add(1);
+                    continue;
+                }
+            };
+            paths.insert(session);
+        }
+        return Ok((paths, corrupt_entries));
     }
 
     fn entry_for(&self, alias: &str, session: &Path) -> Result<RegistryEntry> {
@@ -644,6 +940,16 @@ impl SessionRegistry {
         return serde_json::to_vec_pretty(entry).map_err(|source| {
             return Error::InvalidJson {
                 path: self.entry_path(&entry.alias),
+                json_path: "$".to_owned(),
+                source,
+            };
+        });
+    }
+
+    fn encode_reservation(&self, reservation: &AliasReservation) -> Result<Vec<u8>> {
+        return serde_json::to_vec_pretty(reservation).map_err(|source| {
+            return Error::InvalidJson {
+                path: self.entry_path(&reservation.alias),
                 json_path: "$".to_owned(),
                 source,
             };
@@ -747,11 +1053,9 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
             }
         }
     }
-    let socket_exists = canonical.join(CONTROL_SOCKET_NAME).exists();
+    let responsive_identity = recorder_process_identity(&canonical);
     match (entry.recorder_pid, entry.recorder_process_start_ticks) {
-        (Some(pid), Some(start_ticks))
-            if socket_exists && process_start_ticks(pid) == Some(start_ticks) =>
-        {
+        (Some(pid), Some(start_ticks)) if responsive_identity == Some((pid, start_ticks)) => {
             row.lifecycle = RegistryLifecycle::Live;
         }
         (Some(_), Some(_)) => {
@@ -759,7 +1063,7 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
             row.diagnostic =
                 Some("recorder PID/start identity or control socket is stale".to_owned());
         }
-        (None, None) if socket_exists => row.lifecycle = RegistryLifecycle::Live,
+        (None, None) if responsive_identity.is_some() => row.lifecycle = RegistryLifecycle::Live,
         (None, None) => row.lifecycle = RegistryLifecycle::Incomplete,
         _ => {
             row.lifecycle = RegistryLifecycle::Incompatible;
@@ -770,7 +1074,7 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
 }
 
 fn recorder_process_identity(session: &Path) -> Option<(u32, u64)> {
-    let stream = UnixStream::connect(session.join(CONTROL_SOCKET_NAME)).ok()?;
+    let stream = connect_session_control(session).ok()?;
     let credentials = getsockopt(&stream, PeerCredentials).ok()?;
     let pid = u32::try_from(credentials.pid()).ok()?;
     return Some((pid, process_start_ticks(pid)?));
@@ -894,6 +1198,21 @@ fn validate_alias(alias: &str) -> Result<()> {
     return Ok(());
 }
 
+fn system_time_unix_ns() -> Result<u128> {
+    return Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| return Error::ClockBeforeEpoch)?
+        .as_nanos());
+}
+
+fn valid_reservation(alias: &str, reservation: &AliasReservation) -> bool {
+    return reservation.format == REGISTRY_RESERVATION_FORMAT
+        && reservation.version == REGISTRY_RESERVATION_VERSION
+        && reservation.alias == alias
+        && reservation.created_unix_ns < reservation.lease_expires_unix_ns
+        && !reservation.pending_session.as_bytes().is_empty();
+}
+
 fn ensure_owner_directory(path: &Path) -> Result<()> {
     if path.exists() {
         return validate_owner_directory(path);
@@ -940,7 +1259,7 @@ fn validate_owner_directory(path: &Path) -> Result<()> {
     clippy::verbose_file_reads,
     reason = "the already-opened O_NOFOLLOW descriptor must be read without reopening its path"
 )]
-fn read_entry_nofollow(path: &Path) -> Result<RegistryEntry> {
+fn read_registry_record_nofollow(path: &Path) -> Result<RegistryRecord> {
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(O_NOFOLLOW)
@@ -959,13 +1278,43 @@ fn read_entry_nofollow(path: &Path) -> Result<RegistryEntry> {
             source,
         };
     })?;
-    return serde_json::from_slice(&bytes).map_err(|source| {
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
             json_path: "$".to_owned(),
             source,
         };
-    });
+    })?;
+    if value.get("owner_token").is_some() {
+        return serde_json::from_value(value)
+            .map(RegistryRecord::Reservation)
+            .map_err(|source| {
+                return Error::InvalidJson {
+                    path: path.to_path_buf(),
+                    json_path: "$".to_owned(),
+                    source,
+                };
+            });
+    }
+    return serde_json::from_value(value)
+        .map(RegistryRecord::Entry)
+        .map_err(|source| {
+            return Error::InvalidJson {
+                path: path.to_path_buf(),
+                json_path: "$".to_owned(),
+                source,
+            };
+        });
+}
+
+fn read_entry_nofollow(path: &Path) -> Result<RegistryEntry> {
+    return match read_registry_record_nofollow(path)? {
+        RegistryRecord::Entry(entry) => Ok(entry),
+        RegistryRecord::Reservation(_) => Err(registry_error(
+            "read registry entry",
+            "alias startup reservation is still pending",
+        )),
+    };
 }
 
 fn validate_entry_file(path: &Path, file: &File) -> Result<()> {
@@ -1024,6 +1373,106 @@ mod tests {
         fs_err::write(&target, b"{}").expect("target");
         symlink(&target, registry.entry_path("demo")).expect("symlink");
         assert!(registry.resolve("demo").is_err());
+    }
+
+    #[test]
+    fn reservation_excludes_concurrent_owners_and_promotes_only_the_winner() {
+        use std::{
+            sync::{Arc, Barrier},
+            thread,
+        };
+
+        let temporary = TempDir::new().expect("temporary directory");
+        let registry =
+            Arc::new(SessionRegistry::open(temporary.path().join("state")).expect("registry"));
+        let sessions = registry.state_root().join("sessions");
+        fs_err::create_dir(&sessions).expect("sessions directory");
+        let barrier = Arc::new(Barrier::new(3));
+        let mut contenders = Vec::new();
+        for name in ["first", "second"] {
+            let registry = Arc::clone(&registry);
+            let barrier = Arc::clone(&barrier);
+            let pending = sessions.join(format!("{name}.termtrace"));
+            contenders.push(thread::spawn(move || {
+                barrier.wait();
+                return registry.reserve("demo", &pending, Duration::from_secs(30));
+            }));
+        }
+        barrier.wait();
+        let results = contenders
+            .into_iter()
+            .map(|contender| return contender.join().expect("reservation contender"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| return result.is_ok())
+                .count(),
+            1
+        );
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| return result.is_err())
+                .count(),
+            1
+        );
+
+        let reservation = results
+            .into_iter()
+            .find_map(Result::ok)
+            .expect("winning reservation");
+        let encoded: serde_json::Value = serde_json::from_slice(
+            &fs_err::read(registry.entry_path("demo")).expect("reservation record"),
+        )
+        .expect("reservation JSON");
+        assert_eq!(encoded["owner_token"], reservation.owner_token.to_string());
+        assert_eq!(
+            encoded["pending_session"],
+            serde_json::to_value(&reservation.pending_session).expect("pending path JSON")
+        );
+        assert!(encoded["created_unix_ns"].is_number());
+        assert!(encoded["lease_expires_unix_ns"].is_number());
+        let mut wrong_owner = reservation.clone();
+        wrong_owner.owner_token = Uuid::now_v7();
+        assert!(registry.release(&wrong_owner).is_err());
+
+        record_fixture(reservation.session_path());
+        let entry = registry.promote(&reservation).expect("promote winner");
+        assert_eq!(registry.resolve("demo").expect("resolve promoted"), entry);
+    }
+
+    #[test]
+    fn expired_reservation_is_reclaimed_without_accepting_the_old_owner() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let registry = SessionRegistry::open(temporary.path().join("state")).expect("registry");
+        let first_path = registry.state_root().join("sessions/first.termtrace");
+        let first = registry
+            .reserve("demo", &first_path, Duration::from_secs(30))
+            .expect("first reservation");
+        let mut expired = first.clone();
+        expired.created_unix_ns = 0;
+        expired.lease_expires_unix_ns = 1;
+        fs_err::write(
+            registry.entry_path("demo"),
+            registry
+                .encode_reservation(&expired)
+                .expect("expired reservation encoding"),
+        )
+        .expect("publish expired reservation fixture");
+
+        let second_path = registry.state_root().join("sessions/second.termtrace");
+        let second = registry
+            .reserve("demo", &second_path, Duration::from_secs(30))
+            .expect("reclaim expired reservation");
+        assert_ne!(second.owner_token, first.owner_token);
+        assert!(registry.promote(&first).is_err());
+        let resolved = registry
+            .resolve_lifecycle("demo")
+            .expect("resolve replacement reservation");
+        assert_eq!(resolved.lifecycle, RegistryLifecycle::Incomplete);
+        assert_eq!(resolved.session, second_path);
+        registry.release(&second).expect("release replacement");
     }
 
     #[test]

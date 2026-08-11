@@ -356,10 +356,10 @@ impl RuntimeWorkers {
         sender: &mpsc::SyncSender<RuntimeMessage>,
         forward_stdin: bool,
         initial_geometry: TerminalGeometry,
-        session_directory: &Path,
+        control_socket: &str,
     ) -> Result<Self> {
         let signals = spawn_host_signals(sender.clone())?;
-        let control = match spawn_control_server(session_directory, sender.clone()) {
+        let control = match spawn_control_server(control_socket, sender.clone()) {
             Ok(worker) => worker,
             Err(error) => return finish_with_cleanup(Err(error), signals.stop()),
         };

@@ -37,7 +37,9 @@ fn recovers_valid_prefix_and_reports_uncertain_intent() {
                 input_kind: InputKind::Text,
                 descriptor: InputDescriptor::Text,
                 data: ByteString::from(&b"x"[..]),
-                intent: None,
+                terminal_modes_hash: None,
+                semantic_input: Some("text".to_owned()),
+                caller_intent: None,
             },
         )
         .expect("append intent");

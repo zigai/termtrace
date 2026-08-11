@@ -3,10 +3,12 @@ use std::{fs::Permissions, os::unix::fs::PermissionsExt as _};
 
 use tempfile::TempDir;
 
+use super::validation::validate_replay_profile_file;
 use super::*;
 use crate::environment::EnvironmentSpec;
 use crate::provenance::{ProvenancePolicy, collect_execution_provenance};
 use crate::{
+    control::control_socket_name,
     event::{EventLogHeader, InputDescriptor, InputKind, InputSource},
     event_log::{EventLogWriter, SessionClock},
 };
@@ -52,7 +54,7 @@ fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
         operating_system: "linux".to_owned(),
         architecture: "test".to_owned(),
         event_log: "events.jsonl".to_owned(),
-        control_socket: "control.sock".to_owned(),
+        control_socket: control_socket_name(session_id),
         request_journal: "requests.jsonl".to_owned(),
         contains_sensitive_terminal_data: true,
         durability_policy: DurabilityPolicy::default(),
@@ -96,6 +98,7 @@ fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
         terminal_event_seq: event_count.saturating_sub(1),
         durability,
         resource_limit: None,
+        failure: None,
     };
     fs_err::write(
         session.join("completion.json"),
@@ -108,7 +111,7 @@ fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
 
 #[test]
 fn ghostty_profile_provenance_retains_the_split_hash_contract() {
-    assert_eq!(SESSION_MANIFEST_VERSION, 11);
+    assert_eq!(SESSION_MANIFEST_VERSION, 12);
     assert_eq!(GHOSTTY_REPLAY_PROFILE_NAME, "ghostty-profile.ghostty");
 
     let provenance = GhosttyVisualProvenance {
@@ -259,6 +262,32 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
 }
 
 #[test]
+fn completed_content_validation_binds_the_replay_profile_file() {
+    let (temporary, _) = completed_fixture(Vec::new());
+    let session = temporary.path().join("session");
+    let profile_path = session.join(GHOSTTY_REPLAY_PROFILE_NAME);
+    let profile_bytes = b"font-size = 13\n";
+    fs_err::write(&profile_path, profile_bytes).expect("replay profile");
+    let mut manifest = read_manifest(&session).expect("session manifest");
+    manifest.ghostty_visual = Some(GhosttyVisualProvenance {
+        source_config: None,
+        overrides: GhosttyVisualOverrides::default(),
+        replay_profile: GHOSTTY_REPLAY_PROFILE_NAME.to_owned(),
+        replay_profile_hash: blake3::hash(profile_bytes).to_hex().to_string(),
+        effective_config_hash: "0".repeat(64),
+    });
+
+    validate_replay_profile_file(&session, &manifest).expect("matching replay profile");
+    fs_err::write(&profile_path, b"font-size = 14\n").expect("tampered replay profile");
+    let error =
+        validate_replay_profile_file(&session, &manifest).expect_err("profile hash must bind");
+    assert!(matches!(
+        error,
+        Error::InvalidReplay { reason } if reason.contains("replay profile")
+    ));
+}
+
+#[test]
 fn completed_validation_requires_terminal_exit() {
     let (temporary, log) = completed_fixture(vec![Event::Marker {
         operation_id: Uuid::now_v7(),
@@ -281,8 +310,10 @@ fn completed_validation_rejects_pending_mutation() {
             source: InputSource::Agent,
             input_kind: InputKind::Text,
             descriptor: InputDescriptor::Text,
+            terminal_modes_hash: None,
             data: ByteString::from(&b"x"[..]),
-            intent: None,
+            semantic_input: Some("text".to_owned()),
+            caller_intent: None,
         },
         Event::Exit {
             code: None,

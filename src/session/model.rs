@@ -3,7 +3,7 @@ use super::*;
 /// Session manifest format identifier.
 pub const SESSION_MANIFEST_FORMAT: &str = "termtrace-session";
 /// Session manifest schema version.
-pub const SESSION_MANIFEST_VERSION: u32 = 11;
+pub const SESSION_MANIFEST_VERSION: u32 = 12;
 
 /// Current tmux-owned-pane provenance contract.
 pub const TMUX_PANE_PROVENANCE_VERSION: u32 = 1;
@@ -12,7 +12,7 @@ pub const GHOSTTY_REPLAY_PROFILE_NAME: &str = "ghostty-profile.ghostty";
 /// Completion manifest format identifier.
 pub const SESSION_COMPLETION_FORMAT: &str = "termtrace-completion";
 /// Completion manifest schema version.
-pub const SESSION_COMPLETION_VERSION: u32 = 4;
+pub const SESSION_COMPLETION_VERSION: u32 = 5;
 /// Validation contract used when the completion manifest was created.
 pub const COMPLETION_VALIDATION_VERSION: u32 = 1;
 /// Verification report format identifier.
@@ -177,7 +177,7 @@ pub struct SessionManifest {
     pub architecture: String,
     /// Canonical event-log relative path.
     pub event_log: String,
-    /// Live control socket relative path.
+    /// Linux abstract control-socket name for the live recorder.
     pub control_socket: String,
     /// Persistent mutation deduplication journal relative path.
     pub request_journal: String,
@@ -187,6 +187,16 @@ pub struct SessionManifest {
     pub durability_policy: DurabilityPolicy,
     /// Chain-bound runtime resource limits.
     pub resource_limits: ResourceLimits,
+}
+
+/// Recorder failure retained when the child could not complete normally.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionFailure {
+    /// Stable failure category.
+    pub code: String,
+    /// Human-readable failure context.
+    pub message: String,
 }
 
 /// Immutable completion facts written after the final event is durable.
@@ -221,4 +231,6 @@ pub struct SessionCompletion {
     pub durability: DurabilityRecord,
     /// Resource limit that caused host termination, when one was reached.
     pub resource_limit: Option<ResourceLimitOutcome>,
+    /// Fatal recorder failure, absent for normal child completion.
+    pub failure: Option<SessionFailure>,
 }

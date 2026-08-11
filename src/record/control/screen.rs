@@ -18,6 +18,7 @@ use crate::{
     event::ByteString,
     event_log::EventLogWriter,
     ghostty_vt::SemanticState,
+    replay::semantic_state_hash,
 };
 
 use super::super::{
@@ -37,9 +38,7 @@ pub(in crate::record) struct ScreenWaiter {
 }
 
 pub(super) fn presented_state_hash(live: &LiveTerminal) -> Result<String> {
-    let bytes = serde_json::to_vec(&live.presented)
-        .map_err(|error| return terminal_error("serialize presented state", error.to_string()))?;
-    return Ok(blake3::hash(&bytes).to_hex().to_string());
+    return semantic_state_hash(&live.presented);
 }
 
 pub(super) fn valid_blake3_hash(hash: &str) -> bool {
@@ -63,7 +62,7 @@ pub(in crate::record) fn evaluate_screen_waiters(
     let state_bytes = serde_json::to_vec(&live.presented).map_err(|error| {
         return terminal_error("serialize screen waiter state", error.to_string());
     })?;
-    let state_hash = blake3::hash(&state_bytes).to_hex().to_string();
+    let state_hash = semantic_state_hash(&live.presented)?;
     let viewport_text = semantic_viewport_text(&live.presented);
     let observed_monotonic_ns = event_log.elapsed_ns();
     let now = Instant::now();
@@ -285,7 +284,7 @@ pub(super) fn validate_screen_predicate(predicate: &ScreenPredicate) -> StdResul
     return visit(predicate, 1, &mut nodes);
 }
 
-fn evaluate_screen_predicate(
+pub(super) fn evaluate_screen_predicate(
     predicate: &ScreenPredicate,
     state: &SemanticState,
     viewport_text: &str,

@@ -512,6 +512,7 @@ pub(super) fn parse_event_log_with_limits(
             header,
             events,
             pending_operations,
+            source_path: Some(path.to_path_buf()),
         },
         issue,
     });

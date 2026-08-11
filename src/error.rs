@@ -23,7 +23,7 @@ pub enum Error {
     },
 
     /// A persisted JSON document did not match its schema.
-    #[error("invalid JSON document `{path}`")]
+    #[error("invalid JSON document `{path}` at `{json_path}`")]
     #[diagnostic(
         code(termtrace::invalid_json),
         help("Preserve the original file for diagnosis; derived artifacts can be regenerated")
@@ -241,21 +241,21 @@ pub enum Error {
     InputSequenceIncomplete {
         /// Caller-owned sequence request identifier.
         sequence_id: uuid::Uuid,
-        /// Zero-based atom that failed after its intent was recorded.
+        /// Zero-based atom whose encoding or PTY delivery failed.
         failed_atom_index: u32,
         /// Caller-owned identifier of the failed atom.
         failed_operation_id: uuid::Uuid,
         /// Number of preceding atoms applied completely.
         atoms_applied: u32,
-        /// Number of bytes written by all attempted atoms, including a partial failed atom.
+        /// Number of bytes written by all applied or partially applied atoms.
         bytes_written: u64,
-        /// Number of bytes written for the failed atom.
+        /// Number of bytes written for the failed atom; zero for an encoding failure.
         failed_atom_bytes_written: u64,
-        /// First intent event in the attempted prefix.
+        /// First intent event in the applied or attempted prefix.
         first_intent_event_seq: u64,
-        /// Result event for the failed atom.
+        /// Last result event in the applied or attempted prefix.
         last_result_event_seq: u64,
-        /// Underlying terminal write failure.
+        /// Underlying encoding or PTY delivery failure.
         reason: String,
     },
 

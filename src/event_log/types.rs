@@ -148,6 +148,8 @@ pub struct EventLog {
     pub events: Vec<EventRecord>,
     /// Intents without a corresponding result, usually due to interruption.
     pub pending_operations: Vec<PendingOperation>,
+    /// Canonical event-log path when loaded from disk.
+    pub(crate) source_path: Option<PathBuf>,
 }
 
 /// Kind of state-changing operation represented by an intent/result pair.

@@ -75,7 +75,9 @@ impl MutationHistory {
     ) -> Result<()> {
         let operation_ids = if event_end_seq == event_start_seq {
             Vec::new()
-        } else if let ControlCommand::InputSequence { atoms, .. } = command {
+        } else if let ControlCommand::InputSequence { atoms, .. }
+        | ControlCommand::Act { atoms, .. } = command
+        {
             let attempted = usize::try_from(event_end_seq.saturating_sub(event_start_seq) / 2)
                 .unwrap_or(usize::MAX);
             atoms

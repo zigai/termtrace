@@ -15,7 +15,8 @@ use crate::{
     profile::ResolvedGhosttyProfile,
     provenance::ProvenancePolicy,
     session::{
-        GeometryProvenance, ImportProvenance, ResourceLimits, SessionLineage, TmuxPaneProvenance,
+        GeometryProvenance, ImportProvenance, ResourceLimitOutcome, ResourceLimits, SessionLineage,
+        TmuxPaneProvenance,
     },
 };
 use portable_pty::{Child, MasterPty, PtySize};
@@ -84,6 +85,8 @@ pub struct RecordOutcome {
     pub signal_name: Option<String>,
     /// Number of output bytes recorded.
     pub output_bytes: u64,
+    /// Resource budget that terminated the recording, when one was exceeded.
+    pub resource_limit: Option<ResourceLimitOutcome>,
     /// Canonical event-log path.
     pub event_log: PathBuf,
 }

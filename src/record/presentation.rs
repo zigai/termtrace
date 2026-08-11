@@ -46,7 +46,7 @@ enum PresentationTransition {
     ExitSynchronizedOutput,
 }
 
-pub(super) enum PresentationAction {
+pub(crate) enum PresentationAction {
     Immediate,
     Buffered,
     Sequence {
@@ -73,7 +73,7 @@ struct CsiModeParser {
     includes_synchronized_output: bool,
 }
 
-pub(super) struct PresentationTracker {
+pub(crate) struct PresentationTracker {
     state: PresentationParseState,
     pub(super) pending: Vec<u8>,
     synchronized_output: bool,
@@ -150,7 +150,9 @@ pub(super) fn process_semantic_bytes(
                     InputSource::Host,
                     InputKind::Raw,
                     InputDescriptor::Raw,
-                    Some("terminal query response".to_owned()),
+                    None,
+                    Some("terminal-query-response".to_owned()),
+                    None,
                     &response,
                 )?;
             }
@@ -163,7 +165,7 @@ pub(super) fn process_semantic_bytes(
 }
 
 impl PresentationTracker {
-    pub(super) fn new(synchronized_output: bool) -> Self {
+    pub(crate) fn new(synchronized_output: bool) -> Self {
         return Self {
             state: PresentationParseState::Ground,
             pending: Vec::new(),
@@ -171,7 +173,7 @@ impl PresentationTracker {
         };
     }
 
-    pub(super) fn push(&mut self, byte: u8) -> PresentationAction {
+    pub(crate) fn push(&mut self, byte: u8) -> PresentationAction {
         match &mut self.state {
             PresentationParseState::Ground => match byte {
                 0x1b => {
@@ -247,7 +249,7 @@ impl PresentationTracker {
         }
     }
 
-    pub(super) fn finish(&mut self) -> Vec<u8> {
+    pub(crate) fn finish(&mut self) -> Vec<u8> {
         self.state = PresentationParseState::Ground;
         return take(&mut self.pending);
     }

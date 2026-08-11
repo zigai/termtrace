@@ -3,10 +3,10 @@
 mod control;
 mod input;
 mod model;
-mod presentation;
+pub(crate) mod presentation;
 mod process;
 mod runtime;
 mod support;
 
 pub use model::{RecordOptions, RecordOutcome};
-pub use runtime::record;
+pub use runtime::{record, record_with_output};

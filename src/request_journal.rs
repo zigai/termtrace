@@ -346,6 +346,7 @@ pub fn validate_mutation_journal(session: &Path, log: &EventLog) -> Result<u64> 
                 ControlData::Acknowledged { boundaries }
                 | ControlData::InputApplied { boundaries, .. }
                 | ControlData::InputSequenceApplied { boundaries, .. }
+                | ControlData::ActionApplied { boundaries, .. }
                 | ControlData::InputNoop { boundaries, .. }
                 | ControlData::Activated { boundaries, .. }
                 | ControlData::Snapshot { boundaries, .. }

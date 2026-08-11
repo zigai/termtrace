@@ -35,7 +35,7 @@ pub struct Rgb {
     pub b: u8,
 }
 
-/// Layout-independent key accepted by the pinned terminal key encoder.
+/// Layout-independent key accepted by the terminal key encoder adapter.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NamedKey {
@@ -91,7 +91,7 @@ pub struct KeyModifiers {
 pub struct EncodedKey {
     /// Exact bytes to write to the PTY.
     pub data: ByteString,
-    /// Stable pinned encoder identity.
+    /// Stable encoder identity.
     pub encoder: String,
 }
 

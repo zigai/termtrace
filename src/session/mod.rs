@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     Error, Result,
-    artifact::verify_session_artifacts,
+    artifact::{hash_regular_file, verify_session_artifacts},
     environment::ChildEnvironmentPolicy,
     event::{ByteString, Event},
     event_log::{DurabilityPolicy, DurabilityRecord, EventLog},
@@ -28,7 +28,8 @@ pub use io::*;
 pub use model::*;
 pub use provenance::*;
 pub use validation::validate_completed_log;
-use validation::*;
+pub(crate) use validation::validate_completion_candidate;
+use validation::{validate_completion_format, validate_manifest};
 pub use verification::{verify_session, verify_session_with_trust};
 
 #[cfg(test)]

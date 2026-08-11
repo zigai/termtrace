@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use uuid::Uuid;
 
 /// Current on-disk event-log format version.
-pub const EVENT_LOG_VERSION: u32 = 5;
+pub const EVENT_LOG_VERSION: u32 = 6;
 
 /// Stable event-log format identifier.
 pub const EVENT_LOG_FORMAT: &str = "termtrace-events";
@@ -231,7 +231,7 @@ pub enum InputDescriptor {
         alt: bool,
         /// Super modifier.
         super_key: bool,
-        /// Pinned encoder identity.
+        /// Stable encoder identity.
         encoder: String,
         /// BLAKE3 of canonical JSON for the terminal mode snapshot.
         terminal_modes_hash: String,
@@ -351,8 +351,12 @@ pub enum Event {
         descriptor: InputDescriptor,
         /// Exact emitted bytes.
         data: ByteString,
-        /// Optional symbolic intent such as `ctrl-c` or `paste`.
-        intent: Option<String>,
+        /// BLAKE3 of canonical terminal modes used to encode this atom, when mode-aware.
+        terminal_modes_hash: Option<String>,
+        /// Canonical symbolic input, such as `ctrl+u` or `paste`.
+        semantic_input: Option<String>,
+        /// Optional caller-supplied reason for applying the input.
+        caller_intent: Option<String>,
     },
     /// Result of one input intent.
     InputResult {

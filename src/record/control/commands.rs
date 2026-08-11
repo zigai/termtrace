@@ -16,21 +16,23 @@ use zstd::stream::encode_all;
 use crate::{
     Error, Result,
     control::{
+        ActionInputResult, ActionPostcondition, ActionPostconditionResult,
         CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlErrorDetails, ControlRequest,
         ControlResponse, ControlResult, InputSequenceFailureDetails, PointerOperation,
-        ProcessSignal,
+        ProcessSignal, StableCaptureQuality,
     },
     event::{ByteString, Event, InputDescriptor, InputKind, InputSource, OperationStatus},
     event_log::EventLogWriter,
     ghostty_vt::{
         FocusEvent, MouseAction, MouseButton, encode_focus, supported_geometry_cell_count,
     },
+    replay::semantic_state_hash,
 };
 
 use super::super::{
     input::{
-        apply_input, apply_input_sequence, apply_resize, encode_paste, interpolate_cell,
-        mouse_button_name, semantic_key_name,
+        InputSequenceExecution, apply_input, apply_resize, encode_paste, interpolate_cell,
+        mouse_button_name, semantic_key_input, semantic_key_name,
     },
     model::{SpawnedCommand, TerminalGeometry},
     presentation::{LiveTerminal, find_text_regions, resize_semantic, semantic_viewport_text},
@@ -42,10 +44,56 @@ use super::super::{
 use super::{
     history::MutationHistory,
     screen::{
-        MAX_SCREEN_WAITERS, ScreenWaiter, presented_state_hash, valid_blake3_hash,
-        validate_screen_predicate,
+        MAX_SCREEN_WAITERS, ScreenWaiter, evaluate_screen_predicate, presented_state_hash,
+        valid_blake3_hash, validate_screen_predicate,
     },
 };
+
+pub(in crate::record) struct PendingInputSequence {
+    request: ControlRequest,
+    response_sender: mpsc::SyncSender<ControlResponse>,
+    command_hash: String,
+    event_start_seq: u64,
+    execution: InputSequenceExecution,
+    postcondition: Option<ActionPostcondition>,
+    input: Option<ActionInputResult>,
+    postcondition_started_at: Option<Instant>,
+    matching_state: Option<(String, Instant)>,
+}
+
+impl PendingInputSequence {
+    pub(in crate::record) fn next_deadline(&self) -> Instant {
+        if self.input.is_none() {
+            return self.execution.next_deadline();
+        }
+        let Some(postcondition) = &self.postcondition else {
+            return Instant::now();
+        };
+        let started_at = self.postcondition_started_at.unwrap_or_else(Instant::now);
+        return match postcondition {
+            ActionPostcondition::None => Instant::now(),
+            ActionPostcondition::Idle {
+                stable_for_ns,
+                timeout_ns,
+            } => {
+                let deadline = started_at + Duration::from_nanos(*timeout_ns);
+                self.matching_state
+                    .as_ref()
+                    .map_or(deadline, |(_, since)| {
+                        return *since + Duration::from_nanos(*stable_for_ns);
+                    })
+                    .min(deadline)
+            }
+            ActionPostcondition::Screen { timeout_ns, .. } => {
+                started_at + Duration::from_nanos(*timeout_ns)
+            }
+        };
+    }
+
+    fn exclusive(&self) -> bool {
+        return self.postcondition.is_some();
+    }
+}
 
 pub(in crate::record) fn handle_control_request(
     spawned: &mut SpawnedCommand,
@@ -55,6 +103,7 @@ pub(in crate::record) fn handle_control_request(
     history: &mut MutationHistory,
     live: &mut LiveTerminal,
     screen_waiters: &mut Vec<ScreenWaiter>,
+    pending_input_sequence: &mut Option<PendingInputSequence>,
 ) -> Result<()> {
     if request.expected_presented_state_hash.is_some()
         && matches!(
@@ -70,6 +119,18 @@ pub(in crate::record) fn handle_control_request(
             request.request_id,
             "invalid_observation_guard",
             "presented-state guards are only valid for mutations",
+        );
+        let _ = response_sender.send(response);
+        return Ok(());
+    }
+    if pending_input_sequence
+        .as_ref()
+        .is_some_and(PendingInputSequence::exclusive)
+    {
+        let response = control_error_response(
+            request.request_id,
+            "action_busy",
+            "an actor-ordered action is still applying input or evaluating its postcondition",
         );
         let _ = response_sender.send(response);
         return Ok(());
@@ -152,6 +213,15 @@ pub(in crate::record) fn handle_control_request(
             | ControlCommand::Snapshot
             | ControlCommand::CaptureStable { .. }
     );
+    if pending_input_sequence.is_some() && !read_only {
+        let response = control_error_response(
+            request.request_id,
+            "input_sequence_busy",
+            "another paced input sequence is still in progress",
+        );
+        let _ = response_sender.send(response);
+        return Ok(());
+    }
     let command_hash = if read_only {
         None
     } else {
@@ -182,7 +252,87 @@ pub(in crate::record) fn handle_control_request(
     let stale = guard.is_some_and(|hash| {
         return valid_blake3_hash(hash) && hash != current_state_hash;
     });
-    let outcome = if guard.is_some_and(|hash| return !valid_blake3_hash(hash)) {
+    let invalid_guard = guard.is_some_and(|hash| return !valid_blake3_hash(hash));
+    if !invalid_guard && !stale {
+        let sequence = match &request.command {
+            ControlCommand::InputSequence {
+                atoms,
+                pace_ns,
+                include_atom_outcomes,
+            } => Some((atoms, *pace_ns, *include_atom_outcomes, None)),
+            ControlCommand::Act {
+                atoms,
+                pace_ns,
+                include_atom_outcomes,
+                postcondition,
+            } => Some((
+                atoms,
+                *pace_ns,
+                *include_atom_outcomes,
+                Some(postcondition.clone()),
+            )),
+            _ => None,
+        };
+        if let Some((atoms, pace_ns, include_atom_outcomes, postcondition)) = sequence {
+            let validated_postcondition = postcondition
+                .as_ref()
+                .map(validate_action_postcondition)
+                .transpose();
+            let execution = validated_postcondition.and_then(|_| {
+                return InputSequenceExecution::new(
+                    request.request_id,
+                    atoms,
+                    pace_ns,
+                    include_atom_outcomes,
+                );
+            });
+            match execution {
+                Ok(execution) => {
+                    *pending_input_sequence = Some(PendingInputSequence {
+                        request,
+                        response_sender,
+                        command_hash: command_hash.ok_or_else(|| {
+                            return terminal_error(
+                                "schedule input sequence",
+                                "missing mutation command hash",
+                            );
+                        })?,
+                        event_start_seq,
+                        execution,
+                        postcondition,
+                        input: None,
+                        postcondition_started_at: None,
+                        matching_state: None,
+                    });
+                    return Ok(());
+                }
+                Err(error) => {
+                    let response = control_error_response(
+                        request.request_id,
+                        control_error_code(&error),
+                        error.to_string(),
+                    );
+                    if let Some(command_hash) = command_hash {
+                        history.remember(
+                            request.request_id,
+                            &request.command,
+                            command_hash,
+                            event_start_seq,
+                            event_log.next_seq(),
+                            event_log.current_hash(),
+                            response.clone(),
+                        )?;
+                    }
+                    let _ = response_sender.send(response);
+                    return match error {
+                        Error::ControlRejected { .. } => Ok(()),
+                        error => Err(error),
+                    };
+                }
+            }
+        }
+    }
+    let outcome = if invalid_guard {
         Err(control_rejected(
             "invalid_observation_guard",
             "expected presented-state hash must be 64 lowercase hexadecimal characters",
@@ -290,11 +440,358 @@ pub(in crate::record) fn handle_control_request(
         tracing::warn!(request_id = %request.request_id, "control response receiver disconnected");
     }
     match outcome {
-        Ok(_) | Err(Error::ControlRejected { .. } | Error::InputSequenceIncomplete { .. }) => {
+        Ok(_)
+        | Err(
+            Error::ControlRejected { .. }
+            | Error::InputSequenceIncomplete { .. }
+            | Error::GhosttyVt { .. },
+        ) => {
             return Ok(());
         }
         Err(error) => return Err(error),
     }
+}
+
+pub(in crate::record) fn advance_input_sequence(
+    spawned: &mut SpawnedCommand,
+    event_log: &mut EventLogWriter,
+    history: &mut MutationHistory,
+    live: &mut LiveTerminal,
+    pending_input_sequence: &mut Option<PendingInputSequence>,
+    child_completed: bool,
+    output_closed: bool,
+) -> Result<()> {
+    let Some(mut pending) = pending_input_sequence.take() else {
+        return Ok(());
+    };
+    let screen_postcondition_ready = pending.input.is_some()
+        && matches!(
+            &pending.postcondition,
+            Some(ActionPostcondition::Screen { .. })
+        );
+    if !screen_postcondition_ready && Instant::now() < pending.next_deadline() {
+        *pending_input_sequence = Some(pending);
+        return Ok(());
+    }
+    let terminal_outcome = if pending.input.is_some() {
+        match evaluate_action_postcondition(
+            &mut pending,
+            event_log,
+            live,
+            child_completed,
+            output_closed,
+        )? {
+            Some(data) => Ok(data),
+            None => {
+                *pending_input_sequence = Some(pending);
+                return Ok(());
+            }
+        }
+    } else {
+        match pending
+            .execution
+            .advance(spawned.writer.as_mut(), event_log, &mut live.semantic)
+        {
+            Ok(None) => {
+                *pending_input_sequence = Some(pending);
+                return Ok(());
+            }
+            Ok(Some(data)) if pending.postcondition.is_some() => {
+                let input = action_input_result(data)?;
+                pending.input = Some(input);
+                pending.postcondition_started_at = Some(Instant::now());
+                match evaluate_action_postcondition(
+                    &mut pending,
+                    event_log,
+                    live,
+                    child_completed,
+                    output_closed,
+                )? {
+                    Some(data) => Ok(data),
+                    None => {
+                        *pending_input_sequence = Some(pending);
+                        return Ok(());
+                    }
+                }
+            }
+            Ok(Some(data)) => Ok(data),
+            Err(error) => Err(error),
+        }
+    };
+    let current_state_hash = presented_state_hash(live)?;
+    let atom_count = match &pending.request.command {
+        ControlCommand::InputSequence { atoms, .. } | ControlCommand::Act { atoms, .. } => {
+            u32::try_from(atoms.len()).unwrap_or(u32::MAX)
+        }
+        _ => 0,
+    };
+    let response = input_sequence_response(
+        pending.request.request_id,
+        atom_count,
+        &terminal_outcome,
+        current_state_hash,
+        event_log,
+    );
+    history.remember(
+        pending.request.request_id,
+        &pending.request.command,
+        pending.command_hash,
+        pending.event_start_seq,
+        event_log.next_seq(),
+        event_log.current_hash(),
+        response.clone(),
+    )?;
+    if pending.response_sender.send(response).is_err() {
+        tracing::warn!(
+            request_id = %pending.request.request_id,
+            "input sequence response receiver disconnected"
+        );
+    }
+    return match terminal_outcome {
+        Ok(_)
+        | Err(
+            Error::ControlRejected { .. }
+            | Error::InputSequenceIncomplete { .. }
+            | Error::GhosttyVt { .. },
+        ) => Ok(()),
+        Err(error) => Err(error),
+    };
+}
+
+fn validate_action_postcondition(postcondition: &ActionPostcondition) -> Result<()> {
+    match postcondition {
+        ActionPostcondition::None => return Ok(()),
+        ActionPostcondition::Idle {
+            stable_for_ns,
+            timeout_ns,
+        } => {
+            if *timeout_ns > 0 && *timeout_ns <= 3_600_000_000_000 && *stable_for_ns <= *timeout_ns
+            {
+                return Ok(());
+            }
+        }
+        ActionPostcondition::Screen {
+            predicate,
+            timeout_ns,
+        } => {
+            if *timeout_ns > 0
+                && *timeout_ns <= 3_600_000_000_000
+                && validate_screen_predicate(predicate).is_ok()
+            {
+                return Ok(());
+            }
+        }
+    }
+    return Err(control_rejected(
+        "invalid_action_postcondition",
+        "action postcondition exceeds its predicate limits or durations do not satisfy stable <= timeout <= 1h",
+    ));
+}
+
+fn action_input_result(data: ControlData) -> Result<ActionInputResult> {
+    let ControlData::InputSequenceApplied {
+        sequence_id,
+        atom_count,
+        bytes_written,
+        first_intent_event_seq,
+        last_result_event_seq,
+        pace_ns,
+        atoms,
+        ..
+    } = data
+    else {
+        return Err(terminal_error(
+            "complete actor-ordered action",
+            "input sequence returned an unexpected payload",
+        ));
+    };
+    return Ok(ActionInputResult {
+        sequence_id,
+        atom_count,
+        bytes_written,
+        first_intent_event_seq,
+        last_result_event_seq,
+        pace_ns,
+        atoms,
+    });
+}
+
+fn evaluate_action_postcondition(
+    pending: &mut PendingInputSequence,
+    event_log: &EventLogWriter,
+    live: &LiveTerminal,
+    child_completed: bool,
+    output_closed: bool,
+) -> Result<Option<ControlData>> {
+    let input = pending.input.clone().ok_or_else(|| {
+        return terminal_error(
+            "evaluate actor-ordered action",
+            "postcondition started without applied input",
+        );
+    })?;
+    let postcondition = pending.postcondition.as_ref().ok_or_else(|| {
+        return terminal_error(
+            "evaluate actor-ordered action",
+            "missing action postcondition",
+        );
+    })?;
+    if matches!(postcondition, ActionPostcondition::None) {
+        return Ok(Some(ControlData::ActionApplied {
+            input,
+            postcondition: ActionPostconditionResult::None { matched: true },
+            boundaries: actor_boundaries(event_log),
+        }));
+    }
+    let state_hash = presented_state_hash(live)?;
+    let viewport_text = semantic_viewport_text(&live.presented);
+    let now = Instant::now();
+    let started_at = pending.postcondition_started_at.unwrap_or(now);
+    return match postcondition {
+        ActionPostcondition::None => Err(terminal_error(
+            "evaluate actor-ordered action",
+            "unexpected empty action postcondition",
+        )),
+        ActionPostcondition::Idle {
+            stable_for_ns,
+            timeout_ns,
+        } => {
+            match &pending.matching_state {
+                Some((prior_hash, _)) if prior_hash == &state_hash => {}
+                _ => pending.matching_state = Some((state_hash.clone(), now)),
+            }
+            let stable = pending.matching_state.as_ref().is_some_and(|(_, since)| {
+                return since.elapsed() >= Duration::from_nanos(*stable_for_ns);
+            });
+            let deadline = now >= started_at + Duration::from_nanos(*timeout_ns);
+            if !stable && !child_completed && !output_closed && !deadline {
+                return Ok(None);
+            }
+            let quality = if stable {
+                StableCaptureQuality::Stable
+            } else if child_completed {
+                StableCaptureQuality::ChildCompleted
+            } else if output_closed {
+                StableCaptureQuality::OutputClosed
+            } else {
+                StableCaptureQuality::Deadline
+            };
+            Ok(Some(ControlData::ActionApplied {
+                input,
+                postcondition: ActionPostconditionResult::Idle {
+                    matched: stable,
+                    viewport_text,
+                    state_hash,
+                    quality,
+                    cols: live.presented.cols,
+                    rows: live.presented.rows,
+                },
+                boundaries: actor_boundaries(event_log),
+            }))
+        }
+        ActionPostcondition::Screen {
+            predicate,
+            timeout_ns,
+        } => {
+            let matched =
+                evaluate_screen_predicate(predicate, &live.presented, &viewport_text, &state_hash);
+            let deadline = now >= started_at + Duration::from_nanos(*timeout_ns);
+            if !matched && !child_completed && !output_closed && !deadline {
+                return Ok(None);
+            }
+            let completion_quality = if matched {
+                "matched_unsettled"
+            } else if child_completed {
+                "child_completed"
+            } else if output_closed {
+                "output_closed"
+            } else {
+                "deadline"
+            };
+            Ok(Some(ControlData::ActionApplied {
+                input,
+                postcondition: ActionPostconditionResult::Screen {
+                    matched,
+                    viewport_text,
+                    state_hash,
+                    completion_quality: completion_quality.to_owned(),
+                    cols: live.presented.cols,
+                    rows: live.presented.rows,
+                    child_completed,
+                },
+                boundaries: actor_boundaries(event_log),
+            }))
+        }
+    };
+}
+
+fn input_sequence_response(
+    request_id: Uuid,
+    atom_count: u32,
+    outcome: &Result<ControlData>,
+    current_state_hash: String,
+    event_log: &EventLogWriter,
+) -> ControlResponse {
+    return match outcome {
+        Ok(data) => ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id,
+            result: ControlResult::Ok { data: data.clone() },
+        },
+        Err(Error::InputSequenceIncomplete {
+            sequence_id,
+            failed_atom_index,
+            failed_operation_id,
+            atoms_applied,
+            bytes_written,
+            failed_atom_bytes_written,
+            first_intent_event_seq,
+            last_result_event_seq,
+            reason,
+        }) => ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id,
+            result: ControlResult::Error {
+                code: "input_sequence_incomplete".to_owned(),
+                message: format!(
+                    "input sequence `{sequence_id}` stopped at atom {failed_atom_index}: {reason}"
+                ),
+                details: Some(ControlErrorDetails {
+                    current_presented_state_hash: current_state_hash,
+                    boundaries: actor_boundaries(event_log),
+                    scope: "input_sequence_attempted_prefix".to_owned(),
+                    input_sequence: Some(InputSequenceFailureDetails {
+                        sequence_id: *sequence_id,
+                        atom_count,
+                        atoms_applied: *atoms_applied,
+                        failed_atom_index: *failed_atom_index,
+                        failed_operation_id: *failed_operation_id,
+                        bytes_written: *bytes_written,
+                        failed_atom_bytes_written: *failed_atom_bytes_written,
+                        first_intent_event_seq: *first_intent_event_seq,
+                        last_result_event_seq: *last_result_event_seq,
+                        resume_from_atom_index: failed_atom_index.saturating_add(1),
+                    }),
+                }),
+            },
+        },
+        Err(Error::ControlRejected { code, message }) => ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id,
+            result: ControlResult::Error {
+                code: code.clone(),
+                message: message.clone(),
+                details: Some(ControlErrorDetails {
+                    current_presented_state_hash: current_state_hash,
+                    boundaries: actor_boundaries(event_log),
+                    scope: "input_sequence_encoding".to_owned(),
+                    input_sequence: None,
+                }),
+            },
+        },
+        Err(error) => {
+            control_error_response(request_id, control_error_code(error), error.to_string())
+        }
+    };
 }
 
 fn execute_control_command(
@@ -326,7 +823,7 @@ fn execute_control_command(
             return Ok(ControlData::Snapshot {
                 semantic_state_zstd: ByteString::from(compressed),
                 viewport_text: semantic_viewport_text(&live.presented),
-                state_hash: blake3::hash(&encoded).to_hex().to_string(),
+                state_hash: semantic_state_hash(&live.presented)?,
                 presented: true,
                 cols: live.presented.cols,
                 rows: live.presented.rows,
@@ -347,9 +844,22 @@ fn execute_control_command(
         ControlCommand::Input {
             data,
             input_kind,
-            intent,
+            caller_intent,
         } => {
-            validate_control_input(data.as_bytes(), intent.as_deref())?;
+            validate_control_input(data.as_bytes(), caller_intent.as_deref())?;
+            let modes = live.semantic.snapshot()?.modes;
+            let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
+                return terminal_error("serialize input modes", error.to_string());
+            })?;
+            let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
+            let semantic_input = match input_kind {
+                InputKind::Text => "text",
+                InputKind::Raw => "raw",
+                InputKind::Keys => "keys",
+                InputKind::Paste => "paste",
+                InputKind::Focus => "focus",
+                InputKind::Pointer => "pointer",
+            };
             let applied = apply_input(
                 spawned.writer.as_mut(),
                 event_log,
@@ -364,7 +874,9 @@ fn execute_control_command(
                     | InputKind::Focus
                     | InputKind::Pointer => InputDescriptor::Raw,
                 },
-                intent.clone(),
+                Some(terminal_modes_hash),
+                Some(semantic_input.to_owned()),
+                caller_intent.clone(),
                 data.as_bytes(),
             )?;
             return Ok(ControlData::InputApplied {
@@ -377,26 +889,18 @@ fn execute_control_command(
                 boundaries: actor_boundaries(event_log),
             });
         }
-        ControlCommand::InputSequence {
-            atoms,
-            pace_ns,
-            include_atom_outcomes,
-        } => {
-            return apply_input_sequence(
-                spawned.writer.as_mut(),
-                event_log,
-                request_id,
-                atoms,
-                *pace_ns,
-                *include_atom_outcomes,
-                &mut live.semantic,
-            );
+        ControlCommand::InputSequence { .. } | ControlCommand::Act { .. } => {
+            return Err(terminal_error(
+                "dispatch input sequence",
+                "paced input sequence was not scheduled by the actor",
+            ));
         }
         ControlCommand::Key { key, modifiers } => {
             let modes = live.semantic.snapshot()?.modes;
             let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
                 return terminal_error("serialize keyboard modes", error.to_string());
             })?;
+            let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
             let encoded = live.semantic.encode_key(*key, *modifiers)?;
             if encoded.data.as_bytes().is_empty() {
                 return Err(control_rejected(
@@ -417,9 +921,11 @@ fn execute_control_command(
                     alt: modifiers.alt,
                     super_key: modifiers.super_key,
                     encoder: encoded.encoder,
-                    terminal_modes_hash: blake3::hash(&mode_bytes).to_hex().to_string(),
+                    terminal_modes_hash: terminal_modes_hash.clone(),
                 },
-                Some(semantic_key_name(*key)),
+                Some(terminal_modes_hash),
+                Some(semantic_key_input(*key, *modifiers)),
+                None,
                 encoded.data.as_bytes(),
             )?;
             return Ok(ControlData::InputApplied {
@@ -438,6 +944,7 @@ fn execute_control_command(
             let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
                 return terminal_error("serialize paste modes", error.to_string());
             })?;
+            let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
             let encoded = encode_paste(data.as_bytes(), modes.bracketed_paste)?;
             let applied = apply_input(
                 spawned.writer.as_mut(),
@@ -447,9 +954,11 @@ fn execute_control_command(
                 InputKind::Paste,
                 InputDescriptor::Paste {
                     bracketed: modes.bracketed_paste,
-                    terminal_modes_hash: blake3::hash(&mode_bytes).to_hex().to_string(),
+                    terminal_modes_hash: terminal_modes_hash.clone(),
                 },
+                Some(terminal_modes_hash),
                 Some("paste".to_owned()),
+                None,
                 &encoded,
             )?;
             return Ok(ControlData::InputApplied {
@@ -500,9 +1009,11 @@ fn execute_control_command(
                 InputDescriptor::Focus {
                     focused: *focused,
                     encoder: "libghostty-focus-encoder-v1".to_owned(),
-                    terminal_modes_hash,
+                    terminal_modes_hash: terminal_modes_hash.clone(),
                 },
+                Some(terminal_modes_hash),
                 Some(if *focused { "focus-in" } else { "focus-out" }.to_owned()),
+                None,
                 encoded.as_bytes(),
             )?;
             return Ok(ControlData::InputApplied {
@@ -745,9 +1256,11 @@ fn execute_control_command(
                     pixel_width: live.geometry.pixel_width,
                     pixel_height: live.geometry.pixel_height,
                     encoder: "libghostty-mouse-encoder-v1".to_owned(),
-                    terminal_modes_hash,
+                    terminal_modes_hash: terminal_modes_hash.clone(),
                 },
+                Some(terminal_modes_hash),
                 Some(format!("pointer-{operation_name}")),
+                None,
                 &encoded,
             )?;
             return Ok(ControlData::InputApplied {
@@ -885,9 +1398,11 @@ fn execute_control_command(
                     cols: live.geometry.cols,
                     rows: live.geometry.rows,
                     encoder: "libghostty-mouse-encoder-v1".to_owned(),
-                    terminal_modes_hash,
+                    terminal_modes_hash: terminal_modes_hash.clone(),
                 },
+                Some(terminal_modes_hash),
                 Some("activate-visible-text".to_owned()),
+                None,
                 &encoded,
             )?;
             return Ok(ControlData::Activated {
@@ -1020,9 +1535,9 @@ pub(in crate::record) fn apply_signal(
         return result_write;
     }
     return finish_with_cleanup(
-        Err(terminal_error(
-            "signal child process group",
-            error.to_string(),
+        Err(control_rejected(
+            "signal_failed",
+            &format!("signal child process group failed: {error}"),
         )),
         result_write,
     );
@@ -1043,6 +1558,13 @@ fn control_error_code(error: &Error) -> &str {
         Error::ControlRejected { code, .. } => return code,
         Error::InputSequenceIncomplete { .. } => return "input_sequence_incomplete",
         Error::InputWriteFailed { .. } => return "input_write_failed",
+        Error::GhosttyVt { operation, .. } if operation.contains("key") => {
+            return "key_encoding_failed";
+        }
+        Error::GhosttyVt { operation, .. } if operation.contains("mouse") => {
+            return "pointer_encoding_failed";
+        }
+        Error::GhosttyVt { .. } => return "terminal_encoding_failed",
         Error::EventLogPoisoned { .. } | Error::InvalidEventLog { .. } => return "event_log_failed",
         Error::Filesystem { .. }
         | Error::ControlUnavailable { .. }

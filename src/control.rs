@@ -3,12 +3,20 @@
 use std::{
     io::{BufRead as _, BufReader, Error as IoError, ErrorKind, Read as _, Write as _},
     net::Shutdown,
-    os::unix::net::UnixStream,
-    path::Path,
+    os::{
+        linux::net::SocketAddrExt as _,
+        unix::net::{SocketAddr, UnixStream},
+    },
+    path::{Path, PathBuf},
     time::Duration,
 };
 
+use nix::{
+    sys::socket::{getsockopt, sockopt::PeerCredentials},
+    unistd::getuid,
+};
 use schemars::JsonSchema;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -17,12 +25,13 @@ use crate::{
     event::{ByteString, InputKind},
     event_log::CanonicalBoundary,
     ghostty_vt::{CursorStyle, KeyModifiers, ModeState, MouseButton, NamedKey},
+    session::read_manifest,
 };
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 13;
-/// Relative socket path inside a live session directory.
-pub const CONTROL_SOCKET_NAME: &str = "control.sock";
+pub const CONTROL_PROTOCOL_VERSION: u32 = 14;
+/// Prefix for the Linux abstract socket name assigned to each live session.
+pub const CONTROL_SOCKET_PREFIX: &str = "termtrace-control-";
 /// Maximum encoded request or response size.
 pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 1024 * 1024;
 const DEFAULT_CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -274,17 +283,29 @@ pub enum ControlCommand {
         data: ByteString,
         /// Semantic category retained in the canonical input intent.
         input_kind: InputKind,
-        /// Optional human-readable intent.
-        intent: Option<String>,
+        /// Optional caller-supplied reason for the operation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        caller_intent: Option<String>,
     },
     /// Apply one admission-guarded, journaled sequence of keyboard input atoms.
     InputSequence {
-        /// Ordered input atoms resolved against the actor state at admission.
+        /// Ordered input atoms encoded against actor state immediately before each write.
         atoms: Vec<InputSequenceAtom>,
         /// Delay between atoms, bounded together with the atom count.
         pace_ns: u64,
         /// Retain per-atom identifiers and canonical event positions in the response.
         include_atom_outcomes: bool,
+    },
+    /// Apply input and evaluate its postcondition as one actor-ordered operation.
+    Act {
+        /// Ordered input atoms encoded against actor state immediately before each write.
+        atoms: Vec<InputSequenceAtom>,
+        /// Delay between atoms, bounded together with the atom count.
+        pace_ns: u64,
+        /// Retain per-atom identifiers and canonical event positions in the response.
+        include_atom_outcomes: bool,
+        /// Presented-state condition evaluated without releasing actor ordering.
+        postcondition: ActionPostcondition,
     },
     /// Encode and apply one symbolic key against the actor's live terminal modes.
     Key {
@@ -430,6 +451,15 @@ pub enum ControlData {
         /// Durable and observed positions after complete application.
         boundaries: ActorBoundaries,
     },
+    /// Combined input and postcondition result from one actor-ordered action.
+    ActionApplied {
+        /// Exact result of the completely applied input prefix.
+        input: ActionInputResult,
+        /// Exact presented state that satisfied or ended the postcondition.
+        postcondition: ActionPostconditionResult,
+        /// Durable and observed positions after postcondition evaluation.
+        boundaries: ActorBoundaries,
+    },
     /// Successful semantic input request that correctly emitted no bytes.
     InputNoop {
         /// Semantic input category.
@@ -481,7 +511,7 @@ pub enum ControlData {
         semantic_state_zstd: ByteString,
         /// Plain text of the presentation-eligible viewport.
         viewport_text: String,
-        /// BLAKE3 of canonical JSON for `state`.
+        /// Normalized semantic hash assigned by deterministic replay.
         state_hash: String,
         /// Always true for this presentation-filtered endpoint.
         presented: bool,
@@ -508,7 +538,7 @@ pub enum ControlData {
         semantic_state_zstd: ByteString,
         /// Plain text for the exact presentation-eligible viewport.
         viewport_text: String,
-        /// BLAKE3 of canonical JSON for this exact state.
+        /// Normalized semantic hash assigned by deterministic replay.
         state_hash: String,
         /// Terminal columns.
         cols: u16,
@@ -567,6 +597,92 @@ pub enum ControlData {
     },
 }
 
+/// Presented-state condition retained under exclusive actor ordering after input.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "condition", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ActionPostcondition {
+    /// Return immediately after the input sequence completes.
+    None,
+    /// Wait for one unchanged presentation-eligible state.
+    Idle {
+        /// Required unchanged presented-state interval.
+        stable_for_ns: u64,
+        /// Server-side monotonic deadline interval.
+        timeout_ns: u64,
+    },
+    /// Wait for one presentation-eligible screen predicate.
+    Screen {
+        /// Exact screen predicate.
+        predicate: ScreenPredicate,
+        /// Server-side monotonic deadline interval.
+        timeout_ns: u64,
+    },
+}
+
+/// Exact applied-input component of an actor-ordered action.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ActionInputResult {
+    /// Canonical sequence identifier (the action request ID).
+    pub sequence_id: Uuid,
+    /// Number of atoms applied completely.
+    pub atom_count: u32,
+    /// Total exact PTY bytes written across every atom.
+    pub bytes_written: u64,
+    /// First canonical input-intent event in the sequence.
+    pub first_intent_event_seq: u64,
+    /// Last canonical input-result event in the sequence.
+    pub last_result_event_seq: u64,
+    /// Requested delay between atoms.
+    pub pace_ns: u64,
+    /// Optional per-atom outcomes requested by an explicit verbose caller.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub atoms: Vec<InputSequenceAtomOutcome>,
+}
+
+/// Exact postcondition result returned without releasing actor ordering.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ActionPostconditionResult {
+    /// No presented-state postcondition was requested.
+    None {
+        /// Always true after complete input application.
+        matched: bool,
+    },
+    /// Final state of an idle postcondition.
+    Idle {
+        /// Whether the state remained unchanged for the requested interval.
+        matched: bool,
+        /// Plain text for the exact presentation-eligible viewport.
+        viewport_text: String,
+        /// Normalized semantic hash for the returned state.
+        state_hash: String,
+        /// Typed stability quality.
+        quality: StableCaptureQuality,
+        /// Terminal columns.
+        cols: u16,
+        /// Terminal rows.
+        rows: u16,
+    },
+    /// Final state of a screen or regular-expression postcondition.
+    Screen {
+        /// Whether the predicate matched before the deadline or child completion.
+        matched: bool,
+        /// Plain text for the exact presentation-eligible viewport.
+        viewport_text: String,
+        /// Normalized semantic hash for the returned state.
+        state_hash: String,
+        /// Stable completion classification.
+        completion_quality: String,
+        /// Terminal columns.
+        cols: u16,
+        /// Terminal rows.
+        rows: u16,
+        /// Whether child completion ended evaluation.
+        child_completed: bool,
+    },
+}
+
 /// One input atom accepted inside an admission-guarded sequence.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "input", rename_all = "snake_case", deny_unknown_fields)]
@@ -579,8 +695,9 @@ pub enum InputSequenceAtom {
         data: ByteString,
         /// Semantic category retained in canonical evidence.
         input_kind: InputKind,
-        /// Optional human-readable intent.
-        intent: Option<String>,
+        /// Optional caller-supplied reason retained separately from input semantics.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        caller_intent: Option<String>,
     },
     /// One symbolic key encoded against live terminal modes.
     Key {
@@ -590,6 +707,9 @@ pub enum InputSequenceAtom {
         key: NamedKey,
         /// Typed modifier state.
         modifiers: KeyModifiers,
+        /// Optional caller-supplied reason retained separately from the symbolic key.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        caller_intent: Option<String>,
     },
     /// UTF-8 paste encoded using live bracketed-paste mode.
     Paste {
@@ -597,6 +717,9 @@ pub enum InputSequenceAtom {
         operation_id: Uuid,
         /// Paste content before mode-dependent encoding.
         data: ByteString,
+        /// Optional caller-supplied reason retained separately from paste semantics.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        caller_intent: Option<String>,
     },
 }
 
@@ -696,8 +819,62 @@ pub struct InputSequenceFailureDetails {
     pub first_intent_event_seq: u64,
     /// Canonical failed input-result event.
     pub last_result_event_seq: u64,
-    /// First atom not attempted; only this suffix is safe to submit independently.
+    /// First atom safe to submit independently with a new request ID.
     pub resume_from_atom_index: u32,
+}
+
+/// Derive the bounded abstract control-socket name for one session.
+pub fn control_socket_name(session_id: Uuid) -> String {
+    return format!("{CONTROL_SOCKET_PREFIX}{session_id}");
+}
+
+pub(crate) fn control_socket_address(name: &str) -> Result<SocketAddr> {
+    return SocketAddr::from_abstract_name(name.as_bytes()).map_err(|error| {
+        return Error::InvalidControlProtocol {
+            reason: format!("invalid abstract control socket name: {error}"),
+        };
+    });
+}
+
+pub(crate) fn connect_session_control(session_directory: &Path) -> Result<UnixStream> {
+    if !session_directory.join("session.json").is_file() {
+        return Err(Error::ControlUnavailable {
+            session: session_directory.to_path_buf(),
+            lifecycle: control_lifecycle_hint(session_directory),
+            source: IoError::new(ErrorKind::NotFound, "session manifest is unavailable"),
+        });
+    }
+    let manifest = read_manifest(session_directory)?;
+    let address = control_socket_address(&manifest.control_socket)?;
+    let stream = UnixStream::connect_addr(&address).map_err(|source| {
+        return Error::ControlUnavailable {
+            session: session_directory.to_path_buf(),
+            lifecycle: control_lifecycle_hint(session_directory),
+            source,
+        };
+    })?;
+    let credentials = getsockopt(&stream, PeerCredentials).map_err(|error| {
+        return Error::ControlUnavailable {
+            session: session_directory.to_path_buf(),
+            lifecycle: "control_peer_identity_unavailable".to_owned(),
+            source: IoError::from_raw_os_error(error as i32),
+        };
+    })?;
+    if credentials.uid() != getuid().as_raw() {
+        return Err(Error::ControlUnavailable {
+            session: session_directory.to_path_buf(),
+            lifecycle: "control_peer_owner_mismatch".to_owned(),
+            source: IoError::new(
+                ErrorKind::PermissionDenied,
+                "control endpoint belongs to a different user",
+            ),
+        });
+    }
+    return Ok(stream);
+}
+/// Return whether the live recorder's abstract control endpoint accepts a connection.
+pub fn control_endpoint_is_reachable(session_directory: impl AsRef<Path>) -> bool {
+    return connect_session_control(session_directory.as_ref()).is_ok();
 }
 
 /// Send one command to a live session and wait for its correlated response.
@@ -746,7 +923,7 @@ pub fn send_request_response(
     request: &ControlRequest,
 ) -> Result<ControlResponse> {
     let session_directory = session_directory.as_ref();
-    let socket = session_directory.join(CONTROL_SOCKET_NAME);
+    let socket = PathBuf::from("<abstract-control-socket>");
     let mut request_frame = serde_json::to_vec(request).map_err(|source| {
         return Error::InvalidJson {
             path: socket.clone(),
@@ -762,13 +939,7 @@ pub fn send_request_response(
         });
     }
     request_frame.push(b'\n');
-    let mut stream = UnixStream::connect(&socket).map_err(|source| {
-        return Error::ControlUnavailable {
-            session: session_directory.to_path_buf(),
-            lifecycle: control_lifecycle_hint(session_directory, &socket),
-            source,
-        };
-    })?;
+    let mut stream = connect_session_control(session_directory)?;
     let timeout = control_response_timeout(&request.command, Duration::from_secs(2));
     stream
         .set_read_timeout(Some(timeout))
@@ -825,26 +996,43 @@ pub(crate) fn control_response_timeout(command: &ControlCommand, wait_slack: Dur
             Duration::from_nanos(*timeout_ns).saturating_add(wait_slack)
         }
         ControlCommand::InputSequence { atoms, pace_ns, .. } => {
-            let gaps = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
-            let pacing =
-                Duration::from_nanos(pace_ns.saturating_mul(gaps)).min(MAX_INPUT_SEQUENCE_PACING);
-            DEFAULT_CONTROL_TIMEOUT.saturating_add(pacing)
+            input_sequence_response_timeout(atoms, *pace_ns)
+        }
+        ControlCommand::Act {
+            atoms,
+            pace_ns,
+            postcondition,
+            ..
+        } => {
+            let postcondition_timeout = match postcondition {
+                ActionPostcondition::None => Duration::ZERO,
+                ActionPostcondition::Idle { timeout_ns, .. }
+                | ActionPostcondition::Screen { timeout_ns, .. } => {
+                    Duration::from_nanos(*timeout_ns)
+                }
+            };
+            input_sequence_response_timeout(atoms, *pace_ns)
+                .saturating_add(postcondition_timeout)
+                .saturating_add(wait_slack)
         }
         _ => DEFAULT_CONTROL_TIMEOUT,
     };
 }
 
-fn control_lifecycle_hint(session: &Path, socket: &Path) -> String {
+fn input_sequence_response_timeout(atoms: &[InputSequenceAtom], pace_ns: u64) -> Duration {
+    let gaps = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
+    let pacing = Duration::from_nanos(pace_ns.saturating_mul(gaps)).min(MAX_INPUT_SEQUENCE_PACING);
+    return DEFAULT_CONTROL_TIMEOUT.saturating_add(pacing);
+}
+
+fn control_lifecycle_hint(session: &Path) -> String {
     if session.join("completion.json").is_file() {
         return "completed".to_owned();
     }
     if !session.join("session.json").is_file() {
         return "not_a_session".to_owned();
     }
-    if !socket.exists() {
-        return "control_socket_missing_or_recorder_starting".to_owned();
-    }
-    return "stale_or_unreachable_actor".to_owned();
+    return "control_endpoint_unreachable_or_recorder_starting".to_owned();
 }
 
 fn control_transport_error(
@@ -924,13 +1112,13 @@ mod tests {
                 operation_id: Uuid::now_v7(),
                 data: ByteString::new(vec![b'a']),
                 input_kind: InputKind::Text,
-                intent: None,
+                caller_intent: None,
             },
             InputSequenceAtom::Bytes {
                 operation_id: Uuid::now_v7(),
                 data: ByteString::new(vec![b'b']),
                 input_kind: InputKind::Text,
-                intent: None,
+                caller_intent: None,
             },
         ];
         let command = ControlCommand::InputSequence {

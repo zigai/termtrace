@@ -89,6 +89,10 @@ impl EventLogWriter {
                 && self.durable_output_bytes == self.observed_output_bytes,
         };
     }
+    #[cfg(test)]
+    pub(crate) fn poison_for_test(&mut self) {
+        self.poisoned = true;
+    }
 
     /// Create a new owner-only event log and durably write its header.
     ///
