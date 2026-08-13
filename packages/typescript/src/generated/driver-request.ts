@@ -61,7 +61,7 @@ export type ScreenPredicate =
     }
   | {
       predicate: "region_contains";
-      region: ScreenRegion;
+      region: ScreenRegion1;
       /**
        * Exact UTF-8 substring.
        */
@@ -69,7 +69,7 @@ export type ScreenPredicate =
     }
   | {
       predicate: "region_absent";
-      region: ScreenRegion1;
+      region: ScreenRegion2;
       /**
        * Exact UTF-8 substring.
        */
@@ -293,6 +293,10 @@ export interface DriverRequest {
               command: "snapshot";
             }
           | {
+              command: "screen_frame";
+              projection: ScreenProjectionRequest;
+            }
+          | {
               command: "wait_screen";
               /**
                * Exact predicate evaluated against the latest presented viewport.
@@ -350,7 +354,7 @@ export interface DriverRequest {
                   }
                 | {
                     predicate: "region_contains";
-                    region: ScreenRegion;
+                    region: ScreenRegion1;
                     /**
                      * Exact UTF-8 substring.
                      */
@@ -358,7 +362,7 @@ export interface DriverRequest {
                   }
                 | {
                     predicate: "region_absent";
-                    region: ScreenRegion1;
+                    region: ScreenRegion2;
                     /**
                      * Exact UTF-8 substring.
                      */
@@ -445,6 +449,7 @@ export interface DriverRequest {
                      */
                     predicates: ScreenPredicate[];
                   };
+              projection: ScreenProjectionRequest1;
               /**
                * Required unchanged matching-state interval.
                */
@@ -456,6 +461,7 @@ export interface DriverRequest {
             }
           | {
               command: "capture_stable";
+              projection: ScreenProjectionRequest2;
               /**
                * Required unchanged presented-state interval.
                */
@@ -585,7 +591,7 @@ export interface DriverRequest {
                         }
                       | {
                           predicate: "region_contains";
-                          region: ScreenRegion;
+                          region: ScreenRegion1;
                           /**
                            * Exact UTF-8 substring.
                            */
@@ -593,7 +599,7 @@ export interface DriverRequest {
                         }
                       | {
                           predicate: "region_absent";
-                          region: ScreenRegion1;
+                          region: ScreenRegion2;
                           /**
                            * Exact UTF-8 substring.
                            */
@@ -685,6 +691,7 @@ export interface DriverRequest {
                      */
                     timeout_ns: number;
                   };
+              projection: ScreenProjectionRequest3;
             }
           | {
               command: "key";
@@ -948,6 +955,60 @@ export interface DriverRequest {
               label: string;
               selector: "marker";
             };
+      }
+    | {
+        /**
+         * Process-local session handle.
+         */
+        handle: string;
+        /**
+         * Permit explicitly selected hidden synchronized-output state.
+         */
+        include_hidden: boolean;
+        method: "screen_frame";
+        /**
+         * Exact shared state selector.
+         */
+        point:
+          | {
+              selector: "latest_presented";
+            }
+          | {
+              selector: "state_id";
+              /**
+               * Exact semantic state identifier.
+               */
+              state_id: number;
+            }
+          | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of the complete normalized semantic state.
+               */
+              state_hash: string;
+            }
+          | {
+              /**
+               * Canonical event sequence.
+               */
+              event_seq: number;
+              selector: "event_seq";
+            }
+          | {
+              /**
+               * Session-monotonic nanoseconds.
+               */
+              monotonic_ns: number;
+              selector: "monotonic_ns";
+            }
+          | {
+              /**
+               * Unique marker label.
+               */
+              label: string;
+              selector: "marker";
+            };
+        projection: ScreenProjectionRequest4;
       }
     | {
         /**
@@ -1237,7 +1298,20 @@ export interface ResourceLimits {
   output_bytes?: number | null;
 }
 /**
- * Region bounds in viewport cells.
+ * Requested rich detail and exact optional viewport region.
+ */
+export interface ScreenProjectionRequest {
+  /**
+   * Requested representation.
+   */
+  detail: "text" | "spans" | "cells";
+  /**
+   * Exact absolute region, or the complete viewport for text/spans.
+   */
+  region?: ScreenRegion | null;
+}
+/**
+ * Absolute zero-based half-open terminal region.
  */
 export interface ScreenRegion {
   /**
@@ -1245,7 +1319,7 @@ export interface ScreenRegion {
    */
   bottom: number;
   /**
-   * Inclusive zero-based left column.
+   * Inclusive left column.
    */
   left: number;
   /**
@@ -1253,7 +1327,7 @@ export interface ScreenRegion {
    */
   right: number;
   /**
-   * Inclusive zero-based top row.
+   * Inclusive top row.
    */
   top: number;
 }
@@ -1266,7 +1340,7 @@ export interface ScreenRegion1 {
    */
   bottom: number;
   /**
-   * Inclusive zero-based left column.
+   * Inclusive left column.
    */
   left: number;
   /**
@@ -1274,9 +1348,56 @@ export interface ScreenRegion1 {
    */
   right: number;
   /**
-   * Inclusive zero-based top row.
+   * Inclusive top row.
    */
   top: number;
+}
+/**
+ * Region bounds in viewport cells.
+ */
+export interface ScreenRegion2 {
+  /**
+   * Exclusive bottom row.
+   */
+  bottom: number;
+  /**
+   * Inclusive left column.
+   */
+  left: number;
+  /**
+   * Exclusive right column.
+   */
+  right: number;
+  /**
+   * Inclusive top row.
+   */
+  top: number;
+}
+/**
+ * Rich projection returned from the exact satisfying or terminating state.
+ */
+export interface ScreenProjectionRequest1 {
+  /**
+   * Requested representation.
+   */
+  detail: "text" | "spans" | "cells";
+  /**
+   * Exact absolute region, or the complete viewport for text/spans.
+   */
+  region?: ScreenRegion | null;
+}
+/**
+ * Rich projection returned from the exact terminating state.
+ */
+export interface ScreenProjectionRequest2 {
+  /**
+   * Requested representation.
+   */
+  detail: "text" | "spans" | "cells";
+  /**
+   * Exact absolute region, or the complete viewport for text/spans.
+   */
+  region?: ScreenRegion | null;
 }
 /**
  * Typed modifier state.
@@ -1301,6 +1422,19 @@ export interface KeyModifiers {
   [k: string]: unknown;
 }
 /**
+ * Rich projection returned from the exact terminating state.
+ */
+export interface ScreenProjectionRequest3 {
+  /**
+   * Requested representation.
+   */
+  detail: "text" | "spans" | "cells";
+  /**
+   * Exact absolute region, or the complete viewport for text/spans.
+   */
+  region?: ScreenRegion | null;
+}
+/**
  * Typed modifier state.
  */
 export interface KeyModifiers1 {
@@ -1321,6 +1455,19 @@ export interface KeyModifiers1 {
    */
   super_key: boolean;
   [k: string]: unknown;
+}
+/**
+ * Requested rich detail and exact optional viewport region.
+ */
+export interface ScreenProjectionRequest4 {
+  /**
+   * Requested representation.
+   */
+  detail: "text" | "spans" | "cells";
+  /**
+   * Exact absolute region, or the complete viewport for text/spans.
+   */
+  region?: ScreenRegion | null;
 }
 /**
  * Pixel viewport intended for native visual capture.

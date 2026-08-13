@@ -15,45 +15,82 @@ const contracts = ["driver-request", "driver-response"];
 await mkdir(outputDirectory, { recursive: true });
 
 for (const contract of contracts) {
-  const schemaName = `${contract}.schema.json`;
-  const schemaPath = resolve(repositoryRoot, "schemas", schemaName);
-  const typesPath = resolve(outputDirectory, `${contract}.ts`);
-  const validatorPath = resolve(outputDirectory, `validate-${contract}.ts`);
-  const types = await compileFromFile(schemaPath, {
-    bannerComment: `/* Generated from schemas/${schemaName}. DO NOT EDIT. */`,
-    cwd: repositoryRoot,
-    style: { semi: true, singleQuote: false, tabWidth: 2, trailingComma: "all" },
-    unknownAny: true,
-  });
-  await writeFile(typesPath, types);
+    const schemaName = `${contract}.schema.json`;
+    const schemaPath = resolve(repositoryRoot, "schemas", schemaName);
+    const typesPath = resolve(outputDirectory, `${contract}.ts`);
+    const validatorPath = resolve(outputDirectory, `validate-${contract}.ts`);
+    const types = await compileFromFile(schemaPath, {
+        bannerComment: `/* Generated from schemas/${schemaName}. DO NOT EDIT. */`,
+        cwd: repositoryRoot,
+        style: { semi: true, singleQuote: false, tabWidth: 2, trailingComma: "all" },
+        unknownAny: true,
+    });
+    await writeFile(typesPath, types);
 
-  const schema = JSON.parse(await readFile(schemaPath, "utf8"));
-  const ajv = new Ajv2020({
-    allErrors: false,
-    code: { esm: true, lines: true, source: true },
-    strict: true,
-    validateFormats: false,
-  });
-  const validate = ajv.compile(schema);
-  const validator = standaloneCode(ajv, validate);
-  const bundled = await build({
-    bundle: true,
-    format: "esm",
-    legalComments: "none",
-    minify: true,
-    platform: "node",
-    stdin: {
-      contents: validator,
-      loader: "js",
-      resolveDir: packageRoot,
-      sourcefile: `validate-${contract}.js`,
-    },
-    write: false,
-  });
-  const output = bundled.outputFiles[0];
-  if (output === undefined) throw new Error(`esbuild produced no ${contract} validator`);
-  await writeFile(
-    validatorPath,
-    `/* Generated from schemas/${schemaName}. DO NOT EDIT. */\n// @ts-nocheck -- generated and bundled Ajv validator code\n${output.text}`,
-  );
+    const schema = JSON.parse(await readFile(schemaPath, "utf8"));
+    const ajv = new Ajv2020({
+        allErrors: false,
+        code: { esm: true, lines: true, source: true },
+        strict: true,
+        validateFormats: false,
+    });
+    const validate = ajv.compile(schema);
+    const validator = standaloneCode(ajv, validate);
+    const bundled = await build({
+        bundle: true,
+        format: "esm",
+        legalComments: "none",
+        minify: true,
+        platform: "node",
+        stdin: {
+            contents: validator,
+            loader: "js",
+            resolveDir: packageRoot,
+            sourcefile: `validate-${contract}.js`,
+        },
+        write: false,
+    });
+    const output = bundled.outputFiles[0];
+    if (output === undefined) throw new Error(`esbuild produced no ${contract} validator`);
+    await writeFile(
+        validatorPath,
+        `/* Generated from schemas/${schemaName}. DO NOT EDIT. */\n// @ts-nocheck -- generated and bundled Ajv validator code\n${output.text}`,
+    );
+
+    if (contract === "driver-response") {
+        const boundaryDefinitions = [
+            ["control-data", "ControlData"],
+            ["screen-frame", "ScreenFrame"],
+        ];
+        for (const [boundaryName, definitionName] of boundaryDefinitions) {
+            const boundarySchema = {
+                $schema: schema.$schema,
+                $ref: `#/$defs/${definitionName}`,
+                $defs: schema.$defs,
+            };
+            const validateBoundary = ajv.compile(boundarySchema);
+            const boundaryValidator = standaloneCode(ajv, validateBoundary);
+            const boundaryBundle = await build({
+                bundle: true,
+                format: "esm",
+                legalComments: "none",
+                minify: true,
+                platform: "node",
+                stdin: {
+                    contents: boundaryValidator,
+                    loader: "js",
+                    resolveDir: packageRoot,
+                    sourcefile: `validate-${boundaryName}.js`,
+                },
+                write: false,
+            });
+            const boundaryOutput = boundaryBundle.outputFiles[0];
+            if (boundaryOutput === undefined)
+                throw new Error(`esbuild produced no ${boundaryName} validator`);
+            await writeFile(
+                resolve(outputDirectory, `validate-${boundaryName}.ts`),
+                `/* Generated from schemas/${schemaName}#/$defs/${definitionName}. DO NOT EDIT. */\n// @ts-nocheck -- generated and bundled Ajv validator code\n${boundaryOutput.text}`,
+            );
+        }
+    }
 }

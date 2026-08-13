@@ -60,7 +60,7 @@ export type ScreenPredicate =
     }
   | {
       predicate: "region_contains";
-      region: ScreenRegion;
+      region: ScreenRegion2;
       /**
        * Exact UTF-8 substring.
        */
@@ -68,7 +68,7 @@ export type ScreenPredicate =
     }
   | {
       predicate: "region_absent";
-      region: ScreenRegion1;
+      region: ScreenRegion3;
       /**
        * Exact UTF-8 substring.
        */
@@ -521,6 +521,14 @@ export type Event =
       message: string;
       type: "host_error";
     };
+/**
+ * Requested rich-screen representation.
+ */
+export type FrameDetail = "text" | "spans" | "cells";
+/**
+ * Region validation failure reason.
+ */
+export type InvalidRegionReason = "cells_require_explicit_region" | "empty" | "reversed" | "out_of_bounds";
 
 /**
  * Exactly one correlated driver response.
@@ -667,6 +675,7 @@ export interface DriverResponse {
                      */
                     postcondition:
                       | {
+                          frame: ScreenFrame;
                           kind: "none";
                           /**
                            * Always true after complete input application.
@@ -674,10 +683,7 @@ export interface DriverResponse {
                           matched: boolean;
                         }
                       | {
-                          /**
-                           * Terminal columns.
-                           */
-                          cols: number;
+                          frame: ScreenFrame1;
                           kind: "idle";
                           /**
                            * Whether the state remained unchanged for the requested interval.
@@ -687,53 +693,22 @@ export interface DriverResponse {
                            * Typed stability quality.
                            */
                           quality: "stable" | "child_completed" | "output_closed" | "deadline";
-                          /**
-                           * Terminal rows.
-                           */
-                          rows: number;
-                          /**
-                           * Normalized semantic hash for the returned state.
-                           */
-                          state_hash: string;
-                          /**
-                           * Plain text for the exact presentation-eligible viewport.
-                           */
-                          viewport_text: string;
                         }
                       | {
-                          /**
-                           * Whether child completion ended evaluation.
-                           */
-                          child_completed: boolean;
-                          /**
-                           * Terminal columns.
-                           */
-                          cols: number;
-                          /**
-                           * Stable completion classification.
-                           */
-                          completion_quality: string;
+                          frame: ScreenFrame2;
                           kind: "screen";
                           /**
-                           * Whether the predicate matched before the deadline or child completion.
+                           * Whether the predicate matched before termination.
                            */
                           matched: boolean;
                           /**
-                           * Terminal rows.
+                           * Closed completion classification.
                            */
-                          rows: number;
-                          /**
-                           * Normalized semantic hash for the returned state.
-                           */
-                          state_hash: string;
-                          /**
-                           * Plain text for the exact presentation-eligible viewport.
-                           */
-                          viewport_text: string;
+                          quality: "matched" | "matched_unsettled" | "child_completed" | "output_closed" | "deadline";
                         };
                   }
                 | {
-                    boundaries: ActorBoundaries4;
+                    boundaries: ActorBoundaries5;
                     /**
                      * Semantic input category.
                      */
@@ -749,7 +724,7 @@ export interface DriverResponse {
                     terminal_modes_hash: string;
                   }
                 | {
-                    boundaries: ActorBoundaries5;
+                    boundaries: ActorBoundaries6;
                     /**
                      * Number of bytes written completely.
                      */
@@ -797,7 +772,7 @@ export interface DriverResponse {
                     text: string;
                   }
                 | {
-                    boundaries: ActorBoundaries6;
+                    boundaries: ActorBoundaries7;
                     kind: "status";
                     /**
                      * Child process identifier when available.
@@ -805,7 +780,7 @@ export interface DriverResponse {
                     pid?: number | null;
                   }
                 | {
-                    boundaries: ActorBoundaries7;
+                    boundaries: ActorBoundaries8;
                     /**
                      * Terminal columns.
                      */
@@ -823,7 +798,7 @@ export interface DriverResponse {
                      */
                     cursor_visible: boolean;
                     kind: "snapshot";
-                    modes: ModeState;
+                    modes: ModeState1;
                     /**
                      * Session-monotonic observation timestamp.
                      */
@@ -850,29 +825,16 @@ export interface DriverResponse {
                     viewport_text: string;
                   }
                 | {
-                    boundaries: ActorBoundaries8;
-                    /**
-                     * Terminal columns.
-                     */
-                    cols: number;
-                    /**
-                     * Cursor column when it lies in the viewport.
-                     */
-                    cursor_column?: number | null;
-                    /**
-                     * Cursor row when it lies in the viewport.
-                     */
-                    cursor_row?: number | null;
-                    /**
-                     * Whether the cursor is visible.
-                     */
-                    cursor_visible: boolean;
+                    frame: ScreenFrame3;
+                    kind: "screen_frame";
+                  }
+                | {
                     /**
                      * First actor timestamp at which this exact state was observed.
                      */
                     first_observed_monotonic_ns: number;
+                    frame: ScreenFrame4;
                     kind: "stable_snapshot";
-                    modes: ModeState1;
                     /**
                      * Actor timestamp of the returned snapshot.
                      */
@@ -882,47 +844,31 @@ export interface DriverResponse {
                      */
                     quality: "stable" | "child_completed" | "output_closed" | "deadline";
                     /**
-                     * Terminal rows.
-                     */
-                    rows: number;
-                    /**
-                     * Zstandard-compressed canonical JSON for the exact semantic state.
+                     * Zstandard-compressed canonical JSON for this exact semantic state.
                      */
                     semantic_state_zstd: string;
                     /**
                      * Requested unchanged interval.
                      */
                     stable_for_ns: number;
-                    /**
-                     * Normalized semantic hash assigned by deterministic replay.
-                     */
-                    state_hash: string;
-                    /**
-                     * Plain text for the exact presentation-eligible viewport.
-                     */
-                    viewport_text: string;
                   }
                 | {
-                    boundaries: ActorBoundaries9;
                     /**
-                     * Whether immutable child completion made the final matching state stable.
+                     * First matching timestamp for this unchanged state, when matched.
                      */
-                    child_completed: boolean;
-                    /**
-                     * Terminal columns.
-                     */
-                    cols: number;
-                    /**
-                     * `stable` or `matched_unsettled`.
-                     */
-                    completion_quality: string;
-                    /**
-                     * First matching timestamp for this unchanged state.
-                     */
-                    first_match_monotonic_ns: number;
+                    first_match_monotonic_ns?: number | null;
+                    frame: ScreenFrame5;
                     kind: "screen_wait";
                     /**
-                     * Predicate that matched.
+                     * Whether the predicate matched before termination.
+                     */
+                    matched: boolean;
+                    /**
+                     * Last actor timestamp at which the returned state was evaluated.
+                     */
+                    observed_monotonic_ns: number;
+                    /**
+                     * Predicate that was evaluated.
                      */
                     predicate:
                       | {
@@ -977,7 +923,7 @@ export interface DriverResponse {
                         }
                       | {
                           predicate: "region_contains";
-                          region: ScreenRegion;
+                          region: ScreenRegion2;
                           /**
                            * Exact UTF-8 substring.
                            */
@@ -985,7 +931,7 @@ export interface DriverResponse {
                         }
                       | {
                           predicate: "region_absent";
-                          region: ScreenRegion1;
+                          region: ScreenRegion3;
                           /**
                            * Exact UTF-8 substring.
                            */
@@ -1073,24 +1019,16 @@ export interface DriverResponse {
                           predicates: ScreenPredicate[];
                         };
                     /**
-                     * Terminal rows.
+                     * Closed completion classification.
                      */
-                    rows: number;
+                    quality: "matched" | "matched_unsettled" | "child_completed" | "output_closed" | "deadline";
                     /**
                      * Requested unchanged interval.
                      */
                     stable_for_ns: number;
-                    /**
-                     * Last timestamp through which the state remained stable.
-                     */
-                    stable_through_monotonic_ns: number;
-                    /**
-                     * Full presentation-eligible semantic state hash.
-                     */
-                    state_hash: string;
                   }
                 | {
-                    boundaries: ActorBoundaries10;
+                    boundaries: ActorBoundaries9;
                     /**
                      * Canonical event sequence containing the marker.
                      */
@@ -1114,6 +1052,10 @@ export interface DriverResponse {
           | {
               kind: "observation";
               observation: Observation;
+            }
+          | {
+              frame: ScreenFrame6;
+              kind: "screen_frame";
             }
           | {
               /**
@@ -1345,35 +1287,544 @@ export interface ActionInputResult {
   sequence_id: string;
 }
 /**
- * Durable and observed positions at evaluation.
+ * Exact immediate post-input frame.
  */
-export interface ActorBoundaries4 {
-  durable: CanonicalBoundary;
-  observed: CanonicalBoundary1;
+export interface ScreenFrame {
+  /**
+   * Settlement/provenance label.
+   */
+  capture_quality: "live" | "stable" | "completed" | "incomplete";
+  colors: ColorState;
+  cursor: CursorState;
+  /**
+   * Structurally matched detail payload.
+   */
+  data:
+    | {
+        detail: "text";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenTextRow[];
+      }
+    | {
+        detail: "spans";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenSpanRow[];
+      }
+    | {
+        detail: "cells";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenCellRow[];
+      };
+  /**
+   * Projection identity in the `termtrace-screen-frame-v1` hash domain.
+   */
+  frame_hash: string;
+  geometry: ScreenGeometry;
+  modes: ModeState;
+  /**
+   * Whether this state was presentation eligible.
+   */
+  presented: boolean;
+  requested_region: ScreenRegion;
+  returned_region: ScreenRegion1;
+  /**
+   * Exact source occurrence.
+   */
+  source:
+    | {
+        boundaries: ActorBoundaries4;
+        /**
+         * Actor observation time in session-monotonic nanoseconds.
+         */
+        observed_monotonic_ns: number;
+        /**
+         * Canonical session identity.
+         */
+        session_id: string;
+        source: "actor";
+      }
+    | {
+        boundary: CanonicalBoundary2;
+        /**
+         * Responsible canonical event sequence when known.
+         */
+        event_seq?: number | null;
+        /**
+         * Integrity relationship to canonical evidence.
+         */
+        integrity: "canonical_chained" | "unchained";
+        /**
+         * Session-monotonic timestamp when known.
+         */
+        monotonic_ns?: number | null;
+        /**
+         * Resolution path used to select the state.
+         */
+        resolution: "actor_snapshot" | "canonical_replay" | "validated_checkpoint" | "ansi_interpretation";
+        /**
+         * Canonical session identity when available.
+         */
+        session_id?: string | null;
+        source: "resolved";
+        /**
+         * Whether canonical evidence completed durably.
+         */
+        source_completed: boolean;
+        /**
+         * Source category.
+         */
+        source_kind:
+          | "live_session"
+          | "completed_session"
+          | "interrupted_session"
+          | "ansi_stream"
+          | "imported_ansi"
+          | "one_off_command";
+        /**
+         * Dense semantic state identity when assigned.
+         */
+        state_id?: number | null;
+        /**
+         * Requested state selector.
+         */
+        state_point:
+          | {
+              selector: "latest_presented";
+            }
+          | {
+              selector: "state_id";
+              /**
+               * Exact semantic state identifier.
+               */
+              state_id: number;
+            }
+          | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of the complete normalized semantic state.
+               */
+              state_hash: string;
+            }
+          | {
+              /**
+               * Canonical event sequence.
+               */
+              event_seq: number;
+              selector: "event_seq";
+            }
+          | {
+              /**
+               * Session-monotonic nanoseconds.
+               */
+              monotonic_ns: number;
+              selector: "monotonic_ns";
+            }
+          | {
+              /**
+               * Unique marker label.
+               */
+              label: string;
+              selector: "marker";
+            };
+      };
+  /**
+   * Complete semantic v5 state identity.
+   */
+  state_hash: string;
+  /**
+   * Projection format version.
+   */
+  version: number;
 }
 /**
- * Durable and observed positions after application.
+ * Current/default colors and complete palette.
  */
-export interface ActorBoundaries5 {
-  durable: CanonicalBoundary;
-  observed: CanonicalBoundary1;
+export interface ColorState {
+  background: Rgb;
+  /**
+   * Explicit cursor color.
+   */
+  cursor?: Rgb1 | null;
+  foreground: Rgb2;
+  /**
+   * Active 256-color palette.
+   */
+  palette: Rgb1[];
+  [k: string]: unknown;
 }
 /**
- * Durable and observed canonical positions at status evaluation.
+ * Default/current background.
  */
-export interface ActorBoundaries6 {
-  durable: CanonicalBoundary;
-  observed: CanonicalBoundary1;
+export interface Rgb {
+  /**
+   * Blue channel.
+   */
+  b: number;
+  /**
+   * Green channel.
+   */
+  g: number;
+  /**
+   * Red channel.
+   */
+  r: number;
+  [k: string]: unknown;
 }
 /**
- * Durable and observed source boundaries at observation time.
+ * RGB color independent of libghostty's unstable ABI.
  */
-export interface ActorBoundaries7 {
-  durable: CanonicalBoundary;
-  observed: CanonicalBoundary1;
+export interface Rgb1 {
+  /**
+   * Blue channel.
+   */
+  b: number;
+  /**
+   * Green channel.
+   */
+  g: number;
+  /**
+   * Red channel.
+   */
+  r: number;
+  [k: string]: unknown;
 }
 /**
- * Presentation-eligible terminal modes.
+ * RGB color independent of libghostty's unstable ABI.
+ */
+export interface Rgb2 {
+  /**
+   * Blue channel.
+   */
+  b: number;
+  /**
+   * Green channel.
+   */
+  g: number;
+  /**
+   * Red channel.
+   */
+  r: number;
+  [k: string]: unknown;
+}
+/**
+ * Complete cursor state.
+ */
+export interface CursorState {
+  /**
+   * Blink mode.
+   */
+  blinking: boolean;
+  /**
+   * Viewport column when available.
+   */
+  column?: number | null;
+  /**
+   * Whether the cursor lies in the viewport.
+   */
+  in_viewport: boolean;
+  /**
+   * Viewport row when available.
+   */
+  row?: number | null;
+  /**
+   * Visual shape.
+   */
+  style: "bar" | "block" | "underline" | "hollow_block";
+  /**
+   * Visibility mode.
+   */
+  visible: boolean;
+  /**
+   * Whether the cursor is on a wide-character tail.
+   */
+  wide_tail?: boolean | null;
+  [k: string]: unknown;
+}
+/**
+ * Text-detail row.
+ */
+export interface ScreenTextRow {
+  /**
+   * Absolute row.
+   */
+  row: number;
+  /**
+   * Whether this row ends in a native soft wrap.
+   */
+  soft_wrapped: boolean;
+  /**
+   * Deterministic convenience text.
+   */
+  text: string;
+  /**
+   * Whether this row continues a native soft wrap.
+   */
+  wrap_continuation: boolean;
+}
+/**
+ * Span-detail row.
+ */
+export interface ScreenSpanRow {
+  /**
+   * Absolute row.
+   */
+  row: number;
+  /**
+   * Whether this row ends in a native soft wrap.
+   */
+  soft_wrapped: boolean;
+  /**
+   * Lossless ordered appearance spans.
+   */
+  spans: ScreenSpan[];
+  /**
+   * Deterministic convenience text.
+   */
+  text: string;
+  /**
+   * Whether this row continues a native soft wrap.
+   */
+  wrap_continuation: boolean;
+}
+/**
+ * Lossless run of cells with identical complete appearance.
+ */
+export interface ScreenSpan {
+  appearance: ScreenAppearance;
+  /**
+   * Number of terminal columns covered.
+   */
+  cell_count: number;
+  /**
+   * Exact grapheme/width map in column order.
+   */
+  cells: SpanCell[];
+  /**
+   * Exclusive absolute end column.
+   */
+  end_column: number;
+  /**
+   * Inclusive absolute start column.
+   */
+  start_column: number;
+  /**
+   * Deterministic convenience text for this run.
+   */
+  text: string;
+}
+/**
+ * Appearance common to every covered cell.
+ */
+export interface ScreenAppearance {
+  /**
+   * Resolved explicit background before default fallback.
+   */
+  resolved_background?: Rgb1 | null;
+  /**
+   * Resolved explicit foreground before default fallback.
+   */
+  resolved_foreground?: Rgb1 | null;
+  /**
+   * Selection membership.
+   */
+  selected: boolean;
+  style: CellStyle;
+}
+/**
+ * Authoritative source style and color selectors.
+ */
+export interface CellStyle {
+  /**
+   * Background color source.
+   */
+  background:
+    | {
+        kind: "none";
+        [k: string]: unknown;
+      }
+    | {
+        kind: "palette";
+        value: number;
+        [k: string]: unknown;
+      }
+    | {
+        kind: "rgb";
+        value: Rgb1;
+        [k: string]: unknown;
+      };
+  /**
+   * Blink attribute.
+   */
+  blink: boolean;
+  /**
+   * Bold attribute.
+   */
+  bold: boolean;
+  /**
+   * Faint attribute.
+   */
+  faint: boolean;
+  /**
+   * Foreground color source.
+   */
+  foreground:
+    | {
+        kind: "none";
+        [k: string]: unknown;
+      }
+    | {
+        kind: "palette";
+        value: number;
+        [k: string]: unknown;
+      }
+    | {
+        kind: "rgb";
+        value: Rgb1;
+        [k: string]: unknown;
+      };
+  /**
+   * Inverse-video attribute.
+   */
+  inverse: boolean;
+  /**
+   * Invisible attribute.
+   */
+  invisible: boolean;
+  /**
+   * Italic attribute.
+   */
+  italic: boolean;
+  /**
+   * Overline attribute.
+   */
+  overline: boolean;
+  /**
+   * Strikethrough attribute.
+   */
+  strikethrough: boolean;
+  /**
+   * Upstream SGR underline value (`0` through `5`).
+   */
+  underline: number;
+  /**
+   * Underline color source.
+   */
+  underline_color:
+    | {
+        kind: "none";
+        [k: string]: unknown;
+      }
+    | {
+        kind: "palette";
+        value: number;
+        [k: string]: unknown;
+      }
+    | {
+        kind: "rgb";
+        value: Rgb1;
+        [k: string]: unknown;
+      };
+  [k: string]: unknown;
+}
+/**
+ * Per-column content retained inside an appearance span.
+ */
+export interface SpanCell {
+  /**
+   * Complete grapheme cluster.
+   */
+  grapheme: string;
+  /**
+   * Native Ghostty width role.
+   */
+  wide_kind: "narrow" | "wide" | "spacer_tail" | "spacer_head";
+}
+/**
+ * Cell-detail row.
+ */
+export interface ScreenCellRow {
+  /**
+   * Exact ordered cells.
+   */
+  cells: ScreenCell[];
+  /**
+   * Absolute row.
+   */
+  row: number;
+  /**
+   * Whether this row ends in a native soft wrap.
+   */
+  soft_wrapped: boolean;
+  /**
+   * Deterministic convenience text.
+   */
+  text: string;
+  /**
+   * Whether this row continues a native soft wrap.
+   */
+  wrap_continuation: boolean;
+}
+/**
+ * Exact projected terminal cell.
+ */
+export interface ScreenCell {
+  appearance: ScreenAppearance1;
+  /**
+   * Absolute viewport column.
+   */
+  column: number;
+  /**
+   * Complete grapheme cluster, empty for a blank/spacer.
+   */
+  grapheme: string;
+  /**
+   * Absolute viewport row.
+   */
+  row: number;
+  /**
+   * Native Ghostty width role.
+   */
+  wide_kind: "narrow" | "wide" | "spacer_tail" | "spacer_head";
+}
+/**
+ * Complete semantic appearance.
+ */
+export interface ScreenAppearance1 {
+  /**
+   * Resolved explicit background before default fallback.
+   */
+  resolved_background?: Rgb1 | null;
+  /**
+   * Resolved explicit foreground before default fallback.
+   */
+  resolved_foreground?: Rgb1 | null;
+  /**
+   * Selection membership.
+   */
+  selected: boolean;
+  style: CellStyle;
+}
+/**
+ * Full viewport geometry.
+ */
+export interface ScreenGeometry {
+  /**
+   * Viewport columns.
+   */
+  cols: number;
+  /**
+   * Viewport rows.
+   */
+  rows: number;
+}
+/**
+ * Complete relevant terminal modes.
  */
 export interface ModeState {
   /**
@@ -1417,14 +1868,413 @@ export interface TerminalMode {
   [k: string]: unknown;
 }
 /**
- * Actor-consistent canonical source boundaries for this exact state.
+ * Validated requested region.
+ */
+export interface ScreenRegion {
+  /**
+   * Exclusive bottom row.
+   */
+  bottom: number;
+  /**
+   * Inclusive left column.
+   */
+  left: number;
+  /**
+   * Exclusive right column.
+   */
+  right: number;
+  /**
+   * Inclusive top row.
+   */
+  top: number;
+}
+/**
+ * Actually returned region; equal to requested in version 1.
+ */
+export interface ScreenRegion1 {
+  /**
+   * Exclusive bottom row.
+   */
+  bottom: number;
+  /**
+   * Inclusive left column.
+   */
+  left: number;
+  /**
+   * Exclusive right column.
+   */
+  right: number;
+  /**
+   * Inclusive top row.
+   */
+  top: number;
+}
+/**
+ * Durable and actor-observed canonical boundaries.
+ */
+export interface ActorBoundaries4 {
+  durable: CanonicalBoundary;
+  observed: CanonicalBoundary1;
+}
+/**
+ * Exact validated source boundary.
+ */
+export interface CanonicalBoundary2 {
+  /**
+   * Hash of the preceding event, or the event header at sequence zero.
+   */
+  event_hash: string;
+  /**
+   * Sequence number that will be assigned to the next event.
+   */
+  next_event_seq: number;
+  /**
+   * PTY output bytes included through this boundary.
+   */
+  output_bytes: number;
+}
+/**
+ * Exact terminating frame.
+ */
+export interface ScreenFrame1 {
+  /**
+   * Settlement/provenance label.
+   */
+  capture_quality: "live" | "stable" | "completed" | "incomplete";
+  colors: ColorState;
+  cursor: CursorState;
+  /**
+   * Structurally matched detail payload.
+   */
+  data:
+    | {
+        detail: "text";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenTextRow[];
+      }
+    | {
+        detail: "spans";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenSpanRow[];
+      }
+    | {
+        detail: "cells";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenCellRow[];
+      };
+  /**
+   * Projection identity in the `termtrace-screen-frame-v1` hash domain.
+   */
+  frame_hash: string;
+  geometry: ScreenGeometry;
+  modes: ModeState;
+  /**
+   * Whether this state was presentation eligible.
+   */
+  presented: boolean;
+  requested_region: ScreenRegion;
+  returned_region: ScreenRegion1;
+  /**
+   * Exact source occurrence.
+   */
+  source:
+    | {
+        boundaries: ActorBoundaries4;
+        /**
+         * Actor observation time in session-monotonic nanoseconds.
+         */
+        observed_monotonic_ns: number;
+        /**
+         * Canonical session identity.
+         */
+        session_id: string;
+        source: "actor";
+      }
+    | {
+        boundary: CanonicalBoundary2;
+        /**
+         * Responsible canonical event sequence when known.
+         */
+        event_seq?: number | null;
+        /**
+         * Integrity relationship to canonical evidence.
+         */
+        integrity: "canonical_chained" | "unchained";
+        /**
+         * Session-monotonic timestamp when known.
+         */
+        monotonic_ns?: number | null;
+        /**
+         * Resolution path used to select the state.
+         */
+        resolution: "actor_snapshot" | "canonical_replay" | "validated_checkpoint" | "ansi_interpretation";
+        /**
+         * Canonical session identity when available.
+         */
+        session_id?: string | null;
+        source: "resolved";
+        /**
+         * Whether canonical evidence completed durably.
+         */
+        source_completed: boolean;
+        /**
+         * Source category.
+         */
+        source_kind:
+          | "live_session"
+          | "completed_session"
+          | "interrupted_session"
+          | "ansi_stream"
+          | "imported_ansi"
+          | "one_off_command";
+        /**
+         * Dense semantic state identity when assigned.
+         */
+        state_id?: number | null;
+        /**
+         * Requested state selector.
+         */
+        state_point:
+          | {
+              selector: "latest_presented";
+            }
+          | {
+              selector: "state_id";
+              /**
+               * Exact semantic state identifier.
+               */
+              state_id: number;
+            }
+          | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of the complete normalized semantic state.
+               */
+              state_hash: string;
+            }
+          | {
+              /**
+               * Canonical event sequence.
+               */
+              event_seq: number;
+              selector: "event_seq";
+            }
+          | {
+              /**
+               * Session-monotonic nanoseconds.
+               */
+              monotonic_ns: number;
+              selector: "monotonic_ns";
+            }
+          | {
+              /**
+               * Unique marker label.
+               */
+              label: string;
+              selector: "marker";
+            };
+      };
+  /**
+   * Complete semantic v5 state identity.
+   */
+  state_hash: string;
+  /**
+   * Projection format version.
+   */
+  version: number;
+}
+/**
+ * Exact terminating frame.
+ */
+export interface ScreenFrame2 {
+  /**
+   * Settlement/provenance label.
+   */
+  capture_quality: "live" | "stable" | "completed" | "incomplete";
+  colors: ColorState;
+  cursor: CursorState;
+  /**
+   * Structurally matched detail payload.
+   */
+  data:
+    | {
+        detail: "text";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenTextRow[];
+      }
+    | {
+        detail: "spans";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenSpanRow[];
+      }
+    | {
+        detail: "cells";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenCellRow[];
+      };
+  /**
+   * Projection identity in the `termtrace-screen-frame-v1` hash domain.
+   */
+  frame_hash: string;
+  geometry: ScreenGeometry;
+  modes: ModeState;
+  /**
+   * Whether this state was presentation eligible.
+   */
+  presented: boolean;
+  requested_region: ScreenRegion;
+  returned_region: ScreenRegion1;
+  /**
+   * Exact source occurrence.
+   */
+  source:
+    | {
+        boundaries: ActorBoundaries4;
+        /**
+         * Actor observation time in session-monotonic nanoseconds.
+         */
+        observed_monotonic_ns: number;
+        /**
+         * Canonical session identity.
+         */
+        session_id: string;
+        source: "actor";
+      }
+    | {
+        boundary: CanonicalBoundary2;
+        /**
+         * Responsible canonical event sequence when known.
+         */
+        event_seq?: number | null;
+        /**
+         * Integrity relationship to canonical evidence.
+         */
+        integrity: "canonical_chained" | "unchained";
+        /**
+         * Session-monotonic timestamp when known.
+         */
+        monotonic_ns?: number | null;
+        /**
+         * Resolution path used to select the state.
+         */
+        resolution: "actor_snapshot" | "canonical_replay" | "validated_checkpoint" | "ansi_interpretation";
+        /**
+         * Canonical session identity when available.
+         */
+        session_id?: string | null;
+        source: "resolved";
+        /**
+         * Whether canonical evidence completed durably.
+         */
+        source_completed: boolean;
+        /**
+         * Source category.
+         */
+        source_kind:
+          | "live_session"
+          | "completed_session"
+          | "interrupted_session"
+          | "ansi_stream"
+          | "imported_ansi"
+          | "one_off_command";
+        /**
+         * Dense semantic state identity when assigned.
+         */
+        state_id?: number | null;
+        /**
+         * Requested state selector.
+         */
+        state_point:
+          | {
+              selector: "latest_presented";
+            }
+          | {
+              selector: "state_id";
+              /**
+               * Exact semantic state identifier.
+               */
+              state_id: number;
+            }
+          | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of the complete normalized semantic state.
+               */
+              state_hash: string;
+            }
+          | {
+              /**
+               * Canonical event sequence.
+               */
+              event_seq: number;
+              selector: "event_seq";
+            }
+          | {
+              /**
+               * Session-monotonic nanoseconds.
+               */
+              monotonic_ns: number;
+              selector: "monotonic_ns";
+            }
+          | {
+              /**
+               * Unique marker label.
+               */
+              label: string;
+              selector: "marker";
+            };
+      };
+  /**
+   * Complete semantic v5 state identity.
+   */
+  state_hash: string;
+  /**
+   * Projection format version.
+   */
+  version: number;
+}
+/**
+ * Durable and observed positions at evaluation.
+ */
+export interface ActorBoundaries5 {
+  durable: CanonicalBoundary;
+  observed: CanonicalBoundary1;
+}
+/**
+ * Durable and observed positions after application.
+ */
+export interface ActorBoundaries6 {
+  durable: CanonicalBoundary;
+  observed: CanonicalBoundary1;
+}
+/**
+ * Durable and observed canonical positions at status evaluation.
+ */
+export interface ActorBoundaries7 {
+  durable: CanonicalBoundary;
+  observed: CanonicalBoundary1;
+}
+/**
+ * Durable and observed source boundaries at observation time.
  */
 export interface ActorBoundaries8 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
 /**
- * Presentation-eligible terminal modes from this exact state.
+ * Presentation-eligible terminal modes.
  */
 export interface ModeState1 {
   /**
@@ -1450,22 +2300,483 @@ export interface ModeState1 {
   [k: string]: unknown;
 }
 /**
- * Actor-consistent canonical source boundaries.
+ * Exact owned projection produced before actor ordering was released.
  */
-export interface ActorBoundaries9 {
-  durable: CanonicalBoundary;
-  observed: CanonicalBoundary1;
+export interface ScreenFrame3 {
+  /**
+   * Settlement/provenance label.
+   */
+  capture_quality: "live" | "stable" | "completed" | "incomplete";
+  colors: ColorState;
+  cursor: CursorState;
+  /**
+   * Structurally matched detail payload.
+   */
+  data:
+    | {
+        detail: "text";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenTextRow[];
+      }
+    | {
+        detail: "spans";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenSpanRow[];
+      }
+    | {
+        detail: "cells";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenCellRow[];
+      };
+  /**
+   * Projection identity in the `termtrace-screen-frame-v1` hash domain.
+   */
+  frame_hash: string;
+  geometry: ScreenGeometry;
+  modes: ModeState;
+  /**
+   * Whether this state was presentation eligible.
+   */
+  presented: boolean;
+  requested_region: ScreenRegion;
+  returned_region: ScreenRegion1;
+  /**
+   * Exact source occurrence.
+   */
+  source:
+    | {
+        boundaries: ActorBoundaries4;
+        /**
+         * Actor observation time in session-monotonic nanoseconds.
+         */
+        observed_monotonic_ns: number;
+        /**
+         * Canonical session identity.
+         */
+        session_id: string;
+        source: "actor";
+      }
+    | {
+        boundary: CanonicalBoundary2;
+        /**
+         * Responsible canonical event sequence when known.
+         */
+        event_seq?: number | null;
+        /**
+         * Integrity relationship to canonical evidence.
+         */
+        integrity: "canonical_chained" | "unchained";
+        /**
+         * Session-monotonic timestamp when known.
+         */
+        monotonic_ns?: number | null;
+        /**
+         * Resolution path used to select the state.
+         */
+        resolution: "actor_snapshot" | "canonical_replay" | "validated_checkpoint" | "ansi_interpretation";
+        /**
+         * Canonical session identity when available.
+         */
+        session_id?: string | null;
+        source: "resolved";
+        /**
+         * Whether canonical evidence completed durably.
+         */
+        source_completed: boolean;
+        /**
+         * Source category.
+         */
+        source_kind:
+          | "live_session"
+          | "completed_session"
+          | "interrupted_session"
+          | "ansi_stream"
+          | "imported_ansi"
+          | "one_off_command";
+        /**
+         * Dense semantic state identity when assigned.
+         */
+        state_id?: number | null;
+        /**
+         * Requested state selector.
+         */
+        state_point:
+          | {
+              selector: "latest_presented";
+            }
+          | {
+              selector: "state_id";
+              /**
+               * Exact semantic state identifier.
+               */
+              state_id: number;
+            }
+          | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of the complete normalized semantic state.
+               */
+              state_hash: string;
+            }
+          | {
+              /**
+               * Canonical event sequence.
+               */
+              event_seq: number;
+              selector: "event_seq";
+            }
+          | {
+              /**
+               * Session-monotonic nanoseconds.
+               */
+              monotonic_ns: number;
+              selector: "monotonic_ns";
+            }
+          | {
+              /**
+               * Unique marker label.
+               */
+              label: string;
+              selector: "marker";
+            };
+      };
+  /**
+   * Complete semantic v5 state identity.
+   */
+  state_hash: string;
+  /**
+   * Projection format version.
+   */
+  version: number;
+}
+/**
+ * Exact frame projected before waiter ordering was released.
+ */
+export interface ScreenFrame4 {
+  /**
+   * Settlement/provenance label.
+   */
+  capture_quality: "live" | "stable" | "completed" | "incomplete";
+  colors: ColorState;
+  cursor: CursorState;
+  /**
+   * Structurally matched detail payload.
+   */
+  data:
+    | {
+        detail: "text";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenTextRow[];
+      }
+    | {
+        detail: "spans";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenSpanRow[];
+      }
+    | {
+        detail: "cells";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenCellRow[];
+      };
+  /**
+   * Projection identity in the `termtrace-screen-frame-v1` hash domain.
+   */
+  frame_hash: string;
+  geometry: ScreenGeometry;
+  modes: ModeState;
+  /**
+   * Whether this state was presentation eligible.
+   */
+  presented: boolean;
+  requested_region: ScreenRegion;
+  returned_region: ScreenRegion1;
+  /**
+   * Exact source occurrence.
+   */
+  source:
+    | {
+        boundaries: ActorBoundaries4;
+        /**
+         * Actor observation time in session-monotonic nanoseconds.
+         */
+        observed_monotonic_ns: number;
+        /**
+         * Canonical session identity.
+         */
+        session_id: string;
+        source: "actor";
+      }
+    | {
+        boundary: CanonicalBoundary2;
+        /**
+         * Responsible canonical event sequence when known.
+         */
+        event_seq?: number | null;
+        /**
+         * Integrity relationship to canonical evidence.
+         */
+        integrity: "canonical_chained" | "unchained";
+        /**
+         * Session-monotonic timestamp when known.
+         */
+        monotonic_ns?: number | null;
+        /**
+         * Resolution path used to select the state.
+         */
+        resolution: "actor_snapshot" | "canonical_replay" | "validated_checkpoint" | "ansi_interpretation";
+        /**
+         * Canonical session identity when available.
+         */
+        session_id?: string | null;
+        source: "resolved";
+        /**
+         * Whether canonical evidence completed durably.
+         */
+        source_completed: boolean;
+        /**
+         * Source category.
+         */
+        source_kind:
+          | "live_session"
+          | "completed_session"
+          | "interrupted_session"
+          | "ansi_stream"
+          | "imported_ansi"
+          | "one_off_command";
+        /**
+         * Dense semantic state identity when assigned.
+         */
+        state_id?: number | null;
+        /**
+         * Requested state selector.
+         */
+        state_point:
+          | {
+              selector: "latest_presented";
+            }
+          | {
+              selector: "state_id";
+              /**
+               * Exact semantic state identifier.
+               */
+              state_id: number;
+            }
+          | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of the complete normalized semantic state.
+               */
+              state_hash: string;
+            }
+          | {
+              /**
+               * Canonical event sequence.
+               */
+              event_seq: number;
+              selector: "event_seq";
+            }
+          | {
+              /**
+               * Session-monotonic nanoseconds.
+               */
+              monotonic_ns: number;
+              selector: "monotonic_ns";
+            }
+          | {
+              /**
+               * Unique marker label.
+               */
+              label: string;
+              selector: "marker";
+            };
+      };
+  /**
+   * Complete semantic v5 state identity.
+   */
+  state_hash: string;
+  /**
+   * Projection format version.
+   */
+  version: number;
+}
+/**
+ * Exact satisfying or terminating frame.
+ */
+export interface ScreenFrame5 {
+  /**
+   * Settlement/provenance label.
+   */
+  capture_quality: "live" | "stable" | "completed" | "incomplete";
+  colors: ColorState;
+  cursor: CursorState;
+  /**
+   * Structurally matched detail payload.
+   */
+  data:
+    | {
+        detail: "text";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenTextRow[];
+      }
+    | {
+        detail: "spans";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenSpanRow[];
+      }
+    | {
+        detail: "cells";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenCellRow[];
+      };
+  /**
+   * Projection identity in the `termtrace-screen-frame-v1` hash domain.
+   */
+  frame_hash: string;
+  geometry: ScreenGeometry;
+  modes: ModeState;
+  /**
+   * Whether this state was presentation eligible.
+   */
+  presented: boolean;
+  requested_region: ScreenRegion;
+  returned_region: ScreenRegion1;
+  /**
+   * Exact source occurrence.
+   */
+  source:
+    | {
+        boundaries: ActorBoundaries4;
+        /**
+         * Actor observation time in session-monotonic nanoseconds.
+         */
+        observed_monotonic_ns: number;
+        /**
+         * Canonical session identity.
+         */
+        session_id: string;
+        source: "actor";
+      }
+    | {
+        boundary: CanonicalBoundary2;
+        /**
+         * Responsible canonical event sequence when known.
+         */
+        event_seq?: number | null;
+        /**
+         * Integrity relationship to canonical evidence.
+         */
+        integrity: "canonical_chained" | "unchained";
+        /**
+         * Session-monotonic timestamp when known.
+         */
+        monotonic_ns?: number | null;
+        /**
+         * Resolution path used to select the state.
+         */
+        resolution: "actor_snapshot" | "canonical_replay" | "validated_checkpoint" | "ansi_interpretation";
+        /**
+         * Canonical session identity when available.
+         */
+        session_id?: string | null;
+        source: "resolved";
+        /**
+         * Whether canonical evidence completed durably.
+         */
+        source_completed: boolean;
+        /**
+         * Source category.
+         */
+        source_kind:
+          | "live_session"
+          | "completed_session"
+          | "interrupted_session"
+          | "ansi_stream"
+          | "imported_ansi"
+          | "one_off_command";
+        /**
+         * Dense semantic state identity when assigned.
+         */
+        state_id?: number | null;
+        /**
+         * Requested state selector.
+         */
+        state_point:
+          | {
+              selector: "latest_presented";
+            }
+          | {
+              selector: "state_id";
+              /**
+               * Exact semantic state identifier.
+               */
+              state_id: number;
+            }
+          | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of the complete normalized semantic state.
+               */
+              state_hash: string;
+            }
+          | {
+              /**
+               * Canonical event sequence.
+               */
+              event_seq: number;
+              selector: "event_seq";
+            }
+          | {
+              /**
+               * Session-monotonic nanoseconds.
+               */
+              monotonic_ns: number;
+              selector: "monotonic_ns";
+            }
+          | {
+              /**
+               * Unique marker label.
+               */
+              label: string;
+              selector: "marker";
+            };
+      };
+  /**
+   * Complete semantic v5 state identity.
+   */
+  state_hash: string;
+  /**
+   * Projection format version.
+   */
+  version: number;
 }
 /**
  * Region bounds in viewport cells.
  */
-export interface ScreenRegion {
+export interface ScreenRegion2 {
   /**
    * Exclusive bottom row.
    */
   bottom: number;
   /**
-   * Inclusive zero-based left column.
+   * Inclusive left column.
    */
   left: number;
   /**
@@ -1473,20 +2784,20 @@ export interface ScreenRegion {
    */
   right: number;
   /**
-   * Inclusive zero-based top row.
+   * Inclusive top row.
    */
   top: number;
 }
 /**
  * Region bounds in viewport cells.
  */
-export interface ScreenRegion1 {
+export interface ScreenRegion3 {
   /**
    * Exclusive bottom row.
    */
   bottom: number;
   /**
-   * Inclusive zero-based left column.
+   * Inclusive left column.
    */
   left: number;
   /**
@@ -1494,14 +2805,14 @@ export interface ScreenRegion1 {
    */
   right: number;
   /**
-   * Inclusive zero-based top row.
+   * Inclusive top row.
    */
   top: number;
 }
 /**
  * Durable and observed canonical positions after the marker.
  */
-export interface ActorBoundaries10 {
+export interface ActorBoundaries9 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
@@ -1658,7 +2969,7 @@ export interface ResourceLimitOutcome {
  * Shared observation envelope.
  */
 export interface Observation {
-  boundary: CanonicalBoundary2;
+  boundary: CanonicalBoundary3;
   /**
    * Exact canonical session path bytes when evidence exists.
    */
@@ -1763,7 +3074,7 @@ export interface Observation {
 /**
  * Source boundary observed or validated.
  */
-export interface CanonicalBoundary2 {
+export interface CanonicalBoundary3 {
   /**
    * Hash of the preceding event, or the event header at sequence zero.
    */
@@ -1832,6 +3143,162 @@ export interface ModeState2 {
    */
   wraparound: boolean;
   [k: string]: unknown;
+}
+/**
+ * Exact owned rich projection.
+ */
+export interface ScreenFrame6 {
+  /**
+   * Settlement/provenance label.
+   */
+  capture_quality: "live" | "stable" | "completed" | "incomplete";
+  colors: ColorState;
+  cursor: CursorState;
+  /**
+   * Structurally matched detail payload.
+   */
+  data:
+    | {
+        detail: "text";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenTextRow[];
+      }
+    | {
+        detail: "spans";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenSpanRow[];
+      }
+    | {
+        detail: "cells";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenCellRow[];
+      };
+  /**
+   * Projection identity in the `termtrace-screen-frame-v1` hash domain.
+   */
+  frame_hash: string;
+  geometry: ScreenGeometry;
+  modes: ModeState;
+  /**
+   * Whether this state was presentation eligible.
+   */
+  presented: boolean;
+  requested_region: ScreenRegion;
+  returned_region: ScreenRegion1;
+  /**
+   * Exact source occurrence.
+   */
+  source:
+    | {
+        boundaries: ActorBoundaries4;
+        /**
+         * Actor observation time in session-monotonic nanoseconds.
+         */
+        observed_monotonic_ns: number;
+        /**
+         * Canonical session identity.
+         */
+        session_id: string;
+        source: "actor";
+      }
+    | {
+        boundary: CanonicalBoundary2;
+        /**
+         * Responsible canonical event sequence when known.
+         */
+        event_seq?: number | null;
+        /**
+         * Integrity relationship to canonical evidence.
+         */
+        integrity: "canonical_chained" | "unchained";
+        /**
+         * Session-monotonic timestamp when known.
+         */
+        monotonic_ns?: number | null;
+        /**
+         * Resolution path used to select the state.
+         */
+        resolution: "actor_snapshot" | "canonical_replay" | "validated_checkpoint" | "ansi_interpretation";
+        /**
+         * Canonical session identity when available.
+         */
+        session_id?: string | null;
+        source: "resolved";
+        /**
+         * Whether canonical evidence completed durably.
+         */
+        source_completed: boolean;
+        /**
+         * Source category.
+         */
+        source_kind:
+          | "live_session"
+          | "completed_session"
+          | "interrupted_session"
+          | "ansi_stream"
+          | "imported_ansi"
+          | "one_off_command";
+        /**
+         * Dense semantic state identity when assigned.
+         */
+        state_id?: number | null;
+        /**
+         * Requested state selector.
+         */
+        state_point:
+          | {
+              selector: "latest_presented";
+            }
+          | {
+              selector: "state_id";
+              /**
+               * Exact semantic state identifier.
+               */
+              state_id: number;
+            }
+          | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of the complete normalized semantic state.
+               */
+              state_hash: string;
+            }
+          | {
+              /**
+               * Canonical event sequence.
+               */
+              event_seq: number;
+              selector: "event_seq";
+            }
+          | {
+              /**
+               * Session-monotonic nanoseconds.
+               */
+              monotonic_ns: number;
+              selector: "monotonic_ns";
+            }
+          | {
+              /**
+               * Unique marker label.
+               */
+              label: string;
+              selector: "marker";
+            };
+      };
+  /**
+   * Complete semantic v5 state identity.
+   */
+  state_hash: string;
+  /**
+   * Projection format version.
+   */
+  version: number;
 }
 /**
  * One ordered, source-bound timeline item.
@@ -2358,125 +3825,11 @@ export interface SemanticDiff {
  * Before/after values for one changed semantic property.
  */
 export interface ValueChange5 {
-  after: CellStyle;
-  before: CellStyle1;
+  after: CellStyle1;
+  before: CellStyle2;
 }
 /**
  * Value at the later endpoint.
- */
-export interface CellStyle {
-  /**
-   * Background color source.
-   */
-  background:
-    | {
-        kind: "none";
-        [k: string]: unknown;
-      }
-    | {
-        kind: "palette";
-        value: number;
-        [k: string]: unknown;
-      }
-    | {
-        kind: "rgb";
-        value: Rgb;
-        [k: string]: unknown;
-      };
-  /**
-   * Blink attribute.
-   */
-  blink: boolean;
-  /**
-   * Bold attribute.
-   */
-  bold: boolean;
-  /**
-   * Faint attribute.
-   */
-  faint: boolean;
-  /**
-   * Foreground color source.
-   */
-  foreground:
-    | {
-        kind: "none";
-        [k: string]: unknown;
-      }
-    | {
-        kind: "palette";
-        value: number;
-        [k: string]: unknown;
-      }
-    | {
-        kind: "rgb";
-        value: Rgb;
-        [k: string]: unknown;
-      };
-  /**
-   * Inverse-video attribute.
-   */
-  inverse: boolean;
-  /**
-   * Invisible attribute.
-   */
-  invisible: boolean;
-  /**
-   * Italic attribute.
-   */
-  italic: boolean;
-  /**
-   * Overline attribute.
-   */
-  overline: boolean;
-  /**
-   * Strikethrough attribute.
-   */
-  strikethrough: boolean;
-  /**
-   * Upstream SGR underline value (`0` through `5`).
-   */
-  underline: number;
-  /**
-   * Underline color source.
-   */
-  underline_color:
-    | {
-        kind: "none";
-        [k: string]: unknown;
-      }
-    | {
-        kind: "palette";
-        value: number;
-        [k: string]: unknown;
-      }
-    | {
-        kind: "rgb";
-        value: Rgb;
-        [k: string]: unknown;
-      };
-  [k: string]: unknown;
-}
-/**
- * RGB color independent of libghostty's unstable ABI.
- */
-export interface Rgb {
-  /**
-   * Blue channel.
-   */
-  b: number;
-  /**
-   * Green channel.
-   */
-  g: number;
-  /**
-   * Red channel.
-   */
-  r: number;
-  [k: string]: unknown;
-}
-/**
- * Value at the earlier endpoint.
  */
 export interface CellStyle1 {
   /**
@@ -2494,7 +3847,7 @@ export interface CellStyle1 {
       }
     | {
         kind: "rgb";
-        value: Rgb;
+        value: Rgb1;
         [k: string]: unknown;
       };
   /**
@@ -2524,7 +3877,7 @@ export interface CellStyle1 {
       }
     | {
         kind: "rgb";
-        value: Rgb;
+        value: Rgb1;
         [k: string]: unknown;
       };
   /**
@@ -2566,7 +3919,103 @@ export interface CellStyle1 {
       }
     | {
         kind: "rgb";
-        value: Rgb;
+        value: Rgb1;
+        [k: string]: unknown;
+      };
+  [k: string]: unknown;
+}
+/**
+ * Value at the earlier endpoint.
+ */
+export interface CellStyle2 {
+  /**
+   * Background color source.
+   */
+  background:
+    | {
+        kind: "none";
+        [k: string]: unknown;
+      }
+    | {
+        kind: "palette";
+        value: number;
+        [k: string]: unknown;
+      }
+    | {
+        kind: "rgb";
+        value: Rgb1;
+        [k: string]: unknown;
+      };
+  /**
+   * Blink attribute.
+   */
+  blink: boolean;
+  /**
+   * Bold attribute.
+   */
+  bold: boolean;
+  /**
+   * Faint attribute.
+   */
+  faint: boolean;
+  /**
+   * Foreground color source.
+   */
+  foreground:
+    | {
+        kind: "none";
+        [k: string]: unknown;
+      }
+    | {
+        kind: "palette";
+        value: number;
+        [k: string]: unknown;
+      }
+    | {
+        kind: "rgb";
+        value: Rgb1;
+        [k: string]: unknown;
+      };
+  /**
+   * Inverse-video attribute.
+   */
+  inverse: boolean;
+  /**
+   * Invisible attribute.
+   */
+  invisible: boolean;
+  /**
+   * Italic attribute.
+   */
+  italic: boolean;
+  /**
+   * Overline attribute.
+   */
+  overline: boolean;
+  /**
+   * Strikethrough attribute.
+   */
+  strikethrough: boolean;
+  /**
+   * Upstream SGR underline value (`0` through `5`).
+   */
+  underline: number;
+  /**
+   * Underline color source.
+   */
+  underline_color:
+    | {
+        kind: "none";
+        [k: string]: unknown;
+      }
+    | {
+        kind: "palette";
+        value: number;
+        [k: string]: unknown;
+      }
+    | {
+        kind: "rgb";
+        value: Rgb1;
         [k: string]: unknown;
       };
   [k: string]: unknown;
@@ -2575,120 +4024,50 @@ export interface CellStyle1 {
  * Before/after values for one changed semantic property.
  */
 export interface ValueChange4 {
-  after: ColorState;
-  before: ColorState1;
+  after: ColorState1;
+  before: ColorState2;
 }
 /**
  * Value at the later endpoint.
  */
-export interface ColorState {
-  background: Rgb1;
+export interface ColorState1 {
+  background: Rgb;
   /**
    * Explicit cursor color.
    */
-  cursor?: Rgb | null;
+  cursor?: Rgb1 | null;
   foreground: Rgb2;
   /**
    * Active 256-color palette.
    */
-  palette: Rgb[];
-  [k: string]: unknown;
-}
-/**
- * RGB color independent of libghostty's unstable ABI.
- */
-export interface Rgb1 {
-  /**
-   * Blue channel.
-   */
-  b: number;
-  /**
-   * Green channel.
-   */
-  g: number;
-  /**
-   * Red channel.
-   */
-  r: number;
-  [k: string]: unknown;
-}
-/**
- * RGB color independent of libghostty's unstable ABI.
- */
-export interface Rgb2 {
-  /**
-   * Blue channel.
-   */
-  b: number;
-  /**
-   * Green channel.
-   */
-  g: number;
-  /**
-   * Red channel.
-   */
-  r: number;
+  palette: Rgb1[];
   [k: string]: unknown;
 }
 /**
  * Value at the earlier endpoint.
  */
-export interface ColorState1 {
-  background: Rgb1;
+export interface ColorState2 {
+  background: Rgb;
   /**
    * Explicit cursor color.
    */
-  cursor?: Rgb | null;
+  cursor?: Rgb1 | null;
   foreground: Rgb2;
   /**
    * Active 256-color palette.
    */
-  palette: Rgb[];
+  palette: Rgb1[];
   [k: string]: unknown;
 }
 /**
  * Before/after values for one changed semantic property.
  */
 export interface ValueChange2 {
-  after: CursorState;
-  before: CursorState1;
+  after: CursorState1;
+  before: CursorState2;
 }
 /**
  * Value at the later endpoint.
- */
-export interface CursorState {
-  /**
-   * Blink mode.
-   */
-  blinking: boolean;
-  /**
-   * Viewport column when available.
-   */
-  column?: number | null;
-  /**
-   * Whether the cursor lies in the viewport.
-   */
-  in_viewport: boolean;
-  /**
-   * Viewport row when available.
-   */
-  row?: number | null;
-  /**
-   * Cursor visual style.
-   */
-  style: "bar" | "block" | "underline" | "hollow_block";
-  /**
-   * Visibility mode.
-   */
-  visible: boolean;
-  /**
-   * Whether the cursor is on a wide-character tail.
-   */
-  wide_tail?: boolean | null;
-  [k: string]: unknown;
-}
-/**
- * Value at the earlier endpoint.
  */
 export interface CursorState1 {
   /**
@@ -2708,7 +4087,41 @@ export interface CursorState1 {
    */
   row?: number | null;
   /**
-   * Cursor visual style.
+   * Visual shape.
+   */
+  style: "bar" | "block" | "underline" | "hollow_block";
+  /**
+   * Visibility mode.
+   */
+  visible: boolean;
+  /**
+   * Whether the cursor is on a wide-character tail.
+   */
+  wide_tail?: boolean | null;
+  [k: string]: unknown;
+}
+/**
+ * Value at the earlier endpoint.
+ */
+export interface CursorState2 {
+  /**
+   * Blink mode.
+   */
+  blinking: boolean;
+  /**
+   * Viewport column when available.
+   */
+  column?: number | null;
+  /**
+   * Whether the cursor lies in the viewport.
+   */
+  in_viewport: boolean;
+  /**
+   * Viewport row when available.
+   */
+  row?: number | null;
+  /**
+   * Visual shape.
    */
   style: "bar" | "block" | "underline" | "hollow_block";
   /**
@@ -2923,7 +4336,7 @@ export interface ValueChange7 {
   before: boolean;
 }
 /**
- * Changed cells for one viewport row.
+ * Changed cells and native wrap facts for one viewport row.
  */
 export interface RowChange {
   /**
@@ -2934,6 +4347,14 @@ export interface RowChange {
    * Zero-based row.
    */
   row: number;
+  /**
+   * Earlier/later soft-wrap fact, including row absence at either endpoint.
+   */
+  soft_wrapped?: ValueChange8 | null;
+  /**
+   * Earlier/later wrap-continuation fact, including row absence at either endpoint.
+   */
+  wrap_continuation?: ValueChange8 | null;
 }
 /**
  * One changed viewport cell.
@@ -2967,22 +4388,26 @@ export interface CellState {
   /**
    * Resolved explicit background, before terminal-default fallback.
    */
-  resolved_background?: Rgb | null;
+  resolved_background?: Rgb1 | null;
   /**
    * Resolved explicit foreground, before terminal-default fallback.
    */
-  resolved_foreground?: Rgb | null;
+  resolved_foreground?: Rgb1 | null;
   /**
    * Whether the cell is selected.
    */
   selected: boolean;
-  style: CellStyle2;
+  style: CellStyle3;
+  /**
+   * Native width role; never inferred from the grapheme.
+   */
+  wide_kind: "narrow" | "wide" | "spacer_tail" | "spacer_head";
   [k: string]: unknown;
 }
 /**
  * Visual style.
  */
-export interface CellStyle2 {
+export interface CellStyle3 {
   /**
    * Background color source.
    */
@@ -2998,7 +4423,7 @@ export interface CellStyle2 {
       }
     | {
         kind: "rgb";
-        value: Rgb;
+        value: Rgb1;
         [k: string]: unknown;
       };
   /**
@@ -3028,7 +4453,7 @@ export interface CellStyle2 {
       }
     | {
         kind: "rgb";
-        value: Rgb;
+        value: Rgb1;
         [k: string]: unknown;
       };
   /**
@@ -3070,10 +4495,23 @@ export interface CellStyle2 {
       }
     | {
         kind: "rgb";
-        value: Rgb;
+        value: Rgb1;
         [k: string]: unknown;
       };
   [k: string]: unknown;
+}
+/**
+ * Before/after values for one changed semantic property.
+ */
+export interface ValueChange8 {
+  /**
+   * Value at the later endpoint.
+   */
+  after?: boolean | null;
+  /**
+   * Value at the earlier endpoint.
+   */
+  before?: boolean | null;
 }
 /**
  * Later endpoint identity and provenance.
@@ -3502,7 +4940,7 @@ export interface ArtifactMember {
  * Structured actor context attached to a rejected or incomplete request.
  */
 export interface ControlErrorDetails {
-  boundaries: ActorBoundaries11;
+  boundaries: ActorBoundaries10;
   /**
    * Latest presented-state hash at the actor ordering point.
    */
@@ -3515,11 +4953,15 @@ export interface ControlErrorDetails {
    * Exact output or mutation scope covered by these details.
    */
   scope: string;
+  /**
+   * Bounded rich-projection validation or resource-limit facts.
+   */
+  screen_frame?: ScreenFrameFailureDetails | null;
 }
 /**
  * Durable and observed source positions at the failure boundary.
  */
-export interface ActorBoundaries11 {
+export interface ActorBoundaries10 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
 }
@@ -3567,4 +5009,62 @@ export interface InputSequenceFailureDetails {
    * Caller-owned sequence request identifier.
    */
   sequence_id: string;
+}
+/**
+ * Bounded context for a rejected rich screen projection.
+ */
+export interface ScreenFrameFailureDetails {
+  /**
+   * Full terminal columns when geometry was available.
+   */
+  cols?: number | null;
+  /**
+   * Requested projection detail when known.
+   */
+  detail?: FrameDetail | null;
+  /**
+   * `cell_count`, `serialized_bytes`, or `response_bytes` for limit failures.
+   */
+  limit_kind?: string | null;
+  /**
+   * Maximum permitted amount for a limit failure.
+   */
+  maximum?: number | null;
+  /**
+   * Requested region when supplied.
+   */
+  region?: ScreenRegion4 | null;
+  /**
+   * Typed invalid-region reason when validation failed.
+   */
+  region_reason?: InvalidRegionReason | null;
+  /**
+   * Requested measured amount for a limit failure.
+   */
+  requested?: number | null;
+  /**
+   * Full terminal rows when geometry was available.
+   */
+  rows?: number | null;
+}
+/**
+ * Absolute zero-based half-open terminal region.
+ */
+export interface ScreenRegion4 {
+  /**
+   * Exclusive bottom row.
+   */
+  bottom: number;
+  /**
+   * Inclusive left column.
+   */
+  left: number;
+  /**
+   * Exclusive right column.
+   */
+  right: number;
+  /**
+   * Inclusive top row.
+   */
+  top: number;
 }

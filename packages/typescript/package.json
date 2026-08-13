@@ -2,36 +2,65 @@
   "name": "@termtrace/test",
   "version": "0.1.0",
   "description": "Strict TypeScript client for canonical terminal evidence",
+  "license": "MIT",
+  "bin": {
+    "termtrace": "bin/termtrace.js"
+  },
+  "files": [
+    "bin",
+    "lib"
+  ],
   "type": "module",
+  "sideEffects": [
+    "./lib/vitest.js"
+  ],
   "exports": {
     ".": {
       "types": "./lib/index.d.ts",
       "import": "./lib/index.js"
+    },
+    "./vitest": {
+      "types": "./lib/vitest.d.ts",
+      "import": "./lib/vitest.js"
     }
   },
-  "bin": {
-    "termtrace": "bin/termtrace.js"
-  },
-  "files": ["bin", "lib"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "generate:protocol": "node scripts/generate-protocol.mjs",
-    "test": "bun test tests"
+    "lint": "oxlint -c ./.oxlintrc.json .",
+    "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "test": "bun test test",
+    "test:vitest": "bun test test/nested-vitest.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "check": "bun run format:check && bun run lint && bun run typecheck && bun test",
+    "verify": "bun run check"
   },
   "devDependencies": {
     "@types/bun": "^1.2.18",
     "ajv": "8.20.0",
     "esbuild": "0.28.1",
     "json-schema-to-typescript": "15.0.4",
-    "typescript": "^5.8.3"
+    "oxfmt": "^0.59.0",
+    "oxlint": "^1.74.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.3"
   },
-  "engines": {
-    "node": ">=20"
+  "peerDependencies": {
+    "vitest": ">=4.1.3 <5"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   },
   "optionalDependencies": {
     "@termtrace/cli-linux-arm64": "0.1.0",
     "@termtrace/cli-linux-x64": "0.1.0"
   },
-  "license": "MIT"
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "bun@1.3.14"
 }

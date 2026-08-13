@@ -1,0 +1,16 @@
+{
+  "name": "termtrace-vitest-consumer-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@termtrace/test": "file:../../.."
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.3"
+  }
+}
