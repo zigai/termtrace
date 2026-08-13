@@ -17,8 +17,8 @@ repos:
           ruff check --fix --force-exclude
         language: system
         types: [python]
-        files: ^packages/python/(?:src/termtrace|scripts|tests)/
-        exclude: ^packages/python/src/termtrace/_generated/
+        files: ^packages/python/(?:termtrace|scripts|tests)/
+        exclude: ^packages/python/termtrace/_generated/
 
       - id: ruff-format
         name: ruff format
@@ -27,5 +27,5 @@ repos:
           ruff format --force-exclude
         language: system
         types: [python]
-        files: ^packages/python/(?:src/termtrace|scripts|tests)/
-        exclude: ^packages/python/src/termtrace/_generated/
+        files: ^packages/python/(?:termtrace|scripts|tests)/
+        exclude: ^packages/python/termtrace/_generated/

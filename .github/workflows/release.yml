@@ -63,7 +63,7 @@ jobs:
           install -m 0555 "target/${{ matrix.target }}/release/termtrace" "dist/$root/termtrace"
           install -m 0444 LICENSE README.md "dist/$root/"
           install -m 0444 packages/python/pyproject.toml packages/python/README.md "dist/$root/clients/python/"
-          cp -R packages/python/src "dist/$root/clients/python/"
+          cp -R packages/python/termtrace "dist/$root/clients/python/"
           install -m 0444 packages/typescript/package.json packages/typescript/README.md "dist/$root/clients/typescript/"
           cp -R packages/typescript/lib "dist/$root/clients/typescript/"
           tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -C dist -cf - "$root" | gzip -9 -n > "dist/$root.tar.gz"

@@ -21,25 +21,28 @@ validate:
 # run Rust, TypeScript, and Python tests
 test:
   cargo test --locked --all-features
-  bun test --cwd packages/typescript
+  bun run --cwd packages/typescript test
   uv run --project packages/python --locked --group dev pytest -q packages/python/tests
 
 # lint Rust and type-check and lint the language clients
 lint:
   cargo clippy --locked --all-targets --all-features -- -D warnings
-  bun run --cwd packages/typescript check
-  uv run --project packages/python --locked --group dev mypy packages/python/src packages/python/tests
-  uv run --project packages/python --locked --group dev ruff check --force-exclude packages/python/src/termtrace packages/python/scripts packages/python/tests --exclude packages/python/src/termtrace/_generated
+  bun run --cwd packages/typescript lint
+  bun run --cwd packages/typescript typecheck
+  uv run --project packages/python --locked --group dev mypy packages/python/termtrace packages/python/tests
+  uv run --project packages/python --locked --group dev ruff check packages/python/termtrace packages/python/scripts packages/python/tests
 
-# format Rust and handwritten Python sources
+# format Rust and language-client sources
 format:
   cargo fmt --all
-  uv run --project packages/python --locked --group dev ruff format --force-exclude packages/python/src/termtrace packages/python/scripts packages/python/tests --exclude packages/python/src/termtrace/_generated
+  bun run --cwd packages/typescript format
+  uv run --project packages/python --locked --group dev ruff format packages/python/termtrace packages/python/scripts packages/python/tests
 
 # verify formatting without modifying files
 format-check:
   cargo fmt --all -- --check
-  uv run --project packages/python --locked --group dev ruff format --check --force-exclude packages/python/src/termtrace packages/python/scripts packages/python/tests --exclude packages/python/src/termtrace/_generated
+  bun run --cwd packages/typescript format:check
+  uv run --project packages/python --locked --group dev ruff format --check packages/python/termtrace packages/python/scripts packages/python/tests
 
 # run the complete native recording, replay, video, and screenshot smoke test
 smoke:

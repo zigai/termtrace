@@ -8,7 +8,7 @@ fi
 
 binary=$(realpath "$1")
 platform=$2
-package_bin=packages/python/src/termtrace/bin
+package_bin=packages/python/termtrace/bin
 cleanup() {
     rm -rf "$package_bin"
 }

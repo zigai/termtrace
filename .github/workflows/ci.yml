@@ -35,4 +35,6 @@ jobs:
         with:
           bun-version: 1.3.14
       - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+      - name: Bootstrap pinned Ghostty
+        run: scripts/bootstrap.sh
       - run: scripts/ci-clients.sh

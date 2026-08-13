@@ -22,7 +22,7 @@ __pycache__/
 .venv/
 dist/
 *.egg-info/
-/packages/python/src/termtrace/bin/
+/packages/python/termtrace/bin/
 
 # JavaScript and TypeScript package outputs
 node_modules/
