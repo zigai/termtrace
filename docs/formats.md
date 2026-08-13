@@ -41,8 +41,10 @@ The completion manifest binds the session and event roots, final exit event, eve
 
 ## API contract versions
 
-Atomic input sequences and structured retry details use JSONL driver protocol
-version 4 and control protocol version 14. Scenario files require scenario
+Rich screen frames, atomic input sequences, and structured retry details use
+JSONL driver protocol version 5 and control protocol version 15. This is a
+clean cutover: older peers are rejected as incompatible rather than receiving
+partial frames or losing action outcomes. Scenario files require scenario
 version 2. Checked-in JSON Schemas are authoritative for each shape.
 
 `schemas/cli-response.schema.json` defines CLI agent response version 1. Agent
@@ -83,6 +85,20 @@ Running `termtrace analyze index --session SESSION` creates:
 | `derived/manifest.json` | source identity and hashes for every member |
 
 Ranged indexes use a range-specific directory. Live snapshots are hash-addressed and marked incomplete. `--presented-only` excludes states hidden by synchronized output without changing canonical events.
+Semantic state format 5 records Ghostty's authoritative row soft-wrap and
+continuation flags and each cell's native wide role. Its state hashes use the
+`termtrace-semantic-state-v2` domain, so semantic hash selectors are scoped to
+the state-format version. Version-4 derived checkpoints and indexes cannot
+truthfully supply these facts and are rejected rather than defaulted; regenerate
+them from the still-readable canonical event log. Derived bytes remain stable
+only while the semantic engine and state-format versions are unchanged.
+
+The compatibility boundary is deliberate. Canonical recording remains event-log
+version 6, while rich semantic projections require state format 5. Generated
+Python and TypeScript clients move in lockstep with driver protocol 5; there is
+no legacy screen-envelope shim. Public package versions remain unchanged until
+the coordinated release is published.
+
 
 ## Native visual artifacts
 

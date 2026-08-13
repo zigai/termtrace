@@ -37,6 +37,35 @@ session.stop(Some(Duration::from_secs(5)))?;
 # Ok::<(), termtrace::Error>(())
 ```
 
+For ordinary Rust tests, `testing::run_terminal_test` creates a collision-free
+attempt root and owns exactly one launch, completion, and retention decision:
+
+```rust,no_run
+use std::ffi::OsString;
+use termtrace::{
+    client::Terminal,
+    testing::{TerminalTestConfig, run_terminal_test},
+};
+
+let terminal = Terminal::new("termtrace", "test-evidence");
+let config = TerminalTestConfig::new(
+    terminal,
+    [OsString::from("/usr/bin/my-tui")],
+);
+let result = run_terminal_test(config, |test| {
+    test.assert_screen_text("Ready")?;
+    Ok::<(), termtrace::testing::TerminalAssertionError>(())
+});
+assert!(result.is_ok());
+```
+
+Passing attempts are discarded only after canonical content verification.
+Failures retain a driver-verified semantic PNG, debug bundle, canonical session,
+and verified attempt manifest. Repeated finalization returns the first report;
+panic payloads and body errors remain primary while cleanup errors stay bounded
+and secondary. Snapshot updates require `TerminalTestConfig::update_snapshots =
+true`; normal assertion runs never create or replace reviewed snapshots.
+
 Environment JSON is sent over a private stdin pipe. It is not written beneath the evidence root and values do not enter recorder arguments.
 
 ## TypeScript
@@ -78,6 +107,28 @@ with Terminal(binary_path="termtrace", evidence_root="test-evidence") as termina
 ```
 
 The async Python client exposes the same launch fields and `await session.screen.wait_for_idle(...)`.
+
+## Test framework capability matrix
+
+| Capability | Rust built-in harness | pytest | Vitest |
+| --- | --- | --- | --- |
+| Ownership | Fresh driver session per helper call | Fresh sync or native-async driver and session per fixture factory call | Fresh driver and session per runnable attempt |
+| Exact stable/action frame | Yes | Sync and native async | Yes |
+| Locator assertions | Runner-neutral typed results | Pytest-friendly typed assertion façade | Typed async matchers |
+| Semantic snapshots | Termtrace JSON; explicit config update | Termtrace JSON; `--termtrace-update-snapshots` | Vitest snapshot engine; `vitest --update` |
+| Failure evidence | Verified canonical session, semantic PNG, debug bundle | Verified canonical session, semantic PNG, screen bundle | Verified canonical session, semantic PNG, debug bundle |
+| Failure precedence | Body error or panic remains primary | Test failure remains primary | Test failure remains primary |
+| Parallel isolation | UUID attempt roots | Worker, node ID hash, and attempt | Worker, module/test hash, retry, repeat, and session |
+| Skip behavior | Ignored test never calls the helper | Filtered/static skip launches nothing | Filtered/skipped/todo test launches nothing |
+| Timeout integration | No cancellation hook in the standard harness; callers can finalize as `TimedOut` | Framework outcome classification plus bounded teardown | Vitest cancellation signal plus bounded teardown |
+| Supported platform | Linux | Linux | Vitest 4.1.3–4.x on Linux |
+
+All three use `on-failure` by default: a fully successful attempt is discarded,
+while assertion, exception, panic, or timeout outcomes retain bounded artifacts.
+Teardown first requests stop and completion, so owned recorder and child process
+groups are reaped before the adapter returns. Artifact paths are contained under
+the caller's evidence root. Evidence contains exact terminal output, can contain
+secrets, and is not automatically redacted.
 
 ## Scenario
 

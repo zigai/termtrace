@@ -68,6 +68,40 @@ if (!frame.viewport_text.includes("Commands")) throw new Error("commands missing
 
 The package ships precompiled standalone Ajv validators. Ajv is a development dependency and is not initialized at client startup.
 
+## Testing API parity
+
+Rust is the semantic authority, while Python and TypeScript expose first-class
+host-language values rather than generated envelopes. All action and stable
+capture APIs return the exact actor-selected rich frame; assertion helpers do
+not follow those operations with a second observation.
+
+| Capability | Rust | Python sync / async | TypeScript |
+| --- | --- | --- | --- |
+| Rich text, styled spans, bounded exact cells | `ScreenFrame` | `ScreenFrame` | `ScreenFrame` |
+| Exact stable capture with quality and timing | `Screen::capture_stable` | `screen.capture_stable` | `screen.captureStable` |
+| Atomic typed input plus none/idle/screen postcondition | `Session::act` | `session.act` / `await session.act` | `session.act` |
+| Guard against an expected presented state | `ActOptions::if_state` | `ActionOptions.if_state` | `ActionOptions.ifState` |
+| Literal substring/exact and native regex | `LocatorSpec` / `regex::Regex` | `str` / `re.Pattern` | `string` / `RegExp` |
+| Row, region, style, and immutable composition | Yes | Yes | Yes |
+| `all`, `count`, strict `single`, explicit `first` / `nth` | Yes | Yes | Yes |
+| Exact satisfying-frame locator wait and unchanged-state interval | Yes | Sync and native async | `AbortSignal`-aware async |
+| Exists/count/text/style/wrap/neutral runner assertions | Yes | Yes | Yes |
+| Source colors versus normalized resolved RGB | Yes | Yes | Yes |
+
+Termtrace locators match terminal cells in one viewport state. They are not
+application widgets or accessibility roles. Coordinates are absolute,
+zero-based terminal columns. Strings use row-local substring matching by
+default; exact mode compares the complete selected text, and crossing linked
+soft-wrap rows requires an explicit option. Host-native regex syntax and flags
+remain language-specific, but empty/zero-width and partial-grapheme matches are
+rejected consistently. `single` rejects both absence and ambiguity.
+
+`fixtures/locator-conformance.json` is consumed by the Rust, Python, and
+TypeScript suites. It fixes shared ordering, terminal-column ranges, combining
+and wide-cell behavior, styled blank coalescing, region intersection,
+soft-wrap crossing, state/frame identity, hidden-state labeling, and invalid
+query categories.
+
 ## Run a persistent workflow without project scaffolding
 
 For more than two or three actions, use one persistent driver or a managed
