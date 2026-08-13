@@ -140,8 +140,11 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("completed final state is stable");
-    assert!(final_wait.child_completed);
-    assert_eq!(final_wait.completion_quality, "stable");
+    assert!(final_wait.matched);
+    assert!(matches!(
+        final_wait.quality,
+        ScreenWaitQuality::ChildCompleted | ScreenWaitQuality::OutputClosed
+    ));
     final_state
         .complete(Duration::from_secs(5))
         .expect("final-state completion");

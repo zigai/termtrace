@@ -9,6 +9,7 @@ const MAX_CAPTURE_BYTES: usize = 256 * 1024;
 const START_RESPONSE_BYTES: usize = 300;
 const ACTION_RESPONSE_BYTES: usize = 250;
 const WAIT_STATUS_RESPONSE_BYTES: usize = 300;
+const MAX_COMPACT_SCREEN_BYTES: usize = 16 * 1024;
 const STOP_RESPONSE_BYTES: usize = 350;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -134,6 +135,77 @@ fn pagination_projection(value: &serde_json::Value) -> Option<serde_json::Value>
     }
     return Some(serde_json::Value::Object(projection));
 }
+fn append_bounded_text(output: &mut String, value: &str) -> bool {
+    let remaining = MAX_COMPACT_SCREEN_BYTES.saturating_sub(output.len());
+    if value.len() <= remaining {
+        output.push_str(value);
+        return false;
+    }
+    let mut end = remaining;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    output.push_str(value.get(..end).unwrap_or_default());
+    return true;
+}
+
+fn bounded_screen_frame_text(
+    frame: &serde_json::Map<String, serde_json::Value>,
+) -> Option<(String, bool)> {
+    if let Some(viewport_text) = frame
+        .get("viewport_text")
+        .and_then(serde_json::Value::as_str)
+    {
+        let mut output = String::new();
+        let truncated = append_bounded_text(&mut output, viewport_text);
+        return Some((output, truncated));
+    }
+    let rows = frame
+        .get("data")
+        .and_then(serde_json::Value::as_object)?
+        .get("rows")
+        .and_then(serde_json::Value::as_array)?;
+    let mut output = String::new();
+    for (index, row) in rows.iter().enumerate() {
+        let text = row
+            .as_object()
+            .and_then(|row| return row.get("text"))
+            .and_then(serde_json::Value::as_str)?;
+        if index != 0 && append_bounded_text(&mut output, "\n") {
+            return Some((output, true));
+        }
+        if append_bounded_text(&mut output, text) {
+            return Some((output, true));
+        }
+    }
+    return Some((output, false));
+}
+
+fn bounded_screen_frame_projection(
+    frame: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Value {
+    let mut projection = serde_json::Map::new();
+    for key in [
+        "version",
+        "state_hash",
+        "frame_hash",
+        "presented",
+        "capture_quality",
+    ] {
+        copy_value(frame, &mut projection, key, key);
+    }
+    copy_value(frame, &mut projection, "geometry", "geometry");
+    if let Some((screen, truncated)) = bounded_screen_frame_text(frame) {
+        projection.insert(
+            "viewport_text".to_owned(),
+            serde_json::Value::String(screen),
+        );
+        if truncated {
+            projection.insert("screen_truncated".to_owned(), serde_json::Value::Bool(true));
+        }
+    }
+    return serde_json::Value::Object(projection);
+}
 
 fn bounded_capture_projection(value: &serde_json::Value) -> Option<serde_json::Value> {
     const MAX_METADATA_STRING_BYTES: usize = 4 * 1_024;
@@ -169,10 +241,20 @@ fn bounded_capture_projection(value: &serde_json::Value) -> Option<serde_json::V
         "completion",
         "observation",
         "postcondition",
+        "predicate",
+        "frame",
     ] {
         let Some(nested) = source.get(key).and_then(serde_json::Value::as_object) else {
             continue;
         };
+        if key == "frame"
+            || (key == "observation"
+                && nested.contains_key("state_hash")
+                && nested.contains_key("data"))
+        {
+            projection.insert(key.to_owned(), bounded_screen_frame_projection(nested));
+            continue;
+        }
         let nested = scalar_fields(nested);
         if !nested.is_empty() {
             projection.insert(key.to_owned(), serde_json::Value::Object(nested));
@@ -551,13 +633,25 @@ fn compact_task_value(
                     }
                     projected.insert("input".to_owned(), serde_json::Value::Object(summary));
                 }
-                if let Some(observation) = compacted
+                if let Some(observation) = source
                     .get("observation")
                     .and_then(serde_json::Value::as_object)
                 {
                     let mut summary = serde_json::Map::new();
-                    for key in ["state", "quality", "screen", "scope"] {
-                        copy_value(observation, &mut summary, key, key);
+                    copy_value(observation, &mut summary, "state", "state");
+                    copy_value(observation, &mut summary, "state_hash", "state");
+                    copy_value(observation, &mut summary, "quality", "quality");
+                    copy_value(observation, &mut summary, "capture_quality", "quality");
+                    copy_value(observation, &mut summary, "scope", "scope");
+                    copy_value(observation, &mut summary, "screen", "screen");
+                    if let Some((screen, truncated)) = bounded_screen_frame_text(observation) {
+                        summary.insert("screen".to_owned(), serde_json::Value::String(screen));
+                        if truncated {
+                            summary.insert(
+                                "screen_truncated".to_owned(),
+                                serde_json::Value::Bool(true),
+                            );
+                        }
                     }
                     projected.insert("observation".to_owned(), serde_json::Value::Object(summary));
                 }
@@ -592,8 +686,23 @@ fn compact_task_value(
             {
                 projected.insert("size".to_owned(), serde_json::json!([cols, rows]));
             }
+            if let Some(frame) = source.get("frame").and_then(serde_json::Value::as_object) {
+                copy_value(frame, &mut projected, "state_hash", "state");
+                copy_value(frame, &mut projected, "geometry", "size");
+                if let Some((screen, truncated)) = bounded_screen_frame_text(frame) {
+                    projected.insert("screen".to_owned(), serde_json::Value::String(screen));
+                    if truncated {
+                        projected
+                            .insert("screen_truncated".to_owned(), serde_json::Value::Bool(true));
+                    }
+                }
+            }
             if source.get("predicate").is_some() {
-                projected.insert("matched".to_owned(), serde_json::Value::Bool(true));
+                projected.insert(
+                    "scope".to_owned(),
+                    serde_json::Value::String("screen".to_owned()),
+                );
+                copy_value(source, &mut projected, "matched", "matched");
             }
         }
         "status" | "stop" => {
@@ -1786,6 +1895,50 @@ mod tests {
         assert_eq!(projection["record"]["presented"], true);
         assert!(projection["record"].get("delta").is_none());
         assert!(projection.get("state").is_none());
+    }
+
+    #[test]
+    fn rich_wait_and_action_frames_keep_bounded_agent_identity_and_text() {
+        let frame = serde_json::json!({
+            "version": 1,
+            "state_hash": "a".repeat(64),
+            "frame_hash": "b".repeat(64),
+            "presented": true,
+            "capture_quality": "live",
+            "geometry": { "cols": 80, "rows": 24 },
+            "data": {
+                "detail": "spans",
+                "rows": [
+                    { "row": 0, "text": "READY" },
+                    { "row": 1, "text": "next" }
+                ]
+            }
+        });
+        let wait = serde_json::json!({
+            "predicate": { "predicate": "contains", "text": "MISSING" },
+            "matched": false,
+            "quality": "deadline",
+            "frame": frame,
+        });
+        let projected = bounded_capture_projection(&wait).expect("bounded wait projection");
+        let compact = compact_task_value(projected, &[], "wait").expect("compact wait");
+        assert_eq!(compact["scope"], "screen");
+        assert_eq!(compact["matched"], false);
+        assert_eq!(compact["state"], "a".repeat(64));
+        assert_eq!(compact["screen"], "READY\nnext");
+
+        let action = serde_json::json!({
+            "observation": frame,
+            "postcondition": {
+                "kind": "screen",
+                "matched": true,
+                "outcome": "matched_unsettled"
+            }
+        });
+        let projected = bounded_capture_projection(&action).expect("bounded action projection");
+        let compact = compact_task_value(projected, &[], "act").expect("compact action");
+        assert_eq!(compact["observation"]["state"], "a".repeat(64));
+        assert_eq!(compact["observation"]["screen"], "READY\nnext");
     }
 
     fn response_state(

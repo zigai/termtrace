@@ -3,17 +3,17 @@
     {
       "name": "hello",
       "response": {
-        "version": 4,
+        "version": 5,
         "request_id": "00000000-0000-0000-0000-000000000001",
         "result": {
           "status": "ok",
           "data": {
             "kind": "hello",
-            "driver_protocol_version": 4,
-            "control_protocol_version": 14,
+            "driver_protocol_version": 5,
+            "control_protocol_version": 15,
             "event_log_version": 6,
-            "state_format_version": 4,
-            "methods": ["hello", "launch", "attach"],
+            "state_format_version": 5,
+            "methods": ["hello", "launch", "attach", "screen_frame"],
             "max_request_bytes": 4194304,
             "max_response_bytes": 4194304
           }
@@ -23,7 +23,7 @@
     {
       "name": "attached",
       "response": {
-        "version": 4,
+        "version": 5,
         "request_id": "00000000-0000-0000-0000-000000000002",
         "result": {
           "status": "ok",
@@ -40,7 +40,7 @@
     {
       "name": "operation-error",
       "response": {
-        "version": 4,
+        "version": 5,
         "request_id": "00000000-0000-0000-0000-000000000003",
         "result": {
           "status": "error",
@@ -63,7 +63,7 @@
     {
       "name": "partial-input-sequence",
       "response": {
-        "version": 4,
+        "version": 5,
         "request_id": "00000000-0000-0000-0000-000000000006",
         "result": {
           "status": "error",
@@ -100,16 +100,16 @@
     {
       "name": "missing-required-field",
       "response": {
-        "version": 4,
+        "version": 5,
         "request_id": "00000000-0000-0000-0000-000000000004",
         "result": {
           "status": "ok",
           "data": {
             "kind": "hello",
-            "driver_protocol_version": 4,
-            "control_protocol_version": 14,
+            "driver_protocol_version": 5,
+            "control_protocol_version": 15,
             "event_log_version": 6,
-            "state_format_version": 4,
+            "state_format_version": 5,
             "methods": []
           }
         }
@@ -118,7 +118,7 @@
     {
       "name": "unknown-sensitive-field",
       "response": {
-        "version": 4,
+        "version": 5,
         "request_id": "00000000-0000-0000-0000-000000000005",
         "result": {
           "status": "error",

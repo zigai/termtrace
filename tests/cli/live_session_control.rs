@@ -1,7 +1,15 @@
 //! live session control CLI integration tests.
 
+use std::os::unix::net::{SocketAddr, UnixListener};
+
 use crate::support::*;
-use termtrace::{control::PointerOperation, ghostty_vt::MouseButton, session::read_completion};
+use termtrace::{
+    control::PointerOperation,
+    ghostty_vt::MouseButton,
+    locator::LocatorError,
+    observation::CaptureQuality,
+    session::{read_completion, read_manifest},
+};
 
 #[test]
 fn live_control_drives_and_audits_a_detached_session() {
@@ -279,27 +287,23 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         &ControlRequest::new(ControlCommand::CaptureStable {
             stable_for_ns: 30_000_000,
             timeout_ns: 2_000_000_000,
+            projection: ScreenProjectionRequest::default(),
         }),
     )
     .expect("stable capture");
-    let ControlData::StableSnapshot {
-        semantic_state_zstd,
-        viewport_text,
-        state_hash,
-        quality,
-        boundaries,
-        ..
-    } = capture
-    else {
+    let ControlData::StableSnapshot { frame, quality, .. } = capture else {
         panic!("wrong stable capture payload");
     };
     assert_eq!(quality, StableCaptureQuality::Stable);
-    assert!(viewport_text.contains("READY"));
-    let encoded = decode_all(semantic_state_zstd.as_bytes()).expect("decode exact stable state");
-    let semantic_state: serde_json::Value =
-        serde_json::from_slice(&encoded).expect("exact stable state JSON");
-    assert!(semantic_state.is_object());
+    let ScreenFrameData::Spans { rows } = &frame.data else {
+        panic!("default projection should return spans");
+    };
+    assert!(rows.iter().any(|row| return row.text.contains("READY")));
+    let state_hash = frame.state_hash.clone();
     assert_eq!(state_hash.len(), 64);
+    let ScreenFrameSource::Actor { boundaries, .. } = &frame.source else {
+        panic!("stable capture should be actor sourced");
+    };
     assert_eq!(boundaries.observed.output_bytes, 5);
     let mut compact_idle = Command::cargo_bin("termtrace").expect("binary should build");
     let compact_output = compact_idle
@@ -365,6 +369,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         &ControlRequest::new(ControlCommand::CaptureStable {
             stable_for_ns: 100_000_000,
             timeout_ns: 250_000_000,
+            projection: ScreenProjectionRequest::default(),
         }),
     )
     .expect("typed deadline capture");
@@ -405,18 +410,21 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         &ControlRequest::new(ControlCommand::CaptureStable {
             stable_for_ns: 3_600_000_000_000,
             timeout_ns: 3_600_000_000_000,
+            projection: ScreenProjectionRequest::default(),
         }),
     )
     .expect("typed child completion");
-    assert!(
-        matches!(
-            completed,
-            ControlData::StableSnapshot {
-                quality: StableCaptureQuality::ChildCompleted | StableCaptureQuality::OutputClosed,
-                ..
-            }
-        ),
-        "unexpected completed-child outcome: {completed:?}"
+    let ControlData::StableSnapshot { quality, frame, .. } = completed else {
+        panic!("unexpected completed-child outcome: {completed:?}");
+    };
+    assert!(matches!(
+        quality,
+        StableCaptureQuality::ChildCompleted | StableCaptureQuality::OutputClosed
+    ));
+    assert_eq!(
+        frame.capture_quality,
+        CaptureQuality::Live,
+        "actor-owned termination is not validated completed evidence"
     );
     let _completed_status = completed_child.wait().expect("completed recorder exit");
 
@@ -428,7 +436,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
             "--",
             "/bin/sh",
             "-c",
-            "printf CLOSED; exec 0<&- 1>&- 2>&-; sleep 2",
+            "printf CLOSED; exec 0<&- 1>&- 2>&-; sleep 8",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -438,6 +446,28 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     wait_for_control(&closed_session);
     wait_for_output(&closed_session, b"CLOSED", Duration::from_secs(2))
         .expect("closed fixture output");
+    let closed = send_request(
+        &closed_session,
+        &ControlRequest::new(ControlCommand::CaptureStable {
+            stable_for_ns: 1_000_000_000,
+            timeout_ns: 3_000_000_000,
+            projection: ScreenProjectionRequest::default(),
+        }),
+    )
+    .expect("typed output closure");
+    let ControlData::StableSnapshot {
+        quality: StableCaptureQuality::OutputClosed,
+        frame,
+        ..
+    } = closed
+    else {
+        panic!("unexpected output-closed outcome: {closed:?}");
+    };
+    assert_eq!(
+        frame.capture_quality,
+        CaptureQuality::Live,
+        "actor-owned output closure is not validated completed evidence"
+    );
     let mut strict_idle = Command::cargo_bin("termtrace").expect("binary should build");
     strict_idle
         .arg("wait-idle")
@@ -460,22 +490,74 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""quality":"output_closed""#));
-    let closed = send_request(
-        &closed_session,
-        &ControlRequest::new(ControlCommand::CaptureStable {
-            stable_for_ns: 1_000_000_000,
-            timeout_ns: 3_000_000_000,
-        }),
-    )
-    .expect("typed output closure");
-    assert!(matches!(
-        closed,
-        ControlData::StableSnapshot {
-            quality: StableCaptureQuality::OutputClosed,
-            ..
-        }
-    ));
     let _closed_status = closed_child.wait().expect("closed recorder exit");
+}
+
+#[test]
+fn locator_deadline_bounds_an_in_flight_actor_capture() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session_path = temporary.path().join("locator-deadline");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let recorder = StdCommand::new(binary)
+        .args(["record", "--no-input", "--out"])
+        .arg(&session_path)
+        .args(["--", "/bin/sh", "-c", "printf READY; sleep 30"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn locator deadline recorder");
+    wait_for_control(&session_path);
+    wait_for_output(&session_path, b"READY", Duration::from_secs(2))
+        .expect("locator fixture ready");
+
+    let terminal = ClientTerminal::new(binary, temporary.path().join("unused-evidence-root"));
+    let fake_session_path = temporary.path().join("stalled-control");
+    fs::create_dir_all(&fake_session_path).expect("create stalled session directory");
+    let mut manifest = read_manifest(&session_path).expect("read session manifest");
+    manifest.control_socket = format!("{}-deadline", manifest.control_socket);
+    let address = {
+        use std::os::linux::net::SocketAddrExt as _;
+
+        SocketAddr::from_abstract_name(manifest.control_socket.as_bytes())
+            .expect("deadline socket address")
+    };
+    let listener = UnixListener::bind_addr(&address).expect("bind deadline socket");
+    fs::write(
+        fake_session_path.join("session.json"),
+        serde_json::to_vec(&manifest).expect("encode deadline manifest"),
+    )
+    .expect("install deadline manifest");
+    let session = terminal
+        .attach(&fake_session_path)
+        .expect("attach stalled locator session");
+    let stalled_server = thread::spawn(move || {
+        let (_stream, _) = listener.accept().expect("accept deadline request");
+        thread::sleep(Duration::from_secs(1));
+    });
+
+    let screen = session.screen();
+    let locator = screen.get_by_text("READY").expect("valid locator");
+    let started_at = Instant::now();
+    let error = locator
+        .wait(Duration::from_millis(50), Duration::from_millis(5))
+        .expect_err("stalled capture transport must honor the locator deadline");
+    let elapsed = started_at.elapsed();
+    assert!(
+        matches!(error, LocatorError::Timeout { .. }),
+        "unexpected locator failure: {error:?}"
+    );
+    assert!(
+        elapsed < Duration::from_millis(500),
+        "locator transport exceeded its deadline by too much: {elapsed:?}"
+    );
+
+    stalled_server.join().expect("join stalled control server");
+    send_request(&session_path, &ControlRequest::new(ControlCommand::Stop))
+        .expect("stop locator fixture");
+    let _output = recorder
+        .wait_with_output()
+        .expect("wait for locator recorder");
 }
 
 #[test]
@@ -791,6 +873,7 @@ fn rejected_control_requests_do_not_terminate_the_recorder_actor() {
                 },
                 stable_for_ns: 1,
                 timeout_ns: 0,
+                projection: ScreenProjectionRequest::default(),
             },
             "invalid_screen_wait",
         ),

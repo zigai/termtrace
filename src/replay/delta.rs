@@ -34,6 +34,10 @@ fn row_diffs(previous: Option<&SemanticState>, current: &SemanticState) -> Vec<R
         .iter()
         .filter_map(|row| {
             let old_row = previous.and_then(|state| return state.grid.get(usize::from(row.row)));
+            let wrap_changed = old_row.is_none_or(|old| {
+                return old.soft_wrapped != row.soft_wrapped
+                    || old.wrap_continuation != row.wrap_continuation;
+            });
             let cells = row
                 .cells
                 .iter()
@@ -43,8 +47,10 @@ fn row_diffs(previous: Option<&SemanticState>, current: &SemanticState) -> Vec<R
                 })
                 .cloned()
                 .collect::<Vec<_>>();
-            return (!cells.is_empty()).then_some(RowDiff {
+            return (wrap_changed || !cells.is_empty()).then_some(RowDiff {
                 row: row.row,
+                soft_wrapped: row.soft_wrapped,
+                wrap_continuation: row.wrap_continuation,
                 cells,
             });
         })

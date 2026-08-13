@@ -23,10 +23,12 @@ use nix::{
 use crate::{
     Error, Result,
     control::{
-        CONTROL_PROTOCOL_VERSION, ControlRequest, ControlResponse, ControlResult,
-        MAX_CONTROL_MESSAGE_BYTES, control_response_timeout, control_socket_address,
-        validate_frame,
+        ActionPostconditionResult, ActorBoundaries, CONTROL_PROTOCOL_VERSION, ControlData,
+        ControlErrorDetails, ControlRequest, ControlResponse, ControlResult,
+        MAX_CONTROL_MESSAGE_BYTES, ScreenFrameFailureDetails, control_response_timeout,
+        control_socket_address, validate_frame,
     },
+    screen_frame::{FrameDetail, ScreenFrame, ScreenFrameData, ScreenFrameSource},
 };
 
 use super::super::{
@@ -256,17 +258,128 @@ fn cancellation_requested(cancel: &OwnedFd) -> Result<bool> {
 }
 
 fn write_control_response(stream: &mut UnixStream, response: &ControlResponse) -> Result<()> {
-    serde_json::to_writer(&mut *stream, &response).map_err(|source| {
+    let encoded = serde_json::to_vec(response).map_err(|source| {
         return Error::InvalidJson {
             path: PathBuf::from("<control-socket>"),
             json_path: "$".to_owned(),
             source,
         };
     })?;
+    let response_bytes = u64::try_from(encoded.len().saturating_add(1)).unwrap_or(u64::MAX);
+    let encoded = if response_bytes > MAX_CONTROL_MESSAGE_BYTES {
+        let (code, message, details) = oversized_response_error(response, response_bytes);
+        serde_json::to_vec(&ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id: response.request_id,
+            result: ControlResult::Error {
+                code,
+                message,
+                details,
+            },
+        })
+        .map_err(|source| {
+            return Error::InvalidJson {
+                path: PathBuf::from("<control-socket>"),
+                json_path: "$".to_owned(),
+                source,
+            };
+        })?
+    } else {
+        encoded
+    };
     return stream
-        .write_all(b"\n")
+        .write_all(&encoded)
+        .and_then(|()| return stream.write_all(b"\n"))
         .and_then(|()| return stream.flush())
         .map_err(|error| return terminal_error("write control response", error.to_string()));
+}
+
+fn oversized_response_error(
+    response: &ControlResponse,
+    response_bytes: u64,
+) -> (String, String, Option<ControlErrorDetails>) {
+    let ControlResult::Ok { data } = &response.result else {
+        return (
+            "response_too_large".to_owned(),
+            format!("complete control response exceeds the {MAX_CONTROL_MESSAGE_BYTES}-byte limit"),
+            None,
+        );
+    };
+    let Some((frame, boundaries, scope)) = rich_response_context(data) else {
+        return (
+            "response_too_large".to_owned(),
+            format!("complete control response exceeds the {MAX_CONTROL_MESSAGE_BYTES}-byte limit"),
+            None,
+        );
+    };
+    let detail = match &frame.data {
+        ScreenFrameData::Text { .. } => FrameDetail::Text,
+        ScreenFrameData::Spans { .. } => FrameDetail::Spans,
+        ScreenFrameData::Cells { .. } => FrameDetail::Cells,
+    };
+    return (
+        "screen_frame_resource_limit".to_owned(),
+        format!("complete control response exceeds the {MAX_CONTROL_MESSAGE_BYTES}-byte limit"),
+        Some(ControlErrorDetails {
+            current_presented_state_hash: frame.state_hash.clone(),
+            boundaries,
+            scope: scope.to_owned(),
+            input_sequence: None,
+            screen_frame: Some(ScreenFrameFailureDetails {
+                detail: Some(detail),
+                region: Some(frame.requested_region),
+                region_reason: None,
+                cols: Some(frame.geometry.cols),
+                rows: Some(frame.geometry.rows),
+                limit_kind: Some("response_bytes".to_owned()),
+                requested: Some(response_bytes),
+                maximum: Some(MAX_CONTROL_MESSAGE_BYTES),
+            }),
+        }),
+    );
+}
+
+fn rich_response_context(
+    data: &ControlData,
+) -> Option<(&ScreenFrame, ActorBoundaries, &'static str)> {
+    let (frame, boundaries, scope) = match data {
+        ControlData::ScreenFrame { frame } => (
+            frame,
+            actor_frame_boundaries(frame)?,
+            "screen_frame_response",
+        ),
+        ControlData::StableSnapshot { frame, .. } => (
+            frame,
+            actor_frame_boundaries(frame)?,
+            "stable_snapshot_response",
+        ),
+        ControlData::ScreenWait { frame, .. } => (
+            frame,
+            actor_frame_boundaries(frame)?,
+            "screen_wait_response",
+        ),
+        ControlData::ActionApplied {
+            postcondition,
+            boundaries,
+            ..
+        } => {
+            let frame = match postcondition {
+                ActionPostconditionResult::None { frame, .. }
+                | ActionPostconditionResult::Idle { frame, .. }
+                | ActionPostconditionResult::Screen { frame, .. } => frame,
+            };
+            (frame, boundaries.clone(), "action_response")
+        }
+        _ => return None,
+    };
+    return Some((frame, boundaries, scope));
+}
+
+fn actor_frame_boundaries(frame: &ScreenFrame) -> Option<ActorBoundaries> {
+    let ScreenFrameSource::Actor { boundaries, .. } = &frame.source else {
+        return None;
+    };
+    return Some(boundaries.clone());
 }
 
 impl ControlWorker {
@@ -280,5 +393,87 @@ impl ControlWorker {
             .join()
             .map_err(|_| return terminal_error("join control server", "control thread panicked"));
         return finish_with_cleanup(cancel_result, join_result);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        control::ActorBoundaries,
+        event_log::CanonicalBoundary,
+        ghostty_vt::GhosttyVt,
+        observation::CaptureQuality,
+        screen_frame::{ScreenProjectionRequest, project_screen_frame},
+    };
+    use uuid::Uuid;
+
+    fn boundaries() -> ActorBoundaries {
+        let boundary = CanonicalBoundary {
+            next_event_seq: 7,
+            event_hash: "a".repeat(64),
+            output_bytes: 11,
+        };
+        return ActorBoundaries {
+            durable: boundary.clone(),
+            observed: boundary,
+        };
+    }
+
+    fn actor_frame() -> ScreenFrame {
+        let mut terminal = GhosttyVt::new(8, 2, 0).expect("terminal");
+        terminal.write(b"READY");
+        let state = terminal.snapshot().expect("semantic state");
+        return project_screen_frame(
+            &state,
+            &ScreenProjectionRequest::default(),
+            ScreenFrameSource::Actor {
+                session_id: Uuid::nil(),
+                boundaries: boundaries(),
+                observed_monotonic_ns: 13,
+            },
+            true,
+            CaptureQuality::Live,
+        )
+        .expect("screen frame");
+    }
+
+    #[test]
+    fn oversized_rich_response_retains_typed_response_limit_details() {
+        let frame = actor_frame();
+        let response = ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id: Uuid::nil(),
+            result: ControlResult::Ok {
+                data: ControlData::ScreenFrame { frame },
+            },
+        };
+        let (code, _, details) =
+            oversized_response_error(&response, MAX_CONTROL_MESSAGE_BYTES + 37);
+
+        assert_eq!(code, "screen_frame_resource_limit");
+        let details = details.expect("rich response details");
+        let screen = details.screen_frame.expect("screen-frame details");
+        assert_eq!(screen.limit_kind.as_deref(), Some("response_bytes"));
+        assert_eq!(screen.requested, Some(MAX_CONTROL_MESSAGE_BYTES + 37));
+        assert_eq!(screen.maximum, Some(MAX_CONTROL_MESSAGE_BYTES));
+        assert_eq!(screen.detail, Some(FrameDetail::Spans));
+    }
+
+    #[test]
+    fn oversized_non_rich_response_is_not_misclassified_as_a_screen_frame() {
+        let response = ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id: Uuid::nil(),
+            result: ControlResult::Ok {
+                data: ControlData::Acknowledged {
+                    boundaries: boundaries(),
+                },
+            },
+        };
+        let (code, _, details) = oversized_response_error(&response, MAX_CONTROL_MESSAGE_BYTES + 1);
+
+        assert_eq!(code, "response_too_large");
+        assert!(details.is_none());
     }
 }

@@ -225,6 +225,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     let runtime = match consume_runtime(
         &mut spawned,
         &mut event_log,
+        session_id,
         output,
         options.forward_stdin,
         options.continue_after_output_mirror_closes,
@@ -573,6 +574,7 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
 fn consume_runtime(
     spawned: &mut SpawnedCommand,
     event_log: &mut EventLogWriter,
+    session_id: Uuid,
     output: &mut impl Write,
     forward_stdin: bool,
     continue_after_output_mirror_closes: bool,
@@ -642,6 +644,7 @@ fn consume_runtime(
                     process_runtime_message(
                         message,
                         spawned,
+                        session_id,
                         event_log,
                         output,
                         continue_after_output_mirror_closes,
@@ -661,21 +664,32 @@ fn consume_runtime(
                 }
                 Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => {}
             }
+            if exit_status.is_none() {
+                exit_status = spawned
+                    .child
+                    .try_wait()
+                    .map_err(|error| return terminal_error("poll child", error.to_string()))?;
+                if exit_status.is_some() && !progress.output_closed {
+                    drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
+                }
+            }
             advance_input_sequence(
                 spawned,
+                session_id,
                 event_log,
                 &mut mutation_history,
                 &mut live_terminal,
                 &mut pending_input_sequence,
-                exit_status.is_some(),
+                exit_status.is_some() && progress.output_closed,
                 progress.output_closed,
             )?;
             event_log.flush_due()?;
             evaluate_screen_waiters(
+                session_id,
                 event_log,
                 &live_terminal,
                 &mut screen_waiters,
-                false,
+                exit_status.is_some() && progress.output_closed,
                 progress.output_closed,
             )?;
 
@@ -706,26 +720,8 @@ fn consume_runtime(
                 resource_kill_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
             }
 
-            if exit_status.is_none() {
-                exit_status = spawned
-                    .child
-                    .try_wait()
-                    .map_err(|error| return terminal_error("poll child", error.to_string()))?;
-                if exit_status.is_some() && !progress.output_closed {
-                    drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
-                }
-            }
             if received_output && exit_status.is_some() && !progress.output_closed {
                 drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
-            }
-            if exit_status.is_some() && !progress.output_closed {
-                evaluate_screen_waiters(
-                    event_log,
-                    &live_terminal,
-                    &mut screen_waiters,
-                    true,
-                    false,
-                )?;
             }
             if exit_status.is_none()
                 && resource_kill_deadline.is_some_and(|deadline| return Instant::now() >= deadline)
@@ -767,6 +763,7 @@ fn consume_runtime(
             }
         }
         evaluate_screen_waiters(
+            session_id,
             event_log,
             &live_terminal,
             &mut screen_waiters,
@@ -799,6 +796,7 @@ fn consume_runtime(
 fn process_runtime_message(
     message: RuntimeMessage,
     spawned: &mut SpawnedCommand,
+    session_id: Uuid,
     event_log: &mut EventLogWriter,
     output: &mut impl Write,
     continue_after_output_mirror_closes: bool,
@@ -903,6 +901,7 @@ fn process_runtime_message(
         RuntimeMessage::Control { request, response } => {
             handle_control_request(
                 spawned,
+                session_id,
                 event_log,
                 request,
                 response,

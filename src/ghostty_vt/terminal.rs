@@ -459,6 +459,10 @@ impl GhosttyVt {
     pub fn format(&self, format: Format) -> Result<Vec<u8>> {
         return snapshot::format(self.terminal, format);
     }
+
+    pub(crate) fn format_replay_seed(&self) -> Result<Vec<u8>> {
+        return snapshot::format_replay_seed(self.terminal);
+    }
 }
 
 impl Drop for GhosttyVt {

@@ -173,6 +173,19 @@ pub struct CellStyle {
     /// Upstream SGR underline value (`0` through `5`).
     pub underline: i32,
 }
+/// Authoritative width role reported by Ghostty for one terminal cell.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WideKind {
+    /// A regular one-column cell.
+    Narrow,
+    /// The leading cell of a two-column grapheme.
+    Wide,
+    /// The non-rendered cell following a wide grapheme.
+    SpacerTail,
+    /// A wrap-edge spacer preceding a wide grapheme on the next row.
+    SpacerHead,
+}
 
 /// One visible cell in a semantic snapshot.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -181,6 +194,8 @@ pub struct CellState {
     pub column: u16,
     /// Full UTF-8 grapheme cluster; empty for a blank cell.
     pub grapheme: String,
+    /// Native width role; never inferred from the grapheme.
+    pub wide_kind: WideKind,
     /// Visual style.
     pub style: CellStyle,
     /// Resolved explicit foreground, before terminal-default fallback.
@@ -196,6 +211,10 @@ pub struct CellState {
 pub struct RowState {
     /// Zero-based viewport row.
     pub row: u16,
+    /// Whether this row ends in a native soft wrap.
+    pub soft_wrapped: bool,
+    /// Whether this row continues a native soft wrap from its predecessor.
+    pub wrap_continuation: bool,
     /// Whether Ghostty marked this row dirty during the update.
     pub dirty: bool,
     /// All cells, including blanks.

@@ -51,6 +51,7 @@ pub fn serve(mut input: impl BufRead, mut output: impl Write) -> Result<()> {
 pub(super) struct Driver {
     pub(super) sessions: HashMap<Uuid, PathBuf>,
     pub(super) launched: HashSet<Uuid>,
+    pub(super) recorders: HashMap<Uuid, Child>,
     pub(super) cached: HashMap<Uuid, CachedDriverResponse>,
     order: VecDeque<Uuid>,
     pub(super) cached_bytes: usize,
@@ -150,13 +151,29 @@ pub(super) fn bounded_response(response: DriverResponse) -> DriverResponse {
     if u64::try_from(encoded_bytes).unwrap_or(u64::MAX) <= DRIVER_MAX_RESPONSE_BYTES {
         return response;
     }
+    let rich_screen_response = matches!(
+        &response.result,
+        DriverResult::Ok {
+            data: DriverData::ScreenFrame { .. }
+                | DriverData::Control {
+                    data: ControlData::ScreenFrame { .. }
+                        | ControlData::StableSnapshot { .. }
+                        | ControlData::ScreenWait { .. }
+                        | ControlData::ActionApplied { .. },
+                },
+        }
+    );
     return DriverResponse {
         version: DRIVER_PROTOCOL_VERSION,
         request_id: response.request_id,
         result: *driver_failure_with_retry(
-            "response_too_large",
+            if rich_screen_response {
+                "screen_frame_resource_limit"
+            } else {
+                "response_too_large"
+            },
             format!(
-                "driver response exceeds the {DRIVER_MAX_RESPONSE_BYTES}-byte limit; request a smaller page or metadata-only projection"
+                "driver response exceeds the {DRIVER_MAX_RESPONSE_BYTES}-byte limit; request a smaller projection or page"
             ),
             None,
             "safe_same_request_id",

@@ -456,7 +456,7 @@ pub(crate) fn write_index(
                 record: record.clone(),
                 state: state.clone(),
             };
-            let engine_vt = engine.format(Format::Vt)?;
+            let engine_vt = engine.format_replay_seed()?;
             let seed = ReplaySeed {
                 inspection: inspection.clone(),
                 engine_vt: engine_vt.clone(),

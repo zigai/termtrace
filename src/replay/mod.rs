@@ -25,7 +25,7 @@ use crate::{
     event_log::EventLog,
     ghostty_vt::{
         CellState, CellStyle, ColorSpec, ColorState, CursorState, DirtyState, Format, GhosttyVt,
-        ModeState, SemanticState, TerminalMetadata, supported_geometry_cell_count,
+        ModeState, RowState, SemanticState, TerminalMetadata, supported_geometry_cell_count,
     },
     session::validate_completed_log,
     timeline::{SourceRange, resolve_source_range, timeline_event},

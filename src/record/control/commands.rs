@@ -16,17 +16,22 @@ use zstd::stream::encode_all;
 use crate::{
     Error, Result,
     control::{
-        ActionInputResult, ActionPostcondition, ActionPostconditionResult,
+        ActionInputResult, ActionPostcondition, ActionPostconditionResult, ActorBoundaries,
         CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlErrorDetails, ControlRequest,
         ControlResponse, ControlResult, InputSequenceFailureDetails, PointerOperation,
-        ProcessSignal, StableCaptureQuality,
+        ProcessSignal, ScreenFrameFailureDetails, ScreenPostconditionQuality, StableCaptureQuality,
     },
     event::{ByteString, Event, InputDescriptor, InputKind, InputSource, OperationStatus},
     event_log::EventLogWriter,
     ghostty_vt::{
         FocusEvent, MouseAction, MouseButton, encode_focus, supported_geometry_cell_count,
     },
+    observation::CaptureQuality,
     replay::semantic_state_hash,
+    screen_frame::{
+        ScreenFrame, ScreenFrameError, ScreenFrameLimitKind, ScreenFrameSource,
+        ScreenProjectionRequest, project_screen_frame, validate_screen_region,
+    },
 };
 
 use super::super::{
@@ -56,6 +61,7 @@ pub(in crate::record) struct PendingInputSequence {
     event_start_seq: u64,
     execution: InputSequenceExecution,
     postcondition: Option<ActionPostcondition>,
+    projection: Option<ScreenProjectionRequest>,
     input: Option<ActionInputResult>,
     postcondition_started_at: Option<Instant>,
     matching_state: Option<(String, Instant)>,
@@ -97,6 +103,7 @@ impl PendingInputSequence {
 
 pub(in crate::record) fn handle_control_request(
     spawned: &mut SpawnedCommand,
+    session_id: Uuid,
     event_log: &mut EventLogWriter,
     request: ControlRequest,
     response_sender: mpsc::SyncSender<ControlResponse>,
@@ -111,6 +118,7 @@ pub(in crate::record) fn handle_control_request(
             ControlCommand::Ping
                 | ControlCommand::Status
                 | ControlCommand::Snapshot
+                | ControlCommand::ScreenFrame { .. }
                 | ControlCommand::WaitScreen { .. }
                 | ControlCommand::CaptureStable { .. }
         )
@@ -139,6 +147,7 @@ pub(in crate::record) fn handle_control_request(
         predicate,
         stable_for_ns,
         timeout_ns,
+        projection,
     } = &request.command
     {
         if validate_screen_predicate(predicate).is_err()
@@ -150,6 +159,19 @@ pub(in crate::record) fn handle_control_request(
                 request.request_id,
                 "invalid_screen_wait",
                 "screen predicate exceeds its text/regex/region/composition limits or durations do not satisfy stable <= timeout <= 1h",
+            );
+            let _ = response_sender.send(response);
+            return Ok(());
+        }
+        if let Err(error) =
+            validate_screen_region(projection, live.presented.cols, live.presented.rows)
+        {
+            let response = screen_frame_error_response(
+                request.request_id,
+                &error,
+                presented_state_hash(live)?,
+                event_log,
+                "screen_wait_admission",
             );
             let _ = response_sender.send(response);
             return Ok(());
@@ -169,6 +191,7 @@ pub(in crate::record) fn handle_control_request(
             stable_for: Duration::from_nanos(*stable_for_ns),
             deadline: Instant::now() + Duration::from_nanos(*timeout_ns),
             matching_state: None,
+            projection: *projection,
             response: response_sender,
         });
         return Ok(());
@@ -176,13 +199,31 @@ pub(in crate::record) fn handle_control_request(
     if let ControlCommand::CaptureStable {
         stable_for_ns,
         timeout_ns,
+        projection,
     } = &request.command
     {
-        if *timeout_ns == 0 || *timeout_ns > 3_600_000_000_000 || *stable_for_ns > *timeout_ns {
+        if *stable_for_ns == 0
+            || *timeout_ns == 0
+            || *timeout_ns > 3_600_000_000_000
+            || *stable_for_ns > *timeout_ns
+        {
             let response = control_error_response(
                 request.request_id,
                 "invalid_stable_capture",
                 "durations must satisfy stable <= timeout <= 1h and timeout must be nonzero",
+            );
+            let _ = response_sender.send(response);
+            return Ok(());
+        }
+        if let Err(error) =
+            validate_screen_region(projection, live.presented.cols, live.presented.rows)
+        {
+            let response = screen_frame_error_response(
+                request.request_id,
+                &error,
+                presented_state_hash(live)?,
+                event_log,
+                "stable_capture_admission",
             );
             let _ = response_sender.send(response);
             return Ok(());
@@ -202,6 +243,7 @@ pub(in crate::record) fn handle_control_request(
             stable_for: Duration::from_nanos(*stable_for_ns),
             deadline: Instant::now() + Duration::from_nanos(*timeout_ns),
             matching_state: None,
+            projection: *projection,
             response: response_sender,
         });
         return Ok(());
@@ -211,6 +253,7 @@ pub(in crate::record) fn handle_control_request(
         ControlCommand::Ping
             | ControlCommand::Status
             | ControlCommand::Snapshot
+            | ControlCommand::ScreenFrame { .. }
             | ControlCommand::CaptureStable { .. }
     );
     if pending_input_sequence.is_some() && !read_only {
@@ -259,25 +302,38 @@ pub(in crate::record) fn handle_control_request(
                 atoms,
                 pace_ns,
                 include_atom_outcomes,
-            } => Some((atoms, *pace_ns, *include_atom_outcomes, None)),
+            } => Some((atoms, *pace_ns, *include_atom_outcomes, None, None)),
             ControlCommand::Act {
                 atoms,
                 pace_ns,
                 include_atom_outcomes,
                 postcondition,
+                projection,
             } => Some((
                 atoms,
                 *pace_ns,
                 *include_atom_outcomes,
                 Some(postcondition.clone()),
+                Some(*projection),
             )),
             _ => None,
         };
-        if let Some((atoms, pace_ns, include_atom_outcomes, postcondition)) = sequence {
+        if let Some((atoms, pace_ns, include_atom_outcomes, postcondition, projection)) = sequence {
             let validated_postcondition = postcondition
                 .as_ref()
                 .map(validate_action_postcondition)
-                .transpose();
+                .transpose()
+                .and_then(|_| {
+                    if let Some(projection) = &projection {
+                        validate_screen_region(
+                            projection,
+                            live.presented.cols,
+                            live.presented.rows,
+                        )
+                        .map_err(Error::ScreenFrame)?;
+                    }
+                    return Ok(());
+                });
             let execution = validated_postcondition.and_then(|_| {
                 return InputSequenceExecution::new(
                     request.request_id,
@@ -303,15 +359,25 @@ pub(in crate::record) fn handle_control_request(
                         input: None,
                         postcondition_started_at: None,
                         matching_state: None,
+                        projection,
                     });
                     return Ok(());
                 }
                 Err(error) => {
-                    let response = control_error_response(
-                        request.request_id,
-                        control_error_code(&error),
-                        error.to_string(),
-                    );
+                    let response = match &error {
+                        Error::ScreenFrame(error) => screen_frame_error_response(
+                            request.request_id,
+                            error,
+                            current_state_hash,
+                            event_log,
+                            "action_admission",
+                        ),
+                        _ => control_error_response(
+                            request.request_id,
+                            control_error_code(&error),
+                            error.to_string(),
+                        ),
+                    };
                     if let Some(command_hash) = command_hash {
                         history.remember(
                             request.request_id,
@@ -325,7 +391,7 @@ pub(in crate::record) fn handle_control_request(
                     }
                     let _ = response_sender.send(response);
                     return match error {
-                        Error::ControlRejected { .. } => Ok(()),
+                        Error::ControlRejected { .. } | Error::ScreenFrame(_) => Ok(()),
                         error => Err(error),
                     };
                 }
@@ -346,6 +412,7 @@ pub(in crate::record) fn handle_control_request(
         execute_control_command(
             spawned,
             event_log,
+            session_id,
             request.request_id,
             &request.command,
             live,
@@ -363,6 +430,7 @@ pub(in crate::record) fn handle_control_request(
                     boundaries: actor_boundaries(event_log),
                     scope: "actor_processed_presented_output".to_owned(),
                     input_sequence: None,
+                    screen_frame: None,
                 }),
             },
         },
@@ -410,6 +478,7 @@ pub(in crate::record) fn handle_control_request(
                             last_result_event_seq: *last_result_event_seq,
                             resume_from_atom_index: failed_atom_index.saturating_add(1),
                         }),
+                        screen_frame: None,
                     }),
                 },
             }
@@ -418,6 +487,21 @@ pub(in crate::record) fn handle_control_request(
             version: CONTROL_PROTOCOL_VERSION,
             request_id: request.request_id,
             result: ControlResult::Ok { data: data.clone() },
+        },
+        (Err(Error::ScreenFrame(error)), _) => ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id: request.request_id,
+            result: ControlResult::Error {
+                code: screen_frame_error_code(error).to_owned(),
+                message: error.to_string(),
+                details: Some(ControlErrorDetails {
+                    current_presented_state_hash: current_state_hash,
+                    boundaries: actor_boundaries(event_log),
+                    scope: "screen_frame_projection".to_owned(),
+                    input_sequence: None,
+                    screen_frame: Some(screen_frame_failure_details(error)),
+                }),
+            },
         },
         (Err(error), _) => control_error_response(
             request.request_id,
@@ -444,7 +528,8 @@ pub(in crate::record) fn handle_control_request(
         | Err(
             Error::ControlRejected { .. }
             | Error::InputSequenceIncomplete { .. }
-            | Error::GhosttyVt { .. },
+            | Error::GhosttyVt { .. }
+            | Error::ScreenFrame(_),
         ) => {
             return Ok(());
         }
@@ -454,6 +539,7 @@ pub(in crate::record) fn handle_control_request(
 
 pub(in crate::record) fn advance_input_sequence(
     spawned: &mut SpawnedCommand,
+    session_id: Uuid,
     event_log: &mut EventLogWriter,
     history: &mut MutationHistory,
     live: &mut LiveTerminal,
@@ -477,15 +563,17 @@ pub(in crate::record) fn advance_input_sequence(
         match evaluate_action_postcondition(
             &mut pending,
             event_log,
+            session_id,
             live,
             child_completed,
             output_closed,
-        )? {
-            Some(data) => Ok(data),
-            None => {
+        ) {
+            Ok(Some(data)) => Ok(data),
+            Ok(None) => {
                 *pending_input_sequence = Some(pending);
                 return Ok(());
             }
+            Err(error) => Err(error),
         }
     } else {
         match pending
@@ -503,15 +591,17 @@ pub(in crate::record) fn advance_input_sequence(
                 match evaluate_action_postcondition(
                     &mut pending,
                     event_log,
+                    session_id,
                     live,
                     child_completed,
                     output_closed,
-                )? {
-                    Some(data) => Ok(data),
-                    None => {
+                ) {
+                    Ok(Some(data)) => Ok(data),
+                    Ok(None) => {
                         *pending_input_sequence = Some(pending);
                         return Ok(());
                     }
+                    Err(error) => Err(error),
                 }
             }
             Ok(Some(data)) => Ok(data),
@@ -552,7 +642,8 @@ pub(in crate::record) fn advance_input_sequence(
         | Err(
             Error::ControlRejected { .. }
             | Error::InputSequenceIncomplete { .. }
-            | Error::GhosttyVt { .. },
+            | Error::GhosttyVt { .. }
+            | Error::ScreenFrame(_),
         ) => Ok(()),
         Err(error) => Err(error),
     };
@@ -565,7 +656,10 @@ fn validate_action_postcondition(postcondition: &ActionPostcondition) -> Result<
             stable_for_ns,
             timeout_ns,
         } => {
-            if *timeout_ns > 0 && *timeout_ns <= 3_600_000_000_000 && *stable_for_ns <= *timeout_ns
+            if *stable_for_ns > 0
+                && *timeout_ns > 0
+                && *timeout_ns <= 3_600_000_000_000
+                && *stable_for_ns <= *timeout_ns
             {
                 return Ok(());
             }
@@ -619,6 +713,7 @@ fn action_input_result(data: ControlData) -> Result<ActionInputResult> {
 fn evaluate_action_postcondition(
     pending: &mut PendingInputSequence,
     event_log: &EventLogWriter,
+    session_id: Uuid,
     live: &LiveTerminal,
     child_completed: bool,
     output_closed: bool,
@@ -635,11 +730,29 @@ fn evaluate_action_postcondition(
             "missing action postcondition",
         );
     })?;
+    let projection = pending.projection.as_ref().ok_or_else(|| {
+        return terminal_error(
+            "evaluate actor-ordered action",
+            "missing action screen projection",
+        );
+    })?;
     if matches!(postcondition, ActionPostcondition::None) {
+        let boundaries = actor_boundaries(event_log);
+        let frame = actor_screen_frame(
+            session_id,
+            event_log,
+            live,
+            boundaries.clone(),
+            projection,
+            CaptureQuality::Live,
+        )?;
         return Ok(Some(ControlData::ActionApplied {
             input,
-            postcondition: ActionPostconditionResult::None { matched: true },
-            boundaries: actor_boundaries(event_log),
+            postcondition: ActionPostconditionResult::None {
+                matched: true,
+                frame,
+            },
+            boundaries,
         }));
     }
     let state_hash = presented_state_hash(live)?;
@@ -657,7 +770,7 @@ fn evaluate_action_postcondition(
         } => {
             match &pending.matching_state {
                 Some((prior_hash, _)) if prior_hash == &state_hash => {}
-                _ => pending.matching_state = Some((state_hash.clone(), now)),
+                _ => pending.matching_state = Some((state_hash, now)),
             }
             let stable = pending.matching_state.as_ref().is_some_and(|(_, since)| {
                 return since.elapsed() >= Duration::from_nanos(*stable_for_ns);
@@ -675,17 +788,30 @@ fn evaluate_action_postcondition(
             } else {
                 StableCaptureQuality::Deadline
             };
+            let capture_quality = if stable {
+                CaptureQuality::Stable
+            } else if deadline {
+                CaptureQuality::Incomplete
+            } else {
+                CaptureQuality::Live
+            };
+            let boundaries = actor_boundaries(event_log);
+            let frame = actor_screen_frame(
+                session_id,
+                event_log,
+                live,
+                boundaries.clone(),
+                projection,
+                capture_quality,
+            )?;
             Ok(Some(ControlData::ActionApplied {
                 input,
                 postcondition: ActionPostconditionResult::Idle {
                     matched: stable,
-                    viewport_text,
-                    state_hash,
                     quality,
-                    cols: live.presented.cols,
-                    rows: live.presented.rows,
+                    frame,
                 },
-                boundaries: actor_boundaries(event_log),
+                boundaries,
             }))
         }
         ActionPostcondition::Screen {
@@ -698,30 +824,57 @@ fn evaluate_action_postcondition(
             if !matched && !child_completed && !output_closed && !deadline {
                 return Ok(None);
             }
-            let completion_quality = if matched {
-                "matched_unsettled"
+            let quality = if matched {
+                ScreenPostconditionQuality::MatchedUnsettled
             } else if child_completed {
-                "child_completed"
+                ScreenPostconditionQuality::ChildCompleted
             } else if output_closed {
-                "output_closed"
+                ScreenPostconditionQuality::OutputClosed
             } else {
-                "deadline"
+                ScreenPostconditionQuality::Deadline
             };
+            let capture_quality = if deadline && !matched {
+                CaptureQuality::Incomplete
+            } else {
+                CaptureQuality::Live
+            };
+            let boundaries = actor_boundaries(event_log);
+            let frame = actor_screen_frame(
+                session_id,
+                event_log,
+                live,
+                boundaries.clone(),
+                projection,
+                capture_quality,
+            )?;
             Ok(Some(ControlData::ActionApplied {
                 input,
                 postcondition: ActionPostconditionResult::Screen {
                     matched,
-                    viewport_text,
-                    state_hash,
-                    completion_quality: completion_quality.to_owned(),
-                    cols: live.presented.cols,
-                    rows: live.presented.rows,
-                    child_completed,
+                    quality,
+                    frame,
                 },
-                boundaries: actor_boundaries(event_log),
+                boundaries,
             }))
         }
     };
+}
+
+fn actor_screen_frame(
+    session_id: Uuid,
+    event_log: &EventLogWriter,
+    live: &LiveTerminal,
+    boundaries: ActorBoundaries,
+    projection: &ScreenProjectionRequest,
+    capture_quality: CaptureQuality,
+) -> Result<ScreenFrame> {
+    let source = ScreenFrameSource::Actor {
+        session_id,
+        boundaries,
+        observed_monotonic_ns: event_log.elapsed_ns(),
+    };
+    return project_screen_frame(&live.presented, projection, source, true, capture_quality)
+        .map_err(Error::ScreenFrame);
 }
 
 fn input_sequence_response(
@@ -771,6 +924,22 @@ fn input_sequence_response(
                         last_result_event_seq: *last_result_event_seq,
                         resume_from_atom_index: failed_atom_index.saturating_add(1),
                     }),
+                    screen_frame: None,
+                }),
+            },
+        },
+        Err(Error::ScreenFrame(error)) => ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id,
+            result: ControlResult::Error {
+                code: screen_frame_error_code(error).to_owned(),
+                message: error.to_string(),
+                details: Some(ControlErrorDetails {
+                    current_presented_state_hash: current_state_hash,
+                    boundaries: actor_boundaries(event_log),
+                    scope: "action_terminating_screen_frame".to_owned(),
+                    input_sequence: None,
+                    screen_frame: Some(screen_frame_failure_details(error)),
                 }),
             },
         },
@@ -785,6 +954,7 @@ fn input_sequence_response(
                     boundaries: actor_boundaries(event_log),
                     scope: "input_sequence_encoding".to_owned(),
                     input_sequence: None,
+                    screen_frame: None,
                 }),
             },
         },
@@ -797,6 +967,7 @@ fn input_sequence_response(
 fn execute_control_command(
     spawned: &mut SpawnedCommand,
     event_log: &mut EventLogWriter,
+    session_id: Uuid,
     request_id: Uuid,
     command: &ControlCommand,
     live: &mut LiveTerminal,
@@ -834,6 +1005,18 @@ fn execute_control_command(
                 modes: live.presented.modes.clone(),
                 boundaries: actor_boundaries(event_log),
             });
+        }
+        ControlCommand::ScreenFrame { projection } => {
+            let boundaries = actor_boundaries(event_log);
+            let frame = actor_screen_frame(
+                session_id,
+                event_log,
+                live,
+                boundaries,
+                projection,
+                CaptureQuality::Live,
+            )?;
+            return Ok(ControlData::ScreenFrame { frame });
         }
         ControlCommand::WaitScreen { .. } | ControlCommand::CaptureStable { .. } => {
             return Err(control_rejected(
@@ -1542,6 +1725,94 @@ pub(in crate::record) fn apply_signal(
         result_write,
     );
 }
+pub(super) fn screen_frame_error_code(error: &ScreenFrameError) -> &'static str {
+    return match error {
+        ScreenFrameError::InvalidRegion { .. } => "invalid_screen_region",
+        ScreenFrameError::ResourceLimit { .. } => "screen_frame_resource_limit",
+        ScreenFrameError::InconsistentSemanticState { .. } | ScreenFrameError::Serialization => {
+            "screen_frame_projection_failed"
+        }
+    };
+}
+
+fn screen_frame_error_response(
+    request_id: Uuid,
+    error: &ScreenFrameError,
+    current_state_hash: String,
+    event_log: &EventLogWriter,
+    scope: &str,
+) -> ControlResponse {
+    return ControlResponse {
+        version: CONTROL_PROTOCOL_VERSION,
+        request_id,
+        result: ControlResult::Error {
+            code: screen_frame_error_code(error).to_owned(),
+            message: error.to_string(),
+            details: Some(ControlErrorDetails {
+                current_presented_state_hash: current_state_hash,
+                boundaries: actor_boundaries(event_log),
+                scope: scope.to_owned(),
+                input_sequence: None,
+                screen_frame: Some(screen_frame_failure_details(error)),
+            }),
+        },
+    };
+}
+
+pub(super) fn screen_frame_failure_details(error: &ScreenFrameError) -> ScreenFrameFailureDetails {
+    return match error {
+        ScreenFrameError::InvalidRegion {
+            region,
+            cols,
+            rows,
+            reason,
+        } => ScreenFrameFailureDetails {
+            detail: None,
+            region: *region,
+            region_reason: Some(*reason),
+            cols: Some(*cols),
+            rows: Some(*rows),
+            limit_kind: None,
+            requested: None,
+            maximum: None,
+        },
+        ScreenFrameError::ResourceLimit {
+            limit,
+            requested,
+            maximum,
+            detail,
+            region,
+        } => ScreenFrameFailureDetails {
+            detail: Some(*detail),
+            region: Some(*region),
+            region_reason: None,
+            cols: None,
+            rows: None,
+            limit_kind: Some(
+                match limit {
+                    ScreenFrameLimitKind::CellCount => "cell_count",
+                    ScreenFrameLimitKind::SerializedBytes => "serialized_bytes",
+                    ScreenFrameLimitKind::ResponseBytes => "response_bytes",
+                }
+                .to_owned(),
+            ),
+            requested: Some(*requested),
+            maximum: Some(*maximum),
+        },
+        ScreenFrameError::InconsistentSemanticState { .. } | ScreenFrameError::Serialization => {
+            ScreenFrameFailureDetails {
+                detail: None,
+                region: None,
+                region_reason: None,
+                cols: None,
+                rows: None,
+                limit_kind: None,
+                requested: None,
+                maximum: None,
+            }
+        }
+    };
+}
 
 fn nix_signal(signal: ProcessSignal) -> (Signal, &'static str) {
     match signal {
@@ -1557,6 +1828,13 @@ fn control_error_code(error: &Error) -> &str {
     match error {
         Error::ControlRejected { code, .. } => return code,
         Error::InputSequenceIncomplete { .. } => return "input_sequence_incomplete",
+        Error::ScreenFrame(ScreenFrameError::InvalidRegion { .. }) => {
+            return "invalid_screen_region";
+        }
+        Error::ScreenFrame(ScreenFrameError::ResourceLimit { .. }) => {
+            return "screen_frame_resource_limit";
+        }
+        Error::ScreenFrame(_) => return "screen_frame_projection_failed",
         Error::InputWriteFailed { .. } => return "input_write_failed",
         Error::GhosttyVt { operation, .. } if operation.contains("key") => {
             return "key_encoding_failed";

@@ -5,7 +5,7 @@ use crate::event::ByteString;
 /// Pinned Ghostty source revision used by the semantic adapter.
 pub const GHOSTTY_REVISION: &str = "55a3e33ab26a23d75b274b23c7f76d837db00578";
 /// Derived artifact format version.
-pub const STATE_FORMAT_VERSION: u32 = 4;
+pub const STATE_FORMAT_VERSION: u32 = 5;
 /// Relative directory containing replay-derived artifacts.
 pub const DERIVED_DIRECTORY: &str = "derived";
 
@@ -38,6 +38,10 @@ pub struct IndexOptions {
 pub struct RowDiff {
     /// Zero-based row.
     pub row: u16,
+    /// Whether the row ends in a native soft wrap.
+    pub soft_wrapped: bool,
+    /// Whether the row continues a native soft wrap from its predecessor.
+    pub wrap_continuation: bool,
     /// Cells whose complete semantic value changed.
     pub cells: Vec<CellState>,
 }
@@ -57,7 +61,7 @@ pub struct StateDelta {
     pub active_style: Option<CellStyle>,
     /// New terminal metadata when it changed.
     pub metadata: Option<TerminalMetadata>,
-    /// Cell-level row deltas.
+    /// Authoritative wrap and cell deltas by row.
     pub rows: Vec<RowDiff>,
 }
 

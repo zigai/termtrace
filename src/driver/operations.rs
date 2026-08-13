@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::screen_frame::ScreenFrameError;
+
 impl Driver {
     pub(super) fn execute(&mut self, request: &DriverRequest) -> DriverResponse {
         let result = (|| -> StdResult<DriverData, Box<DriverResult>> {
@@ -19,6 +21,7 @@ impl Driver {
                         "complete",
                         "discard_completed",
                         "observe",
+                        "screen_frame",
                         "timeline",
                         "diff",
                         "diagnose",
@@ -127,18 +130,13 @@ impl Driver {
                         })
                 }
                 DriverMethod::Complete { handle, timeout_ms } => {
-                    let path = self.sessions.get(handle).ok_or_else(|| {
-                        return driver_failure(
-                            "unknown_handle",
-                            "session handle is not attached",
-                            None,
-                        );
-                    })?;
-                    wait_for_completion(path, Duration::from_millis(*timeout_ms))
-                        .map(|completion| return DriverData::Completion { completion })
+                    let path = self.session_path(handle)?.clone();
+                    let completion = wait_for_completion(&path, Duration::from_millis(*timeout_ms))
                         .map_err(|error| {
                             return driver_failure_from_error(error, Some(path.clone()));
-                        })
+                        })?;
+                    self.reap_recorder(handle, &path)?;
+                    Ok(DriverData::Completion { completion })
                 }
                 DriverMethod::DiscardCompleted { handle } => {
                     if !self.launched.contains(handle) {
@@ -150,6 +148,7 @@ impl Driver {
                     }
                     let path = self.session_path(handle)?.clone();
                     let _log = completed_driver_log(&path)?;
+                    self.reap_recorder(handle, &path)?;
                     fs_err::remove_dir_all(&path).map_err(|error| {
                         return driver_failure(
                             "evidence_discard_failed",
@@ -183,6 +182,93 @@ impl Driver {
                         .map_err(|error| {
                             return driver_failure_from_error(error, Some(path.clone()));
                         })
+                }
+                DriverMethod::ScreenFrame {
+                    handle,
+                    point,
+                    include_hidden,
+                    projection,
+                } => {
+                    let path = self.session_path(handle)?;
+                    if path.join("completion.json").is_file() {
+                        let (state, source, presented) =
+                            resolved_screen_state_for_session(path, point.clone(), *include_hidden)
+                                .map_err(|error| {
+                                    return driver_failure_from_error(error, Some(path.clone()));
+                                })?;
+                        project_screen_frame(
+                            &state,
+                            projection,
+                            source,
+                            presented,
+                            CaptureQuality::Completed,
+                        )
+                        .map(|frame| return DriverData::ScreenFrame { frame })
+                        .map_err(|error| {
+                            return driver_failure_from_error(
+                                Error::ScreenFrame(error),
+                                Some(path.clone()),
+                            );
+                        })
+                    } else {
+                        if point != &StatePoint::LatestPresented || *include_hidden {
+                            return Err(driver_failure(
+                                "invalid_state_point",
+                                "live rich frames support only latest-presented selection without hidden-state permission",
+                                Some(path.clone()),
+                            ));
+                        }
+                        let control = ControlRequest {
+                            version: CONTROL_PROTOCOL_VERSION,
+                            request_id: request.request_id,
+                            expected_presented_state_hash: None,
+                            command: ControlCommand::ScreenFrame {
+                                projection: *projection,
+                            },
+                        };
+                        match send_request_response(path, &control) {
+                            Ok(ControlResponse {
+                                result:
+                                    ControlResult::Ok {
+                                        data: ControlData::ScreenFrame { frame },
+                                    },
+                                ..
+                            }) => Ok(DriverData::ScreenFrame { frame }),
+                            Ok(ControlResponse {
+                                result: ControlResult::Ok { data: _ },
+                                ..
+                            }) => Err(driver_failure(
+                                "invalid_control_response",
+                                "actor returned the wrong rich-screen payload",
+                                Some(path.clone()),
+                            )),
+                            Ok(ControlResponse {
+                                result:
+                                    ControlResult::Error {
+                                        code,
+                                        message,
+                                        details,
+                                    },
+                                ..
+                            }) => {
+                                let (retry_safety, uncertain) =
+                                    actor_failure_retry(&code, details.as_ref());
+                                Err(driver_failure_with_retry(
+                                    &code,
+                                    message,
+                                    Some(path.clone()),
+                                    retry_safety,
+                                    uncertain,
+                                    details,
+                                ))
+                            }
+                            Err(error) => Err(driver_control_failure_from_error(
+                                error,
+                                path.clone(),
+                                false,
+                            )),
+                        }
+                    }
                 }
                 DriverMethod::Timeline {
                     handle,
@@ -287,14 +373,15 @@ impl Driver {
                     match renderer {
                         DriverScreenshotRenderer::Semantic => {
                             save(path, destination, point.clone(), &[SaveFormat::Png], false)
-                                .map(|outcome| {
-                                    return DriverData::Artifact {
+                                .and_then(|outcome| {
+                                    verify_saved_artifact(&outcome.directory, &outcome.manifest)?;
+                                    return Ok(DriverData::Artifact {
                                         artifact_type: "semantic_screenshot".to_owned(),
                                         directory: outcome.directory.clone(),
                                         primary: outcome.directory.join("screen.png"),
                                         manifest: outcome.directory.join("save-manifest.json"),
                                         truth_layer: "semantic_rendering".to_owned(),
-                                    };
+                                    });
                                 })
                                 .map_err(|error| {
                                     return driver_failure_from_error(error, Some(path.clone()));
@@ -370,28 +457,36 @@ impl Driver {
                     profile,
                 } => {
                     let path = self.session_path(handle)?;
-                    create_bundle(path, destination, *profile)
-                        .map(|manifest| {
-                            return DriverData::Bundle {
-                                directory: destination.clone(),
-                                manifest,
-                            };
-                        })
-                        .map_err(|error| {
-                            return driver_failure_from_error(error, Some(path.clone()));
-                        })
+                    let manifest = create_bundle(path, destination, *profile).map_err(|error| {
+                        return driver_failure_from_error(error, Some(path.clone()));
+                    })?;
+                    let policy = BundleVerificationPolicy::new(path, *profile);
+                    let verified = verify_bundle(destination, &policy).map_err(|error| {
+                        return driver_failure_from_error(error, Some(path.clone()));
+                    })?;
+                    if verified != manifest {
+                        return Err(driver_failure(
+                            "bundle_verification_failed",
+                            "verified bundle manifest changed after publication",
+                            Some(path.clone()),
+                        ));
+                    }
+                    Ok(DriverData::Bundle {
+                        directory: destination.clone(),
+                        manifest: verified,
+                    })
                 }
                 DriverMethod::Detach { handle } => {
                     self.launched.remove(handle);
                     if self.sessions.remove(handle).is_none() {
-                        Err(driver_failure(
+                        return Err(driver_failure(
                             "unknown_handle",
                             "session handle is not attached",
                             None,
-                        ))
-                    } else {
-                        Ok(DriverData::Detached)
+                        ));
                     }
+                    self.detach_recorder(handle);
+                    Ok(DriverData::Detached)
                 }
             };
         })();
@@ -472,15 +567,43 @@ impl Driver {
             return driver_failure_from_error(error, Some(evidence_root.to_path_buf()));
         })?;
         let session_id = session.session_id();
-        let canonical_session = session.detach();
+        let (canonical_session, recorder) = session.into_detached_parts();
         let handle = Uuid::now_v7();
         self.sessions.insert(handle, canonical_session.clone());
         self.launched.insert(handle);
+        if let Some(recorder) = recorder {
+            self.recorders.insert(handle, recorder);
+        }
         return Ok(DriverData::Attached {
             handle,
             session_id,
             canonical_session,
             completed: false,
+        });
+    }
+
+    fn reap_recorder(&mut self, handle: &Uuid, path: &Path) -> StdResult<(), Box<DriverResult>> {
+        let Some(mut recorder) = self.recorders.remove(handle) else {
+            return Ok(());
+        };
+        recorder.wait().map_err(|error| {
+            return driver_failure(
+                "recorder_wait_failed",
+                error.to_string(),
+                Some(path.to_path_buf()),
+            );
+        })?;
+        return Ok(());
+    }
+
+    fn detach_recorder(&mut self, handle: &Uuid) {
+        let Some(mut recorder) = self.recorders.remove(handle) else {
+            return;
+        };
+        thread::spawn(move || {
+            if let Err(error) = recorder.wait() {
+                tracing::warn!(%error, "failed to reap detached driver recorder");
+            }
         });
     }
 }
@@ -524,6 +647,16 @@ pub(super) fn driver_failure_from_error(
             ),
         ),
         Error::ControlRejected { code, .. } => (code.clone(), error.to_string()),
+        Error::ScreenFrame(ScreenFrameError::InvalidRegion { .. }) => {
+            ("invalid_screen_region".to_owned(), error.to_string())
+        }
+        Error::ScreenFrame(ScreenFrameError::ResourceLimit { .. }) => {
+            ("screen_frame_resource_limit".to_owned(), error.to_string())
+        }
+        Error::ScreenFrame(_) => (
+            "screen_frame_projection_failed".to_owned(),
+            error.to_string(),
+        ),
         _ => ("operation_failed".to_owned(), error.to_string()),
     };
     return driver_failure(&code, message, evidence);
@@ -576,6 +709,9 @@ pub(super) fn actor_failure_retry(
     code: &str,
     details: Option<&ControlErrorDetails>,
 ) -> (&'static str, bool) {
+    if details.is_some_and(|value| return value.scope == "action_terminating_screen_frame") {
+        return ("safe_same_request_id", false);
+    }
     if code == "input_sequence_incomplete" {
         let uncertain = details
             .and_then(|value| return value.input_sequence.as_ref())
@@ -593,6 +729,7 @@ pub(super) fn control_command_mutates(command: &ControlCommand) -> bool {
         command,
         ControlCommand::Ping
             | ControlCommand::Status
+            | ControlCommand::ScreenFrame { .. }
             | ControlCommand::Snapshot
             | ControlCommand::WaitScreen { .. }
             | ControlCommand::CaptureStable { .. }
@@ -651,4 +788,42 @@ pub(super) fn driver_error(
         request_id,
         result: *driver_failure(code, message, evidence),
     };
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use crate::{
+        control::{ActorBoundaries, ControlErrorDetails},
+        event_log::CanonicalBoundary,
+    };
+
+    use super::actor_failure_retry;
+
+    #[test]
+    fn post_apply_terminating_frame_requires_same_action_id() {
+        let boundary = CanonicalBoundary {
+            next_event_seq: 2,
+            event_hash: "a".repeat(64),
+            output_bytes: 3,
+        };
+        let details = ControlErrorDetails {
+            current_presented_state_hash: "b".repeat(64),
+            boundaries: ActorBoundaries {
+                durable: boundary.clone(),
+                observed: boundary,
+            },
+            scope: "action_terminating_screen_frame".to_owned(),
+            input_sequence: None,
+            screen_frame: None,
+        };
+
+        assert_eq!(
+            actor_failure_retry("screen_frame_resource_limit", Some(&details)),
+            ("safe_same_request_id", false)
+        );
+        assert_eq!(
+            actor_failure_retry("screen_frame_resource_limit", None),
+            ("safe_new_request", false)
+        );
+    }
 }

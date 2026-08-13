@@ -4,6 +4,24 @@ use std::{io::Error as IoError, path::PathBuf, result::Result as StdResult};
 
 use miette::Diagnostic;
 use thiserror::Error;
+use uuid::Uuid;
+
+use crate::{
+    client::{ActionResult, StableScreenCapture},
+    control::{ActorBoundaries, InputSequenceFailureDetails},
+    screen_frame::ScreenFrameError,
+};
+
+/// Bounded retry fact attached to typed public actor failures.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RetrySafety {
+    /// The exact same request identifier and payload may be retried idempotently.
+    SameRequestOnly,
+    /// No mutation occurred; a new request may be submitted after reevaluation.
+    NewRequest,
+    /// The available evidence cannot establish a safe automatic retry.
+    Unknown,
+}
 
 /// Failures exposed by Termtrace's public interfaces.
 #[derive(Debug, Error, Diagnostic)]
@@ -140,6 +158,98 @@ pub enum Error {
     InvalidControlProtocol {
         /// Protocol validation failure.
         reason: String,
+    },
+    /// A bounded rich-screen projection request was invalid or exceeded its limits.
+    #[error(transparent)]
+    #[diagnostic(code(termtrace::screen_frame))]
+    ScreenFrame(ScreenFrameError),
+    /// A public action atom violated the shared bounded input contract.
+    #[error("invalid input atom at index {atom_index}: {reason}")]
+    #[diagnostic(code(termtrace::invalid_atom))]
+    InvalidAtom {
+        /// Zero-based atom index.
+        atom_index: usize,
+        /// Bounded validation reason.
+        reason: String,
+    },
+
+    /// A public duration violated an exact operation-specific bound.
+    #[error("invalid duration `{field}`: {reason}")]
+    #[diagnostic(code(termtrace::invalid_duration))]
+    InvalidDuration {
+        /// Stable option field name.
+        field: &'static str,
+        /// Bounded validation reason.
+        reason: String,
+    },
+
+    /// An optimistic action guard rejected before any input was applied.
+    #[error("presented state changed from `{expected_state_hash}` to `{current_state_hash}`")]
+    #[diagnostic(code(termtrace::stale_state))]
+    StaleState {
+        /// Caller-supplied expected state hash.
+        expected_state_hash: String,
+        /// Actor-current presented state hash.
+        current_state_hash: String,
+        /// Exact rejection ordering point.
+        boundaries: Box<ActorBoundaries>,
+        /// No input was applied; retry requires reevaluating with a new request.
+        retry_safety: RetrySafety,
+    },
+
+    /// Actor exclusivity rejected a new action before mutation.
+    #[error("actor action is busy: {message}")]
+    #[diagnostic(code(termtrace::action_busy))]
+    ActionBusy {
+        /// Bounded actor diagnostic.
+        message: String,
+    },
+
+    /// An admitted input action retained a known applied prefix.
+    #[error("partial input stopped after a bounded applied prefix")]
+    #[diagnostic(code(termtrace::partial_input))]
+    PartialInput {
+        /// Complete bounded actor prefix accounting.
+        details: InputSequenceFailureDetails,
+        /// Exact same-request retry is idempotent but does not apply the suffix.
+        retry_safety: RetrySafety,
+        /// Whether any bytes of the failed atom were written.
+        uncertain: bool,
+    },
+
+    /// An action applied every input atom but failed to project its terminating frame.
+    #[error(
+        "action `{request_id}` applied all input but could not project its terminating frame: {source}"
+    )]
+    #[diagnostic(code(termtrace::action_terminating_screen_frame))]
+    ActionTerminatingFrame {
+        /// Caller-retainable identifier required for an idempotent retry.
+        request_id: Uuid,
+        /// Exact failure ordering point after complete input application.
+        boundaries: Box<ActorBoundaries>,
+        /// Input was completely applied before projection failed.
+        input_fully_applied: bool,
+        /// Only the exact same request identifier and payload may be retried.
+        retry_safety: RetrySafety,
+        /// Typed terminating-frame projection failure.
+        #[source]
+        source: ScreenFrameError,
+    },
+
+    /// An action returned a non-success terminal quality under strict policy.
+    #[error("action postcondition did not complete successfully")]
+    #[diagnostic(code(termtrace::postcondition_incomplete))]
+    PostconditionIncomplete {
+        /// Complete exact action result, including its terminating frame.
+        result: Box<ActionResult>,
+    },
+
+    /// A stable capture returned a non-stable terminal quality under strict policy.
+    #[error("stable capture did not reach the requested stable interval")]
+    #[diagnostic(code(termtrace::stable_capture_incomplete))]
+    StableCaptureIncomplete {
+        /// Complete exact stable capture, including its terminating frame.
+        result: Box<StableScreenCapture>,
     },
 
     /// A live session rejected a well-formed control request.

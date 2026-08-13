@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "command": [
+    "/bin/sh",
+    "-c",
+    "trap 'exit 0' TERM; printf READY; IFS= read -r line; printf '\\033[?2026hHIDDEN:%s' \"$line\"; sleep 0.05; printf '\\033[?2026l\\r\\nMATCH:%s' \"$line\"; while :; do sleep 0.1; done"
+  ],
+  "ready_text": "READY",
+  "request_id": "019fddda-17c8-7000-87da-8785e71ab5e0",
+  "input": [
+    {
+      "kind": "text",
+      "text": "shared"
+    },
+    {
+      "kind": "key",
+      "key": "enter"
+    }
+  ],
+  "predicate": {
+    "predicate": "contains",
+    "text": "HIDDEN:shared"
+  },
+  "region": {
+    "top": 0,
+    "left": 0,
+    "width": 80,
+    "height": 24
+  },
+  "expected_text": "HIDDEN:shared",
+  "expected_atom_count": 2,
+  "frame_detail": "cells"
+}

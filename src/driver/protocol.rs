@@ -1,7 +1,7 @@
 use super::*;
 
 /// Current JSONL driver protocol version.
-pub const DRIVER_PROTOCOL_VERSION: u32 = 4;
+pub const DRIVER_PROTOCOL_VERSION: u32 = 5;
 /// Maximum JSON bytes accepted in one newline-delimited request frame.
 pub const DRIVER_MAX_REQUEST_BYTES: u64 = 4 * 1024 * 1024;
 /// Maximum JSON bytes emitted in one newline-delimited response frame.
@@ -103,6 +103,17 @@ pub enum DriverMethod {
         point: StatePoint,
         /// Permit explicitly selected hidden synchronized-output state.
         include_hidden: bool,
+    },
+    /// Project one exact bounded rich frame from a live or completed state.
+    ScreenFrame {
+        /// Process-local session handle.
+        handle: Uuid,
+        /// Exact shared state selector.
+        point: StatePoint,
+        /// Permit explicitly selected hidden synchronized-output state.
+        include_hidden: bool,
+        /// Requested rich detail and exact optional viewport region.
+        projection: ScreenProjectionRequest,
     },
     /// Build one bounded page of the completed canonical/semantic timeline.
     Timeline {
@@ -272,6 +283,11 @@ pub enum DriverData {
     Observation {
         /// Shared observation envelope.
         observation: Box<Observation>,
+    },
+    /// Bounded rich frame projected at one exact source point.
+    ScreenFrame {
+        /// Exact owned rich projection.
+        frame: ScreenFrame,
     },
     /// Ordered timeline projection page.
     Timeline {

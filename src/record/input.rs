@@ -339,8 +339,8 @@ fn validate_input_sequence(atoms: &[InputSequenceAtom], pace_ns: u64) -> Result<
             "input sequence must contain 1 through 4096 atoms",
         ));
     }
-    let gap_count = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
-    let total_pace_ns = pace_ns.checked_mul(gap_count).ok_or_else(|| {
+    let atom_count = u64::try_from(atoms.len()).unwrap_or(u64::MAX);
+    let total_pace_ns = pace_ns.checked_mul(atom_count).ok_or_else(|| {
         return control_rejected(
             "invalid_input_sequence",
             "input sequence pacing duration overflowed",

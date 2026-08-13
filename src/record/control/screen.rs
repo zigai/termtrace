@@ -12,19 +12,23 @@ use zstd::stream::encode_all;
 use crate::{
     Result,
     control::{
-        CONTROL_PROTOCOL_VERSION, ControlData, ControlResponse, ControlResult, ScreenMode,
-        ScreenPredicate, ScreenRegion, StableCaptureQuality, StateHashComparison,
+        CONTROL_PROTOCOL_VERSION, ControlData, ControlErrorDetails, ControlResponse, ControlResult,
+        ScreenMode, ScreenPredicate, ScreenRegion, ScreenWaitQuality, StableCaptureQuality,
+        StateHashComparison,
     },
     event::ByteString,
     event_log::EventLogWriter,
     ghostty_vt::SemanticState,
+    observation::CaptureQuality,
     replay::semantic_state_hash,
+    screen_frame::{ScreenFrameSource, ScreenProjectionRequest, project_screen_frame},
 };
 
 use super::super::{
     presentation::{LiveTerminal, semantic_viewport_text},
     support::{actor_boundaries, control_error_response, terminal_error},
 };
+use super::commands::{screen_frame_error_code, screen_frame_failure_details};
 
 pub(super) const MAX_SCREEN_WAITERS: usize = 128;
 
@@ -33,6 +37,7 @@ pub(in crate::record) struct ScreenWaiter {
     pub(super) predicate: Option<ScreenPredicate>,
     pub(super) stable_for: Duration,
     pub(super) deadline: Instant,
+    pub(super) projection: ScreenProjectionRequest,
     pub(super) matching_state: Option<(String, Instant, u64)>,
     pub(super) response: mpsc::SyncSender<ControlResponse>,
 }
@@ -50,6 +55,7 @@ pub(super) fn valid_blake3_hash(hash: &str) -> bool {
 }
 
 pub(in crate::record) fn evaluate_screen_waiters(
+    session_id: Uuid,
     event_log: &EventLogWriter,
     live: &LiveTerminal,
     waiters: &mut Vec<ScreenWaiter>,
@@ -59,9 +65,6 @@ pub(in crate::record) fn evaluate_screen_waiters(
     if waiters.is_empty() {
         return Ok(());
     }
-    let state_bytes = serde_json::to_vec(&live.presented).map_err(|error| {
-        return terminal_error("serialize screen waiter state", error.to_string());
-    })?;
     let state_hash = semantic_state_hash(&live.presented)?;
     let viewport_text = semantic_viewport_text(&live.presented);
     let observed_monotonic_ns = event_log.elapsed_ns();
@@ -93,112 +96,114 @@ pub(in crate::record) fn evaluate_screen_waiters(
             .matching_state
             .as_ref()
             .is_some_and(|(_, since, _)| return since.elapsed() >= waiter.stable_for);
-        let capture_quality = waiter.predicate.is_none().then(|| {
-            if stable {
-                return StableCaptureQuality::Stable;
-            }
-            if child_completed {
-                return StableCaptureQuality::ChildCompleted;
-            }
-            if output_closed {
-                return StableCaptureQuality::OutputClosed;
-            }
-            return StableCaptureQuality::Deadline;
-        });
-        let capture_finished = waiter.predicate.is_none()
-            && (stable || child_completed || output_closed || now >= waiter.deadline);
-        let predicate_stable =
-            stable || (child_completed && output_closed && waiter.matching_state.is_some());
-        if predicate_stable && waiter.predicate.is_some() {
-            let waiter = waiters.remove(index);
-            let Some(predicate) = waiter.predicate else {
-                return Err(terminal_error(
-                    "complete screen waiter",
-                    "predicate waiter lost its predicate",
-                ));
-            };
-            let first_match_monotonic_ns = waiter
-                .matching_state
-                .as_ref()
-                .map_or(observed_monotonic_ns, |(_, _, value)| return *value);
-            let response = ControlResponse {
-                version: CONTROL_PROTOCOL_VERSION,
-                request_id: waiter.request_id,
-                result: ControlResult::Ok {
-                    data: ControlData::ScreenWait {
-                        predicate,
-                        state_hash: state_hash.clone(),
-                        first_match_monotonic_ns,
-                        stable_through_monotonic_ns: observed_monotonic_ns,
-                        stable_for_ns: u64::try_from(waiter.stable_for.as_nanos())
-                            .unwrap_or(u64::MAX),
-                        boundaries: actor_boundaries(event_log),
-                        cols: live.presented.cols,
-                        rows: live.presented.rows,
-                        completion_quality: if waiter.stable_for.is_zero() && !child_completed {
-                            "matched_unsettled".to_owned()
-                        } else {
-                            "stable".to_owned()
-                        },
-                        child_completed,
-                    },
-                },
-            };
-            let _ = waiter.response.send(response);
+        let deadline = now >= waiter.deadline;
+        let finished = stable || child_completed || output_closed || deadline;
+        if !finished {
+            index += 1;
             continue;
         }
-        if capture_finished {
-            let waiter = waiters.remove(index);
-            let Some(quality) = capture_quality else {
-                return Err(terminal_error(
-                    "complete stable capture",
-                    "capture waiter lost its typed quality",
-                ));
+
+        let waiter = waiters.remove(index);
+        let boundaries = actor_boundaries(event_log);
+        let capture_quality = if stable {
+            CaptureQuality::Stable
+        } else if deadline {
+            CaptureQuality::Incomplete
+        } else {
+            CaptureQuality::Live
+        };
+        let source = ScreenFrameSource::Actor {
+            session_id,
+            boundaries: boundaries.clone(),
+            observed_monotonic_ns,
+        };
+        let frame = match project_screen_frame(
+            &live.presented,
+            &waiter.projection,
+            source,
+            true,
+            capture_quality,
+        ) {
+            Ok(frame) => frame,
+            Err(error) => {
+                let response = ControlResponse {
+                    version: CONTROL_PROTOCOL_VERSION,
+                    request_id: waiter.request_id,
+                    result: ControlResult::Error {
+                        code: screen_frame_error_code(&error).to_owned(),
+                        message: error.to_string(),
+                        details: Some(ControlErrorDetails {
+                            current_presented_state_hash: state_hash.clone(),
+                            boundaries,
+                            scope: "screen_wait_terminating_frame".to_owned(),
+                            input_sequence: None,
+                            screen_frame: Some(screen_frame_failure_details(&error)),
+                        }),
+                    },
+                };
+                let _ = waiter.response.send(response);
+                continue;
+            }
+        };
+        let data = if let Some(predicate) = waiter.predicate {
+            let quality = if stable && waiter.stable_for.is_zero() {
+                ScreenWaitQuality::MatchedUnsettled
+            } else if stable {
+                ScreenWaitQuality::Matched
+            } else if child_completed {
+                ScreenWaitQuality::ChildCompleted
+            } else if output_closed {
+                ScreenWaitQuality::OutputClosed
+            } else {
+                ScreenWaitQuality::Deadline
             };
-            let first_observed_monotonic_ns = waiter
-                .matching_state
-                .as_ref()
-                .map_or(observed_monotonic_ns, |(_, _, value)| return *value);
-            let compressed = encode_all(state_bytes.as_slice(), 3).map_err(|error| {
-                return terminal_error("compress stable screen state", error.to_string());
+            ControlData::ScreenWait {
+                predicate,
+                matched,
+                first_match_monotonic_ns: waiter
+                    .matching_state
+                    .as_ref()
+                    .map(|(_, _, value)| return *value),
+                observed_monotonic_ns,
+                stable_for_ns: u64::try_from(waiter.stable_for.as_nanos()).unwrap_or(u64::MAX),
+                quality,
+                frame,
+            }
+        } else {
+            let quality = if stable {
+                StableCaptureQuality::Stable
+            } else if child_completed {
+                StableCaptureQuality::ChildCompleted
+            } else if output_closed {
+                StableCaptureQuality::OutputClosed
+            } else {
+                StableCaptureQuality::Deadline
+            };
+            let encoded = serde_json::to_vec(&live.presented).map_err(|error| {
+                return terminal_error("serialize presented state", error.to_string());
             })?;
-            let response = ControlResponse {
-                version: CONTROL_PROTOCOL_VERSION,
-                request_id: waiter.request_id,
-                result: ControlResult::Ok {
-                    data: ControlData::StableSnapshot {
-                        semantic_state_zstd: ByteString::from(compressed),
-                        viewport_text: viewport_text.clone(),
-                        state_hash: state_hash.clone(),
-                        cols: live.presented.cols,
-                        rows: live.presented.rows,
-                        cursor_column: live.presented.cursor.column,
-                        cursor_row: live.presented.cursor.row,
-                        cursor_visible: live.presented.cursor.visible,
-                        first_observed_monotonic_ns,
-                        observed_monotonic_ns,
-                        stable_for_ns: u64::try_from(waiter.stable_for.as_nanos())
-                            .unwrap_or(u64::MAX),
-                        quality,
-                        modes: live.presented.modes.clone(),
-                        boundaries: actor_boundaries(event_log),
-                    },
-                },
-            };
-            let _ = waiter.response.send(response);
-            continue;
-        }
-        if now >= waiter.deadline {
-            let waiter = waiters.remove(index);
-            let response = control_error_response(
-                waiter.request_id,
-                "wait_deadline",
-                "screen predicate did not become stable before its server-side deadline",
-            );
-            let _ = waiter.response.send(response);
-            continue;
-        }
-        index += 1;
+            let compressed = encode_all(encoded.as_slice(), 3).map_err(|error| {
+                return terminal_error("compress presented state", error.to_string());
+            })?;
+            ControlData::StableSnapshot {
+                frame,
+                semantic_state_zstd: ByteString::from(compressed),
+
+                first_observed_monotonic_ns: waiter
+                    .matching_state
+                    .as_ref()
+                    .map_or(observed_monotonic_ns, |(_, _, value)| return *value),
+                observed_monotonic_ns,
+                stable_for_ns: u64::try_from(waiter.stable_for.as_nanos()).unwrap_or(u64::MAX),
+                quality,
+            }
+        };
+        let response = ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id: waiter.request_id,
+            result: ControlResult::Ok { data },
+        };
+        let _ = waiter.response.send(response);
     }
     return Ok(());
 }

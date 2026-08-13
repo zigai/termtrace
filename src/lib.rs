@@ -2,6 +2,7 @@
 
 pub mod analysis;
 pub mod artifact;
+pub mod assertions;
 pub mod bundle;
 pub mod capability;
 pub mod client;
@@ -17,6 +18,7 @@ pub mod geometry;
 pub mod ghostty_vt;
 pub mod inspection;
 pub mod interop;
+pub mod locator;
 pub mod observation;
 pub mod output_projection;
 pub mod pagination;
@@ -32,16 +34,18 @@ pub mod reviewer;
 pub mod save;
 pub mod scenario;
 pub mod schema;
+pub mod screen_frame;
 pub mod semantic_image;
 pub mod semantic_video;
 pub mod session;
 pub mod session_registry;
 pub mod task_facade;
 mod terminal_mode;
+pub mod testing;
 pub mod timeline;
 pub mod tmux_bundle;
 pub mod tmux_recording;
 pub mod visual;
 pub mod vt_framer;
 
-pub use error::{Error, Result};
+pub use error::{Error, Result, RetrySafety};

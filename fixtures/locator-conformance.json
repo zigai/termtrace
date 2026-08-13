@@ -1,0 +1,454 @@
+{
+  "version": 1,
+  "frame": {
+    "version": 1,
+    "state_hash": "fixture-state-v1",
+    "frame_hash": "fixture-frame-v1",
+    "presented": false,
+    "capture_quality": "incomplete",
+    "source": {
+      "source": "actor",
+      "session_id": "00000000-0000-0000-0000-000000000001",
+      "boundaries": {
+        "durable": { "event_hash": "durable", "next_event_seq": 9, "output_bytes": 48 },
+        "observed": { "event_hash": "observed", "next_event_seq": 10, "output_bytes": 52 }
+      },
+      "observed_monotonic_ns": 1234
+    },
+    "geometry": { "cols": 12, "rows": 5 },
+    "requested_region": { "top": 0, "left": 0, "right": 12, "bottom": 5 },
+    "returned_region": { "top": 0, "left": 0, "right": 12, "bottom": 5 },
+    "cursor": {
+      "row": 4,
+      "column": 4,
+      "visible": true,
+      "blinking": false,
+      "style": "block",
+      "in_viewport": true,
+      "wide_tail": false
+    },
+    "modes": {
+      "alternate_screen": false,
+      "bracketed_paste": false,
+      "synchronized_output": false,
+      "wraparound": true,
+      "values": []
+    },
+    "colors": {
+      "foreground": { "r": 255, "g": 255, "b": 255 },
+      "background": { "r": 0, "g": 0, "b": 0 },
+      "cursor": null,
+      "palette": []
+    },
+    "data": {
+      "detail": "spans",
+      "rows": [
+        {
+          "row": 0,
+          "soft_wrapped": false,
+          "wrap_continuation": false,
+          "text": "Ready Ready ",
+          "spans": [
+            {
+              "start_column": 0,
+              "end_column": 12,
+              "cell_count": 12,
+              "text": "Ready Ready ",
+              "appearance": {
+                "style": {
+                  "foreground": { "kind": "none" },
+                  "background": { "kind": "none" },
+                  "underline_color": { "kind": "none" },
+                  "bold": false,
+                  "faint": false,
+                  "italic": false,
+                  "underline": 0,
+                  "blink": false,
+                  "inverse": false,
+                  "invisible": false,
+                  "strikethrough": false,
+                  "overline": false
+                },
+                "resolved_foreground": null,
+                "resolved_background": null,
+                "selected": false
+              },
+              "cells": [
+                { "grapheme": "R", "wide_kind": "narrow" },
+                { "grapheme": "e", "wide_kind": "narrow" },
+                { "grapheme": "a", "wide_kind": "narrow" },
+                { "grapheme": "d", "wide_kind": "narrow" },
+                { "grapheme": "y", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": "R", "wide_kind": "narrow" },
+                { "grapheme": "e", "wide_kind": "narrow" },
+                { "grapheme": "a", "wide_kind": "narrow" },
+                { "grapheme": "d", "wide_kind": "narrow" },
+                { "grapheme": "y", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" }
+              ]
+            }
+          ]
+        },
+        {
+          "row": 1,
+          "soft_wrapped": false,
+          "wrap_continuation": false,
+          "text": "é界   ERROR ",
+          "spans": [
+            {
+              "start_column": 0,
+              "end_column": 6,
+              "cell_count": 6,
+              "text": "é界   ",
+              "appearance": {
+                "style": {
+                  "foreground": { "kind": "none" },
+                  "background": { "kind": "none" },
+                  "underline_color": { "kind": "none" },
+                  "bold": false,
+                  "faint": false,
+                  "italic": false,
+                  "underline": 0,
+                  "blink": false,
+                  "inverse": false,
+                  "invisible": false,
+                  "strikethrough": false,
+                  "overline": false
+                },
+                "resolved_foreground": null,
+                "resolved_background": null,
+                "selected": false
+              },
+              "cells": [
+                { "grapheme": "é", "wide_kind": "narrow" },
+                { "grapheme": "界", "wide_kind": "wide" },
+                { "grapheme": "", "wide_kind": "spacer_tail" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" }
+              ]
+            },
+            {
+              "start_column": 6,
+              "end_column": 11,
+              "cell_count": 5,
+              "text": "ERROR",
+              "appearance": {
+                "style": {
+                  "foreground": { "kind": "none" },
+                  "background": { "kind": "none" },
+                  "underline_color": { "kind": "none" },
+                  "bold": true,
+                  "faint": false,
+                  "italic": false,
+                  "underline": 0,
+                  "blink": false,
+                  "inverse": false,
+                  "invisible": false,
+                  "strikethrough": false,
+                  "overline": false
+                },
+                "resolved_foreground": null,
+                "resolved_background": null,
+                "selected": false
+              },
+              "cells": [
+                { "grapheme": "E", "wide_kind": "narrow" },
+                { "grapheme": "R", "wide_kind": "narrow" },
+                { "grapheme": "R", "wide_kind": "narrow" },
+                { "grapheme": "O", "wide_kind": "narrow" },
+                { "grapheme": "R", "wide_kind": "narrow" }
+              ]
+            },
+            {
+              "start_column": 11,
+              "end_column": 12,
+              "cell_count": 1,
+              "text": " ",
+              "appearance": {
+                "style": {
+                  "foreground": { "kind": "none" },
+                  "background": { "kind": "none" },
+                  "underline_color": { "kind": "none" },
+                  "bold": false,
+                  "faint": false,
+                  "italic": false,
+                  "underline": 0,
+                  "blink": false,
+                  "inverse": false,
+                  "invisible": false,
+                  "strikethrough": false,
+                  "overline": false
+                },
+                "resolved_foreground": null,
+                "resolved_background": null,
+                "selected": false
+              },
+              "cells": [
+                { "grapheme": " ", "wide_kind": "narrow" }
+              ]
+            }
+          ]
+        },
+        {
+          "row": 2,
+          "soft_wrapped": false,
+          "wrap_continuation": false,
+          "text": "            ",
+          "spans": [
+            {
+              "start_column": 0,
+              "end_column": 12,
+              "cell_count": 12,
+              "text": "            ",
+              "appearance": {
+                "style": {
+                  "foreground": { "kind": "none" },
+                  "background": { "kind": "rgb", "value": { "r": 59, "g": 30, "b": 28 } },
+                  "underline_color": { "kind": "none" },
+                  "bold": false,
+                  "faint": false,
+                  "italic": false,
+                  "underline": 0,
+                  "blink": false,
+                  "inverse": false,
+                  "invisible": false,
+                  "strikethrough": false,
+                  "overline": false
+                },
+                "resolved_foreground": null,
+                "resolved_background": { "r": 59, "g": 30, "b": 28 },
+                "selected": false
+              },
+              "cells": [
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" }
+              ]
+            }
+          ]
+        },
+        {
+          "row": 3,
+          "soft_wrapped": true,
+          "wrap_continuation": false,
+          "text": "wrapped     ",
+          "spans": [
+            {
+              "start_column": 0,
+              "end_column": 12,
+              "cell_count": 12,
+              "text": "wrapped     ",
+              "appearance": {
+                "style": {
+                  "foreground": { "kind": "none" },
+                  "background": { "kind": "none" },
+                  "underline_color": { "kind": "none" },
+                  "bold": false,
+                  "faint": false,
+                  "italic": false,
+                  "underline": 0,
+                  "blink": false,
+                  "inverse": false,
+                  "invisible": false,
+                  "strikethrough": false,
+                  "overline": false
+                },
+                "resolved_foreground": null,
+                "resolved_background": null,
+                "selected": false
+              },
+              "cells": [
+                { "grapheme": "w", "wide_kind": "narrow" },
+                { "grapheme": "r", "wide_kind": "narrow" },
+                { "grapheme": "a", "wide_kind": "narrow" },
+                { "grapheme": "p", "wide_kind": "narrow" },
+                { "grapheme": "p", "wide_kind": "narrow" },
+                { "grapheme": "e", "wide_kind": "narrow" },
+                { "grapheme": "d", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" }
+              ]
+            }
+          ]
+        },
+        {
+          "row": 4,
+          "soft_wrapped": false,
+          "wrap_continuation": true,
+          "text": "tail        ",
+          "spans": [
+            {
+              "start_column": 0,
+              "end_column": 12,
+              "cell_count": 12,
+              "text": "tail        ",
+              "appearance": {
+                "style": {
+                  "foreground": { "kind": "none" },
+                  "background": { "kind": "none" },
+                  "underline_color": { "kind": "none" },
+                  "bold": false,
+                  "faint": false,
+                  "italic": false,
+                  "underline": 0,
+                  "blink": false,
+                  "inverse": false,
+                  "invisible": false,
+                  "strikethrough": false,
+                  "overline": false
+                },
+                "resolved_foreground": null,
+                "resolved_background": null,
+                "selected": false
+              },
+              "cells": [
+                { "grapheme": "t", "wide_kind": "narrow" },
+                { "grapheme": "a", "wide_kind": "narrow" },
+                { "grapheme": "i", "wide_kind": "narrow" },
+                { "grapheme": "l", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" },
+                { "grapheme": " ", "wide_kind": "narrow" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "duplicate substring ordering",
+      "query": { "kind": "text", "value": "Ready" },
+      "matches": [
+        { "text": "Ready", "ranges": [[0, 0, 5]] },
+        { "text": "Ready", "ranges": [[0, 6, 11]] }
+      ]
+    },
+    {
+      "name": "exact row text",
+      "query": { "kind": "text", "value": "Ready Ready ", "exact": true },
+      "matches": [
+        { "text": "Ready Ready ", "ranges": [[0, 0, 12]] }
+      ]
+    },
+    {
+      "name": "native regex",
+      "query": { "kind": "regex", "pattern": "ERR.R" },
+      "matches": [
+        { "text": "ERROR", "ranges": [[1, 6, 11]] }
+      ]
+    },
+    {
+      "name": "combining grapheme",
+      "query": { "kind": "text", "value": "é", "exact": false },
+      "matches": [
+        { "text": "é", "ranges": [[1, 0, 1]] }
+      ]
+    },
+    {
+      "name": "wide head and spacer tail",
+      "query": { "kind": "text", "value": "界" },
+      "matches": [
+        { "text": "界", "ranges": [[1, 1, 3]] }
+      ]
+    },
+    {
+      "name": "text and style composition",
+      "query": {
+        "kind": "all",
+        "specs": [
+          { "kind": "text", "value": "ERROR" },
+          { "kind": "style", "bold": true }
+        ]
+      },
+      "matches": [
+        { "text": "ERROR", "ranges": [[1, 6, 11]] }
+      ]
+    },
+    {
+      "name": "styled blanks coalesce",
+      "query": { "kind": "style", "resolved_background": "#3b1e1c" },
+      "matches": [
+        { "text": "            ", "ranges": [[2, 0, 12]] }
+      ]
+    },
+    {
+      "name": "row includes blank cells",
+      "query": { "kind": "row", "row": 2 },
+      "matches": [
+        { "text": "            ", "ranges": [[2, 0, 12]] }
+      ]
+    },
+    {
+      "name": "region intersects text",
+      "query": {
+        "kind": "all",
+        "specs": [
+          { "kind": "text", "value": "Ready" },
+          { "kind": "region", "top": 0, "left": 6, "width": 6, "height": 1 }
+        ]
+      },
+      "matches": [
+        { "text": "Ready", "ranges": [[0, 6, 11]] }
+      ]
+    },
+    {
+      "name": "soft wrapped rows stay row local by default",
+      "query": { "kind": "text", "value": "wrapped     tail" },
+      "matches": []
+    },
+    {
+      "name": "explicit soft wrap crossing",
+      "query": { "kind": "text", "value": "wrapped     tail", "cross_soft_wraps": true },
+      "matches": [
+        { "text": "wrapped     tail", "ranges": [[3, 0, 12], [4, 0, 4]] }
+      ]
+    },
+    {
+      "name": "empty text rejected",
+      "query": { "kind": "text", "value": "" },
+      "error": "invalid_query"
+    },
+    {
+      "name": "zero width regex rejected",
+      "query": { "kind": "regex", "pattern": "a*" },
+      "error": "invalid_query"
+    },
+    {
+      "name": "partial grapheme rejected",
+      "query": { "kind": "regex", "pattern": "́" },
+      "error": "invalid_query"
+    },
+    {
+      "name": "disjoint regions rejected",
+      "query": {
+        "kind": "all",
+        "specs": [
+          { "kind": "region", "top": 0, "left": 0, "width": 2, "height": 1 },
+          { "kind": "region", "top": 1, "left": 0, "width": 2, "height": 1 }
+        ]
+      },
+      "error": "invalid_query"
+    }
+  ]
+}

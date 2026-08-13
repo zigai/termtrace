@@ -15,7 +15,9 @@ use uuid::Uuid;
 use crate::{
     Error, Result,
     artifact::sync_parent_directory,
-    control::{ControlCommand, ControlData, ControlResponse, ControlResult},
+    control::{
+        ControlCommand, ControlData, ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES,
+    },
     event::Event,
     event_log::EventLog,
 };
@@ -25,7 +27,9 @@ pub const MUTATION_JOURNAL_NAME: &str = "requests.jsonl";
 /// Mutation journal record format identifier.
 pub const MUTATION_JOURNAL_FORMAT: &str = "termtrace-mutation-request";
 /// Mutation journal schema version.
-pub const MUTATION_JOURNAL_VERSION: u32 = 1;
+pub const MUTATION_JOURNAL_VERSION: u32 = 2;
+const MAX_MUTATION_JOURNAL_BYTES: u64 = 64 * MAX_CONTROL_MESSAGE_BYTES;
+const MAX_MUTATION_JOURNAL_RECORD_BYTES: u64 = 3 * MAX_CONTROL_MESSAGE_BYTES;
 
 /// One durable mutation request outcome tied to a canonical event boundary.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -57,6 +61,12 @@ pub struct MutationJournalRecord {
     pub response: ControlResponse,
 }
 
+#[derive(Deserialize)]
+struct MutationJournalHeader {
+    format: String,
+    version: u32,
+}
+
 #[derive(Serialize)]
 struct MutationJournalBody<'record> {
     format: &'record str,
@@ -78,6 +88,7 @@ pub(crate) struct MutationJournal {
     path: PathBuf,
     writer: BufWriter<File>,
     next_seq: u64,
+    encoded_bytes: u64,
     previous_hash: String,
 }
 
@@ -107,6 +118,7 @@ impl MutationJournal {
             path,
             writer: BufWriter::new(file),
             next_seq: 0,
+            encoded_bytes: 0,
             previous_hash: "0".repeat(64),
         });
     }
@@ -114,6 +126,14 @@ impl MutationJournal {
     /// Number of durably journaled mutation requests.
     pub(crate) fn len(&self) -> u64 {
         return self.next_seq;
+    }
+
+    /// Whether one worst-case bounded record can still be durably admitted.
+    pub(crate) fn has_record_capacity(&self) -> bool {
+        return self
+            .encoded_bytes
+            .checked_add(MAX_MUTATION_JOURNAL_RECORD_BYTES)
+            .is_some_and(|bytes| return bytes <= MAX_MUTATION_JOURNAL_BYTES);
     }
 
     /// Find a prior request outcome, validating the journal chain first.
@@ -124,9 +144,28 @@ impl MutationJournal {
                 source,
             };
         })?;
-        return Ok(read_mutation_journal(&self.path)?
-            .into_iter()
-            .find(|record| return record.request_id == request_id));
+        let reader = BufReader::new(File::open(&self.path).map_err(|source| {
+            return Error::Filesystem {
+                path: self.path.clone(),
+                source,
+            };
+        })?);
+        let mut previous_hash = "0".repeat(64);
+        let mut matched = None;
+        for (index, line) in reader.lines().enumerate() {
+            let line = line.map_err(|source| {
+                return Error::Filesystem {
+                    path: self.path.clone(),
+                    source,
+                };
+            })?;
+            let record = decode_record(&line, index, &previous_hash, &self.path)?;
+            previous_hash = record.hash.clone();
+            if matched.is_none() && record.request_id == request_id {
+                matched = Some(record);
+            }
+        }
+        return Ok(matched);
     }
 
     /// Durably append a final response before it is sent to the caller.
@@ -174,6 +213,17 @@ impl MutationJournal {
         let mut encoded = serde_json::to_vec(&record)
             .map_err(|source| return json_error(self.path.clone(), source))?;
         encoded.push(b'\n');
+        let record_bytes = u64::try_from(encoded.len()).unwrap_or(u64::MAX);
+        if record_bytes > MAX_MUTATION_JOURNAL_RECORD_BYTES
+            || self
+                .encoded_bytes
+                .checked_add(record_bytes)
+                .is_none_or(|bytes| return bytes > MAX_MUTATION_JOURNAL_BYTES)
+        {
+            return Err(invalid_journal(
+                "mutation journal byte budget would be exceeded",
+            ));
+        }
         self.writer
             .write_all(&encoded)
             .and_then(|()| return self.writer.flush())
@@ -184,6 +234,7 @@ impl MutationJournal {
                     source,
                 };
             })?;
+        self.encoded_bytes = self.encoded_bytes.saturating_add(record_bytes);
         self.next_seq = self.next_seq.checked_add(1).ok_or_else(|| {
             return invalid_journal("mutation journal sequence overflow");
         })?;
@@ -212,6 +263,53 @@ pub(crate) fn guarded_command_hash(
     return Ok(blake3::hash(&bytes).to_hex().to_string());
 }
 
+fn decode_record(
+    line: &str,
+    index: usize,
+    previous_hash: &str,
+    path: &Path,
+) -> Result<MutationJournalRecord> {
+    let header: MutationJournalHeader = serde_json::from_str(line)
+        .map_err(|source| return json_error(path.to_path_buf(), source))?;
+    if header.format != MUTATION_JOURNAL_FORMAT || header.version != MUTATION_JOURNAL_VERSION {
+        return Err(invalid_journal(format!(
+            "unsupported mutation journal format `{}` version {}; expected `{}` version {}",
+            header.format, header.version, MUTATION_JOURNAL_FORMAT, MUTATION_JOURNAL_VERSION
+        )));
+    }
+    let record: MutationJournalRecord = serde_json::from_str(line)
+        .map_err(|source| return json_error(path.to_path_buf(), source))?;
+    let seq = u64::try_from(index).unwrap_or(u64::MAX);
+    if record.seq != seq
+        || record.prev_hash != previous_hash
+        || record.response.request_id != record.request_id
+        || record.event_end_seq < record.event_start_seq
+    {
+        return Err(invalid_journal(
+            "mutation journal sequence, correlation, or event range is invalid",
+        ));
+    }
+    let body = MutationJournalBody {
+        format: &record.format,
+        version: record.version,
+        seq: record.seq,
+        prev_hash: &record.prev_hash,
+        request_id: record.request_id,
+        command_hash: &record.command_hash,
+        operation_ids: &record.operation_ids,
+        event_start_seq: record.event_start_seq,
+        event_end_seq: record.event_end_seq,
+        event_hash: &record.event_hash,
+        response: &record.response,
+    };
+    if record.hash != hash_body(&body, path)? {
+        return Err(invalid_journal(
+            "mutation journal record hash does not match",
+        ));
+    }
+    return Ok(record);
+}
+
 /// Read and validate a complete persistent mutation journal.
 pub fn read_mutation_journal(path: &Path) -> Result<Vec<MutationJournalRecord>> {
     if !path.exists() {
@@ -232,38 +330,7 @@ pub fn read_mutation_journal(path: &Path) -> Result<Vec<MutationJournalRecord>> 
                 source,
             };
         })?;
-        let record: MutationJournalRecord = serde_json::from_str(&line)
-            .map_err(|source| return json_error(path.to_path_buf(), source))?;
-        let seq = u64::try_from(index).unwrap_or(u64::MAX);
-        if record.format != MUTATION_JOURNAL_FORMAT
-            || record.version != MUTATION_JOURNAL_VERSION
-            || record.seq != seq
-            || record.prev_hash != previous_hash
-            || record.response.request_id != record.request_id
-            || record.event_end_seq < record.event_start_seq
-        {
-            return Err(invalid_journal(
-                "mutation journal format, sequence, correlation, or event range is invalid",
-            ));
-        }
-        let body = MutationJournalBody {
-            format: &record.format,
-            version: record.version,
-            seq: record.seq,
-            prev_hash: &record.prev_hash,
-            request_id: record.request_id,
-            command_hash: &record.command_hash,
-            operation_ids: &record.operation_ids,
-            event_start_seq: record.event_start_seq,
-            event_end_seq: record.event_end_seq,
-            event_hash: &record.event_hash,
-            response: &record.response,
-        };
-        if record.hash != hash_body(&body, path)? {
-            return Err(invalid_journal(
-                "mutation journal record hash does not match",
-            ));
-        }
+        let record = decode_record(&line, index, &previous_hash, path)?;
         previous_hash = record.hash.clone();
         records.push(record);
     }
@@ -342,7 +409,7 @@ pub fn validate_mutation_journal(session: &Path, log: &EventLog) -> Result<u64> 
             ));
         }
         let boundaries = match &record.response.result {
-            ControlResult::Ok { data } => Some(match data {
+            ControlResult::Ok { data } => match data {
                 ControlData::Acknowledged { boundaries }
                 | ControlData::InputApplied { boundaries, .. }
                 | ControlData::InputSequenceApplied { boundaries, .. }
@@ -350,11 +417,12 @@ pub fn validate_mutation_journal(session: &Path, log: &EventLog) -> Result<u64> 
                 | ControlData::InputNoop { boundaries, .. }
                 | ControlData::Activated { boundaries, .. }
                 | ControlData::Snapshot { boundaries, .. }
-                | ControlData::StableSnapshot { boundaries, .. }
-                | ControlData::ScreenWait { boundaries, .. }
                 | ControlData::Status { boundaries, .. }
-                | ControlData::Marked { boundaries, .. } => boundaries,
-            }),
+                | ControlData::Marked { boundaries, .. } => Some(boundaries),
+                ControlData::ScreenFrame { .. }
+                | ControlData::StableSnapshot { .. }
+                | ControlData::ScreenWait { .. } => None,
+            },
             ControlResult::Error {
                 details: Some(details),
                 ..
@@ -404,4 +472,113 @@ fn invalid_journal(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
     };
+}
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+    use crate::control::CONTROL_PROTOCOL_VERSION;
+
+    fn error_response(request_id: Uuid, message: String) -> ControlResponse {
+        return ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id,
+            result: ControlResult::Error {
+                code: "fixture".to_owned(),
+                message,
+                details: None,
+            },
+        };
+    }
+
+    #[test]
+    fn incompatible_version_is_rejected_before_response_decode() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let path = temporary.path().join(MUTATION_JOURNAL_NAME);
+        fs::write(
+            &path,
+            format!(
+                "{{\"format\":\"{MUTATION_JOURNAL_FORMAT}\",\"version\":1,\"response\":{{\"old\":\"shape\"}}}}\n"
+            ),
+        )
+        .expect("old journal fixture");
+
+        let error = read_mutation_journal(&path).expect_err("old version must be rejected");
+        assert!(matches!(
+            error,
+            Error::InvalidReplay { reason }
+                if reason.contains("unsupported mutation journal format")
+                    && reason.contains("version 1")
+        ));
+    }
+
+    #[test]
+    fn lookup_streams_valid_records_and_preserves_exact_response() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let mut journal = MutationJournal::create(temporary.path()).expect("journal");
+        let first_id = Uuid::now_v7();
+        let second_id = Uuid::now_v7();
+        let first_response = error_response(first_id, "first".to_owned());
+        journal
+            .append(
+                first_id,
+                "a".repeat(64),
+                Vec::new(),
+                0,
+                0,
+                "b".repeat(64),
+                first_response.clone(),
+            )
+            .expect("first record");
+        journal
+            .append(
+                second_id,
+                "c".repeat(64),
+                Vec::new(),
+                0,
+                0,
+                "d".repeat(64),
+                error_response(second_id, "second".to_owned()),
+            )
+            .expect("second record");
+
+        let found = journal
+            .lookup(first_id)
+            .expect("lookup")
+            .expect("first record");
+        assert_eq!(found.response, first_response);
+    }
+
+    #[test]
+    fn oversized_record_is_not_persisted() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let mut journal = MutationJournal::create(temporary.path()).expect("journal");
+        let request_id = Uuid::now_v7();
+        let oversized =
+            "x".repeat(usize::try_from(MAX_MUTATION_JOURNAL_RECORD_BYTES).expect("record limit"));
+
+        let error = journal
+            .append(
+                request_id,
+                "a".repeat(64),
+                Vec::new(),
+                0,
+                0,
+                "b".repeat(64),
+                error_response(request_id, oversized),
+            )
+            .expect_err("oversized record");
+        assert!(matches!(
+            error,
+            Error::InvalidReplay { reason }
+                if reason == "mutation journal byte budget would be exceeded"
+        ));
+        assert_eq!(
+            fs::metadata(temporary.path().join(MUTATION_JOURNAL_NAME))
+                .expect("journal metadata")
+                .len(),
+            0
+        );
+    }
 }

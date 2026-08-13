@@ -779,7 +779,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""scope":"screen""#))
-        .stdout(predicate::str::contains(r#""quality":"stable""#));
+        .stdout(predicate::str::contains(r#""quality":"matched""#));
     let mut absent_wait = Command::cargo_bin("termtrace").expect("binary should build");
     absent_wait
         .arg("wait")

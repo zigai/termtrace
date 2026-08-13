@@ -19,7 +19,7 @@ use crate::{
     Error, Result,
     analysis::{DiagnosticCheck, diagnose},
     client::{Session, Terminal},
-    control::{ControlCommand, ControlData, ControlRequest, ScreenPredicate},
+    control::{ControlCommand, ControlData, ControlRequest, ScreenPredicate, ScreenWaitQuality},
     environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},
     event::{ByteString, Event, InputKind},
     event_log::EventLog,
@@ -27,6 +27,7 @@ use crate::{
     inspection::{state_text, wait_for_screen},
     observation::{StatePoint, observe_session_with_options},
     replay::{StateSelector, inspect, replay},
+    screen_frame::{ScreenFrame, ScreenFrameData},
     semantic_image::render_png,
     session::validate_completed_log,
     timeline::{build_timeline, build_timeline_page},
@@ -699,22 +700,37 @@ fn execute_step(
                     ));
                 }
             };
-            return wait_for_screen(
+            let matched = wait_for_screen(
                 session.path(),
                 predicate,
                 Duration::from_millis(wait.stable_for_ms),
                 Duration::from_millis(wait.timeout_ms.unwrap_or(scenario.launch.timeout_ms)),
             )
-            .map(|matched| {
-                return ScenarioStepResult {
-                    index,
-                    kind: step.kind().to_owned(),
-                    request_ids,
-                    state_hash: Some(matched.state_hash),
-                };
-            })
             .map_err(|error| {
                 return step_failure(index, step, Vec::new(), error.to_string());
+            })?;
+            let wait_satisfied = matched.matched
+                && if wait.stable_for_ms == 0 {
+                    matched.quality == ScreenWaitQuality::MatchedUnsettled
+                } else {
+                    matched.quality == ScreenWaitQuality::Matched
+                };
+            if !wait_satisfied {
+                return Err(step_failure(
+                    index,
+                    step,
+                    request_ids,
+                    format!(
+                        "screen predicate did not meet the requested stability before {:?}",
+                        matched.quality
+                    ),
+                ));
+            }
+            return Ok(ScenarioStepResult {
+                index,
+                kind: step.kind().to_owned(),
+                request_ids,
+                state_hash: Some(matched.frame.state_hash),
             });
         }
         ScenarioStep::Send(inputs) => {
@@ -762,16 +778,8 @@ fn execute_step(
                 .map_err(|error| {
                     return step_failure(index, step, Vec::new(), error.to_string());
                 })?;
-            let current = capture.snapshot;
-            let ControlData::StableSnapshot { state_hash, .. } = &current else {
-                return Err(step_failure(
-                    index,
-                    step,
-                    Vec::new(),
-                    "screen endpoint did not return an atomic stable snapshot",
-                ));
-            };
-            let baseline = frame_snapshot(&current).map_err(|error| {
+            let state_hash = capture.frame.state_hash.clone();
+            let baseline = rich_frame_snapshot(&capture.frame).map_err(|error| {
                 return step_failure(index, step, Vec::new(), error.to_string());
             })?;
             let path = snapshot_path(failure_root, &snapshot.name).map_err(|error| {
@@ -825,7 +833,7 @@ fn execute_step(
                 index,
                 kind: step.kind().to_owned(),
                 request_ids,
-                state_hash: Some(state_hash.clone()),
+                state_hash: Some(state_hash),
             });
         }
         ScenarioStep::AssertTimeline(assertion) => {
@@ -873,36 +881,30 @@ fn step_failure(
     };
 }
 
-fn frame_snapshot(data: &ControlData) -> Result<ScenarioFrameSnapshot> {
-    let (ControlData::Snapshot {
-        viewport_text,
-        cols,
-        rows,
-        cursor_column,
-        cursor_row,
-        cursor_visible,
-        ..
+fn rich_frame_snapshot(frame: &ScreenFrame) -> Result<ScenarioFrameSnapshot> {
+    let viewport_text = match &frame.data {
+        ScreenFrameData::Text { rows } => rows
+            .iter()
+            .map(|row| return row.text.as_str())
+            .collect::<Vec<_>>(),
+        ScreenFrameData::Spans { rows } => rows
+            .iter()
+            .map(|row| return row.text.as_str())
+            .collect::<Vec<_>>(),
+        ScreenFrameData::Cells { rows } => rows
+            .iter()
+            .map(|row| return row.text.as_str())
+            .collect::<Vec<_>>(),
     }
-    | ControlData::StableSnapshot {
-        viewport_text,
-        cols,
-        rows,
-        cursor_column,
-        cursor_row,
-        cursor_visible,
-        ..
-    }) = data
-    else {
-        return Err(scenario_error("screen endpoint did not return a snapshot"));
-    };
+    .join("\n");
     return Ok(ScenarioFrameSnapshot {
         version: 1,
-        viewport_text: viewport_text.clone(),
-        cols: *cols,
-        rows: *rows,
-        cursor_column: *cursor_column,
-        cursor_row: *cursor_row,
-        cursor_visible: *cursor_visible,
+        viewport_text,
+        cols: frame.geometry.cols,
+        rows: frame.geometry.rows,
+        cursor_column: frame.cursor.column,
+        cursor_row: frame.cursor.row,
+        cursor_visible: frame.cursor.visible,
     });
 }
 

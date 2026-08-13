@@ -16,12 +16,12 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
     let hello_id = "019f0000-0000-7000-8000-000000000001";
     let attach_id = "019f0000-0000-7000-8000-000000000002";
     let hello = serde_json::json!({
-        "version": 4,
+        "version": 5,
         "request_id": hello_id,
         "method": { "method": "hello" }
     });
     let attach = serde_json::json!({
-        "version": 4,
+        "version": 5,
         "request_id": attach_id,
         "method": { "method": "attach", "session": session }
     });
@@ -45,7 +45,7 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
     };
     assert_eq!(first, second);
     assert_eq!(first["result"]["data"]["kind"], "hello");
-    assert_eq!(first["result"]["data"]["driver_protocol_version"], 4);
+    assert_eq!(first["result"]["data"]["driver_protocol_version"], 5);
     assert_eq!(third["result"]["data"]["kind"], "attached");
     assert_eq!(third["result"]["data"]["completed"], true);
     assert!(third["result"]["data"]["handle"].is_string());

@@ -94,6 +94,25 @@ struct StateHashMetadata<'state> {
     active_style: &'state CellStyle,
     metadata: &'state TerminalMetadata,
 }
+#[derive(Serialize)]
+struct StateHashRow<'state> {
+    row: u16,
+    soft_wrapped: bool,
+    wrap_continuation: bool,
+    cells: &'state [CellState],
+}
+
+fn hash_semantic_row(row: &RowState) -> Result<blake3::Hash> {
+    let normalized = StateHashRow {
+        row: row.row,
+        soft_wrapped: row.soft_wrapped,
+        wrap_continuation: row.wrap_continuation,
+        cells: &row.cells,
+    };
+    let encoded = serde_json::to_vec(&normalized)
+        .map_err(|source| return json_error(PathBuf::from("<semantic-row>"), source))?;
+    return Ok(blake3::hash(&encoded));
+}
 
 /// Hash a normalized semantic state with the replay state-hash contract.
 ///
@@ -116,12 +135,10 @@ pub fn semantic_state_hash(state: &SemanticState) -> Result<String> {
     let encoded = serde_json::to_vec(&metadata)
         .map_err(|source| return json_error(PathBuf::from("<semantic-metadata>"), source))?;
     let mut hash = blake3::Hasher::new();
-    hash.update(b"termtrace-semantic-state-v1\0");
+    hash.update(b"termtrace-semantic-state-v2\0");
     hash.update(&encoded);
     for row in &state.grid {
-        let encoded = serde_json::to_vec(&row.cells)
-            .map_err(|source| return json_error(PathBuf::from("<semantic-row>"), source))?;
-        hash.update(blake3::hash(&encoded).as_bytes());
+        hash.update(hash_semantic_row(row)?.as_bytes());
     }
     return Ok(hash.finalize().to_hex().to_string());
 }
@@ -1056,6 +1073,9 @@ impl ReplayBuilder {
         }
         if semantic_state_hash(&restored)? != record.state_hash {
             let mut mismatches: Vec<&str> = Vec::new();
+            if restored.cols != state.cols || restored.rows != state.rows {
+                mismatches.push("geometry");
+            }
             if restored.grid.len() != state.grid.len()
                 || restored
                     .grid
@@ -1064,6 +1084,18 @@ impl ReplayBuilder {
                     .any(|(actual, expected)| return actual.cells != expected.cells)
             {
                 mismatches.push("grid");
+            }
+            if restored.grid.len() != state.grid.len()
+                || restored
+                    .grid
+                    .iter()
+                    .zip(&state.grid)
+                    .any(|(actual, expected)| {
+                        return actual.soft_wrapped != expected.soft_wrapped
+                            || actual.wrap_continuation != expected.wrap_continuation;
+                    })
+            {
+                mismatches.push("row_topology");
             }
             if restored.cursor != state.cursor {
                 mismatches.push("cursor");
@@ -1181,15 +1213,18 @@ impl ReplayBuilder {
                     .previous
                     .as_ref()
                     .and_then(|previous| return previous.grid.get(usize::from(row.row)))
-                    .is_none_or(|previous| return previous.cells != row.cells);
+                    .is_none_or(|previous| {
+                        return previous.row != row.row
+                            || previous.soft_wrapped != row.soft_wrapped
+                            || previous.wrap_continuation != row.wrap_continuation
+                            || previous.cells != row.cells;
+                    });
             if changed {
-                let encoded = serde_json::to_vec(&row.cells)
-                    .map_err(|source| return json_error(PathBuf::from("<semantic-row>"), source))?;
                 let slot = self
                     .row_hashes
                     .get_mut(usize::from(row.row))
                     .ok_or_else(|| return invalid_replay("semantic row is outside the viewport"))?;
-                *slot = blake3::hash(&encoded);
+                *slot = hash_semantic_row(row)?;
             }
         }
         let metadata = StateHashMetadata {
@@ -1204,7 +1239,7 @@ impl ReplayBuilder {
         let encoded = serde_json::to_vec(&metadata)
             .map_err(|source| return json_error(PathBuf::from("<semantic-metadata>"), source))?;
         let mut hash = blake3::Hasher::new();
-        hash.update(b"termtrace-semantic-state-v1\0");
+        hash.update(b"termtrace-semantic-state-v2\0");
         hash.update(&encoded);
         for row_hash in &self.row_hashes {
             hash.update(row_hash.as_bytes());

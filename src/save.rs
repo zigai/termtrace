@@ -2,12 +2,18 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeSet,
+    path::{Component, Path, PathBuf},
+};
 use uuid::Uuid;
 
 use crate::{
     Error, Result,
-    artifact::{commit_directory, create_private_directory, sync_directory, write_secure},
+    artifact::{
+        commit_directory, create_private_directory, hash_regular_file, open_regular_file_nofollow,
+        sync_directory, write_secure,
+    },
     event::ByteString,
     event_log::EventLog,
     ghostty_vt::Format,
@@ -122,6 +128,79 @@ pub struct SaveOutcome {
     pub directory: PathBuf,
     /// Published manifest.
     pub manifest: SaveManifest,
+}
+
+/// Re-read and verify one saved semantic artifact against its trusted creation result.
+///
+/// # Errors
+///
+/// Returns an error for a changed manifest, missing or extra members, unsafe paths,
+/// non-regular files, or any byte length or digest mismatch.
+pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Result<SaveManifest> {
+    const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+
+    let manifest_path = directory.join("save-manifest.json");
+    let (manifest_file, manifest_bytes) = open_regular_file_nofollow(&manifest_path)?;
+    if manifest_bytes > MAX_MANIFEST_BYTES {
+        return Err(save_error("saved artifact manifest exceeds 1 MiB"));
+    }
+    let manifest: SaveManifest = serde_json::from_reader(manifest_file).map_err(|source| {
+        return Error::InvalidJson {
+            path: manifest_path.clone(),
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
+    if &manifest != expected {
+        return Err(save_error(
+            "saved artifact manifest does not match its trusted creation result",
+        ));
+    }
+
+    let mut expected_members: BTreeSet<String> = BTreeSet::new();
+    for member in &manifest.files {
+        let path = Path::new(&member.path);
+        if path.components().count() != 1
+            || !matches!(path.components().next(), Some(Component::Normal(_)))
+            || !expected_members.insert(member.path.clone())
+        {
+            return Err(save_error("saved artifact contains an unsafe member path"));
+        }
+        let (byte_count, digest) = hash_regular_file(&directory.join(path))?;
+        if byte_count != member.byte_count || digest != member.blake3 {
+            return Err(save_error(format!(
+                "saved artifact member {} failed integrity verification",
+                member.path
+            )));
+        }
+    }
+
+    let mut observed_members: BTreeSet<String> = BTreeSet::new();
+    for entry in fs_err::read_dir(directory).map_err(|source| {
+        return Error::Filesystem {
+            path: directory.to_path_buf(),
+            source,
+        };
+    })? {
+        let entry = entry.map_err(|source| {
+            return Error::Filesystem {
+                path: directory.to_path_buf(),
+                source,
+            };
+        })?;
+        let name = entry.file_name().into_string().map_err(|_| {
+            return save_error("saved artifact contains a non-UTF-8 member name");
+        })?;
+        if name != "save-manifest.json" {
+            observed_members.insert(name);
+        }
+    }
+    if observed_members != expected_members {
+        return Err(save_error(
+            "saved artifact member inventory does not match its manifest",
+        ));
+    }
+    return Ok(manifest);
 }
 
 /// One entry in an atomic multi-state semantic screenshot batch.

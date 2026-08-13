@@ -59,12 +59,16 @@ pub struct CellChange {
     pub after: Option<CellState>,
 }
 
-/// Changed cells for one viewport row.
+/// Changed cells and native wrap facts for one viewport row.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RowChange {
     /// Zero-based row.
     pub row: u16,
+    /// Earlier/later soft-wrap fact, including row absence at either endpoint.
+    pub soft_wrapped: Option<ValueChange<Option<bool>>>,
+    /// Earlier/later wrap-continuation fact, including row absence at either endpoint.
+    pub wrap_continuation: Option<ValueChange<Option<bool>>>,
     /// Complete semantic cell changes.
     pub cells: Vec<CellChange>,
 }
@@ -245,10 +249,18 @@ fn changed<T: Eq>(before: T, after: T) -> Option<ValueChange<T>> {
 fn changed_rows(before: &SemanticState, after: &SemanticState) -> Vec<RowChange> {
     let rows = before.rows.max(after.rows);
     let columns = before.cols.max(after.cols);
-    let mut changed = Vec::new();
+    let mut row_changes = Vec::new();
     for row in 0..rows {
         let before_row = before.grid.iter().find(|value| return value.row == row);
         let after_row = after.grid.iter().find(|value| return value.row == row);
+        let soft_wrapped = changed(
+            before_row.map(|value| return value.soft_wrapped),
+            after_row.map(|value| return value.soft_wrapped),
+        );
+        let wrap_continuation = changed(
+            before_row.map(|value| return value.wrap_continuation),
+            after_row.map(|value| return value.wrap_continuation),
+        );
         let mut cells = Vec::new();
         for column in 0..columns {
             let before_cell = before_row.and_then(|value| {
@@ -265,15 +277,42 @@ fn changed_rows(before: &SemanticState, after: &SemanticState) -> Vec<RowChange>
                 });
             }
         }
-        if !cells.is_empty() {
-            changed.push(RowChange { row, cells });
+        if !cells.is_empty() || soft_wrapped.is_some() || wrap_continuation.is_some() {
+            row_changes.push(RowChange {
+                row,
+                soft_wrapped,
+                wrap_continuation,
+                cells,
+            });
         }
     }
-    return changed;
+    return row_changes;
 }
 
 fn diff_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ghostty_vt::GhosttyVt;
+
+    #[test]
+    fn changed_rows_retains_wrap_only_changes() {
+        let mut terminal = GhosttyVt::new(4, 2, 0).expect("terminal");
+        terminal.write(b"abcd");
+        let before = terminal.snapshot().expect("before");
+        let mut after = before.clone();
+        after.grid[0].soft_wrapped = !after.grid[0].soft_wrapped;
+        after.grid[1].wrap_continuation = !after.grid[1].wrap_continuation;
+
+        let rows = changed_rows(&before, &after);
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| return row.cells.is_empty()));
+        assert!(rows[0].soft_wrapped.is_some());
+        assert!(rows[1].wrap_continuation.is_some());
+    }
 }

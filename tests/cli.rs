@@ -7,6 +7,8 @@ mod support;
 mod adoption_surfaces;
 #[path = "cli/artifacts_and_bundles.rs"]
 mod artifacts_and_bundles;
+#[path = "cli/atomic_action_conformance.rs"]
+mod atomic_action_conformance;
 #[path = "cli/command_surface.rs"]
 mod command_surface;
 #[path = "cli/drivers_and_clients.rs"]
@@ -35,6 +37,8 @@ mod session_registry_and_lifecycle;
 mod show_workflows;
 #[path = "cli/task_oriented_workflows.rs"]
 mod task_oriented_workflows;
+#[path = "cli/testing_adapters.rs"]
+mod testing_adapters;
 #[path = "cli/timeline_analysis.rs"]
 mod timeline_analysis;
 #[path = "cli/tmux_recording.rs"]

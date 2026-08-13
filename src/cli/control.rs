@@ -1,5 +1,10 @@
 use super::*;
 
+use termtrace::{
+    control::{ScreenPostconditionQuality, ScreenWaitQuality},
+    screen_frame::{ScreenFrame, ScreenProjectionRequest},
+};
+
 pub(super) fn run_screen(arguments: ScreenArgs) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session)?;
     if !matches!(
@@ -144,6 +149,7 @@ pub(super) fn run_act(arguments: ActArgs) -> Result<ExitCode> {
         pace_ns: u64::try_from(arguments.pace.as_nanos()).unwrap_or(u64::MAX),
         include_atom_outcomes: arguments.verbose,
         postcondition,
+        projection: ScreenProjectionRequest::default(),
     });
     request.request_id = request_id;
     request.expected_presented_state_hash = arguments.expected_presented_state_hash;
@@ -227,6 +233,18 @@ fn action_postcondition(arguments: &ActArgs) -> ActionPostcondition {
     return ActionPostcondition::None;
 }
 
+fn action_observation(frame: &ScreenFrame) -> Result<serde_json::Value> {
+    let mut observation = serde_json::to_value(frame).into_diagnostic()?;
+    observation
+        .as_object_mut()
+        .ok_or_else(|| miette::miette!("action frame response is not an object"))?
+        .insert(
+            "state".to_owned(),
+            serde_json::Value::String(frame.state_hash.clone()),
+        );
+    return Ok(observation);
+}
+
 fn action_applied_response(
     request_id: uuid::Uuid,
     data: &ControlData,
@@ -262,35 +280,27 @@ fn action_applied_response(
             );
     }
     let (postcondition, observation, ended, matched) = match postcondition {
-        ActionPostconditionResult::None { matched } => (
+        ActionPostconditionResult::None { matched, frame } => (
             serde_json::json!({
                 "kind": "none",
                 "matched": matched,
                 "outcome": "matched",
             }),
-            serde_json::Value::Null,
+            action_observation(frame)?,
             false,
             *matched,
         ),
         ActionPostconditionResult::Idle {
             matched,
-            viewport_text,
-            state_hash,
             quality,
-            cols,
-            rows,
+            frame,
         } => (
             serde_json::json!({
                 "kind": "idle",
                 "matched": matched,
                 "outcome": quality,
             }),
-            serde_json::json!({
-                "state": state_hash,
-                "quality": quality,
-                "size": [cols, rows],
-                "screen": viewport_text,
-            }),
+            action_observation(frame)?,
             matches!(
                 quality,
                 StableCaptureQuality::ChildCompleted | StableCaptureQuality::OutputClosed
@@ -299,25 +309,20 @@ fn action_applied_response(
         ),
         ActionPostconditionResult::Screen {
             matched,
-            viewport_text,
-            state_hash,
-            completion_quality,
-            cols,
-            rows,
-            child_completed,
+            quality,
+            frame,
         } => (
             serde_json::json!({
                 "kind": "screen",
                 "matched": matched,
-                "outcome": completion_quality,
+                "outcome": quality,
             }),
-            serde_json::json!({
-                "state": state_hash,
-                "quality": completion_quality,
-                "size": [cols, rows],
-                "screen": viewport_text,
-            }),
-            *child_completed || completion_quality == "output_closed",
+            action_observation(frame)?,
+            matches!(
+                quality,
+                ScreenPostconditionQuality::ChildCompleted
+                    | ScreenPostconditionQuality::OutputClosed
+            ),
             *matched,
         ),
     };
@@ -557,12 +562,19 @@ pub(super) fn run_wait(arguments: WaitArgs) -> Result<ExitCode> {
         }
         _ => return Err(miette::miette!("exactly one wait predicate is required")),
     };
-    return write_json_line(&wait_for_screen(
-        session,
-        predicate,
-        arguments.stable_for,
-        timeout,
-    )?);
+    let outcome = wait_for_screen(session, predicate, arguments.stable_for, timeout)?;
+    let matched = outcome.matched
+        && if arguments.stable_for.is_zero() {
+            outcome.quality == ScreenWaitQuality::MatchedUnsettled
+        } else {
+            outcome.quality == ScreenWaitQuality::Matched
+        };
+    write_json_line(&outcome)?;
+    return Ok(if matched {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    });
 }
 
 pub(super) fn run_wait_idle(arguments: WaitIdleArgs) -> Result<ExitCode> {
@@ -581,23 +593,16 @@ pub(super) fn run_wait_idle(arguments: WaitIdleArgs) -> Result<ExitCode> {
         &ControlRequest::new(ControlCommand::CaptureStable {
             stable_for_ns: u64::try_from(arguments.stable_for.as_nanos()).unwrap_or(u64::MAX),
             timeout_ns: arguments.timeout_ms.saturating_mul(1_000_000),
+            projection: ScreenProjectionRequest::default(),
         }),
     )?;
     let ControlData::StableSnapshot {
-        semantic_state_zstd: _,
-        viewport_text,
-        state_hash,
-        cols,
-        rows,
-        cursor_column,
-        cursor_row,
-        cursor_visible,
+        frame,
         first_observed_monotonic_ns,
         observed_monotonic_ns,
         stable_for_ns,
+        semantic_state_zstd: _,
         quality,
-        modes,
-        boundaries,
     } = &data
     else {
         return Err(miette::miette!(
@@ -616,22 +621,13 @@ pub(super) fn run_wait_idle(arguments: WaitIdleArgs) -> Result<ExitCode> {
     return write_json_line(&serde_json::json!({
         "kind": "stable_snapshot",
         "quality": quality,
-        "state_hash": state_hash,
-        "viewport_text": viewport_text,
-        "geometry": {
-            "cols": cols,
-            "rows": rows,
-        },
-        "cursor": {
-            "column": cursor_column,
-            "row": cursor_row,
-            "visible": cursor_visible,
-        },
+        "state_hash": frame.state_hash,
+        "frame_hash": frame.frame_hash,
+        "geometry": frame.geometry,
+        "frame": frame,
         "first_observed_monotonic_ns": first_observed_monotonic_ns,
         "observed_monotonic_ns": observed_monotonic_ns,
         "stable_for_ns": stable_for_ns,
-        "modes": modes,
-        "boundary": compact_boundaries(boundaries),
     }));
 }
 
@@ -796,6 +792,7 @@ fn compact_control_data(data: &ControlData) -> Result<serde_json::Value> {
             "boundary": compact_boundaries(boundaries),
         }),
         ControlData::ActionApplied { .. }
+        | ControlData::ScreenFrame { .. }
         | ControlData::StableSnapshot { .. }
         | ControlData::ScreenWait { .. } => serde_json::to_value(data).into_diagnostic()?,
         ControlData::Marked {
@@ -1340,11 +1337,43 @@ pub(super) fn run_pointer(arguments: PointerArgs) -> Result<ExitCode> {
 #[cfg(test)]
 mod action_response_tests {
     use super::*;
+    use termtrace::{
+        ghostty_vt::GhosttyVt,
+        screen_frame::{ScreenFrameSource, ScreenProjectionRequest, project_screen_frame},
+    };
 
     #[test]
     fn action_success_retains_input_observation_request_and_boundaries() {
         let request_id =
             uuid::Uuid::parse_str("018f47d2-7ad0-7000-8000-000000000001").expect("request UUID");
+        let boundaries: ActorBoundaries = serde_json::from_value(serde_json::json!({
+            "durable": {
+                "next_event_seq": 4,
+                "event_hash": "b".repeat(64),
+                "output_bytes": 10
+            },
+            "observed": {
+                "next_event_seq": 5,
+                "event_hash": "c".repeat(64),
+                "output_bytes": 12
+            }
+        }))
+        .expect("actor boundaries");
+        let mut engine = GhosttyVt::new(80, 24, 0).expect("semantic engine");
+        engine.write(b"current screen");
+        let state = engine.snapshot().expect("semantic state");
+        let frame = project_screen_frame(
+            &state,
+            &ScreenProjectionRequest::default(),
+            ScreenFrameSource::Actor {
+                session_id: request_id,
+                boundaries: boundaries.clone(),
+                observed_monotonic_ns: 1,
+            },
+            true,
+            CaptureQuality::Live,
+        )
+        .expect("rich frame");
         let data: ControlData = serde_json::from_value(serde_json::json!({
             "kind": "action_applied",
             "input": {
@@ -1365,25 +1394,10 @@ mod action_response_tests {
             "postcondition": {
                 "kind": "screen",
                 "matched": false,
-                "viewport_text": "current screen",
-                "state_hash": "a".repeat(64),
-                "completion_quality": "deadline",
-                "cols": 80,
-                "rows": 24,
-                "child_completed": false
+                "quality": "deadline",
+                "frame": frame
             },
-            "boundaries": {
-                "durable": {
-                    "next_event_seq": 4,
-                    "event_hash": "b".repeat(64),
-                    "output_bytes": 10
-                },
-                "observed": {
-                    "next_event_seq": 5,
-                    "event_hash": "c".repeat(64),
-                    "output_bytes": 12
-                }
-            }
+            "boundaries": boundaries
         }))
         .expect("action payload");
         let (response, matched) =
@@ -1399,7 +1413,11 @@ mod action_response_tests {
         );
         assert_eq!(response["postcondition"]["outcome"], "deadline");
         assert_eq!(response["ended"], false);
-        assert_eq!(response["observation"]["screen"], "current screen");
+        assert!(
+            response["observation"]["data"]["rows"][0]["text"]
+                .as_str()
+                .is_some_and(|text| return text.starts_with("current screen"))
+        );
         assert_eq!(response["boundaries"]["durable"]["next_event_seq"], 4);
         assert_eq!(response["boundaries"]["observed"]["next_event_seq"], 5);
     }

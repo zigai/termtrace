@@ -48,7 +48,9 @@ pub use model::{
     ObservationResolution, ObservationSourceKind, StatePoint, TruthLayer,
 };
 pub(crate) use model::{frame_from_state, frame_hash};
-pub(crate) use session::{completed_observation_from_inspection, state_selector};
+pub(crate) use session::{
+    completed_observation_from_inspection, resolved_screen_state_for_session, state_selector,
+};
 pub use session::{
     observe_one_off_session, observe_session, observe_session_with_options,
     observe_validated_prefix, semantic_state_for_session, semantic_state_with_hash_for_session,

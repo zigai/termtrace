@@ -1,5 +1,7 @@
 use super::*;
 
+use termtrace::{control::ScreenWaitQuality, screen_frame::ScreenProjectionRequest};
+
 const DEFAULT_DURABILITY_MAX_INTERVAL_MS: u64 = 50;
 const DEFAULT_DURABILITY_MAX_UNCOMMITTED_BYTES: u64 = 65_536;
 
@@ -457,28 +459,21 @@ fn start_postcondition(
             &ControlRequest::new(ControlCommand::CaptureStable {
                 stable_for_ns: u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX),
                 timeout_ns: u64::try_from(synchronization.timeout.as_nanos()).unwrap_or(u64::MAX),
+                projection: ScreenProjectionRequest::default(),
             }),
         )?;
-        let ControlData::StableSnapshot {
-            viewport_text,
-            state_hash,
-            cols,
-            rows,
-            quality,
-            ..
-        } = data
-        else {
+        let ControlData::StableSnapshot { frame, quality, .. } = data else {
             return Err(miette::miette!(
-                "recording actor returned an unexpected stable-capture payload"
+                "actor returned the wrong stable-capture payload"
             ));
         };
         return Ok(serde_json::json!({
             "matched": quality == StableCaptureQuality::Stable,
             "kind": "idle",
-            "state": state_hash,
             "quality": quality,
-            "size": [cols, rows],
-            "screen": viewport_text,
+            "state_hash": frame.state_hash,
+            "frame_hash": frame.frame_hash,
+            "frame": frame,
         }));
     }
     let (kind, predicate) = match (
@@ -499,30 +494,19 @@ fn start_postcondition(
         }
     };
     let matched = wait_for_screen(session, predicate, Duration::ZERO, synchronization.timeout)?;
-    let mut postcondition = serde_json::json!({
-        "matched": true,
+    return Ok(serde_json::json!({
+        "matched": matched.matched,
         "kind": kind,
-        "state": matched.state_hash,
-        "quality": matched.completion_quality,
-        "size": [matched.cols, matched.rows],
-        "ended": matched.child_completed,
-    });
-    if let Ok(ControlData::Snapshot {
-        viewport_text,
-        state_hash,
-        ..
-    }) = request(session, ControlCommand::Snapshot)
-        && state_hash == matched.state_hash
-    {
-        postcondition
-            .as_object_mut()
-            .ok_or_else(|| miette::miette!("start postcondition is not an object"))?
-            .insert(
-                "screen".to_owned(),
-                serde_json::Value::String(viewport_text),
-            );
-    }
-    return Ok(postcondition);
+        "state": matched.frame.state_hash,
+        "frame_hash": matched.frame.frame_hash,
+        "quality": matched.quality,
+        "size": [matched.frame.geometry.cols, matched.frame.geometry.rows],
+        "ended": matches!(
+            matched.quality,
+            ScreenWaitQuality::ChildCompleted | ScreenWaitQuality::OutputClosed
+        ),
+        "frame": matched.frame,
+    }));
 }
 
 pub(super) fn run_restart(arguments: RestartArgs) -> Result<ExitCode> {

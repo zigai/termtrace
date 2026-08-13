@@ -64,6 +64,10 @@
           "additionalProperties": false,
           "description": "No presented-state postcondition was requested.",
           "properties": {
+            "frame": {
+              "$ref": "#/$defs/ScreenFrame",
+              "description": "Exact immediate post-input frame."
+            },
             "kind": {
               "const": "none",
               "type": "string"
@@ -75,7 +79,8 @@
           },
           "required": [
             "kind",
-            "matched"
+            "matched",
+            "frame"
           ],
           "type": "object"
         },
@@ -83,12 +88,9 @@
           "additionalProperties": false,
           "description": "Final state of an idle postcondition.",
           "properties": {
-            "cols": {
-              "description": "Terminal columns.",
-              "format": "uint16",
-              "maximum": 65535,
-              "minimum": 0,
-              "type": "integer"
+            "frame": {
+              "$ref": "#/$defs/ScreenFrame",
+              "description": "Exact terminating frame."
             },
             "kind": {
               "const": "idle",
@@ -101,86 +103,42 @@
             "quality": {
               "$ref": "#/$defs/StableCaptureQuality",
               "description": "Typed stability quality."
-            },
-            "rows": {
-              "description": "Terminal rows.",
-              "format": "uint16",
-              "maximum": 65535,
-              "minimum": 0,
-              "type": "integer"
-            },
-            "state_hash": {
-              "description": "Normalized semantic hash for the returned state.",
-              "type": "string"
-            },
-            "viewport_text": {
-              "description": "Plain text for the exact presentation-eligible viewport.",
-              "type": "string"
             }
           },
           "required": [
             "kind",
             "matched",
-            "viewport_text",
-            "state_hash",
             "quality",
-            "cols",
-            "rows"
+            "frame"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
-          "description": "Final state of a screen or regular-expression postcondition.",
+          "description": "Final state of a screen postcondition.",
           "properties": {
-            "child_completed": {
-              "description": "Whether child completion ended evaluation.",
-              "type": "boolean"
-            },
-            "cols": {
-              "description": "Terminal columns.",
-              "format": "uint16",
-              "maximum": 65535,
-              "minimum": 0,
-              "type": "integer"
-            },
-            "completion_quality": {
-              "description": "Stable completion classification.",
-              "type": "string"
+            "frame": {
+              "$ref": "#/$defs/ScreenFrame",
+              "description": "Exact terminating frame."
             },
             "kind": {
               "const": "screen",
               "type": "string"
             },
             "matched": {
-              "description": "Whether the predicate matched before the deadline or child completion.",
+              "description": "Whether the predicate matched before termination.",
               "type": "boolean"
             },
-            "rows": {
-              "description": "Terminal rows.",
-              "format": "uint16",
-              "maximum": 65535,
-              "minimum": 0,
-              "type": "integer"
-            },
-            "state_hash": {
-              "description": "Normalized semantic hash for the returned state.",
-              "type": "string"
-            },
-            "viewport_text": {
-              "description": "Plain text for the exact presentation-eligible viewport.",
-              "type": "string"
+            "quality": {
+              "$ref": "#/$defs/ScreenPostconditionQuality",
+              "description": "Closed completion classification."
             }
           },
           "required": [
             "kind",
             "matched",
-            "viewport_text",
-            "state_hash",
-            "completion_quality",
-            "cols",
-            "rows",
-            "child_completed"
+            "quality",
+            "frame"
           ],
           "type": "object"
         }
@@ -235,6 +193,192 @@
         "next_event_seq",
         "event_hash",
         "output_bytes"
+      ],
+      "type": "object"
+    },
+    "CaptureQuality": {
+      "description": "How settled the observed state is.",
+      "oneOf": [
+        {
+          "const": "live",
+          "description": "Immediate state from a responsive live actor.",
+          "type": "string"
+        },
+        {
+          "const": "stable",
+          "description": "Live state proven unchanged for a requested interval.",
+          "type": "string"
+        },
+        {
+          "const": "completed",
+          "description": "State from validated completed evidence.",
+          "type": "string"
+        },
+        {
+          "const": "incomplete",
+          "description": "Explicitly incomplete validated prefix.",
+          "type": "string"
+        }
+      ]
+    },
+    "CellStyle": {
+      "description": "Complete style attached to one terminal cell.",
+      "properties": {
+        "background": {
+          "$ref": "#/$defs/ColorSpec",
+          "description": "Background color source."
+        },
+        "blink": {
+          "description": "Blink attribute.",
+          "type": "boolean"
+        },
+        "bold": {
+          "description": "Bold attribute.",
+          "type": "boolean"
+        },
+        "faint": {
+          "description": "Faint attribute.",
+          "type": "boolean"
+        },
+        "foreground": {
+          "$ref": "#/$defs/ColorSpec",
+          "description": "Foreground color source."
+        },
+        "inverse": {
+          "description": "Inverse-video attribute.",
+          "type": "boolean"
+        },
+        "invisible": {
+          "description": "Invisible attribute.",
+          "type": "boolean"
+        },
+        "italic": {
+          "description": "Italic attribute.",
+          "type": "boolean"
+        },
+        "overline": {
+          "description": "Overline attribute.",
+          "type": "boolean"
+        },
+        "strikethrough": {
+          "description": "Strikethrough attribute.",
+          "type": "boolean"
+        },
+        "underline": {
+          "description": "Upstream SGR underline value (`0` through `5`).",
+          "format": "int32",
+          "type": "integer"
+        },
+        "underline_color": {
+          "$ref": "#/$defs/ColorSpec",
+          "description": "Underline color source."
+        }
+      },
+      "required": [
+        "foreground",
+        "background",
+        "underline_color",
+        "bold",
+        "italic",
+        "faint",
+        "blink",
+        "inverse",
+        "invisible",
+        "strikethrough",
+        "overline",
+        "underline"
+      ],
+      "type": "object"
+    },
+    "ColorSpec": {
+      "description": "Cell color source before default-color fallback.",
+      "oneOf": [
+        {
+          "description": "No explicit color.",
+          "properties": {
+            "kind": {
+              "const": "none",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Index into the active 256-color palette.",
+          "properties": {
+            "kind": {
+              "const": "palette",
+              "type": "string"
+            },
+            "value": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Explicit true color.",
+          "properties": {
+            "kind": {
+              "const": "rgb",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Rgb"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ColorState": {
+      "description": "Active terminal colors.",
+      "properties": {
+        "background": {
+          "$ref": "#/$defs/Rgb",
+          "description": "Default/current background."
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rgb"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit cursor color."
+        },
+        "foreground": {
+          "$ref": "#/$defs/Rgb",
+          "description": "Default/current foreground."
+        },
+        "palette": {
+          "description": "Active 256-color palette.",
+          "items": {
+            "$ref": "#/$defs/Rgb"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "background",
+        "foreground",
+        "palette"
       ],
       "type": "object"
     },
@@ -661,56 +805,40 @@
         },
         {
           "additionalProperties": false,
-          "description": "Atomic stable-screen wait result and the exact state that satisfied or ended the wait.",
+          "description": "Bounded rich projection of one exact actor-presented state.",
           "properties": {
-            "boundaries": {
-              "$ref": "#/$defs/ActorBoundaries",
-              "description": "Actor-consistent canonical source boundaries for this exact state."
+            "frame": {
+              "$ref": "#/$defs/ScreenFrame",
+              "description": "Exact owned projection produced before actor ordering was released."
             },
-            "cols": {
-              "description": "Terminal columns.",
-              "format": "uint16",
-              "maximum": 65535,
-              "minimum": 0,
-              "type": "integer"
-            },
-            "cursor_column": {
-              "description": "Cursor column when it lies in the viewport.",
-              "format": "uint16",
-              "maximum": 65535,
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "cursor_row": {
-              "description": "Cursor row when it lies in the viewport.",
-              "format": "uint16",
-              "maximum": 65535,
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "cursor_visible": {
-              "description": "Whether the cursor is visible.",
-              "type": "boolean"
-            },
+            "kind": {
+              "const": "screen_frame",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "frame"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Atomic stable-screen wait result and its exact terminating frame.",
+          "properties": {
             "first_observed_monotonic_ns": {
               "description": "First actor timestamp at which this exact state was observed.",
               "format": "uint64",
               "minimum": 0,
               "type": "integer"
             },
+            "frame": {
+              "$ref": "#/$defs/ScreenFrame",
+              "description": "Exact frame projected before waiter ordering was released."
+            },
             "kind": {
               "const": "stable_snapshot",
               "type": "string"
-            },
-            "modes": {
-              "$ref": "#/$defs/ModeState",
-              "description": "Presentation-eligible terminal modes from this exact state."
             },
             "observed_monotonic_ns": {
               "description": "Actor timestamp of the returned snapshot.",
@@ -722,122 +850,82 @@
               "$ref": "#/$defs/StableCaptureQuality",
               "description": "Typed reason the operation returned."
             },
-            "rows": {
-              "description": "Terminal rows.",
-              "format": "uint16",
-              "maximum": 65535,
-              "minimum": 0,
-              "type": "integer"
-            },
             "semantic_state_zstd": {
               "$ref": "#/$defs/Base64Bytes",
-              "description": "Zstandard-compressed canonical JSON for the exact semantic state."
+              "description": "Zstandard-compressed canonical JSON for this exact semantic state."
             },
             "stable_for_ns": {
               "description": "Requested unchanged interval.",
               "format": "uint64",
               "minimum": 0,
               "type": "integer"
-            },
-            "state_hash": {
-              "description": "Normalized semantic hash assigned by deterministic replay.",
-              "type": "string"
-            },
-            "viewport_text": {
-              "description": "Plain text for the exact presentation-eligible viewport.",
-              "type": "string"
             }
           },
           "required": [
             "kind",
+            "frame",
             "semantic_state_zstd",
-            "viewport_text",
-            "state_hash",
-            "cols",
-            "rows",
-            "cursor_visible",
             "first_observed_monotonic_ns",
             "observed_monotonic_ns",
             "stable_for_ns",
-            "quality",
-            "modes",
-            "boundaries"
+            "quality"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
-          "description": "Successful server-side presented-screen wait.",
+          "description": "Exact result of one server-side presented-screen wait.",
           "properties": {
-            "boundaries": {
-              "$ref": "#/$defs/ActorBoundaries",
-              "description": "Actor-consistent canonical source boundaries."
-            },
-            "child_completed": {
-              "description": "Whether immutable child completion made the final matching state stable.",
-              "type": "boolean"
-            },
-            "cols": {
-              "description": "Terminal columns.",
-              "format": "uint16",
-              "maximum": 65535,
-              "minimum": 0,
-              "type": "integer"
-            },
-            "completion_quality": {
-              "description": "`stable` or `matched_unsettled`.",
-              "type": "string"
-            },
             "first_match_monotonic_ns": {
-              "description": "First matching timestamp for this unchanged state.",
+              "description": "First matching timestamp for this unchanged state, when matched.",
               "format": "uint64",
               "minimum": 0,
-              "type": "integer"
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "frame": {
+              "$ref": "#/$defs/ScreenFrame",
+              "description": "Exact satisfying or terminating frame."
             },
             "kind": {
               "const": "screen_wait",
               "type": "string"
             },
-            "predicate": {
-              "$ref": "#/$defs/ScreenPredicate",
-              "description": "Predicate that matched."
+            "matched": {
+              "description": "Whether the predicate matched before termination.",
+              "type": "boolean"
             },
-            "rows": {
-              "description": "Terminal rows.",
-              "format": "uint16",
-              "maximum": 65535,
+            "observed_monotonic_ns": {
+              "description": "Last actor timestamp at which the returned state was evaluated.",
+              "format": "uint64",
               "minimum": 0,
               "type": "integer"
+            },
+            "predicate": {
+              "$ref": "#/$defs/ScreenPredicate",
+              "description": "Predicate that was evaluated."
+            },
+            "quality": {
+              "$ref": "#/$defs/ScreenWaitQuality",
+              "description": "Closed completion classification."
             },
             "stable_for_ns": {
               "description": "Requested unchanged interval.",
               "format": "uint64",
               "minimum": 0,
               "type": "integer"
-            },
-            "stable_through_monotonic_ns": {
-              "description": "Last timestamp through which the state remained stable.",
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "state_hash": {
-              "description": "Full presentation-eligible semantic state hash.",
-              "type": "string"
             }
           },
           "required": [
             "kind",
             "predicate",
-            "state_hash",
-            "first_match_monotonic_ns",
-            "stable_through_monotonic_ns",
+            "matched",
+            "observed_monotonic_ns",
             "stable_for_ns",
-            "boundaries",
-            "cols",
-            "rows",
-            "completion_quality",
-            "child_completed"
+            "quality",
+            "frame"
           ],
           "type": "object"
         },
@@ -900,6 +988,17 @@
         "scope": {
           "description": "Exact output or mutation scope covered by these details.",
           "type": "string"
+        },
+        "screen_frame": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScreenFrameFailureDetails"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Bounded rich-projection validation or resource-limit facts."
         }
       },
       "required": [
@@ -995,6 +1094,61 @@
         }
       ]
     },
+    "CursorState": {
+      "description": "Cursor state at one semantic boundary.",
+      "properties": {
+        "blinking": {
+          "description": "Blink mode.",
+          "type": "boolean"
+        },
+        "column": {
+          "description": "Viewport column when available.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "in_viewport": {
+          "description": "Whether the cursor lies in the viewport.",
+          "type": "boolean"
+        },
+        "row": {
+          "description": "Viewport row when available.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "style": {
+          "$ref": "#/$defs/CursorStyle",
+          "description": "Visual shape."
+        },
+        "visible": {
+          "description": "Visibility mode.",
+          "type": "boolean"
+        },
+        "wide_tail": {
+          "description": "Whether the cursor is on a wide-character tail.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "visible",
+        "blinking",
+        "in_viewport",
+        "style"
+      ],
+      "type": "object"
+    },
     "CursorStyle": {
       "description": "Cursor visual style.",
       "oneOf": [
@@ -1016,6 +1170,26 @@
         {
           "const": "hollow_block",
           "description": "Hollow block.",
+          "type": "string"
+        }
+      ]
+    },
+    "FrameDetail": {
+      "description": "Requested rich-screen representation.",
+      "oneOf": [
+        {
+          "const": "text",
+          "description": "Deterministic convenience text with authoritative row wrap facts.",
+          "type": "string"
+        },
+        {
+          "const": "spans",
+          "description": "Lossless appearance spans.",
+          "type": "string"
+        },
+        {
+          "const": "cells",
+          "description": "Exact cells; requires an explicit region.",
           "type": "string"
         }
       ]
@@ -1173,6 +1347,31 @@
       ],
       "type": "object"
     },
+    "InvalidRegionReason": {
+      "description": "Region validation failure reason.",
+      "oneOf": [
+        {
+          "const": "cells_require_explicit_region",
+          "description": "Exact cells were requested without an explicit region.",
+          "type": "string"
+        },
+        {
+          "const": "empty",
+          "description": "Region has zero width or height.",
+          "type": "string"
+        },
+        {
+          "const": "reversed",
+          "description": "An edge is ordered before its origin.",
+          "type": "string"
+        },
+        {
+          "const": "out_of_bounds",
+          "description": "Region lies outside the full viewport.",
+          "type": "string"
+        }
+      ]
+    },
     "ModeState": {
       "description": "Terminal modes relevant to presentation and input.",
       "properties": {
@@ -1206,6 +1405,607 @@
         "wraparound",
         "bracketed_paste",
         "values"
+      ],
+      "type": "object"
+    },
+    "ObservationIntegrity": {
+      "description": "Integrity relationship between an observation and canonical evidence.",
+      "oneOf": [
+        {
+          "const": "canonical_chained",
+          "description": "State derives from a validated canonical hash chain or live actor boundary.",
+          "type": "string"
+        },
+        {
+          "const": "unchained",
+          "description": "State derives from an unchained byte stream.",
+          "type": "string"
+        }
+      ]
+    },
+    "ObservationResolution": {
+      "description": "Service path used to resolve an observation without changing its meaning.",
+      "oneOf": [
+        {
+          "const": "actor_snapshot",
+          "description": "Actor-consistent live snapshot fast path.",
+          "type": "string"
+        },
+        {
+          "const": "canonical_replay",
+          "description": "Independently validated canonical event replay.",
+          "type": "string"
+        },
+        {
+          "const": "validated_checkpoint",
+          "description": "Content-addressed full-state checkpoint validated against exact source bytes.",
+          "type": "string"
+        },
+        {
+          "const": "ansi_interpretation",
+          "description": "Pinned semantic interpretation of an unchained ANSI stream.",
+          "type": "string"
+        }
+      ]
+    },
+    "ObservationSourceKind": {
+      "description": "Source category for one observation.",
+      "oneOf": [
+        {
+          "const": "live_session",
+          "description": "Responsive canonical recording actor.",
+          "type": "string"
+        },
+        {
+          "const": "completed_session",
+          "description": "Validated completed canonical recording.",
+          "type": "string"
+        },
+        {
+          "const": "interrupted_session",
+          "description": "Explicitly validated but incomplete canonical event prefix.",
+          "type": "string"
+        },
+        {
+          "const": "ansi_stream",
+          "description": "Unchained ANSI/VT byte stream.",
+          "type": "string"
+        },
+        {
+          "const": "imported_ansi",
+          "description": "Completed canonical evidence imported from an ANSI/VT byte stream.",
+          "type": "string"
+        },
+        {
+          "const": "one_off_command",
+          "description": "Canonical recording allocated for a one-off command.",
+          "type": "string"
+        }
+      ]
+    },
+    "Rgb": {
+      "description": "RGB color independent of libghostty's unstable ABI.",
+      "properties": {
+        "b": {
+          "description": "Blue channel.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "g": {
+          "description": "Green channel.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "r": {
+          "description": "Red channel.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "r",
+        "g",
+        "b"
+      ],
+      "type": "object"
+    },
+    "ScreenAppearance": {
+      "additionalProperties": false,
+      "description": "Complete appearance shared by an exact cell or a lossless span.",
+      "properties": {
+        "resolved_background": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rgb"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Resolved explicit background before default fallback."
+        },
+        "resolved_foreground": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rgb"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Resolved explicit foreground before default fallback."
+        },
+        "selected": {
+          "description": "Selection membership.",
+          "type": "boolean"
+        },
+        "style": {
+          "$ref": "#/$defs/CellStyle",
+          "description": "Authoritative source style and color selectors."
+        }
+      },
+      "required": [
+        "style",
+        "selected"
+      ],
+      "type": "object"
+    },
+    "ScreenCell": {
+      "additionalProperties": false,
+      "description": "Exact projected terminal cell.",
+      "properties": {
+        "appearance": {
+          "$ref": "#/$defs/ScreenAppearance",
+          "description": "Complete semantic appearance."
+        },
+        "column": {
+          "description": "Absolute viewport column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "grapheme": {
+          "description": "Complete grapheme cluster, empty for a blank/spacer.",
+          "type": "string"
+        },
+        "row": {
+          "description": "Absolute viewport row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wide_kind": {
+          "$ref": "#/$defs/WideKind",
+          "description": "Native Ghostty width role."
+        }
+      },
+      "required": [
+        "row",
+        "column",
+        "grapheme",
+        "wide_kind",
+        "appearance"
+      ],
+      "type": "object"
+    },
+    "ScreenCellRow": {
+      "additionalProperties": false,
+      "description": "Cell-detail row.",
+      "properties": {
+        "cells": {
+          "description": "Exact ordered cells.",
+          "items": {
+            "$ref": "#/$defs/ScreenCell"
+          },
+          "type": "array"
+        },
+        "row": {
+          "description": "Absolute row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "soft_wrapped": {
+          "description": "Whether this row ends in a native soft wrap.",
+          "type": "boolean"
+        },
+        "text": {
+          "description": "Deterministic convenience text.",
+          "type": "string"
+        },
+        "wrap_continuation": {
+          "description": "Whether this row continues a native soft wrap.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "row",
+        "soft_wrapped",
+        "wrap_continuation",
+        "text",
+        "cells"
+      ],
+      "type": "object"
+    },
+    "ScreenFrame": {
+      "additionalProperties": false,
+      "description": "Versioned, bounded projection of one exact semantic state.",
+      "properties": {
+        "capture_quality": {
+          "$ref": "#/$defs/CaptureQuality",
+          "description": "Settlement/provenance label."
+        },
+        "colors": {
+          "$ref": "#/$defs/ColorState",
+          "description": "Current/default colors and complete palette."
+        },
+        "cursor": {
+          "$ref": "#/$defs/CursorState",
+          "description": "Complete cursor state."
+        },
+        "data": {
+          "$ref": "#/$defs/ScreenFrameData",
+          "description": "Structurally matched detail payload."
+        },
+        "frame_hash": {
+          "description": "Projection identity in the `termtrace-screen-frame-v1` hash domain.",
+          "type": "string"
+        },
+        "geometry": {
+          "$ref": "#/$defs/ScreenGeometry",
+          "description": "Full viewport geometry."
+        },
+        "modes": {
+          "$ref": "#/$defs/ModeState",
+          "description": "Complete relevant terminal modes."
+        },
+        "presented": {
+          "description": "Whether this state was presentation eligible.",
+          "type": "boolean"
+        },
+        "requested_region": {
+          "$ref": "#/$defs/ScreenRegion",
+          "description": "Validated requested region."
+        },
+        "returned_region": {
+          "$ref": "#/$defs/ScreenRegion",
+          "description": "Actually returned region; equal to requested in version 1."
+        },
+        "source": {
+          "$ref": "#/$defs/ScreenFrameSource",
+          "description": "Exact source occurrence."
+        },
+        "state_hash": {
+          "description": "Complete semantic v5 state identity.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Projection format version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "state_hash",
+        "presented",
+        "capture_quality",
+        "source",
+        "geometry",
+        "requested_region",
+        "returned_region",
+        "cursor",
+        "modes",
+        "colors",
+        "data",
+        "frame_hash"
+      ],
+      "type": "object"
+    },
+    "ScreenFrameData": {
+      "description": "Structurally discriminated rich row payload.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Convenience text and authoritative wrap facts.",
+          "properties": {
+            "detail": {
+              "const": "text",
+              "type": "string"
+            },
+            "rows": {
+              "description": "Ordered projected rows.",
+              "items": {
+                "$ref": "#/$defs/ScreenTextRow"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "detail",
+            "rows"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Lossless appearance spans.",
+          "properties": {
+            "detail": {
+              "const": "spans",
+              "type": "string"
+            },
+            "rows": {
+              "description": "Ordered projected rows.",
+              "items": {
+                "$ref": "#/$defs/ScreenSpanRow"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "detail",
+            "rows"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact cells.",
+          "properties": {
+            "detail": {
+              "const": "cells",
+              "type": "string"
+            },
+            "rows": {
+              "description": "Ordered projected rows.",
+              "items": {
+                "$ref": "#/$defs/ScreenCellRow"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "detail",
+            "rows"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ScreenFrameFailureDetails": {
+      "additionalProperties": false,
+      "description": "Bounded context for a rejected rich screen projection.",
+      "properties": {
+        "cols": {
+          "description": "Full terminal columns when geometry was available.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameDetail"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Requested projection detail when known."
+        },
+        "limit_kind": {
+          "description": "`cell_count`, `serialized_bytes`, or `response_bytes` for limit failures.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maximum": {
+          "description": "Maximum permitted amount for a limit failure.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScreenRegion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Requested region when supplied."
+        },
+        "region_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InvalidRegionReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Typed invalid-region reason when validation failed."
+        },
+        "requested": {
+          "description": "Requested measured amount for a limit failure.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "rows": {
+          "description": "Full terminal rows when geometry was available.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ScreenFrameSource": {
+      "description": "Exact provenance of the projected semantic state.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "State selected while the live actor still owned exclusivity.",
+          "properties": {
+            "boundaries": {
+              "$ref": "#/$defs/ActorBoundaries",
+              "description": "Durable and actor-observed canonical boundaries."
+            },
+            "observed_monotonic_ns": {
+              "description": "Actor observation time in session-monotonic nanoseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "session_id": {
+              "description": "Canonical session identity.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "source": {
+              "const": "actor",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "session_id",
+            "boundaries",
+            "observed_monotonic_ns"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "State selected through a completed or explicit semantic resolution.",
+          "properties": {
+            "boundary": {
+              "$ref": "#/$defs/CanonicalBoundary",
+              "description": "Exact validated source boundary."
+            },
+            "event_seq": {
+              "description": "Responsible canonical event sequence when known.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "integrity": {
+              "$ref": "#/$defs/ObservationIntegrity",
+              "description": "Integrity relationship to canonical evidence."
+            },
+            "monotonic_ns": {
+              "description": "Session-monotonic timestamp when known.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "resolution": {
+              "$ref": "#/$defs/ObservationResolution",
+              "description": "Resolution path used to select the state."
+            },
+            "session_id": {
+              "description": "Canonical session identity when available.",
+              "format": "uuid",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "const": "resolved",
+              "type": "string"
+            },
+            "source_completed": {
+              "description": "Whether canonical evidence completed durably.",
+              "type": "boolean"
+            },
+            "source_kind": {
+              "$ref": "#/$defs/ObservationSourceKind",
+              "description": "Source category."
+            },
+            "state_id": {
+              "description": "Dense semantic state identity when assigned.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "state_point": {
+              "$ref": "#/$defs/StatePoint",
+              "description": "Requested state selector."
+            }
+          },
+          "required": [
+            "source",
+            "source_kind",
+            "source_completed",
+            "state_point",
+            "boundary",
+            "integrity",
+            "resolution"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ScreenGeometry": {
+      "additionalProperties": false,
+      "description": "Complete terminal geometry, independent of the returned region.",
+      "properties": {
+        "cols": {
+          "description": "Viewport columns.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "description": "Viewport rows.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cols",
+        "rows"
       ],
       "type": "object"
     },
@@ -1311,6 +2111,36 @@
             "number"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "ScreenPostconditionQuality": {
+      "description": "Why an exact action screen postcondition returned.",
+      "oneOf": [
+        {
+          "const": "matched",
+          "description": "The predicate matched and its state met the requested stability contract.",
+          "type": "string"
+        },
+        {
+          "const": "matched_unsettled",
+          "description": "The predicate matched without an additional settling interval.",
+          "type": "string"
+        },
+        {
+          "const": "child_completed",
+          "description": "Child completion terminated the postcondition before a match.",
+          "type": "string"
+        },
+        {
+          "const": "output_closed",
+          "description": "PTY output closure terminated the postcondition before a match.",
+          "type": "string"
+        },
+        {
+          "const": "deadline",
+          "description": "The actor-side deadline elapsed before a match.",
+          "type": "string"
         }
       ]
     },
@@ -1643,7 +2473,7 @@
     },
     "ScreenRegion": {
       "additionalProperties": false,
-      "description": "Half-open viewport region used by structural screen predicates.",
+      "description": "Absolute zero-based half-open terminal region.",
       "properties": {
         "bottom": {
           "description": "Exclusive bottom row.",
@@ -1653,7 +2483,7 @@
           "type": "integer"
         },
         "left": {
-          "description": "Inclusive zero-based left column.",
+          "description": "Inclusive left column.",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
@@ -1667,7 +2497,7 @@
           "type": "integer"
         },
         "top": {
-          "description": "Inclusive zero-based top row.",
+          "description": "Inclusive top row.",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
@@ -1675,10 +2505,182 @@
         }
       },
       "required": [
-        "left",
         "top",
+        "left",
         "right",
         "bottom"
+      ],
+      "type": "object"
+    },
+    "ScreenSpan": {
+      "additionalProperties": false,
+      "description": "Lossless run of cells with identical complete appearance.",
+      "properties": {
+        "appearance": {
+          "$ref": "#/$defs/ScreenAppearance",
+          "description": "Appearance common to every covered cell."
+        },
+        "cell_count": {
+          "description": "Number of terminal columns covered.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cells": {
+          "description": "Exact grapheme/width map in column order.",
+          "items": {
+            "$ref": "#/$defs/SpanCell"
+          },
+          "type": "array"
+        },
+        "end_column": {
+          "description": "Exclusive absolute end column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_column": {
+          "description": "Inclusive absolute start column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text": {
+          "description": "Deterministic convenience text for this run.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start_column",
+        "end_column",
+        "cell_count",
+        "text",
+        "appearance",
+        "cells"
+      ],
+      "type": "object"
+    },
+    "ScreenSpanRow": {
+      "additionalProperties": false,
+      "description": "Span-detail row.",
+      "properties": {
+        "row": {
+          "description": "Absolute row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "soft_wrapped": {
+          "description": "Whether this row ends in a native soft wrap.",
+          "type": "boolean"
+        },
+        "spans": {
+          "description": "Lossless ordered appearance spans.",
+          "items": {
+            "$ref": "#/$defs/ScreenSpan"
+          },
+          "type": "array"
+        },
+        "text": {
+          "description": "Deterministic convenience text.",
+          "type": "string"
+        },
+        "wrap_continuation": {
+          "description": "Whether this row continues a native soft wrap.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "row",
+        "soft_wrapped",
+        "wrap_continuation",
+        "text",
+        "spans"
+      ],
+      "type": "object"
+    },
+    "ScreenTextRow": {
+      "additionalProperties": false,
+      "description": "Text-detail row.",
+      "properties": {
+        "row": {
+          "description": "Absolute row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "soft_wrapped": {
+          "description": "Whether this row ends in a native soft wrap.",
+          "type": "boolean"
+        },
+        "text": {
+          "description": "Deterministic convenience text.",
+          "type": "string"
+        },
+        "wrap_continuation": {
+          "description": "Whether this row continues a native soft wrap.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "row",
+        "soft_wrapped",
+        "wrap_continuation",
+        "text"
+      ],
+      "type": "object"
+    },
+    "ScreenWaitQuality": {
+      "description": "Why an exact actor-side screen predicate operation returned.",
+      "oneOf": [
+        {
+          "const": "matched",
+          "description": "The predicate matched and its state met the requested stability interval.",
+          "type": "string"
+        },
+        {
+          "const": "matched_unsettled",
+          "description": "The predicate matched but no stability interval was requested.",
+          "type": "string"
+        },
+        {
+          "const": "child_completed",
+          "description": "Child completion terminated the operation before a match.",
+          "type": "string"
+        },
+        {
+          "const": "output_closed",
+          "description": "PTY output closure terminated the operation before a match.",
+          "type": "string"
+        },
+        {
+          "const": "deadline",
+          "description": "The actor-side deadline elapsed before a match.",
+          "type": "string"
+        }
+      ]
+    },
+    "SpanCell": {
+      "additionalProperties": false,
+      "description": "Per-column content retained inside an appearance span.",
+      "properties": {
+        "grapheme": {
+          "description": "Complete grapheme cluster.",
+          "type": "string"
+        },
+        "wide_kind": {
+          "$ref": "#/$defs/WideKind",
+          "description": "Native Ghostty width role."
+        }
+      },
+      "required": [
+        "grapheme",
+        "wide_kind"
       ],
       "type": "object"
     },
@@ -1722,6 +2724,126 @@
         }
       ]
     },
+    "StatePoint": {
+      "description": "Shared state selection vocabulary.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Latest presentation-eligible state.",
+          "properties": {
+            "selector": {
+              "const": "latest_presented",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact semantic state identifier.",
+          "properties": {
+            "selector": {
+              "const": "state_id",
+              "type": "string"
+            },
+            "state_id": {
+              "description": "Exact semantic state identifier.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "selector",
+            "state_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact content-addressed semantic state hash.",
+          "properties": {
+            "selector": {
+              "const": "state_hash",
+              "type": "string"
+            },
+            "state_hash": {
+              "description": "BLAKE3 hash of the complete normalized semantic state.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "state_hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Latest state at or before an event sequence.",
+          "properties": {
+            "event_seq": {
+              "description": "Canonical event sequence.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "selector": {
+              "const": "event_seq",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "event_seq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Latest state at or before a session-monotonic timestamp.",
+          "properties": {
+            "monotonic_ns": {
+              "description": "Session-monotonic nanoseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "selector": {
+              "const": "monotonic_ns",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "monotonic_ns"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "State at a uniquely named marker.",
+          "properties": {
+            "label": {
+              "description": "Unique marker label.",
+              "type": "string"
+            },
+            "selector": {
+              "const": "marker",
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "label"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "TerminalMode": {
       "description": "One ANSI or DEC mode value.",
       "properties": {
@@ -1747,6 +2869,31 @@
         "enabled"
       ],
       "type": "object"
+    },
+    "WideKind": {
+      "description": "Authoritative width role reported by Ghostty for one terminal cell.",
+      "oneOf": [
+        {
+          "const": "narrow",
+          "description": "A regular one-column cell.",
+          "type": "string"
+        },
+        {
+          "const": "wide",
+          "description": "The leading cell of a two-column grapheme.",
+          "type": "string"
+        },
+        {
+          "const": "spacer_tail",
+          "description": "The non-rendered cell following a wide grapheme.",
+          "type": "string"
+        },
+        {
+          "const": "spacer_head",
+          "description": "A wrap-edge spacer preceding a wide grapheme on the next row.",
+          "type": "string"
+        }
+      ]
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/mutation-journal-record.schema.json",

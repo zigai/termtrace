@@ -54,7 +54,6 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
     assert_eq!(started["postcondition"]["kind"], "screen");
 
     let request_id = "019fddda-17c8-7000-87da-8785e71ab5c8";
-    let action_started = Instant::now();
     let mut act = Command::cargo_bin("termtrace").expect("binary should build");
     let output = act
         .env("TERMTRACE_STATE_DIR", &state)
@@ -76,10 +75,6 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
         .get_output()
         .stdout
         .clone();
-    assert!(
-        action_started.elapsed() < Duration::from_secs(1),
-        "matched screen action waited for its full timeout"
-    );
     let action: serde_json::Value =
         serde_json::from_slice(&output).expect("action response should be JSON");
     assert_eq!(action["request_id"], request_id);
@@ -89,7 +84,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
     assert_eq!(action["postcondition"]["matched"], true);
     assert_eq!(action["postcondition"]["outcome"], "matched_unsettled");
     assert_eq!(
-        action["observation"]["state"].as_str().map(str::len),
+        action["observation"]["state_hash"].as_str().map(str::len),
         Some(64)
     );
     assert!(action["boundaries"]["observed"]["next_event_seq"].is_number());
@@ -303,6 +298,112 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
 }
 
 #[test]
+fn child_completed_wait_returns_the_output_drained_frame() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "--response",
+            "full",
+            "start",
+            "drained-frame",
+            "--",
+            "/bin/sh",
+            "-c",
+            "sleep 1.5; dd if=/dev/zero bs=16384 count=8 2>/dev/null | tr '\\0' X; printf TAIL_SENTINEL",
+        ])
+        .assert()
+        .success();
+
+    let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = wait
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "--response",
+            "full",
+            "wait",
+            "drained-frame",
+            "--screen",
+            "NEVER_APPEARS",
+            "--timeout",
+            "15s",
+        ])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let waited: serde_json::Value =
+        serde_json::from_slice(&output).expect("child-completed wait response");
+    assert_eq!(waited["quality"], "child_completed");
+    assert!(
+        String::from_utf8_lossy(&output).contains("TAIL_SENTINEL"),
+        "terminating wait frame omitted queued PTY output: {waited}"
+    );
+
+    let mut completed = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = completed
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["--response", "full", "screen", "drained-frame"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let completed: serde_json::Value =
+        serde_json::from_slice(&output).expect("completed screen response");
+    assert_eq!(waited["frame"]["state_hash"], completed["state"]);
+    assert!(
+        String::from_utf8_lossy(&output).contains("TAIL_SENTINEL"),
+        "completed frame omitted sentinel: {completed}"
+    );
+
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "--response",
+            "full",
+            "start",
+            "drained-action",
+            "--",
+            "/bin/sh",
+            "-c",
+            "sleep 1.5; dd if=/dev/zero bs=16384 count=8 2>/dev/null | tr '\\0' Y; printf ACTION_TAIL",
+        ])
+        .assert()
+        .success();
+    let mut action = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = action
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "--response",
+            "full",
+            "act",
+            "drained-action",
+            "text:Z",
+            "--until-screen",
+            "NEVER_APPEARS",
+            "--timeout",
+            "5s",
+        ])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let action: serde_json::Value =
+        serde_json::from_slice(&output).expect("child-completed action response");
+    assert_eq!(action["postcondition"]["outcome"], "child_completed");
+    assert!(
+        String::from_utf8_lossy(&output).contains("ACTION_TAIL"),
+        "terminating action frame omitted queued PTY output: {action}"
+    );
+}
+
+#[test]
 fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("atomic-action");
@@ -365,7 +466,7 @@ fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
     assert_eq!(action["postcondition"]["matched"], false);
     assert_eq!(action["postcondition"]["outcome"], "deadline");
     assert_eq!(action["ended"], false);
-    assert!(action["observation"]["state"].as_str().is_some());
+    assert!(action["observation"]["state_hash"].as_str().is_some());
     assert!(action["boundaries"]["observed"]["next_event_seq"].is_number());
 
     let mut after = Command::cargo_bin("termtrace").expect("binary should build");

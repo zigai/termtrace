@@ -23,8 +23,8 @@ pub(crate) use termtrace::{
     client::Terminal as ClientTerminal,
     control::{
         ControlCommand, ControlData, ControlRequest, ControlResult, ScreenMode, ScreenPredicate,
-        ScreenRegion, StableCaptureQuality, StateHashComparison, control_endpoint_is_reachable,
-        control_socket_name, send_request, send_request_response,
+        ScreenRegion, ScreenWaitQuality, StableCaptureQuality, StateHashComparison,
+        control_endpoint_is_reachable, control_socket_name, send_request, send_request_response,
     },
     environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},
     event::{
@@ -44,13 +44,14 @@ pub(crate) use termtrace::{
         derived_directory_name, index_session_range, index_session_with_options, replay,
     },
     request_journal::read_mutation_journal,
+    screen_frame::{ScreenFrameData, ScreenFrameSource, ScreenProjectionRequest},
     session::{
         CaptureTarget, GeometrySource, SessionCompletion, SessionManifest, TmuxPaneLaunchKind,
         read_manifest, validate_completed_log,
     },
     timeline::SourceRange,
 };
-pub(crate) use zstd::stream::{decode_all, read::Decoder};
+pub(crate) use zstd::stream::read::Decoder;
 
 pub(crate) fn wait_for_control(session: &Path) {
     let deadline = Instant::now() + Duration::from_secs(5);

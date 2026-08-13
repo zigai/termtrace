@@ -48,11 +48,16 @@
         "style": {
           "$ref": "#/$defs/CellStyle",
           "description": "Visual style."
+        },
+        "wide_kind": {
+          "$ref": "#/$defs/WideKind",
+          "description": "Native width role; never inferred from the grapheme."
         }
       },
       "required": [
         "column",
         "grapheme",
+        "wide_kind",
         "style",
         "selected"
       ],
@@ -407,10 +412,20 @@
           "maximum": 65535,
           "minimum": 0,
           "type": "integer"
+        },
+        "soft_wrapped": {
+          "description": "Whether this row ends in a native soft wrap.",
+          "type": "boolean"
+        },
+        "wrap_continuation": {
+          "description": "Whether this row continues a native soft wrap from its predecessor.",
+          "type": "boolean"
         }
       },
       "required": [
         "row",
+        "soft_wrapped",
+        "wrap_continuation",
         "dirty",
         "cells"
       ],
@@ -652,6 +667,31 @@
         "enabled"
       ],
       "type": "object"
+    },
+    "WideKind": {
+      "description": "Authoritative width role reported by Ghostty for one terminal cell.",
+      "oneOf": [
+        {
+          "const": "narrow",
+          "description": "A regular one-column cell.",
+          "type": "string"
+        },
+        {
+          "const": "wide",
+          "description": "The leading cell of a two-column grapheme.",
+          "type": "string"
+        },
+        {
+          "const": "spacer_tail",
+          "description": "The non-rendered cell following a wide grapheme.",
+          "type": "string"
+        },
+        {
+          "const": "spacer_head",
+          "description": "A wrap-edge spacer preceding a wide grapheme on the next row.",
+          "type": "string"
+        }
+      ]
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/replay-checkpoint.schema.json",

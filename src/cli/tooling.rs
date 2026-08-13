@@ -97,11 +97,11 @@ fn run_python_client(assets: &Path, arguments: ClientRunArgs) -> Result<ExitCode
             .into_diagnostic()?;
         return process_exit_code(status);
     }
-    let python_source = assets.join("python/src");
+    let python_root = assets.join("python");
     let python_path = match env::var_os("PYTHONPATH") {
-        Some(existing) => env::join_paths([python_source.as_os_str(), existing.as_os_str()])
+        Some(existing) => env::join_paths([python_root.as_os_str(), existing.as_os_str()])
             .map_err(|error| return miette::miette!("invalid PYTHONPATH: {error}"))?,
-        None => python_source.into_os_string(),
+        None => python_root.into_os_string(),
     };
     let status = ProcessCommand::new("python3")
         .arg(&script)

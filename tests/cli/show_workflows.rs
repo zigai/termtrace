@@ -598,6 +598,123 @@ fn show_one_off_waits_stop_durably_and_detach_is_explicit() {
     assert!(session.join("completion.json").is_file());
 }
 
+#[test]
+fn synchronization_commands_reject_incomplete_stability() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+
+    let mut idle_start = Command::cargo_bin("termtrace").expect("binary should build");
+    let idle_output = idle_start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "start",
+            "idle",
+            "--until-idle",
+            "10ms",
+            "--timeout",
+            "2s",
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; sleep 30",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let idle: serde_json::Value =
+        serde_json::from_slice(&idle_output).expect("idle start response");
+    assert_eq!(idle["postcondition"]["matched"], true);
+    let mut stop_idle = Command::cargo_bin("termtrace").expect("binary should build");
+    stop_idle
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "idle", "--wait"])
+        .assert()
+        .success();
+
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "start",
+            "stable-contract",
+            "--until-screen",
+            "READY",
+            "--timeout",
+            "5s",
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; printf 'READY\\n'; i=0; while :; do printf '\\r%04d' \"$i\"; i=$((i + 1)); sleep .01; done",
+        ])
+        .assert()
+        .success();
+
+    let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
+    wait.env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "wait",
+            "stable-contract",
+            "READY",
+            "--stable-for",
+            "200ms",
+            "--timeout-ms",
+            "500",
+        ])
+        .assert()
+        .failure();
+
+    let mut show = Command::cargo_bin("termtrace").expect("binary should build");
+    show.env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "show",
+            "stable-contract",
+            "--stable-for",
+            "200ms",
+            "--timeout-ms",
+            "500",
+            "--format",
+            "json-compact",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "live stability was not established before Deadline",
+        ));
+
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "stable-contract", "--wait"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn show_one_off_rejects_an_unmatched_wait() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let mut show = Command::cargo_bin("termtrace").expect("binary should build");
+    fs_err::set_permissions(temporary.path(), Permissions::from_mode(0o700))
+        .expect("owner-only state directory");
+    show.env("TERMTRACE_STATE_DIR", temporary.path())
+        .args([
+            "show",
+            "--wait",
+            "NEVER",
+            "--timeout-ms",
+            "500",
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; sleep 30",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "one-off wait did not meet the requested predicate stability before Deadline",
+        ));
+}
+
 fn assert_semantic_image(format: &str, bytes: &[u8]) {
     if format == "svg" {
         assert!(bytes.starts_with(b"<svg "), "missing SVG signature");

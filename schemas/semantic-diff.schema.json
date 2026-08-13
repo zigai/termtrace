@@ -87,11 +87,16 @@
         "style": {
           "$ref": "#/$defs/CellStyle",
           "description": "Visual style."
+        },
+        "wide_kind": {
+          "$ref": "#/$defs/WideKind",
+          "description": "Native width role; never inferred from the grapheme."
         }
       },
       "required": [
         "column",
         "grapheme",
+        "wide_kind",
         "style",
         "selected"
       ],
@@ -491,7 +496,7 @@
     },
     "RowChange": {
       "additionalProperties": false,
-      "description": "Changed cells for one viewport row.",
+      "description": "Changed cells and native wrap facts for one viewport row.",
       "properties": {
         "cells": {
           "description": "Complete semantic cell changes.",
@@ -506,6 +511,28 @@
           "maximum": 65535,
           "minimum": 0,
           "type": "integer"
+        },
+        "soft_wrapped": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueChange8"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Earlier/later soft-wrap fact, including row absence at either endpoint."
+        },
+        "wrap_continuation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueChange8"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Earlier/later wrap-continuation fact, including row absence at either endpoint."
         }
       },
       "required": [
@@ -842,6 +869,52 @@
         "after"
       ],
       "type": "object"
+    },
+    "ValueChange8": {
+      "additionalProperties": false,
+      "description": "Before/after values for one changed semantic property.",
+      "properties": {
+        "after": {
+          "description": "Value at the later endpoint.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "before": {
+          "description": "Value at the earlier endpoint.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "WideKind": {
+      "description": "Authoritative width role reported by Ghostty for one terminal cell.",
+      "oneOf": [
+        {
+          "const": "narrow",
+          "description": "A regular one-column cell.",
+          "type": "string"
+        },
+        {
+          "const": "wide",
+          "description": "The leading cell of a two-column grapheme.",
+          "type": "string"
+        },
+        {
+          "const": "spacer_tail",
+          "description": "The non-rendered cell following a wide grapheme.",
+          "type": "string"
+        },
+        {
+          "const": "spacer_head",
+          "description": "A wrap-edge spacer preceding a wide grapheme on the next row.",
+          "type": "string"
+        }
+      ]
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/semantic-diff.schema.json",

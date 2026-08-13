@@ -189,6 +189,25 @@
         },
         {
           "additionalProperties": false,
+          "description": "Return one bounded rich projection of the latest presented state.",
+          "properties": {
+            "command": {
+              "const": "screen_frame",
+              "type": "string"
+            },
+            "projection": {
+              "$ref": "#/$defs/ScreenProjectionRequest",
+              "description": "Requested rich detail and exact optional viewport region."
+            }
+          },
+          "required": [
+            "command",
+            "projection"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Wait inside the actor for a stable presentation-eligible predicate.",
           "properties": {
             "command": {
@@ -198,6 +217,10 @@
             "predicate": {
               "$ref": "#/$defs/ScreenPredicate",
               "description": "Exact screen predicate."
+            },
+            "projection": {
+              "$ref": "#/$defs/ScreenProjectionRequest",
+              "description": "Rich projection returned from the exact satisfying or terminating state."
             },
             "stable_for_ns": {
               "description": "Required unchanged matching-state interval.",
@@ -216,7 +239,8 @@
             "command",
             "predicate",
             "stable_for_ns",
-            "timeout_ns"
+            "timeout_ns",
+            "projection"
           ],
           "type": "object"
         },
@@ -227,6 +251,10 @@
             "command": {
               "const": "capture_stable",
               "type": "string"
+            },
+            "projection": {
+              "$ref": "#/$defs/ScreenProjectionRequest",
+              "description": "Rich projection returned from the exact terminating state."
             },
             "stable_for_ns": {
               "description": "Required unchanged presented-state interval.",
@@ -244,7 +272,8 @@
           "required": [
             "command",
             "stable_for_ns",
-            "timeout_ns"
+            "timeout_ns",
+            "projection"
           ],
           "type": "object"
         },
@@ -341,6 +370,10 @@
             "postcondition": {
               "$ref": "#/$defs/ActionPostcondition",
               "description": "Presented-state condition evaluated without releasing actor ordering."
+            },
+            "projection": {
+              "$ref": "#/$defs/ScreenProjectionRequest",
+              "description": "Rich projection returned from the exact terminating state."
             }
           },
           "required": [
@@ -348,7 +381,8 @@
             "atoms",
             "pace_ns",
             "include_atom_outcomes",
-            "postcondition"
+            "postcondition",
+            "projection"
           ],
           "type": "object"
         },
@@ -920,6 +954,41 @@
         },
         {
           "additionalProperties": false,
+          "description": "Project one exact bounded rich frame from a live or completed state.",
+          "properties": {
+            "handle": {
+              "description": "Process-local session handle.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "include_hidden": {
+              "description": "Permit explicitly selected hidden synchronized-output state.",
+              "type": "boolean"
+            },
+            "method": {
+              "const": "screen_frame",
+              "type": "string"
+            },
+            "point": {
+              "$ref": "#/$defs/StatePoint",
+              "description": "Exact shared state selector."
+            },
+            "projection": {
+              "$ref": "#/$defs/ScreenProjectionRequest",
+              "description": "Requested rich detail and exact optional viewport region."
+            }
+          },
+          "required": [
+            "method",
+            "handle",
+            "point",
+            "include_hidden",
+            "projection"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Build one bounded page of the completed canonical/semantic timeline.",
           "properties": {
             "all_states": {
@@ -1264,6 +1333,26 @@
         }
       },
       "type": "object"
+    },
+    "FrameDetail": {
+      "description": "Requested rich-screen representation.",
+      "oneOf": [
+        {
+          "const": "text",
+          "description": "Deterministic convenience text with authoritative row wrap facts.",
+          "type": "string"
+        },
+        {
+          "const": "spans",
+          "description": "Lossless appearance spans.",
+          "type": "string"
+        },
+        {
+          "const": "cells",
+          "description": "Exact cells; requires an explicit region.",
+          "type": "string"
+        }
+      ]
     },
     "InputKind": {
       "description": "User-facing interpretation of an input byte sequence.",
@@ -2169,9 +2258,34 @@
         }
       ]
     },
+    "ScreenProjectionRequest": {
+      "additionalProperties": false,
+      "description": "Options for one rich projection.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/FrameDetail",
+          "description": "Requested representation."
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScreenRegion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact absolute region, or the complete viewport for text/spans."
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "type": "object"
+    },
     "ScreenRegion": {
       "additionalProperties": false,
-      "description": "Half-open viewport region used by structural screen predicates.",
+      "description": "Absolute zero-based half-open terminal region.",
       "properties": {
         "bottom": {
           "description": "Exclusive bottom row.",
@@ -2181,7 +2295,7 @@
           "type": "integer"
         },
         "left": {
-          "description": "Inclusive zero-based left column.",
+          "description": "Inclusive left column.",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
@@ -2195,7 +2309,7 @@
           "type": "integer"
         },
         "top": {
-          "description": "Inclusive zero-based top row.",
+          "description": "Inclusive top row.",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
@@ -2203,8 +2317,8 @@
         }
       },
       "required": [
-        "left",
         "top",
+        "left",
         "right",
         "bottom"
       ],

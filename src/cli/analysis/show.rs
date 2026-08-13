@@ -1,4 +1,5 @@
 use super::*;
+use termtrace::control::ScreenWaitQuality;
 
 pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
     if arguments.screen.is_some() || arguments.since.is_some() {
@@ -152,18 +153,22 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
                         "live stability is valid only for latest-presented observations"
                     ));
                 }
-                stable_hash = Some(
-                    wait_for_screen(
-                        &session,
-                        ScreenPredicate::StateHash {
-                            hash: "0".repeat(64),
-                            comparison: StateHashComparison::Changed,
-                        },
-                        arguments.stable_for,
-                        Duration::from_millis(arguments.timeout_ms),
-                    )?
-                    .state_hash,
-                );
+                let stable_wait = wait_for_screen(
+                    &session,
+                    ScreenPredicate::StateHash {
+                        hash: "0".repeat(64),
+                        comparison: StateHashComparison::Changed,
+                    },
+                    arguments.stable_for,
+                    Duration::from_millis(arguments.timeout_ms),
+                )?;
+                if !stable_wait.matched || stable_wait.quality != ScreenWaitQuality::Matched {
+                    return Err(miette::miette!(
+                        "live stability was not established before {:?}",
+                        stable_wait.quality
+                    ));
+                }
+                stable_hash = Some(stable_wait.frame.state_hash);
             }
             let mut observation =
                 observe_session_with_options(&session, point.clone(), arguments.include_hidden)?;
@@ -720,6 +725,28 @@ fn run_one_off_command(
                 ));
             }
         };
+        let wait_satisfied = waited.matched
+            && if stable_for.is_zero() {
+                waited.quality == ScreenWaitQuality::MatchedUnsettled
+            } else {
+                waited.quality == ScreenWaitQuality::Matched
+            };
+        if !wait_satisfied {
+            let stop_result = request(&paths.session, ControlCommand::Stop);
+            if stop_result.is_ok() {
+                let _ = child.wait();
+            }
+            let stop_description = match &stop_result {
+                Ok(_) => "accepted".to_owned(),
+                Err(stop_error) => stop_error.to_string(),
+            };
+            return Err(miette::miette!(
+                "one-off wait did not meet the requested predicate stability before {:?}; evidence preserved at {}; stop request: {}",
+                waited.quality,
+                paths.session.display(),
+                stop_description,
+            ));
+        }
         let observation = match observe_session_with_options(
             &paths.session,
             StatePoint::LatestPresented,
@@ -742,7 +769,7 @@ fn run_one_off_command(
                 ));
             }
         };
-        if observation.state_hash != waited.state_hash {
+        if observation.state_hash != waited.frame.state_hash {
             let stop_result = request(&paths.session, ControlCommand::Stop);
             if stop_result.is_ok() {
                 let _ = child.wait();

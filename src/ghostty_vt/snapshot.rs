@@ -9,7 +9,7 @@ use super::{
     terminal::check,
     types::{
         CellState, CellStyle, ColorSpec, ColorState, CursorState, CursorStyle, DirtyState, Format,
-        ModeState, Rgb, RowState, SemanticState, TerminalMetadata, TerminalMode,
+        ModeState, Rgb, RowState, SemanticState, TerminalMetadata, TerminalMode, WideKind,
     },
 };
 
@@ -36,11 +36,15 @@ impl<'engine> Snapshot<'engine> {
         if let Some(state) = self.snapshot_if_changed()? {
             return Ok(state);
         }
-        return self
-            .last_snapshot
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| return invalid_snapshot("unchanged terminal has no prior snapshot"));
+        let mut state = self.last_snapshot.as_ref().cloned().ok_or_else(|| {
+            return invalid_snapshot("unchanged terminal has no prior snapshot");
+        })?;
+        state.dirty = DirtyState::Clean;
+        state.dirty_rows.clear();
+        for row in &mut state.grid {
+            row.dirty = false;
+        }
+        return Ok(state);
     }
 
     pub(super) fn snapshot_if_changed(&mut self) -> Result<Option<SemanticState>> {
@@ -111,6 +115,18 @@ impl<'engine> Snapshot<'engine> {
 }
 
 pub(super) fn format(terminal: sys::GhosttyTerminal, format: Format) -> Result<Vec<u8>> {
+    return format_with_unwrap(terminal, format, false);
+}
+
+pub(super) fn format_replay_seed(terminal: sys::GhosttyTerminal) -> Result<Vec<u8>> {
+    return format_with_unwrap(terminal, Format::Vt, true);
+}
+
+fn format_with_unwrap(
+    terminal: sys::GhosttyTerminal,
+    format: Format,
+    unwrap: bool,
+) -> Result<Vec<u8>> {
     let emit = match format {
         Format::Plain => sys::GhosttyFormatterFormat_GHOSTTY_FORMATTER_FORMAT_PLAIN,
         Format::Vt => sys::GhosttyFormatterFormat_GHOSTTY_FORMATTER_FORMAT_VT,
@@ -138,7 +154,7 @@ pub(super) fn format(terminal: sys::GhosttyTerminal, format: Format) -> Result<V
     let options = sys::GhosttyFormatterTerminalOptions {
         size: size_of::<sys::GhosttyFormatterTerminalOptions>(),
         emit,
-        unwrap: false,
+        unwrap,
         trim: true,
         extra,
         selection: ptr::null(),
@@ -367,7 +383,22 @@ impl Snapshot<'_> {
                 "get row dirty state",
                 sys::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_DIRTY,
             )?;
-            let cells = if read_all || row_dirty {
+            let mut row_state = if read_all || row_dirty {
+                let raw_row: sys::GhosttyRow = row_get(
+                    handles.row,
+                    "get raw row",
+                    sys::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_RAW,
+                )?;
+                let soft_wrapped = raw_row_get(
+                    raw_row,
+                    "get row wrap",
+                    sys::GhosttyRowData_GHOSTTY_ROW_DATA_WRAP,
+                )?;
+                let wrap_continuation = raw_row_get(
+                    raw_row,
+                    "get row wrap continuation",
+                    sys::GhosttyRowData_GHOSTTY_ROW_DATA_WRAP_CONTINUATION,
+                )?;
                 check("populate row cells", unsafe {
                     sys::ghostty_render_state_row_get(
                         handles.row,
@@ -385,15 +416,23 @@ impl Snapshot<'_> {
                     }
                     cells.push(read_cell(handles.cells, column)?);
                 }
-                cells
+                RowState {
+                    row,
+                    soft_wrapped,
+                    wrap_continuation,
+                    dirty: row_dirty,
+                    cells,
+                }
             } else {
                 reusable
                     .and_then(|state| return state.grid.get(usize::from(row)))
-                    .map(|state| return state.cells.clone())
+                    .filter(|state| return state.row == row)
+                    .cloned()
                     .ok_or_else(|| {
                         return invalid_snapshot("clean row is absent from previous snapshot");
                     })?
             };
+            row_state.dirty = row_dirty;
             let clean = false;
             check("reset row dirty state", unsafe {
                 sys::ghostty_render_state_row_set(
@@ -402,11 +441,7 @@ impl Snapshot<'_> {
                     (&raw const clean).cast::<c_void>(),
                 )
             })?;
-            grid.push(RowState {
-                row,
-                dirty: row_dirty,
-                cells,
-            });
+            grid.push(row_state);
         }
         if grid.len() != usize::from(rows) {
             return Err(invalid_snapshot(
@@ -530,6 +565,25 @@ fn cell_get<T: Default>(
     })?;
     return Ok(value);
 }
+fn raw_row_get<T: Default>(row: sys::GhosttyRow, operation: &'static str, key: u32) -> Result<T> {
+    let mut value = T::default();
+    check(operation, unsafe {
+        sys::ghostty_row_get(row, key, (&raw mut value).cast::<c_void>())
+    })?;
+    return Ok(value);
+}
+
+fn raw_cell_get<T: Default>(
+    cell: sys::GhosttyCell,
+    operation: &'static str,
+    key: u32,
+) -> Result<T> {
+    let mut value = T::default();
+    check(operation, unsafe {
+        sys::ghostty_cell_get(cell, key, (&raw mut value).cast::<c_void>())
+    })?;
+    return Ok(value);
+}
 
 fn read_cell(cells: sys::GhosttyRenderStateRowCells, column: u16) -> Result<CellState> {
     let mut style = sys::GhosttyStyle {
@@ -546,6 +600,7 @@ fn read_cell(cells: sys::GhosttyRenderStateRowCells, column: u16) -> Result<Cell
     return Ok(CellState {
         column,
         grapheme: read_grapheme(cells)?,
+        wide_kind: read_wide_kind(cells)?,
         style: decode_style(style)?,
         resolved_foreground: optional_cell_color(
             cells,
@@ -561,6 +616,35 @@ fn read_cell(cells: sys::GhosttyRenderStateRowCells, column: u16) -> Result<Cell
             sys::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED,
         )?,
     });
+}
+
+fn read_wide_kind(cells: sys::GhosttyRenderStateRowCells) -> Result<WideKind> {
+    let cell: sys::GhosttyCell = cell_get(
+        cells,
+        "get raw cell",
+        sys::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW,
+    )?;
+    let wide: sys::GhosttyCellWide = raw_cell_get(
+        cell,
+        "get cell wide kind",
+        sys::GhosttyCellData_GHOSTTY_CELL_DATA_WIDE,
+    )?;
+    return decode_wide_kind(wide);
+}
+
+fn decode_wide_kind(wide: sys::GhosttyCellWide) -> Result<WideKind> {
+    match wide {
+        sys::GhosttyCellWide_GHOSTTY_CELL_WIDE_NARROW => return Ok(WideKind::Narrow),
+        sys::GhosttyCellWide_GHOSTTY_CELL_WIDE_WIDE => return Ok(WideKind::Wide),
+        sys::GhosttyCellWide_GHOSTTY_CELL_WIDE_SPACER_TAIL => return Ok(WideKind::SpacerTail),
+        sys::GhosttyCellWide_GHOSTTY_CELL_WIDE_SPACER_HEAD => return Ok(WideKind::SpacerHead),
+        result => {
+            return Err(Error::GhosttyVt {
+                operation: "decode cell wide kind",
+                result: i32::try_from(result).unwrap_or(i32::MAX),
+            });
+        }
+    }
 }
 
 fn read_grapheme(cells: sys::GhosttyRenderStateRowCells) -> Result<String> {
@@ -691,11 +775,12 @@ fn semantic_content_eq(left: &SemanticState, right: &SemanticState) -> bool {
         && left.active_style == right.active_style
         && left.metadata == right.metadata
         && left.grid.len() == right.grid.len()
-        && left
-            .grid
-            .iter()
-            .zip(&right.grid)
-            .all(|(left, right)| return left.row == right.row && left.cells == right.cells);
+        && left.grid.iter().zip(&right.grid).all(|(left, right)| {
+            return left.row == right.row
+                && left.soft_wrapped == right.soft_wrapped
+                && left.wrap_continuation == right.wrap_continuation
+                && left.cells == right.cells;
+        });
 }
 
 impl From<sys::GhosttyColorRgb> for Rgb {
@@ -792,8 +877,62 @@ mod tests {
                 .modes
                 .synchronized_output
         );
+
         terminal.resize(10, 3, 9, 18).expect("resize");
         let resized = terminal.snapshot().expect("resized snapshot");
         assert_eq!((resized.cols, resized.rows), (10, 3));
+    }
+    #[test]
+    fn preserves_native_wrap_and_wide_facts_across_clean_reuse() {
+        let mut terminal = GhosttyVt::new(4, 3, 0).expect("create terminal");
+        terminal.write("abc界".as_bytes());
+        let first = terminal.snapshot().expect("first snapshot");
+        assert!(first.grid.iter().any(|row| return row.soft_wrapped));
+        assert!(first.grid.iter().any(|row| return row.wrap_continuation));
+        assert!(
+            first
+                .grid
+                .iter()
+                .flat_map(|row| return &row.cells)
+                .any(|cell| {
+                    return cell.wide_kind == WideKind::Wide;
+                })
+        );
+        assert!(
+            first
+                .grid
+                .iter()
+                .flat_map(|row| return &row.cells)
+                .any(|cell| {
+                    return cell.wide_kind == WideKind::SpacerTail;
+                })
+        );
+        assert!(
+            first
+                .grid
+                .iter()
+                .flat_map(|row| return &row.cells)
+                .any(|cell| {
+                    return cell.wide_kind == WideKind::SpacerHead;
+                })
+        );
+
+        let reused = terminal.snapshot().expect("clean reused snapshot");
+        assert!(reused.grid.iter().all(|row| return !row.dirty));
+        assert!(first.grid.iter().zip(&reused.grid).all(|(left, right)| {
+            return left.soft_wrapped == right.soft_wrapped
+                && left.wrap_continuation == right.wrap_continuation
+                && left.cells == right.cells;
+        }));
+    }
+    #[test]
+    fn rejects_unknown_native_wide_kind() {
+        assert!(matches!(
+            decode_wide_kind(sys::GhosttyCellWide_GHOSTTY_CELL_WIDE_MAX_VALUE),
+            Err(Error::GhosttyVt {
+                operation: "decode cell wide kind",
+                ..
+            })
+        ));
     }
 }

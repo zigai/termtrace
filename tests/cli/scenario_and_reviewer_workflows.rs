@@ -257,6 +257,63 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
 }
 
 #[test]
+fn scenario_wait_requires_the_requested_stability_interval() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let scenario = temporary.path().join("unstable.termtrace.json");
+    let artifacts = temporary.path().join("artifacts");
+    fs_err::write(
+        &scenario,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "version": 2,
+            "name": "unstable matching screen",
+            "launch": {
+                "command": [
+                    "/bin/sh",
+                    "-c",
+                    "printf 'READY\\n'; i=0; while :; do printf '\\r%04d' \"$i\"; i=$((i + 1)); sleep .01; done"
+                ],
+                "environment": {
+                    "base": "clear",
+                    "set": {},
+                    "copy": ["PATH"],
+                    "unset": [],
+                    "color": "never"
+                },
+                "timeoutMs": 1000
+            },
+            "steps": [{
+                "waitScreen": {
+                    "contains": "READY",
+                    "stableForMs": 100,
+                    "timeoutMs": 250
+                }
+            }]
+        }))
+        .expect("scenario JSON"),
+    )
+    .expect("write scenario");
+
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+    let assertion = command
+        .arg("test")
+        .arg(&scenario)
+        .arg("--artifacts")
+        .arg(&artifacts)
+        .assert()
+        .failure();
+    let report: serde_json::Value =
+        serde_json::from_slice(&assertion.get_output().stdout).expect("scenario report");
+    assert_eq!(report["status"], "failed");
+    let attempt = &report["cases"][0]["attempts"][0]["report"];
+    assert_eq!(attempt["failure"]["step_index"], 0);
+    assert!(
+        attempt["failure"]["message"]
+            .as_str()
+            .is_some_and(|message| return message.contains("requested stability before Deadline"))
+    );
+}
+
+#[test]
 fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("review-session");

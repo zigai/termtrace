@@ -11,11 +11,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Error, Result,
-    control::{ActorBoundaries, ControlCommand, ControlData, ScreenPredicate, request},
+    control::{ControlCommand, ControlData, ScreenPredicate, ScreenWaitQuality, request},
     event::Event,
     event_log::{EventLog, EventLogCursor},
     ghostty_vt::SemanticState,
     replay::{StateInspection, StateSelector, inspect},
+    screen_frame::{ScreenFrame, ScreenProjectionRequest},
     session::{SessionCompletion, validate_completed_log},
 };
 
@@ -30,34 +31,24 @@ pub struct WaitOutcome {
     pub monotonic_ns: u64,
 }
 
-/// Successful presented-screen wait evidence.
+/// Exact presented-screen wait evidence.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScreenWaitOutcome {
-    /// Predicate that matched.
+    /// Predicate evaluated by the actor.
     pub predicate: ScreenPredicate,
-    /// Observation scope, fixed to `screen`.
-    pub scope: String,
-    /// Full presentation-eligible semantic state hash.
-    pub state_hash: String,
-    /// Whether the observed state was presentation eligible.
-    pub presented: bool,
-    /// First session-monotonic timestamp at which this unchanged state matched.
-    pub first_match_monotonic_ns: u64,
-    /// Last session-monotonic timestamp through which the state remained stable.
-    pub stable_through_monotonic_ns: u64,
+    /// Whether the predicate matched before termination.
+    pub matched: bool,
+    /// First matching actor timestamp, when matched.
+    pub first_match_monotonic_ns: Option<u64>,
+    /// Actor timestamp of the returned frame.
+    pub observed_monotonic_ns: u64,
     /// Requested stability duration.
     pub stable_for_ns: u64,
-    /// Actor-consistent canonical source boundaries.
-    pub boundaries: ActorBoundaries,
-    /// Whether completion was present when the result was returned.
-    pub child_completed: bool,
-    /// Terminal columns.
-    pub cols: u16,
-    /// Terminal rows.
-    pub rows: u16,
-    /// `stable` or `matched_unsettled`.
-    pub completion_quality: String,
+    /// Closed completion classification.
+    pub quality: ScreenWaitQuality,
+    /// Exact satisfying or terminating frame.
+    pub frame: ScreenFrame,
 }
 
 /// Wait for an exact predicate on the latest presentation-eligible viewport.
@@ -80,17 +71,16 @@ pub fn wait_for_screen(
             predicate: predicate.clone(),
             stable_for_ns,
             timeout_ns,
+            projection: ScreenProjectionRequest::default(),
         },
     )?;
     let ControlData::ScreenWait {
-        state_hash,
+        matched,
         first_match_monotonic_ns,
-        stable_through_monotonic_ns,
-        boundaries,
-        cols,
-        rows,
-        completion_quality,
-        child_completed,
+        observed_monotonic_ns,
+        stable_for_ns,
+        quality,
+        frame,
         ..
     } = result
     else {
@@ -100,17 +90,12 @@ pub fn wait_for_screen(
     };
     return Ok(ScreenWaitOutcome {
         predicate,
-        scope: "screen".to_owned(),
-        state_hash,
-        presented: true,
+        matched,
         first_match_monotonic_ns,
-        stable_through_monotonic_ns,
+        observed_monotonic_ns,
         stable_for_ns,
-        boundaries,
-        child_completed,
-        cols,
-        rows,
-        completion_quality,
+        quality,
+        frame,
     });
 }
 

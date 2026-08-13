@@ -60,7 +60,7 @@ impl MutationHistory {
     }
 
     pub(super) fn is_full(&self) -> bool {
-        return self.journal.len() >= MAX_SESSION_MUTATIONS;
+        return self.journal.len() >= MAX_SESSION_MUTATIONS || !self.journal.has_record_capacity();
     }
 
     pub(in crate::record) fn remember(

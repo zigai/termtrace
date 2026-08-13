@@ -20,16 +20,18 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub use crate::screen_frame::ScreenRegion;
 use crate::{
     Error, Result,
     event::{ByteString, InputKind},
     event_log::CanonicalBoundary,
     ghostty_vt::{CursorStyle, KeyModifiers, ModeState, MouseButton, NamedKey},
+    screen_frame::{FrameDetail, InvalidRegionReason, ScreenFrame, ScreenProjectionRequest},
     session::read_manifest,
 };
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 14;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 15;
 /// Prefix for the Linux abstract socket name assigned to each live session.
 pub const CONTROL_SOCKET_PREFIX: &str = "termtrace-control-";
 /// Maximum encoded request or response size.
@@ -176,20 +178,6 @@ pub enum ScreenPredicate {
     },
 }
 
-/// Half-open viewport region used by structural screen predicates.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ScreenRegion {
-    /// Inclusive zero-based left column.
-    pub left: u16,
-    /// Inclusive zero-based top row.
-    pub top: u16,
-    /// Exclusive right column.
-    pub right: u16,
-    /// Exclusive bottom row.
-    pub bottom: u16,
-}
-
 /// Stable terminal-mode selectors available to screen predicates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
@@ -250,6 +238,37 @@ impl StableCaptureQuality {
         };
     }
 }
+/// Why an exact actor-side screen predicate operation returned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenWaitQuality {
+    /// The predicate matched and its state met the requested stability interval.
+    Matched,
+    /// The predicate matched but no stability interval was requested.
+    MatchedUnsettled,
+    /// Child completion terminated the operation before a match.
+    ChildCompleted,
+    /// PTY output closure terminated the operation before a match.
+    OutputClosed,
+    /// The actor-side deadline elapsed before a match.
+    Deadline,
+}
+
+/// Why an exact action screen postcondition returned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenPostconditionQuality {
+    /// The predicate matched and its state met the requested stability contract.
+    Matched,
+    /// The predicate matched without an additional settling interval.
+    MatchedUnsettled,
+    /// Child completion terminated the postcondition before a match.
+    ChildCompleted,
+    /// PTY output closure terminated the postcondition before a match.
+    OutputClosed,
+    /// The actor-side deadline elapsed before a match.
+    Deadline,
+}
 
 /// One command sent to the live session actor.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -261,6 +280,11 @@ pub enum ControlCommand {
     Status,
     /// Return the latest presentation-eligible semantic viewport.
     Snapshot,
+    /// Return one bounded rich projection of the latest presented state.
+    ScreenFrame {
+        /// Requested rich detail and exact optional viewport region.
+        projection: ScreenProjectionRequest,
+    },
     /// Wait inside the actor for a stable presentation-eligible predicate.
     WaitScreen {
         /// Exact screen predicate.
@@ -269,6 +293,8 @@ pub enum ControlCommand {
         stable_for_ns: u64,
         /// Server-side monotonic deadline interval.
         timeout_ns: u64,
+        /// Rich projection returned from the exact satisfying or terminating state.
+        projection: ScreenProjectionRequest,
     },
     /// Atomically wait for a stable presented state and return that exact actor snapshot.
     CaptureStable {
@@ -276,6 +302,8 @@ pub enum ControlCommand {
         stable_for_ns: u64,
         /// Server-side monotonic deadline interval.
         timeout_ns: u64,
+        /// Rich projection returned from the exact terminating state.
+        projection: ScreenProjectionRequest,
     },
     /// Send exact bytes to the child PTY.
     Input {
@@ -306,6 +334,8 @@ pub enum ControlCommand {
         include_atom_outcomes: bool,
         /// Presented-state condition evaluated without releasing actor ordering.
         postcondition: ActionPostcondition,
+        /// Rich projection returned from the exact terminating state.
+        projection: ScreenProjectionRequest,
     },
     /// Encode and apply one symbolic key against the actor's live terminal modes.
     Key {
@@ -532,24 +562,18 @@ pub enum ControlData {
         /// Durable and observed source boundaries at observation time.
         boundaries: ActorBoundaries,
     },
-    /// Atomic stable-screen wait result and the exact state that satisfied or ended the wait.
+    /// Bounded rich projection of one exact actor-presented state.
+    ScreenFrame {
+        /// Exact owned projection produced before actor ordering was released.
+        frame: ScreenFrame,
+    },
+    /// Atomic stable-screen wait result and its exact terminating frame.
     StableSnapshot {
-        /// Zstandard-compressed canonical JSON for the exact semantic state.
+        /// Exact frame projected before waiter ordering was released.
+        frame: ScreenFrame,
+        /// Zstandard-compressed canonical JSON for this exact semantic state.
         semantic_state_zstd: ByteString,
-        /// Plain text for the exact presentation-eligible viewport.
-        viewport_text: String,
-        /// Normalized semantic hash assigned by deterministic replay.
-        state_hash: String,
-        /// Terminal columns.
-        cols: u16,
-        /// Terminal rows.
-        rows: u16,
-        /// Cursor column when it lies in the viewport.
-        cursor_column: Option<u16>,
-        /// Cursor row when it lies in the viewport.
-        cursor_row: Option<u16>,
-        /// Whether the cursor is visible.
-        cursor_visible: bool,
+
         /// First actor timestamp at which this exact state was observed.
         first_observed_monotonic_ns: u64,
         /// Actor timestamp of the returned snapshot.
@@ -558,33 +582,23 @@ pub enum ControlData {
         stable_for_ns: u64,
         /// Typed reason the operation returned.
         quality: StableCaptureQuality,
-        /// Presentation-eligible terminal modes from this exact state.
-        modes: ModeState,
-        /// Actor-consistent canonical source boundaries for this exact state.
-        boundaries: ActorBoundaries,
     },
-    /// Successful server-side presented-screen wait.
+    /// Exact result of one server-side presented-screen wait.
     ScreenWait {
-        /// Predicate that matched.
+        /// Predicate that was evaluated.
         predicate: ScreenPredicate,
-        /// Full presentation-eligible semantic state hash.
-        state_hash: String,
-        /// First matching timestamp for this unchanged state.
-        first_match_monotonic_ns: u64,
-        /// Last timestamp through which the state remained stable.
-        stable_through_monotonic_ns: u64,
+        /// Whether the predicate matched before termination.
+        matched: bool,
+        /// First matching timestamp for this unchanged state, when matched.
+        first_match_monotonic_ns: Option<u64>,
+        /// Last actor timestamp at which the returned state was evaluated.
+        observed_monotonic_ns: u64,
         /// Requested unchanged interval.
         stable_for_ns: u64,
-        /// Actor-consistent canonical source boundaries.
-        boundaries: ActorBoundaries,
-        /// Terminal columns.
-        cols: u16,
-        /// Terminal rows.
-        rows: u16,
-        /// `stable` or `matched_unsettled`.
-        completion_quality: String,
-        /// Whether immutable child completion made the final matching state stable.
-        child_completed: bool,
+        /// Closed completion classification.
+        quality: ScreenWaitQuality,
+        /// Exact satisfying or terminating frame.
+        frame: ScreenFrame,
     },
     /// Canonical position of an appended marker.
     Marked {
@@ -648,38 +662,26 @@ pub enum ActionPostconditionResult {
     None {
         /// Always true after complete input application.
         matched: bool,
+        /// Exact immediate post-input frame.
+        frame: ScreenFrame,
     },
     /// Final state of an idle postcondition.
     Idle {
         /// Whether the state remained unchanged for the requested interval.
         matched: bool,
-        /// Plain text for the exact presentation-eligible viewport.
-        viewport_text: String,
-        /// Normalized semantic hash for the returned state.
-        state_hash: String,
         /// Typed stability quality.
         quality: StableCaptureQuality,
-        /// Terminal columns.
-        cols: u16,
-        /// Terminal rows.
-        rows: u16,
+        /// Exact terminating frame.
+        frame: ScreenFrame,
     },
-    /// Final state of a screen or regular-expression postcondition.
+    /// Final state of a screen postcondition.
     Screen {
-        /// Whether the predicate matched before the deadline or child completion.
+        /// Whether the predicate matched before termination.
         matched: bool,
-        /// Plain text for the exact presentation-eligible viewport.
-        viewport_text: String,
-        /// Normalized semantic hash for the returned state.
-        state_hash: String,
-        /// Stable completion classification.
-        completion_quality: String,
-        /// Terminal columns.
-        cols: u16,
-        /// Terminal rows.
-        rows: u16,
-        /// Whether child completion ended evaluation.
-        child_completed: bool,
+        /// Closed completion classification.
+        quality: ScreenPostconditionQuality,
+        /// Exact terminating frame.
+        frame: ScreenFrame,
     },
 }
 
@@ -795,6 +797,31 @@ pub struct ControlErrorDetails {
     /// Exact attempted prefix when an admitted input sequence stopped early.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_sequence: Option<InputSequenceFailureDetails>,
+    /// Bounded rich-projection validation or resource-limit facts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screen_frame: Option<ScreenFrameFailureDetails>,
+}
+
+/// Bounded context for a rejected rich screen projection.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenFrameFailureDetails {
+    /// Requested projection detail when known.
+    pub detail: Option<FrameDetail>,
+    /// Requested region when supplied.
+    pub region: Option<ScreenRegion>,
+    /// Typed invalid-region reason when validation failed.
+    pub region_reason: Option<InvalidRegionReason>,
+    /// Full terminal columns when geometry was available.
+    pub cols: Option<u16>,
+    /// Full terminal rows when geometry was available.
+    pub rows: Option<u16>,
+    /// `cell_count`, `serialized_bytes`, or `response_bytes` for limit failures.
+    pub limit_kind: Option<String>,
+    /// Requested measured amount for a limit failure.
+    pub requested: Option<u64>,
+    /// Maximum permitted amount for a limit failure.
+    pub maximum: Option<u64>,
 }
 
 /// Recoverable accounting for an input sequence that stopped during PTY delivery.

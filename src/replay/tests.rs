@@ -5,6 +5,7 @@ use zstd::stream::decode_all;
 
 use super::*;
 use crate::event::{ByteString, EventLogHeader, EventRecord};
+use crate::ghostty_vt::WideKind;
 
 fn output_log(data: &[u8]) -> EventLog {
     return EventLog {
@@ -156,7 +157,7 @@ fn validated_checkpoint_seed_skips_long_session_canonical_output_prefix() {
                     record,
                     state: state.clone(),
                 },
-                engine_vt: engine.format(Format::Vt)?,
+                engine_vt: engine.format_replay_seed()?,
             });
         }
         return Ok(());
@@ -209,7 +210,7 @@ fn alternate_screen_checkpoint_seed_is_rejected_before_replay() {
                     record,
                     state: state.clone(),
                 },
-                engine_vt: engine.format(Format::Vt)?,
+                engine_vt: engine.format_replay_seed()?,
             });
         }
         return Ok(());
@@ -336,5 +337,68 @@ fn periodic_checkpoint_reconstructs_scrolling_grid() {
     assert!(
         checkpoint_count > 1,
         "scrolling replay must retain usable checkpoints beyond the initial state"
+    );
+}
+
+#[test]
+fn semantic_hash_v2_binds_wrap_and_wide_but_not_dirtiness() {
+    let mut terminal = GhosttyVt::new(4, 3, 0).expect("terminal");
+    terminal.write("abc界".as_bytes());
+    let state = terminal.snapshot().expect("semantic state");
+    let baseline = semantic_state_hash(&state).expect("baseline hash");
+
+    let mut wrap_changed = state.clone();
+    wrap_changed.grid[0].soft_wrapped = !wrap_changed.grid[0].soft_wrapped;
+    assert_ne!(
+        baseline,
+        semantic_state_hash(&wrap_changed).expect("wrap hash")
+    );
+
+    let mut wide_changed = state.clone();
+    wide_changed.grid[0].cells[0].wide_kind = WideKind::SpacerHead;
+    assert_ne!(
+        baseline,
+        semantic_state_hash(&wide_changed).expect("wide hash")
+    );
+
+    let mut dirty_changed = state;
+    dirty_changed.dirty = DirtyState::Full;
+    dirty_changed.dirty_rows = vec![0];
+    dirty_changed.grid[0].dirty = !dirty_changed.grid[0].dirty;
+    assert_eq!(
+        baseline,
+        semantic_state_hash(&dirty_changed).expect("dirty hash")
+    );
+}
+
+#[test]
+fn row_delta_emits_and_reconstructs_wrap_facts_without_cell_changes() {
+    let mut terminal = GhosttyVt::new(2, 2, 0).expect("terminal");
+    terminal.write(b"x");
+    let previous = terminal.snapshot().expect("semantic state");
+    let mut current = previous.clone();
+    current.grid[0].soft_wrapped = !current.grid[0].soft_wrapped;
+    current.grid[0].wrap_continuation = !current.grid[0].wrap_continuation;
+    let delta = state_delta(Some(&previous), &current);
+    assert_eq!(delta.rows.len(), 1);
+    assert!(delta.rows[0].cells.is_empty());
+    assert_eq!(delta.rows[0].soft_wrapped, current.grid[0].soft_wrapped);
+    assert_eq!(
+        delta.rows[0].wrap_continuation,
+        current.grid[0].wrap_continuation
+    );
+    let mut reconstructed = previous;
+    for row_diff in delta.rows {
+        let row = &mut reconstructed.grid[usize::from(row_diff.row)];
+        row.soft_wrapped = row_diff.soft_wrapped;
+        row.wrap_continuation = row_diff.wrap_continuation;
+        for cell in row_diff.cells {
+            let column = usize::from(cell.column);
+            row.cells[column] = cell;
+        }
+    }
+    assert_eq!(
+        semantic_state_hash(&reconstructed).expect("reconstructed hash"),
+        semantic_state_hash(&current).expect("current hash")
     );
 }

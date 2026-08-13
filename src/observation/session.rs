@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::screen_frame::ScreenFrameSource;
+
 /// Observe a responsive live session or validated completed session.
 ///
 /// # Errors
@@ -298,6 +300,43 @@ fn completed_observation_from_cached(
         frame,
         payload_hash,
     });
+}
+pub(crate) fn resolved_screen_state_for_session(
+    session: &Path,
+    point: StatePoint,
+    include_hidden: bool,
+) -> Result<(SemanticState, ScreenFrameSource, bool)> {
+    let canonical = session.canonicalize().map_err(|source| {
+        return Error::Filesystem {
+            path: session.to_path_buf(),
+            source,
+        };
+    })?;
+    let manifest = read_manifest(&canonical)?;
+    let completion = read_completion(&canonical)?;
+    let (state, resolution) = resolve_completed_state(&canonical, &point, &completion)?;
+    if !state.presented && !include_hidden {
+        return Err(observation_error(
+            "selected semantic state is hidden; pass explicit hidden-state permission",
+        ));
+    }
+    let source = ScreenFrameSource::Resolved {
+        source_kind: ObservationSourceKind::CompletedSession,
+        session_id: Some(manifest.session_id),
+        source_completed: true,
+        state_point: point,
+        state_id: state.state_id,
+        event_seq: state.event_seq,
+        monotonic_ns: state.monotonic_ns,
+        boundary: CanonicalBoundary {
+            next_event_seq: completion.event_count,
+            event_hash: completion.final_event_hash,
+            output_bytes: completion.output_bytes,
+        },
+        integrity: ObservationIntegrity::CanonicalChained,
+        resolution,
+    };
+    return Ok((state.state, source, state.presented));
 }
 
 pub(crate) fn completed_observation_from_inspection(

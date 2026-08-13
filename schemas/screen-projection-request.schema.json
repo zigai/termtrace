@@ -1,0 +1,91 @@
+{
+  "$defs": {
+    "FrameDetail": {
+      "description": "Requested rich-screen representation.",
+      "oneOf": [
+        {
+          "const": "text",
+          "description": "Deterministic convenience text with authoritative row wrap facts.",
+          "type": "string"
+        },
+        {
+          "const": "spans",
+          "description": "Lossless appearance spans.",
+          "type": "string"
+        },
+        {
+          "const": "cells",
+          "description": "Exact cells; requires an explicit region.",
+          "type": "string"
+        }
+      ]
+    },
+    "ScreenRegion": {
+      "additionalProperties": false,
+      "description": "Absolute zero-based half-open terminal region.",
+      "properties": {
+        "bottom": {
+          "description": "Exclusive bottom row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "left": {
+          "description": "Inclusive left column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "right": {
+          "description": "Exclusive right column.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "top": {
+          "description": "Inclusive top row.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "top",
+        "left",
+        "right",
+        "bottom"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/screen-projection-request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Options for one rich projection.",
+  "properties": {
+    "detail": {
+      "$ref": "#/$defs/FrameDetail",
+      "description": "Requested representation."
+    },
+    "region": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScreenRegion"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Exact absolute region, or the complete viewport for text/spans."
+    }
+  },
+  "required": [
+    "detail"
+  ],
+  "title": "ScreenProjectionRequest",
+  "type": "object"
+}
