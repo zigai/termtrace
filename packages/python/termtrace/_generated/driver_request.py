@@ -55,16 +55,7 @@ class ControlCommand3(Struct, forbid_unknown_fields=True, tag_field='command', t
     pass
 
 
-class ControlCommand5(Struct, forbid_unknown_fields=True, tag_field='command', tag='capture_stable'):
-    stable_for_ns: Annotated[
-        int, Meta(description='Required unchanged presented-state interval.', ge=0)
-    ]
-    timeout_ns: Annotated[
-        int, Meta(description='Server-side monotonic deadline interval.', ge=0)
-    ]
-
-
-class ControlCommand10(Struct, forbid_unknown_fields=True, tag_field='command', tag='paste'):
+class ControlCommand11(Struct, forbid_unknown_fields=True, tag_field='command', tag='paste'):
     data: Annotated[
         Base64Bytes,
         Meta(
@@ -73,7 +64,7 @@ class ControlCommand10(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-class ControlCommand11(Struct, forbid_unknown_fields=True, tag_field='command', tag='focus'):
+class ControlCommand12(Struct, forbid_unknown_fields=True, tag_field='command', tag='focus'):
     focused: Annotated[
         bool,
         Meta(
@@ -88,7 +79,7 @@ class ControlCommand11(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-class ControlCommand13(Struct, forbid_unknown_fields=True, tag_field='command', tag='activate'):
+class ControlCommand14(Struct, forbid_unknown_fields=True, tag_field='command', tag='activate'):
     strict: Annotated[
         bool,
         Meta(
@@ -104,7 +95,7 @@ class ControlCommand13(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-class ControlCommand14(Struct, forbid_unknown_fields=True, tag_field='command', tag='resize'):
+class ControlCommand15(Struct, forbid_unknown_fields=True, tag_field='command', tag='resize'):
     cols: Annotated[int, Meta(description='Terminal columns.', ge=0, le=65535)]
     pixel_height: Annotated[
         int, Meta(description='Total pixel height.', ge=0, le=65535)
@@ -113,11 +104,11 @@ class ControlCommand14(Struct, forbid_unknown_fields=True, tag_field='command', 
     rows: Annotated[int, Meta(description='Terminal rows.', ge=0, le=65535)]
 
 
-class ControlCommand16(Struct, forbid_unknown_fields=True, tag_field='command', tag='mark'):
+class ControlCommand17(Struct, forbid_unknown_fields=True, tag_field='command', tag='mark'):
     label: Annotated[str, Meta(description='Non-empty marker label.')]
 
 
-class ControlCommand17(Struct, forbid_unknown_fields=True, tag_field='command', tag='stop'):
+class ControlCommand18(Struct, forbid_unknown_fields=True, tag_field='command', tag='stop'):
     pass
 
 
@@ -170,7 +161,7 @@ class DriverMethod8(Struct, forbid_unknown_fields=True, tag_field='method', tag=
     handle: Annotated[str, Meta(description='Process-local owned session handle.')]
 
 
-class DriverMethod10(Struct, forbid_unknown_fields=True, tag_field='method', tag='timeline'):
+class DriverMethod11(Struct, forbid_unknown_fields=True, tag_field='method', tag='timeline'):
     all_states: Annotated[
         bool, Meta(description='Include non-presented semantic states.')
     ]
@@ -185,7 +176,7 @@ class DriverMethod10(Struct, forbid_unknown_fields=True, tag_field='method', tag
     offset: Annotated[int, Meta(description='Zero-based entry offset.', ge=0)]
 
 
-class DriverMethod12(Struct, forbid_unknown_fields=True, tag_field='method', tag='diagnose'):
+class DriverMethod13(Struct, forbid_unknown_fields=True, tag_field='method', tag='diagnose'):
     broad_change_percent: Annotated[
         int,
         Meta(description='Broad repaint threshold from 1 through 100.', ge=0, le=255),
@@ -196,7 +187,7 @@ class DriverMethod12(Struct, forbid_unknown_fields=True, tag_field='method', tag
     handle: Annotated[str, Meta(description='Process-local session handle.')]
 
 
-class DriverMethod13(Struct, forbid_unknown_fields=True, tag_field='method', tag='events'):
+class DriverMethod14(Struct, forbid_unknown_fields=True, tag_field='method', tag='events'):
     from_event_seq: Annotated[
         int, Meta(description='Inclusive first event sequence.', ge=0)
     ]
@@ -212,13 +203,13 @@ class DriverMethod13(Struct, forbid_unknown_fields=True, tag_field='method', tag
     metadata_only: Annotated[bool, Meta(description='Elide exact byte payloads.')]
 
 
-class DriverMethod16(Struct, forbid_unknown_fields=True, tag_field='method', tag='bundle'):
+class DriverMethod17(Struct, forbid_unknown_fields=True, tag_field='method', tag='bundle'):
     destination: Annotated[str, Meta(description='New no-replace bundle directory.')]
     handle: Annotated[str, Meta(description='Process-local session handle.')]
     profile: Annotated[BundleProfile, Meta(description='Explicit sensitivity profile.')]
 
 
-class DriverMethod17(Struct, forbid_unknown_fields=True, tag_field='method', tag='detach'):
+class DriverMethod18(Struct, forbid_unknown_fields=True, tag_field='method', tag='detach'):
     handle: Annotated[str, Meta(description='Process-local session handle.')]
 
 
@@ -269,6 +260,12 @@ class EnvironmentSpec(Struct, forbid_unknown_fields=True):
         ]
         | UnsetType
     ) = field(default_factory=lambda: list[str]())
+
+
+class FrameDetail(StrEnum):
+    text = 'text'
+    spans = 'spans'
+    cells = 'cells'
 
 
 class InputKind(StrEnum):
@@ -500,13 +497,9 @@ class ScreenPredicate10(Struct, forbid_unknown_fields=True, tag_field='predicate
 
 class ScreenRegion(Struct, forbid_unknown_fields=True):
     bottom: Annotated[int, Meta(description='Exclusive bottom row.', ge=0, le=65535)]
-    left: Annotated[
-        int, Meta(description='Inclusive zero-based left column.', ge=0, le=65535)
-    ]
+    left: Annotated[int, Meta(description='Inclusive left column.', ge=0, le=65535)]
     right: Annotated[int, Meta(description='Exclusive right column.', ge=0, le=65535)]
-    top: Annotated[
-        int, Meta(description='Inclusive zero-based top row.', ge=0, le=65535)
-    ]
+    top: Annotated[int, Meta(description='Inclusive top row.', ge=0, le=65535)]
 
 
 class StateHashComparison(StrEnum):
@@ -552,7 +545,7 @@ class VerificationLevel(StrEnum):
     signature = 'signature'
 
 
-class ControlCommand6(Struct, forbid_unknown_fields=True, tag_field='command', tag='input'):
+class ControlCommand7(Struct, forbid_unknown_fields=True, tag_field='command', tag='input'):
     data: Annotated[
         Base64Bytes, Meta(description='Raw bytes encoded as Base64 in JSON.')
     ]
@@ -570,12 +563,12 @@ class ControlCommand6(Struct, forbid_unknown_fields=True, tag_field='command', t
     ) = UNSET
 
 
-class ControlCommand9(Struct, forbid_unknown_fields=True, tag_field='command', tag='key'):
+class ControlCommand10(Struct, forbid_unknown_fields=True, tag_field='command', tag='key'):
     key: Annotated[NamedKey, Meta(description='Layout-independent key.')]
     modifiers: Annotated[KeyModifiers, Meta(description='Typed modifier state.')]
 
 
-class ControlCommand12(Struct, forbid_unknown_fields=True, tag_field='command', tag='pointer'):
+class ControlCommand13(Struct, forbid_unknown_fields=True, tag_field='command', tag='pointer'):
     column: Annotated[
         int, Meta(description='Zero-based viewport column.', ge=0, le=65535)
     ]
@@ -591,7 +584,7 @@ class ControlCommand12(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-class ControlCommand15(Struct, forbid_unknown_fields=True, tag_field='command', tag='signal'):
+class ControlCommand16(Struct, forbid_unknown_fields=True, tag_field='command', tag='signal'):
     signal: Annotated[ProcessSignal, Meta(description='Signal to send.')]
 
 
@@ -641,7 +634,7 @@ class DriverMethod9(Struct, forbid_unknown_fields=True, tag_field='method', tag=
     point: Annotated[StatePoint, Meta(description='Exact shared state selector.')]
 
 
-class DriverMethod11(Struct, forbid_unknown_fields=True, tag_field='method', tag='diff'):
+class DriverMethod12(Struct, forbid_unknown_fields=True, tag_field='method', tag='diff'):
     from_: Annotated[StatePoint, Meta(description='Earlier state point.')] = field(
         name='from'
     )
@@ -649,7 +642,7 @@ class DriverMethod11(Struct, forbid_unknown_fields=True, tag_field='method', tag
     to: Annotated[StatePoint, Meta(description='Later state point.')]
 
 
-class DriverMethod14(Struct, forbid_unknown_fields=True, tag_field='method', tag='screenshot'):
+class DriverMethod15(Struct, forbid_unknown_fields=True, tag_field='method', tag='screenshot'):
     destination: Annotated[str, Meta(description='No-replace artifact directory.')]
     handle: Annotated[str, Meta(description='Process-local session handle.')]
     point: Annotated[StatePoint, Meta(description='Exact selected state point.')]
@@ -666,7 +659,7 @@ class DriverMethod14(Struct, forbid_unknown_fields=True, tag_field='method', tag
     ) = UNSET
 
 
-class DriverMethod15(Struct, forbid_unknown_fields=True, tag_field='method', tag='verify'):
+class DriverMethod16(Struct, forbid_unknown_fields=True, tag_field='method', tag='verify'):
     handle: Annotated[str, Meta(description='Process-local session handle.')]
     level: Annotated[VerificationLevel, Meta(description='Requested validation depth.')]
 
@@ -714,7 +707,39 @@ class ScreenPredicate11(Struct, forbid_unknown_fields=True, tag_field='predicate
     hash: Annotated[str, Meta(description='Lowercase BLAKE3 state hash.')]
 
 
-class ControlCommand7(Struct, forbid_unknown_fields=True, tag_field='command', tag='input_sequence'):
+class ScreenProjectionRequest(Struct, forbid_unknown_fields=True):
+    detail: Annotated[FrameDetail, Meta(description='Requested representation.')]
+    region: (
+        Annotated[
+            ScreenRegion,
+            Meta(description='Exact absolute region, or the complete viewport for text/spans.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+
+
+class ControlCommand4(Struct, forbid_unknown_fields=True, tag_field='command', tag='screen_frame'):
+    projection: Annotated[
+        ScreenProjectionRequest,
+        Meta(description='Requested rich detail and exact optional viewport region.'),
+    ]
+
+
+class ControlCommand6(Struct, forbid_unknown_fields=True, tag_field='command', tag='capture_stable'):
+    projection: Annotated[
+        ScreenProjectionRequest,
+        Meta(description='Rich projection returned from the exact terminating state.'),
+    ]
+    stable_for_ns: Annotated[
+        int, Meta(description='Required unchanged presented-state interval.', ge=0)
+    ]
+    timeout_ns: Annotated[
+        int, Meta(description='Server-side monotonic deadline interval.', ge=0)
+    ]
+
+
+class ControlCommand8(Struct, forbid_unknown_fields=True, tag_field='command', tag='input_sequence'):
     atoms: Annotated[
         list[InputSequenceAtom],
         Meta(
@@ -736,6 +761,21 @@ class ControlCommand7(Struct, forbid_unknown_fields=True, tag_field='command', t
     ]
 
 
+class DriverMethod10(Struct, forbid_unknown_fields=True, tag_field='method', tag='screen_frame'):
+    handle: Annotated[str, Meta(description='Process-local session handle.')]
+    include_hidden: Annotated[
+        bool,
+        Meta(
+            description='Permit explicitly selected hidden synchronized-output state.'
+        ),
+    ]
+    point: Annotated[StatePoint, Meta(description='Exact shared state selector.')]
+    projection: Annotated[
+        ScreenProjectionRequest,
+        Meta(description='Requested rich detail and exact optional viewport region.'),
+    ]
+
+
 class DriverRequest(Struct, forbid_unknown_fields=True):
     method: Annotated[DriverMethod, Meta(description='Typed driver operation.')]
     request_id: Annotated[
@@ -754,8 +794,14 @@ class ActionPostcondition3(Struct, forbid_unknown_fields=True, tag_field='condit
 ActionPostcondition: TypeAlias = Annotated[ActionPostcondition1 | ActionPostcondition2 | ActionPostcondition3, Meta(description='Presented-state condition retained under exclusive actor ordering after input.')]
 
 
-class ControlCommand4(Struct, forbid_unknown_fields=True, tag_field='command', tag='wait_screen'):
+class ControlCommand5(Struct, forbid_unknown_fields=True, tag_field='command', tag='wait_screen'):
     predicate: Annotated[ScreenPredicate, Meta(description='Exact screen predicate.')]
+    projection: Annotated[
+        ScreenProjectionRequest,
+        Meta(
+            description='Rich projection returned from the exact satisfying or terminating state.'
+        ),
+    ]
     stable_for_ns: Annotated[
         int, Meta(description='Required unchanged matching-state interval.', ge=0)
     ]
@@ -764,7 +810,7 @@ class ControlCommand4(Struct, forbid_unknown_fields=True, tag_field='command', t
     ]
 
 
-class ControlCommand8(Struct, forbid_unknown_fields=True, tag_field='command', tag='act'):
+class ControlCommand9(Struct, forbid_unknown_fields=True, tag_field='command', tag='act'):
     atoms: Annotated[
         list[InputSequenceAtom],
         Meta(
@@ -790,9 +836,13 @@ class ControlCommand8(Struct, forbid_unknown_fields=True, tag_field='command', t
             description='Presented-state condition evaluated without releasing actor ordering.'
         ),
     ]
+    projection: Annotated[
+        ScreenProjectionRequest,
+        Meta(description='Rich projection returned from the exact terminating state.'),
+    ]
 
 
-ControlCommand: TypeAlias = Annotated[ControlCommand1 | ControlCommand2 | ControlCommand3 | ControlCommand4 | ControlCommand5 | ControlCommand6 | ControlCommand7 | ControlCommand8 | ControlCommand9 | ControlCommand10 | ControlCommand11 | ControlCommand12 | ControlCommand13 | ControlCommand14 | ControlCommand15 | ControlCommand16 | ControlCommand17, Meta(description='One command sent to the live session actor.')]
+ControlCommand: TypeAlias = Annotated[ControlCommand1 | ControlCommand2 | ControlCommand3 | ControlCommand4 | ControlCommand5 | ControlCommand6 | ControlCommand7 | ControlCommand8 | ControlCommand9 | ControlCommand10 | ControlCommand11 | ControlCommand12 | ControlCommand13 | ControlCommand14 | ControlCommand15 | ControlCommand16 | ControlCommand17 | ControlCommand18, Meta(description='One command sent to the live session actor.')]
 
 
 class DriverMethod4(Struct, forbid_unknown_fields=True, tag_field='method', tag='control'):
@@ -805,7 +855,7 @@ class DriverMethod4(Struct, forbid_unknown_fields=True, tag_field='method', tag=
     ) = UNSET
 
 
-DriverMethod: TypeAlias = Annotated[DriverMethod1 | DriverMethod2 | DriverMethod3 | DriverMethod4 | DriverMethod5 | DriverMethod6 | DriverMethod7 | DriverMethod8 | DriverMethod9 | DriverMethod10 | DriverMethod11 | DriverMethod12 | DriverMethod13 | DriverMethod14 | DriverMethod15 | DriverMethod16 | DriverMethod17, Meta(description='Supported initial high-level driver methods.')]
+DriverMethod: TypeAlias = Annotated[DriverMethod1 | DriverMethod2 | DriverMethod3 | DriverMethod4 | DriverMethod5 | DriverMethod6 | DriverMethod7 | DriverMethod8 | DriverMethod9 | DriverMethod10 | DriverMethod11 | DriverMethod12 | DriverMethod13 | DriverMethod14 | DriverMethod15 | DriverMethod16 | DriverMethod17 | DriverMethod18, Meta(description='Supported initial high-level driver methods.')]
 
 
 class ScreenPredicate12(Struct, forbid_unknown_fields=True, tag_field='predicate', tag='all'):

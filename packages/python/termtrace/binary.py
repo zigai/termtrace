@@ -34,9 +34,7 @@ def main() -> NoReturn:
         binary = resolve_binary()
         launcher = Path(sys.argv[0]).resolve()
         if binary == launcher:
-            raise FileNotFoundError(
-                "packaged termtrace binary not found; install a platform wheel"
-            )
+            raise FileNotFoundError("packaged termtrace binary not found; install a platform wheel")
     except FileNotFoundError as e:
         print(f"termtrace: {e}", file=sys.stderr)
         raise SystemExit(127) from None

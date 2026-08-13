@@ -1,14 +1,25 @@
 """Cross-language fixtures for the generated protocol boundary."""
 
+import copy
 import json
 import unittest
 from pathlib import Path
 
 from termtrace import (
+    ActionBusyError,
     ControlErrorDetails,
+    ControlResult,
+    Frame,
+    InputSequenceBusyError,
     InputSequenceFailureDetails,
+    ResourceLimitError,
     TermtraceOperationError,
     TermtraceProtocolError,
+    TimelineEntry,
+)
+from termtrace._generated.driver_response import ScreenFrameFailureDetails
+from termtrace.models import (
+    ControlResult as ModelControlResult,
 )
 from termtrace.models import (
     DriverAttachedData,
@@ -16,11 +27,22 @@ from termtrace.models import (
     decode_driver_response,
     encode_driver_request,
 )
+from termtrace.models import (
+    Frame as ModelFrame,
+)
+from termtrace.models import (
+    TimelineEntry as ModelTimelineEntry,
+)
 
 FIXTURES = Path(__file__).parents[3] / "fixtures" / "protocol" / "driver-responses.json"
 
 
 class DriverResponseTests(unittest.TestCase):
+    def test_package_root_preserves_public_model_exports(self) -> None:
+        self.assertIs(ControlResult, ModelControlResult)
+        self.assertIs(Frame, ModelFrame)
+        self.assertIs(TimelineEntry, ModelTimelineEntry)
+
     def setUp(self) -> None:
         self.cases = json.loads(FIXTURES.read_text(encoding="utf-8"))
 
@@ -37,7 +59,7 @@ class DriverResponseTests(unittest.TestCase):
             DriverAttachedData,
         )
 
-        self.assertEqual(parsed_hello.driver_protocol_version, 4)
+        self.assertEqual(parsed_hello.driver_protocol_version, 5)
         self.assertEqual(parsed_attached.canonical_session, "/tmp/example.termtrace")
 
     def test_rejects_uncorrelated_response(self) -> None:
@@ -64,6 +86,53 @@ class DriverResponseTests(unittest.TestCase):
         self.assertIsInstance(details, ControlErrorDetails)
         assert isinstance(details, ControlErrorDetails)
         self.assertEqual(details.scope, "state_guard")
+        self.assertEqual(captured.exception.request_id, response["request_id"])
+
+    def test_typed_driver_errors_preserve_retry_evidence_and_details(self) -> None:
+        source = self.cases["valid"][2]["response"]
+        error_types = (
+            ("action_busy", ActionBusyError),
+            ("input_sequence_busy", InputSequenceBusyError),
+            ("screen_frame_resource_limit", ResourceLimitError),
+        )
+
+        for code, error_type in error_types:
+            with self.subTest(code=code):
+                response = copy.deepcopy(source)
+                response["result"]["code"] = code
+                response["result"]["retry_safety"] = "safe_same_request_id"
+                response["result"]["uncertain"] = True
+                if code == "screen_frame_resource_limit":
+                    response["result"]["details"]["screen_frame"] = {
+                        "cols": 160,
+                        "rows": 45,
+                        "detail": "cells",
+                        "limit_kind": "cell_count",
+                        "requested": 2_000_000,
+                        "maximum": 1_000_000,
+                    }
+
+                with self.assertRaises(error_type) as captured:
+                    decode_driver_response(
+                        json.dumps(response).encode(),
+                        response["request_id"],
+                        DriverHelloData,
+                    )
+
+                error = captured.exception
+                self.assertEqual(error.retry_safety, "safe_same_request_id")
+                self.assertTrue(error.uncertain)
+                self.assertEqual(error.evidence, "/tmp/example.termtrace")
+                self.assertEqual(error.request_id, response["request_id"])
+                self.assertIsInstance(error.details, ControlErrorDetails)
+                if code == "screen_frame_resource_limit":
+                    details = error.details
+                    assert isinstance(details, ControlErrorDetails)
+                    screen_frame = details.screen_frame
+                    assert isinstance(screen_frame, ScreenFrameFailureDetails)
+                    self.assertEqual(screen_frame.limit_kind, "cell_count")
+                    self.assertEqual(screen_frame.requested, 2_000_000)
+                    self.assertEqual(screen_frame.maximum, 1_000_000)
 
     def test_preserves_exact_partial_input_sequence_details(self) -> None:
         response = self.cases["valid"][3]["response"]
@@ -77,6 +146,8 @@ class DriverResponseTests(unittest.TestCase):
         self.assertEqual(captured.exception.retry_safety, "safe_same_request_id")
         self.assertTrue(captured.exception.uncertain)
         self.assertIsInstance(details, ControlErrorDetails)
+        self.assertEqual(captured.exception.evidence, "/tmp/example.termtrace")
+        self.assertEqual(captured.exception.request_id, response["request_id"])
         assert isinstance(details, ControlErrorDetails)
         sequence = details.input_sequence
         self.assertIsInstance(sequence, InputSequenceFailureDetails)

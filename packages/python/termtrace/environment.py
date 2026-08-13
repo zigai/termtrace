@@ -13,9 +13,7 @@ class EnvironmentOptions:
     """Deterministic child-environment policy transported only through driver stdin."""
 
     inherit_env: bool = True
-    set: Mapping[str, str | bytes] = field(
-        default_factory=lambda: dict[str, str | bytes]()
-    )
+    set: Mapping[str, str | bytes] = field(default_factory=lambda: dict[str, str | bytes]())
     copy: Sequence[str] = ()
     unset: Sequence[str] = ()
     color: Literal["auto", "always", "never"] = "auto"
@@ -23,7 +21,6 @@ class EnvironmentOptions:
 
 def encode_environment(options: EnvironmentOptions | None) -> dict[str, JsonValue]:
     """Encode environment values without placing their contents in diagnostics."""
-
     selected = options or EnvironmentOptions()
     encoded: dict[str, JsonValue] = {}
     for name, value in selected.set.items():

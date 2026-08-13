@@ -1,7 +1,9 @@
 """Native asyncio transport with explicit subprocess ownership."""
 
 import asyncio
+import math
 import os
+import re
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
@@ -10,17 +12,45 @@ from typing import Literal, Self, TypeVar
 
 import msgspec
 
-from termtrace.atoms import KeyboardAtom, encode_input_sequence
+from termtrace.atoms import InputAtom, KeyboardAtom, encode_atoms, encode_input_sequence
 from termtrace.binary import resolve_binary
-from termtrace.duration import seconds_to_milliseconds, seconds_to_nanoseconds
+from termtrace.duration import (
+    Duration,
+    duration,
+    seconds_to_milliseconds,
+)
 from termtrace.environment import EnvironmentOptions, encode_environment
-from termtrace.errors import TermtraceOperationError, TermtraceProtocolError
+from termtrace.errors import (
+    PostconditionIncompleteError,
+    RequestTimeoutError,
+    StableCaptureIncompleteError,
+    StaleStateError,
+    TermtraceOperationError,
+    TermtraceProtocolError,
+)
+from termtrace.frames import FrameRequest, Region, ScreenFrame
+from termtrace.locators import (
+    AsyncLocator,
+    LocatorSpec,
+    StyleFilter,
+    TextSpec,
+)
+from termtrace.locators import (
+    region as region_spec,
+)
+from termtrace.locators import (
+    row as row_spec,
+)
+from termtrace.locators import (
+    style as style_spec,
+)
 from termtrace.models import (
+    ActionOptions,
+    ActionResult,
     Artifact,
     BundleResult,
     Completion,
     ControlResult,
-    ControlStableSnapshotData,
     DiagnosticReport,
     DriverArtifactData,
     DriverAttachedData,
@@ -35,20 +65,34 @@ from termtrace.models import (
     DriverHelloData,
     DriverObservationData,
     DriverOutputWaitData,
+    DriverScreenFrameData,
     DriverTimelineData,
     DriverVerificationData,
     EventPage,
-    Frame,
     JsonObject,
     JsonValue,
     Observation,
+    ScreenWaitResult,
     SemanticDiff,
+    StableCapture,
+    StableOptions,
     TimelinePage,
     VerificationReport,
     WaitOutcome,
     decode_driver_response,
     encode_driver_request,
+    is_incomplete_completion,
 )
+from termtrace.normalization import (
+    encode_frame_request,
+    encode_postcondition,
+    normalize_action,
+    normalize_frame,
+    normalize_screen_wait,
+    normalize_stable_capture,
+)
+
+DRIVER_RESPONSE_STREAM_LIMIT = 4 * 1024 * 1024 + 1
 
 ResponseDataT = TypeVar("ResponseDataT", bound=msgspec.Struct)
 
@@ -56,9 +100,7 @@ ResponseDataT = TypeVar("ResponseDataT", bound=msgspec.Struct)
 class AsyncTerminal:
     """Async context manager owning one driver process and stream pair."""
 
-    def __init__(
-        self, process: asyncio.subprocess.Process, evidence_root: Path | None
-    ) -> None:
+    def __init__(self, process: asyncio.subprocess.Process, evidence_root: Path | None) -> None:
         if process.stdin is None or process.stdout is None:
             raise TermtraceProtocolError("driver pipes were not created")
         self._process = process
@@ -83,6 +125,7 @@ class AsyncTerminal:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            limit=DRIVER_RESPONSE_STREAM_LIMIT,
         )
         terminal = cls(process, None if evidence_root is None else Path(evidence_root))
         await terminal.request({"method": "hello"}, DriverHelloData)
@@ -104,9 +147,7 @@ class AsyncTerminal:
 
         root = Path(evidence_root) if evidence_root is not None else self._evidence_root
         if root is None:
-            raise ValueError(
-                "launch requires evidence_root on AsyncTerminal or this call"
-            )
+            raise ValueError("launch requires evidence_root on AsyncTerminal or this call")
         encoded: list[JsonValue] = [
             base64.b64encode(os.fsencode(argument)).decode() for argument in command
         ]
@@ -117,9 +158,7 @@ class AsyncTerminal:
                 "command": encoded,
                 "cols": cols,
                 "rows": rows,
-                "working_directory": None
-                if working_directory is None
-                else str(working_directory),
+                "working_directory": None if working_directory is None else str(working_directory),
                 "environment": encode_environment(environment),
                 "resource_limits": {
                     "output_bytes": output_byte_budget,
@@ -138,9 +177,7 @@ class AsyncTerminal:
         )
 
     async def attach(self, session: str | Path) -> "AsyncSession":
-        data = await self.request(
-            {"method": "attach", "session": str(session)}, DriverAttachedData
-        )
+        data = await self.request({"method": "attach", "session": str(session)}, DriverAttachedData)
         return AsyncSession(
             self,
             data.handle,
@@ -156,21 +193,31 @@ class AsyncTerminal:
         method: JsonObject,
         response_type: type[ResponseDataT],
         request_id: str | None = None,
+        request_timeout: float | None = None,
     ) -> ResponseDataT:
         if self._closed:
             raise TermtraceProtocolError("driver is closed")
+        if request_timeout is not None and (
+            not math.isfinite(request_timeout) or request_timeout <= 0
+        ):
+            raise ValueError("request timeout must be finite and greater than zero")
         correlation_id = request_id or str(uuid.uuid4())
         payload = encode_driver_request(method, correlation_id)
-        async with self._lock:
-            if self._closed:
-                raise TermtraceProtocolError("driver is closed")
-            self._stdin.write(payload + b"\n")
-            try:
-                await self._stdin.drain()
-                line = await self._stdout.readline()
-            except asyncio.CancelledError:
-                self._abort_transport()
-                raise
+        try:
+            async with asyncio.timeout(request_timeout):
+                async with self._lock:
+                    if self._closed:
+                        raise TermtraceProtocolError("driver is closed")
+                    self._stdin.write(payload + b"\n")
+                    await self._stdin.drain()
+                    line = await self._stdout.readline()
+        except TimeoutError:
+            self._abort_transport()
+            assert request_timeout is not None
+            raise RequestTimeoutError(request_timeout) from None
+        except asyncio.CancelledError:
+            self._abort_transport()
+            raise
         if not line:
             raise TermtraceProtocolError("driver closed before its correlated response")
         return decode_driver_response(line, correlation_id, response_type)
@@ -203,6 +250,10 @@ class AsyncTerminal:
             except ProcessLookupError:
                 return
             await self._process.wait()
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
 
     async def __aenter__(self) -> Self:
         return self
@@ -251,17 +302,28 @@ class AsyncSession:
         *,
         request_id: str | None = None,
         if_state: str | None = None,
+        request_timeout: float | None = None,
     ) -> ControlResult:
-        response = await self._terminal.request(
-            {
-                "method": "control",
-                "handle": self.handle,
-                "command": command,
-                "expected_presented_state_hash": if_state,
-            },
-            DriverControlData,
-            request_id,
-        )
+        try:
+            response = await self._terminal.request(
+                {
+                    "method": "control",
+                    "handle": self.handle,
+                    "command": command,
+                    "expected_presented_state_hash": if_state,
+                },
+                DriverControlData,
+                request_id=request_id,
+                request_timeout=request_timeout,
+            )
+        except StaleStateError as e:
+            raise StaleStateError(
+                str(e),
+                expected_state_hash=if_state,
+                current_state_hash=e.current_state_hash,
+                retry_safety=e.retry_safety,
+                evidence=e.evidence,
+            ) from e
         return response.data
 
     async def completion(self) -> Completion:
@@ -277,16 +339,57 @@ class AsyncSession:
         response_type: type[ResponseDataT],
         *,
         request_id: str | None = None,
+        request_timeout: float | None = None,
     ) -> ResponseDataT:
         return await self._terminal.request(
-            {**method, "handle": self.handle}, response_type, request_id=request_id
+            {**method, "handle": self.handle},
+            response_type,
+            request_id=request_id,
+            request_timeout=request_timeout,
         )
 
+    async def act(
+        self,
+        atoms: Sequence[InputAtom],
+        options: ActionOptions = ActionOptions(),
+    ) -> ActionResult:
+        request_id = options.request_id or str(uuid.uuid4())
+        pace = options.pace
+        if pace > Duration.seconds(60):
+            raise ValueError("action pace must not exceed 60 seconds")
+        if pace.nanoseconds * len(atoms) > Duration.seconds(60).nanoseconds:
+            raise ValueError("total action pacing must not exceed 60 seconds")
+        response = await self.control(
+            {
+                "command": "act",
+                "atoms": encode_atoms(
+                    atoms, request_id=request_id, caller_intent=options.caller_intent
+                ),
+                "pace_ns": pace.nanoseconds,
+                "include_atom_outcomes": options.verbose_atom_outcomes,
+                "postcondition": encode_postcondition(options.postcondition),
+                "projection": encode_frame_request(options.frame),
+            },
+            request_id=request_id,
+            if_state=options.if_state,
+        )
+        result = normalize_action(response, request_id)
+        if is_incomplete_completion(result.postcondition) and not options.allow_incomplete:
+            raise PostconditionIncompleteError(result)
+        return result
+
     async def stop(
-        self, *, request_id: str | None = None, if_state: str | None = None
+        self,
+        *,
+        request_id: str | None = None,
+        if_state: str | None = None,
+        request_timeout: float | None = None,
     ) -> ControlResult:
         return await self.control(
-            {"command": "stop"}, request_id=request_id, if_state=if_state
+            {"command": "stop"},
+            request_id=request_id,
+            if_state=if_state,
+            request_timeout=request_timeout,
         )
 
     async def resize(
@@ -343,13 +446,10 @@ class AsyncSession:
 
     async def finish(self, *, passed: bool) -> None:
         """Complete owned work and apply its explicit retention policy."""
-
         if self._closed:
             return
         if not self._owned:
-            raise ValueError(
-                "finish is valid only for sessions launched by this client"
-            )
+            raise ValueError("finish is valid only for sessions launched by this client")
         await self._ensure_completed()
         if passed and self._evidence_policy == "on-failure":
             await self._terminal.request(
@@ -395,22 +495,64 @@ class AsyncScreen:
         return await self._session.control({"command": "snapshot"})
 
     async def text(self) -> str:
-        return (await self.frame()).viewport_text
-
-    async def frame(self, point: JsonObject | None = None) -> Frame:
         data = await self._session.request(
             {
                 "method": "observe",
-                "point": point or {"selector": "latest_presented"},
+                "point": {"selector": "latest_presented"},
                 "include_hidden": False,
             },
             DriverObservationData,
         )
-        return data.observation.frame
+        return data.observation.frame.viewport_text
+
+    async def frame(
+        self,
+        options: FrameRequest = FrameRequest(),
+        *,
+        request_timeout: float | None = None,
+    ) -> ScreenFrame:
+        data = await self._session.request(
+            {
+                "method": "screen_frame",
+                "point": {"selector": "latest_presented"},
+                "include_hidden": False,
+                "projection": encode_frame_request(options),
+            },
+            DriverScreenFrameData,
+            request_timeout=request_timeout,
+        )
+        return normalize_frame(data.frame)
+
+    async def cells(self, region: Region) -> ScreenFrame:
+        return await self.frame(FrameRequest("cells", region))
+
+    def locator(self, spec: LocatorSpec) -> AsyncLocator:
+        async def capture(request_timeout: float | None) -> ScreenFrame:
+            return await self.frame(request_timeout=request_timeout)
+
+        return AsyncLocator(capture, spec)
+
+    def get_by_text(
+        self,
+        query: str | re.Pattern[str],
+        *,
+        exact: bool = False,
+        cross_soft_wraps: bool = False,
+    ) -> AsyncLocator:
+        return self.locator(TextSpec(query, exact, cross_soft_wraps))
+
+    def row(self, index: int) -> AsyncLocator:
+        return self.locator(row_spec(index))
+
+    def region(self, value: Region) -> AsyncLocator:
+        return self.locator(region_spec(value))
+
+    def filter(self, style: StyleFilter) -> AsyncLocator:
+        return self.locator(style_spec(style))
 
     async def wait_for_text(
         self, text: str, *, stable_for: float = 0.0, timeout: float = 10.0
-    ) -> ControlResult:
+    ) -> ScreenWaitResult:
         return await self.wait_for(
             {"predicate": "contains", "text": text},
             stable_for=stable_for,
@@ -421,21 +563,28 @@ class AsyncScreen:
         self,
         predicate: JsonObject,
         *,
-        stable_for: float = 0.0,
-        timeout: float = 10.0,
-    ) -> ControlResult:
-        return await self._session.control(
+        stable_for: Duration | int | float = Duration(0),
+        timeout: Duration | int | float = Duration.seconds(10),
+        frame: FrameRequest = FrameRequest(),
+    ) -> ScreenWaitResult:
+        stable_value = duration(stable_for)
+        timeout_value = duration(timeout)
+        if timeout_value.nanoseconds == 0:
+            raise ValueError("screen wait timeout must be greater than zero")
+        response = await self._session.control(
             {
                 "command": "wait_screen",
                 "predicate": predicate,
-                "stable_for_ns": seconds_to_nanoseconds(stable_for),
-                "timeout_ns": seconds_to_nanoseconds(timeout),
+                "stable_for_ns": stable_value.nanoseconds,
+                "timeout_ns": timeout_value.nanoseconds,
+                "projection": encode_frame_request(frame),
             }
         )
+        return normalize_screen_wait(response)
 
     async def wait_for_absence(
         self, text: str, *, stable_for: float = 0.0, timeout: float = 10.0
-    ) -> ControlResult:
+    ) -> ScreenWaitResult:
         return await self.wait_for(
             {"predicate": "absent", "text": text},
             stable_for=stable_for,
@@ -444,12 +593,45 @@ class AsyncScreen:
 
     async def wait_for_regex(
         self, pattern: str, *, stable_for: float = 0.0, timeout: float = 10.0
-    ) -> ControlResult:
+    ) -> ScreenWaitResult:
         return await self.wait_for(
             {"predicate": "matches_regex", "pattern": pattern},
             stable_for=stable_for,
             timeout=timeout,
         )
+
+    async def capture_stable(
+        self,
+        options: StableOptions | None = None,
+        *,
+        stable_for: Duration | int | float = Duration.milliseconds(100),
+        timeout: Duration | int | float = Duration.seconds(10),
+        frame: FrameRequest = FrameRequest(),
+        allow_incomplete: bool = False,
+    ) -> StableCapture:
+        selected = options or StableOptions(
+            duration(stable_for), duration(timeout), frame, allow_incomplete
+        )
+        if self._session._completed:
+            return StableCapture(
+                "stable",
+                Duration(0),
+                Duration(0),
+                selected.stable_for,
+                await self.frame(selected.frame),
+            )
+        response = await self._session.control(
+            {
+                "command": "capture_stable",
+                "stable_for_ns": selected.stable_for.nanoseconds,
+                "timeout_ns": selected.timeout.nanoseconds,
+                "projection": encode_frame_request(selected.frame),
+            }
+        )
+        result = normalize_stable_capture(response)
+        if result.quality != "stable" and not selected.allow_incomplete:
+            raise StableCaptureIncompleteError(result)
+        return result
 
     async def wait_for_idle(
         self,
@@ -457,22 +639,10 @@ class AsyncScreen:
         stable_for: float = 0.1,
         timeout: float = 10.0,
         allow_incomplete: bool = False,
-    ) -> ControlStableSnapshotData:
-        """Atomically return the exact state that satisfied or ended the idle wait."""
-        response = await self._session.control(
-            {
-                "command": "capture_stable",
-                "stable_for_ns": seconds_to_nanoseconds(stable_for),
-                "timeout_ns": seconds_to_nanoseconds(timeout),
-            }
+    ) -> StableCapture:
+        return await self.capture_stable(
+            stable_for=stable_for, timeout=timeout, allow_incomplete=allow_incomplete
         )
-        if not isinstance(response, ControlStableSnapshotData):
-            raise TermtraceProtocolError("stable capture response has an invalid kind")
-        if response.quality != "stable" and not allow_incomplete:
-            raise TermtraceProtocolError(
-                f"stable capture ended with {response.quality}; set allow_incomplete to inspect it"
-            )
-        return response
 
     async def screenshot(
         self,
@@ -571,7 +741,6 @@ class AsyncKeyboard:
         if_state: str | None = None,
     ) -> ControlResult:
         """Apply a complete atom list under one state guard and request ID."""
-
         sequence_id = request_id or str(uuid.uuid4())
         return await self._session.control(
             encode_input_sequence(
@@ -834,6 +1003,9 @@ class AsyncOutput:
 class AsyncEvidence:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def completion(self) -> Completion:
+        return await self._session.completion()
 
     async def complete(self, *, timeout: float = 10.0) -> Completion:
         return await self._session.complete(timeout_ms=seconds_to_milliseconds(timeout))

@@ -1,19 +1,19 @@
 import asyncio
 import math
 import sys
+from pathlib import Path
 
 import pytest
+
 from termtrace import BytesAtom, KeyAtom, PasteAtom, TextAtom
 from termtrace.async_client import AsyncSession, AsyncTerminal
 from termtrace.atoms import encode_input_sequence
 from termtrace.client import DriverTransport, Session
-from termtrace.errors import TermtraceProtocolError
+from termtrace.errors import RequestTimeoutError, TermtraceProtocolError
 from termtrace.models import DriverHelloData, encode_driver_request
 
 
-@pytest.mark.parametrize(
-    "duration", [-1.0, math.nan, math.inf, 1e30, sys.float_info.max]
-)
+@pytest.mark.parametrize("duration", [-1.0, math.nan, math.inf, 1e30, sys.float_info.max])
 def test_screen_waits_reject_invalid_durations_before_driver_io(
     duration: float,
 ) -> None:
@@ -60,9 +60,7 @@ def test_async_request_cancellation_closes_desynchronized_transport() -> None:
             stderr=asyncio.subprocess.PIPE,
         )
         terminal = AsyncTerminal(process, None)
-        request = asyncio.create_task(
-            terminal.request({"method": "hello"}, DriverHelloData)
-        )
+        request = asyncio.create_task(terminal.request({"method": "hello"}, DriverHelloData))
         assert process.stderr is not None
         assert await process.stderr.readline() == b"received\n"
 
@@ -76,6 +74,30 @@ def test_async_request_cancellation_closes_desynchronized_transport() -> None:
         assert process.returncode is not None
 
     asyncio.run(exercise())
+
+
+def test_sync_request_timeout_terminates_desynchronized_transport(
+    tmp_path: Path,
+) -> None:
+    driver = tmp_path / "driver"
+    driver.write_text(
+        "#!/bin/sh\nIFS= read -r request\nexec sleep 30\n",
+        encoding="utf-8",
+    )
+    driver.chmod(0o700)
+    transport = DriverTransport(driver)
+
+    with pytest.raises(RequestTimeoutError) as captured:
+        transport.request(
+            {"method": "hello"},
+            DriverHelloData,
+            timeout=0.02,
+        )
+    assert captured.value.uncertain is True
+    assert captured.value.retry_safety == "unsafe"
+    with pytest.raises(TermtraceProtocolError, match="driver is closed"):
+        transport.request({"method": "hello"}, DriverHelloData)
+    transport.close()
 
 
 def test_atomic_input_sequence_builder_is_typed_bounded_and_correlated() -> None:

@@ -13,25 +13,54 @@ dependencies = ["msgspec>=0.21.1,<1"]
 
 [project.optional-dependencies]
 pytest = ["pytest>=8"]
+pytest-async = ["pytest>=8", "pytest-asyncio>=0.24"]
 
 [project.scripts]
 termtrace = "termtrace.binary:main"
 
 [dependency-groups]
 codegen = ["datamodel-code-generator==0.68.1"]
-dev = ["mypy==2.3.0", "pytest==9.1.1", "ruff==0.15.7"]
+dev = ["mypy==2.3.0", "pytest==9.1.1", "pytest-asyncio>=1.0", "ruff==0.15.7"]
+
+[tool.uv]
+default-groups = ["dev"]
 
 [project.entry-points.pytest11]
 termtrace = "termtrace.pytest_plugin"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/termtrace"]
-artifacts = ["src/termtrace/bin/termtrace"]
+packages = ["termtrace"]
+artifacts = ["termtrace/bin/termtrace"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
-include = ["src", "tests"]
+include = ["termtrace", "tests"]
 
 [tool.mypy]
 strict = true
-files = ["src", "tests"]
+files = ["termtrace", "tests"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["termtrace/_generated"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402", "F401"]
+
+[tool.ruff.lint.flake8-builtins]
+ignorelist = ["id", "input"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["termtrace", "tests"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"

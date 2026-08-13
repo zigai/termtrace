@@ -1,8 +1,12 @@
 """Synchronous driver transport and domain namespaces."""
 
+import math
 import os
+import re
+import select
 import subprocess
 import threading
+import time
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
@@ -11,22 +15,50 @@ from typing import IO, Literal, Self, TypeVar
 
 import msgspec
 
-from termtrace.atoms import KeyboardAtom, encode_input_sequence
+from termtrace.atoms import InputAtom, KeyboardAtom, encode_atoms, encode_input_sequence
 from termtrace.binary import resolve_binary
-from termtrace.duration import seconds_to_milliseconds, seconds_to_nanoseconds
+from termtrace.duration import (
+    Duration,
+    duration,
+    seconds_to_milliseconds,
+)
 from termtrace.environment import (
     EnvironmentOptions as EnvironmentOptions,
 )
 from termtrace.environment import (
     encode_environment,
 )
-from termtrace.errors import TermtraceOperationError, TermtraceProtocolError
+from termtrace.errors import (
+    PostconditionIncompleteError,
+    RequestTimeoutError,
+    StableCaptureIncompleteError,
+    StaleStateError,
+    TermtraceOperationError,
+    TermtraceProtocolError,
+)
+from termtrace.frames import FrameRequest, Region, ScreenFrame
+from termtrace.locators import (
+    Locator,
+    LocatorSpec,
+    StyleFilter,
+    TextSpec,
+)
+from termtrace.locators import (
+    region as region_spec,
+)
+from termtrace.locators import (
+    row as row_spec,
+)
+from termtrace.locators import (
+    style as style_spec,
+)
 from termtrace.models import (
+    ActionOptions,
+    ActionResult,
     Artifact,
     BundleResult,
     Completion,
     ControlResult,
-    ControlStableSnapshotData,
     DiagnosticReport,
     DriverArtifactData,
     DriverAttachedData,
@@ -41,22 +73,35 @@ from termtrace.models import (
     DriverHelloData,
     DriverObservationData,
     DriverOutputWaitData,
+    DriverScreenFrameData,
     DriverTimelineData,
     DriverVerificationData,
     EventPage,
-    Frame,
     JsonObject,
     JsonValue,
     Observation,
+    ScreenWaitResult,
     SemanticDiff,
+    StableCapture,
+    StableOptions,
     TimelinePage,
     VerificationReport,
     WaitOutcome,
     decode_driver_response,
     encode_driver_request,
+    is_incomplete_completion,
+)
+from termtrace.normalization import (
+    encode_frame_request,
+    encode_postcondition,
+    normalize_action,
+    normalize_frame,
+    normalize_screen_wait,
+    normalize_stable_capture,
 )
 
 ResponseDataT = TypeVar("ResponseDataT", bound=msgspec.Struct)
+DRIVER_RESPONSE_STREAM_LIMIT = 4 * 1024 * 1024 + 1
 
 
 class DriverTransport:
@@ -78,25 +123,94 @@ class DriverTransport:
         self._stdin = self._process.stdin
         self._stdout = self._process.stdout
         self._lock = threading.Lock()
+        self._read_buffer = bytearray()
+        self._closed = False
 
     def request(
         self,
         method: JsonObject,
         response_type: type[ResponseDataT],
         request_id: str | None = None,
+        timeout: float | None = None,
     ) -> ResponseDataT:
+        if self._closed:
+            raise TermtraceProtocolError("driver is closed")
+        if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
+            raise ValueError("request timeout must be finite and greater than zero")
         correlation_id = request_id or str(uuid.uuid4())
         payload = encode_driver_request(method, correlation_id)
-        with self._lock:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        acquired = self._lock.acquire() if timeout is None else self._lock.acquire(timeout=timeout)
+        if not acquired:
+            assert timeout is not None
+            self._abort()
+            raise RequestTimeoutError(timeout)
+        try:
             self._stdin.write(payload + b"\n")
             self._stdin.flush()
-            line = self._stdout.readline()
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                self._abort()
+                assert timeout is not None
+                raise RequestTimeoutError(timeout)
+            line = self._readline(remaining)
+        except RequestTimeoutError:
+            assert timeout is not None
+            raise RequestTimeoutError(timeout) from None
+        finally:
+            self._lock.release()
         if not line:
             raise TermtraceProtocolError("driver closed before its correlated response")
         return decode_driver_response(line, correlation_id, response_type)
 
+    def _readline(self, timeout: float | None) -> bytes:
+        if timeout is None:
+            return self._stdout.readline()
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("request timeout must be finite and greater than zero")
+
+        deadline = time.monotonic() + timeout
+        while True:
+            newline = self._read_buffer.find(b"\n")
+            if newline >= 0:
+                line = bytes(self._read_buffer[: newline + 1])
+                del self._read_buffer[: newline + 1]
+                return line
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._abort()
+                raise RequestTimeoutError(timeout)
+            ready, _, _ = select.select([self._stdout], [], [], remaining)
+            if not ready:
+                self._abort()
+                raise RequestTimeoutError(timeout)
+            chunk = os.read(self._stdout.fileno(), 64 * 1024)
+            if not chunk:
+                return b""
+            self._read_buffer.extend(chunk)
+            if len(self._read_buffer) > DRIVER_RESPONSE_STREAM_LIMIT:
+                self._abort()
+                raise TermtraceProtocolError("driver response exceeded the bounded stream limit")
+
+    def _abort(self) -> None:
+        self._closed = True
+        if self._process.poll() is None:
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait(timeout=1)
+        self._stdin.close()
+        self._stdout.close()
+
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         if self._process.poll() is not None:
+            self._stdin.close()
+            self._stdout.close()
             return
         self._stdin.close()
         try:
@@ -104,6 +218,11 @@ class DriverTransport:
         except subprocess.TimeoutExpired:
             self._process.terminate()
             self._process.wait(timeout=5)
+        self._stdout.close()
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
 
 
 class Terminal:
@@ -146,9 +265,7 @@ class Terminal:
                 "command": encoded,
                 "cols": cols,
                 "rows": rows,
-                "working_directory": None
-                if working_directory is None
-                else str(working_directory),
+                "working_directory": None if working_directory is None else str(working_directory),
                 "environment": encode_environment(environment),
                 "resource_limits": {
                     "output_bytes": output_byte_budget,
@@ -182,6 +299,10 @@ class Terminal:
 
     def close(self) -> None:
         self._transport.close()
+
+    @property
+    def closed(self) -> bool:
+        return self._transport.closed
 
     def __enter__(self) -> Self:
         return self
@@ -230,17 +351,31 @@ class Session:
         *,
         request_id: str | None = None,
         if_state: str | None = None,
+        request_timeout: float | None = None,
     ) -> ControlResult:
-        response = self._transport.request(
-            {
-                "method": "control",
-                "handle": self.handle,
-                "command": command,
-                "expected_presented_state_hash": if_state,
-            },
-            DriverControlData,
-            request_id,
-        )
+        try:
+            response = self._transport.request(
+                {
+                    "method": "control",
+                    "handle": self.handle,
+                    "command": command,
+                    "expected_presented_state_hash": if_state,
+                },
+                DriverControlData,
+                request_id=request_id,
+                timeout=request_timeout,
+            )
+        except StaleStateError as e:
+            raise StaleStateError(
+                str(e),
+                expected_state_hash=if_state,
+                current_state_hash=e.current_state_hash,
+                retry_safety=e.retry_safety,
+                evidence=e.evidence,
+                uncertain=e.uncertain,
+                request_id=e.request_id,
+                details=e.details,
+            ) from e
         return response.data
 
     def request(
@@ -249,30 +384,65 @@ class Session:
         response_type: type[ResponseDataT],
         *,
         request_id: str | None = None,
+        request_timeout: float | None = None,
     ) -> ResponseDataT:
         return self._transport.request(
-            {**method, "handle": self.handle}, response_type, request_id=request_id
+            {**method, "handle": self.handle},
+            response_type,
+            request_id=request_id,
+            timeout=request_timeout,
         )
+
+    def act(
+        self,
+        atoms: Sequence[InputAtom],
+        options: ActionOptions = ActionOptions(),
+    ) -> ActionResult:
+        request_id = options.request_id or str(uuid.uuid4())
+        pace = options.pace
+        if pace > Duration.seconds(60):
+            raise ValueError("action pace must not exceed 60 seconds")
+        if pace.nanoseconds * len(atoms) > Duration.seconds(60).nanoseconds:
+            raise ValueError("total action pacing must not exceed 60 seconds")
+        postcondition = encode_postcondition(options.postcondition)
+        try:
+            response = self.control(
+                {
+                    "command": "act",
+                    "atoms": encode_atoms(
+                        atoms, request_id=request_id, caller_intent=options.caller_intent
+                    ),
+                    "pace_ns": pace.nanoseconds,
+                    "include_atom_outcomes": options.verbose_atom_outcomes,
+                    "postcondition": postcondition,
+                    "projection": encode_frame_request(options.frame),
+                },
+                request_id=request_id,
+                if_state=options.if_state,
+            )
+        except TermtraceOperationError as e:
+            if e.request_id is None:
+                e.request_id = request_id
+            raise
+        result = normalize_action(response, request_id)
+        if is_incomplete_completion(result.postcondition) and not options.allow_incomplete:
+            raise PostconditionIncompleteError(result)
+        return result
 
     def close(self) -> None:
         if self._closed:
             return
         if self._owned and self._evidence_policy != "manual":
             self._ensure_completed()
-        self._transport.request(
-            {"method": "detach", "handle": self.handle}, DriverDetachedData
-        )
+        self._transport.request({"method": "detach", "handle": self.handle}, DriverDetachedData)
         self._closed = True
 
     def finish(self, *, passed: bool) -> None:
         """Complete owned work and apply its explicit retention policy."""
-
         if self._closed:
             return
         if not self._owned:
-            raise ValueError(
-                "finish is valid only for sessions launched by this client"
-            )
+            raise ValueError("finish is valid only for sessions launched by this client")
         self._ensure_completed()
         if passed and self._evidence_policy == "on-failure":
             self._transport.request(
@@ -281,9 +451,7 @@ class Session:
             )
             self._closed = True
             return
-        self._transport.request(
-            {"method": "detach", "handle": self.handle}, DriverDetachedData
-        )
+        self._transport.request({"method": "detach", "handle": self.handle}, DriverDetachedData)
         self._closed = True
 
     def _ensure_completed(self) -> None:
@@ -303,10 +471,17 @@ class Session:
         return result.completion
 
     def stop(
-        self, *, request_id: str | None = None, if_state: str | None = None
+        self,
+        *,
+        request_id: str | None = None,
+        if_state: str | None = None,
+        request_timeout: float | None = None,
     ) -> ControlResult:
         return self.control(
-            {"command": "stop"}, request_id=request_id, if_state=if_state
+            {"command": "stop"},
+            request_id=request_id,
+            if_state=if_state,
+            request_timeout=request_timeout,
         )
 
     def resize(
@@ -331,10 +506,16 @@ class Session:
             if_state=if_state,
         )
 
-    def complete(self, *, timeout_ms: int) -> Completion:
+    def complete(
+        self,
+        *,
+        timeout_ms: int,
+        request_timeout: float | None = None,
+    ) -> Completion:
         result = self._transport.request(
             {"method": "complete", "handle": self.handle, "timeout_ms": timeout_ms},
             DriverCompletionData,
+            timeout=request_timeout,
         )
         self._completed = True
         return result.completion
@@ -374,22 +555,64 @@ class Screen:
         return self._session.control({"command": "snapshot"})
 
     def text(self) -> str:
-        return self.frame().viewport_text
-
-    def frame(self, point: JsonObject | None = None) -> Frame:
         data = self._session.request(
             {
                 "method": "observe",
-                "point": point or {"selector": "latest_presented"},
+                "point": {"selector": "latest_presented"},
                 "include_hidden": False,
             },
             DriverObservationData,
         )
-        return data.observation.frame
+        return data.observation.frame.viewport_text
+
+    def frame(
+        self,
+        options: FrameRequest = FrameRequest(),
+        *,
+        request_timeout: float | None = None,
+    ) -> ScreenFrame:
+        data = self._session.request(
+            {
+                "method": "screen_frame",
+                "point": {"selector": "latest_presented"},
+                "include_hidden": False,
+                "projection": encode_frame_request(options),
+            },
+            DriverScreenFrameData,
+            request_timeout=request_timeout,
+        )
+        return normalize_frame(data.frame)
+
+    def cells(self, region: Region) -> ScreenFrame:
+        return self.frame(FrameRequest("cells", region))
+
+    def locator(self, spec: LocatorSpec) -> Locator:
+        return Locator(
+            lambda request_timeout: self.frame(request_timeout=request_timeout),
+            spec,
+        )
+
+    def get_by_text(
+        self,
+        query: str | re.Pattern[str],
+        *,
+        exact: bool = False,
+        cross_soft_wraps: bool = False,
+    ) -> Locator:
+        return self.locator(TextSpec(query, exact, cross_soft_wraps))
+
+    def row(self, index: int) -> Locator:
+        return self.locator(row_spec(index))
+
+    def region(self, value: Region) -> Locator:
+        return self.locator(region_spec(value))
+
+    def filter(self, style: StyleFilter) -> Locator:
+        return self.locator(style_spec(style))
 
     def wait_for_text(
         self, text: str, *, stable_for: float = 0.0, timeout: float = 10.0
-    ) -> ControlResult:
+    ) -> ScreenWaitResult:
         return self.wait_for(
             {"predicate": "contains", "text": text},
             stable_for=stable_for,
@@ -400,21 +623,28 @@ class Screen:
         self,
         predicate: JsonObject,
         *,
-        stable_for: float = 0.0,
-        timeout: float = 10.0,
-    ) -> ControlResult:
-        return self._session.control(
+        stable_for: Duration | int | float = Duration(0),
+        timeout: Duration | int | float = Duration.seconds(10),
+        frame: FrameRequest = FrameRequest(),
+    ) -> ScreenWaitResult:
+        stable_value = duration(stable_for)
+        timeout_value = duration(timeout)
+        if timeout_value.nanoseconds == 0:
+            raise ValueError("screen wait timeout must be greater than zero")
+        response = self._session.control(
             {
                 "command": "wait_screen",
                 "predicate": predicate,
-                "stable_for_ns": seconds_to_nanoseconds(stable_for),
-                "timeout_ns": seconds_to_nanoseconds(timeout),
+                "stable_for_ns": stable_value.nanoseconds,
+                "timeout_ns": timeout_value.nanoseconds,
+                "projection": encode_frame_request(frame),
             }
         )
+        return normalize_screen_wait(response)
 
     def wait_for_absence(
         self, text: str, *, stable_for: float = 0.0, timeout: float = 10.0
-    ) -> ControlResult:
+    ) -> ScreenWaitResult:
         return self.wait_for(
             {"predicate": "absent", "text": text},
             stable_for=stable_for,
@@ -423,12 +653,45 @@ class Screen:
 
     def wait_for_regex(
         self, pattern: str, *, stable_for: float = 0.0, timeout: float = 10.0
-    ) -> ControlResult:
+    ) -> ScreenWaitResult:
         return self.wait_for(
             {"predicate": "matches_regex", "pattern": pattern},
             stable_for=stable_for,
             timeout=timeout,
         )
+
+    def capture_stable(
+        self,
+        options: StableOptions | None = None,
+        *,
+        stable_for: Duration | int | float = Duration.milliseconds(100),
+        timeout: Duration | int | float = Duration.seconds(10),
+        frame: FrameRequest = FrameRequest(),
+        allow_incomplete: bool = False,
+    ) -> StableCapture:
+        selected = options or StableOptions(
+            duration(stable_for), duration(timeout), frame, allow_incomplete
+        )
+        if self._session._completed:
+            return StableCapture(
+                "stable",
+                Duration(0),
+                Duration(0),
+                selected.stable_for,
+                self.frame(selected.frame),
+            )
+        response = self._session.control(
+            {
+                "command": "capture_stable",
+                "stable_for_ns": selected.stable_for.nanoseconds,
+                "timeout_ns": selected.timeout.nanoseconds,
+                "projection": encode_frame_request(selected.frame),
+            }
+        )
+        result = normalize_stable_capture(response)
+        if result.quality != "stable" and not selected.allow_incomplete:
+            raise StableCaptureIncompleteError(result)
+        return result
 
     def wait_for_idle(
         self,
@@ -436,27 +699,17 @@ class Screen:
         stable_for: float = 0.1,
         timeout: float = 10.0,
         allow_incomplete: bool = False,
-    ) -> ControlStableSnapshotData:
-        """Atomically return the exact state that satisfied or ended the idle wait."""
-        response = self._session.control(
-            {
-                "command": "capture_stable",
-                "stable_for_ns": seconds_to_nanoseconds(stable_for),
-                "timeout_ns": seconds_to_nanoseconds(timeout),
-            }
+    ) -> StableCapture:
+        return self.capture_stable(
+            stable_for=stable_for, timeout=timeout, allow_incomplete=allow_incomplete
         )
-        if not isinstance(response, ControlStableSnapshotData):
-            raise TermtraceProtocolError("stable capture response has an invalid kind")
-        if response.quality != "stable" and not allow_incomplete:
-            raise TermtraceProtocolError(
-                f"stable capture ended with {response.quality}; set allow_incomplete to inspect it"
-            )
-        return response
 
     def screenshot(
         self,
         destination: str | Path,
         point: JsonObject | None = None,
+        *,
+        request_timeout: float | None = None,
     ) -> Artifact:
         return self._session.request(
             {
@@ -467,6 +720,7 @@ class Screen:
                 "viewport": None,
             },
             DriverArtifactData,
+            request_timeout=request_timeout,
         )
 
 
@@ -547,7 +801,6 @@ class Keyboard:
         if_state: str | None = None,
     ) -> ControlResult:
         """Apply a complete atom list under one state guard and request ID."""
-
         sequence_id = request_id or str(uuid.uuid4())
         return self._session.control(
             encode_input_sequence(
@@ -797,13 +1050,21 @@ class Evidence:
         return self._session.completion()
 
     def complete(self, *, timeout: float = 10.0) -> Completion:
-        return self._session.complete(timeout_ms=seconds_to_milliseconds(timeout))
+        return self._session.complete(
+            timeout_ms=seconds_to_milliseconds(timeout),
+            request_timeout=timeout + 1.0,
+        )
 
     def verify(
-        self, level: Literal["structure", "content", "durability_record"] = "content"
+        self,
+        level: Literal["structure", "content", "durability_record"] = "content",
+        *,
+        request_timeout: float | None = None,
     ) -> VerificationReport:
         result = self._session.request(
-            {"method": "verify", "level": level}, DriverVerificationData
+            {"method": "verify", "level": level},
+            DriverVerificationData,
+            request_timeout=request_timeout,
         )
         return result.report
 
@@ -811,6 +1072,8 @@ class Evidence:
         self,
         destination: str | Path,
         profile: Literal["screen", "debug", "forensic"] = "screen",
+        *,
+        request_timeout: float | None = None,
     ) -> BundleResult:
         return self._session.request(
             {
@@ -819,6 +1082,7 @@ class Evidence:
                 "profile": profile,
             },
             DriverBundleData,
+            request_timeout=request_timeout,
         )
 
 
@@ -826,9 +1090,7 @@ class Output:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def wait_for_bytes(
-        self, data: bytes | memoryview, *, timeout: float = 10.0
-    ) -> WaitOutcome:
+    def wait_for_bytes(self, data: bytes | memoryview, *, timeout: float = 10.0) -> WaitOutcome:
         import base64
 
         return self._session.wait_for_output(

@@ -10,7 +10,7 @@ from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_ROOT = PACKAGE_ROOT.parents[1]
-GENERATED_ROOT = PACKAGE_ROOT / "src" / "termtrace" / "_generated"
+GENERATED_ROOT = PACKAGE_ROOT / "termtrace" / "_generated"
 MODELS = (
     ("driver-request.schema.json", "driver_request.py", False),
     ("driver-response.schema.json", "driver_response.py", True),
@@ -19,7 +19,6 @@ MODELS = (
 
 def main() -> None:
     """Regenerate the response model without timestamps or permissive structs."""
-
     for schema_name, output_name, add_aliases in MODELS:
         _generate(schema_name, output_name, add_aliases)
 
@@ -117,18 +116,12 @@ def _normalize(source: str, schema_name: str, add_aliases: bool) -> str:
         "DriverResult": "Driver{tag}Result",
     }
     for class_prefix, alias_template in alias_groups.items():
-        pattern = re.compile(
-            rf"class ({class_prefix}\d+)\(Struct,[^\n]*tag='([^']+)'[^\n]*\):"
-        )
+        pattern = re.compile(rf"class ({class_prefix}\d+)\(Struct,[^\n]*tag='([^']+)'[^\n]*\):")
         for class_name, tag in pattern.findall(source):
             pascal_tag = "".join(part.capitalize() for part in tag.split("_"))
-            aliases.append(
-                f"{alias_template.format(tag=pascal_tag)}: TypeAlias = {class_name}"
-            )
+            aliases.append(f"{alias_template.format(tag=pascal_tag)}: TypeAlias = {class_name}")
     if not aliases:
-        raise RuntimeError(
-            "generated response models did not contain tagged driver variants"
-        )
+        raise RuntimeError("generated response models did not contain tagged driver variants")
     return f"{source.rstrip()}\n\n# Stable names for anonymous tagged-union variants.\n{chr(10).join(aliases)}\n"
 
 

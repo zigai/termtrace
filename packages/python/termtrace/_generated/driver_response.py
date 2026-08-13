@@ -8,36 +8,6 @@ from typing import Annotated, Any, TypeAlias
 from msgspec import UNSET, Meta, Struct, UnsetType, field
 
 
-class ActionPostconditionResult1(Struct, forbid_unknown_fields=True, tag_field='kind', tag='none'):
-    matched: Annotated[
-        bool, Meta(description='Always true after complete input application.')
-    ]
-
-
-class ActionPostconditionResult3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='screen'):
-    child_completed: Annotated[
-        bool, Meta(description='Whether child completion ended evaluation.')
-    ]
-    cols: Annotated[int, Meta(description='Terminal columns.', ge=0, le=65535)]
-    completion_quality: Annotated[
-        str, Meta(description='Stable completion classification.')
-    ]
-    matched: Annotated[
-        bool,
-        Meta(
-            description='Whether the predicate matched before the deadline or child completion.'
-        ),
-    ]
-    rows: Annotated[int, Meta(description='Terminal rows.', ge=0, le=65535)]
-    state_hash: Annotated[
-        str, Meta(description='Normalized semantic hash for the returned state.')
-    ]
-    viewport_text: Annotated[
-        str,
-        Meta(description='Plain text for the exact presentation-eligible viewport.'),
-    ]
-
-
 class ArtifactSensitivity(StrEnum):
     sensitive_terminal_data = 'sensitive_terminal_data'
     operational_metadata = 'operational_metadata'
@@ -158,7 +128,7 @@ class DriverData2(Struct, forbid_unknown_fields=True, tag_field='kind', tag='att
     ]
 
 
-class DriverData11(Struct, forbid_unknown_fields=True, tag_field='kind', tag='artifact'):
+class DriverData12(Struct, forbid_unknown_fields=True, tag_field='kind', tag='artifact'):
     artifact_type: Annotated[
         str, Meta(description='`semantic_screenshot` or `native_screenshot`.')
     ]
@@ -170,11 +140,11 @@ class DriverData11(Struct, forbid_unknown_fields=True, tag_field='kind', tag='ar
     truth_layer: Annotated[str, Meta(description='Exact truth-layer label.')]
 
 
-class DriverData14(Struct, forbid_unknown_fields=True, tag_field='kind', tag='detached'):
+class DriverData15(Struct, forbid_unknown_fields=True, tag_field='kind', tag='detached'):
     pass
 
 
-class DriverData15(Struct, forbid_unknown_fields=True, tag_field='kind', tag='discarded'):
+class DriverData16(Struct, forbid_unknown_fields=True, tag_field='kind', tag='discarded'):
     evidence_removed: Annotated[
         bool, Meta(description='Confirms that the canonical directory was removed.')
     ]
@@ -318,6 +288,12 @@ class Event12(Struct, forbid_unknown_fields=True, tag_field='type', tag='host_er
 class FindingConfidence(StrEnum):
     high = 'high'
     medium = 'medium'
+
+
+class FrameDetail(StrEnum):
+    text = 'text'
+    spans = 'spans'
+    cells = 'cells'
 
 
 class InputDescriptor1(Struct, forbid_unknown_fields=True, tag_field='kind', tag='raw'):
@@ -533,6 +509,13 @@ class InputSource(StrEnum):
     host = 'host'
 
 
+class InvalidRegionReason(StrEnum):
+    cells_require_explicit_region = 'cells_require_explicit_region'
+    empty = 'empty'
+    reversed = 'reversed'
+    out_of_bounds = 'out_of_bounds'
+
+
 class LifecycleKind(StrEnum):
     spawned = 'spawned'
     output_closed = 'output_closed'
@@ -640,6 +623,11 @@ class Rgb(Struct, forbid_unknown_fields=True):
     r: Annotated[int, Meta(description='Red channel.', ge=0, le=255)]
 
 
+class ScreenGeometry(Struct, forbid_unknown_fields=True):
+    cols: Annotated[int, Meta(description='Viewport columns.', ge=0, le=65535)]
+    rows: Annotated[int, Meta(description='Viewport rows.', ge=0, le=65535)]
+
+
 class ScreenMode1(Struct, forbid_unknown_fields=True, tag_field='mode', tag='alternate_screen'):
     pass
 
@@ -665,6 +653,14 @@ class ScreenMode6(Struct, forbid_unknown_fields=True, tag_field='mode', tag='dec
 
 
 ScreenMode: TypeAlias = Annotated[ScreenMode1 | ScreenMode2 | ScreenMode3 | ScreenMode4 | ScreenMode5 | ScreenMode6, Meta(description='Stable terminal-mode selectors available to screen predicates.')]
+
+
+class ScreenPostconditionQuality(StrEnum):
+    matched = 'matched'
+    matched_unsettled = 'matched_unsettled'
+    child_completed = 'child_completed'
+    output_closed = 'output_closed'
+    deadline = 'deadline'
 
 
 class ScreenPredicate1(Struct, forbid_unknown_fields=True, tag_field='predicate', tag='contains'):
@@ -733,13 +729,28 @@ class ScreenPredicate10(Struct, forbid_unknown_fields=True, tag_field='predicate
 
 class ScreenRegion(Struct, forbid_unknown_fields=True):
     bottom: Annotated[int, Meta(description='Exclusive bottom row.', ge=0, le=65535)]
-    left: Annotated[
-        int, Meta(description='Inclusive zero-based left column.', ge=0, le=65535)
-    ]
+    left: Annotated[int, Meta(description='Inclusive left column.', ge=0, le=65535)]
     right: Annotated[int, Meta(description='Exclusive right column.', ge=0, le=65535)]
-    top: Annotated[
-        int, Meta(description='Inclusive zero-based top row.', ge=0, le=65535)
+    top: Annotated[int, Meta(description='Inclusive top row.', ge=0, le=65535)]
+
+
+class ScreenTextRow(Struct, forbid_unknown_fields=True):
+    row: Annotated[int, Meta(description='Absolute row.', ge=0, le=65535)]
+    soft_wrapped: Annotated[
+        bool, Meta(description='Whether this row ends in a native soft wrap.')
     ]
+    text: Annotated[str, Meta(description='Deterministic convenience text.')]
+    wrap_continuation: Annotated[
+        bool, Meta(description='Whether this row continues a native soft wrap.')
+    ]
+
+
+class ScreenWaitQuality(StrEnum):
+    matched = 'matched'
+    matched_unsettled = 'matched_unsettled'
+    child_completed = 'child_completed'
+    output_closed = 'output_closed'
+    deadline = 'deadline'
 
 
 class SessionFailure(Struct, forbid_unknown_fields=True):
@@ -871,6 +882,19 @@ class ValueChange6(Struct, forbid_unknown_fields=True):
 class ValueChange7(Struct, forbid_unknown_fields=True):
     after: Annotated[bool, Meta(description='Value at the later endpoint.')]
     before: Annotated[bool, Meta(description='Value at the earlier endpoint.')]
+
+
+class ValueChange8(Struct, forbid_unknown_fields=True):
+    after: (
+        Annotated[bool, Meta(description='Value at the later endpoint.')]
+        | None
+        | UnsetType
+    ) = UNSET
+    before: (
+        Annotated[bool, Meta(description='Value at the earlier endpoint.')]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
 class VerificationFinding(Struct, forbid_unknown_fields=True):
@@ -1035,6 +1059,13 @@ class WaitOutcome(Struct, forbid_unknown_fields=True):
     ]
 
 
+class WideKind(StrEnum):
+    narrow = 'narrow'
+    wide = 'wide'
+    spacer_tail = 'spacer_tail'
+    spacer_head = 'spacer_head'
+
+
 class ActionInputResult(Struct, forbid_unknown_fields=True):
     atom_count: Annotated[
         int, Meta(description='Number of atoms applied completely.', ge=0)
@@ -1063,30 +1094,6 @@ class ActionInputResult(Struct, forbid_unknown_fields=True):
         ]
         | UnsetType
     ) = UNSET
-
-
-class ActionPostconditionResult2(Struct, forbid_unknown_fields=True, tag_field='kind', tag='idle'):
-    cols: Annotated[int, Meta(description='Terminal columns.', ge=0, le=65535)]
-    matched: Annotated[
-        bool,
-        Meta(
-            description='Whether the state remained unchanged for the requested interval.'
-        ),
-    ]
-    quality: Annotated[
-        StableCaptureQuality, Meta(description='Typed stability quality.')
-    ]
-    rows: Annotated[int, Meta(description='Terminal rows.', ge=0, le=65535)]
-    state_hash: Annotated[
-        str, Meta(description='Normalized semantic hash for the returned state.')
-    ]
-    viewport_text: Annotated[
-        str,
-        Meta(description='Plain text for the exact presentation-eligible viewport.'),
-    ]
-
-
-ActionPostconditionResult: TypeAlias = Annotated[ActionPostconditionResult1 | ActionPostconditionResult2 | ActionPostconditionResult3, Meta(description='Exact postcondition result returned without releasing actor ordering.')]
 
 
 class ActorBoundaries(Struct, forbid_unknown_fields=True):
@@ -1227,25 +1234,6 @@ class ControlData3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='in
     ) = UNSET
 
 
-class ControlData4(Struct, forbid_unknown_fields=True, tag_field='kind', tag='action_applied'):
-    boundaries: Annotated[
-        ActorBoundaries,
-        Meta(
-            description='Durable and observed positions after postcondition evaluation.'
-        ),
-    ]
-    input: Annotated[
-        ActionInputResult,
-        Meta(description='Exact result of the completely applied input prefix.'),
-    ]
-    postcondition: Annotated[
-        ActionPostconditionResult,
-        Meta(
-            description='Exact presented state that satisfied or ended the postcondition.'
-        ),
-    ]
-
-
 class ControlData5(Struct, forbid_unknown_fields=True, tag_field='kind', tag='input_noop'):
     boundaries: Annotated[
         ActorBoundaries,
@@ -1308,7 +1296,7 @@ class ControlData7(Struct, forbid_unknown_fields=True, tag_field='kind', tag='st
     ) = UNSET
 
 
-class ControlData11(Struct, forbid_unknown_fields=True, tag_field='kind', tag='marked'):
+class ControlData12(Struct, forbid_unknown_fields=True, tag_field='kind', tag='marked'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(description='Durable and observed canonical positions after the marker.'),
@@ -1317,31 +1305,6 @@ class ControlData11(Struct, forbid_unknown_fields=True, tag_field='kind', tag='m
         int, Meta(description='Canonical event sequence containing the marker.', ge=0)
     ]
     label: Annotated[str, Meta(description='Normalized marker label.')]
-
-
-class ControlErrorDetails(Struct, forbid_unknown_fields=True):
-    boundaries: Annotated[
-        ActorBoundaries,
-        Meta(
-            description='Durable and observed source positions at the failure boundary.'
-        ),
-    ]
-    current_presented_state_hash: Annotated[
-        str,
-        Meta(description='Latest presented-state hash at the actor ordering point.'),
-    ]
-    scope: Annotated[
-        str,
-        Meta(description='Exact output or mutation scope covered by these details.'),
-    ]
-    input_sequence: (
-        Annotated[
-            InputSequenceFailureDetails,
-            Meta(description='Exact attempted prefix when an admitted input sequence stopped early.'),
-        ]
-        | None
-        | UnsetType
-    ) = UNSET
 
 
 class CursorState(Struct, forbid_unknown_fields=True):
@@ -1402,41 +1365,16 @@ class DriverData4(Struct, forbid_unknown_fields=True, tag_field='kind', tag='out
     ]
 
 
-class DriverData12(Struct, forbid_unknown_fields=True, tag_field='kind', tag='verification'):
+class DriverData13(Struct, forbid_unknown_fields=True, tag_field='kind', tag='verification'):
     report: Annotated[
         VerificationReport,
         Meta(description='Stable complete report, including invalid findings.'),
     ]
 
 
-class DriverData13(Struct, forbid_unknown_fields=True, tag_field='kind', tag='bundle'):
+class DriverData14(Struct, forbid_unknown_fields=True, tag_field='kind', tag='bundle'):
     directory: Annotated[str, Meta(description='Atomically committed directory.')]
     manifest: Annotated[BundleManifest, Meta(description='Complete bundle manifest.')]
-
-
-class DriverResult2(Struct, forbid_unknown_fields=True, tag_field='status', tag='error'):
-    code: Annotated[str, Meta(description='Machine-readable code.')]
-    message: Annotated[str, Meta(description='Human-readable diagnostic.')]
-    retry_safety: Annotated[
-        str,
-        Meta(description='`safe_same_request_id`, `safe_new_request`, or `unknown`.'),
-    ]
-    uncertain: Annotated[
-        bool, Meta(description='Whether mutation application may be uncertain.')
-    ]
-    details: (
-        Annotated[
-            ControlErrorDetails,
-            Meta(description='Actor-provided ordering or attempted-prefix details when available.'),
-        ]
-        | None
-        | UnsetType
-    ) = UNSET
-    evidence: (
-        Annotated[str, Meta(description='Canonical evidence path when known.')]
-        | None
-        | UnsetType
-    ) = UNSET
 
 
 class Event2(Struct, forbid_unknown_fields=True, tag_field='type', tag='input_intent'):
@@ -1621,6 +1559,139 @@ class ObservationFrame(Struct, forbid_unknown_fields=True):
     ) = UNSET
 
 
+class ScreenFrameData1(Struct, forbid_unknown_fields=True, tag_field='detail', tag='text'):
+    rows: Annotated[list[ScreenTextRow], Meta(description='Ordered projected rows.')]
+
+
+class ScreenFrameFailureDetails(Struct, forbid_unknown_fields=True):
+    cols: (
+        Annotated[
+            int,
+            Meta(description='Full terminal columns when geometry was available.', ge=0, le=65535),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    detail: (
+        Annotated[
+            FrameDetail,
+            Meta(description='Requested projection detail when known.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    limit_kind: (
+        Annotated[
+            str,
+            Meta(description='`cell_count`, `serialized_bytes`, or `response_bytes` for limit failures.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    maximum: (
+        Annotated[
+            int,
+            Meta(description='Maximum permitted amount for a limit failure.', ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    region: (
+        Annotated[ScreenRegion, Meta(description='Requested region when supplied.')]
+        | None
+        | UnsetType
+    ) = UNSET
+    region_reason: (
+        Annotated[
+            InvalidRegionReason,
+            Meta(description='Typed invalid-region reason when validation failed.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    requested: (
+        Annotated[
+            int,
+            Meta(description='Requested measured amount for a limit failure.', ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    rows: (
+        Annotated[
+            int,
+            Meta(description='Full terminal rows when geometry was available.', ge=0, le=65535),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+
+
+class ScreenFrameSource1(Struct, forbid_unknown_fields=True, tag_field='source', tag='actor'):
+    boundaries: Annotated[
+        ActorBoundaries,
+        Meta(description='Durable and actor-observed canonical boundaries.'),
+    ]
+    observed_monotonic_ns: Annotated[
+        int,
+        Meta(
+            description='Actor observation time in session-monotonic nanoseconds.', ge=0
+        ),
+    ]
+    session_id: Annotated[str, Meta(description='Canonical session identity.')]
+
+
+class ScreenFrameSource2(Struct, forbid_unknown_fields=True, tag_field='source', tag='resolved'):
+    boundary: Annotated[
+        CanonicalBoundary, Meta(description='Exact validated source boundary.')
+    ]
+    integrity: Annotated[
+        ObservationIntegrity,
+        Meta(description='Integrity relationship to canonical evidence.'),
+    ]
+    resolution: Annotated[
+        ObservationResolution,
+        Meta(description='Resolution path used to select the state.'),
+    ]
+    source_completed: Annotated[
+        bool, Meta(description='Whether canonical evidence completed durably.')
+    ]
+    source_kind: Annotated[ObservationSourceKind, Meta(description='Source category.')]
+    state_point: Annotated[StatePoint, Meta(description='Requested state selector.')]
+    event_seq: (
+        Annotated[
+            int,
+            Meta(description='Responsible canonical event sequence when known.', ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    monotonic_ns: (
+        Annotated[
+            int,
+            Meta(description='Session-monotonic timestamp when known.', ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    session_id: (
+        Annotated[str, Meta(description='Canonical session identity when available.')]
+        | None
+        | UnsetType
+    ) = UNSET
+    state_id: (
+        Annotated[
+            int,
+            Meta(description='Dense semantic state identity when assigned.', ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+
+
+ScreenFrameSource: TypeAlias = Annotated[ScreenFrameSource1 | ScreenFrameSource2, Meta(description='Exact provenance of the projected semantic state.')]
+
+
 class ScreenPredicate7(Struct, forbid_unknown_fields=True, tag_field='predicate', tag='region_contains'):
     region: Annotated[
         ScreenRegion, Meta(description='Region bounds in viewport cells.')
@@ -1698,6 +1769,11 @@ class SessionCompletion(Struct, forbid_unknown_fields=True):
         | None
         | UnsetType
     ) = UNSET
+
+
+class SpanCell(Struct, forbid_unknown_fields=True):
+    grapheme: Annotated[str, Meta(description='Complete grapheme cluster.')]
+    wide_kind: Annotated[WideKind, Meta(description='Native Ghostty width role.')]
 
 
 class TimelineItem2(Struct, forbid_unknown_fields=True, tag_field='kind', tag='canonical_event'):
@@ -1808,62 +1884,33 @@ class ControlData8(Struct, forbid_unknown_fields=True, tag_field='kind', tag='sn
     ) = UNSET
 
 
-class ControlData9(Struct, forbid_unknown_fields=True, tag_field='kind', tag='stable_snapshot'):
+class ControlErrorDetails(Struct, forbid_unknown_fields=True):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(
-            description='Actor-consistent canonical source boundaries for this exact state.'
+            description='Durable and observed source positions at the failure boundary.'
         ),
     ]
-    cols: Annotated[int, Meta(description='Terminal columns.', ge=0, le=65535)]
-    cursor_visible: Annotated[bool, Meta(description='Whether the cursor is visible.')]
-    first_observed_monotonic_ns: Annotated[
-        int,
-        Meta(
-            description='First actor timestamp at which this exact state was observed.',
-            ge=0,
-        ),
-    ]
-    modes: Annotated[
-        ModeState,
-        Meta(description='Presentation-eligible terminal modes from this exact state.'),
-    ]
-    observed_monotonic_ns: Annotated[
-        int, Meta(description='Actor timestamp of the returned snapshot.', ge=0)
-    ]
-    quality: Annotated[
-        StableCaptureQuality, Meta(description='Typed reason the operation returned.')
-    ]
-    rows: Annotated[int, Meta(description='Terminal rows.', ge=0, le=65535)]
-    semantic_state_zstd: Annotated[
-        Base64Bytes,
-        Meta(
-            description='Zstandard-compressed canonical JSON for the exact semantic state.'
-        ),
-    ]
-    stable_for_ns: Annotated[
-        int, Meta(description='Requested unchanged interval.', ge=0)
-    ]
-    state_hash: Annotated[
+    current_presented_state_hash: Annotated[
         str,
-        Meta(description='Normalized semantic hash assigned by deterministic replay.'),
+        Meta(description='Latest presented-state hash at the actor ordering point.'),
     ]
-    viewport_text: Annotated[
+    scope: Annotated[
         str,
-        Meta(description='Plain text for the exact presentation-eligible viewport.'),
+        Meta(description='Exact output or mutation scope covered by these details.'),
     ]
-    cursor_column: (
+    input_sequence: (
         Annotated[
-            int,
-            Meta(description='Cursor column when it lies in the viewport.', ge=0, le=65535),
+            InputSequenceFailureDetails,
+            Meta(description='Exact attempted prefix when an admitted input sequence stopped early.'),
         ]
         | None
         | UnsetType
     ) = UNSET
-    cursor_row: (
+    screen_frame: (
         Annotated[
-            int,
-            Meta(description='Cursor row when it lies in the viewport.', ge=0, le=65535),
+            ScreenFrameFailureDetails,
+            Meta(description='Bounded rich-projection validation or resource-limit facts.'),
         ]
         | None
         | UnsetType
@@ -1894,13 +1941,38 @@ class DriverData5(Struct, forbid_unknown_fields=True, tag_field='kind', tag='com
     ]
 
 
-class DriverData10(Struct, forbid_unknown_fields=True, tag_field='kind', tag='events'):
+class DriverData11(Struct, forbid_unknown_fields=True, tag_field='kind', tag='events'):
     events: Annotated[
         list[EventProjection], Meta(description='Ordered event projections.')
     ]
     next_event_seq: Annotated[
         int, Meta(description='Next event sequence when more source may exist.', ge=0)
     ]
+
+
+class DriverResult2(Struct, forbid_unknown_fields=True, tag_field='status', tag='error'):
+    code: Annotated[str, Meta(description='Machine-readable code.')]
+    message: Annotated[str, Meta(description='Human-readable diagnostic.')]
+    retry_safety: Annotated[
+        str,
+        Meta(description='`safe_same_request_id`, `safe_new_request`, or `unknown`.'),
+    ]
+    uncertain: Annotated[
+        bool, Meta(description='Whether mutation application may be uncertain.')
+    ]
+    details: (
+        Annotated[
+            ControlErrorDetails,
+            Meta(description='Actor-provided ordering or attempted-prefix details when available.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    evidence: (
+        Annotated[str, Meta(description='Canonical evidence path when known.')]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
 class Observation(Struct, forbid_unknown_fields=True):
@@ -1972,6 +2044,94 @@ class Observation(Struct, forbid_unknown_fields=True):
     ) = UNSET
 
 
+class ScreenAppearance(Struct, forbid_unknown_fields=True):
+    selected: Annotated[bool, Meta(description='Selection membership.')]
+    style: Annotated[
+        CellStyle, Meta(description='Authoritative source style and color selectors.')
+    ]
+    resolved_background: (
+        Annotated[
+            Rgb,
+            Meta(description='Resolved explicit background before default fallback.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    resolved_foreground: (
+        Annotated[
+            Rgb,
+            Meta(description='Resolved explicit foreground before default fallback.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+
+
+class ScreenCell(Struct, forbid_unknown_fields=True):
+    appearance: Annotated[
+        ScreenAppearance, Meta(description='Complete semantic appearance.')
+    ]
+    column: Annotated[
+        int, Meta(description='Absolute viewport column.', ge=0, le=65535)
+    ]
+    grapheme: Annotated[
+        str, Meta(description='Complete grapheme cluster, empty for a blank/spacer.')
+    ]
+    row: Annotated[int, Meta(description='Absolute viewport row.', ge=0, le=65535)]
+    wide_kind: Annotated[WideKind, Meta(description='Native Ghostty width role.')]
+
+
+class ScreenCellRow(Struct, forbid_unknown_fields=True):
+    cells: Annotated[list[ScreenCell], Meta(description='Exact ordered cells.')]
+    row: Annotated[int, Meta(description='Absolute row.', ge=0, le=65535)]
+    soft_wrapped: Annotated[
+        bool, Meta(description='Whether this row ends in a native soft wrap.')
+    ]
+    text: Annotated[str, Meta(description='Deterministic convenience text.')]
+    wrap_continuation: Annotated[
+        bool, Meta(description='Whether this row continues a native soft wrap.')
+    ]
+
+
+class ScreenFrameData3(Struct, forbid_unknown_fields=True, tag_field='detail', tag='cells'):
+    rows: Annotated[list[ScreenCellRow], Meta(description='Ordered projected rows.')]
+
+
+class ScreenSpan(Struct, forbid_unknown_fields=True):
+    appearance: Annotated[
+        ScreenAppearance, Meta(description='Appearance common to every covered cell.')
+    ]
+    cell_count: Annotated[
+        int, Meta(description='Number of terminal columns covered.', ge=0, le=65535)
+    ]
+    cells: Annotated[
+        list[SpanCell], Meta(description='Exact grapheme/width map in column order.')
+    ]
+    end_column: Annotated[
+        int, Meta(description='Exclusive absolute end column.', ge=0, le=65535)
+    ]
+    start_column: Annotated[
+        int, Meta(description='Inclusive absolute start column.', ge=0, le=65535)
+    ]
+    text: Annotated[
+        str, Meta(description='Deterministic convenience text for this run.')
+    ]
+
+
+class ScreenSpanRow(Struct, forbid_unknown_fields=True):
+    row: Annotated[int, Meta(description='Absolute row.', ge=0, le=65535)]
+    soft_wrapped: Annotated[
+        bool, Meta(description='Whether this row ends in a native soft wrap.')
+    ]
+    spans: Annotated[
+        list[ScreenSpan], Meta(description='Lossless ordered appearance spans.')
+    ]
+    text: Annotated[str, Meta(description='Deterministic convenience text.')]
+    wrap_continuation: Annotated[
+        bool, Meta(description='Whether this row continues a native soft wrap.')
+    ]
+
+
 class TimelineItem3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='vt_token'):
     token: Annotated[
         VtToken, Meta(description='Exact token and canonical source segments.')
@@ -1993,6 +2153,10 @@ class CellState(Struct, forbid_unknown_fields=True):
     ]
     selected: Annotated[bool, Meta(description='Whether the cell is selected.')]
     style: Annotated[CellStyle, Meta(description='Visual style.')]
+    wide_kind: Annotated[
+        WideKind,
+        Meta(description='Native width role; never inferred from the grapheme.'),
+    ]
     resolved_background: (
         Annotated[
             Rgb,
@@ -2049,8 +2213,15 @@ class DriverData6(Struct, forbid_unknown_fields=True, tag_field='kind', tag='obs
     ]
 
 
-class DriverData9(Struct, forbid_unknown_fields=True, tag_field='kind', tag='diagnose'):
+class DriverData10(Struct, forbid_unknown_fields=True, tag_field='kind', tag='diagnose'):
     report: Annotated[DiagnoseReport, Meta(description='Source-bound findings.')]
+
+
+class ScreenFrameData2(Struct, forbid_unknown_fields=True, tag_field='detail', tag='spans'):
+    rows: Annotated[list[ScreenSpanRow], Meta(description='Ordered projected rows.')]
+
+
+ScreenFrameData: TypeAlias = Annotated[ScreenFrameData1 | ScreenFrameData2 | ScreenFrameData3, Meta(description='Structurally discriminated rich row payload.')]
 
 
 class TimelineEntry(Struct, forbid_unknown_fields=True):
@@ -2086,7 +2257,7 @@ class CellChange(Struct, forbid_unknown_fields=True):
     ) = UNSET
 
 
-class DriverData7(Struct, forbid_unknown_fields=True, tag_field='kind', tag='timeline'):
+class DriverData8(Struct, forbid_unknown_fields=True, tag_field='kind', tag='timeline'):
     entries: Annotated[
         list[TimelineEntry], Meta(description='Requested entries in canonical order.')
     ]
@@ -2105,6 +2276,56 @@ class RowChange(Struct, forbid_unknown_fields=True):
         list[CellChange], Meta(description='Complete semantic cell changes.')
     ]
     row: Annotated[int, Meta(description='Zero-based row.', ge=0, le=65535)]
+    soft_wrapped: (
+        Annotated[
+            ValueChange8,
+            Meta(description='Earlier/later soft-wrap fact, including row absence at either endpoint.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    wrap_continuation: (
+        Annotated[
+            ValueChange8,
+            Meta(description='Earlier/later wrap-continuation fact, including row absence at either endpoint.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+
+
+class ScreenFrame(Struct, forbid_unknown_fields=True):
+    capture_quality: Annotated[
+        CaptureQuality, Meta(description='Settlement/provenance label.')
+    ]
+    colors: Annotated[
+        ColorState, Meta(description='Current/default colors and complete palette.')
+    ]
+    cursor: Annotated[CursorState, Meta(description='Complete cursor state.')]
+    data: Annotated[
+        ScreenFrameData, Meta(description='Structurally matched detail payload.')
+    ]
+    frame_hash: Annotated[
+        str,
+        Meta(
+            description='Projection identity in the `termtrace-screen-frame-v1` hash domain.'
+        ),
+    ]
+    geometry: Annotated[ScreenGeometry, Meta(description='Full viewport geometry.')]
+    modes: Annotated[ModeState, Meta(description='Complete relevant terminal modes.')]
+    presented: Annotated[
+        bool, Meta(description='Whether this state was presentation eligible.')
+    ]
+    requested_region: Annotated[
+        ScreenRegion, Meta(description='Validated requested region.')
+    ]
+    returned_region: Annotated[
+        ScreenRegion,
+        Meta(description='Actually returned region; equal to requested in version 1.'),
+    ]
+    source: Annotated[ScreenFrameSource, Meta(description='Exact source occurrence.')]
+    state_hash: Annotated[str, Meta(description='Complete semantic v5 state identity.')]
+    version: Annotated[int, Meta(description='Projection format version.', ge=0)]
 
 
 class SemanticDiff(Struct, forbid_unknown_fields=True):
@@ -2157,7 +2378,102 @@ class SemanticDiff(Struct, forbid_unknown_fields=True):
     ) = UNSET
 
 
-class DriverData8(Struct, forbid_unknown_fields=True, tag_field='kind', tag='diff'):
+class ActionPostconditionResult1(Struct, forbid_unknown_fields=True, tag_field='kind', tag='none'):
+    frame: Annotated[ScreenFrame, Meta(description='Exact immediate post-input frame.')]
+    matched: Annotated[
+        bool, Meta(description='Always true after complete input application.')
+    ]
+
+
+class ActionPostconditionResult2(Struct, forbid_unknown_fields=True, tag_field='kind', tag='idle'):
+    frame: Annotated[ScreenFrame, Meta(description='Exact terminating frame.')]
+    matched: Annotated[
+        bool,
+        Meta(
+            description='Whether the state remained unchanged for the requested interval.'
+        ),
+    ]
+    quality: Annotated[
+        StableCaptureQuality, Meta(description='Typed stability quality.')
+    ]
+
+
+class ActionPostconditionResult3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='screen'):
+    frame: Annotated[ScreenFrame, Meta(description='Exact terminating frame.')]
+    matched: Annotated[
+        bool, Meta(description='Whether the predicate matched before termination.')
+    ]
+    quality: Annotated[
+        ScreenPostconditionQuality,
+        Meta(description='Closed completion classification.'),
+    ]
+
+
+ActionPostconditionResult: TypeAlias = Annotated[ActionPostconditionResult1 | ActionPostconditionResult2 | ActionPostconditionResult3, Meta(description='Exact postcondition result returned without releasing actor ordering.')]
+
+
+class ControlData4(Struct, forbid_unknown_fields=True, tag_field='kind', tag='action_applied'):
+    boundaries: Annotated[
+        ActorBoundaries,
+        Meta(
+            description='Durable and observed positions after postcondition evaluation.'
+        ),
+    ]
+    input: Annotated[
+        ActionInputResult,
+        Meta(description='Exact result of the completely applied input prefix.'),
+    ]
+    postcondition: Annotated[
+        ActionPostconditionResult,
+        Meta(
+            description='Exact presented state that satisfied or ended the postcondition.'
+        ),
+    ]
+
+
+class ControlData9(Struct, forbid_unknown_fields=True, tag_field='kind', tag='screen_frame'):
+    frame: Annotated[
+        ScreenFrame,
+        Meta(
+            description='Exact owned projection produced before actor ordering was released.'
+        ),
+    ]
+
+
+class ControlData10(Struct, forbid_unknown_fields=True, tag_field='kind', tag='stable_snapshot'):
+    first_observed_monotonic_ns: Annotated[
+        int,
+        Meta(
+            description='First actor timestamp at which this exact state was observed.',
+            ge=0,
+        ),
+    ]
+    frame: Annotated[
+        ScreenFrame,
+        Meta(description='Exact frame projected before waiter ordering was released.'),
+    ]
+    observed_monotonic_ns: Annotated[
+        int, Meta(description='Actor timestamp of the returned snapshot.', ge=0)
+    ]
+    quality: Annotated[
+        StableCaptureQuality, Meta(description='Typed reason the operation returned.')
+    ]
+    semantic_state_zstd: Annotated[
+        Base64Bytes,
+        Meta(
+            description='Zstandard-compressed canonical JSON for this exact semantic state.'
+        ),
+    ]
+    stable_for_ns: Annotated[
+        int, Meta(description='Requested unchanged interval.', ge=0)
+    ]
+
+
+class DriverData7(Struct, forbid_unknown_fields=True, tag_field='kind', tag='screen_frame'):
+    frame: Annotated[ScreenFrame, Meta(description='Exact owned rich projection.')]
+
+
+class DriverData9(Struct, forbid_unknown_fields=True, tag_field='kind', tag='diff'):
     difference: Annotated[
         SemanticDiff, Meta(description='Source-bound semantic difference.')
     ]
@@ -2169,49 +2485,47 @@ class DriverResponse(Struct, forbid_unknown_fields=True):
     version: Annotated[int, Meta(description='Driver protocol version.', ge=0)]
 
 
-class ControlData10(Struct, forbid_unknown_fields=True, tag_field='kind', tag='screen_wait'):
-    boundaries: Annotated[
-        ActorBoundaries,
-        Meta(description='Actor-consistent canonical source boundaries.'),
+class ControlData11(Struct, forbid_unknown_fields=True, tag_field='kind', tag='screen_wait'):
+    frame: Annotated[
+        ScreenFrame, Meta(description='Exact satisfying or terminating frame.')
     ]
-    child_completed: Annotated[
-        bool,
+    matched: Annotated[
+        bool, Meta(description='Whether the predicate matched before termination.')
+    ]
+    observed_monotonic_ns: Annotated[
+        int,
         Meta(
-            description='Whether immutable child completion made the final matching state stable.'
+            description='Last actor timestamp at which the returned state was evaluated.',
+            ge=0,
         ),
     ]
-    cols: Annotated[int, Meta(description='Terminal columns.', ge=0, le=65535)]
-    completion_quality: Annotated[
-        str, Meta(description='`stable` or `matched_unsettled`.')
+    predicate: Annotated[
+        ScreenPredicate, Meta(description='Predicate that was evaluated.')
     ]
-    first_match_monotonic_ns: Annotated[
-        int,
-        Meta(description='First matching timestamp for this unchanged state.', ge=0),
+    quality: Annotated[
+        ScreenWaitQuality, Meta(description='Closed completion classification.')
     ]
-    predicate: Annotated[ScreenPredicate, Meta(description='Predicate that matched.')]
-    rows: Annotated[int, Meta(description='Terminal rows.', ge=0, le=65535)]
     stable_for_ns: Annotated[
         int, Meta(description='Requested unchanged interval.', ge=0)
     ]
-    stable_through_monotonic_ns: Annotated[
-        int,
-        Meta(
-            description='Last timestamp through which the state remained stable.', ge=0
-        ),
-    ]
-    state_hash: Annotated[
-        str, Meta(description='Full presentation-eligible semantic state hash.')
-    ]
+    first_match_monotonic_ns: (
+        Annotated[
+            int,
+            Meta(description='First matching timestamp for this unchanged state, when matched.', ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
-ControlData: TypeAlias = Annotated[ControlData1 | ControlData2 | ControlData3 | ControlData4 | ControlData5 | ControlData6 | ControlData7 | ControlData8 | ControlData9 | ControlData10 | ControlData11, Meta(description='Successful response payload.')]
+ControlData: TypeAlias = Annotated[ControlData1 | ControlData2 | ControlData3 | ControlData4 | ControlData5 | ControlData6 | ControlData7 | ControlData8 | ControlData9 | ControlData10 | ControlData11 | ControlData12, Meta(description='Successful response payload.')]
 
 
 class DriverData3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='control'):
     data: Annotated[ControlData, Meta(description='Exact actor result data.')]
 
 
-DriverData: TypeAlias = Annotated[DriverData1 | DriverData2 | DriverData3 | DriverData4 | DriverData5 | DriverData6 | DriverData7 | DriverData8 | DriverData9 | DriverData10 | DriverData11 | DriverData12 | DriverData13 | DriverData14 | DriverData15, Meta(description='Typed driver result payload.')]
+DriverData: TypeAlias = Annotated[DriverData1 | DriverData2 | DriverData3 | DriverData4 | DriverData5 | DriverData6 | DriverData7 | DriverData8 | DriverData9 | DriverData10 | DriverData11 | DriverData12 | DriverData13 | DriverData14 | DriverData15 | DriverData16, Meta(description='Typed driver result payload.')]
 
 
 class DriverResult1(Struct, forbid_unknown_fields=True, tag_field='status', tag='ok'):
@@ -2238,29 +2552,31 @@ ScreenPredicate: TypeAlias = Annotated[ScreenPredicate1 | ScreenPredicate2 | Scr
 # Stable names for anonymous tagged-union variants.
 DriverHelloData: TypeAlias = DriverData1
 DriverAttachedData: TypeAlias = DriverData2
-DriverArtifactData: TypeAlias = DriverData11
-DriverDetachedData: TypeAlias = DriverData14
-DriverDiscardedData: TypeAlias = DriverData15
+DriverArtifactData: TypeAlias = DriverData12
+DriverDetachedData: TypeAlias = DriverData15
+DriverDiscardedData: TypeAlias = DriverData16
 DriverOutputWaitData: TypeAlias = DriverData4
-DriverVerificationData: TypeAlias = DriverData12
-DriverBundleData: TypeAlias = DriverData13
+DriverVerificationData: TypeAlias = DriverData13
+DriverBundleData: TypeAlias = DriverData14
 DriverCompletionData: TypeAlias = DriverData5
-DriverEventsData: TypeAlias = DriverData10
+DriverEventsData: TypeAlias = DriverData11
 DriverObservationData: TypeAlias = DriverData6
-DriverDiagnoseData: TypeAlias = DriverData9
-DriverTimelineData: TypeAlias = DriverData7
-DriverDiffData: TypeAlias = DriverData8
+DriverDiagnoseData: TypeAlias = DriverData10
+DriverTimelineData: TypeAlias = DriverData8
+DriverScreenFrameData: TypeAlias = DriverData7
+DriverDiffData: TypeAlias = DriverData9
 DriverControlData: TypeAlias = DriverData3
 ControlAcknowledgedData: TypeAlias = ControlData1
 ControlInputAppliedData: TypeAlias = ControlData2
 ControlInputSequenceAppliedData: TypeAlias = ControlData3
-ControlActionAppliedData: TypeAlias = ControlData4
 ControlInputNoopData: TypeAlias = ControlData5
 ControlActivatedData: TypeAlias = ControlData6
 ControlStatusData: TypeAlias = ControlData7
-ControlMarkedData: TypeAlias = ControlData11
+ControlMarkedData: TypeAlias = ControlData12
 ControlSnapshotData: TypeAlias = ControlData8
-ControlStableSnapshotData: TypeAlias = ControlData9
-ControlScreenWaitData: TypeAlias = ControlData10
+ControlActionAppliedData: TypeAlias = ControlData4
+ControlScreenFrameData: TypeAlias = ControlData9
+ControlStableSnapshotData: TypeAlias = ControlData10
+ControlScreenWaitData: TypeAlias = ControlData11
 DriverErrorResult: TypeAlias = DriverResult2
 DriverOkResult: TypeAlias = DriverResult1
