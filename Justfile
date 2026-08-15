@@ -14,19 +14,23 @@ generate:
   cargo run --locked --quiet -- tooling schemas --out schemas
   scripts/generate-client-protocol.sh
 
+# enforce the complete allowlist of direct internal Cargo dependencies
+architecture:
+  python3 scripts/check-architecture.py
+
 # compile every Rust target and feature without running tests
 validate:
-  cargo check --locked --all-targets --all-features
+  cargo check --locked --workspace --all-targets --all-features
 
 # run Rust, TypeScript, and Python tests
 test:
-  cargo test --locked --all-features
+  cargo test --locked --workspace --all-features
   bun run --cwd packages/typescript test
   uv run --project packages/python --locked --group dev pytest -q packages/python/tests
 
 # lint Rust and type-check and lint the language clients
 lint:
-  cargo clippy --locked --all-targets --all-features -- -D warnings
+  cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
   bun run --cwd packages/typescript lint
   bun run --cwd packages/typescript typecheck
   uv run --project packages/python --locked --group dev mypy packages/python/termtrace packages/python/tests
@@ -49,7 +53,7 @@ smoke:
   @scripts/native-smoke-test.sh
 
 # run every non-mutating repository check
-check: format-check lint validate test
+check: architecture format-check lint validate test
 
 # list available commands
 help:

@@ -22,6 +22,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@46511b1c83438f0dd37c02d843619ece5a4abb5b # 1.97.1
         with:
           components: clippy,rustfmt
+      - name: Install cargo-machete
+        run: cargo install cargo-machete --version 0.9.2 --locked
       - name: Install headless Ghostty config fixture
         run: echo "$GITHUB_WORKSPACE/tests/fixtures/bin" >> "$GITHUB_PATH"
       - run: scripts/ci-rust.sh

@@ -9,6 +9,8 @@ bash tests/install.sh
 python3 -m py_compile demos/apps/terminal_showcase.py
 scripts/bootstrap.sh
 bash scripts/check-github-action-pins.sh
+python3 scripts/check-architecture.py
+cargo machete
 cargo fmt --all -- --check
-cargo test --locked --all-features
-cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-features
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
