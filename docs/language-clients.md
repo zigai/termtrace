@@ -28,6 +28,12 @@ Rust serde + Schemars types
 
 Every request and response is validated at the process boundary. Protocol envelopes and anonymous tagged-union variants remain internal. Stable domain results such as frames, observations, diffs, completion manifests, verification reports, and artifacts are deliberately exported with concrete types.
 
+Rust `termtrace-model::protocol::driver` owns driver request and response wire
+contracts. The generated clients translate those responses into exported
+host-language domain results; neither client owns a competing response schema.
+The separate command-line envelope is owned by
+`termtrace-model::protocol::cli_response` and is not a client transport type.
+
 Validation diagnostics never contain the raw message because terminal output, typed input, paths, and evidence metadata can be sensitive.
 
 ## Python
@@ -45,6 +51,16 @@ with Terminal(evidence_root=".termtrace-evidence") as terminal:
 ```
 
 `AsyncTerminal` exposes the same domain results through native asyncio methods. Sync and async transports share the generated models, request encoding, response decoding, correlation checks, and error translation.
+
+The Python package keeps immutable rich-screen behavior under
+`termtrace/screen`: `frame`, `queries`, `locators`, `snapshot`, and wire
+conversion. Session request/action workflows and sync/async session objects live
+under `termtrace/session`, with session wire conversion in `session/wire`.
+Binary discovery, request transport, protocol translation, and generated
+request/response models live under `termtrace/transport`; generated code is
+confined to `transport/generated`. Sync and async I/O remain separate. Only
+pure request construction, validation, lifecycle, and evidence helpers are
+shared.
 
 ## TypeScript
 
@@ -67,6 +83,14 @@ if (!frame.viewport_text.includes("Commands")) throw new Error("commands missing
 ```
 
 The package ships precompiled standalone Ajv validators. Ajv is a development dependency and is not initialized at client startup.
+
+The TypeScript package keeps generated protocol types and validators in
+`transport/generated`, process and protocol-boundary code in `transport`,
+session workflows in `session`, and rich immutable screen values and queries in
+`screen`. `@termtrace/test` remains the curated public facade.
+`testing/vitest.ts` is only the stable `@termtrace/test/vitest` entrypoint; its
+fixture, lifecycle, matcher, matcher-input, and type implementations live under
+`testing/vitest`.
 
 ## Testing API parity
 
@@ -96,7 +120,7 @@ soft-wrap rows requires an explicit option. Host-native regex syntax and flags
 remain language-specific, but empty/zero-width and partial-grapheme matches are
 rejected consistently. `single` rejects both absence and ambiguity.
 
-`fixtures/locator-conformance.json` is consumed by the Rust, Python, and
+`fixtures/conformance/locators/locator.json` is consumed by the Rust, Python,
 TypeScript suites. It fixes shared ordering, terminal-column ranges, combining
 and wide-cell behavior, styled blank coalescing, region intersection,
 soft-wrap crossing, state/frame identity, hidden-state labeling, and invalid
@@ -147,6 +171,6 @@ bun run --cwd packages/typescript build
 Schema generation replaces existing files with known generated schema names and
 leaves unrelated files in the destination untouched.
 
-Generation pins `datamodel-code-generator`, `json-schema-to-typescript`, and Ajv versions. CI regenerates both packages and rejects any diff. Shared valid and invalid responses in `fixtures/protocol/driver-responses.json` are exercised by both language test suites.
+Generation pins `datamodel-code-generator`, `json-schema-to-typescript`, and Ajv versions. CI regenerates both packages and rejects any diff. Shared valid and invalid responses in `fixtures/conformance/protocol/driver-responses.json` are exercised by both language test suites.
 
 The generated Python request model uses a dictionary representation only for the Rust `NamedKey` union because that union mixes scalar strings with untagged object variants, which `msgspec` cannot decode as one typed union. The Rust driver still performs exact request validation, including the `NamedKey` variants.

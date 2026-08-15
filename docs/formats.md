@@ -54,6 +54,13 @@ mode writes exactly one object, bounded to 64 KiB, with required `v`, `ok`, and
 coexist with applied input, and callers must not invent a retry policy from the
 process exit code. Logs and progress are written to stderr.
 
+The Rust contract owner is
+`termtrace_model::protocol::cli_response::{CLI_RESPONSE_VERSION,
+CliResponseEnvelope, Applied, Retry, SessionState}`. The executable's
+`cli::output` modules only select and render response modes and flatten
+command-specific fields into that envelope; they do not own another response
+model.
+
 `schemas/tmux-recording-manifest.schema.json` defines aggregate tmux recording
 version 2: the composite client track, linked pane tracks, observed lifecycle,
 layout and focus transitions, and explicit coverage gaps.

@@ -14,6 +14,12 @@ Resolution order is:
 
 A name cannot appear in conflicting operations. Recorder-owned terminal/color names cannot be set, copied, or unset directly. `auto` preserves inherited color variables, `always` requests color through common variables, and `never` sets `NO_COLOR` plus zero-valued force-color variables.
 
+Shared executable programs used to exercise terminal behavior live under
+`fixtures/programs/terminal/`. Cross-SDK atomic action data lives at
+`fixtures/conformance/actions/atomic-action.json`; it is data rather than an
+executable test program, so every caller applies the same request and expected
+result while retaining its own public API path.
+
 ## Rust
 
 ```rust,no_run

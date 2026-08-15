@@ -22,7 +22,7 @@ add generated scaffolding to the application repository.
   never command-line values.
 - Use `--output-byte-budget` to terminate runaway output without truncating
   canonical evidence.
-- Use the framework-neutral fixtures under `fixtures/terminal/` for line input,
+- Use the framework-neutral fixtures under `fixtures/programs/terminal/` for line input,
   alternate-screen behavior, and terminal-query responses.
 
 ## Completion criterion
