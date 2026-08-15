@@ -10,7 +10,7 @@ from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_ROOT = PACKAGE_ROOT.parents[1]
-GENERATED_ROOT = PACKAGE_ROOT / "termtrace" / "_generated"
+GENERATED_ROOT = PACKAGE_ROOT / "termtrace" / "transport" / "generated"
 MODELS = (
     ("driver-request.schema.json", "driver_request.py", False),
     ("driver-response.schema.json", "driver_response.py", True),

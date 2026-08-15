@@ -12,7 +12,7 @@
   ],
   "type": "module",
   "sideEffects": [
-    "./lib/vitest.js"
+    "./lib/testing/vitest.js"
   ],
   "exports": {
     ".": {
@@ -20,8 +20,8 @@
       "import": "./lib/index.js"
     },
     "./vitest": {
-      "types": "./lib/vitest.d.ts",
-      "import": "./lib/vitest.js"
+      "types": "./lib/testing/vitest.d.ts",
+      "import": "./lib/testing/vitest.js"
     }
   },
   "scripts": {

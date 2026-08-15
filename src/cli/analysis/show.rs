@@ -1,7 +1,68 @@
-use super::*;
-use termtrace::control::ScreenWaitQuality;
+use crate::cli::output::ResponseWriter;
 
-pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
+use std::{
+    env,
+    ffi::OsString,
+    io::{self, Read as _, Write as _},
+    os::unix::ffi::OsStrExt as _,
+    path::{Path, PathBuf},
+    process::{Command as ProcessCommand, ExitCode, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
+
+use miette::{IntoDiagnostic as _, Result};
+use termtrace_engine::{
+    Error,
+    diff::inspect_point,
+    observation::{
+        CaptureQuality, Observation, ObservationSourceKind, TruthLayer, format_ansi_stream,
+        observe_ansi_stream, observe_one_off_session, observe_validated_prefix,
+        semantic_state_from_ansi,
+    },
+    recording::control::evaluate_screen_predicate,
+    registry::SessionRegistry,
+    replay::{format_state, semantic_state_hash},
+};
+use termtrace_evidence::{
+    artifact::write_secure,
+    event_log::EventLog,
+    session::{read_manifest, validate_completed_log},
+};
+use termtrace_media::native_capture::{
+    CaptureKind, CaptureOptions, capture, native_capture_target,
+};
+use termtrace_model::{
+    execution::event::Event,
+    protocol::capability::NATIVE_SCREENSHOT_CAPABILITY,
+    protocol::control::{ControlCommand, ScreenPredicate, ScreenWaitQuality, StateHashComparison},
+    registry::DetachedSessionPaths,
+    terminal::observation::StatePoint,
+    terminal::replay::{StateSelection, StateSelector},
+    terminal::state::SemanticState,
+    value::ByteString,
+};
+use termtrace_render::{SEMANTIC_PNG_RENDERER, SEMANTIC_SVG_RENDERER, render_png, render_svg};
+use termtrace_sdk::{
+    control_endpoint_is_reachable, inspection::wait_for_screen, observe_session_with_options,
+    request, semantic_state_with_hash_for_session,
+};
+use termtrace_terminal::Format as GhosttyFormat;
+
+use crate::cli::{
+    analysis::args::{ShowArgs, ShowFormat, ShowRenderer},
+    control::args::{ScreenArgs, ScreenEncoding},
+    control::run_screen,
+    output::{stable_enum_label, write_json_line, write_stdout},
+    recording::open_detached_log,
+    session_helpers::resolve_session_ref,
+    tooling::require_cli_capability,
+};
+
+pub(in crate::cli) fn run_show(
+    response: &mut ResponseWriter,
+    arguments: ShowArgs,
+) -> Result<ExitCode> {
     if arguments.screen.is_some() || arguments.since.is_some() {
         let session = arguments.session.clone().ok_or_else(|| {
             return miette::miette!("compact show requires a canonical session source");
@@ -11,11 +72,14 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
                 "compact show accepts only a canonical session source"
             ));
         }
-        return run_screen(ScreenArgs {
-            session,
-            screen: arguments.screen.unwrap_or(ScreenEncoding::Text),
-            since: arguments.since,
-        });
+        return run_screen(
+            response,
+            ScreenArgs {
+                session,
+                screen: arguments.screen.unwrap_or(ScreenEncoding::Text),
+                since: arguments.since,
+            },
+        );
     }
     let image_format = matches!(arguments.format, ShowFormat::Svg | ShowFormat::Png);
     if !image_format && arguments.renderer == ShowRenderer::Native {
@@ -80,7 +144,7 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
             ));
         }
         if arguments.renderer == ShowRenderer::Native {
-            require_capability(NATIVE_SCREENSHOT_CAPABILITY)?;
+            require_cli_capability(NATIVE_SCREENSHOT_CAPABILITY)?;
         }
         let outcome = run_one_off_command(
             &arguments.command,
@@ -96,12 +160,15 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
             .observation
             .as_ref()
             .is_some_and(|observation| return observation.source_completed);
-        return write_json_line(&serde_json::json!({
-            "kind": "detached_one_off",
-            "canonical_session": ByteString::from(outcome.session.as_os_str().as_bytes()),
-            "detached": outcome.detached,
-            "source_completed": source_completed,
-        }));
+        return write_json_line(
+            response,
+            &serde_json::json!({
+                "kind": "detached_one_off",
+                "canonical_session": ByteString::from(outcome.session.as_os_str().as_bytes()),
+                "detached": outcome.detached,
+                "source_completed": source_completed,
+            }),
+        );
     }
     if arguments.recover_prefix {
         let session = arguments.session.as_ref().ok_or_else(|| {
@@ -119,18 +186,24 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
             ));
         }
         let session = resolve_session_ref(session.clone())?;
-        let observation = observe_validated_prefix(&session, point, arguments.include_hidden)?;
+        let observation = observe_validated_prefix(&session, point, arguments.include_hidden)
+            .into_diagnostic()?;
         if arguments.metadata {
             write_observation_metadata(&observation)?;
         }
         return match arguments.format {
-            ShowFormat::Text => write_stdout(format!("{}\n", observation.frame.viewport_text)),
-            ShowFormat::Json => write_stdout(format!(
-                "{}\n",
-                serde_json::to_string_pretty(&observation).into_diagnostic()?
-            )),
-            ShowFormat::JsonCompact => write_json_line(&observation),
-            ShowFormat::FrameJson => write_json_line(&observation.frame_envelope()),
+            ShowFormat::Text => {
+                write_stdout(response, format!("{}\n", observation.frame.viewport_text))
+            }
+            ShowFormat::Json => write_stdout(
+                response,
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&observation).into_diagnostic()?
+                ),
+            ),
+            ShowFormat::JsonCompact => write_json_line(response, &observation),
+            ShowFormat::FrameJson => write_json_line(response, &observation.frame_envelope()),
             _ => Err(miette::miette!("unsupported prefix observation format")),
         };
     }
@@ -161,7 +234,8 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
                     },
                     arguments.stable_for,
                     Duration::from_millis(arguments.timeout_ms),
-                )?;
+                )
+                .into_diagnostic()?;
                 if !stable_wait.matched || stable_wait.quality != ScreenWaitQuality::Matched {
                     return Err(miette::miette!(
                         "live stability was not established before {:?}",
@@ -171,7 +245,8 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
                 stable_hash = Some(stable_wait.frame.state_hash);
             }
             let mut observation =
-                observe_session_with_options(&session, point.clone(), arguments.include_hidden)?;
+                observe_session_with_options(&session, point.clone(), arguments.include_hidden)
+                    .into_diagnostic()?;
             if let Some(state_hash) = stable_hash {
                 if observation.state_hash != state_hash {
                     return Err(miette::miette!(
@@ -199,7 +274,8 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
                     &session,
                     &point,
                     arguments.include_hidden,
-                )?;
+                )
+                .into_diagnostic()?;
                 ensure_observation_state_hash(&observation, &state_hash)?;
                 Some(render_show_image(&state, arguments.format)?)
             } else {
@@ -233,7 +309,8 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
             if let Some(destination) = &arguments.record_out {
                 record_ansi_import(&bytes, &input, destination, arguments.cols, arguments.rows)?;
                 let mut observation =
-                    observe_one_off_session(destination, StatePoint::LatestPresented, false)?;
+                    observe_one_off_session(destination, StatePoint::LatestPresented, false)
+                        .into_diagnostic()?;
                 observation.source_kind = ObservationSourceKind::ImportedAnsi;
                 let formatted = formatter
                     .map(|format| {
@@ -249,7 +326,8 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
                         destination,
                         &StatePoint::LatestPresented,
                         false,
-                    )?;
+                    )
+                    .into_diagnostic()?;
                     ensure_observation_state_hash(&observation, &state_hash)?;
                     Some(render_show_image(&state, arguments.format)?)
                 } else {
@@ -259,12 +337,15 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
             } else {
                 let formatted = formatter
                     .map(|format| {
-                        return format_ansi_stream(&bytes, arguments.cols, arguments.rows, format);
+                        return format_ansi_stream(&bytes, arguments.cols, arguments.rows, format)
+                            .into_diagnostic();
                     })
                     .transpose()?;
-                let observation = observe_ansi_stream(&bytes, arguments.cols, arguments.rows)?;
+                let observation = observe_ansi_stream(&bytes, arguments.cols, arguments.rows)
+                    .into_diagnostic()?;
                 let image = if image_format {
-                    let state = semantic_state_from_ansi(&bytes, arguments.cols, arguments.rows)?;
+                    let state = semantic_state_from_ansi(&bytes, arguments.cols, arguments.rows)
+                        .into_diagnostic()?;
                     ensure_direct_observation_state(&observation, &state)?;
                     Some(render_show_image(&state, arguments.format)?)
                 } else {
@@ -290,7 +371,7 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
                 ));
             }
             if image_format && arguments.renderer == ShowRenderer::Native {
-                require_capability(NATIVE_SCREENSHOT_CAPABILITY)?;
+                require_cli_capability(NATIVE_SCREENSHOT_CAPABILITY)?;
             }
             let outcome = run_one_off_command(
                 &arguments.command,
@@ -306,7 +387,8 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
             let session = outcome.session;
             let mut observation = match outcome.observation {
                 Some(observation) => observation,
-                None => observe_one_off_session(&session, point.clone(), arguments.include_hidden)?,
+                None => observe_one_off_session(&session, point.clone(), arguments.include_hidden)
+                    .into_diagnostic()?,
             };
             let formatted = formatter
                 .map(|format| return format_completed_state(&session, &point, format))
@@ -319,7 +401,8 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
                     &session,
                     &point,
                     arguments.include_hidden,
-                )?;
+                )
+                .into_diagnostic()?;
                 ensure_observation_state_hash(&observation, &state_hash)?;
                 Some(render_show_image(&state, arguments.format)?)
             } else {
@@ -353,26 +436,37 @@ pub(in crate::cli) fn run_show(arguments: ShowArgs) -> Result<ExitCode> {
             "observation": observation,
         }))
         .into_diagnostic()?;
-        write_secure(path, &manifest)?;
+        write_secure(path, &manifest).into_diagnostic()?;
     } else if arguments.manifest.is_some() {
         return Err(miette::miette!(
             "--manifest is valid only for SVG or PNG output"
         ));
     }
     let result = match arguments.format {
-        ShowFormat::Text => write_stdout(format!("{}\n", observation.frame.viewport_text)),
-        ShowFormat::Json => write_stdout(format!(
-            "{}\n",
-            serde_json::to_string_pretty(&observation).into_diagnostic()?
-        )),
-        ShowFormat::JsonCompact => write_json_line(&observation),
-        ShowFormat::FrameJson => write_json_line(&observation.frame_envelope()),
-        ShowFormat::Vt | ShowFormat::Html => write_stdout(formatted.ok_or_else(|| {
-            return miette::miette!("selected formatter produced no output");
-        })?),
-        ShowFormat::Svg | ShowFormat::Png => write_stdout(image.ok_or_else(|| {
-            return miette::miette!("selected image renderer produced no output");
-        })?),
+        ShowFormat::Text => {
+            write_stdout(response, format!("{}\n", observation.frame.viewport_text))
+        }
+        ShowFormat::Json => write_stdout(
+            response,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&observation).into_diagnostic()?
+            ),
+        ),
+        ShowFormat::JsonCompact => write_json_line(response, &observation),
+        ShowFormat::FrameJson => write_json_line(response, &observation.frame_envelope()),
+        ShowFormat::Vt | ShowFormat::Html => write_stdout(
+            response,
+            formatted.ok_or_else(|| {
+                return miette::miette!("selected formatter produced no output");
+            })?,
+        ),
+        ShowFormat::Svg | ShowFormat::Png => write_stdout(
+            response,
+            image.ok_or_else(|| {
+                return miette::miette!("selected image renderer produced no output");
+            })?,
+        ),
     };
     if result.is_ok()
         && let Some((session, diagnostic_logs)) = discard_session
@@ -417,7 +511,7 @@ fn render_show_image(state: &SemanticState, format: ShowFormat) -> Result<Vec<u8
 }
 
 fn ensure_direct_observation_state(observation: &Observation, state: &SemanticState) -> Result<()> {
-    let state_hash = semantic_state_hash(state)?;
+    let state_hash = semantic_state_hash(state).into_diagnostic()?;
     return ensure_observation_state_hash(observation, &state_hash);
 }
 
@@ -436,9 +530,9 @@ fn render_native_show(session: &Path, point: &StatePoint) -> Result<Vec<u8>> {
             "native show rendering requires completed canonical evidence"
         ));
     }
-    let log = EventLog::read(session.join("events.jsonl"))?;
-    validate_completed_log(session, &log)?;
-    let inspection = inspect_point(&log, point)?;
+    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
+    validate_completed_log(session, &log).into_diagnostic()?;
+    let inspection = inspect_point(&log, point).into_diagnostic()?;
     if !inspection.record.presented {
         return Err(miette::miette!(
             "native show rendering rejects hidden semantic states"
@@ -448,8 +542,8 @@ fn render_native_show(session: &Path, point: &StatePoint) -> Result<Vec<u8>> {
         .record
         .event_seq
         .ok_or_else(|| return miette::miette!("the initial state has no native replay endpoint"))?;
-    require_capability(NATIVE_SCREENSHOT_CAPABILITY)?;
-    let (target, geometry_solver) = native_capture_target(session, None)?;
+    require_cli_capability(NATIVE_SCREENSHOT_CAPABILITY)?;
+    let (target, geometry_solver) = native_capture_target(session, None).into_diagnostic()?;
     let destination =
         env::temp_dir().join(format!(".termtrace-native-show-{}", uuid::Uuid::now_v7()));
     let outcome = capture(&CaptureOptions {
@@ -468,7 +562,8 @@ fn render_native_show(session: &Path, point: &StatePoint) -> Result<Vec<u8>> {
             event_byte_offset: inspection.record.event_byte_offset,
         },
         destination: Some(destination.clone()),
-    })?;
+    })
+    .into_diagnostic()?;
     let image = fs_err::read(outcome.screenshot).into_diagnostic()?;
     fs_err::remove_dir_all(&destination)
         .map_err(|error| return miette::miette!("remove native show staging artifact: {error}"))?;
@@ -480,14 +575,15 @@ fn format_completed_state(
     point: &StatePoint,
     format: GhosttyFormat,
 ) -> Result<Vec<u8>> {
-    let log = EventLog::read(session.join("events.jsonl"))?;
-    validate_completed_log(session, &log)?;
-    let inspection = inspect_point(&log, point)?;
-    return Ok(format_state(
+    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
+    validate_completed_log(session, &log).into_diagnostic()?;
+    let inspection = inspect_point(&log, point).into_diagnostic()?;
+    return format_state(
         &log,
         StateSelector::StateId(inspection.record.state_id),
         format,
-    )?);
+    )
+    .into_diagnostic();
 }
 
 struct OneOffCommandOutcome {
@@ -505,17 +601,19 @@ fn record_ansi_import(
     rows: u16,
 ) -> Result<()> {
     if destination.exists() {
-        return Err(Error::ArtifactExists {
-            path: destination.to_path_buf(),
-        }
-        .into());
+        return Err(miette::miette!(
+            "{}",
+            Error::ArtifactExists {
+                path: destination.to_path_buf(),
+            }
+        ));
     }
     let parent = destination
         .parent()
         .ok_or_else(|| return miette::miette!("ANSI import destination has no parent"))?;
     fs_err::create_dir_all(parent).into_diagnostic()?;
     let input = parent.join(format!(".ansi-import-{}.tmp", uuid::Uuid::now_v7()));
-    write_secure(&input, bytes)?;
+    write_secure(&input, bytes).into_diagnostic()?;
     let hash = blake3::hash(bytes).to_hex().to_string();
     let process = ProcessCommand::new(env::current_exe().into_diagnostic()?)
         .args(["record", "--no-input", "--out"])
@@ -548,8 +646,8 @@ fn record_ansi_import(
             String::from_utf8_lossy(&process.stderr)
         ));
     }
-    let log = EventLog::read(destination.join("events.jsonl"))?;
-    validate_completed_log(destination, &log)?;
+    let log = EventLog::read(destination.join("events.jsonl")).into_diagnostic()?;
+    validate_completed_log(destination, &log).into_diagnostic()?;
     let imported = log
         .events
         .iter()
@@ -567,7 +665,7 @@ fn record_ansi_import(
             "ANSI import canonical output does not match the exact source bytes"
         ));
     }
-    let manifest = read_manifest(destination)?;
+    let manifest = read_manifest(destination).into_diagnostic()?;
     if manifest
         .import_provenance
         .as_ref()
@@ -601,10 +699,12 @@ fn run_one_off_command(
     }
     let paths = if let Some(session) = requested_out {
         if session.exists() {
-            return Err(Error::ArtifactExists {
-                path: session.to_path_buf(),
-            }
-            .into());
+            return Err(miette::miette!(
+                "{}",
+                Error::ArtifactExists {
+                    path: session.to_path_buf(),
+                }
+            ));
         }
         let parent = session
             .parent()
@@ -621,7 +721,10 @@ fn run_one_off_command(
             stderr_log: parent.join(format!(".{name}.{identity}.stderr.log")),
         }
     } else {
-        SessionRegistry::open_default()?.allocate_detached_paths()?
+        SessionRegistry::open_default()
+            .into_diagnostic()?
+            .allocate_detached_paths()
+            .into_diagnostic()?
     };
     let stdout = open_detached_log(&paths.stdout_log)?;
     let stderr = open_detached_log(&paths.stderr_log)?;
@@ -651,15 +754,27 @@ fn run_one_off_command(
         if let Some(status) = child.try_wait().into_diagnostic()? {
             if paths.session.join("completion.json").is_file() {
                 let mut observation =
-                    observe_one_off_session(&paths.session, StatePoint::LatestPresented, false)?;
+                    observe_one_off_session(&paths.session, StatePoint::LatestPresented, false)
+                        .into_diagnostic()?;
                 if let Some(predicate) = &wait_predicate {
                     let matched = match predicate {
                         ScreenPredicate::Contains { text } => {
                             observation.frame.viewport_text.contains(text)
                         }
-                        ScreenPredicate::MatchesRegex { pattern } => regex::Regex::new(pattern)
-                            .into_diagnostic()?
-                            .is_match(&observation.frame.viewport_text),
+                        ScreenPredicate::MatchesRegex { .. } => {
+                            let (state, state_hash) = semantic_state_with_hash_for_session(
+                                &paths.session,
+                                &StatePoint::LatestPresented,
+                                false,
+                            )
+                            .into_diagnostic()?;
+                            evaluate_screen_predicate(
+                                predicate,
+                                &state,
+                                &observation.frame.viewport_text,
+                                &state_hash,
+                            )
+                        }
                         _ => false,
                     };
                     if !matched {
@@ -784,7 +899,7 @@ fn run_one_off_command(
                 stop_description,
             ));
         }
-        request(&paths.session, ControlCommand::Stop)?;
+        request(&paths.session, ControlCommand::Stop).into_diagnostic()?;
         Some(observation)
     } else {
         None

@@ -1,34 +1,5 @@
 """Runner-neutral typed clients and immutable terminal evidence values."""
 
-from termtrace.assertions import (
-    assert_cursor,
-    assert_frame_text,
-    assert_match_style,
-    assert_match_text,
-    assert_matches,
-    assert_neutral_region,
-    assert_no_matches,
-    assert_no_wrapped_rows,
-    assert_normalized_frame,
-    assert_screen_text,
-    assert_snapshot_file,
-    assert_terminal_snapshot,
-    regex,
-    stable_terminal_snapshot,
-)
-from termtrace.async_client import (
-    AsyncEvents,
-    AsyncEvidence,
-    AsyncKeyboard,
-    AsyncNative,
-    AsyncOutput,
-    AsyncPointer,
-    AsyncScreen,
-    AsyncSemantic,
-    AsyncSession,
-    AsyncTerminal,
-)
-from termtrace.async_testing import AsyncTermtraceTest
 from termtrace.atoms import (
     BytesAtom,
     InputAtom,
@@ -37,21 +8,8 @@ from termtrace.atoms import (
     PasteAtom,
     TextAtom,
 )
-from termtrace.client import (
-    DriverTransport,
-    EnvironmentOptions,
-    Events,
-    Evidence,
-    Keyboard,
-    Native,
-    Output,
-    Pointer,
-    Screen,
-    Semantic,
-    Session,
-    Terminal,
-)
 from termtrace.duration import Duration
+from termtrace.environment import EnvironmentOptions
 from termtrace.errors import (
     ActionBusyError,
     BusyError,
@@ -79,7 +37,7 @@ from termtrace.errors import (
     TransportError,
     ValidationError,
 )
-from termtrace.frames import (
+from termtrace.screen.frame import (
     ActorBoundaries,
     Appearance,
     CanonicalBoundary,
@@ -104,13 +62,11 @@ from termtrace.frames import (
     TerminalMode,
     WideKind,
 )
-from termtrace.locators import (
+from termtrace.screen.locators import AsyncLocator, Locator, LocatorWaitResult
+from termtrace.screen.queries import (
     AllSpec,
-    AsyncLocator,
     CellRange,
-    Locator,
     LocatorSpec,
-    LocatorWaitResult,
     Query,
     RegionSpec,
     RowSpec,
@@ -125,14 +81,70 @@ from termtrace.locators import (
     style,
     text,
 )
-from termtrace.models import (
+from termtrace.screen.snapshot import FrameSnapshot, SnapshotProfile, normalize_frame
+from termtrace.session.actions import (
     ActionCompletion,
     ActionOptions,
     ActionPostcondition,
     ActionQuality,
     ActionResult,
-    Artifact,
     AtomOutcome,
+    IdleCompletion,
+    IdlePostcondition,
+    InputResult,
+    NoneCompletion,
+    NonePostcondition,
+    ScreenCompletion,
+    ScreenPostcondition,
+    ScreenWaitResult,
+    StableCapture,
+    StableOptions,
+    StableQuality,
+)
+from termtrace.session.async_ import (
+    AsyncEvents,
+    AsyncEvidence,
+    AsyncKeyboard,
+    AsyncNative,
+    AsyncOutput,
+    AsyncPointer,
+    AsyncScreen,
+    AsyncSemantic,
+    AsyncSession,
+)
+from termtrace.session.sync import (
+    Events,
+    Evidence,
+    Keyboard,
+    Native,
+    Output,
+    Pointer,
+    Screen,
+    Semantic,
+    Session,
+)
+from termtrace.testing.assertions import (
+    assert_cursor,
+    assert_frame_text,
+    assert_match_style,
+    assert_match_text,
+    assert_matches,
+    assert_neutral_region,
+    assert_no_matches,
+    assert_no_wrapped_rows,
+    assert_normalized_frame,
+    assert_screen_text,
+    assert_snapshot_file,
+    assert_terminal_snapshot,
+    regex,
+    stable_terminal_snapshot,
+)
+from termtrace.testing.async_ import AsyncTermtraceTest
+from termtrace.testing.lifecycle import EvidencePolicy, FinalizationReport, TermtraceTestConfig
+from termtrace.testing.sync import TermtraceTest
+from termtrace.transport.async_ import AsyncTerminal
+from termtrace.transport.protocol import (
+    Artifact,
     AttachedSession,
     BundleResult,
     Completion,
@@ -141,32 +153,15 @@ from termtrace.models import (
     DiagnosticReport,
     EventPage,
     Frame,
-    IdleCompletion,
-    IdlePostcondition,
-    InputResult,
     InputSequenceFailureDetails,
-    NoneCompletion,
-    NonePostcondition,
     Observation,
-    ScreenCompletion,
-    ScreenPostcondition,
-    ScreenWaitResult,
     SemanticDiff,
-    StableCapture,
-    StableOptions,
-    StableQuality,
     TimelineEntry,
     TimelinePage,
     VerificationReport,
     WaitOutcome,
 )
-from termtrace.snapshots import FrameSnapshot, SnapshotProfile, normalize_frame
-from termtrace.testing import (
-    EvidencePolicy,
-    FinalizationReport,
-    TermtraceTest,
-    TermtraceTestConfig,
-)
+from termtrace.transport.sync import DriverTransport, Terminal
 
 __all__ = [
     "ActionBusyError",

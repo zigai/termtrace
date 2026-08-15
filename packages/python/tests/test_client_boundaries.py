@@ -6,11 +6,13 @@ from pathlib import Path
 import pytest
 
 from termtrace import BytesAtom, KeyAtom, PasteAtom, TextAtom
-from termtrace.async_client import AsyncSession, AsyncTerminal
 from termtrace.atoms import encode_input_sequence
-from termtrace.client import DriverTransport, Session
 from termtrace.errors import RequestTimeoutError, TermtraceProtocolError
-from termtrace.models import DriverHelloData, encode_driver_request
+from termtrace.session.async_ import AsyncSession
+from termtrace.session.sync import Session
+from termtrace.transport.async_ import AsyncTerminal
+from termtrace.transport.protocol import DriverHelloData, encode_driver_request
+from termtrace.transport.sync import DriverTransport
 
 
 @pytest.mark.parametrize("duration", [-1.0, math.nan, math.inf, 1e30, sys.float_info.max])

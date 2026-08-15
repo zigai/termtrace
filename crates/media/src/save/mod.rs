@@ -1,0 +1,592 @@
+//! Atomic multi-format publication for one semantic observation.
+
+use crate::{Error, Result};
+use std::{
+    collections::BTreeSet,
+    fs,
+    io::{self, Read as _},
+    os::unix::{ffi::OsStrExt as _, fs::FileTypeExt as _},
+    path::{Component, Path, PathBuf},
+    process,
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use termtrace_engine::{
+    observation::state_text,
+    replay::{inspect_many, inspect_with_formats},
+};
+use termtrace_evidence::{
+    artifact::{
+        commit_directory, create_private_directory, hash_regular_file, sync_directory, write_secure,
+    },
+    event_log::{CanonicalBoundary, EventLog},
+    session::{read_manifest, validate_completed_log},
+};
+use termtrace_model::{
+    artifact::save::{
+        SaveFormat, SaveManifest, SaveOutcome, SavedFile, ScreenshotBatchEntry,
+        ScreenshotBatchManifest, SemanticImageResource,
+    },
+    execution::event::Event,
+    execution::session::{SessionCompletion, SessionManifest},
+    terminal::observation::{
+        CaptureQuality, Observation, ObservationFrame, ObservationIntegrity, ObservationResolution,
+        ObservationSourceKind, StatePoint, TruthLayer,
+    },
+    terminal::replay::{StateInspection, StateSelector},
+    value::ByteString,
+};
+use termtrace_render::{
+    Error as RenderError, SEMANTIC_CELL_HEIGHT, SEMANTIC_CELL_WIDTH, SEMANTIC_FONT_BYTES,
+    SEMANTIC_FONT_FAMILY, SEMANTIC_FONT_SIZE, SEMANTIC_FONT_SOURCE, SEMANTIC_PNG_RENDERER,
+    SEMANTIC_SVG_RENDERER, render_png, render_svg, semantic_font_hash,
+};
+use termtrace_terminal::Format;
+
+static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Re-read and verify one saved semantic artifact against its trusted creation result.
+///
+/// # Errors
+///
+/// Returns an error for a changed manifest, missing or extra members, unsafe paths,
+/// non-regular files, or any byte length or digest mismatch.
+pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Result<SaveManifest> {
+    const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+
+    let manifest_path = directory.join("save-manifest.json");
+    let metadata = fs::symlink_metadata(&manifest_path)
+        .map_err(|source| return filesystem_error(&manifest_path, source))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(save_error("saved artifact manifest is not a regular file"));
+    }
+    if metadata.len() > MAX_MANIFEST_BYTES {
+        return Err(save_error("saved artifact manifest exceeds 1 MiB"));
+    }
+    let manifest_file = fs::File::open(&manifest_path)
+        .map_err(|source| return filesystem_error(&manifest_path, source))?;
+    let mut manifest_bytes: Vec<u8> = Vec::new();
+    manifest_file
+        .take(MAX_MANIFEST_BYTES.saturating_add(1))
+        .read_to_end(&mut manifest_bytes)
+        .map_err(|source| return filesystem_error(&manifest_path, source))?;
+    if u64::try_from(manifest_bytes.len()).unwrap_or(u64::MAX) > MAX_MANIFEST_BYTES {
+        return Err(save_error("saved artifact manifest exceeds 1 MiB"));
+    }
+    let manifest: SaveManifest = serde_json::from_slice(&manifest_bytes).map_err(|source| {
+        return Error::InvalidJson {
+            path: manifest_path.clone(),
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
+    if &manifest != expected {
+        return Err(save_error(
+            "saved artifact manifest does not match its trusted creation result",
+        ));
+    }
+
+    let mut expected_members: BTreeSet<String> = BTreeSet::new();
+    for member in &manifest.files {
+        let path = Path::new(&member.path);
+        if path.components().count() != 1
+            || !matches!(path.components().next(), Some(Component::Normal(_)))
+            || !expected_members.insert(member.path.clone())
+        {
+            return Err(save_error("saved artifact contains an unsafe member path"));
+        }
+        let (byte_count, digest) = hash_regular_file(&directory.join(path))?;
+        if byte_count != member.byte_count || digest != member.blake3 {
+            return Err(save_error(format!(
+                "saved artifact member {} failed integrity verification",
+                member.path
+            )));
+        }
+    }
+
+    let mut observed_members: BTreeSet<String> = BTreeSet::new();
+    for entry in
+        fs::read_dir(directory).map_err(|source| return filesystem_error(directory, source))?
+    {
+        let entry = entry.map_err(|source| return filesystem_error(directory, source))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|source| return filesystem_error(entry.path(), source))?;
+        if file_type.is_dir()
+            || file_type.is_symlink()
+            || file_type.is_block_device()
+            || file_type.is_char_device()
+            || file_type.is_fifo()
+            || file_type.is_socket()
+        {
+            return Err(save_error("saved artifact contains a non-regular member"));
+        }
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| return save_error("saved artifact contains a non-UTF-8 member name"))?;
+        if name != "save-manifest.json" {
+            observed_members.insert(name);
+        }
+    }
+    if observed_members != expected_members {
+        return Err(save_error(
+            "saved artifact member inventory does not match its manifest",
+        ));
+    }
+    return Ok(manifest);
+}
+
+/// Resolve one state and atomically publish selected representations.
+///
+/// # Errors
+///
+/// Returns an error for invalid/incomplete evidence, unsupported hidden state,
+/// existing destination, filesystem failure, or inconsistent state resolution.
+pub fn save(
+    session: &Path,
+    destination: &Path,
+    point: StatePoint,
+    formats: &[SaveFormat],
+    include_hidden: bool,
+) -> Result<SaveOutcome> {
+    validate_formats(formats)?;
+    let canonical = session
+        .canonicalize()
+        .map_err(|source| return filesystem_error(session, source))?;
+    let log = EventLog::read(canonical.join("events.jsonl"))?;
+    let completion = validate_completed_log(&canonical, &log)?;
+    let source_manifest = read_manifest(&canonical)?;
+    let selector = state_selector(&log, &point)?;
+    let engine_formats: Vec<Format> = formats
+        .iter()
+        .filter_map(|format| match format {
+            SaveFormat::Vt => return Some(Format::Vt),
+            SaveFormat::Html => return Some(Format::Html),
+            _ => return None,
+        })
+        .collect();
+    let (inspection, rendered) = inspect_with_formats(&log, selector, &engine_formats)?;
+    if !inspection.record.presented && !include_hidden {
+        return Err(save_error(
+            "selected semantic state is hidden; pass explicit hidden-state permission",
+        ));
+    }
+    let observation = observation_from_inspection(
+        &canonical,
+        &source_manifest,
+        point.clone(),
+        &completion,
+        &inspection,
+    )?;
+
+    let parent = destination
+        .parent()
+        .ok_or_else(|| return save_error("save path has no parent"))?;
+    let staging = staging_path(destination, "save")?;
+    create_private_directory(&staging)?;
+    let publish = (|| -> Result<SaveManifest> {
+        let mut files: Vec<SavedFile> = Vec::with_capacity(formats.len());
+        for format in formats {
+            let rendered_file = render_saved_file(*format, &observation, &inspection, &rendered)?;
+            let target = staging.join(&rendered_file.path);
+            write_secure(&target, &rendered_file.bytes)?;
+            files.push(SavedFile {
+                path: rendered_file.path,
+                media_type: rendered_file.media_type.to_owned(),
+                byte_count: u64::try_from(rendered_file.bytes.len()).unwrap_or(u64::MAX),
+                blake3: blake3::hash(&rendered_file.bytes).to_hex().to_string(),
+                truth_layer: rendered_file.truth_layer.map(str::to_owned),
+                renderer: rendered_file.renderer.map(str::to_owned),
+            });
+        }
+        let save_manifest = SaveManifest {
+            format: "termtrace-save".to_owned(),
+            version: 2,
+            session_id: source_manifest.session_id,
+            canonical_session: ByteString::from(canonical.as_os_str().as_bytes()),
+            state_point: point,
+            state_id: inspection.record.state_id,
+            state_hash: inspection.record.state_hash,
+            source_final_event_hash: completion.final_event_hash,
+            sensitivity: "terminal_screen_may_contain_secrets".to_owned(),
+            files,
+            semantic_image_resources: if formats
+                .iter()
+                .any(|format| matches!(format, SaveFormat::Svg | SaveFormat::Png))
+            {
+                semantic_image_resources()
+            } else {
+                Vec::new()
+            },
+        };
+        let manifest_path = staging.join("save-manifest.json");
+        write_secure(
+            &manifest_path,
+            &pretty_json(&save_manifest, &manifest_path)?,
+        )?;
+        sync_directory(&staging)?;
+        return Ok(save_manifest);
+    })();
+    let save_manifest = match publish {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+    };
+    if let Err(error) = commit_directory(parent, &staging, destination) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error.into());
+    }
+    return Ok(SaveOutcome {
+        directory: destination.to_path_buf(),
+        manifest: save_manifest,
+    });
+}
+
+/// Atomically publish several exact semantic states under one batch directory.
+///
+/// # Errors
+///
+/// Returns the same errors as [`save`] and rejects empty or non-image batches.
+pub fn save_screenshot_batch(
+    session: &Path,
+    destination: &Path,
+    points: &[StatePoint],
+    format: SaveFormat,
+    include_hidden: bool,
+) -> Result<ScreenshotBatchManifest> {
+    if points.is_empty() || !matches!(format, SaveFormat::Svg | SaveFormat::Png) {
+        return Err(save_error(
+            "screenshot batches require at least one point and an SVG or PNG format",
+        ));
+    }
+    let canonical = session
+        .canonicalize()
+        .map_err(|source| return filesystem_error(session, source))?;
+    let log = EventLog::read(canonical.join("events.jsonl"))?;
+    let completion = validate_completed_log(&canonical, &log)?;
+    let source_manifest = read_manifest(&canonical)?;
+    let selectors: Vec<StateSelector> = points
+        .iter()
+        .map(|point| return state_selector(&log, point))
+        .collect::<Result<Vec<_>>>()?;
+    let inspections = inspect_many(&log, &selectors)?;
+    if !include_hidden
+        && inspections
+            .iter()
+            .any(|inspection| return !inspection.record.presented)
+    {
+        return Err(save_error(
+            "selected semantic state is hidden; pass explicit hidden-state permission",
+        ));
+    }
+
+    let parent = destination
+        .parent()
+        .ok_or_else(|| return save_error("batch path has no parent"))?;
+    let staging = staging_path(destination, "batch")?;
+    create_private_directory(&staging)?;
+    let publish = (|| -> Result<ScreenshotBatchManifest> {
+        let (filename, media_type, renderer) = match format {
+            SaveFormat::Svg => ("screen.svg", "image/svg+xml", SEMANTIC_SVG_RENDERER),
+            SaveFormat::Png => ("screen.png", "image/png", SEMANTIC_PNG_RENDERER),
+            _ => return Err(save_error("batch format must be SVG or PNG")),
+        };
+        let mut entries: Vec<ScreenshotBatchEntry> = Vec::with_capacity(points.len());
+        for (index, (point, inspection)) in points.iter().zip(inspections).enumerate() {
+            let directory = format!("state-{index:04}");
+            let entry_directory = staging.join(&directory);
+            create_private_directory(&entry_directory)?;
+            let bytes = match format {
+                SaveFormat::Svg => render_svg(&inspection.state),
+                SaveFormat::Png => render_png(&inspection.state).map_err(render_error)?,
+                _ => return Err(save_error("batch format must be SVG or PNG")),
+            };
+            write_secure(&entry_directory.join(filename), &bytes)?;
+            let save_manifest = SaveManifest {
+                format: "termtrace-save".to_owned(),
+                version: 2,
+                session_id: source_manifest.session_id,
+                canonical_session: ByteString::from(canonical.as_os_str().as_bytes()),
+                state_point: point.clone(),
+                state_id: inspection.record.state_id,
+                state_hash: inspection.record.state_hash,
+                source_final_event_hash: completion.final_event_hash.clone(),
+                sensitivity: "terminal_screen_may_contain_secrets".to_owned(),
+                files: vec![SavedFile {
+                    path: filename.to_owned(),
+                    media_type: media_type.to_owned(),
+                    byte_count: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+                    blake3: blake3::hash(&bytes).to_hex().to_string(),
+                    truth_layer: Some("semantic_rendering".to_owned()),
+                    renderer: Some(renderer.to_owned()),
+                }],
+                semantic_image_resources: semantic_image_resources(),
+            };
+            let manifest_path = entry_directory.join("save-manifest.json");
+            write_secure(
+                &manifest_path,
+                &pretty_json(&save_manifest, &manifest_path)?,
+            )?;
+            sync_directory(&entry_directory)?;
+            entries.push(ScreenshotBatchEntry {
+                image: format!("{directory}/{filename}"),
+                directory,
+                manifest: save_manifest,
+            });
+        }
+        let manifest = ScreenshotBatchManifest {
+            format: "termtrace-screenshot-batch".to_owned(),
+            version: 1,
+            image_format: format,
+            entries,
+        };
+        let manifest_path = staging.join("batch-manifest.json");
+        write_secure(&manifest_path, &pretty_json(&manifest, &manifest_path)?)?;
+        sync_directory(&staging)?;
+        return Ok(manifest);
+    })();
+    let manifest = match publish {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+    };
+    if let Err(error) = commit_directory(parent, &staging, destination) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error.into());
+    }
+    return Ok(manifest);
+}
+fn observation_from_inspection(
+    session: &Path,
+    source_manifest: &SessionManifest,
+    point: StatePoint,
+    completion: &SessionCompletion,
+    inspection: &StateInspection,
+) -> Result<Observation> {
+    let frame = ObservationFrame {
+        viewport_text: state_text(&inspection.state),
+        cols: inspection.state.cols,
+        rows: inspection.state.rows,
+        cursor_column: inspection.state.cursor.column,
+        cursor_row: inspection.state.cursor.row,
+        cursor_visible: inspection.state.cursor.visible,
+        modes: inspection.state.modes.clone(),
+    };
+    let frame_bytes = serde_json::to_vec(&frame).map_err(|source| {
+        return Error::InvalidJson {
+            path: PathBuf::from("<observation-frame>"),
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
+    return Ok(Observation {
+        source_kind: ObservationSourceKind::CompletedSession,
+        session_id: Some(source_manifest.session_id),
+        canonical_session: Some(ByteString::from(session.as_os_str().as_bytes())),
+        source_completed: true,
+        state_point: point,
+        state_id: Some(inspection.record.state_id),
+        state_hash: inspection.record.state_hash.clone(),
+        event_seq: inspection.record.event_seq,
+        monotonic_ns: Some(inspection.record.monotonic_ns),
+        presented: inspection.record.presented,
+        boundary: CanonicalBoundary {
+            next_event_seq: completion.event_count,
+            event_hash: completion.final_event_hash.clone(),
+            output_bytes: completion.output_bytes,
+        },
+        capture_quality: CaptureQuality::Completed,
+        truth_layer: TruthLayer::Semantic,
+        integrity: ObservationIntegrity::CanonicalChained,
+        resolution: ObservationResolution::CanonicalReplay,
+        frame,
+        payload_hash: blake3::hash(&frame_bytes).to_hex().to_string(),
+    });
+}
+
+struct RenderedFile {
+    path: String,
+    media_type: &'static str,
+    bytes: Vec<u8>,
+    truth_layer: Option<&'static str>,
+    renderer: Option<&'static str>,
+}
+
+fn render_saved_file(
+    format: SaveFormat,
+    observation: &Observation,
+    inspection: &StateInspection,
+    rendered: &[(Format, Vec<u8>)],
+) -> Result<RenderedFile> {
+    let file = match format {
+        SaveFormat::Txt => RenderedFile {
+            path: "screen.txt".to_owned(),
+            media_type: "text/plain; charset=utf-8",
+            bytes: observation.frame.viewport_text.as_bytes().to_vec(),
+            truth_layer: None,
+            renderer: None,
+        },
+        SaveFormat::Json => RenderedFile {
+            path: "observation.json".to_owned(),
+            media_type: "application/json",
+            bytes: pretty_json(observation, Path::new("observation.json"))?,
+            truth_layer: None,
+            renderer: None,
+        },
+        SaveFormat::DeepJson => RenderedFile {
+            path: "semantic-state.json".to_owned(),
+            media_type: "application/json",
+            bytes: pretty_json(inspection, Path::new("semantic-state.json"))?,
+            truth_layer: None,
+            renderer: None,
+        },
+        SaveFormat::Vt => RenderedFile {
+            path: "screen.vt".to_owned(),
+            media_type: "application/vnd.termtrace.vt",
+            bytes: rendered_format(rendered, Format::Vt)?,
+            truth_layer: Some("semantic"),
+            renderer: Some("pinned-libghostty-vt-formatter"),
+        },
+        SaveFormat::Html => RenderedFile {
+            path: "screen.html".to_owned(),
+            media_type: "text/html; charset=utf-8",
+            bytes: rendered_format(rendered, Format::Html)?,
+            truth_layer: Some("semantic"),
+            renderer: Some("pinned-libghostty-vt-formatter"),
+        },
+        SaveFormat::Svg => RenderedFile {
+            path: "screen.svg".to_owned(),
+            media_type: "image/svg+xml",
+            bytes: render_svg(&inspection.state),
+            truth_layer: Some("semantic_rendering"),
+            renderer: Some(SEMANTIC_SVG_RENDERER),
+        },
+        SaveFormat::Png => RenderedFile {
+            path: "screen.png".to_owned(),
+            media_type: "image/png",
+            bytes: render_png(&inspection.state).map_err(render_error)?,
+            truth_layer: Some("semantic_rendering"),
+            renderer: Some(SEMANTIC_PNG_RENDERER),
+        },
+    };
+    return Ok(file);
+}
+
+fn validate_formats(formats: &[SaveFormat]) -> Result<()> {
+    if formats.is_empty() {
+        return Err(save_error("at least one save format is required"));
+    }
+    if formats.iter().enumerate().any(|(index, format)| {
+        return formats
+            .iter()
+            .skip(index + 1)
+            .any(|later| return later == format);
+    }) {
+        return Err(save_error("save formats must not be repeated"));
+    }
+    return Ok(());
+}
+
+fn state_selector(log: &EventLog, point: &StatePoint) -> Result<StateSelector> {
+    match point {
+        StatePoint::LatestPresented => return Ok(StateSelector::LatestPresented),
+        StatePoint::StateId { state_id } => return Ok(StateSelector::StateId(*state_id)),
+        StatePoint::StateHash { state_hash } => {
+            return Ok(StateSelector::StateHash(state_hash.clone()));
+        }
+        StatePoint::EventSeq { event_seq } => return Ok(StateSelector::EventSeq(*event_seq)),
+        StatePoint::MonotonicNs { monotonic_ns } => {
+            return Ok(StateSelector::MonotonicNs(*monotonic_ns));
+        }
+        StatePoint::Marker { label } => {
+            let mut matches = log.events.iter().filter(|record| {
+                return matches!(&record.event, Event::Marker { label: value, .. } if value == label)
+            });
+            let event_seq = matches
+                .next()
+                .map(|record| return record.seq)
+                .ok_or_else(|| return save_error("marker does not exist"))?;
+            if matches.next().is_some() {
+                return Err(save_error("marker label is ambiguous"));
+            }
+            return Ok(StateSelector::EventSeq(event_seq));
+        }
+    }
+}
+
+fn semantic_image_resources() -> Vec<SemanticImageResource> {
+    return vec![SemanticImageResource {
+        font_family: SEMANTIC_FONT_FAMILY.to_owned(),
+        font_source: SEMANTIC_FONT_SOURCE.to_owned(),
+        font_byte_count: u64::try_from(SEMANTIC_FONT_BYTES.len()).unwrap_or(u64::MAX),
+        font_blake3: semantic_font_hash(),
+        fallback_policy: "bundled_font_only_missing_glyph_box".to_owned(),
+        font_size: SEMANTIC_FONT_SIZE,
+        cell_width: SEMANTIC_CELL_WIDTH,
+        cell_height: SEMANTIC_CELL_HEIGHT,
+        padding: 0,
+        background_policy: "opaque_terminal_background".to_owned(),
+    }];
+}
+
+fn pretty_json(value: &impl serde::Serialize, path: &Path) -> Result<Vec<u8>> {
+    let mut bytes = serde_json::to_vec_pretty(value).map_err(|source| {
+        return Error::InvalidJson {
+            path: path.to_path_buf(),
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
+    bytes.push(b'\n');
+    return Ok(bytes);
+}
+
+fn rendered_format(rendered: &[(Format, Vec<u8>)], format: Format) -> Result<Vec<u8>> {
+    return rendered
+        .iter()
+        .find(|(candidate, _)| return *candidate == format)
+        .map(|(_, bytes)| return bytes.clone())
+        .ok_or_else(|| return save_error("requested semantic format was not captured"));
+}
+
+fn staging_path(destination: &Path, kind: &str) -> Result<PathBuf> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| return save_error(format!("{kind} path has no parent")))?;
+    let name = destination
+        .file_name()
+        .ok_or_else(|| return save_error(format!("{kind} path has no basename")))?;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| return Error::ClockBeforeEpoch)?
+        .as_nanos();
+    let sequence = STAGING_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    return Ok(parent.join(format!(
+        ".{}.{}.{timestamp}.{sequence}.tmp",
+        name.to_string_lossy(),
+        process::id()
+    )));
+}
+
+fn render_error(error: RenderError) -> Error {
+    return save_error(format!("semantic rendering failed: {error}"));
+}
+
+fn filesystem_error(path: impl Into<PathBuf>, source: io::Error) -> Error {
+    return Error::Filesystem {
+        path: path.into(),
+        source,
+    };
+}
+
+fn save_error(reason: impl Into<String>) -> Error {
+    return Error::InvalidReplay {
+        reason: reason.into(),
+    };
+}

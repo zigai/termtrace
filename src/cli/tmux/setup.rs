@@ -1,4 +1,40 @@
-use super::*;
+use crate::cli::output::ResponseWriter;
+
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    fmt::Write as _,
+    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
+    path::PathBuf,
+    process::ExitCode,
+};
+
+use miette::{IntoDiagnostic as _, Result};
+use termtrace_engine::registry::SessionRegistry;
+use termtrace_model::value::ByteString;
+
+use crate::cli::output::{write_json_line, write_stdout};
+
+use super::{
+    GUARDED_HOOKS, OPTION_AGGREGATE_MANIFEST, OPTION_ALLOW_UNRECORDED, OPTION_CELL_HEIGHT,
+    OPTION_CELL_WIDTH, OPTION_COVERAGE, OPTION_GHOSTTY_CONFIG, OPTION_ORIGINAL_COMMAND,
+    OPTION_ORIGINAL_SHELL, OPTION_OUTPUT_ROOT, OPTION_PROFILE_MODE, OPTION_SCOPE, OPTION_TERM,
+    OPTION_TERMTRACE, OPTION_TMUX, OPTION_VERSION, RESERVED_OPTIONS, TMUX_HOOK_INDEX,
+    TMUX_INTEGRATION_VERSION, TMUX_WRAPPER_BINARY_ENV,
+    args::{
+        TmuxConfigArgs, TmuxConnectionArgs, TmuxCoverageMode, TmuxEnableArgs,
+        TmuxGhosttyProfileMode, TmuxSetupArgs,
+    },
+    client::{
+        TmuxClient, hook_name, option_path, option_text, parse_option, shell_quote,
+        tmux_config_quote,
+    },
+    scope::{
+        TmuxScopePolicy, initial_scope_policy, resolve_live_scope, scope_bytes, scope_from_options,
+        set_scope_policy,
+    },
+    supervisor::{clear_managed_pane_options, grandfather_current_panes, tmux_status_report},
+};
 
 #[derive(Clone, Debug)]
 pub(super) struct PreparedTmuxSetup {
@@ -15,29 +51,38 @@ pub(super) struct PreparedTmuxSetup {
     pub(super) scope: TmuxScopePolicy,
 }
 
-pub(in crate::cli) fn run_tmux_config(arguments: TmuxConfigArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_tmux_config(
+    response: &mut ResponseWriter,
+    arguments: TmuxConfigArgs,
+) -> Result<ExitCode> {
     let setup = prepare_tmux_setup(arguments.setup, arguments.tmux)?;
-    return write_stdout(tmux_config_fragment(&setup)?);
+    return write_stdout(response, tmux_config_fragment(&setup)?);
 }
 
-pub(in crate::cli) fn run_tmux_enable(arguments: TmuxEnableArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_tmux_enable(
+    response: &mut ResponseWriter,
+    arguments: TmuxEnableArgs,
+) -> Result<ExitCode> {
     let client = TmuxClient::from_connection(arguments.connection.clone());
     let mut setup = prepare_tmux_setup(arguments.setup, arguments.connection.tmux)?;
     setup.scope = resolve_live_scope(&client, &setup.scope)?;
     let already_enabled = enable_prepared_tmux_setup(&client, &setup)?;
     let report = tmux_status_report(&client)?;
-    return write_json_line(&serde_json::json!({
-        "enabled": true,
-        "already_enabled": already_enabled,
-        "integration_version": 1,
-        "coverage": setup.coverage,
-        "strict": setup.coverage == TmuxCoverageMode::Strict,
-        "output_root": ByteString::from(setup.output_root.as_os_str().as_bytes()),
-        "scope": setup.scope,
-        "existing_panes": report.pane_count,
-        "existing_unrecorded_panes": report.unrecorded_panes,
-        "retroactive": false,
-    }));
+    return write_json_line(
+        response,
+        &serde_json::json!({
+            "enabled": true,
+            "already_enabled": already_enabled,
+            "integration_version": 1,
+            "coverage": setup.coverage,
+            "strict": setup.coverage == TmuxCoverageMode::Strict,
+            "output_root": ByteString::from(setup.output_root.as_os_str().as_bytes()),
+            "scope": setup.scope,
+            "existing_panes": report.pane_count,
+            "existing_unrecorded_panes": report.unrecorded_panes,
+            "retroactive": false,
+        }),
+    );
 }
 
 pub(super) fn enable_prepared_tmux_setup(
@@ -99,14 +144,20 @@ pub(super) fn enable_prepared_tmux_setup(
     return Ok(false);
 }
 
-pub(in crate::cli) fn run_tmux_disable(connection: TmuxConnectionArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_tmux_disable(
+    response: &mut ResponseWriter,
+    connection: TmuxConnectionArgs,
+) -> Result<ExitCode> {
     let client = TmuxClient::from_connection(connection);
     let version = option_text(&client, OPTION_VERSION)?;
     if version.is_empty() {
-        return write_json_line(&serde_json::json!({
-            "enabled": false,
-            "already_disabled": true,
-        }));
+        return write_json_line(
+            response,
+            &serde_json::json!({
+                "enabled": false,
+                "already_disabled": true,
+            }),
+        );
     }
     if version != TMUX_INTEGRATION_VERSION {
         return Err(miette::miette!(
@@ -142,11 +193,14 @@ pub(in crate::cli) fn run_tmux_disable(connection: TmuxConnectionArgs) -> Result
         client.unset_option(name)?;
     }
     clear_managed_pane_options(&client)?;
-    return write_json_line(&serde_json::json!({
-        "enabled": false,
-        "already_disabled": false,
-        "default_command_restored": true,
-    }));
+    return write_json_line(
+        response,
+        &serde_json::json!({
+            "enabled": false,
+            "already_disabled": false,
+            "default_command_restored": true,
+        }),
+    );
 }
 
 pub(super) fn prepare_tmux_setup(setup: TmuxSetupArgs, tmux: PathBuf) -> Result<PreparedTmuxSetup> {
@@ -178,8 +232,8 @@ pub(super) fn prepare_tmux_setup(setup: TmuxSetupArgs, tmux: PathBuf) -> Result<
         &setup.panes,
     )?;
     let registry = match setup.output_root {
-        Some(root) => SessionRegistry::open(root)?,
-        None => SessionRegistry::open_default()?,
+        Some(root) => SessionRegistry::open(root).into_diagnostic()?,
+        None => SessionRegistry::open_default().into_diagnostic()?,
     };
     let output_root = fs_err::canonicalize(registry.state_root()).into_diagnostic()?;
     let termtrace =

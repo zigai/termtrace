@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
-import { Duration } from "../src/actions.js";
+import { Duration } from "../src/session/actions.js";
 import {
     assertMatchStyle,
     assertMatches,
@@ -9,9 +9,9 @@ import {
     assertNoMatches,
     assertNoWrappedRows,
     assertScreenMatch,
-} from "../src/assertions.js";
+} from "../src/testing/assertions.js";
 import { InvalidQueryError, LocatorTimeoutError } from "../src/errors.js";
-import { Locator } from "../src/locators.js";
+import { Locator } from "../src/screen/locator.js";
 import {
     allOf,
     evaluateQuery,
@@ -20,10 +20,10 @@ import {
     styleQuery,
     textQuery,
     type LocatorSpec,
-} from "../src/queries.js";
-import { parseScreenFrame, ScreenFrame, type ScreenAppearance } from "../src/screen-frame.js";
+} from "../src/screen/queries.js";
+import { parseScreenFrame, ScreenFrame, type ScreenAppearance } from "../src/screen/frame.js";
 
-const fixturePath = join(import.meta.dir, "../../../fixtures/locator-conformance.json");
+const fixturePath = join(import.meta.dir, "../../../fixtures/conformance/locators/locator.json");
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
     if (typeof value !== "object" || value === null || Array.isArray(value))

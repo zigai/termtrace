@@ -1,4 +1,25 @@
-use super::*;
+use crate::cli::output::ResponseWriter;
+
+use std::{
+    collections::BTreeSet,
+    ffi::{OsStr, OsString},
+    os::unix::ffi::OsStrExt as _,
+    process::ExitCode,
+    str,
+};
+
+use miette::{IntoDiagnostic as _, Result};
+use termtrace_model::value::ByteString;
+
+use crate::cli::output::write_json_line;
+
+use super::{
+    OPTION_EXCLUDED_PID, OPTION_SCOPE, OPTION_SELECTED_PID, OPTION_VERSION,
+    TMUX_INTEGRATION_VERSION,
+    args::TmuxScopeArgs,
+    client::{TmuxClient, option_text, query_number, valid_tmux_identifier},
+    supervisor::grandfather_current_panes,
+};
 
 const TMUX_SCOPE_VERSION: u32 = 1;
 
@@ -58,7 +79,10 @@ impl TmuxScopePolicy {
     }
 }
 
-pub(in crate::cli) fn run_tmux_scope(arguments: TmuxScopeArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_tmux_scope(
+    response: &mut ResponseWriter,
+    arguments: TmuxScopeArgs,
+) -> Result<ExitCode> {
     let client = TmuxClient::from_connection(arguments.connection);
     if option_text(&client, OPTION_VERSION)? != TMUX_INTEGRATION_VERSION {
         return Err(miette::miette!(
@@ -82,11 +106,14 @@ pub(in crate::cli) fn run_tmux_scope(arguments: TmuxScopeArgs) -> Result<ExitCod
         }
         None => scope_from_options(&client)?,
     };
-    return write_json_line(&serde_json::json!({
-        "changed": changed,
-        "future_processes_only": changed,
-        "scope": policy,
-    }));
+    return write_json_line(
+        response,
+        &serde_json::json!({
+            "changed": changed,
+            "future_processes_only": changed,
+            "scope": policy,
+        }),
+    );
 }
 
 pub(super) fn initial_scope_policy(

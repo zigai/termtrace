@@ -1,6 +1,19 @@
+use crate::cli::output::ResponseWriter;
+
 use std::{
-    os::unix::fs::{FileTypeExt as _, MetadataExt as _},
-    time::{SystemTime, UNIX_EPOCH},
+    collections::{BTreeMap, BTreeSet},
+    env,
+    ffi::OsString,
+    fs::{File, OpenOptions, Permissions},
+    io::{self, Write as _},
+    os::unix::{
+        ffi::{OsStrExt as _, OsStringExt as _},
+        fs::{FileTypeExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
+    },
+    path::{Path, PathBuf},
+    process::{Command as ProcessCommand, ExitCode, Stdio},
+    str,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use nix::{
@@ -9,16 +22,37 @@ use nix::{
     unistd::geteuid,
 };
 
-use super::*;
-use termtrace::tmux_recording::{
-    TMUX_RECORDING_FORMAT, TMUX_RECORDING_VERSION, TmuxCompositeTrack, TmuxCoverageGap,
-    TmuxLifecycleEvent, TmuxPaneSnapshot, TmuxRecordingCoverage, TmuxRecordingLifecycle,
-    TmuxRecordingManifest,
+use miette::{IntoDiagnostic as _, Result};
+use termtrace_engine::{inspection::wait_for_completion, registry::SessionRegistry};
+use termtrace_export::tmux;
+use termtrace_model::{
+    artifact::tmux::{
+        TMUX_RECORDING_FORMAT, TMUX_RECORDING_VERSION, TmuxCompositeTrack, TmuxCoverageGap,
+        TmuxLifecycleEvent, TmuxPaneSnapshot, TmuxRecordingCoverage, TmuxRecordingLifecycle,
+        TmuxRecordingManifest,
+    },
+    value::ByteString,
+};
+
+use crate::cli::output::write_json_line;
+
+use super::{
+    OPTION_AGGREGATE_MANIFEST, OPTION_COVERAGE, OPTION_PANE_SESSION,
+    args::{
+        TmuxBundleArgs, TmuxCoverageMode, TmuxRecordArgs, TmuxStatusArgs, TmuxStopArgs,
+        TmuxVideoArgs, TmuxVideoPreset, TmuxVideoRenderer,
+    },
+    client::{TmuxClient, option_path, option_text, same_executable},
+    setup::{enable_prepared_tmux_setup, prepare_tmux_setup, tmux_config_fragment},
+    supervisor::tmux_status_report,
 };
 
 const TMUX_RECORDINGS_DIRECTORY: &str = "tmux-recordings";
 
-pub(in crate::cli) fn run_tmux_record(mut arguments: TmuxRecordArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_tmux_record(
+    response: &mut ResponseWriter,
+    mut arguments: TmuxRecordArgs,
+) -> Result<ExitCode> {
     validate_recording_name(&arguments.name)?;
     if arguments.command.is_empty() {
         return Err(miette::miette!(
@@ -35,8 +69,8 @@ pub(in crate::cli) fn run_tmux_record(mut arguments: TmuxRecordArgs) -> Result<E
         )));
     }
     let registry = match arguments.setup.output_root.as_ref() {
-        Some(root) => SessionRegistry::open(root)?,
-        None => SessionRegistry::open_default()?,
+        Some(root) => SessionRegistry::open(root).into_diagnostic()?,
+        None => SessionRegistry::open_default().into_diagnostic()?,
     };
     let directory = registry
         .state_root()
@@ -47,7 +81,7 @@ pub(in crate::cli) fn run_tmux_record(mut arguments: TmuxRecordArgs) -> Result<E
     arguments.setup.aggregate_manifest = Some(manifest_path.clone());
     let setup = prepare_tmux_setup(arguments.setup, arguments.connection.tmux.clone())?;
     let alias = format!("tmux-{}-composite", arguments.name);
-    registry.ensure_available(&alias)?;
+    registry.ensure_available(&alias).into_diagnostic()?;
     let client = TmuxClient::from_connection(arguments.connection.clone());
     let now = unix_time_ns()?;
     let manifest = TmuxRecordingManifest {
@@ -121,7 +155,7 @@ pub(in crate::cli) fn run_tmux_record(mut arguments: TmuxRecordArgs) -> Result<E
             output.status
         ));
     }
-    let entry = registry.resolve(&alias)?;
+    let entry = registry.resolve(&alias).into_diagnostic()?;
     {
         let _manifest_lock = lock_tmux_manifest(&manifest_path)?;
         let mut manifest = read_tmux_manifest(&manifest_path)?;
@@ -146,20 +180,26 @@ pub(in crate::cli) fn run_tmux_record(mut arguments: TmuxRecordArgs) -> Result<E
         tracing::warn!(%error, "aggregate tmux recording started before its first server snapshot");
     }
     let manifest = read_tmux_manifest(&manifest_path)?;
-    return write_json_line(&serde_json::json!({
-        "kind": "tmux_recording",
-        "recording_id": manifest.recording_id,
-        "name": manifest.name,
-        "lifecycle": manifest.lifecycle,
-        "manifest": manifest_path,
-        "composite_track": manifest.composite_track,
-        "pane_tracks": manifest.pane_tracks,
-        "coverage": manifest.coverage,
-        "coverage_gaps": manifest.coverage_gaps,
-    }));
+    return write_json_line(
+        response,
+        &serde_json::json!({
+            "kind": "tmux_recording",
+            "recording_id": manifest.recording_id,
+            "name": manifest.name,
+            "lifecycle": manifest.lifecycle,
+            "manifest": manifest_path,
+            "composite_track": manifest.composite_track,
+            "pane_tracks": manifest.pane_tracks,
+            "coverage": manifest.coverage,
+            "coverage_gaps": manifest.coverage_gaps,
+        }),
+    );
 }
 
-pub(in crate::cli) fn run_tmux_recording_status(arguments: TmuxStatusArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_tmux_recording_status(
+    response: &mut ResponseWriter,
+    arguments: TmuxStatusArgs,
+) -> Result<ExitCode> {
     let name = arguments
         .recording
         .as_deref()
@@ -176,10 +216,13 @@ pub(in crate::cli) fn run_tmux_recording_status(arguments: TmuxStatusArgs) -> Re
     if let Err(error) = refresh_aggregate_manifest(&manifest_path, &client) {
         tracing::debug!(%error, "tmux server is unavailable while reading aggregate status");
     }
-    return write_json_line(&read_tmux_manifest(&manifest_path)?);
+    return write_json_line(response, &read_tmux_manifest(&manifest_path)?);
 }
 
-pub(in crate::cli) fn run_tmux_stop(arguments: TmuxStopArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_tmux_stop(
+    response: &mut ResponseWriter,
+    arguments: TmuxStopArgs,
+) -> Result<ExitCode> {
     let manifest_path = recording_manifest_path(arguments.output_root.as_deref(), &arguments.name)?;
     let initial_manifest = {
         let _manifest_lock = lock_tmux_manifest(&manifest_path)?;
@@ -245,19 +288,25 @@ pub(in crate::cli) fn run_tmux_stop(arguments: TmuxStopArgs) -> Result<ExitCode>
         }
         manifest
     };
-    return write_json_line(&serde_json::json!({
-        "kind": "tmux_recording_stopped",
-        "recording_id": manifest.recording_id,
-        "name": manifest.name,
-        "lifecycle": manifest.lifecycle,
-        "manifest": manifest_path,
-        "composite_track": manifest.composite_track,
-        "pane_tracks": manifest.pane_tracks,
-        "coverage_gaps": manifest.coverage_gaps,
-    }));
+    return write_json_line(
+        response,
+        &serde_json::json!({
+            "kind": "tmux_recording_stopped",
+            "recording_id": manifest.recording_id,
+            "name": manifest.name,
+            "lifecycle": manifest.lifecycle,
+            "manifest": manifest_path,
+            "composite_track": manifest.composite_track,
+            "pane_tracks": manifest.pane_tracks,
+            "coverage_gaps": manifest.coverage_gaps,
+        }),
+    );
 }
 
-pub(in crate::cli) fn run_tmux_video(arguments: TmuxVideoArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_tmux_video(
+    response: &mut ResponseWriter,
+    arguments: TmuxVideoArgs,
+) -> Result<ExitCode> {
     let manifest_path = recording_manifest_path(arguments.output_root.as_deref(), &arguments.name)?;
     let manifest = read_tmux_manifest(&manifest_path)?;
     let session = manifest.composite_track.session.ok_or_else(|| {
@@ -296,23 +345,29 @@ pub(in crate::cli) fn run_tmux_video(arguments: TmuxVideoArgs) -> Result<ExitCod
             output.status
         ));
     }
-    let response: serde_json::Value = serde_json::from_slice(&output.stdout)
+    let video_response: serde_json::Value = serde_json::from_slice(&output.stdout)
         .map_err(|error| return miette::miette!("video facade returned invalid JSON: {error}"))?;
-    return write_json_line(&response);
+    return write_json_line(response, &video_response);
 }
 
-pub(in crate::cli) fn run_tmux_bundle(arguments: TmuxBundleArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_tmux_bundle(
+    response: &mut ResponseWriter,
+    arguments: TmuxBundleArgs,
+) -> Result<ExitCode> {
     let manifest_path = recording_manifest_path(arguments.output_root.as_deref(), &arguments.name)?;
-    let manifest = create_tmux_bundle(&manifest_path, &arguments.out)?;
-    return write_json_line(&serde_json::json!({
-        "kind": "tmux_bundle",
-        "directory": arguments.out,
-        "recording_id": manifest.recording_id,
-        "recording_name": manifest.recording_name,
-        "track_count": manifest.tracks.len(),
-        "member_count": manifest.members.len(),
-        "manifest": manifest,
-    }));
+    let manifest = tmux::create(&manifest_path, &arguments.out).into_diagnostic()?;
+    return write_json_line(
+        response,
+        &serde_json::json!({
+            "kind": "tmux_bundle",
+            "directory": arguments.out,
+            "recording_id": manifest.recording_id,
+            "recording_name": manifest.recording_name,
+            "track_count": manifest.tracks.len(),
+            "member_count": manifest.members.len(),
+            "manifest": manifest,
+        }),
+    );
 }
 
 pub(super) fn coverage_from_options(client: &TmuxClient) -> Result<TmuxCoverageMode> {
@@ -860,8 +915,8 @@ fn client_from_manifest(manifest: &TmuxRecordingManifest) -> TmuxClient {
 fn recording_manifest_path(output_root: Option<&Path>, name: &str) -> Result<PathBuf> {
     validate_recording_name(name)?;
     let registry = match output_root {
-        Some(root) => SessionRegistry::open(root)?,
-        None => SessionRegistry::open_default()?,
+        Some(root) => SessionRegistry::open(root).into_diagnostic()?,
+        None => SessionRegistry::open_default().into_diagnostic()?,
     };
     return Ok(registry
         .state_root()

@@ -6,9 +6,9 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from termtrace.frames import ScreenFrame
-    from termtrace.locators import CellRange
-    from termtrace.models import ActionResult, StableCapture
+    from termtrace.screen.frame import ScreenFrame
+    from termtrace.screen.queries import CellRange
+    from termtrace.session.actions import ActionResult, StableCapture
 
 MAX_DIAGNOSTIC_CHARS = 512
 MAX_DIAGNOSTIC_MATCHES = 8
@@ -137,7 +137,7 @@ class PostconditionIncompleteError(IncompleteError):
     code = "postcondition_incomplete"
 
     def __init__(self, result: ActionResult) -> None:
-        from termtrace.models import IdleCompletion, ScreenCompletion
+        from termtrace.session.actions import IdleCompletion, ScreenCompletion
 
         completion = result.postcondition
         quality = (

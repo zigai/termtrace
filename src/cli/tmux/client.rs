@@ -1,4 +1,16 @@
-use super::*;
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    fmt::{Display, Write as _},
+    os::unix::ffi::OsStringExt as _,
+    path::{Path, PathBuf},
+    process::Command as ProcessCommand,
+    str,
+};
+
+use miette::Result;
+
+use super::{TMUX_HOOK_INDEX, TMUX_WRAPPER_BINARY_ENV, args::TmuxConnectionArgs};
 
 #[derive(Clone)]
 pub(super) struct TmuxClient {

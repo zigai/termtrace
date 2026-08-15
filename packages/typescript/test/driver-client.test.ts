@@ -5,7 +5,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { expect, test } from "bun:test";
 
-import { DriverClient } from "../src/driver-client.js";
+import { DriverClient } from "../src/transport/driver-client.js";
 import { RequestTimeoutError } from "../src/errors.js";
 
 test("rejects requests issued after the driver exits", async () => {

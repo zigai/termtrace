@@ -7,10 +7,15 @@ from typing import cast
 
 import pytest
 
-from termtrace import async_testing, testing
-from termtrace.async_client import AsyncSession, AsyncTerminal
-from termtrace.async_testing import AsyncTermtraceTest
-from termtrace.testing import TermtraceTestConfig, create_evidence_directory
+from termtrace.session.async_ import AsyncSession
+from termtrace.testing import async_ as async_testing
+from termtrace.testing.async_ import AsyncTermtraceTest
+from termtrace.testing.lifecycle import (
+    TermtraceTestConfig,
+    _ArtifactHashBudget,
+    create_evidence_directory,
+)
+from termtrace.transport.async_ import AsyncTerminal
 
 
 class FakeAsyncScreen:
@@ -221,7 +226,7 @@ async def test_async_manifest_uses_aggregate_hash_budget(
     monkeypatch.setattr(
         async_testing,
         "_ArtifactHashBudget",
-        lambda: testing._ArtifactHashBudget(bytes_remaining=1, members_remaining=100),
+        lambda: _ArtifactHashBudget(bytes_remaining=1, members_remaining=100),
     )
 
     report = await owner.finalize(outcome="assertion_failed")

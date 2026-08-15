@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from termtrace.binary import resolve_binary
+from termtrace.transport.binary import resolve_binary
 
 
 def test_explicit_binary_override_is_resolved(tmp_path: Path) -> None:

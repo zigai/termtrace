@@ -10,10 +10,10 @@ from typing import Literal, TypeAlias
 
 import msgspec
 
-from termtrace._generated import driver_request as request_wire
 from termtrace.duration import Duration
 from termtrace.errors import InvalidAtomError, InvalidDurationError
-from termtrace.models import JsonObject, JsonValue
+from termtrace.transport.generated import driver_request as request_wire
+from termtrace.transport.protocol import JsonObject, JsonValue
 
 
 @dataclass(frozen=True, slots=True)

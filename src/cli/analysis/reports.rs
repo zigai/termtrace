@@ -1,18 +1,59 @@
-use super::*;
+use crate::cli::output::ResponseWriter;
 
-pub(in crate::cli) fn run_timeline(arguments: TimelineArgs) -> Result<ExitCode> {
+use std::{fmt::Write as _, mem::take, process::ExitCode};
+
+use miette::{IntoDiagnostic as _, Result};
+use termtrace_engine::{
+    analysis::{
+        diagnostics::{diagnose, explain},
+        last_action::analyze_last_action,
+    },
+    diff::diff_states_with_semantic_states,
+    timeline::{build_timeline, build_timeline_page, resolve_source_selection},
+};
+use termtrace_evidence::{event_log::EventLog, session::validate_completed_log};
+use termtrace_media::native_capture::validated_visual_manifests;
+use termtrace_model::{
+    execution::event::Event,
+    registry::RegistryLifecycle,
+    terminal::analysis::{DiagnoseReport, ExplainOutputPage, ExplainReport},
+    terminal::diff::SemanticDiff,
+    terminal::observation::StatePoint,
+    terminal::timeline::{TimelineEntry, TimelineItem},
+    value::pagination::OutputPage,
+};
+use termtrace_render::{render_diff_png, render_diff_svg};
+
+use crate::cli::{
+    analysis::args::{
+        DiagnoseArgs, DiagnoseFacadeArgs, DiffArgs, DiffFormat, ExplainArgs, ExplainFormat,
+        InspectFacadeArgs, TimelineArgs,
+    },
+    output::{
+        id_list, optional_display, paginate, quoted_text, stable_enum_label, write_json_line,
+        write_stdout,
+    },
+    session_helpers::{resolve_session, resolve_session_ref, write_session_lifecycle},
+};
+
+pub(in crate::cli) fn run_timeline(
+    response: &mut ResponseWriter,
+    arguments: TimelineArgs,
+) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
-    let log = EventLog::read(session.join("events.jsonl"))?;
-    validate_completed_log(&session, &log)?;
+    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
+    validate_completed_log(&session, &log).into_diagnostic()?;
     let range = resolve_source_selection(
         &log,
         arguments.range.start_monotonic_ns,
         arguments.range.end_monotonic_ns,
         arguments.range.from_marker.as_deref(),
         arguments.range.to_marker.as_deref(),
-    )?;
+    )
+    .into_diagnostic()?;
     let (entries, page, partial) = if arguments.page.all {
-        let entries = build_timeline(&log, arguments.all_states, arguments.controls, range)?;
+        let entries = build_timeline(&log, arguments.all_states, arguments.controls, range)
+            .into_diagnostic()?;
         paginate(entries, &arguments.page)
     } else {
         let limit = u16::try_from(arguments.page.limit)
@@ -24,12 +65,13 @@ pub(in crate::cli) fn run_timeline(arguments: TimelineArgs) -> Result<ExitCode> 
             range,
             u64::try_from(arguments.page.offset).unwrap_or(u64::MAX),
             limit,
-        )?;
-        let returned = timeline_page.entries.len();
+        )
+        .into_diagnostic()?;
         let next_offset = timeline_page
             .next_offset
             .and_then(|offset| return usize::try_from(offset).ok());
         let truncated = next_offset.is_some();
+        let returned = timeline_page.entries.len();
         let total = (!truncated && (arguments.page.offset == 0 || returned > 0))
             .then(|| return arguments.page.offset.saturating_add(returned));
         let page = OutputPage {
@@ -48,13 +90,16 @@ pub(in crate::cli) fn run_timeline(arguments: TimelineArgs) -> Result<ExitCode> 
     };
     if arguments.jsonl {
         for entry in entries {
-            write_json_line(&entry)?;
+            write_json_line(response, &entry)?;
         }
         if partial {
-            write_json_line(&serde_json::json!({
-                "kind": "output_page",
-                "page": page,
-            }))?;
+            write_json_line(
+                response,
+                &serde_json::json!({
+                    "kind": "output_page",
+                    "page": page,
+                }),
+            )?;
         }
         return Ok(ExitCode::SUCCESS);
     }
@@ -70,13 +115,16 @@ pub(in crate::cli) fn run_timeline(arguments: TimelineArgs) -> Result<ExitCode> 
         )
         .into_diagnostic()?;
     }
-    return write_stdout(output);
+    return write_stdout(response, output);
 }
 
-pub(in crate::cli) fn run_diff(arguments: DiffArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_diff(
+    response: &mut ResponseWriter,
+    arguments: DiffArgs,
+) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
-    let log = EventLog::read(session.join("events.jsonl"))?;
-    validate_completed_log(&session, &log)?;
+    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
+    validate_completed_log(&session, &log).into_diagnostic()?;
     let from = diff_point(
         arguments.from_state,
         arguments.from_state_hash,
@@ -91,28 +139,35 @@ pub(in crate::cli) fn run_diff(arguments: DiffArgs) -> Result<ExitCode> {
         arguments.to_at,
         arguments.to_marker,
     )?;
-    let (difference, before_state, after_state) = diff_states_with_semantic_states(&log, from, to)?;
+    let (difference, before_state, after_state) =
+        diff_states_with_semantic_states(&log, from, to).into_diagnostic()?;
     let image_states = matches!(arguments.format, DiffFormat::Svg | DiffFormat::Png)
         .then_some((before_state, after_state));
     let changed = difference.changed;
     let _output_status = match arguments.format {
-        DiffFormat::Text => write_stdout(diff_text(&difference)?)?,
-        DiffFormat::Json => write_stdout(format!(
-            "{}\n",
-            serde_json::to_string_pretty(&difference).into_diagnostic()?
-        ))?,
-        DiffFormat::JsonCompact => write_json_line(&difference)?,
+        DiffFormat::Text => write_stdout(response, diff_text(&difference)?)?,
+        DiffFormat::Json => write_stdout(
+            response,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&difference).into_diagnostic()?
+            ),
+        )?,
+        DiffFormat::JsonCompact => write_json_line(response, &difference)?,
         DiffFormat::Svg => {
             let (before, after) = image_states
                 .as_ref()
                 .ok_or_else(|| return miette::miette!("missing visual diff states"))?;
-            write_stdout(render_diff_svg(before, after, &difference))?
+            write_stdout(response, render_diff_svg(before, after, &difference))?
         }
         DiffFormat::Png => {
             let (before, after) = image_states
                 .as_ref()
                 .ok_or_else(|| return miette::miette!("missing visual diff states"))?;
-            write_stdout(render_diff_png(before, after, &difference)?)?
+            write_stdout(
+                response,
+                render_diff_png(before, after, &difference).into_diagnostic()?,
+            )?
         }
     };
     if arguments.expect_no_change && changed {
@@ -121,10 +176,13 @@ pub(in crate::cli) fn run_diff(arguments: DiffArgs) -> Result<ExitCode> {
     return Ok(ExitCode::SUCCESS);
 }
 
-pub(in crate::cli) fn run_explain(arguments: ExplainArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_explain(
+    response: &mut ResponseWriter,
+    arguments: ExplainArgs,
+) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
-    let log = EventLog::read(session.join("events.jsonl"))?;
-    validate_completed_log(&session, &log)?;
+    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
+    validate_completed_log(&session, &log).into_diagnostic()?;
     let target = diff_point(
         arguments.state,
         arguments.state_hash,
@@ -132,7 +190,7 @@ pub(in crate::cli) fn run_explain(arguments: ExplainArgs) -> Result<ExitCode> {
         arguments.at,
         arguments.marker,
     )?;
-    let mut report = explain(&log, target, arguments.context)?;
+    let mut report = explain(&log, target, arguments.context).into_diagnostic()?;
     let (tokens, tokens_page, tokens_partial) = paginate(take(&mut report.tokens), &arguments.page);
     let (states, states_page, states_partial) = paginate(take(&mut report.states), &arguments.page);
     let (findings, findings_page, findings_partial) =
@@ -158,37 +216,45 @@ pub(in crate::cli) fn run_explain(arguments: ExplainArgs) -> Result<ExitCode> {
                 )
                 .into_diagnostic()?;
             }
-            write_stdout(output)
+            write_stdout(response, output)
         }
         ExplainFormat::Json | ExplainFormat::JsonCompact => {
             if matches!(arguments.format, ExplainFormat::Json) {
-                write_stdout(format!(
-                    "{}\n",
-                    serde_json::to_string_pretty(&report).into_diagnostic()?
-                ))
+                write_stdout(
+                    response,
+                    format!(
+                        "{}\n",
+                        serde_json::to_string_pretty(&report).into_diagnostic()?
+                    ),
+                )
             } else {
-                write_json_line(&report)
+                write_json_line(response, &report)
             }
         }
     };
 }
 
-pub(in crate::cli) fn run_diagnose(arguments: DiagnoseArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_diagnose(
+    response: &mut ResponseWriter,
+    arguments: DiagnoseArgs,
+) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
-    let log = EventLog::read(session.join("events.jsonl"))?;
-    validate_completed_log(&session, &log)?;
+    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
+    validate_completed_log(&session, &log).into_diagnostic()?;
+    let visual_evidence = validated_visual_manifests(&session).into_diagnostic()?;
     let mut report = diagnose(
-        &session,
         &log,
         arguments.check,
         arguments.broad_change_percent,
-    )?;
+        &visual_evidence,
+    )
+    .into_diagnostic()?;
     let has_findings = !report.findings.is_empty();
     let (findings, page, partial) = paginate(take(&mut report.findings), &arguments.page);
     report.findings = findings;
     report.output_page = partial.then_some(page.clone());
     if arguments.json {
-        write_json_line(&report)?;
+        write_json_line(response, &report)?;
     } else {
         let mut output = diagnose_text(&report)?;
         if partial {
@@ -199,7 +265,7 @@ pub(in crate::cli) fn run_diagnose(arguments: DiagnoseArgs) -> Result<ExitCode> 
             )
             .into_diagnostic()?;
         }
-        write_stdout(output)?;
+        write_stdout(response, output)?;
     }
     if arguments.fail_on_finding && has_findings {
         return Ok(ExitCode::FAILURE);
@@ -207,28 +273,46 @@ pub(in crate::cli) fn run_diagnose(arguments: DiagnoseArgs) -> Result<ExitCode> 
     return Ok(ExitCode::SUCCESS);
 }
 
-pub(in crate::cli) fn run_inspect_facade(arguments: InspectFacadeArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_inspect_facade(
+    response: &mut ResponseWriter,
+    arguments: InspectFacadeArgs,
+) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session)?;
     if resolved.lifecycle != RegistryLifecycle::Completed {
-        return write_session_lifecycle(&resolved, "inspect_last_action", ExitCode::FAILURE);
+        return write_session_lifecycle(
+            response,
+            &resolved,
+            "inspect_last_action",
+            ExitCode::FAILURE,
+        );
     }
-    let log = EventLog::read(resolved.path.join("events.jsonl"))?;
-    validate_completed_log(&resolved.path, &log)?;
-    let analysis = analyze_last_action(&resolved.path, &log, arguments.broad_change_percent)?;
+    let log = EventLog::read(resolved.path.join("events.jsonl")).into_diagnostic()?;
+    validate_completed_log(&resolved.path, &log).into_diagnostic()?;
+    let analysis = analyze_last_action(&resolved.path, &log, arguments.broad_change_percent)
+        .into_diagnostic()?;
     let _last_action = arguments.last_action;
-    return write_json_line(&analysis.inspection);
+    return write_json_line(response, &analysis.inspection);
 }
 
-pub(in crate::cli) fn run_diagnose_facade(arguments: DiagnoseFacadeArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_diagnose_facade(
+    response: &mut ResponseWriter,
+    arguments: DiagnoseFacadeArgs,
+) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session)?;
     if resolved.lifecycle != RegistryLifecycle::Completed {
-        return write_session_lifecycle(&resolved, "diagnose_since_last_action", ExitCode::FAILURE);
+        return write_session_lifecycle(
+            response,
+            &resolved,
+            "diagnose_since_last_action",
+            ExitCode::FAILURE,
+        );
     }
-    let log = EventLog::read(resolved.path.join("events.jsonl"))?;
-    validate_completed_log(&resolved.path, &log)?;
-    let analysis = analyze_last_action(&resolved.path, &log, arguments.broad_change_percent)?;
+    let log = EventLog::read(resolved.path.join("events.jsonl")).into_diagnostic()?;
+    validate_completed_log(&resolved.path, &log).into_diagnostic()?;
+    let analysis = analyze_last_action(&resolved.path, &log, arguments.broad_change_percent)
+        .into_diagnostic()?;
     let _since_last_action = arguments.since_last_action;
-    return write_json_line(&analysis.diagnostics);
+    return write_json_line(response, &analysis.diagnostics);
 }
 
 fn explain_text(report: &ExplainReport) -> Result<String> {

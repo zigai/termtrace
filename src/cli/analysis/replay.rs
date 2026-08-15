@@ -1,44 +1,95 @@
-use super::*;
+use crate::cli::output::ResponseWriter;
 
-pub(in crate::cli) fn run_markers(arguments: MarkersArgs) -> Result<ExitCode> {
+use std::{process::ExitCode, time::Duration};
+
+use miette::{IntoDiagnostic as _, Result};
+use termtrace_engine::{
+    Error,
+    analysis::reviewer::{
+        export_state as export_review_state, search as search_review, summarize as summarize_review,
+    },
+    inspection::inspect_session,
+    observation::{prune_replay_cache, replay_cache_status, state_text},
+    replay::{IndexOptions, StateSelector, index_session_with_options},
+};
+use termtrace_media::{
+    native_capture::validated_visual_manifests,
+    playback::{PlaybackOptions, playback},
+    presentation::markers as list_markers,
+};
+use termtrace_model::terminal::reviewer::ReviewerCapabilities;
+
+use crate::cli::{
+    analysis::args::{
+        CacheArgs, CacheCommand, IndexArgs, InspectArgs, InspectFormat, MarkersArgs, PlaybackArgs,
+        ReviewArgs,
+    },
+    analysis::reviewer::run as run_reviewer,
+    output::{row_text, write_json_line, write_stdout},
+    session_helpers::{resolve_cli_range, resolve_session_ref, selection},
+};
+
+pub(in crate::cli) fn run_markers(
+    response: &mut ResponseWriter,
+    arguments: MarkersArgs,
+) -> Result<ExitCode> {
     let session = resolve_session_ref(arguments.session)?;
-    return write_json_line(&list_markers(session, arguments.fps)?);
+    return write_json_line(
+        response,
+        &list_markers(session, arguments.fps).into_diagnostic()?,
+    );
 }
 
-pub(in crate::cli) fn run_review(arguments: ReviewArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_review(
+    response: &mut ResponseWriter,
+    arguments: ReviewArgs,
+) -> Result<ExitCode> {
     if arguments.commands {
-        return write_json_line(&ReviewerCapabilities::default());
+        return write_json_line(response, &ReviewerCapabilities::default());
     }
     let session = arguments.session.ok_or_else(|| {
         return miette::miette!("review requires SESSION unless --commands is used");
     })?;
     let session = resolve_session_ref(session)?;
     if let (Some(destination), Some(state_id)) = (&arguments.export_state, arguments.state) {
-        return write_json_line(&export_review_state(session, state_id, destination)?);
+        return write_json_line(
+            response,
+            &export_review_state(session, state_id, destination).into_diagnostic()?,
+        );
     }
     if arguments.json {
         if let Some(query) = &arguments.search {
-            return write_json_line(&search_review(session, query)?);
+            return write_json_line(response, &search_review(session, query).into_diagnostic()?);
         }
-        return write_json_line(&summarize_review(
-            session,
-            arguments.around_marker.as_deref(),
-        )?);
+        let visual_evidence = validated_visual_manifests(&session).into_diagnostic()?;
+        return write_json_line(
+            response,
+            &summarize_review(
+                session,
+                arguments.around_marker.as_deref(),
+                &visual_evidence,
+            )
+            .into_diagnostic()?,
+        );
     }
     run_reviewer(
         session,
         arguments.around_marker.as_deref(),
         arguments.search.as_deref(),
-    )?;
+    )
+    .into_diagnostic()?;
     return Ok(ExitCode::SUCCESS);
 }
 
-pub(in crate::cli) fn run_index(arguments: IndexArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_index(
+    response: &mut ResponseWriter,
+    arguments: IndexArgs,
+) -> Result<ExitCode> {
     if !arguments.live_snapshot && !arguments.session.join("completion.json").is_file() {
         return Err(Error::SessionIncomplete {
             session: arguments.session,
-        }
-        .into());
+        })
+        .into_diagnostic();
     }
     let (start_monotonic_ns, end_monotonic_ns) =
         resolve_cli_range(&arguments.session, &arguments.range)?;
@@ -51,15 +102,19 @@ pub(in crate::cli) fn run_index(arguments: IndexArgs) -> Result<ExitCode> {
             live_snapshot: arguments.live_snapshot,
             state_selection,
         },
-    )?;
-    return write_json_line(&serde_json::json!({
-        "directory": outcome.directory,
-        "state_count": outcome.state_count,
-        "semantic_state_count": outcome.semantic_state_count,
-        "source_complete": outcome.source_complete,
-        "state_selection": outcome.state_selection,
-        "final_state_hash": outcome.final_state_hash,
-    }));
+    )
+    .into_diagnostic()?;
+    return write_json_line(
+        response,
+        &serde_json::json!({
+            "directory": outcome.directory,
+            "state_count": outcome.state_count,
+            "semantic_state_count": outcome.semantic_state_count,
+            "source_complete": outcome.source_complete,
+            "state_selection": outcome.state_selection,
+            "final_state_hash": outcome.final_state_hash,
+        }),
+    );
 }
 
 pub(in crate::cli) fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> {
@@ -76,11 +131,15 @@ pub(in crate::cli) fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> 
         endpoint_event_seq: arguments.endpoint_event_seq,
         endpoint_event_byte_offset: arguments.endpoint_event_byte_offset,
         instant: arguments.instant,
-    })?;
+    })
+    .into_diagnostic()?;
     return Ok(ExitCode::SUCCESS);
 }
 
-pub(in crate::cli) fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_inspect(
+    response: &mut ResponseWriter,
+    arguments: InspectArgs,
+) -> Result<ExitCode> {
     let selector = match (
         arguments.state,
         arguments.state_hash,
@@ -98,7 +157,7 @@ pub(in crate::cli) fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
             ));
         }
     };
-    let inspection = inspect_session(arguments.session, selector)?;
+    let inspection = inspect_session(arguments.session, selector).into_diagnostic()?;
     if let Some(row_number) = arguments.row {
         let row = inspection
             .state
@@ -115,44 +174,56 @@ pub(in crate::cli) fn run_inspect(arguments: InspectArgs) -> Result<ExitCode> {
             "presented": inspection.record.presented,
         });
         return match arguments.format {
-            InspectFormat::Json => write_stdout(format!(
-                "{}\n",
-                serde_json::to_string_pretty(&serde_json::json!({
+            InspectFormat::Json => write_stdout(
+                response,
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "record": record,
+                        "row": row,
+                    }))
+                    .into_diagnostic()?
+                ),
+            ),
+            InspectFormat::JsonCompact => write_json_line(
+                response,
+                &serde_json::json!({
                     "record": record,
                     "row": row,
-                }))
-                .into_diagnostic()?
-            )),
-            InspectFormat::JsonCompact => write_json_line(&serde_json::json!({
-                "record": record,
-                "row": row,
-            })),
-            InspectFormat::Text => write_stdout(format!("{}\n", row_text(row))),
+                }),
+            ),
+            InspectFormat::Text => write_stdout(response, format!("{}\n", row_text(row))),
         };
     }
     match arguments.format {
         InspectFormat::Json => {
-            return write_stdout(format!(
-                "{}\n",
-                serde_json::to_string_pretty(&inspection).into_diagnostic()?
-            ));
+            return write_stdout(
+                response,
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&inspection).into_diagnostic()?
+                ),
+            );
         }
-        InspectFormat::JsonCompact => return write_json_line(&inspection),
+        InspectFormat::JsonCompact => return write_json_line(response, &inspection),
         InspectFormat::Text => {
-            return write_stdout(format!("{}\n", state_text(&inspection.state)));
+            return write_stdout(response, format!("{}\n", state_text(&inspection.state)));
         }
     }
 }
 
-pub(in crate::cli) fn run_cache(arguments: CacheArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_cache(
+    response: &mut ResponseWriter,
+    arguments: CacheArgs,
+) -> Result<ExitCode> {
     return match arguments.command {
         CacheCommand::Status(arguments) => {
             let session = resolve_session_ref(arguments.session)?;
-            write_json_line(&replay_cache_status(&session)?)
+            write_json_line(response, &replay_cache_status(&session).into_diagnostic()?)
         }
         CacheCommand::Prune(arguments) => {
             let session = resolve_session_ref(arguments.session)?;
-            write_json_line(&prune_replay_cache(&session)?)
+            write_json_line(response, &prune_replay_cache(&session).into_diagnostic()?)
         }
     };
 }

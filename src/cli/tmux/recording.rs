@@ -1,4 +1,43 @@
-use super::*;
+use std::{
+    env,
+    ffi::OsString,
+    os::unix::{ffi::OsStringExt as _, process::CommandExt as _},
+    path::{Path, PathBuf},
+    process::{Command as ProcessCommand, ExitCode},
+    sync::mpsc,
+    thread,
+    time::Duration,
+};
+
+use miette::{IntoDiagnostic as _, Result};
+use termtrace_engine::{
+    analysis::profile::{builtin_terminal_colors, terminal_colors_for_profile},
+    recording::{RecordOptions, inherited_geometry, record, resolve_ghostty_profile},
+    registry::SessionRegistry,
+};
+use termtrace_evidence::event_log::DurabilityPolicy;
+use termtrace_model::{
+    execution::environment::EnvironmentSpec,
+    execution::provenance::ProvenancePolicy,
+    execution::session::{
+        GeometryProvenance, GeometrySource, GhosttyVisualOverrides, ResourceLimits,
+        TMUX_PANE_PROVENANCE_VERSION, TmuxPaneLaunchKind, TmuxPaneProvenance,
+    },
+    value::ByteString,
+};
+use termtrace_sdk::control_endpoint_is_reachable;
+
+use super::{
+    OPTION_CELL_HEIGHT, OPTION_CELL_WIDTH, OPTION_GHOSTTY_CONFIG, OPTION_ORIGINAL_COMMAND,
+    OPTION_ORIGINAL_SHELL, OPTION_OUTPUT_ROOT, OPTION_PANE_SESSION, OPTION_PROFILE_MODE,
+    OPTION_TERM, OPTION_TERMTRACE, OPTION_VERSION, TMUX_INTEGRATION_VERSION,
+    args::TmuxRunArgs,
+    client::{
+        TmuxClient, option_path, option_text, parse_option, query_number, query_text,
+        same_executable, valid_tmux_identifier,
+    },
+    scope::{mark_pane_scope_decision, pane_matches_scope, scope_from_options},
+};
 
 pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> {
     let pane = env::var("TMUX_PANE").map_err(|_| {
@@ -39,7 +78,7 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
     let mut tmux_pane = capture_tmux_pane(&client, &pane, launch_kind)?;
     let cell_width = parse_option::<u16>(&client, OPTION_CELL_WIDTH)?;
     let cell_height = parse_option::<u16>(&client, OPTION_CELL_HEIGHT)?;
-    let geometry = inherited_geometry(cell_width, cell_height)?;
+    let geometry = inherited_geometry(cell_width, cell_height).into_diagnostic()?;
     tmux_pane.pane_width = geometry.cols;
     tmux_pane.pane_height = geometry.rows;
     let configured_term = option_text(&client, OPTION_TERM)?;
@@ -54,10 +93,10 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
     let profile_mode = option_text(&client, OPTION_PROFILE_MODE)?;
     let ghostty_profile = match profile_mode.as_str() {
         "off" => None,
-        "required" => Some(resolve_ghostty_profile(
-            ghostty_config.as_deref(),
-            GhosttyVisualOverrides::default(),
-        )?),
+        "required" => Some(
+            resolve_ghostty_profile(ghostty_config.as_deref(), GhosttyVisualOverrides::default())
+                .into_diagnostic()?,
+        ),
         "auto" => match resolve_ghostty_profile(
             ghostty_config.as_deref(),
             GhosttyVisualOverrides::default(),
@@ -75,14 +114,14 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
             ));
         }
     };
-    let colors = ghostty_profile.as_ref().map_or_else(
-        || return resolved_terminal_colors(),
-        |profile| return terminal_colors_for_profile(profile),
-    )?;
+    let colors = ghostty_profile
+        .as_ref()
+        .map_or_else(builtin_terminal_colors, terminal_colors_for_profile)
+        .into_diagnostic()?;
     let output_root = option_path(&client, OPTION_OUTPUT_ROOT)?
         .ok_or_else(|| return miette::miette!("configured tmux output root is empty"))?;
-    let registry = SessionRegistry::open(output_root)?;
-    let paths = registry.allocate_detached_paths()?;
+    let registry = SessionRegistry::open(output_root).into_diagnostic()?;
+    let paths = registry.allocate_detached_paths().into_diagnostic()?;
     let creation_alias = Some(format!(
         "tmux-{}-{}-{}",
         tmux_pane.session_id.trim_start_matches('$'),
@@ -137,7 +176,7 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
     if let Err(error) = publication {
         tracing::debug!(%error, pane = %pane, "could not publish tmux pane recording path");
     }
-    let outcome = outcome?;
+    let outcome = outcome.into_diagnostic()?;
     return outcome
         .exit_code
         .and_then(|code| return u8::try_from(code).ok())

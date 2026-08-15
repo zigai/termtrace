@@ -1,4 +1,8 @@
-use super::*;
+use std::{ffi::OsString, path::PathBuf};
+
+use clap::{Args, Subcommand, ValueEnum};
+
+use crate::cli::parsers::parse_video_fps;
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct TmuxArgs {

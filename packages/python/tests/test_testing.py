@@ -10,13 +10,17 @@ from typing import cast
 
 import pytest
 
-from termtrace import testing
-from termtrace.client import DriverTransport, Session, Terminal
-from termtrace.testing import (
-    TermtraceTest,
+import termtrace.testing.sync as testing_sync
+from termtrace.session.sync import Session
+from termtrace.testing.lifecycle import (
+    EvidencePolicy,
     TermtraceTestConfig,
+    _artifact_digest,
+    _ArtifactHashBudget,
     create_evidence_directory,
 )
+from termtrace.testing.sync import TermtraceTest
+from termtrace.transport.sync import DriverTransport, Terminal
 
 
 class FakeScreen:
@@ -136,7 +140,7 @@ class FakeTerminal:
 def make_owner(
     tmp_path: Path,
     *,
-    policy: testing.EvidencePolicy = "always",
+    policy: EvidencePolicy = "always",
     completion_error: bool = False,
     close_error: bool = False,
     stop_interruption: BaseException | None = None,
@@ -352,12 +356,12 @@ def test_artifact_digest_enforces_aggregate_hash_budget(tmp_path: Path) -> None:
     second = tmp_path / "second"
     first.write_bytes(b"abc")
     second.write_bytes(b"d")
-    budget = testing._ArtifactHashBudget(bytes_remaining=3, members_remaining=2)
+    budget = _ArtifactHashBudget(bytes_remaining=3, members_remaining=2)
 
-    testing._artifact_digest(first, budget)
+    _artifact_digest(first, budget)
 
     with pytest.raises(ValueError, match="hashed bytes"):
-        testing._artifact_digest(second, budget)
+        _artifact_digest(second, budget)
 
 
 def test_snapshot_updates_only_under_explicit_policy(
@@ -376,7 +380,7 @@ def test_snapshot_updates_only_under_explicit_policy(
         observed.append(update)
         return object()
 
-    monkeypatch.setattr(testing, "assert_snapshot_file", fake_snapshot)
+    monkeypatch.setattr(testing_sync, "assert_snapshot_file", fake_snapshot)
     normal, _, _ = make_owner(tmp_path / "normal")
     updating, _, _ = make_owner(tmp_path / "update", update_snapshots=True)
     normal.assert_snapshot("screen")

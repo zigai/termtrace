@@ -1,4 +1,25 @@
-use super::*;
+use crate::cli::output::ResponseWriter;
+
+use std::{
+    ffi::OsString,
+    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
+    path::{Path, PathBuf},
+    process::ExitCode,
+    str,
+};
+
+use miette::{IntoDiagnostic as _, Result};
+use termtrace_engine::{registry::SessionRegistry, timeline::resolve_source_selection};
+use termtrace_evidence::event_log::EventLog;
+use termtrace_model::{
+    protocol::control::{ControlCommand, ControlData},
+    registry::RegistryLifecycle,
+    terminal::replay::StateSelection,
+    value::ByteString,
+};
+use termtrace_sdk::{control_endpoint_is_reachable, request};
+
+use crate::cli::{analysis::args::TimeRangeArgs, output::write_json_line};
 
 pub(super) struct ResolvedSessionRef {
     pub(super) path: PathBuf,
@@ -18,7 +39,10 @@ pub(super) fn resolve_session(target: PathBuf) -> Result<ResolvedSessionRef> {
     if let Some(name) = bytes.strip_prefix(b"name:") {
         let name = str::from_utf8(name)
             .map_err(|_| miette::miette!("name: session reference must be valid UTF-8"))?;
-        let resolved = SessionRegistry::open_default()?.resolve_lifecycle(name)?;
+        let resolved = SessionRegistry::open_default()
+            .into_diagnostic()?
+            .resolve_lifecycle(name)
+            .into_diagnostic()?;
         return Ok(ResolvedSessionRef {
             path: resolved.session,
             lifecycle: resolved.lifecycle,
@@ -31,7 +55,10 @@ pub(super) fn resolve_session(target: PathBuf) -> Result<ResolvedSessionRef> {
     let name = target
         .to_str()
         .ok_or_else(|| miette::miette!("non-UTF-8 session paths require the path: prefix"))?;
-    let resolved = SessionRegistry::open_default()?.resolve_lifecycle(name)?;
+    let resolved = SessionRegistry::open_default()
+        .into_diagnostic()?
+        .resolve_lifecycle(name)
+        .into_diagnostic()?;
     return Ok(ResolvedSessionRef {
         path: resolved.session,
         lifecycle: resolved.lifecycle,
@@ -44,18 +71,22 @@ pub(super) fn resolve_session_ref(target: PathBuf) -> Result<PathBuf> {
 }
 
 pub(super) fn write_session_lifecycle(
+    response: &mut ResponseWriter,
     resolved: &ResolvedSessionRef,
     operation: &'static str,
     exit_code: ExitCode,
 ) -> Result<ExitCode> {
-    write_json_line(&serde_json::json!({
-        "kind": "session_lifecycle",
-        "operation": operation,
-        "lifecycle": resolved.lifecycle.as_str(),
-        "session": ByteString::from(resolved.path.as_os_str().as_bytes()),
-        "session_display": resolved.path.display().to_string(),
-        "diagnostic": resolved.diagnostic,
-    }))?;
+    write_json_line(
+        response,
+        &serde_json::json!({
+            "kind": "session_lifecycle",
+            "operation": operation,
+            "lifecycle": resolved.lifecycle.as_str(),
+            "session": ByteString::from(resolved.path.as_os_str().as_bytes()),
+            "session_display": resolved.path.display().to_string(),
+            "diagnostic": resolved.diagnostic,
+        }),
+    )?;
     return Ok(exit_code);
 }
 
@@ -107,7 +138,7 @@ pub(super) fn resolve_cli_range(
     }
     let event_path = session.join("events.jsonl");
     let live_event_count = if !session.join("completion.json").is_file() {
-        match request(session, ControlCommand::Status) {
+        match request(session, ControlCommand::Status).into_diagnostic() {
             Ok(ControlData::Status { boundaries, .. }) => Some(boundaries.durable.next_event_seq),
             Ok(_) => {
                 return Err(miette::miette!(
@@ -123,8 +154,8 @@ pub(super) fn resolve_cli_range(
         None
     };
     let log = match live_event_count {
-        Some(event_count) => EventLog::read_prefix(event_path, event_count)?,
-        None => EventLog::read(event_path)?,
+        Some(event_count) => EventLog::read_prefix(event_path, event_count).into_diagnostic()?,
+        None => EventLog::read(event_path).into_diagnostic()?,
     };
     let resolved = resolve_source_selection(
         &log,
@@ -132,7 +163,8 @@ pub(super) fn resolve_cli_range(
         range.end_monotonic_ns,
         range.from_marker.as_deref(),
         range.to_marker.as_deref(),
-    )?;
+    )
+    .into_diagnostic()?;
     return Ok(resolved.map_or((None, None), |value| {
         return (Some(value.start_monotonic_ns), Some(value.end_monotonic_ns));
     }));

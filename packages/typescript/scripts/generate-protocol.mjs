@@ -9,7 +9,7 @@ import { compileFromFile } from "json-schema-to-typescript";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(packageRoot, "../..");
-const outputDirectory = resolve(packageRoot, "src/generated");
+const outputDirectory = resolve(packageRoot, "src/transport/generated");
 const contracts = ["driver-request", "driver-response"];
 
 await mkdir(outputDirectory, { recursive: true });

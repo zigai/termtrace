@@ -386,7 +386,7 @@
   "$id": "https://github.com/zigai/termtrace/schemas/screenshot-batch-manifest.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Manifest for an atomically published multi-state screenshot batch.",
+  "description": "Manifest for an atomically published multi-state semantic screenshot batch.",
   "properties": {
     "entries": {
       "description": "Ordered exact-state entries.",

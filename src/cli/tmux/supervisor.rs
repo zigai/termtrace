@@ -1,4 +1,39 @@
-use super::*;
+use crate::cli::output::ResponseWriter;
+
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ffi::{OsStr, OsString},
+    fmt::Write as _,
+    io,
+    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
+    path::{Path, PathBuf},
+    process::{self, ExitCode},
+    str, thread,
+    time::{Duration, Instant},
+};
+
+use miette::{IntoDiagnostic as _, Result};
+use termtrace_model::value::ByteString;
+
+use crate::cli::output::{optional_display, write_json_line, write_stdout};
+
+use super::{
+    OPTION_EXCLUDED_PID, OPTION_GRANDFATHERED_PID, OPTION_OUTPUT_ROOT, OPTION_PANE_SESSION,
+    OPTION_SELECTED_PID, OPTION_SUPERVISOR_PID, OPTION_TERMTRACE, OPTION_TMUX, OPTION_VERSION,
+    SUPERVISOR_INTERVAL, SUPERVISOR_LOCK, TMUX_INTEGRATION_VERSION, UNRECORDED_GRACE,
+    aggregate::{
+        coverage_from_options, refresh_configured_aggregate_manifest, run_tmux_recording_status,
+    },
+    args::{TmuxCoverageMode, TmuxGuardArgs, TmuxStatusArgs},
+    client::{
+        TmuxClient, option_text, query_number, query_text, same_executable, valid_tmux_identifier,
+    },
+    scope::{
+        TmuxScopeMode, TmuxScopePolicy, mark_pane_scope_decision, pane_matches_scope,
+        pane_scope_decision, scope_from_options,
+    },
+    setup::{setup_from_options, tmux_wrapper_command},
+};
 
 #[derive(serde::Serialize)]
 pub(super) struct TmuxPaneStatus {
@@ -39,14 +74,17 @@ pub(super) struct PaneProcessRow {
     pub(super) window_id: String,
 }
 
-pub(in crate::cli) fn run_tmux_status(arguments: TmuxStatusArgs) -> Result<ExitCode> {
+pub(in crate::cli) fn run_tmux_status(
+    response: &mut ResponseWriter,
+    arguments: TmuxStatusArgs,
+) -> Result<ExitCode> {
     if arguments.recording.is_some() {
-        return run_tmux_recording_status(arguments);
+        return run_tmux_recording_status(response, arguments);
     }
     let client = TmuxClient::from_connection(arguments.connection);
     let report = tmux_status_report(&client)?;
     if arguments.json {
-        return write_json_line(&report);
+        return write_json_line(response, &report);
     }
     let scope = report
         .scope
@@ -90,7 +128,7 @@ pub(in crate::cli) fn run_tmux_status(arguments: TmuxStatusArgs) -> Result<ExitC
         )
         .into_diagnostic()?;
     }
-    return write_stdout(output);
+    return write_stdout(response, output);
 }
 
 pub(in crate::cli) fn run_tmux_guard(arguments: TmuxGuardArgs) -> Result<ExitCode> {
@@ -412,11 +450,10 @@ pub(super) fn process_id_has_role(
         Ok(path) => path,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(source) => {
-            return Err(Error::Filesystem {
-                path: process.join("exe"),
-                source,
-            })
-            .into_diagnostic();
+            return Err(miette::miette!(
+                "could not inspect process executable {}: {source}",
+                process.join("exe").display()
+            ));
         }
     };
     if !same_executable(&actual_executable, expected_executable) {
@@ -426,11 +463,10 @@ pub(super) fn process_id_has_role(
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(source) => {
-            return Err(Error::Filesystem {
-                path: process.join("cmdline"),
-                source,
-            })
-            .into_diagnostic();
+            return Err(miette::miette!(
+                "could not inspect process command line {}: {source}",
+                process.join("cmdline").display()
+            ));
         }
     };
     let mut arguments = command_line.split(|byte| return *byte == 0);

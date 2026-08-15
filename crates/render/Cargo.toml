@@ -1,0 +1,15 @@
+[package]
+name = "termtrace-render"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+termtrace-model = { path = "../model" }
+termtrace-terminal = { path = "../terminal" }
+base64 = "0.22.1"
+blake3 = "1.8.2"
+resvg = { version = "0.45.1", default-features = false, features = ["text"] }
+
+[lints]
+workspace = true

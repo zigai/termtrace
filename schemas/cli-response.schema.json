@@ -1,16 +1,59 @@
 {
+  "$id": "https://github.com/zigai/termtrace/schemas/cli-response.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://termtrace.dev/schemas/cli-response.schema.json",
-  "title": "Termtrace CLI response",
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "ok": {
+            "const": false
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "then": {
+        "required": [
+          "code",
+          "applied",
+          "retry",
+          "session_state"
+        ]
+      }
+    }
+  ],
   "description": "Version 1 compact response emitted by --response agent.",
-  "type": "object",
-  "required": ["v", "ok", "type"],
   "properties": {
-    "v": { "const": 1 },
-    "ok": { "type": "boolean" },
-    "type": { "type": "string", "minLength": 1 },
-    "code": { "type": "string", "minLength": 1 },
-    "applied": { "enum": ["none", "all", "partial", "unknown"] },
+    "applied": {
+      "enum": [
+        "none",
+        "all",
+        "partial",
+        "unknown"
+      ]
+    },
+    "code": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "request_id": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "response_bytes": {
+      "minimum": 0,
+      "type": "integer"
+    },
     "retry": {
       "enum": [
         "not_needed",
@@ -20,17 +63,31 @@
         "unsafe"
       ]
     },
-    "session_state": { "enum": ["live", "ended", "completed", "pending", "unknown"] },
-    "request_id": { "type": ["string", "integer"] },
-    "message": { "type": "string" },
-    "truncated": { "type": "boolean" },
-    "response_bytes": { "type": "integer", "minimum": 0 }
-  },
-  "allOf": [
-    {
-      "if": { "properties": { "ok": { "const": false } }, "required": ["ok"] },
-      "then": { "required": ["code", "applied", "retry", "session_state"] }
+    "session_state": {
+      "enum": [
+        "live",
+        "ended",
+        "completed",
+        "pending",
+        "unknown"
+      ]
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "type": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "v": {
+      "const": 1
     }
+  },
+  "required": [
+    "v",
+    "ok",
+    "type"
   ],
-  "additionalProperties": true
+  "title": "Termtrace CLI response",
+  "type": "object"
 }

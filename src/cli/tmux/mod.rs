@@ -1,12 +1,9 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    ffi::OsString,
-    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
-    os::unix::process::CommandExt as _,
-    process, str,
-};
+use std::process::ExitCode;
+use std::time::Duration;
 
-use super::*;
+use miette::Result;
+
+use crate::cli::output::ResponseWriter;
 
 mod aggregate;
 mod args;
@@ -16,16 +13,11 @@ mod scope;
 mod setup;
 mod supervisor;
 
-use aggregate::*;
 pub(super) use aggregate::{run_tmux_bundle, run_tmux_record, run_tmux_stop, run_tmux_video};
-pub(super) use args::*;
-use client::*;
+pub(super) use args::{TmuxArgs, TmuxSubcommand};
 pub(super) use recording::run_tmux_pane;
 pub(super) use scope::run_tmux_scope;
-use scope::*;
-use setup::*;
 pub(super) use setup::{run_tmux_config, run_tmux_disable, run_tmux_enable};
-use supervisor::*;
 pub(super) use supervisor::{run_tmux_guard, run_tmux_status, run_tmux_supervisor};
 
 const TMUX_INTEGRATION_VERSION: &str = "1";
@@ -80,3 +72,20 @@ const RESERVED_OPTIONS: &[&str] = &[
     OPTION_SCOPE,
     OPTION_SUPERVISOR_PID,
 ];
+
+pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -> Result<ExitCode> {
+    return match command {
+        TmuxSubcommand::Record(arguments) => run_tmux_record(response, arguments),
+        TmuxSubcommand::Status(arguments) => run_tmux_status(response, arguments),
+        TmuxSubcommand::Stop(arguments) => run_tmux_stop(response, arguments),
+        TmuxSubcommand::Video(arguments) => run_tmux_video(response, arguments),
+        TmuxSubcommand::Bundle(arguments) => run_tmux_bundle(response, arguments),
+        TmuxSubcommand::Config(arguments) => run_tmux_config(response, arguments),
+        TmuxSubcommand::Enable(arguments) => run_tmux_enable(response, arguments),
+        TmuxSubcommand::Disable(arguments) => run_tmux_disable(response, arguments),
+        TmuxSubcommand::Scope(arguments) => run_tmux_scope(response, arguments),
+        TmuxSubcommand::Run(arguments) => run_tmux_pane(arguments),
+        TmuxSubcommand::Guard(arguments) => run_tmux_guard(arguments),
+        TmuxSubcommand::Supervise => run_tmux_supervisor(),
+    };
+}

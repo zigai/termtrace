@@ -1,0 +1,199 @@
+use super::super::control::{
+    client_error, exact_duration_ns, public_control_error, send_request_response_with_timeout,
+    validate_stable_options,
+};
+use super::super::*;
+
+/// Presented-screen operations.
+pub struct Screen<'session> {
+    pub(in crate::client) session: &'session Session,
+}
+
+/// Atomic stable-screen outcome retaining the exact actor frame.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StableScreenCapture {
+    /// Typed reason the actor returned.
+    pub quality: StableCaptureQuality,
+    /// Exact frame projected before waiter ordering was released.
+    pub frame: ScreenFrame,
+    /// First actor timestamp at which this exact state was observed.
+    pub first_observed_monotonic_ns: u64,
+    /// Actor timestamp of the returned snapshot.
+    pub observed_monotonic_ns: u64,
+    /// Requested unchanged interval.
+    pub stable_for_ns: u64,
+}
+
+impl Screen<'_> {
+    pub(crate) fn session(&self) -> &Session {
+        return self.session;
+    }
+
+    /// Return the latest actor-presented compact compatibility snapshot.
+    pub fn snapshot(&self) -> Result<ControlData> {
+        return send_request(
+            &self.session.path,
+            &ControlRequest::new(ControlCommand::Snapshot),
+        );
+    }
+
+    /// Return one bounded rich latest-presented frame from a live or completed session.
+    pub fn frame(&self, projection: ScreenProjectionRequest) -> Result<ScreenFrame> {
+        if self.session.path.join("completion.json").is_file() {
+            let point = StatePoint::LatestPresented;
+            let observation =
+                observe_session_with_options(&self.session.path, point.clone(), false)?;
+            let state = semantic_state_for_session(&self.session.path, &point, false)?;
+            let source = ScreenFrameSource::Resolved {
+                source_kind: observation.source_kind,
+                session_id: observation.session_id,
+                source_completed: observation.source_completed,
+                state_point: observation.state_point,
+                state_id: observation.state_id,
+                event_seq: observation.event_seq,
+                monotonic_ns: observation.monotonic_ns,
+                boundary: observation.boundary,
+                integrity: observation.integrity,
+                resolution: observation.resolution,
+            };
+            return project_screen_frame(
+                &state,
+                &projection,
+                source,
+                observation.presented,
+                CaptureQuality::Completed,
+            )
+            .map_err(Error::ScreenFrame);
+        }
+        let request = ControlRequest::new(ControlCommand::ScreenFrame { projection });
+        let response = send_request_response(&self.session.path, &request)?;
+        let data = match response.result {
+            ControlResult::Ok { data } => data,
+            ControlResult::Error {
+                code,
+                message,
+                details,
+            } => return Err(public_control_error(code, message, details, None, None)),
+        };
+        let ControlData::ScreenFrame { frame } = data else {
+            return Err(client_error("actor returned the wrong rich-screen payload"));
+        };
+        return Ok(frame);
+    }
+
+    /// Return exact cells for one explicit absolute region.
+    pub fn cells(&self, region: ScreenRegion) -> Result<ScreenFrame> {
+        return self.frame(ScreenProjectionRequest {
+            detail: FrameDetail::Cells,
+            region: Some(region),
+        });
+    }
+
+    /// Return a truth-labeled latest presented compact observation.
+    pub fn observation(&self) -> Result<Observation> {
+        return observe_session_with_options(
+            &self.session.path,
+            StatePoint::LatestPresented,
+            false,
+        );
+    }
+
+    /// Wait inside the actor for a stable presented predicate.
+    pub fn wait(
+        &self,
+        predicate: ScreenPredicate,
+        stable_for: Duration,
+        timeout: Duration,
+    ) -> Result<ScreenWaitOutcome> {
+        return wait_for_screen(&self.session.path, predicate, stable_for, timeout);
+    }
+
+    /// Atomically capture one exact rich frame under actor stability ordering.
+    pub fn capture_stable(&self, options: StableCaptureOptions) -> Result<StableScreenCapture> {
+        return self.capture_stable_inner(options);
+    }
+
+    fn capture_stable_inner(&self, options: StableCaptureOptions) -> Result<StableScreenCapture> {
+        validate_stable_options(options)?;
+        let stable_for_ns = exact_duration_ns("stable_for", options.stable_for)?;
+        if self.session.path.join("completion.json").is_file() {
+            return Ok(StableScreenCapture {
+                quality: StableCaptureQuality::Stable,
+                frame: self.frame(options.projection)?,
+                first_observed_monotonic_ns: 0,
+                observed_monotonic_ns: 0,
+                stable_for_ns,
+            });
+        }
+        let mut request = ControlRequest::new(ControlCommand::CaptureStable {
+            stable_for_ns,
+            timeout_ns: exact_duration_ns("timeout", options.timeout)?,
+            projection: options.projection,
+        });
+        request.request_id = Uuid::now_v7();
+        let response =
+            send_request_response_with_timeout(&self.session.path, &request, options.timeout)?;
+        let data = match response.result {
+            ControlResult::Ok { data } => data,
+            ControlResult::Error {
+                code,
+                message,
+                details,
+            } => return Err(public_control_error(code, message, details, None, None)),
+        };
+        let ControlData::StableSnapshot {
+            frame,
+            first_observed_monotonic_ns,
+            observed_monotonic_ns,
+            stable_for_ns,
+            quality,
+            semantic_state_zstd: _,
+        } = data
+        else {
+            return Err(client_error(
+                "actor returned the wrong stable-capture payload",
+            ));
+        };
+        let capture = StableScreenCapture {
+            quality,
+            frame,
+            first_observed_monotonic_ns,
+            observed_monotonic_ns,
+            stable_for_ns,
+        };
+        if quality != StableCaptureQuality::Stable && !options.allow_incomplete {
+            return Err(Error::StableCaptureIncomplete {
+                result: Box::new(capture),
+            });
+        }
+        return Ok(capture);
+    }
+
+    /// Compatibility shorthand for a strict spans-detail stable capture.
+    pub fn wait_for_idle(
+        &self,
+        stable_for: Duration,
+        timeout: Duration,
+    ) -> Result<StableScreenCapture> {
+        return self.capture_stable(StableCaptureOptions {
+            stable_for,
+            timeout,
+            projection: ScreenProjectionRequest::default(),
+            allow_incomplete: false,
+        });
+    }
+
+    /// Compatibility shorthand retaining incomplete stable outcomes.
+    pub fn wait_for_idle_outcome(
+        &self,
+        stable_for: Duration,
+        timeout: Duration,
+    ) -> Result<StableScreenCapture> {
+        return self.capture_stable(StableCaptureOptions {
+            stable_for,
+            timeout,
+            projection: ScreenProjectionRequest::default(),
+            allow_incomplete: true,
+        });
+    }
+}

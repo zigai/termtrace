@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { Duration, encodeAction, parseActionResult } from "../src/actions.js";
+import { Duration, encodeAction, parseActionResult } from "../src/session/actions.js";
 import {
     InvalidDurationError,
     InvalidQueryError,
@@ -10,9 +10,9 @@ import {
     NoMatchError,
     ProtocolMismatchError,
 } from "../src/errors.js";
-import { Locator } from "../src/locators.js";
+import { Locator } from "../src/screen/locator.js";
 import { Screen, Session, type JsonObject } from "../src/index.js";
-import { allOf, evaluateQuery, regionQuery, styleQuery, textQuery } from "../src/queries.js";
+import { allOf, evaluateQuery, regionQuery, styleQuery, textQuery } from "../src/screen/queries.js";
 import {
     ScreenFrame,
     parseScreenFrame,
@@ -21,8 +21,8 @@ import {
     type ScreenAppearance,
     type ScreenCell,
     type ScreenRow,
-} from "../src/screen-frame.js";
-import { normalizeFrame } from "../src/snapshots.js";
+} from "../src/screen/frame.js";
+import { normalizeFrame } from "../src/screen/snapshots.js";
 
 const style: CellStyle = Object.freeze({
     foreground: Object.freeze({ kind: "none" }),

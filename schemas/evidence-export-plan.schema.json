@@ -1,0 +1,103 @@
+{
+  "$defs": {
+    "ArtifactSensitivity": {
+      "description": "Sensitivity classification for one derived artifact member.",
+      "oneOf": [
+        {
+          "const": "sensitive_terminal_data",
+          "description": "Member contains or may reveal terminal content.",
+          "type": "string"
+        },
+        {
+          "const": "operational_metadata",
+          "description": "Member contains only non-content operational metadata.",
+          "type": "string"
+        }
+      ]
+    },
+    "BundlePlanMember": {
+      "additionalProperties": false,
+      "description": "One planned member and its sensitivity before publication.",
+      "properties": {
+        "path": {
+          "description": "Relative output path.",
+          "type": "string"
+        },
+        "relationship": {
+          "description": "Why the member is selected.",
+          "type": "string"
+        },
+        "sensitivity": {
+          "$ref": "#/$defs/ArtifactSensitivity",
+          "description": "Explicit sensitivity class."
+        }
+      },
+      "required": [
+        "path",
+        "sensitivity",
+        "relationship"
+      ],
+      "type": "object"
+    },
+    "BundleProfile": {
+      "description": "Fixed bundle content policy.",
+      "oneOf": [
+        {
+          "const": "screen",
+          "description": "Latest screen observation without canonical raw events.",
+          "type": "string"
+        },
+        {
+          "const": "debug",
+          "description": "Screen plus metadata-only canonical event projections and verification.",
+          "type": "string"
+        },
+        {
+          "const": "forensic",
+          "description": "Complete top-level canonical session payload plus verification.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/evidence-export-plan.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Dry-run selection inventory.",
+  "properties": {
+    "format": {
+      "description": "Stable plan format.",
+      "type": "string"
+    },
+    "includes_canonical_evidence": {
+      "description": "Whether canonical raw evidence is included.",
+      "type": "boolean"
+    },
+    "members": {
+      "description": "Planned files.",
+      "items": {
+        "$ref": "#/$defs/BundlePlanMember"
+      },
+      "type": "array"
+    },
+    "profile": {
+      "$ref": "#/$defs/BundleProfile",
+      "description": "Selected policy."
+    },
+    "version": {
+      "description": "Plan schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "profile",
+    "includes_canonical_evidence",
+    "members"
+  ],
+  "title": "BundlePlan",
+  "type": "object"
+}

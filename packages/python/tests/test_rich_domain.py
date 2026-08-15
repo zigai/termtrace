@@ -6,8 +6,6 @@ from typing import cast
 
 import pytest
 
-from termtrace.async_client import AsyncScreen, AsyncSession
-from termtrace.client import Screen, Session
 from termtrace.duration import Duration
 from termtrace.errors import (
     InvalidDurationError,
@@ -19,7 +17,7 @@ from termtrace.errors import (
     ProtocolMismatchError,
     RequestTimeoutError,
 )
-from termtrace.frames import (
+from termtrace.screen.frame import (
     Appearance,
     CellStyle,
     Color,
@@ -36,8 +34,11 @@ from termtrace.frames import (
     ScreenSpan,
     SpanCell,
 )
-from termtrace.locators import AsyncLocator, Locator, StyleFilter, evaluate, region, style, text
-from termtrace.snapshots import normalize_frame
+from termtrace.screen.locators import AsyncLocator, Locator
+from termtrace.screen.queries import StyleFilter, evaluate, region, style, text
+from termtrace.screen.snapshot import normalize_frame
+from termtrace.session.async_ import AsyncScreen, AsyncSession
+from termtrace.session.sync import Screen, Session
 
 
 def _appearance(*, bold: bool = False) -> Appearance:

@@ -1,0 +1,16 @@
+[package]
+name = "termtrace-model"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+base64 = "0.22.1"
+blake3 = "1.8.2"
+schemars = { version = "1.1.0", features = ["uuid1"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+uuid = { version = "1.18.1", features = ["serde"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,188 @@
+//! Save-independent state inspection and bounded evidence waits.
+
+use std::{
+    path::Path,
+    thread,
+    time::{Duration, Instant},
+};
+
+use termtrace_evidence::{
+    event_log::{EventLog, EventLogCursor},
+    session::validate_completed_log,
+};
+pub use termtrace_model::terminal::inspection::WaitOutcome;
+use termtrace_model::{
+    execution::event::Event,
+    execution::session::SessionCompletion,
+    terminal::replay::{StateInspection, StateSelector},
+    terminal::state::SemanticState,
+};
+
+use crate::observation::state_text;
+use crate::replay::inspect;
+use crate::{Error, Result};
+
+/// Reconstruct one complete semantic state directly from canonical evidence.
+pub fn inspect_session(
+    session_directory: impl AsRef<Path>,
+    selector: StateSelector,
+) -> Result<StateInspection> {
+    let session = session_directory.as_ref();
+    let log = EventLog::read(session.join("events.jsonl"))?;
+    if session.join("completion.json").is_file() {
+        validate_completed_log(session, &log)?;
+    }
+    return inspect(&log, selector);
+}
+
+/// Render a semantic state as compact agent-readable viewport text.
+pub fn inspect_state_text(state: &SemanticState) -> String {
+    return state_text(state);
+}
+
+/// Wait until exact bytes appear in the bounded canonical output stream.
+pub fn wait_for_output(
+    session_directory: impl AsRef<Path>,
+    needle: &[u8],
+    timeout: Duration,
+) -> Result<WaitOutcome> {
+    if needle.is_empty() {
+        return Err(wait_error("wait condition must not be empty"));
+    }
+    let session = session_directory.as_ref();
+    let event_path = session.join("events.jsonl");
+    let completion_path = session.join("completion.json");
+    let deadline = Instant::now() + timeout;
+    let mut cursor = EventLogCursor::open(&event_path)?;
+    let mut matcher = OutputMatcher::new(needle);
+    loop {
+        while let Some(record) = cursor.next_record()? {
+            if let Event::Output { data } = &record.event
+                && let Some(output_end_offset) = matcher.push(data.as_bytes())
+            {
+                return Ok(WaitOutcome {
+                    event_seq: record.seq,
+                    output_end_offset,
+                    monotonic_ns: record.monotonic_ns,
+                });
+            }
+            if matches!(record.event, Event::Exit { .. }) {
+                return Err(wait_error("child exited before output matched"));
+            }
+        }
+        if completion_path.is_file() {
+            if let Some(line) = cursor.incomplete_line() {
+                return Err(Error::InvalidEventLog {
+                    path: event_path,
+                    line,
+                    reason: "truncated line without newline terminator".to_owned(),
+                });
+            }
+            return Err(wait_error("session completed before output matched"));
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(wait_error("timed out before output matched"));
+        }
+        thread::sleep(Duration::from_millis(50).min(deadline.saturating_duration_since(now)));
+    }
+}
+
+/// Wait until completion is published and verify it against canonical events.
+pub fn wait_for_completion(
+    session_directory: impl AsRef<Path>,
+    timeout: Duration,
+) -> Result<SessionCompletion> {
+    let session = session_directory.as_ref();
+    let completion_path = session.join("completion.json");
+    let deadline = Instant::now() + timeout;
+    loop {
+        if completion_path.is_file() {
+            let log = EventLog::read(session.join("events.jsonl"))?;
+            return Ok(validate_completed_log(session, &log)?);
+        }
+        if Instant::now() >= deadline {
+            return Err(wait_error("timed out before session completion"));
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+struct OutputMatcher<'needle> {
+    needle: &'needle [u8],
+    prefix_lengths: Vec<usize>,
+    matched: usize,
+    output_offset: u64,
+}
+
+impl<'needle> OutputMatcher<'needle> {
+    fn new(needle: &'needle [u8]) -> Self {
+        let mut prefix_lengths: Vec<usize> = vec![0; needle.len()];
+        let mut matched = 0;
+        for index in 1..needle.len() {
+            let Some(byte) = needle.get(index).copied() else {
+                break;
+            };
+            while matched > 0 && needle.get(matched).copied() != Some(byte) {
+                matched = prefix_lengths
+                    .get(matched.saturating_sub(1))
+                    .copied()
+                    .unwrap_or(0);
+            }
+            if needle.get(matched).copied() == Some(byte) {
+                matched = matched.saturating_add(1);
+            }
+            if let Some(length) = prefix_lengths.get_mut(index) {
+                *length = matched;
+            }
+        }
+        return Self {
+            needle,
+            prefix_lengths,
+            matched: 0,
+            output_offset: 0,
+        };
+    }
+
+    fn push(&mut self, bytes: &[u8]) -> Option<u64> {
+        for byte in bytes {
+            while self.matched > 0 && self.needle.get(self.matched) != Some(byte) {
+                self.matched = self
+                    .prefix_lengths
+                    .get(self.matched.saturating_sub(1))
+                    .copied()
+                    .unwrap_or(0);
+            }
+            if self.needle.get(self.matched) == Some(byte) {
+                self.matched = self.matched.saturating_add(1);
+            }
+            self.output_offset = self.output_offset.saturating_add(1);
+            if self.matched == self.needle.len() {
+                return Some(self.output_offset);
+            }
+        }
+        return None;
+    }
+}
+
+fn wait_error(message: impl Into<String>) -> Error {
+    return Error::ControlRejected {
+        code: "wait_failed".to_owned(),
+        message: message.into(),
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_matches_across_output_chunks() {
+        let mut matching = OutputMatcher::new(b"it ac");
+        assert_eq!(matching.push(b"split "), None);
+        assert_eq!(matching.push(b"across"), Some(8));
+
+        let mut missing = OutputMatcher::new(b"other");
+        assert_eq!(missing.push(b"missing"), None);
+    }
+}

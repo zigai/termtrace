@@ -1,0 +1,25 @@
+[package]
+name = "termtrace-test-fixture"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "termtrace-fixture"
+path = "src/main.rs"
+
+[dependencies]
+blake3 = "1.8.2"
+clap = { version = "4.5.51", features = ["derive", "env", "wrap_help"] }
+miette = { version = "7.6.0", features = ["fancy"] }
+serde_json = "1.0.145"
+termtrace-engine = { path = "../engine" }
+termtrace-evidence = { path = "../evidence" }
+termtrace-model = { path = "../model" }
+uuid = { version = "1.18.1", features = ["v7"] }
+
+[dev-dependencies]
+tempfile = "3.23.0"
+
+[lints]
+workspace = true

@@ -1,0 +1,28 @@
+[package]
+name = "termtrace-engine"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+blake3 = "1.8.2"
+fs-err = "3.2.0"
+nix = { version = "0.30.1", features = ["fs", "poll", "process", "signal", "socket", "term", "user"] }
+portable-pty = "0.9.0"
+regex = "1.12.2"
+rustix = { version = "1.1.4", features = ["termios"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+signal-hook = "0.3.18"
+tracing = "0.1.41"
+uuid = { version = "1.18.1", features = ["serde", "v7"] }
+zstd = "0.13.3"
+termtrace-model = { path = "../model" }
+termtrace-terminal = { path = "../terminal" }
+termtrace-evidence = { path = "../evidence" }
+
+[dev-dependencies]
+tempfile = "3.23.0"
+
+[lints]
+workspace = true

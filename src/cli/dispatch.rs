@@ -1,170 +1,61 @@
-use super::*;
+use std::process::ExitCode;
 
-pub(super) fn dispatch(command: Command) -> Result<ExitCode> {
-    match command {
-        Command::Record(arguments) => return run_record(arguments),
-        Command::Test(arguments) => return run_test(arguments),
-        Command::Start(arguments) => return run_start(arguments),
-        Command::Restart(arguments) => return run_restart(arguments),
-        Command::Status(arguments) => return run_status(arguments),
-        Command::Act(arguments) => return run_act(arguments),
-        Command::Send(arguments) => return run_send(arguments),
-        Command::Stop(arguments) => return run_stop(arguments),
-        Command::Tmux(arguments) => return dispatch_tmux(arguments.command),
-        Command::Control(arguments) => return dispatch_control(arguments.command),
-        Command::Analyze(arguments) => return dispatch_analyze(arguments.command),
-        Command::Artifact(arguments) => return dispatch_artifact(arguments.command),
-        Command::Inspect(arguments) => return run_inspect_facade(arguments),
-        Command::Diagnose(arguments) => return run_diagnose_facade(arguments),
-        Command::Screenshot(arguments) => return run_screenshot_facade(arguments),
-        Command::Bundle(arguments) => return run_bundle_facade(arguments),
-        Command::BugReport(arguments) => return run_bug_report_facade(arguments),
-        Command::Video(arguments) => return run_video_facade(arguments),
-        Command::Registry(arguments) => return dispatch_registry(arguments.command),
-        Command::Integrity(arguments) => return dispatch_integrity(arguments.command),
-        Command::Tooling(arguments) => return dispatch_tooling(arguments.command),
-        Command::Capabilities(arguments) => return run_doctor(arguments),
-        Command::Agent => return run_driver(),
-        Command::Playback(arguments) => return run_playback(arguments),
-        Command::GeometryProbe(arguments) => {
-            run_probe(&arguments.out)?;
-            return Ok(ExitCode::SUCCESS);
-        }
-        Command::Show(arguments) => return run_show(arguments),
-        Command::Screen(arguments) => return run_screen(arguments),
-        Command::Wait(arguments) => return run_wait(arguments),
-        Command::WaitIdle(arguments) => return run_wait_idle(arguments),
-    }
-}
+use miette::Result;
 
-pub(super) fn dispatch_tmux(command: TmuxSubcommand) -> Result<ExitCode> {
+use crate::cli::command::Command;
+
+use crate::cli::{
+    analysis::{
+        dispatch as dispatch_analyze, run_diagnose_facade, run_inspect_facade, run_playback,
+        run_show,
+    },
+    artifacts::{
+        dispatch as dispatch_artifact, run_bug_report_facade, run_bundle_facade,
+        run_screenshot_facade, run_video_facade,
+    },
+    control::{
+        dispatch as dispatch_control, run_act, run_screen, run_send, run_status, run_stop,
+        run_wait, run_wait_idle,
+    },
+    integrity::dispatch as dispatch_integrity,
+    output::ResponseWriter,
+    recording::{run_geometry_probe, run_record, run_restart, run_start},
+    registry::dispatch as dispatch_registry,
+    scenario::run_test,
+    tmux::dispatch as dispatch_tmux,
+    tooling::{dispatch as dispatch_tooling, run_doctor, run_driver},
+};
+
+pub(super) fn dispatch(response: &mut ResponseWriter, command: Command) -> Result<ExitCode> {
     return match command {
-        TmuxSubcommand::Record(arguments) => run_tmux_record(arguments),
-        TmuxSubcommand::Status(arguments) => run_tmux_status(arguments),
-        TmuxSubcommand::Stop(arguments) => run_tmux_stop(arguments),
-        TmuxSubcommand::Video(arguments) => run_tmux_video(arguments),
-        TmuxSubcommand::Bundle(arguments) => run_tmux_bundle(arguments),
-        TmuxSubcommand::Config(arguments) => run_tmux_config(arguments),
-        TmuxSubcommand::Enable(arguments) => run_tmux_enable(arguments),
-        TmuxSubcommand::Disable(arguments) => run_tmux_disable(arguments),
-        TmuxSubcommand::Scope(arguments) => run_tmux_scope(arguments),
-        TmuxSubcommand::Run(arguments) => run_tmux_pane(arguments),
-        TmuxSubcommand::Guard(arguments) => run_tmux_guard(arguments),
-        TmuxSubcommand::Supervise => run_tmux_supervisor(),
+        Command::Record(arguments) => run_record(response, arguments),
+        Command::Test(arguments) => run_test(response, arguments),
+        Command::Start(arguments) => run_start(response, arguments),
+        Command::Restart(arguments) => run_restart(response, arguments),
+        Command::Status(arguments) => run_status(response, arguments),
+        Command::Act(arguments) => run_act(response, arguments),
+        Command::Send(arguments) => run_send(response, arguments),
+        Command::Stop(arguments) => run_stop(response, arguments),
+        Command::Tmux(arguments) => dispatch_tmux(response, arguments.command),
+        Command::Control(arguments) => dispatch_control(response, arguments.command),
+        Command::Analyze(arguments) => dispatch_analyze(response, arguments.command),
+        Command::Artifact(arguments) => dispatch_artifact(response, arguments.command),
+        Command::Inspect(arguments) => run_inspect_facade(response, arguments),
+        Command::Diagnose(arguments) => run_diagnose_facade(response, arguments),
+        Command::Screenshot(arguments) => run_screenshot_facade(response, arguments),
+        Command::Bundle(arguments) => run_bundle_facade(response, arguments),
+        Command::BugReport(arguments) => run_bug_report_facade(response, arguments),
+        Command::Video(arguments) => run_video_facade(response, arguments),
+        Command::Registry(arguments) => dispatch_registry(response, arguments.command),
+        Command::Integrity(arguments) => dispatch_integrity(response, arguments.command),
+        Command::Tooling(arguments) => dispatch_tooling(response, arguments.command),
+        Command::Capabilities(arguments) => run_doctor(response, arguments),
+        Command::Agent => run_driver(),
+        Command::Playback(arguments) => run_playback(arguments),
+        Command::GeometryProbe(arguments) => run_geometry_probe(arguments),
+        Command::Show(arguments) => run_show(response, arguments),
+        Command::Screen(arguments) => run_screen(response, arguments),
+        Command::Wait(arguments) => run_wait(response, arguments),
+        Command::WaitIdle(arguments) => run_wait_idle(response, arguments),
     };
-}
-
-pub(super) fn dispatch_control(command: ControlSubcommand) -> Result<ExitCode> {
-    match command {
-        ControlSubcommand::Ping(arguments) => {
-            return run_control(arguments.session, ControlCommand::Ping);
-        }
-        ControlSubcommand::Keys => return run_keys(),
-        ControlSubcommand::Focus(arguments) => {
-            return run_control_guarded(
-                arguments.session,
-                ControlCommand::Focus {
-                    focused: matches!(arguments.direction, FocusDirection::In),
-                    strict: arguments.strict,
-                },
-                arguments.expected_presented_state_hash,
-                arguments.request_id,
-            );
-        }
-        ControlSubcommand::Pointer(arguments) => return run_pointer(arguments),
-        ControlSubcommand::Activate(arguments) => {
-            return run_control_guarded(
-                arguments.session,
-                ControlCommand::Activate {
-                    text: arguments.text,
-                    unique: arguments.unique,
-                    strict: arguments.strict,
-                },
-                arguments.expected_presented_state_hash,
-                arguments.request_id,
-            );
-        }
-        ControlSubcommand::Resize(arguments) => return run_resize(arguments),
-        ControlSubcommand::Signal(arguments) => {
-            return run_control_guarded(
-                arguments.session,
-                ControlCommand::Signal {
-                    signal: arguments.signal.into(),
-                },
-                arguments.expected_presented_state_hash,
-                arguments.request_id,
-            );
-        }
-        ControlSubcommand::Mark(arguments) => {
-            return run_control_guarded(
-                arguments.session,
-                ControlCommand::Mark {
-                    label: arguments.label,
-                },
-                arguments.expected_presented_state_hash,
-                arguments.request_id,
-            );
-        }
-    }
-}
-
-pub(super) fn dispatch_analyze(command: AnalyzeSubcommand) -> Result<ExitCode> {
-    match command {
-        AnalyzeSubcommand::Index(arguments) => return run_index(arguments),
-        AnalyzeSubcommand::Inspect(arguments) => return run_inspect(arguments),
-        AnalyzeSubcommand::Timeline(arguments) => return run_timeline(arguments),
-        AnalyzeSubcommand::Diff(arguments) => return run_diff(arguments),
-        AnalyzeSubcommand::Explain(arguments) => return run_explain(arguments),
-        AnalyzeSubcommand::Diagnose(arguments) => return run_diagnose(arguments),
-        AnalyzeSubcommand::Review(arguments) => return run_review(arguments),
-        AnalyzeSubcommand::Output(arguments) => return run_output(arguments),
-        AnalyzeSubcommand::Events(arguments) => return run_events(arguments),
-        AnalyzeSubcommand::Markers(arguments) => return run_markers(arguments),
-        AnalyzeSubcommand::Cache(arguments) => return run_cache(arguments),
-    }
-}
-
-pub(super) fn dispatch_artifact(command: ArtifactSubcommand) -> Result<ExitCode> {
-    match command {
-        ArtifactSubcommand::Capture(arguments) => return run_capture(arguments),
-        ArtifactSubcommand::Save(arguments) => return run_save(arguments),
-        ArtifactSubcommand::Screenshot(arguments) => return run_screenshot(arguments),
-        ArtifactSubcommand::Video(arguments) => return run_video(arguments),
-        ArtifactSubcommand::Bundle(arguments) => {
-            return match arguments.command {
-                ArtifactBundleSubcommand::Create(arguments) => run_bundle(arguments),
-                ArtifactBundleSubcommand::Verify(arguments) => run_bundle_verify(arguments),
-            };
-        }
-        ArtifactSubcommand::Asciicast(arguments) => return run_export_asciicast(arguments),
-    }
-}
-
-pub(super) fn dispatch_registry(command: RegistrySubcommand) -> Result<ExitCode> {
-    match command {
-        RegistrySubcommand::Register(arguments) => return run_register(arguments),
-        RegistrySubcommand::Resolve(arguments) => return run_resolve(arguments),
-        RegistrySubcommand::List(arguments) => return run_list(arguments),
-        RegistrySubcommand::Remove(arguments) => return run_remove(arguments),
-        RegistrySubcommand::Gc(arguments) => return run_gc(arguments),
-    }
-}
-
-pub(super) fn dispatch_integrity(command: IntegritySubcommand) -> Result<ExitCode> {
-    match command {
-        IntegritySubcommand::Verify(arguments) => return run_verify(arguments),
-        IntegritySubcommand::Sign(arguments) => return run_sign(arguments),
-        IntegritySubcommand::Recover(arguments) => return run_recover(arguments),
-    }
-}
-
-pub(super) fn dispatch_tooling(command: ToolingSubcommand) -> Result<ExitCode> {
-    match command {
-        ToolingSubcommand::Doctor(arguments) => return run_doctor(arguments),
-        ToolingSubcommand::Client(arguments) => return run_client(arguments),
-        ToolingSubcommand::Driver => return run_driver(),
-        ToolingSubcommand::Schemas(arguments) => return run_schemas(arguments),
-        ToolingSubcommand::Completions(arguments) => return run_completions(arguments),
-        ToolingSubcommand::Version(arguments) => return run_version(arguments),
-    }
 }

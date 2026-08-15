@@ -7,7 +7,7 @@ import {
     encodeDriverRequest,
     parseDriverResponse,
     TermtraceProtocolError,
-} from "../src/protocol.js";
+} from "../src/transport/protocol.js";
 import {
     InvalidAtomError,
     Keyboard,
@@ -20,7 +20,10 @@ import {
 
 type FixtureCase = { readonly name: string; readonly response: unknown };
 
-const fixturePath = resolve(import.meta.dir, "../../../fixtures/protocol/driver-responses.json");
+const fixturePath = resolve(
+    import.meta.dir,
+    "../../../fixtures/conformance/protocol/driver-responses.json",
+);
 const fixtures = parseFixtures(JSON.parse(readFileSync(fixturePath, "utf8")));
 
 describe("parseDriverResponse", () => {

@@ -17,24 +17,26 @@ from termtrace import (
     TermtraceProtocolError,
     TimelineEntry,
 )
-from termtrace._generated.driver_response import ScreenFrameFailureDetails
-from termtrace.models import (
+from termtrace.transport.generated.driver_response import ScreenFrameFailureDetails
+from termtrace.transport.protocol import (
     ControlResult as ModelControlResult,
 )
-from termtrace.models import (
+from termtrace.transport.protocol import (
     DriverAttachedData,
     DriverHelloData,
     decode_driver_response,
     encode_driver_request,
 )
-from termtrace.models import (
+from termtrace.transport.protocol import (
     Frame as ModelFrame,
 )
-from termtrace.models import (
+from termtrace.transport.protocol import (
     TimelineEntry as ModelTimelineEntry,
 )
 
-FIXTURES = Path(__file__).parents[3] / "fixtures" / "protocol" / "driver-responses.json"
+FIXTURES = (
+    Path(__file__).parents[3] / "fixtures" / "conformance" / "protocol" / "driver-responses.json"
+)
 
 
 class DriverResponseTests(unittest.TestCase):

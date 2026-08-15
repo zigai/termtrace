@@ -1,0 +1,18 @@
+[package]
+name = "termtrace-schema"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+fs-err = "3.2.0"
+schemars = { version = "1.1.0", features = ["uuid1"] }
+serde_json = "1.0.145"
+thiserror = "2.0.17"
+termtrace-model = { path = "../model" }
+
+[dev-dependencies]
+jsonschema = { version = "0.33.0", default-features = false }
+
+[lints]
+workspace = true

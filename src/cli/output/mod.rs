@@ -1,0 +1,135 @@
+use std::{
+    fmt::{Display, Write as _},
+    io::{self, IsTerminal as _, Write as _},
+    process::ExitCode,
+};
+
+use miette::{IntoDiagnostic as _, Result};
+use termtrace_model::{
+    protocol::{
+        cli_response::{Applied, CLI_RESPONSE_VERSION, CliResponseEnvelope, Retry, SessionState},
+        output_projection::OutputProjectionQuality,
+    },
+    terminal::state::RowState,
+    value::pagination::OutputPage,
+};
+
+use crate::cli::analysis::args::PageArgs;
+
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use clap::{ValueEnum, error::ErrorKind as ClapErrorKind};
+
+const MAX_AGENT_RESPONSE_BYTES: usize = 64 * 1024;
+const MAX_CAPTURE_BYTES: usize = 256 * 1024;
+const START_RESPONSE_BYTES: usize = 300;
+const ACTION_RESPONSE_BYTES: usize = 250;
+const WAIT_STATUS_RESPONSE_BYTES: usize = 300;
+const MAX_COMPACT_SCREEN_BYTES: usize = 16 * 1024;
+const STOP_RESPONSE_BYTES: usize = 350;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(super) enum ResponseMode {
+    Auto,
+    Human,
+    Agent,
+    Full,
+    Quiet,
+}
+
+impl ResponseMode {
+    pub(super) fn resolve(self) -> Self {
+        if self != Self::Auto {
+            return self;
+        }
+        if io::stdout().is_terminal() {
+            return Self::Human;
+        }
+        return Self::Agent;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(super) enum ResponseField {
+    Cursor,
+    Modes,
+    Boundary,
+    Timing,
+}
+
+#[derive(Debug)]
+struct ResponseState {
+    mode: ResponseMode,
+    fields: Vec<ResponseField>,
+    command_type: String,
+    mutating: bool,
+    values: Vec<serde_json::Value>,
+    raw: Vec<u8>,
+    captured_bytes: usize,
+    omitted_items: usize,
+}
+
+/// Explicit owner of all response capture and rendering state for one CLI invocation.
+#[derive(Debug)]
+pub(super) struct ResponseWriter {
+    state: ResponseState,
+}
+
+impl ResponseWriter {
+    pub(super) fn new(
+        mode: ResponseMode,
+        fields: Vec<ResponseField>,
+        command_type: String,
+        mutating: bool,
+    ) -> Self {
+        return Self {
+            state: ResponseState {
+                mode,
+                fields,
+                command_type,
+                mutating,
+                values: Vec::new(),
+                raw: Vec::new(),
+                captured_bytes: 0,
+                omitted_items: 0,
+            },
+        };
+    }
+
+    fn mode(&self) -> ResponseMode {
+        return self.state.mode;
+    }
+}
+
+fn progress_enabled(mode: ResponseMode) -> bool {
+    return mode != ResponseMode::Quiet;
+}
+
+mod envelope;
+mod helpers;
+mod human;
+mod io_core;
+mod pagination;
+mod projection;
+mod sink;
+
+use envelope::*;
+use human::*;
+#[cfg(test)]
+use io_core::capture_raw_into;
+use io_core::{capture_json, capture_raw, direct_stderr, direct_stdout, report_message};
+use pagination::{pagination_projection, raw_pagination_projection};
+use projection::*;
+
+pub(super) use helpers::{
+    id_list, optional_display, projection_warning, quoted_text, row_text, stable_enum_label,
+    write_projection_warning,
+};
+pub(super) use io_core::write_progress;
+pub(super) use pagination::paginate;
+pub(super) use sink::{
+    finish_response, response_output, write_clap_error, write_follow_json_line,
+    write_follow_stdout, write_json_line, write_stdout,
+};
+
+#[cfg(test)]
+mod tests;

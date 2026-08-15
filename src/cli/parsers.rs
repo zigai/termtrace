@@ -1,4 +1,12 @@
-use super::*;
+use std::{result::Result as StdResult, time::Duration};
+
+use miette::Result;
+use termtrace_engine::timeline::parse_time_offset_ns;
+use termtrace_model::{
+    execution::provenance::ProvenanceCapture, execution::session::CaptureTarget,
+    protocol::capability::CAPABILITY_IDS, terminal::analysis::DiagnosticCheck,
+    terminal::screen::ScreenRegion,
+};
 
 pub(super) fn parse_row_predicate(value: &str) -> Result<(u16, String)> {
     let (row, text) = value
@@ -242,7 +250,11 @@ pub(super) fn parse_rgb_color(value: &str) -> StdResult<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        parse_media_hold_duration, parse_pace_duration, parse_stability_duration,
+        parse_wait_deadline_duration,
+    };
+    use std::time::Duration;
 
     #[test]
     fn duration_parsers_enforce_domain_limits_and_wording() {

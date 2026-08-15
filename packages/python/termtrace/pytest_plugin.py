@@ -25,19 +25,19 @@ else:
     except ModuleNotFoundError:
         pytest_asyncio = None
 
-from termtrace.assertions import assert_cursor, assert_screen_text, assert_snapshot_file
-from termtrace.async_testing import AsyncTermtraceTest
-from termtrace.client import Session
 from termtrace.environment import EnvironmentOptions
-from termtrace.snapshots import FrameSnapshot
-from termtrace.testing import (
+from termtrace.screen.snapshot import FrameSnapshot
+from termtrace.session.sync import Session
+from termtrace.testing.assertions import assert_cursor, assert_screen_text, assert_snapshot_file
+from termtrace.testing.async_ import AsyncTermtraceTest
+from termtrace.testing.lifecycle import (
     EvidencePolicy,
     FinalizationReport,
-    TermtraceTest,
     TermtraceTestConfig,
     TestOutcome,
     classify_outcome,
 )
+from termtrace.testing.sync import TermtraceTest
 
 
 class SyncTestFactory(Protocol):

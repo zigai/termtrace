@@ -1,8 +1,8 @@
 import type {
     ControlErrorDetails,
-    DriverFailure,
     InputSequenceFailureDetails,
-} from "./protocol.js";
+} from "./transport/generated/driver-response.js";
+import type { DriverFailure } from "./transport/failure.js";
 
 export type TermtraceErrorCode =
     | "invalid_atom"

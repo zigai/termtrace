@@ -1,0 +1,165 @@
+//! Explicitly lossy, streaming-safe child-output projections.
+
+pub use termtrace_model::protocol::output_projection::{
+    OutputProjectionQuality, OutputProjectionReport,
+};
+
+/// Streaming control stripper retaining printable bytes, line breaks, carriage returns, and tabs.
+#[derive(Debug, Default)]
+pub struct ControlStripper {
+    state: StripState,
+    control: Vec<u8>,
+    source_byte_count: u64,
+    output_byte_count: u64,
+    alternate_screen_observed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum StripState {
+    #[default]
+    Ground,
+    Escape,
+    Csi,
+    Osc,
+    String,
+    OscEscape,
+    StringEscape,
+}
+
+impl ControlStripper {
+    /// Consume one arbitrary byte chunk without requiring control boundaries to align.
+    #[must_use]
+    pub fn feed(&mut self, bytes: &[u8]) -> Vec<u8> {
+        self.source_byte_count = self
+            .source_byte_count
+            .saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+        let mut output = Vec::with_capacity(bytes.len());
+        for byte in bytes.iter().copied() {
+            self.consume(byte, &mut output);
+        }
+        self.output_byte_count = self
+            .output_byte_count
+            .saturating_add(u64::try_from(output.len()).unwrap_or(u64::MAX));
+        return output;
+    }
+
+    /// Whether a recognized alternate-screen transition was observed.
+    #[must_use]
+    pub fn alternate_screen_observed(&self) -> bool {
+        return self.alternate_screen_observed;
+    }
+
+    /// Total source bytes consumed.
+    #[must_use]
+    pub fn source_byte_count(&self) -> u64 {
+        return self.source_byte_count;
+    }
+
+    /// Total bytes emitted.
+    #[must_use]
+    pub fn output_byte_count(&self) -> u64 {
+        return self.output_byte_count;
+    }
+
+    fn consume(&mut self, byte: u8, output: &mut Vec<u8>) {
+        match self.state {
+            StripState::Ground => match byte {
+                0x1b => self.begin(StripState::Escape, byte),
+                0x9b => self.begin(StripState::Csi, byte),
+                0x9d => self.begin(StripState::Osc, byte),
+                0x90 | 0x9f => self.begin(StripState::String, byte),
+                b'\n' | b'\r' | b'\t' => output.push(byte),
+                0x00..=0x1f | 0x7f | 0x80..=0x9f => {}
+                _ => output.push(byte),
+            },
+            StripState::Escape => {
+                self.push_control(byte);
+                self.state = match byte {
+                    b'[' => StripState::Csi,
+                    b']' => StripState::Osc,
+                    b'P' | b'_' | b'^' => StripState::String,
+                    0x30..=0x7e => {
+                        self.finish_control();
+                        StripState::Ground
+                    }
+                    _ => StripState::Escape,
+                };
+            }
+            StripState::Csi => {
+                self.push_control(byte);
+                if (0x40..=0x7e).contains(&byte) {
+                    self.finish_control();
+                    self.state = StripState::Ground;
+                }
+            }
+            StripState::Osc => {
+                self.push_control(byte);
+                match byte {
+                    0x07 => {
+                        self.finish_control();
+                        self.state = StripState::Ground;
+                    }
+                    0x1b => self.state = StripState::OscEscape,
+                    _ => {}
+                }
+            }
+            StripState::String => {
+                self.push_control(byte);
+                if byte == 0x1b {
+                    self.state = StripState::StringEscape;
+                }
+            }
+            StripState::OscEscape | StripState::StringEscape => {
+                self.push_control(byte);
+                if byte == b'\\' {
+                    self.finish_control();
+                    self.state = StripState::Ground;
+                } else {
+                    self.state = if self.state == StripState::OscEscape {
+                        StripState::Osc
+                    } else {
+                        StripState::String
+                    };
+                }
+            }
+        }
+    }
+
+    fn begin(&mut self, state: StripState, byte: u8) {
+        self.control.clear();
+        self.control.push(byte);
+        self.state = state;
+    }
+
+    fn push_control(&mut self, byte: u8) {
+        if self.control.len() < 4096 {
+            self.control.push(byte);
+        }
+    }
+
+    fn finish_control(&mut self) {
+        if self.control.ends_with(b"?47h")
+            || self.control.ends_with(b"?1047h")
+            || self.control.ends_with(b"?1049h")
+        {
+            self.alternate_screen_observed = true;
+        }
+        self.control.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strips_controls_across_chunks_and_flags_alternate_screen() {
+        let mut stripper = ControlStripper::default();
+        let mut output = stripper.feed(b"before\n\x1b[?104");
+        output.extend(stripper.feed(b"9h\x1b[31mred\x1b[0m\n"));
+        assert_eq!(output, b"before\nred\n");
+        assert!(stripper.alternate_screen_observed());
+        assert_eq!(stripper.source_byte_count(), 28);
+        assert_eq!(stripper.output_byte_count(), 11);
+    }
+}

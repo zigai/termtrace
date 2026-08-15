@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
-from termtrace.models import JsonValue
+from termtrace.transport.protocol import JsonValue
 
 
 @dataclass(frozen=True, slots=True)

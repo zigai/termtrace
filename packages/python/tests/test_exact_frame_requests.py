@@ -3,17 +3,13 @@ import asyncio
 import msgspec
 import pytest
 
-from termtrace.async_client import AsyncScreen, AsyncSession
 from termtrace.atoms import TextAtom
-from termtrace.client import Screen, Session
 from termtrace.errors import ProtocolMismatchError, TermtraceOperationError
-from termtrace.frames import FrameRequest, Region
-from termtrace.models import (
-    ActionOptions,
-    ControlResult,
-    DriverScreenFrameData,
-    JsonObject,
-)
+from termtrace.screen.frame import FrameRequest, Region
+from termtrace.session.actions import ActionOptions
+from termtrace.session.async_ import AsyncScreen, AsyncSession
+from termtrace.session.sync import Screen, Session
+from termtrace.transport.protocol import ControlResult, DriverScreenFrameData, JsonObject
 
 
 def _wire_frame(state_hash: str) -> dict[str, object]:

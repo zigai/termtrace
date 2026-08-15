@@ -1,0 +1,14 @@
+[package]
+name = "termtrace-terminal"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+blake3 = "1.8.2"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+termtrace-model = { path = "../model" }
+
+[lints]
+workspace = true

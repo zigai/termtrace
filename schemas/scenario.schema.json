@@ -284,7 +284,7 @@
             "setBytes": {},
             "unset": []
           },
-          "description": "Deterministic child environment; text values are UTF-8 and byte values are explicit Base64."
+          "description": "Deterministic child environment."
         },
         "geometry": {
           "$ref": "#/$defs/ScenarioGeometry",

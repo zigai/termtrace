@@ -1,47 +1,47 @@
 //! End-to-end tests for the public command-line interface.
 
-#[path = "cli/support.rs"]
+#[path = "cli/support/mod.rs"]
 mod support;
 
-#[path = "cli/adoption_surfaces.rs"]
+#[path = "cli/integration/adoption_surfaces.rs"]
 mod adoption_surfaces;
-#[path = "cli/artifacts_and_bundles.rs"]
+#[path = "cli/integration/artifacts_and_bundles.rs"]
 mod artifacts_and_bundles;
-#[path = "cli/atomic_action_conformance.rs"]
+#[path = "cli/contracts/atomic_action_conformance.rs"]
 mod atomic_action_conformance;
-#[path = "cli/command_surface.rs"]
+#[path = "cli/integration/command_surface.rs"]
 mod command_surface;
-#[path = "cli/drivers_and_clients.rs"]
+#[path = "cli/integration/drivers_and_clients.rs"]
 mod drivers_and_clients;
-#[path = "cli/integrity_and_receipts.rs"]
+#[path = "cli/integration/integrity_and_receipts.rs"]
 mod integrity_and_receipts;
-#[path = "cli/launch_validation_and_stdio.rs"]
+#[path = "cli/integration/launch_validation_and_stdio.rs"]
 mod launch_validation_and_stdio;
-#[path = "cli/live_session_control.rs"]
+#[path = "cli/integration/live_session_control/mod.rs"]
 mod live_session_control;
-#[path = "cli/output_events_and_postprocessing.rs"]
+#[path = "cli/integration/output_events_and_postprocessing.rs"]
 mod output_events_and_postprocessing;
-#[path = "cli/recording_basics.rs"]
+#[path = "cli/integration/recording_basics.rs"]
 mod recording_basics;
-#[path = "cli/replay_index_and_playback.rs"]
+#[path = "cli/integration/replay_index_and_playback.rs"]
 mod replay_index_and_playback;
-#[path = "cli/response_contract.rs"]
+#[path = "cli/contracts/response_contract.rs"]
 mod response_contract;
-#[path = "cli/scenario_and_reviewer_workflows.rs"]
+#[path = "cli/integration/scenario_and_reviewer_workflows.rs"]
 mod scenario_and_reviewer_workflows;
-#[path = "cli/semantic_input.rs"]
+#[path = "cli/integration/semantic_input.rs"]
 mod semantic_input;
-#[path = "cli/session_registry_and_lifecycle.rs"]
+#[path = "cli/integration/session_registry_and_lifecycle/mod.rs"]
 mod session_registry_and_lifecycle;
-#[path = "cli/show_workflows.rs"]
+#[path = "cli/integration/show_workflows.rs"]
 mod show_workflows;
-#[path = "cli/task_oriented_workflows.rs"]
+#[path = "cli/integration/task_oriented_workflows.rs"]
 mod task_oriented_workflows;
-#[path = "cli/testing_adapters.rs"]
+#[path = "cli/contracts/testing_adapters.rs"]
 mod testing_adapters;
-#[path = "cli/timeline_analysis.rs"]
+#[path = "cli/integration/timeline_analysis.rs"]
 mod timeline_analysis;
-#[path = "cli/tmux_recording.rs"]
+#[path = "cli/integration/tmux_recording/mod.rs"]
 mod tmux_recording;
-#[path = "cli/workflow_regression_gates.rs"]
+#[path = "cli/contracts/workflow_regression_gates.rs"]
 mod workflow_regression_gates;

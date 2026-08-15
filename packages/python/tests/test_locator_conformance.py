@@ -8,19 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from termtrace.assertions import (
-    assert_match_style,
-    assert_neutral_region,
-    assert_no_matches,
-    assert_no_wrapped_rows,
-)
 from termtrace.duration import Duration
 from termtrace.errors import InvalidQueryError, InvalidRegionError, LocatorTimeoutError
-from termtrace.frames import Region, ScreenFrame
-from termtrace.locators import (
+from termtrace.screen.frame import Region, ScreenFrame
+from termtrace.screen.locators import AsyncLocator, Locator
+from termtrace.screen.queries import (
     AllSpec,
-    AsyncLocator,
-    Locator,
     LocatorSpec,
     StyleFilter,
     evaluate,
@@ -29,9 +22,15 @@ from termtrace.locators import (
     style,
     text,
 )
-from termtrace.normalization import normalize_frame
+from termtrace.screen.wire import normalize_frame
+from termtrace.testing.assertions import (
+    assert_match_style,
+    assert_neutral_region,
+    assert_no_matches,
+    assert_no_wrapped_rows,
+)
 
-FIXTURE_PATH = Path(__file__).parents[3] / "fixtures" / "locator-conformance.json"
+FIXTURE_PATH = Path(__file__).parents[3] / "fixtures" / "conformance" / "locators" / "locator.json"
 
 
 def _mapping(value: object) -> Mapping[str, object]:

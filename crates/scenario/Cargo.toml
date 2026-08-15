@@ -1,0 +1,25 @@
+[package]
+name = "termtrace-scenario"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+blake3 = "1.8.2"
+fs-err = "3.2.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+serde_path_to_error = "0.1.20"
+uuid = { version = "1.18.1", features = ["serde", "v7"] }
+zstd = "0.13.3"
+termtrace-model = { path = "../model" }
+termtrace-evidence = { path = "../evidence" }
+termtrace-engine = { path = "../engine" }
+termtrace-render = { path = "../render" }
+termtrace-sdk = { path = "../sdk" }
+
+[dev-dependencies]
+tempfile = "3.23.0"
+
+[lints]
+workspace = true
