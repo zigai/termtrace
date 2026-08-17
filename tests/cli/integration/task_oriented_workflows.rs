@@ -3,10 +3,10 @@
 use crate::support::*;
 
 #[test]
-fn capabilities_and_wait_help_remain_directly_discoverable() {
-    let mut capabilities = Command::cargo_bin("termtrace").expect("binary should build");
-    capabilities
-        .args(["--response", "full", "capabilities", "--json"])
+fn doctor_and_wait_help_remain_directly_discoverable() {
+    let mut doctor = Command::cargo_bin("termtrace").expect("binary should build");
+    doctor
+        .args(["--response", "full", "doctor", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""id":"semantic""#));

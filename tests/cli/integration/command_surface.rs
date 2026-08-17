@@ -277,13 +277,6 @@ fn complex_selector_help_stays_within_one_hundred_columns() {
 
 #[test]
 fn nested_command_paths_dispatch() {
-    let mut version = Command::cargo_bin("termtrace").expect("binary should build");
-    version
-        .args(["tooling", "version"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("termtrace "));
-
     let mut keys = Command::cargo_bin("termtrace").expect("binary should build");
     keys.args(["control", "keys"])
         .assert()
@@ -316,42 +309,56 @@ fn nested_command_paths_dispatch() {
 }
 
 #[test]
-fn tooling_doctor_is_the_only_capability_inventory_command() {
-    let mut help = Command::cargo_bin("termtrace").expect("binary should build");
-    let output = help
-        .args(["tooling", "--help"])
+fn doctor_is_the_only_top_level_capability_inventory_command() {
+    let mut root_help = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = root_help
+        .arg("--help")
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
-    let help = String::from_utf8(output).expect("UTF-8 help");
+    let root_help = String::from_utf8(output).expect("UTF-8 help");
     assert!(
-        help.lines()
+        root_help
+            .lines()
             .any(|line| return line.trim_start().starts_with("doctor ")),
-        "doctor command missing from tooling help: {help}"
+        "doctor command missing from root help: {root_help}"
     );
     assert!(
-        !help
+        !root_help
             .lines()
             .any(|line| return line.trim_start().starts_with("capabilities ")),
-        "redundant capabilities command remains in tooling help: {help}"
+        "redundant capabilities command remains in root help: {root_help}"
     );
 
-    let mut removed = Command::cargo_bin("termtrace").expect("binary should build");
-    removed
-        .args(["tooling", "capabilities"])
-        .assert()
-        .code(2)
-        .stderr(predicate::str::contains("unrecognized subcommand"));
+    for removed_path in [
+        &["tooling", "doctor"][..],
+        &["capabilities"][..],
+        &["tooling", "capabilities"][..],
+    ] {
+        let mut removed = Command::cargo_bin("termtrace").expect("binary should build");
+        removed
+            .args(removed_path)
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains("unrecognized subcommand"));
+    }
 }
 
 #[test]
-fn version_subcommand_reports_package_version() {
-    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+fn help_and_version_are_top_level_only() {
+    let mut help = Command::cargo_bin("termtrace").expect("binary should build");
+    help.args(["help", "version"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Report build and runtime component versions",
+        ));
 
-    command
-        .args(["tooling", "version"])
+    let mut version = Command::cargo_bin("termtrace").expect("binary should build");
+    version
+        .arg("version")
         .assert()
         .success()
         .stdout(predicate::str::contains(concat!(
@@ -365,13 +372,22 @@ fn version_subcommand_reports_package_version() {
         .stdout(predicate::str::contains(format!(
             "event-log v{EVENT_LOG_VERSION}"
         )));
+
+    for removed_path in [&["tooling", "help"][..], &["tooling", "version"][..]] {
+        let mut removed = Command::cargo_bin("termtrace").expect("binary should build");
+        removed
+            .args(removed_path)
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains("unrecognized subcommand"));
+    }
 }
 
 #[test]
 fn doctor_reports_capability_boundaries_and_enforces_requirements() {
     let mut version = Command::cargo_bin("termtrace").expect("binary should build");
     version
-        .args(["tooling", "version", "--json"])
+        .args(["version", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""termtrace_version":"0.1.0""#))
@@ -380,7 +396,7 @@ fn doctor_reports_capability_boundaries_and_enforces_requirements() {
 
     let mut semantic = Command::cargo_bin("termtrace").expect("binary should build");
     semantic
-        .args(["tooling", "doctor", "--require", "semantic", "--json"])
+        .args(["doctor", "--require", "semantic", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""id":"semantic""#))
@@ -389,13 +405,7 @@ fn doctor_reports_capability_boundaries_and_enforces_requirements() {
     let mut blocked = Command::cargo_bin("termtrace").expect("binary should build");
     blocked
         .env("PATH", "")
-        .args([
-            "tooling",
-            "doctor",
-            "--require",
-            "native-video",
-            "--explain",
-        ])
+        .args(["doctor", "--require", "native-video", "--explain"])
         .assert()
         .failure()
         .stdout(predicate::str::contains("native-video"))
@@ -405,13 +415,7 @@ fn doctor_reports_capability_boundaries_and_enforces_requirements() {
     let mut semantic_video = Command::cargo_bin("termtrace").expect("binary should build");
     semantic_video
         .env("PATH", "")
-        .args([
-            "tooling",
-            "doctor",
-            "--require",
-            "semantic-video",
-            "--explain",
-        ])
+        .args(["doctor", "--require", "semantic-video", "--explain"])
         .assert()
         .code(1)
         .stdout(predicate::str::contains("semantic-video"))
@@ -514,7 +518,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
             "required capability `native-screenshot` is blocked",
         ))
         .stderr(predicate::str::contains("native_host_tools_missing"))
-        .stderr(predicate::str::contains("termtrace tooling doctor"))
+        .stderr(predicate::str::contains("termtrace doctor"))
         .stderr(predicate::str::contains("native-screenshot --explain"));
     assert_no_entry_with_prefix(temporary.path(), ".termtrace-native-show-");
 
@@ -533,7 +537,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
             "required capability `native-screenshot` is blocked",
         ))
         .stderr(predicate::str::contains("native_host_tools_missing"))
-        .stderr(predicate::str::contains("termtrace tooling doctor"))
+        .stderr(predicate::str::contains("termtrace doctor"))
         .stderr(predicate::str::contains("native-screenshot --explain"));
     assert!(
         !screenshot.exists(),
@@ -554,7 +558,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
             "required capability `native-video` is blocked",
         ))
         .stderr(predicate::str::contains("native_video_dependency_missing"))
-        .stderr(predicate::str::contains("termtrace tooling doctor"))
+        .stderr(predicate::str::contains("termtrace doctor"))
         .stderr(predicate::str::contains("native-video --explain"));
     assert!(
         !session.join("visual").exists(),
@@ -581,7 +585,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .stderr(predicate::str::contains(
             "semantic_video_dependency_missing",
         ))
-        .stderr(predicate::str::contains("termtrace tooling doctor"))
+        .stderr(predicate::str::contains("termtrace doctor"))
         .stderr(predicate::str::contains("semantic-video --explain"));
     assert!(!preview.exists(), "blocked preview created its destination");
     assert_no_entry_with_prefix(temporary.path(), ".preview-");
@@ -605,7 +609,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .stderr(predicate::str::contains(
             "semantic_video_dependency_missing",
         ))
-        .stderr(predicate::str::contains("termtrace tooling doctor"))
+        .stderr(predicate::str::contains("termtrace doctor"))
         .stderr(predicate::str::contains("semantic-video --explain"));
     assert!(!export.exists(), "blocked export created its destination");
     assert_no_entry_with_prefix(temporary.path(), ".presentation-");

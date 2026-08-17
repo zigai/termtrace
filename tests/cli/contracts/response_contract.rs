@@ -7,7 +7,7 @@ fn termtrace() -> Command {
 #[test]
 fn agent_success_is_one_compact_versioned_object() {
     let output = termtrace()
-        .args(["--response", "agent", "tooling", "version"])
+        .args(["--response", "agent", "version"])
         .output()
         .expect("run version command");
 
@@ -84,7 +84,7 @@ fn agent_argument_failure_keeps_stdout_strict() {
 fn environment_selects_agent_and_flag_takes_precedence() {
     let agent = termtrace()
         .env("TERMTRACE_RESPONSE", "agent")
-        .args(["tooling", "version"])
+        .arg("version")
         .output()
         .expect("run agent version");
     assert!(agent.status.success());
@@ -95,7 +95,7 @@ fn environment_selects_agent_and_flag_takes_precedence() {
 
     let quiet = termtrace()
         .env("TERMTRACE_RESPONSE", "agent")
-        .args(["--response", "quiet", "tooling", "version"])
+        .args(["--response", "quiet", "version"])
         .output()
         .expect("run quiet version");
     assert!(quiet.status.success());
@@ -135,7 +135,7 @@ fn mutation_failure_has_retry_state_without_second_stdout_error() {
 #[test]
 fn full_preserves_legacy_forensic_payload_and_quiet_is_exit_only() {
     let full = termtrace()
-        .args(["--response", "full", "tooling", "version", "--json"])
+        .args(["--response", "full", "version", "--json"])
         .output()
         .expect("run full version");
     assert!(full.status.success());
@@ -144,7 +144,7 @@ fn full_preserves_legacy_forensic_payload_and_quiet_is_exit_only() {
     assert!(value.get("ok").is_none());
 
     let quiet = termtrace()
-        .args(["--response", "quiet", "tooling", "version", "--json"])
+        .args(["--response", "quiet", "version", "--json"])
         .output()
         .expect("run quiet version");
     assert!(quiet.status.success());
