@@ -79,7 +79,7 @@ jobs:
           cmp "target/${{ matrix.target }}/release/termtrace" "$install_root/bin/termtrace"
           test -f "$install_root/share/termtrace/clients/python/pyproject.toml"
           test -f "$install_root/share/termtrace/clients/typescript/lib/index.js"
-          "$install_root/bin/termtrace" tooling doctor --require core,semantic
+          "$install_root/bin/termtrace" doctor --require core,semantic
           "$install_root/bin/termtrace" tooling client status
       - name: Package shell installer
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -109,14 +109,14 @@ jobs:
           trap 'rm -rf "$wheel_root"' EXIT
           uv venv --python 3.11 "$wheel_root/venv"
           uv pip install --python "$wheel_root/venv/bin/python" dist/python/*.whl
-          "$wheel_root/venv/bin/termtrace" tooling doctor --require core,semantic
+          "$wheel_root/venv/bin/termtrace" doctor --require core,semantic
       - name: Test npm command
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           npm_root=$(mktemp -d)
           trap 'rm -rf "$npm_root"' EXIT
           npm install --global --prefix "$npm_root" dist/npm/termtrace-cli-linux-x64-*.tgz dist/npm/termtrace-test-*.tgz
-          node "$npm_root/lib/node_modules/@termtrace/test/bin/termtrace.js" tooling doctor --require core,semantic
+          node "$npm_root/lib/node_modules/@termtrace/test/bin/termtrace.js" doctor --require core,semantic
       - name: Checksum client packages
         run: find dist/python dist/npm -type f -print0 | sort -z | xargs -0 sha256sum > "dist/termtrace-${{ matrix.target }}-packages.sha256"
       - name: Generate CycloneDX SBOM
