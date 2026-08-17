@@ -25,7 +25,7 @@ trap cleanup EXIT
 rm -rf "$staging"
 mkdir -p "$staging/bin" dist/npm
 install -m 0555 "$binary" "$staging/bin/termtrace"
-"$staging/bin/termtrace" tooling doctor --require semantic
+"$staging/bin/termtrace" doctor --require semantic
 python3 - "$staging/package.json" "$version" "$os" "$arch" <<'PY'
 import json
 import pathlib

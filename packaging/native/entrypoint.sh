@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -eq 0 ]; then
-    exec termtrace tooling doctor
+    exec termtrace doctor
 fi
 
 exec termtrace "$@"

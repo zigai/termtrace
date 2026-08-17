@@ -15,7 +15,7 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$package_bin"
 install -m 0555 "$binary" "$package_bin/termtrace"
-"$package_bin/termtrace" tooling doctor --require semantic
+"$package_bin/termtrace" doctor --require semantic
 uv build --wheel packages/python --out-dir dist/python
 wheel=$(find dist/python -maxdepth 1 -name '*.whl' -print -quit)
 if [[ -z "$wheel" ]]; then

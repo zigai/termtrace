@@ -836,7 +836,7 @@ step "Building Termtrace"
 run cargo build
 
 step "Checking native capture capabilities"
-run target/debug/termtrace --response full tooling doctor --json \
+run target/debug/termtrace --response full doctor --json \
     --require native-screenshot,native-video
 
 printf 'font-size = 11\nwindow-padding-x = 2\nbackground = #220000\n' >"$profile"

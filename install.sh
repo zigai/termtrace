@@ -241,7 +241,7 @@ destination="${install_dir}/termtrace"
 candidate=$(mktemp "${install_dir}/.termtrace.XXXXXX")
 install -m 0555 "$binary" "$candidate"
 
-"$candidate" tooling doctor --require core,semantic >/dev/null
+"$candidate" doctor --require core,semantic >/dev/null
 
 mkdir -p "$(dirname "$client_dir")"
 client_candidate=$(mktemp -d "$(dirname "$client_dir")/.termtrace-clients.XXXXXX")
@@ -276,6 +276,6 @@ case ":${PATH}:" in
     *:"$install_dir":*)
         ;;
     *)
-        printf 'Add %s to PATH, then run: termtrace tooling doctor --explain\n' "$install_dir"
+        printf 'Add %s to PATH, then run: termtrace doctor --explain\n' "$install_dir"
         ;;
 esac
