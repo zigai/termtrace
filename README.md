@@ -89,7 +89,7 @@ termtrace test SCENARIO.json
 The top-level debugging and handoff commands are the normal task interface.
 Use the nested `analyze` and `artifact` command groups only for advanced
 selectors, forensic reports, batch rendering, or non-default bundle profiles.
-Use `termtrace tooling doctor --explain` to check optional native dependencies.
+Use `termtrace doctor --explain` to check optional native dependencies.
 
 ## Documentation
 

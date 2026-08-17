@@ -8,7 +8,7 @@ Choose the least-sensitive artifact that proves the requested outcome.
   semantic screenshot workflow.
 - Use `termtrace artifact screenshot` only for exact selectors, screenshot
   batches, manifested multi-file output, or native capture.
-- Use native capture only after `termtrace tooling doctor --json` reports the
+- Use native capture only after `termtrace doctor --json` reports the
   required environment ready. Retain the geometry probes and exact profile
   hashes.
 

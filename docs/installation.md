@@ -47,7 +47,7 @@ The installer first attempts an ordinary release download, then uses the authent
 After installing, run:
 
 ```bash
-termtrace tooling doctor --explain
+termtrace doctor --explain
 ```
 
 Capabilities are reported independently. A machine may support recording and semantic replay without supporting native screenshots or video.
@@ -55,9 +55,9 @@ Capabilities are reported independently. A machine may support recording and sem
 Use `--require` in CI:
 
 ```bash
-termtrace tooling doctor --require core,semantic
-termtrace tooling doctor --require native-screenshot,presentation
-termtrace tooling doctor --require semantic-video,presentation
+termtrace doctor --require core,semantic
+termtrace doctor --require native-screenshot,presentation
+termtrace doctor --require semantic-video,presentation
 ```
 
 `semantic-video` requires the pinned semantic engine plus FFmpeg/FFprobe with `libx264rgb`; it does not require Ghostty GTK, Xvfb, D-Bus, ImageMagick, or OpenGL. Native video remains the default presentation source.
@@ -75,7 +75,7 @@ mkdir -p "$HOME/.local/bin"
 install -m 0555 termtrace-TARGET/termtrace "$HOME/.local/bin/termtrace"
 mkdir -p "$HOME/.local/share/termtrace"
 cp -R termtrace-TARGET/clients "$HOME/.local/share/termtrace/clients"
-termtrace tooling doctor --require core,semantic
+termtrace doctor --require core,semantic
 termtrace tooling client status
 ```
 

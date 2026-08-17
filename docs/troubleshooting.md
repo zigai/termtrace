@@ -3,7 +3,7 @@
 Start with the capability report and the diagnostic code from the failing command:
 
 ```bash
-termtrace tooling doctor --explain
+termtrace doctor --explain
 ```
 
 ## Build cannot find the semantic library
@@ -145,7 +145,7 @@ Semantic video also uses a fixed frame rate and honestly reports presentation-el
 Check the independent semantic-video and presentation capabilities:
 
 ```bash
-termtrace tooling doctor --require semantic-video,presentation --explain
+termtrace doctor --require semantic-video,presentation --explain
 ```
 
 Semantic source failures retain `semantic-source-ffmpeg.log` in the failed presentation staging directory when available. They do not modify canonical evidence or silently retry with native capture.
