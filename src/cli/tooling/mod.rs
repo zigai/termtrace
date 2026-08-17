@@ -68,7 +68,7 @@ pub(super) fn require_cli_capability(id: &str) -> Result<()> {
             remediation,
         }) => {
             return Err(miette::miette!(
-                "required capability `{id}` is blocked ({code}): {detail}; fix: {remediation}; inspect with `termtrace tooling doctor --require {id} --explain`"
+                "required capability `{id}` is blocked ({code}): {detail}; fix: {remediation}; inspect with `termtrace doctor --require {id} --explain`"
             ));
         }
         Err(error) => return Err(error).into_diagnostic(),
@@ -415,11 +415,9 @@ pub(super) fn dispatch(
     command: ToolingSubcommand,
 ) -> Result<ExitCode> {
     return match command {
-        ToolingSubcommand::Doctor(arguments) => run_doctor(response, arguments),
         ToolingSubcommand::Client(arguments) => run_client(response, arguments),
         ToolingSubcommand::Driver => run_driver(),
         ToolingSubcommand::Schemas(arguments) => run_schemas(response, arguments),
         ToolingSubcommand::Completions(arguments) => run_completions(response, arguments),
-        ToolingSubcommand::Version(arguments) => run_version(response, arguments),
     };
 }

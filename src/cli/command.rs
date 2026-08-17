@@ -20,7 +20,7 @@ use crate::cli::{
     registry::args::{RegistryArgs, RegistrySubcommand},
     scenario::args::TestArgs,
     tmux::{TmuxArgs, TmuxSubcommand},
-    tooling::args::{ClientCommand, DoctorArgs, ToolingArgs, ToolingSubcommand},
+    tooling::args::{ClientCommand, DoctorArgs, ToolingArgs, ToolingSubcommand, VersionArgs},
 };
 
 const ROOT_HELP_TEMPLATE: &str = "\
@@ -48,7 +48,7 @@ const ROOT_COMMAND_GROUPS: &[(&str, &[&str])] = &[
             "wait-idle",
         ],
     ),
-    ("Agent discovery", &["capabilities", "agent"]),
+    ("Runtime", &["doctor", "version", "agent"]),
     ("Debugging", &["inspect", "diagnose"]),
     ("Media", &["screenshot", "video"]),
     ("Evidence export", &["bundle", "bug-report"]),
@@ -139,7 +139,9 @@ pub(super) enum Command {
     /// Runtime, SDK, and shell integration tools.
     Tooling(ToolingArgs),
     /// Probe built-in and optional host capabilities.
-    Capabilities(DoctorArgs),
+    Doctor(DoctorArgs),
+    /// Report build and runtime component versions.
+    Version(VersionArgs),
     /// Serve the versioned language-neutral JSONL process protocol.
     #[command(visible_alias = "rpc")]
     Agent,
@@ -245,7 +247,9 @@ enum CompletionCommand {
     /// Runtime, SDK, and shell integration tools.
     Tooling(ToolingArgs),
     /// Probe built-in and optional host capabilities.
-    Capabilities(DoctorArgs),
+    Doctor(DoctorArgs),
+    /// Report build and runtime component versions.
+    Version(VersionArgs),
     /// Serve the versioned language-neutral JSONL process protocol.
     #[command(visible_alias = "rpc")]
     Agent,
@@ -436,11 +440,10 @@ pub(super) fn preserves_requested_output(command: &Command) -> bool {
             ToolingSubcommand::Client(arguments) => {
                 !matches!(arguments.command, ClientCommand::Status)
             }
-            ToolingSubcommand::Doctor(arguments) => arguments.json || !arguments.require.is_empty(),
-            ToolingSubcommand::Version(arguments) => arguments.json,
             ToolingSubcommand::Schemas(_) => false,
         },
-        Command::Capabilities(arguments) => arguments.json || !arguments.require.is_empty(),
+        Command::Doctor(arguments) => arguments.json || !arguments.require.is_empty(),
+        Command::Version(arguments) => arguments.json,
         Command::Registry(arguments) => matches!(
             arguments.command,
             RegistrySubcommand::Resolve(_) | RegistrySubcommand::List(_)

@@ -6,6 +6,7 @@ use clap_complete::Shell;
 use crate::cli::parsers::parse_capability_id;
 
 #[derive(Debug, Args)]
+#[command(disable_help_subcommand = true)]
 pub(in crate::cli) struct ToolingArgs {
     #[command(subcommand)]
     pub(in crate::cli) command: ToolingSubcommand,
@@ -13,8 +14,6 @@ pub(in crate::cli) struct ToolingArgs {
 
 #[derive(Debug, Subcommand)]
 pub(in crate::cli) enum ToolingSubcommand {
-    /// Probe built-in and optional host capabilities.
-    Doctor(DoctorArgs),
     /// Run Python or TypeScript client code from managed SDK assets without project files.
     Client(ClientArgs),
     /// Serve the versioned language-neutral JSONL process protocol.
@@ -23,8 +22,6 @@ pub(in crate::cli) enum ToolingSubcommand {
     Schemas(SchemaArgs),
     /// Generate a shell completion script from the current command graph.
     Completions(CompletionsArgs),
-    /// Report build and runtime component versions.
-    Version(VersionArgs),
 }
 
 #[derive(Debug, Args)]

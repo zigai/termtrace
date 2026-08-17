@@ -23,7 +23,7 @@ use crate::cli::{
     registry::dispatch as dispatch_registry,
     scenario::run_test,
     tmux::dispatch as dispatch_tmux,
-    tooling::{dispatch as dispatch_tooling, run_doctor, run_driver},
+    tooling::{dispatch as dispatch_tooling, run_doctor, run_driver, run_version},
 };
 
 pub(super) fn dispatch(response: &mut ResponseWriter, command: Command) -> Result<ExitCode> {
@@ -49,7 +49,8 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: Command) -> Resul
         Command::Registry(arguments) => dispatch_registry(response, arguments.command),
         Command::Integrity(arguments) => dispatch_integrity(response, arguments.command),
         Command::Tooling(arguments) => dispatch_tooling(response, arguments.command),
-        Command::Capabilities(arguments) => run_doctor(response, arguments),
+        Command::Doctor(arguments) => run_doctor(response, arguments),
+        Command::Version(arguments) => run_version(response, arguments),
         Command::Agent => run_driver(),
         Command::Playback(arguments) => run_playback(arguments),
         Command::GeometryProbe(arguments) => run_geometry_probe(arguments),
