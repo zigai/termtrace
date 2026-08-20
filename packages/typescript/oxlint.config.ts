@@ -1,12 +1,14 @@
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["oxc", "typescript", "unicorn", "promise"],
-  "env": {
-    "builtin": true,
-    "node": true
+import { defineConfig, type OxlintConfig } from "oxlint";
+import antislop from "oxlint-rules/config";
+
+const projectConfig: OxlintConfig = {
+  plugins: ["oxc", "typescript", "unicorn", "promise"],
+  env: {
+    builtin: true,
+    node: true,
   },
-  "ignorePatterns": ["node_modules/**", "lib/**", "src/transport/generated/**"],
-  "rules": {
+  ignorePatterns: ["node_modules/**", "lib/**", "src/transport/generated/**"],
+  rules: {
     "@typescript-eslint/ban-ts-comment": "error",
     "@typescript-eslint/no-duplicate-enum-values": "error",
     "@typescript-eslint/no-empty-object-type": "error",
@@ -25,7 +27,7 @@
     "@typescript-eslint/prefer-namespace-keyword": "error",
     "@typescript-eslint/triple-slash-reference": "error",
     "default-case-last": "error",
-    "eqeqeq": "error",
+    eqeqeq: "error",
     "no-array-constructor": "error",
     "no-duplicate-imports": "warn",
     "no-unused-expressions": "error",
@@ -35,6 +37,11 @@
     "promise/no-return-in-finally": "error",
     "typescript/no-mixed-enums": "error",
     "unicorn/prefer-date-now": "error",
-    "unicorn/prefer-math-trunc": "error"
-  }
-}
+    "unicorn/prefer-math-trunc": "error",
+  },
+};
+
+export default defineConfig({
+  ...projectConfig,
+  extends: [antislop, ...(projectConfig.extends ?? [])],
+});

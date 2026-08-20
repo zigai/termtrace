@@ -27,8 +27,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "generate:protocol": "node scripts/generate-protocol.mjs",
-    "lint": "oxlint -c ./.oxlintrc.json .",
-    "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
+    "lint": "oxlint -c ./oxlint.config.ts .",
+    "lint:fix": "oxlint -c ./oxlint.config.ts . --fix",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "test": "bun test test",
@@ -43,7 +43,8 @@
     "esbuild": "0.28.1",
     "json-schema-to-typescript": "15.0.4",
     "oxfmt": "^0.59.0",
-    "oxlint": "^1.74.0",
+    "oxlint": "1.79.0",
+    "oxlint-rules": "0.1.0",
     "typescript": "^5.8.3",
     "vitest": "^4.1.3"
   },
