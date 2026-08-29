@@ -20,6 +20,7 @@ zstd = "0.13.3"
 termtrace-model = { path = "../model" }
 termtrace-terminal = { path = "../terminal" }
 termtrace-evidence = { path = "../evidence" }
+directories = "6.0.0"
 
 [dev-dependencies]
 tempfile = "3.23.0"

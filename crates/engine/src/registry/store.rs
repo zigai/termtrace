@@ -1,11 +1,12 @@
+use directories::BaseDirs;
+
 use super::liveness::recorder_process_identity;
 use super::*;
 
 impl SessionRegistry {
     /// Open the default owner-only session registry.
     ///
-    /// `TERMTRACE_STATE_DIR` overrides the base directory. Otherwise the base
-    /// is `$XDG_STATE_HOME/termtrace`, falling back to `$HOME/.local/state/termtrace`.
+    /// `TERMTRACE_STATE_DIR` overrides the platform user state directory.
     ///
     /// # Errors
     ///
@@ -434,16 +435,17 @@ pub(super) fn default_state_root() -> Result<PathBuf> {
     if let Some(path) = env::var_os("TERMTRACE_STATE_DIR") {
         return Ok(PathBuf::from(path));
     }
-    if let Some(path) = env::var_os("XDG_STATE_HOME") {
-        return Ok(PathBuf::from(path).join("termtrace"));
-    }
-    let home = env::var_os("HOME").ok_or_else(|| {
-        return registry_error(
-            "select registry state root",
-            "TERMTRACE_STATE_DIR, XDG_STATE_HOME, and HOME are unset",
-        );
-    })?;
-    return Ok(PathBuf::from(home).join(".local/state/termtrace"));
+    let state_home = BaseDirs::new()
+        .and_then(|dirs| {
+            return dirs.state_dir().map(Path::to_path_buf);
+        })
+        .ok_or_else(|| {
+            return registry_error(
+                "select registry state root",
+                "platform user state directory is unavailable",
+            );
+        })?;
+    return Ok(state_home.join("termtrace"));
 }
 
 pub(super) fn ensure_owner_directory(path: &Path) -> Result<()> {
