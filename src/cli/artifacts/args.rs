@@ -23,50 +23,14 @@ pub(in crate::cli) struct ArtifactArgs {
 
 #[derive(Debug, Subcommand)]
 pub(in crate::cli) enum ArtifactSubcommand {
+    /// Import an ANSI/VT byte stream as canonical evidence.
+    Import(ImportArgs),
     /// Capture actual Ghostty pixels on a private headless display.
     Capture(CaptureArgs),
     /// Atomically publish representations of one semantic state.
     Save(SaveArgs),
-    /// Render one deterministic semantic screenshot artifact directory.
-    Screenshot(ScreenshotArgs),
-    /// Plan or export presentation edits; native Ghostty pixels are the default source.
-    Video(VideoArgs),
-    /// Publish or inspect a deterministic sensitivity-labeled evidence export.
-    Bundle(ArtifactBundleArgs),
     /// Export a lossy UTF-8 asciinema v2 interoperability cast.
     Asciicast(ExportArgs),
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct ArtifactBundleArgs {
-    #[command(subcommand)]
-    pub(in crate::cli) command: ArtifactBundleSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub(in crate::cli) enum ArtifactBundleSubcommand {
-    /// Publish a deterministic sensitivity-labeled evidence export directory.
-    Create(BundleArgs),
-    /// Verify every manifested bundle member and included evidence.
-    Verify(BundleVerifyArgs),
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct ScreenshotFacadeArgs {
-    /// Completed session name or canonical path.
-    pub(in crate::cli) session: PathBuf,
-    /// New PNG output file.
-    #[arg(short = 'o', long)]
-    pub(in crate::cli) out: PathBuf,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct BundleFacadeArgs {
-    /// Completed session name or canonical path.
-    pub(in crate::cli) session: PathBuf,
-    /// New owner-only bundle directory.
-    #[arg(short = 'o', long)]
-    pub(in crate::cli) out: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -106,7 +70,7 @@ pub(in crate::cli) struct BundleArgs {
     #[arg(long, value_enum, default_value_t = BundleProfileArg::Screen)]
     pub(in crate::cli) profile: BundleProfileArg,
     /// New owner-only destination directory.
-    #[arg(long)]
+    #[arg(short = 'o', long)]
     pub(in crate::cli) out: PathBuf,
     /// Print the selected paths and sensitivities without writing.
     #[arg(long)]
@@ -126,6 +90,22 @@ pub(in crate::cli) struct BundleVerifyArgs {
     /// Exact content and sensitivity policy expected by the verifier.
     #[arg(long, value_enum)]
     pub(in crate::cli) profile: BundleProfileArg,
+}
+
+#[derive(Debug, Args)]
+pub(in crate::cli) struct ImportArgs {
+    /// ANSI/VT byte stream path, or `-` for standard input.
+    #[arg(long)]
+    pub(in crate::cli) input: PathBuf,
+    /// New canonical session directory.
+    #[arg(long)]
+    pub(in crate::cli) out: PathBuf,
+    /// Imported terminal columns.
+    #[arg(long, default_value_t = 160)]
+    pub(in crate::cli) cols: u16,
+    /// Imported terminal rows.
+    #[arg(long, default_value_t = 45)]
+    pub(in crate::cli) rows: u16,
 }
 
 #[derive(Debug, Args)]
@@ -207,8 +187,8 @@ pub(in crate::cli) struct SaveArgs {
 pub(in crate::cli) struct ScreenshotArgs {
     /// Completed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
-    /// New artifact directory containing `screen.svg` and its manifest.
-    #[arg(long)]
+    /// New manifested screenshot artifact directory.
+    #[arg(short = 'o', long)]
     pub(in crate::cli) out: PathBuf,
     /// Exact semantic state identifier.
     #[arg(long)]
@@ -269,22 +249,6 @@ pub(in crate::cli) struct CaptureArgs {
     pub(in crate::cli) range: TimeRangeArgs,
 }
 
-#[derive(Debug, Args)]
-pub(in crate::cli) struct VideoArgs {
-    #[command(subcommand)]
-    pub(in crate::cli) command: VideoCommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub(in crate::cli) enum VideoCommand {
-    /// Resolve clips, speeds, and holds without rendering.
-    Plan(VideoPlanArgs),
-    /// Render an atomic contact sheet and low-resolution review video.
-    Preview(VideoPreviewArgs),
-    /// Export an H.264 MP4 and frame provenance into a new directory.
-    Export(VideoExportArgs),
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(in crate::cli) enum VideoSourceArg {
     /// Verified pixels captured from the real Ghostty renderer.
@@ -329,12 +293,40 @@ pub(in crate::cli) enum VideoCursorStyleArg {
 }
 
 #[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("video_mode")
+        .required(true)
+        .multiple(false)
+        .args(["out", "dry_run", "preview_out"])
+))]
 pub(in crate::cli) struct VideoFacadeArgs {
     /// Completed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
     /// New MP4 output file; a manifested `.termtrace` sidecar is retained.
     #[arg(short, long)]
-    pub(in crate::cli) out: PathBuf,
+    pub(in crate::cli) out: Option<PathBuf>,
+    /// Resolve and print the presentation plan without rendering.
+    #[arg(long)]
+    pub(in crate::cli) dry_run: bool,
+    /// Render a contact sheet and low-resolution review video into this new directory.
+    #[arg(long)]
+    pub(in crate::cli) preview_out: Option<PathBuf>,
+    /// Strict versioned edit-plan JSON; omit to derive a plan from the facade options.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "preset",
+            "resolution",
+            "scale",
+            "start_marker",
+            "end_marker",
+            "trim_idle",
+            "hold_start",
+            "hold_end",
+            "cursor_style"
+        ]
+    )]
+    pub(in crate::cli) edit: Option<PathBuf>,
     /// Delivery quality and default timing policy.
     #[arg(long, value_enum, default_value_t = VideoPresetArg::Docs)]
     pub(in crate::cli) preset: VideoPresetArg,
@@ -371,71 +363,19 @@ pub(in crate::cli) struct VideoFacadeArgs {
     /// Preserve or hide the recorded cursor.
     #[arg(long, value_enum, default_value_t = VideoCursorStyleArg::Recorded)]
     pub(in crate::cli) cursor_style: VideoCursorStyleArg,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct VideoSourceArgs {
-    /// Presentation source; native Ghostty pixels remain the default.
-    #[arg(long, value_enum, default_value_t = VideoSourceArg::Native)]
-    pub(in crate::cli) source: VideoSourceArg,
-    /// Semantic source frame rate; invalid for native capture.
-    #[arg(long)]
-    pub(in crate::cli) fps: Option<u16>,
-    /// Semantic rasterization quality; invalid for native capture.
-    #[arg(long, value_enum)]
-    pub(in crate::cli) semantic_raster_profile: Option<SemanticRasterProfileArg>,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct VideoPreviewArgs {
-    /// Completed session; native source additionally requires a verified capture.
-    pub(in crate::cli) session: PathBuf,
-    #[command(flatten)]
-    pub(in crate::cli) source: VideoSourceArgs,
-    /// Strict versioned edit-plan JSON.
-    #[arg(long)]
-    pub(in crate::cli) edit: PathBuf,
-    /// New no-replace preview artifact directory.
-    #[arg(long)]
-    pub(in crate::cli) out: PathBuf,
     /// Storyboard tile columns.
-    #[arg(long, default_value_t = 4)]
+    #[arg(long, default_value_t = 4, requires = "preview_out")]
     pub(in crate::cli) columns: u8,
     /// Width of each storyboard tile.
-    #[arg(long, default_value_t = 320)]
+    #[arg(long, default_value_t = 320, requires = "preview_out")]
     pub(in crate::cli) tile_width: u16,
     /// Maximum storyboard frames.
-    #[arg(long, default_value_t = 12)]
+    #[arg(long, default_value_t = 12, requires = "preview_out")]
     pub(in crate::cli) max_frames: u16,
     /// Retain only frames carrying configured change visualization.
-    #[arg(long)]
+    #[arg(long, requires = "preview_out")]
     pub(in crate::cli) change_only: bool,
     /// Low-resolution preview width.
-    #[arg(long, default_value_t = 640)]
+    #[arg(long, default_value_t = 640, requires = "preview_out")]
     pub(in crate::cli) preview_width: u16,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct VideoPlanArgs {
-    /// Completed session; native source additionally requires a verified capture.
-    pub(in crate::cli) session: PathBuf,
-    #[command(flatten)]
-    pub(in crate::cli) source: VideoSourceArgs,
-    /// Strict versioned edit-plan JSON.
-    #[arg(long)]
-    pub(in crate::cli) edit: PathBuf,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct VideoExportArgs {
-    /// Completed session; native source additionally requires a verified capture.
-    pub(in crate::cli) session: PathBuf,
-    #[command(flatten)]
-    pub(in crate::cli) source: VideoSourceArgs,
-    /// Strict versioned edit-plan JSON.
-    #[arg(long)]
-    pub(in crate::cli) edit: PathBuf,
-    /// New no-replace presentation artifact directory.
-    #[arg(long)]
-    pub(in crate::cli) out: PathBuf,
 }

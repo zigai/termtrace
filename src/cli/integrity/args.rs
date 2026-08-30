@@ -15,6 +15,8 @@ pub(in crate::cli) struct IntegrityArgs {
 pub(in crate::cli) enum IntegritySubcommand {
     /// Verify a completed session's structure and evidence bindings offline.
     Verify(VerifyArgs),
+    /// Verify every manifested bundle member against its canonical source.
+    VerifyBundle(crate::cli::artifacts::args::BundleVerifyArgs),
     /// Create a detached OpenSSH receipt for verified evidence roots.
     Sign(SignArgs),
     /// Copy the longest integrity-checked event prefix without modifying source.

@@ -168,14 +168,6 @@ pub(super) fn send_cli_control(
     }
 }
 
-pub(in crate::cli) fn run_control(
-    response: &mut ResponseWriter,
-    session: PathBuf,
-    command: ControlCommand,
-) -> Result<ExitCode> {
-    return run_control_guarded(response, session, command, None, None);
-}
-
 pub(in crate::cli) fn run_control_guarded(
     response: &mut ResponseWriter,
     session: PathBuf,

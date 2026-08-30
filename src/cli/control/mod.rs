@@ -36,7 +36,7 @@ use termtrace_sdk::{
 use crate::cli::{
     control::args::{
         ActArgs, PointerArgs, PointerCommand, ResizeArgs, ScreenArgs, ScreenEncoding, SendArgs,
-        StatusArgs, StopArgs, WaitArgs, WaitIdleArgs,
+        StatusArgs, StopArgs, WaitArgs,
     },
     output::write_json_line,
     parsers::{parse_cursor_position, parse_region_predicate, parse_row_predicate},
@@ -56,17 +56,14 @@ use wait::compact_boundaries;
 pub(super) use action::run_act;
 pub(super) use input::{run_keys, run_pointer, run_resize, run_send};
 pub(super) use screen::run_screen;
-pub(super) use transport::{run_control, run_control_guarded, run_status, run_stop};
-pub(super) use wait::{run_wait, run_wait_idle};
+pub(super) use transport::{run_control_guarded, run_status, run_stop};
+pub(super) use wait::run_wait;
 
 pub(super) fn dispatch(
     response: &mut ResponseWriter,
     command: ControlSubcommand,
 ) -> Result<ExitCode> {
     return match command {
-        ControlSubcommand::Ping(arguments) => {
-            run_control(response, arguments.session, ControlCommand::Ping)
-        }
         ControlSubcommand::Keys => run_keys(response),
         ControlSubcommand::Focus(arguments) => run_control_guarded(
             response,

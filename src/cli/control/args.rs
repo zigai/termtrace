@@ -19,8 +19,6 @@ pub(in crate::cli) struct ControlArgs {
 
 #[derive(Debug, Subcommand)]
 pub(in crate::cli) enum ControlSubcommand {
-    /// Verify that a live session control socket is responsive.
-    Ping(SessionArgs),
     /// Print the accepted symbolic key and modifier grammar.
     Keys,
     /// Report terminal-window focus when the application opted in.
@@ -74,7 +72,7 @@ pub(in crate::cli) struct WaitArgs {
     /// Exact UTF-8 text to find in canonical output history.
     #[arg(long)]
     pub(in crate::cli) output: Option<String>,
-    /// Wait for an unchanged presented screen, optionally choosing the interval.
+    /// Atomically return the exact presented snapshot after it remains unchanged for this duration.
     #[arg(
         long,
         value_parser = parse_stability_duration,
@@ -116,34 +114,24 @@ pub(in crate::cli) struct WaitArgs {
     #[arg(long)]
     pub(in crate::cli) state_unchanged: Option<String>,
     /// Require an unchanged matching presented state for this duration.
-    #[arg(long, value_parser = parse_stability_duration, default_value = "0ms")]
+    #[arg(
+        long,
+        value_parser = parse_stability_duration,
+        default_value = "0ms",
+        conflicts_with = "idle"
+    )]
     pub(in crate::cli) stable_for: Duration,
-    /// Maximum wait duration in milliseconds.
-    #[arg(long, default_value_t = 30_000)]
-    pub(in crate::cli) timeout_ms: u64,
-    /// Duration-form maximum wait; preferred over the millisecond compatibility option.
-    #[arg(long, value_parser = parse_wait_deadline_duration, conflicts_with = "timeout_ms")]
-    pub(in crate::cli) timeout: Option<Duration>,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct WaitIdleArgs {
-    /// Live session name or canonical path.
-    pub(in crate::cli) session: PathBuf,
-    /// Required unchanged presented-state interval.
-    #[arg(long, value_parser = parse_stability_duration, default_value = "100ms")]
-    pub(in crate::cli) stable_for: Duration,
-    /// Maximum server-side wait duration in milliseconds.
-    #[arg(long, default_value_t = 30_000)]
-    pub(in crate::cli) timeout_ms: u64,
+    /// Maximum wait duration.
+    #[arg(long, value_parser = parse_wait_deadline_duration, default_value = "30s")]
+    pub(in crate::cli) timeout: Duration,
     /// Return typed completed/output-closed/deadline snapshots instead of rejecting them.
-    #[arg(long)]
+    #[arg(long, requires = "idle")]
     pub(in crate::cli) allow_incomplete: bool,
     /// Require the stable interval to complete while the recorder is still live.
-    #[arg(long, conflicts_with = "allow_incomplete")]
+    #[arg(long, requires = "idle", conflicts_with = "allow_incomplete")]
     pub(in crate::cli) require_live_stability: bool,
     /// Include the compressed complete semantic state in the response.
-    #[arg(long)]
+    #[arg(long, requires = "idle")]
     pub(in crate::cli) full_state: bool,
 }
 
@@ -294,36 +282,20 @@ pub(in crate::cli) struct StopArgs {
     ArgGroup::new("input")
         .required(true)
         .multiple(false)
-        .args(["atoms", "stdin"])
+        .args(["text", "file", "stdin"])
 ))]
-#[command(
-    override_usage = "termtrace send [OPTIONS] <SESSION> <ATOM>...\n       termtrace send [OPTIONS] --stdin <SESSION>"
-)]
 pub(in crate::cli) struct SendArgs {
     /// Live session name or canonical path.
-    #[arg(index = 1)]
     pub(in crate::cli) session: PathBuf,
-    /// Named keys, text:VALUE, paste:VALUE, raw:VALUE, or raw-file:PATH atoms.
-    #[arg(index = 2, value_name = "ATOM", num_args = 1..)]
-    pub(in crate::cli) atoms: Vec<String>,
-    /// Read one exact raw burst from standard input.
+    /// UTF-8 text to write directly to the child PTY.
+    #[arg(long)]
+    pub(in crate::cli) text: Option<String>,
+    /// File whose exact bytes are written directly to the child PTY.
+    #[arg(long)]
+    pub(in crate::cli) file: Option<PathBuf>,
+    /// Read one exact byte burst from standard input.
     #[arg(long)]
     pub(in crate::cli) stdin: bool,
-    /// Delay between atoms; paced text is split by Unicode scalar.
-    #[arg(long, value_parser = parse_pace_duration, default_value = "0ms")]
-    pub(in crate::cli) pace: Duration,
-    /// Human-readable reason retained with the input event.
-    #[arg(long)]
-    pub(in crate::cli) intent: Option<String>,
-    /// Apply every input atom only if the latest presented state has this BLAKE3 hash.
-    #[arg(long = "if-state")]
-    pub(in crate::cli) expected_presented_state_hash: Option<String>,
-    /// Caller-owned identifier for idempotent retries.
-    #[arg(long)]
-    pub(in crate::cli) request_id: Option<uuid::Uuid>,
-    /// Include per-atom operation and canonical event identifiers in the response.
-    #[arg(long)]
-    pub(in crate::cli) verbose: bool,
 }
 
 #[derive(Debug, Args)]

@@ -4,63 +4,55 @@ pub(in crate::cli) fn run_send(
     response: &mut ResponseWriter,
     arguments: SendArgs,
 ) -> Result<ExitCode> {
-    let request_id = arguments.request_id.unwrap_or_else(uuid::Uuid::now_v7);
-    let mut atoms: Vec<InputSequenceAtom> = Vec::new();
-    if arguments.stdin {
-        let mut data: Vec<u8> = Vec::new();
-        io::stdin().read_to_end(&mut data).into_diagnostic()?;
-        atoms.push(InputSequenceAtom::Bytes {
-            operation_id: sequence_operation_id(request_id, 0),
-            data: ByteString::new(data),
-            input_kind: InputKind::Raw,
-            caller_intent: arguments.intent.clone(),
-        });
-    } else {
-        for atom in &arguments.atoms {
-            if arguments.pace.is_zero() || !atom.starts_with("text:") {
-                let operation_id = sequence_operation_id(request_id, atoms.len());
-                atoms.push(input_sequence_atom_for_cli(
-                    atom,
-                    operation_id,
-                    arguments.intent.clone(),
-                )?);
-                continue;
-            }
-            let text = atom.strip_prefix("text:").unwrap_or_default();
-            for scalar in text.chars() {
-                atoms.push(InputSequenceAtom::Bytes {
-                    operation_id: sequence_operation_id(request_id, atoms.len()),
-                    data: ByteString::new(scalar.to_string().into_bytes()),
-                    input_kind: InputKind::Text,
-                    caller_intent: arguments.intent.clone(),
-                });
-            }
+    let SendArgs {
+        session,
+        text,
+        file,
+        stdin,
+    } = arguments;
+    let (data, input_kind) = match (text, file, stdin) {
+        (Some(text), None, false) => (text.into_bytes(), InputKind::Text),
+        (None, Some(path), false) => (fs_err::read(path).into_diagnostic()?, InputKind::Raw),
+        (None, None, true) => {
+            let mut data: Vec<u8> = Vec::new();
+            io::stdin().read_to_end(&mut data).into_diagnostic()?;
+            (data, InputKind::Raw)
         }
+        _ => {
+            return Err(miette::miette!(
+                "exactly one of --text, --file, or --stdin is required"
+            ));
+        }
+    };
+    if data.is_empty() {
+        return Err(miette::miette!("direct input must not be empty"));
     }
-    if atoms.is_empty() || atoms.len() > 4096 {
-        return Err(miette::miette!(
-            "input sequence must contain 1 to 4096 atoms"
-        ));
-    }
-    let resolved = resolve_session(arguments.session)?;
+
+    let resolved = resolve_session(session)?;
     if resolved.lifecycle != RegistryLifecycle::Live {
         return write_session_lifecycle(response, &resolved, "send", ExitCode::FAILURE);
     }
+    let request_id = uuid::Uuid::now_v7();
+    let atom = InputSequenceAtom::Bytes {
+        operation_id: sequence_operation_id(request_id, 0),
+        data: ByteString::new(data),
+        input_kind,
+        caller_intent: None,
+    };
     let mut request = ControlRequest::new(ControlCommand::InputSequence {
-        atoms,
-        pace_ns: u64::try_from(arguments.pace.as_nanos()).unwrap_or(u64::MAX),
-        include_atom_outcomes: arguments.verbose,
+        atoms: vec![atom],
+        pace_ns: 0,
+        include_atom_outcomes: false,
     });
     request.request_id = request_id;
-    request.expected_presented_state_hash = arguments.expected_presented_state_hash;
     let control_response = match send_request_response(&resolved.path, &request) {
         Ok(control_response) => control_response,
         Err(error) => {
             write_json_line(
                 response,
                 &serde_json::json!({
-                    "kind": "input_sequence_failed",
-                    "sequence_id": request.request_id,
+                    "kind": "input_send_failed",
+                    "request_id": request.request_id,
                     "code": "transport_lost",
                     "message": error.to_string(),
                     "applied": "unknown",
@@ -82,8 +74,8 @@ pub(in crate::cli) fn run_send(
             write_json_line(
                 response,
                 &serde_json::json!({
-                    "kind": "input_sequence_failed",
-                    "sequence_id": request.request_id,
+                    "kind": "input_send_failed",
+                    "request_id": request.request_id,
                     "code": code,
                     "message": message,
                     "details": details,
@@ -97,39 +89,24 @@ pub(in crate::cli) fn run_send(
     };
     let ControlData::InputSequenceApplied {
         sequence_id,
-        atom_count,
         bytes_written,
-        first_intent_event_seq,
-        last_result_event_seq,
-        pace_ns,
-        atoms,
         boundaries,
+        ..
     } = data
     else {
         return Err(miette::miette!(
-            "recording actor returned an unexpected input-sequence payload"
+            "recording actor returned an unexpected direct-input payload"
         ));
     };
-    let mut output = serde_json::json!({
-        "kind": "input_sequence_applied",
-        "sequence_id": sequence_id,
-        "atom_count": atom_count,
-        "bytes_written": bytes_written,
-        "first_intent_event_seq": first_intent_event_seq,
-        "last_result_event_seq": last_result_event_seq,
-        "pace_ns": pace_ns,
-        "boundary": compact_boundaries(&boundaries),
-    });
-    if arguments.verbose {
-        output
-            .as_object_mut()
-            .ok_or_else(|| return miette::miette!("input-sequence output is not an object"))?
-            .insert(
-                "atoms".to_owned(),
-                serde_json::to_value(atoms).into_diagnostic()?,
-            );
-    }
-    return write_json_line(response, &output);
+    return write_json_line(
+        response,
+        &serde_json::json!({
+            "kind": "input_sent",
+            "request_id": sequence_id,
+            "bytes_written": bytes_written,
+            "boundary": compact_boundaries(&boundaries),
+        }),
+    );
 }
 
 pub(super) fn input_sequence_atom_for_cli(

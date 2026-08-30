@@ -1,13 +1,15 @@
 use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
-use args::{ArtifactBundleSubcommand, ArtifactSubcommand};
+use args::ArtifactSubcommand;
 
 use std::{
+    env,
     ffi::OsStr,
+    io::{self, Read as _},
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
-    process::ExitCode,
+    process::{Command as ProcessCommand, ExitCode, Stdio},
     time::Duration,
 };
 
@@ -18,7 +20,9 @@ use termtrace_engine::{
     timeline::{SourceRange, resolve_source_selection},
 };
 use termtrace_evidence::{
-    artifact::write_secure, event_log::EventLog, session::validate_completed_log,
+    artifact::write_secure,
+    event_log::EventLog,
+    session::{read_manifest, validate_completed_log},
 };
 use termtrace_export::{
     archive::{create as create_bundle_archive, verify as verify_bundle_archive},
@@ -50,15 +54,13 @@ use termtrace_model::{
     terminal::replay::StateSelection,
     value::ByteString,
 };
-use termtrace_render::render_png;
 
 use crate::cli::{
     analysis::args::ShowRenderer,
     artifacts::args::{
-        BugReportFacadeArgs, BundleArgs, BundleFacadeArgs, BundleProfileArg, BundleVerifyArgs,
-        CaptureArgs, ExportArgs, SaveArgs, ScreenshotArgs, ScreenshotFacadeArgs, ScreenshotFormat,
-        SemanticRasterProfileArg, VideoArgs, VideoCommand, VideoCursorStyleArg, VideoFacadeArgs,
-        VideoPresetArg, VideoSourceArg, VideoSourceArgs,
+        BugReportFacadeArgs, BundleArgs, BundleVerifyArgs, CaptureArgs, ExportArgs, ImportArgs,
+        SaveArgs, ScreenshotArgs, ScreenshotFormat, SemanticRasterProfileArg, VideoCursorStyleArg,
+        VideoFacadeArgs, VideoPresetArg, VideoSourceArg,
     },
     output::{write_json_line, write_progress},
     session_helpers::{
@@ -83,79 +85,16 @@ pub(super) fn run_export_asciicast(
     );
 }
 
-pub(super) fn run_video(response: &mut ResponseWriter, arguments: VideoArgs) -> Result<ExitCode> {
-    return match arguments.command {
-        VideoCommand::Plan(arguments) => {
-            let session = resolve_session_ref(arguments.session)?;
-            let edit = read_edit_plan(&arguments.edit).into_diagnostic()?;
-            let source = video_source_request(arguments.source)?;
-            write_json_line(
-                response,
-                &plan_presentation(session, &edit, source).into_diagnostic()?,
-            )
-        }
-        VideoCommand::Preview(arguments) => {
-            let session = resolve_session_ref(arguments.session)?;
-            let edit = read_edit_plan(&arguments.edit).into_diagnostic()?;
-            let source = video_source_request(arguments.source)?;
-            let plan = plan_presentation(session, &edit, source).into_diagnostic()?;
-            require_video_render_capabilities(source)?;
-            let outcome = preview_presentation(
-                &plan,
-                arguments.out,
-                PreviewOptions {
-                    columns: arguments.columns,
-                    tile_width: arguments.tile_width,
-                    max_frames: arguments.max_frames,
-                    change_only: arguments.change_only,
-                    preview_width: arguments.preview_width,
-                },
-            )
-            .into_diagnostic()?;
-            write_json_line(
-                response,
-                &serde_json::json!({
-                    "kind": "presentation_preview",
-                    "directory": outcome.directory,
-                    "contact_sheet": outcome.contact_sheet,
-                    "video": outcome.video,
-                    "edit_plan_hash": plan.edit_plan_hash,
-                    "source": match &plan.source { PresentationSource::Native { .. } => "native", PresentationSource::Semantic { .. } => "semantic" },
-                }),
-            )
-        }
-        VideoCommand::Export(arguments) => {
-            let session = resolve_session_ref(arguments.session)?;
-            let edit = read_edit_plan(&arguments.edit).into_diagnostic()?;
-            let source = video_source_request(arguments.source)?;
-            let plan = plan_presentation(session, &edit, source).into_diagnostic()?;
-            require_video_render_capabilities(source)?;
-            let outcome = export_presentation(&plan, arguments.out).into_diagnostic()?;
-            write_json_line(
-                response,
-                &serde_json::json!({
-                    "kind": "presentation",
-                    "directory": outcome.directory,
-                    "video": outcome.video,
-                    "edit_plan_hash": plan.edit_plan_hash,
-                    "output_frame_count": plan.output_frame_count,
-                    "source": match &plan.source { PresentationSource::Native { .. } => "native", PresentationSource::Semantic { .. } => "semantic" },
-                }),
-            )
-        }
+pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -> Result<ExitCode> {
+    let bytes = if arguments.input == Path::new("-") {
+        let mut bytes: Vec<u8> = Vec::new();
+        io::stdin().read_to_end(&mut bytes).into_diagnostic()?;
+        bytes
+    } else {
+        fs_err::read(&arguments.input).into_diagnostic()?
     };
-}
-const VIDEO_IDLE_THRESHOLD_NS: u64 = 2_000_000_000;
-const VIDEO_IDLE_CONTEXT_NS: u64 = 500_000_000;
-
-pub(super) fn run_video_facade(
-    response: &mut ResponseWriter,
-    arguments: VideoFacadeArgs,
-) -> Result<ExitCode> {
-    if arguments.out.extension() != Some(OsStr::new("mp4")) {
-        return Err(miette::miette!(
-            "video output must use the `.mp4` extension"
-        ));
+    if bytes.is_empty() {
+        return Err(miette::miette!("ANSI import input must not be empty"));
     }
     if arguments.out.exists() {
         return Err(Error::ArtifactExists {
@@ -163,10 +102,124 @@ pub(super) fn run_video_facade(
         })
         .into_diagnostic();
     }
-    let sidecar = video_sidecar_path(&arguments.out);
-    if sidecar.exists() {
-        return Err(Error::ArtifactExists { path: sidecar }).into_diagnostic();
+    let parent = arguments
+        .out
+        .parent()
+        .ok_or_else(|| miette::miette!("ANSI import destination has no parent"))?;
+    fs_err::create_dir_all(parent).into_diagnostic()?;
+    let input = parent.join(format!(".ansi-import-{}.tmp", uuid::Uuid::now_v7()));
+    write_secure(&input, &bytes).into_diagnostic()?;
+    let hash = blake3::hash(&bytes).to_hex().to_string();
+    let process = ProcessCommand::new(env::current_exe().into_diagnostic()?)
+        .args(["record", "--no-input", "--out"])
+        .arg(&arguments.out)
+        .args([
+            "--cols",
+            &arguments.cols.to_string(),
+            "--rows",
+            &arguments.rows.to_string(),
+        ])
+        .args(["--import-source-kind", "ansi_stream"])
+        .args(["--import-source-byte-count", &bytes.len().to_string()])
+        .args(["--import-source-blake3", &hash])
+        .arg("--import-source")
+        .arg(arguments.input.as_os_str())
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "stty raw -echo < /dev/tty; exec /bin/cat -- \"$1\"",
+            "termtrace-ansi-import",
+        ])
+        .arg(&input)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output();
+    let cleanup = fs_err::remove_file(&input);
+    let process = process.into_diagnostic()?;
+    cleanup.into_diagnostic()?;
+    if !process.status.success() {
+        return Err(miette::miette!(
+            "ANSI import recorder failed with {}: {}",
+            process.status,
+            String::from_utf8_lossy(&process.stderr)
+        ));
     }
+    let log = EventLog::read(arguments.out.join("events.jsonl")).into_diagnostic()?;
+    validate_completed_log(&arguments.out, &log).into_diagnostic()?;
+    let imported: Vec<u8> = log
+        .events
+        .iter()
+        .filter_map(|record| match &record.event {
+            Event::Output { data } => Some(data.as_bytes()),
+            _ => None,
+        })
+        .flatten()
+        .copied()
+        .collect();
+    if imported != bytes {
+        return Err(miette::miette!(
+            "ANSI import canonical output does not match the exact source bytes"
+        ));
+    }
+    let manifest = read_manifest(&arguments.out).into_diagnostic()?;
+    if manifest
+        .import_provenance
+        .as_ref()
+        .is_none_or(|provenance| {
+            provenance.source_kind != "ansi_stream"
+                || provenance.byte_count != u64::try_from(bytes.len()).unwrap_or(u64::MAX)
+                || provenance.blake3 != hash
+        })
+    {
+        return Err(miette::miette!(
+            "ANSI import session did not bind its source provenance"
+        ));
+    }
+    return write_json_line(
+        response,
+        &serde_json::json!({
+            "kind": "ansi_import",
+            "session": arguments.out,
+            "byte_count": bytes.len(),
+            "blake3": hash,
+        }),
+    );
+}
+
+const VIDEO_IDLE_THRESHOLD_NS: u64 = 2_000_000_000;
+const VIDEO_IDLE_CONTEXT_NS: u64 = 500_000_000;
+
+pub(super) fn run_video_facade(
+    response: &mut ResponseWriter,
+    arguments: VideoFacadeArgs,
+) -> Result<ExitCode> {
+    let mode_count = usize::from(arguments.out.is_some())
+        + usize::from(arguments.dry_run)
+        + usize::from(arguments.preview_out.is_some());
+    if mode_count != 1 {
+        return Err(miette::miette!(
+            "exactly one of --out, --dry-run, or --preview-out is required"
+        ));
+    }
+    let sidecar = if let Some(out) = arguments.out.as_ref() {
+        if out.extension() != Some(OsStr::new("mp4")) {
+            return Err(miette::miette!(
+                "video output must use the `.mp4` extension"
+            ));
+        }
+        if out.exists() {
+            return Err(Error::ArtifactExists { path: out.clone() }).into_diagnostic();
+        }
+        let sidecar = video_sidecar_path(out);
+        if sidecar.exists() {
+            return Err(Error::ArtifactExists { path: sidecar }).into_diagnostic();
+        }
+        Some(sidecar)
+    } else {
+        None
+    };
 
     let resolved = resolve_session(arguments.session.clone())?;
     if resolved.lifecycle != RegistryLifecycle::Completed {
@@ -182,40 +235,13 @@ pub(super) fn run_video_facade(
         && !session.join("visual/manifest.json").is_file()
     {
         return Err(miette::miette!(
-            "native renderer requires a verified capture; run `termtrace artifact capture --session {}` or explicitly choose `--renderer semantic`",
+            "native renderer requires a verified capture manifest; run `termtrace artifact capture --session {}` after checking `termtrace doctor --require native-video --explain`, or explicitly choose `--renderer semantic`",
             session.display()
         ));
     }
-    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
-    validate_completed_log(&session, &log).into_diagnostic()?;
-    let final_monotonic_ns = log
-        .events
-        .last()
-        .map_or(0, |record| return record.monotonic_ns);
-    let mut selected = resolve_source_selection(
-        &log,
-        None,
-        None,
-        arguments.start_marker.as_deref(),
-        arguments.end_marker.as_deref(),
-    )
-    .into_diagnostic()?
-    .unwrap_or(SourceRange {
-        start_monotonic_ns: 0,
-        end_monotonic_ns: final_monotonic_ns,
-    });
-    selected.end_monotonic_ns = selected.end_monotonic_ns.min(final_monotonic_ns);
-    if selected.start_monotonic_ns >= selected.end_monotonic_ns {
-        return Err(miette::miette!(
-            "video range must contain positive recorded time"
-        ));
-    }
-    let ranges = video_clip_ranges(&log, selected, arguments.trim_idle);
     let (default_fps, default_hold_start, default_hold_end) = video_preset_timing(arguments.preset);
     let requested_fps = arguments.fps;
     let provisional_fps = requested_fps.unwrap_or(default_fps);
-    let hold_start = arguments.hold_start.unwrap_or(default_hold_start);
-    let hold_end = arguments.hold_end.unwrap_or(default_hold_end);
     let raster_profile =
         semantic_raster_profile(arguments.preset, arguments.semantic_raster_profile);
     let source = match arguments.renderer {
@@ -230,42 +256,106 @@ pub(super) fn run_video_facade(
         response,
         format_args!("Planning video from {}...", session.display()),
     );
-    require_video_render_capabilities(source)?;
-    let provisional = facade_edit_plan(&arguments, &ranges, provisional_fps, hold_start, hold_end)?;
-    let first_plan = plan_presentation(&session, &provisional, source).into_diagnostic()?;
-    if requested_fps.is_some_and(|fps| return fps != first_plan.fps) {
+    let plan = if let Some(edit_path) = arguments.edit.as_ref() {
+        let edit = read_edit_plan(edit_path).into_diagnostic()?;
+        plan_presentation(&session, &edit, source).into_diagnostic()?
+    } else {
+        let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
+        validate_completed_log(&session, &log).into_diagnostic()?;
+        let final_monotonic_ns = log.events.last().map_or(0, |record| record.monotonic_ns);
+        let mut selected = resolve_source_selection(
+            &log,
+            None,
+            None,
+            arguments.start_marker.as_deref(),
+            arguments.end_marker.as_deref(),
+        )
+        .into_diagnostic()?
+        .unwrap_or(SourceRange {
+            start_monotonic_ns: 0,
+            end_monotonic_ns: final_monotonic_ns,
+        });
+        selected.end_monotonic_ns = selected.end_monotonic_ns.min(final_monotonic_ns);
+        if selected.start_monotonic_ns >= selected.end_monotonic_ns {
+            return Err(miette::miette!(
+                "video range must contain positive recorded time"
+            ));
+        }
+        let ranges = video_clip_ranges(&log, selected, arguments.trim_idle);
+        let hold_start = arguments.hold_start.unwrap_or(default_hold_start);
+        let hold_end = arguments.hold_end.unwrap_or(default_hold_end);
+        let provisional =
+            facade_edit_plan(&arguments, &ranges, provisional_fps, hold_start, hold_end)?;
+        let first_plan = plan_presentation(&session, &provisional, source).into_diagnostic()?;
+        let edit = facade_edit_plan(&arguments, &ranges, first_plan.fps, hold_start, hold_end)?;
+        if edit == provisional {
+            first_plan
+        } else {
+            plan_presentation(&session, &edit, source).into_diagnostic()?
+        }
+    };
+    if requested_fps.is_some_and(|fps| fps != plan.fps) {
         return Err(miette::miette!(
             "requested {} FPS but the verified native capture is {} FPS; recapture at the requested rate",
-            requested_fps.unwrap_or(first_plan.fps),
-            first_plan.fps
+            requested_fps.unwrap_or(plan.fps),
+            plan.fps
         ));
     }
-    let edit = facade_edit_plan(&arguments, &ranges, first_plan.fps, hold_start, hold_end)?;
-    let plan = if edit == provisional {
-        first_plan
-    } else {
-        plan_presentation(&session, &edit, source).into_diagnostic()?
-    };
+    if arguments.dry_run {
+        return write_json_line(response, &plan);
+    }
 
+    require_video_render_capabilities(source)?;
+    if let Some(preview_out) = arguments.preview_out {
+        let outcome = preview_presentation(
+            &plan,
+            preview_out,
+            PreviewOptions {
+                columns: arguments.columns,
+                tile_width: arguments.tile_width,
+                max_frames: arguments.max_frames,
+                change_only: arguments.change_only,
+                preview_width: arguments.preview_width,
+            },
+        )
+        .into_diagnostic()?;
+        return write_json_line(
+            response,
+            &serde_json::json!({
+                "kind": "presentation_preview",
+                "directory": outcome.directory,
+                "contact_sheet": outcome.contact_sheet,
+                "video": outcome.video,
+                "edit_plan_hash": plan.edit_plan_hash,
+                "source": match &plan.source {
+                    PresentationSource::Native { .. } => "native",
+                    PresentationSource::Semantic { .. } => "semantic",
+                },
+            }),
+        );
+    }
+
+    let output = arguments
+        .out
+        .ok_or_else(|| miette::miette!("video export requires --out"))?;
+    let sidecar = sidecar.ok_or_else(|| miette::miette!("video export sidecar is missing"))?;
     write_progress(
         response,
         format_args!(
             "Rendering {} frames at {} FPS with the {} renderer...",
             plan.output_frame_count,
             plan.fps,
-            match plan.source {
+            match &plan.source {
                 PresentationSource::Native { .. } => "native",
                 PresentationSource::Semantic { .. } => "semantic",
             }
         ),
     );
     let outcome = export_presentation(&plan, &sidecar).into_diagnostic()?;
-    fs_err::hard_link(&outcome.video, &arguments.out)
-        .map_err(|source| {
-            return Error::Filesystem {
-                path: arguments.out.clone(),
-                source,
-            };
+    fs_err::hard_link(&outcome.video, &output)
+        .map_err(|source| Error::Filesystem {
+            path: output.clone(),
+            source,
         })
         .into_diagnostic()?;
     write_progress(
@@ -276,11 +366,14 @@ pub(super) fn run_video_facade(
         response,
         &serde_json::json!({
             "kind": "video",
-            "output": ByteString::from(arguments.out.as_os_str().as_bytes()),
-            "output_display": arguments.out.display().to_string(),
+            "output": ByteString::from(output.as_os_str().as_bytes()),
+            "output_display": output.display().to_string(),
             "manifest": sidecar.join("manifest.json"),
             "artifact_directory": sidecar,
-            "renderer": match plan.source { PresentationSource::Native { .. } => "native", PresentationSource::Semantic { .. } => "semantic" },
+            "renderer": match &plan.source {
+                PresentationSource::Native { .. } => "native",
+                PresentationSource::Semantic { .. } => "semantic",
+            },
             "fps": plan.fps,
             "width": plan.output_width,
             "height": plan.output_height,
@@ -534,32 +627,6 @@ fn video_sidecar_path(output: &Path) -> PathBuf {
         return sidecar;
     }
     return Path::new(".").join(sidecar);
-}
-
-fn video_source_request(arguments: VideoSourceArgs) -> Result<PresentationSourceRequest> {
-    return match arguments.source {
-        VideoSourceArg::Native if arguments.semantic_raster_profile.is_some() => Err(
-            miette::miette!("--semantic-raster-profile configures semantic video only"),
-        ),
-        VideoSourceArg::Native if arguments.fps.is_some() => Err(miette::miette!(
-            "--fps configures semantic video only; native FPS comes from the capture manifest"
-        )),
-        VideoSourceArg::Native => Ok(PresentationSourceRequest::Native),
-        VideoSourceArg::Semantic => {
-            let fps = arguments.fps.unwrap_or(24);
-            if !(1..=120).contains(&fps) {
-                return Err(miette::miette!(
-                    "semantic video FPS must be between 1 and 120"
-                ));
-            }
-            Ok(PresentationSourceRequest::Semantic {
-                fps,
-                raster_profile: arguments
-                    .semantic_raster_profile
-                    .map_or(SemanticRasterProfile::Direct, SemanticRasterProfile::from),
-            })
-        }
-    };
 }
 
 fn video_render_capability_ids(
@@ -838,53 +905,6 @@ pub(super) fn run_screenshot(
     );
 }
 
-pub(super) fn run_screenshot_facade(
-    response: &mut ResponseWriter,
-    arguments: ScreenshotFacadeArgs,
-) -> Result<ExitCode> {
-    let resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle != RegistryLifecycle::Completed {
-        return write_session_lifecycle(response, &resolved, "screenshot", ExitCode::FAILURE);
-    }
-    let log = EventLog::read(resolved.path.join("events.jsonl")).into_diagnostic()?;
-    validate_completed_log(&resolved.path, &log).into_diagnostic()?;
-    let inspection = inspect_point(&log, &StatePoint::LatestPresented).into_diagnostic()?;
-    let image = render_png(&inspection.state).into_diagnostic()?;
-    write_secure(&arguments.out, &image).into_diagnostic()?;
-    return write_json_line(
-        response,
-        &serde_json::json!({
-            "kind": "semantic_screenshot",
-            "truth_layer": "semantic_rendering",
-            "file": ByteString::from(arguments.out.as_os_str().as_bytes()),
-            "file_display": arguments.out.display().to_string(),
-            "state_id": inspection.record.state_id,
-            "state_hash": inspection.record.state_hash,
-            "presentation_eligible": inspection.record.presented,
-        }),
-    );
-}
-
-pub(super) fn run_bundle_facade(
-    response: &mut ResponseWriter,
-    arguments: BundleFacadeArgs,
-) -> Result<ExitCode> {
-    let resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle != RegistryLifecycle::Completed {
-        return write_session_lifecycle(response, &resolved, "bundle", ExitCode::FAILURE);
-    }
-    return run_bundle(
-        response,
-        BundleArgs {
-            session: resolved.path,
-            profile: BundleProfileArg::Screen,
-            out: arguments.out,
-            dry_run: false,
-            archive: false,
-        },
-    );
-}
-
 pub(super) fn run_bug_report_facade(
     response: &mut ResponseWriter,
     arguments: BugReportFacadeArgs,
@@ -977,14 +997,9 @@ pub(super) fn dispatch(
     command: ArtifactSubcommand,
 ) -> Result<ExitCode> {
     return match command {
+        ArtifactSubcommand::Import(arguments) => run_import(response, arguments),
         ArtifactSubcommand::Capture(arguments) => run_capture(response, arguments),
         ArtifactSubcommand::Save(arguments) => run_save(response, arguments),
-        ArtifactSubcommand::Screenshot(arguments) => run_screenshot(response, arguments),
-        ArtifactSubcommand::Video(arguments) => run_video(response, arguments),
-        ArtifactSubcommand::Bundle(arguments) => match arguments.command {
-            ArtifactBundleSubcommand::Create(arguments) => run_bundle(response, arguments),
-            ArtifactBundleSubcommand::Verify(arguments) => run_bundle_verify(response, arguments),
-        },
         ArtifactSubcommand::Asciicast(arguments) => run_export_asciicast(response, arguments),
     };
 }
@@ -1035,29 +1050,6 @@ mod tests {
                 Some(SemanticRasterProfileArg::Supersampled2x),
             ),
             SemanticRasterProfile::Supersampled2x
-        );
-
-        assert_eq!(
-            video_source_request(VideoSourceArgs {
-                source: VideoSourceArg::Semantic,
-                fps: None,
-                semantic_raster_profile: None,
-            })
-            .expect("advanced semantic source defaults are valid"),
-            PresentationSourceRequest::Semantic {
-                fps: 24,
-                raster_profile: SemanticRasterProfile::Direct,
-            }
-        );
-        let native_error = video_source_request(VideoSourceArgs {
-            source: VideoSourceArg::Native,
-            fps: None,
-            semantic_raster_profile: Some(SemanticRasterProfileArg::Direct),
-        })
-        .expect_err("native semantic raster profile must be rejected");
-        assert_eq!(
-            native_error.to_string(),
-            "--semantic-raster-profile configures semantic video only"
         );
     }
 }

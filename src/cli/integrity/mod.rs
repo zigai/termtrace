@@ -11,6 +11,7 @@ use termtrace_evidence::{
 };
 
 use crate::cli::{
+    artifacts::run_bundle_verify,
     integrity::args::{RecoverArgs, SignArgs, VerifyArgs, VerifyLevelArg},
     output::{paginate, stable_enum_label, write_json_line, write_stdout},
 };
@@ -83,6 +84,7 @@ pub(super) fn dispatch(
 ) -> Result<ExitCode> {
     return match command {
         IntegritySubcommand::Verify(arguments) => run_verify(response, arguments),
+        IntegritySubcommand::VerifyBundle(arguments) => run_bundle_verify(response, arguments),
         IntegritySubcommand::Sign(arguments) => run_sign(response, arguments),
         IntegritySubcommand::Recover(arguments) => run_recover(response, arguments),
     };

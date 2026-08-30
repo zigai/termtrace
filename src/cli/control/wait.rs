@@ -4,21 +4,16 @@ pub(in crate::cli) fn run_wait(
     response: &mut ResponseWriter,
     arguments: WaitArgs,
 ) -> Result<ExitCode> {
-    let timeout = arguments
-        .timeout
-        .unwrap_or_else(|| return Duration::from_millis(arguments.timeout_ms));
+    if arguments.idle.is_none()
+        && (arguments.allow_incomplete || arguments.require_live_stability || arguments.full_state)
+    {
+        return Err(miette::miette!(
+            "--allow-incomplete, --require-live-stability, and --full-state require --idle"
+        ));
+    }
+    let timeout = arguments.timeout;
     if let Some(stable_for) = arguments.idle {
-        return run_wait_idle(
-            response,
-            WaitIdleArgs {
-                session: arguments.session,
-                stable_for,
-                timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
-                allow_incomplete: false,
-                require_live_stability: false,
-                full_state: false,
-            },
-        );
+        return run_idle_wait(response, arguments, stable_for);
     }
     let resolved = resolve_session(arguments.session)?;
     if resolved.lifecycle != RegistryLifecycle::Live {
@@ -135,25 +130,26 @@ pub(in crate::cli) fn run_wait(
     });
 }
 
-pub(in crate::cli) fn run_wait_idle(
+fn run_idle_wait(
     response: &mut ResponseWriter,
-    arguments: WaitIdleArgs,
+    arguments: WaitArgs,
+    stable_for: Duration,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session)?;
     if resolved.lifecycle == RegistryLifecycle::Completed {
         if arguments.require_live_stability {
-            return write_session_lifecycle(response, &resolved, "wait_idle", ExitCode::FAILURE);
+            return write_session_lifecycle(response, &resolved, "wait", ExitCode::FAILURE);
         }
         return write_completed_stable_snapshot(response, &resolved, arguments.full_state);
     }
     if resolved.lifecycle != RegistryLifecycle::Live {
-        return write_session_lifecycle(response, &resolved, "wait_idle", ExitCode::FAILURE);
+        return write_session_lifecycle(response, &resolved, "wait", ExitCode::FAILURE);
     }
     let data = send_request(
         resolved.path,
         &ControlRequest::new(ControlCommand::CaptureStable {
-            stable_for_ns: u64::try_from(arguments.stable_for.as_nanos()).unwrap_or(u64::MAX),
-            timeout_ns: arguments.timeout_ms.saturating_mul(1_000_000),
+            stable_for_ns: u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX),
+            timeout_ns: u64::try_from(arguments.timeout.as_nanos()).unwrap_or(u64::MAX),
             projection: ScreenProjectionRequest::default(),
         }),
     )

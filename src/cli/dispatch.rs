@@ -10,12 +10,11 @@ use crate::cli::{
         run_show,
     },
     artifacts::{
-        dispatch as dispatch_artifact, run_bug_report_facade, run_bundle_facade,
-        run_screenshot_facade, run_video_facade,
+        dispatch as dispatch_artifact, run_bug_report_facade, run_bundle, run_screenshot,
+        run_video_facade,
     },
     control::{
-        dispatch as dispatch_control, run_act, run_screen, run_send, run_status, run_stop,
-        run_wait, run_wait_idle,
+        dispatch as dispatch_control, run_act, run_screen, run_send, run_status, run_stop, run_wait,
     },
     integrity::dispatch as dispatch_integrity,
     output::ResponseWriter,
@@ -42,11 +41,11 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: Command) -> Resul
         Command::Artifact(arguments) => dispatch_artifact(response, arguments.command),
         Command::Inspect(arguments) => run_inspect_facade(response, arguments),
         Command::Diagnose(arguments) => run_diagnose_facade(response, arguments),
-        Command::Screenshot(arguments) => run_screenshot_facade(response, arguments),
-        Command::Bundle(arguments) => run_bundle_facade(response, arguments),
+        Command::Screenshot(arguments) => run_screenshot(response, arguments),
+        Command::Bundle(arguments) => run_bundle(response, arguments),
         Command::BugReport(arguments) => run_bug_report_facade(response, arguments),
         Command::Video(arguments) => run_video_facade(response, arguments),
-        Command::Registry(arguments) => dispatch_registry(response, arguments.command),
+        Command::Session(arguments) => dispatch_registry(response, arguments.command),
         Command::Integrity(arguments) => dispatch_integrity(response, arguments.command),
         Command::Tooling(arguments) => dispatch_tooling(response, arguments.command),
         Command::Doctor(arguments) => run_doctor(response, arguments),
@@ -57,6 +56,5 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: Command) -> Resul
         Command::Show(arguments) => run_show(response, arguments),
         Command::Screen(arguments) => run_screen(response, arguments),
         Command::Wait(arguments) => run_wait(response, arguments),
-        Command::WaitIdle(arguments) => run_wait_idle(response, arguments),
     };
 }

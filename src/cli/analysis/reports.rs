@@ -293,7 +293,6 @@ pub(in crate::cli) fn run_inspect_facade(
     validate_completed_log(&resolved.path, &log).into_diagnostic()?;
     let analysis = analyze_last_action(&resolved.path, &log, arguments.broad_change_percent)
         .into_diagnostic()?;
-    let _last_action = arguments.last_action;
     return write_json_line(response, &analysis.inspection);
 }
 
@@ -314,7 +313,6 @@ pub(in crate::cli) fn run_diagnose_facade(
     validate_completed_log(&resolved.path, &log).into_diagnostic()?;
     let analysis = analyze_last_action(&resolved.path, &log, arguments.broad_change_percent)
         .into_diagnostic()?;
-    let _since_last_action = arguments.since_last_action;
     return write_json_line(response, &analysis.diagnostics);
 }
 

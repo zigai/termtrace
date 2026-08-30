@@ -51,8 +51,7 @@ class AsyncTerminal:
         binary = resolve_binary(binary_path)
         process = await asyncio.create_subprocess_exec(
             str(binary),
-            "tooling",
-            "driver",
+            "agent",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,

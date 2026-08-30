@@ -875,7 +875,7 @@ pub(super) fn hash_file(path: &Path) -> Result<String> {
 
 pub(super) fn missing_native_capture_error(session: &Path, manifest: &Path) -> Error {
     return plan_error(format!(
-        "native video source requires a verified capture manifest at `{}`; create it with `termtrace artifact capture --session SESSION` for `{}` after checking the native-video tooling capability with `termtrace doctor --require native-video --explain`, or select `--source semantic`",
+        "native video source requires a verified capture manifest at `{}`; create it with `termtrace artifact capture --session SESSION` for `{}` after checking the native-video tooling capability with `termtrace doctor --require native-video --explain`, or select `--renderer semantic`",
         manifest.display(),
         session.display(),
     ));

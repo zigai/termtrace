@@ -416,7 +416,6 @@ pub(super) fn dispatch(
 ) -> Result<ExitCode> {
     return match command {
         ToolingSubcommand::Client(arguments) => run_client(response, arguments),
-        ToolingSubcommand::Driver => run_driver(),
         ToolingSubcommand::Schemas(arguments) => run_schemas(response, arguments),
         ToolingSubcommand::Completions(arguments) => run_completions(response, arguments),
     };

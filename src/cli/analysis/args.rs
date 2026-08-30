@@ -1,10 +1,10 @@
-use std::{ffi::OsString, path::PathBuf, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use clap::{ArgGroup, Args, Subcommand, ValueEnum};
 use termtrace_model::terminal::analysis::DiagnosticCheck;
 
 use crate::cli::{
-    control::args::{ScreenEncoding, SessionArgs},
+    control::args::SessionArgs,
     parsers::{
         parse_diagnostic_check, parse_event_type, parse_page_limit, parse_stability_duration,
         parse_state_hash,
@@ -48,9 +48,6 @@ pub(in crate::cli) enum AnalyzeSubcommand {
 pub(in crate::cli) struct InspectFacadeArgs {
     /// Completed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
-    /// Derive the diff from the latest canonical input intent/result pair.
-    #[arg(long, required = true)]
-    pub(in crate::cli) last_action: bool,
     /// Minimum changed-cell percentage for a broad repaint warning.
     #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u8).range(1..=100))]
     pub(in crate::cli) broad_change_percent: u8,
@@ -60,9 +57,6 @@ pub(in crate::cli) struct InspectFacadeArgs {
 pub(in crate::cli) struct DiagnoseFacadeArgs {
     /// Completed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
-    /// Restrict diagnostics to evidence after the latest canonical input action.
-    #[arg(long, required = true)]
-    pub(in crate::cli) since_last_action: bool,
     /// Minimum changed-cell percentage for a broad repaint finding.
     #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u8).range(1..=100))]
     pub(in crate::cli) broad_change_percent: u8,
@@ -127,8 +121,6 @@ pub(in crate::cli) enum ShowFormat {
     FrameJson,
     Vt,
     Html,
-    Svg,
-    Png,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -139,40 +131,13 @@ pub(in crate::cli) enum ShowRenderer {
 
 #[derive(Debug, Args)]
 #[command(group(
-    ArgGroup::new("show_source")
-        .required(true)
-        .multiple(false)
-        .args(["session", "input", "command"])
-))]
-#[command(group(
     ArgGroup::new("show_selector")
         .multiple(false)
         .args(["state", "state_hash", "event_seq", "at", "at_marker"])
 ))]
 pub(in crate::cli) struct ShowArgs {
     /// Live session name or canonical completed session path.
-    pub(in crate::cli) session: Option<PathBuf>,
-    /// ANSI/VT byte stream path, or `-` for standard input.
-    #[arg(long)]
-    pub(in crate::cli) input: Option<PathBuf>,
-    /// Promote an ANSI input stream into a new canonical import session.
-    #[arg(long)]
-    pub(in crate::cli) record_out: Option<PathBuf>,
-    /// ANSI stream columns.
-    #[arg(long, default_value_t = 160)]
-    pub(in crate::cli) cols: u16,
-    /// ANSI stream rows.
-    #[arg(long, default_value_t = 45)]
-    pub(in crate::cli) rows: u16,
-    /// One-off command to record to completion, following `--`.
-    #[arg(last = true, num_args = 1..)]
-    pub(in crate::cli) command: Vec<OsString>,
-    /// New canonical evidence path for a one-off command.
-    #[arg(long)]
-    pub(in crate::cli) out: Option<PathBuf>,
-    /// Remove auto-allocated one-off evidence only after successful output.
-    #[arg(long, conflicts_with = "out")]
-    pub(in crate::cli) discard_evidence: bool,
+    pub(in crate::cli) session: PathBuf,
     /// Exact semantic state identifier.
     #[arg(long)]
     pub(in crate::cli) state: Option<u64>,
@@ -194,39 +159,18 @@ pub(in crate::cli) struct ShowArgs {
     /// Require an unchanged live presented state for this duration.
     #[arg(long, value_parser = parse_stability_duration, default_value = "0ms")]
     pub(in crate::cli) stable_for: Duration,
-    /// Server-side deadline for a live stability request.
-    #[arg(long, default_value_t = 30_000)]
-    pub(in crate::cli) timeout_ms: u64,
+    /// Maximum live stability wait.
+    #[arg(long, value_parser = crate::cli::parsers::parse_wait_deadline_duration, default_value = "30s")]
+    pub(in crate::cli) timeout: Duration,
     /// Write a concise provenance header to standard error.
     #[arg(long)]
     pub(in crate::cli) metadata: bool,
-    /// Renderer used by image formats; native never falls back to semantic.
-    #[arg(long, value_enum, default_value_t = ShowRenderer::Semantic)]
-    pub(in crate::cli) renderer: ShowRenderer,
-    /// Optional no-replace sidecar manifest for binary image output.
-    #[arg(long)]
-    pub(in crate::cli) manifest: Option<PathBuf>,
     /// Explicitly observe an integrity-checked incomplete event prefix offline.
     #[arg(long)]
     pub(in crate::cli) recover_prefix: bool,
-    /// For one-off commands, capture when exact presented text appears, then stop.
-    #[arg(long, conflicts_with = "wait_regex")]
-    pub(in crate::cli) wait: Option<String>,
-    /// For one-off commands, capture when a bounded presented regex matches, then stop.
-    #[arg(long, conflicts_with = "wait")]
-    pub(in crate::cli) wait_regex: Option<String>,
-    /// Explicitly leave a one-off recorder running and return its canonical path.
-    #[arg(long)]
-    pub(in crate::cli) detach: bool,
     /// Output representation.
     #[arg(long, value_enum, default_value_t = ShowFormat::Text)]
     pub(in crate::cli) format: ShowFormat,
-    /// Use the compact public screen representation instead of an advanced show format.
-    #[arg(long, value_enum)]
-    pub(in crate::cli) screen: Option<ScreenEncoding>,
-    /// Prior presented-state hash for compact unchanged or diff responses.
-    #[arg(long, value_parser = parse_state_hash)]
-    pub(in crate::cli) since: Option<String>,
 }
 
 #[derive(Debug, Args)]

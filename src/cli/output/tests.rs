@@ -192,6 +192,12 @@ fn rich_wait_and_action_frames_keep_bounded_agent_identity_and_text() {
     assert_eq!(compact["screen"], "READY\nnext");
 
     let action = serde_json::json!({
+        "input": {
+            "applied": "all",
+            "atoms": 2,
+            "bytes": 4,
+            "outcomes": [{ "large": "x".repeat(70_000) }]
+        },
         "observation": frame,
         "postcondition": {
             "kind": "screen",
@@ -201,6 +207,10 @@ fn rich_wait_and_action_frames_keep_bounded_agent_identity_and_text() {
     });
     let projected = bounded_capture_projection(&action).expect("bounded action projection");
     let compact = compact_task_value(projected, &[], "act").expect("compact action");
+    assert_eq!(compact["input"]["applied"], "all");
+    assert_eq!(compact["input"]["atoms"], 2);
+    assert_eq!(compact["input"]["bytes"], 4);
+    assert!(compact["input"].get("outcomes").is_none());
     assert_eq!(compact["observation"]["state"], "a".repeat(64));
     assert_eq!(compact["observation"]["screen"], "READY\nnext");
 }

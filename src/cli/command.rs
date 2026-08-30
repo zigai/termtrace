@@ -8,12 +8,10 @@ use crate::cli::{
         ShowArgs,
     },
     artifacts::args::{
-        ArtifactArgs, ArtifactSubcommand, BugReportFacadeArgs, BundleFacadeArgs,
-        ScreenshotFacadeArgs, VideoFacadeArgs,
+        ArtifactArgs, ArtifactSubcommand, BugReportFacadeArgs, BundleArgs, ScreenshotArgs,
+        VideoFacadeArgs,
     },
-    control::args::{
-        ActArgs, ControlArgs, ScreenArgs, SendArgs, StatusArgs, StopArgs, WaitArgs, WaitIdleArgs,
-    },
+    control::args::{ActArgs, ControlArgs, ScreenArgs, SendArgs, StatusArgs, StopArgs, WaitArgs},
     integrity::args::{IntegrityArgs, IntegritySubcommand},
     output::{ResponseField, ResponseMode},
     recording::args::{GeometryProbeArgs, RecordArgs, RestartArgs, StartArgs},
@@ -33,36 +31,29 @@ Options:
 
 const ROOT_COMMAND_GROUPS: &[(&str, &[&str])] = &[
     (
-        "Recording",
-        &["record", "test", "start", "restart", "stop", "tmux"],
-    ),
-    (
-        "Live workflow",
+        "Sessions",
         &[
-            "status",
-            "act",
-            "send",
-            "screen",
-            "show",
-            "wait",
-            "wait-idle",
+            "record", "start", "restart", "status", "stop", "session", "tmux",
         ],
     ),
-    ("Runtime", &["doctor", "version", "agent"]),
-    ("Debugging", &["inspect", "diagnose"]),
-    ("Media", &["screenshot", "video"]),
-    ("Evidence export", &["bundle", "bug-report"]),
     (
-        "Command groups",
+        "Interaction",
+        &["screen", "show", "wait", "act", "send", "control"],
+    ),
+    ("Investigation", &["inspect", "diagnose", "analyze"]),
+    (
+        "Artifacts",
         &[
-            "control",
-            "analyze",
+            "screenshot",
+            "video",
+            "bundle",
+            "bug-report",
             "artifact",
-            "registry",
             "integrity",
-            "tooling",
         ],
     ),
+    ("Automation", &["test", "agent", "tooling"]),
+    ("System", &["doctor", "version"]),
 ];
 
 #[derive(Debug, Parser)]
@@ -106,9 +97,8 @@ pub(super) enum Command {
     /// Print machine-readable live session status.
     Status(StatusArgs),
     /// Apply terminal input and wait for an optional presented-state postcondition.
-    #[command(visible_alias = "input")]
     Act(ActArgs),
-    /// Send text or file bytes to a live child PTY.
+    /// Send text, file, or standard-input bytes to a live child PTY.
     Send(SendArgs),
     /// Request graceful termination of a live session child.
     Stop(StopArgs),
@@ -124,16 +114,16 @@ pub(super) enum Command {
     Inspect(InspectFacadeArgs),
     /// Run diagnostics bounded to the most recent canonical input action.
     Diagnose(DiagnoseFacadeArgs),
-    /// Render the last presented semantic screen directly to a PNG file.
-    Screenshot(ScreenshotFacadeArgs),
-    /// Publish the default bounded manifested session evidence export.
-    Bundle(BundleFacadeArgs),
+    /// Create a manifested screenshot artifact.
+    Screenshot(ScreenshotArgs),
+    /// Create a sensitivity-labeled evidence bundle.
+    Bundle(BundleArgs),
     /// Publish a bounded manifested debugging evidence export without raw byte streams.
     BugReport(BugReportFacadeArgs),
-    /// Export a manifested presentation video without the advanced command tree.
+    /// Plan, preview, or export a manifested presentation video.
     Video(VideoFacadeArgs),
-    /// Register and manage friendly session names.
-    Registry(RegistryArgs),
+    /// Manage friendly session names and retention.
+    Session(RegistryArgs),
     /// Verify, sign, and recover canonical evidence.
     Integrity(IntegrityArgs),
     /// Runtime, SDK, and shell integration tools.
@@ -143,7 +133,6 @@ pub(super) enum Command {
     /// Report build and runtime component versions.
     Version(VersionArgs),
     /// Serve the versioned language-neutral JSONL process protocol.
-    #[command(visible_alias = "rpc")]
     Agent,
 
     /// Internal timed event playback used as Ghostty's child process.
@@ -154,13 +143,10 @@ pub(super) enum Command {
     GeometryProbe(GeometryProbeArgs),
     /// Return a compact representation of the latest presented screen.
     Screen(ScreenArgs),
-    /// Show a truth-labeled terminal viewport using the advanced format surface.
+    /// Show a truth-labeled live or completed terminal viewport.
     Show(ShowArgs),
     /// Wait for an explicit presented-screen, output-history, or idle predicate.
-    #[command(visible_alias = "wait-screen")]
     Wait(WaitArgs),
-    /// Atomically wait for a stable presented screen and return that exact snapshot.
-    WaitIdle(WaitIdleArgs),
 }
 
 /// Completion generation uses the public command graph and omits internal commands.
@@ -209,15 +195,11 @@ enum CompletionCommand {
     /// Print machine-readable live session status.
     Status(StatusArgs),
     /// Apply terminal input and wait for an optional presented-state postcondition.
-    #[command(visible_alias = "input")]
     Act(ActArgs),
-    /// Send text or file bytes to a live child PTY.
+    /// Send text, file, or standard-input bytes to a live child PTY.
     Send(SendArgs),
     /// Wait for an explicit presented-screen, output-history, or idle predicate.
-    #[command(visible_alias = "wait-screen")]
     Wait(WaitArgs),
-    /// Atomically wait for a stable presented screen and return that exact snapshot.
-    WaitIdle(WaitIdleArgs),
     /// Show a truth-labeled live or completed terminal viewport.
     Show(ShowArgs),
     /// Return a compact representation of the latest presented screen.
@@ -232,16 +214,16 @@ enum CompletionCommand {
     Inspect(InspectFacadeArgs),
     /// Run diagnostics bounded to the most recent canonical input action.
     Diagnose(DiagnoseFacadeArgs),
-    /// Render the last presented semantic screen directly to a PNG file.
-    Screenshot(ScreenshotFacadeArgs),
-    /// Publish the default bounded manifested session evidence export.
-    Bundle(BundleFacadeArgs),
+    /// Create a manifested screenshot artifact.
+    Screenshot(ScreenshotArgs),
+    /// Create a sensitivity-labeled evidence bundle.
+    Bundle(BundleArgs),
     /// Publish a bounded manifested debugging evidence export without raw byte streams.
     BugReport(BugReportFacadeArgs),
-    /// Export a manifested presentation video without the advanced command tree.
+    /// Plan, preview, or export a manifested presentation video.
     Video(VideoFacadeArgs),
-    /// Register and manage friendly session names.
-    Registry(RegistryArgs),
+    /// Manage friendly session names and retention.
+    Session(RegistryArgs),
     /// Verify, sign, and recover canonical evidence.
     Integrity(IntegrityArgs),
     /// Runtime, SDK, and shell integration tools.
@@ -251,7 +233,6 @@ enum CompletionCommand {
     /// Report build and runtime component versions.
     Version(VersionArgs),
     /// Serve the versioned language-neutral JSONL process protocol.
-    #[command(visible_alias = "rpc")]
     Agent,
 }
 fn bound_help_width(command: clap::Command) -> clap::Command {
@@ -317,14 +298,6 @@ pub(super) fn root_command() -> clap::Command {
     grouped_help.push_str(
         "A presented screen is a state snapshot; canonical output is the byte history.\n\
          \n\
-         Agent workflow:\n\
-           termtrace --response agent start NAME --until-screen TEXT -- COMMAND\n\
-           termtrace --response agent act SESSION INPUT... --until-idle DURATION\n\
-           termtrace --response agent screen SESSION --since STATE\n\
-         Use `termtrace agent` after 2–3 actions. Treat applied, retry, and session_state as\n\
-         authoritative. Use root help and direct leaf --help; request fields instead of recursively\n\
-         traversing help or shell-filtering responses.\n\
-         \n\
          Run `termtrace <command> --help` for more details.",
     );
 
@@ -381,9 +354,6 @@ pub(super) fn command_contract(matches: &clap::ArgMatches) -> (String, bool) {
         command_type = name;
         current = subcommand;
     }
-    if matches!(command_type, "wait-idle" | "wait-screen") {
-        command_type = "wait";
-    }
     let mutating = matches!(
         command_type,
         "act"
@@ -391,7 +361,6 @@ pub(super) fn command_contract(matches: &clap::ArgMatches) -> (String, bool) {
             | "start"
             | "restart"
             | "stop"
-            | "input"
             | "key"
             | "paste"
             | "pointer"
@@ -419,12 +388,9 @@ pub(super) fn preserves_requested_output(command: &Command) -> bool {
         | Command::Playback(_)
         | Command::GeometryProbe(_) => true,
         Command::Show(_) => true,
-        Command::Artifact(arguments) => matches!(
-            arguments.command,
-            ArtifactSubcommand::Capture(_)
-                | ArtifactSubcommand::Screenshot(_)
-                | ArtifactSubcommand::Video(_)
-        ),
+        Command::Artifact(arguments) => {
+            matches!(arguments.command, ArtifactSubcommand::Capture(_))
+        }
         Command::Analyze(arguments) => matches!(
             arguments.command,
             AnalyzeSubcommand::Inspect(_)
@@ -436,7 +402,7 @@ pub(super) fn preserves_requested_output(command: &Command) -> bool {
                 | AnalyzeSubcommand::Events(_)
         ),
         Command::Tooling(arguments) => match &arguments.command {
-            ToolingSubcommand::Driver | ToolingSubcommand::Completions(_) => true,
+            ToolingSubcommand::Completions(_) => true,
             ToolingSubcommand::Client(arguments) => {
                 !matches!(arguments.command, ClientCommand::Status)
             }
@@ -444,13 +410,14 @@ pub(super) fn preserves_requested_output(command: &Command) -> bool {
         },
         Command::Doctor(arguments) => arguments.json || !arguments.require.is_empty(),
         Command::Version(arguments) => arguments.json,
-        Command::Registry(arguments) => matches!(
+        Command::Session(arguments) => matches!(
             arguments.command,
             RegistrySubcommand::Resolve(_) | RegistrySubcommand::List(_)
         ),
-        Command::Integrity(arguments) => {
-            matches!(arguments.command, IntegritySubcommand::Verify(_))
-        }
+        Command::Integrity(arguments) => matches!(
+            arguments.command,
+            IntegritySubcommand::Verify(_) | IntegritySubcommand::VerifyBundle(_)
+        ),
         Command::Tmux(arguments) => matches!(arguments.command, TmuxSubcommand::Config(_)),
         _ => false,
     };

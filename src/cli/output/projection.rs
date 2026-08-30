@@ -104,6 +104,7 @@ pub(super) fn bounded_capture_projection(value: &serde_json::Value) -> Option<se
         "record",
         "boundary",
         "completion",
+        "input",
         "observation",
         "postcondition",
         "predicate",

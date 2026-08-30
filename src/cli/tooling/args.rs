@@ -16,8 +16,6 @@ pub(in crate::cli) struct ToolingArgs {
 pub(in crate::cli) enum ToolingSubcommand {
     /// Run Python or TypeScript client code from managed SDK assets without project files.
     Client(ClientArgs),
-    /// Serve the versioned language-neutral JSONL process protocol.
-    Driver,
     /// Generate JSON Schemas for public events, controls, and artifacts.
     Schemas(SchemaArgs),
     /// Generate a shell completion script from the current command graph.

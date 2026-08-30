@@ -43,7 +43,7 @@ export class DriverClient {
     #terminating = false;
 
     constructor(binaryPath: string) {
-        this.#process = spawn(binaryPath, ["tooling", "driver"], {
+        this.#process = spawn(binaryPath, ["agent"], {
             stdio: ["pipe", "pipe", "pipe"],
             detached: process.platform !== "win32",
         });
