@@ -70,9 +70,9 @@ requirement.
 Name the truth source explicitly:
 
 ```sh
-termtrace --response agent wait demo --screen Ready --stable-for 250ms --timeout-ms 30000
-termtrace --response agent wait demo --screen-regex 'Ready|Done' --timeout-ms 30000
-termtrace --response agent wait demo --output 'earlier diagnostic' --timeout-ms 30000
+termtrace --response agent wait demo --screen Ready --stable-for 250ms --timeout 30s
+termtrace --response agent wait demo --screen-regex 'Ready|Done' --timeout 30s
+termtrace --response agent wait demo --output 'earlier diagnostic' --timeout 30s
 ```
 
 `--screen` and `--screen-regex` inspect the current presented viewport.
@@ -99,13 +99,13 @@ Input atoms include text, paste, named keys, raw bytes, and files:
 `raw-file:input.bin`. Run `termtrace control keys` for the complete grammar.
 Use `--pace 35ms` only when the application requires paced input.
 
-Every mutation has a request ID and a durable outcome. Follow the returned
+Every `act` mutation has a request ID and a durable outcome. Follow the returned
 `retry` instruction exactly. An uncertain outcome may require the identical
 request ID and payload; deterministic actor rejection requires a corrected
 request. Never resend a whole sequence merely because its postcondition failed.
 
-For an unguarded mutation with no postcondition, the compatibility `send`
-command remains available.
+For direct unguarded bytes with no semantic interpretation or postcondition,
+use `send SESSION --text TEXT`, `--file PATH`, or `--stdin`.
 
 ## Focus and pointer input
 
@@ -148,8 +148,8 @@ Allowed signals are `interrupt`, `terminate`, `hangup`, `user1`, and `user2`. `s
 Start with the task-level last-action reports:
 
 ```bash
-termtrace inspect SESSION --last-action
-termtrace diagnose SESSION --since-last-action
+termtrace inspect SESSION
+termtrace diagnose SESSION
 ```
 
 These commands derive the complete latest input request from its canonical
@@ -187,11 +187,11 @@ State hashes select exact semantic content; if identical content occurred more t
 Names are navigation metadata, not evidence identity:
 
 ```bash
-termtrace registry register demo --session /tmp/example.termtrace
-termtrace registry resolve demo
-termtrace registry list
-termtrace registry list --all --json
-termtrace registry remove demo
+termtrace session register demo --session /tmp/example.termtrace
+termtrace session resolve demo
+termtrace session list
+termtrace session list --all --json
+termtrace session remove demo
 ```
 
 Removing a name never removes evidence. A positional target containing `/` is treated as a path; other values are treated as names. Prefix ambiguous values with `path:` or `name:`.
@@ -203,7 +203,7 @@ termtrace analyze cache status SESSION
 termtrace analyze cache prune SESSION
 ```
 
-For managed recordings under the Termtrace state root, `termtrace registry gc` reports old completed unregistered candidates without deleting them. Add `--apply` only after reviewing the dry-run report. Registered, live, incomplete, invalid, and newest retained recordings are preserved.
+For managed recordings under the Termtrace state root, `termtrace session gc` reports old completed unregistered candidates without deleting them. Add `--apply` only after reviewing the dry-run report. Registered, live, incomplete, invalid, and newest retained recordings are preserved.
 
 ## Automate repeated tests
 
@@ -218,10 +218,10 @@ termtrace test SCENARIO.json --jobs 4 --reruns 1
 Snapshot files change only with `--update-snapshots`. Each rerun receives a new session; failed attempts are retained.
 
 For more than two or three actions, keep one `termtrace agent` process and begin
-the JSONL protocol with `hello`; `rpc` is an equivalent alias. Typed Python,
-TypeScript, and Rust clients wrap the same screen, keyboard, pointer, event,
-completion, and evidence contracts. Driver handles are process-local; canonical
-session IDs and paths remain stable across driver restarts.
+the JSONL protocol with `hello`. Typed Python, TypeScript, and Rust clients wrap
+the same screen, keyboard, pointer, event, completion, and evidence contracts.
+Driver handles are process-local; canonical session IDs and paths remain stable
+across driver restarts.
 
 For branching, retries, loops, or multi-session orchestration, run a reviewable
 client script without generating a project:
@@ -241,9 +241,9 @@ repeatable assertions.
 Preview the files and sensitivity labels before creating a bundle:
 
 ```bash
-termtrace artifact bundle create SESSION --profile screen --out BUNDLE --dry-run
-termtrace artifact bundle create SESSION --profile screen --out BUNDLE
-termtrace artifact bundle verify BUNDLE --source SESSION --profile screen
+termtrace bundle SESSION --profile screen --out BUNDLE --dry-run
+termtrace bundle SESSION --profile screen --out BUNDLE
+termtrace integrity verify-bundle BUNDLE --source SESSION --profile screen
 ```
 
 Use `screen` for a small state handoff, `debug` for redacted event metadata, and `forensic` only when raw input and output are explicitly required. Bundles are never uploaded automatically.

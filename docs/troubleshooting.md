@@ -21,7 +21,6 @@ It initializes the submodule, installs the pinned Zig toolchain, and builds the 
 Check that the session is still live:
 
 ```bash
-termtrace control ping SESSION
 termtrace status SESSION
 ```
 
@@ -30,8 +29,8 @@ Each live session uses a bounded Linux abstract socket derived from its session 
 If a friendly name is involved, inspect all registry states:
 
 ```bash
-termtrace registry list --all --json
-termtrace registry resolve NAME --json
+termtrace session list --all --json
+termtrace session resolve NAME --json
 ```
 
 ## A tmux pane is not recorded

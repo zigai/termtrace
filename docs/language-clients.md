@@ -3,8 +3,7 @@
 The Python and TypeScript packages own the subprocess lifecycle and expose
 matching `Terminal`, `Session`, `Screen`, `Keyboard`, `Pointer`, semantic,
 event, and evidence namespaces. They communicate with the persistent
-`termtrace agent` driver (`rpc` is an equivalent alias) through versioned
-newline-delimited JSON.
+`termtrace agent` driver through versioned newline-delimited JSON.
 
 ## Contract architecture
 

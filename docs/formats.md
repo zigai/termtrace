@@ -135,11 +135,12 @@ when deterministic semantic replay is the intended source. Frame rate,
 resolution or scale, marker range, idle trimming, endpoint holds, and cursor
 treatment can be selected explicitly.
 
-The advanced `termtrace artifact video export` workflow publishes
-`presentation.mp4`, a normalized plan, an output probe, a per-frame presentation
-map, and a manifest. Native Ghostty capture is the default presentation source.
+The `termtrace video` command can print the resolved plan with `--dry-run`,
+render a review artifact with `--preview-out DIRECTORY`, or export an MP4 with
+`--out FILE.mp4`. Exports retain the normalized plan, output probe, per-frame
+presentation map, and manifest in the `.termtrace` sidecar.
 
-With `--source semantic`, the same directory also retains:
+With `--renderer semantic`, the sidecar also retains:
 
 | File | Contents |
 | --- | --- |
@@ -200,22 +201,27 @@ structure, not trust or safety.
 
 ## Export and handoff
 
+`termtrace artifact import --input FILE --out SESSION` converts an ANSI/VT byte
+stream into canonical chained evidence; use `--input -` for standard input.
+
 `termtrace artifact asciicast` creates a lossy UTF-8 interoperability view.
 Invalid bytes, exact timing, and advanced semantic state cannot be preserved, so
 the cast is never canonical evidence.
 
-`termtrace screenshot SESSION -o FILE` writes one owner-only semantic PNG.
-`termtrace bundle SESSION -o DIRECTORY` publishes the least-sensitive manifested
-screen handoff. `termtrace bug-report SESSION -o DIRECTORY [--screenshot]`
-publishes a bounded manifest containing redacted metadata, the last screen,
-last-action analysis, diagnostics, and a canonical session reference. It omits
-raw input/output event streams by default.
+`termtrace screenshot SESSION -o DIRECTORY` writes a manifested semantic PNG
+by default and also supports exact selectors, screenshot batches, SVG, and
+explicit native rendering. `termtrace bundle SESSION -o DIRECTORY` publishes
+the least-sensitive manifested screen handoff and supports `debug` and
+`forensic` profiles when their additional sensitivity is authorized.
+`termtrace bug-report SESSION -o DIRECTORY [--screenshot]` publishes a bounded
+manifest containing redacted metadata, the last screen, last-action analysis,
+diagnostics, and a canonical session reference. It omits raw input/output event
+streams by default.
 
-The advanced `artifact save`, `artifact screenshot`, and `artifact bundle`
-commands provide multi-format directories, exact selectors, native capture, and
-non-default bundle profiles. Bundle manifests are limited to 1 MiB and 10,000
-payload members. Bundle verification requires the caller's expected source
-session and profile; member sensitivity, relationship, and schema labels are
+`termtrace artifact save` creates selected multi-format representations.
+Bundle manifests are limited to 1 MiB and 10,000 payload members. Verify a
+bundle with `termtrace integrity verify-bundle BUNDLE --source SESSION
+--profile PROFILE`; member sensitivity, relationship, and schema labels are
 derived by the verifier rather than accepted from the bundle.
 
 Terminal content remains untrusted and potentially sensitive in every

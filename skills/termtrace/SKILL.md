@@ -16,8 +16,8 @@ boundary instead.
 
 - Use `start --until-*` for initial synchronization, `act` for input plus its
   postcondition, and `screen --since STATE` for repeated observations. After
-  completion, use `inspect --last-action` and `diagnose --since-last-action`
-  before descending into advanced analysis selectors.
+  completion, use `inspect SESSION` and `diagnose SESSION` before descending
+  into advanced analysis selectors.
 - Keep a persistent `termtrace agent` driver after two or three expected
   actions, or whenever the workflow needs branching, loops, repeated
   observations, multiple sessions, or caller-owned retry IDs. Read
@@ -34,8 +34,8 @@ boundary instead.
   postcondition. The presented screen is the latest presentation-eligible
   viewport, not a transcript.
 - Exact child byte-history requirement: `wait --output` or `analyze output`.
-- Semantic transition: start with `inspect SESSION --last-action` or
-  `diagnose SESSION --since-last-action`; use `analyze timeline`, `analyze diff`,
+- Semantic transition: start with `inspect SESSION` or `diagnose SESSION`; use
+  `analyze timeline`, `analyze diff`,
   and `analyze explain` only when explicit endpoints or forensic detail are
   needed.
 - Native pixels: request native screenshot/video explicitly; semantic images do

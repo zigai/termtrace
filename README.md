@@ -77,9 +77,9 @@ scope selection, storage, and exact fidelity boundaries.
 ## Debugging, artifacts, and tests
 
 ```sh
-termtrace inspect ./app.termtrace --last-action
-termtrace diagnose ./app.termtrace --since-last-action
-termtrace screenshot ./app.termtrace -o ./app.png
+termtrace inspect ./app.termtrace
+termtrace diagnose ./app.termtrace
+termtrace screenshot ./app.termtrace -o ./app-screenshot
 termtrace bundle ./app.termtrace -o ./app-bundle
 termtrace bug-report ./app.termtrace -o ./bug-report --screenshot
 termtrace video ./app.termtrace -o ./app.mp4 --preset docs --renderer semantic
@@ -87,9 +87,9 @@ termtrace test SCENARIO.json
 ```
 
 The top-level debugging and handoff commands are the normal task interface.
-Use the nested `analyze` and `artifact` command groups only for advanced
-selectors, forensic reports, batch rendering, or non-default bundle profiles.
-Use `termtrace doctor --explain` to check optional native dependencies.
+Use `analyze` for explicit forensic selectors and `artifact` for ANSI import,
+native capture, saved representations, or asciicast export. Use
+`termtrace doctor --explain` to check optional native dependencies.
 
 ## Documentation
 

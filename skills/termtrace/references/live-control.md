@@ -20,6 +20,11 @@ modifiers such as `ctrl+f` or `ctrl-down`, and explicit `text:`, `paste:`,
 grammar. Use `--response full` only when forensic terminal internals are
 required.
 
+`send` is deliberately lower-level: choose exactly one of `--text`, `--file`,
+or `--stdin` to write bytes directly. It has no semantic atom grammar, state
+guard, pacing, request ID, or postcondition. Use `act` whenever input depends on
+terminal modes or presented state.
+
 Pass the state returned by `start`, `act`, or `screen` through `--if-state` when
 input is valid only for that presentation. Use the same state with
 `screen --since STATE`; an unchanged response proves that no later presented

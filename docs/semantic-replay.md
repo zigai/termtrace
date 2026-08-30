@@ -91,9 +91,9 @@ Semantic PNG and SVG rendering are deterministic derived views. Native PNG expli
 Presentation planning, preview, and export use verified native Ghostty video by default. Select semantic rendering explicitly when a deterministic MP4 is needed on a host without the native display stack:
 
 ```bash
-termtrace artifact video plan SESSION --source semantic --fps 24 --edit EDIT.json
-termtrace artifact video preview SESSION --source semantic --edit EDIT.json --out PREVIEW
-termtrace artifact video export SESSION --source semantic --edit EDIT.json --out EXPORT
+termtrace video SESSION --renderer semantic --fps 24 --edit EDIT.json --dry-run
+termtrace video SESSION --renderer semantic --edit EDIT.json --preview-out PREVIEW
+termtrace video SESSION --renderer semantic --edit EDIT.json --out EXPORT.mp4
 ```
 
 The semantic scheduler samples the latest presentation-eligible state at each frame boundary. It excludes synchronized-output hidden states and records states too brief to receive a frame as suppressed. A final source frame retains the completed semantic state. Resized sessions use one fixed maximum-grid canvas.
