@@ -107,7 +107,7 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
     let mut resolve = Command::cargo_bin("termtrace").expect("binary should build");
     resolve
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["registry", "resolve", "demo"])
+        .args(["session", "resolve", "demo"])
         .assert()
         .success()
         .stdout(format!("{}\n", successor.display()));

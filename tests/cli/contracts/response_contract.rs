@@ -56,7 +56,7 @@ fn explicit_agent_help_is_versioned_but_default_help_stays_readable() {
         .output()
         .expect("run default help");
     assert!(default.status.success());
-    assert!(String::from_utf8_lossy(&default.stdout).contains("Agent workflow:"));
+    assert!(!String::from_utf8_lossy(&default.stdout).contains("Agent workflow:"));
 }
 
 #[test]
@@ -109,12 +109,12 @@ fn mutation_failure_has_retry_state_without_second_stdout_error() {
         .args([
             "--response",
             "agent",
-            "send",
+            "act",
             "name:response-contract-session-that-does-not-exist",
             "text:x",
         ])
         .output()
-        .expect("run missing-session send");
+        .expect("run missing-session action");
 
     assert!(!output.status.success());
     let response = compact_json_line(&output.stdout);

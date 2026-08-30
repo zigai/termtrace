@@ -42,9 +42,9 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     assert_eq!(boundaries.observed.output_bytes, 5);
     let mut compact_idle = Command::cargo_bin("termtrace").expect("binary should build");
     let compact_output = compact_idle
-        .arg("wait-idle")
+        .arg("wait")
         .arg(&stable_session)
-        .args(["--stable-for", "10ms", "--timeout-ms", "2000"])
+        .args(["--idle", "10ms", "--timeout", "2s"])
         .assert()
         .success()
         .get_output()
@@ -67,15 +67,9 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     assert!(compact.pointer("/semantic_state_zstd").is_none());
     let mut full_idle = Command::cargo_bin("termtrace").expect("binary should build");
     full_idle
-        .args(["--response", "full", "wait-idle"])
+        .args(["--response", "full", "wait"])
         .arg(&stable_session)
-        .args([
-            "--stable-for",
-            "10ms",
-            "--timeout-ms",
-            "2000",
-            "--full-state",
-        ])
+        .args(["--idle", "10ms", "--timeout", "2s", "--full-state"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""semantic_state_zstd""#));
@@ -205,23 +199,17 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     );
     let mut strict_idle = Command::cargo_bin("termtrace").expect("binary should build");
     strict_idle
-        .arg("wait-idle")
+        .arg("wait")
         .arg(&closed_session)
-        .args(["--stable-for", "1s", "--timeout-ms", "3000"])
+        .args(["--idle", "1s", "--timeout", "3s"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("output_closed"));
     let mut permissive_idle = Command::cargo_bin("termtrace").expect("binary should build");
     permissive_idle
-        .arg("wait-idle")
+        .arg("wait")
         .arg(&closed_session)
-        .args([
-            "--stable-for",
-            "1s",
-            "--timeout-ms",
-            "3000",
-            "--allow-incomplete",
-        ])
+        .args(["--idle", "1s", "--timeout", "3s", "--allow-incomplete"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""quality":"output_closed""#));

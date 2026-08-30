@@ -28,7 +28,7 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
     let input = format!("{hello}\n{hello}\n{attach}\n");
     let mut driver = Command::cargo_bin("termtrace").expect("binary should build");
     let output = driver
-        .args(["tooling", "driver"])
+        .arg("agent")
         .write_stdin(input)
         .assert()
         .success()

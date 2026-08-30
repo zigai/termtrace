@@ -26,7 +26,7 @@ fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomple
     let mut register = Command::cargo_bin("termtrace").expect("binary should build");
     register
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["registry", "register", "protected", "--session"])
+        .args(["session", "register", "protected", "--session"])
         .arg(&registered)
         .assert()
         .success();
@@ -50,7 +50,7 @@ fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomple
     let dry_run = dry_run
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "registry",
+            "session",
             "gc",
             "--older-than-days",
             "0",
@@ -93,7 +93,7 @@ fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomple
     apply
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "registry",
+            "session",
             "gc",
             "--older-than-days",
             "0",
@@ -133,7 +133,7 @@ fn corrupt_registry_entries_do_not_poison_listing_or_unsafe_garbage_collection()
     let mut initialize = Command::cargo_bin("termtrace").expect("binary should build");
     initialize
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["registry", "list", "--all", "--json"])
+        .args(["session", "list", "--all", "--json"])
         .assert()
         .success();
     let corrupt = state.join("registry").join("poison.json");
@@ -143,7 +143,7 @@ fn corrupt_registry_entries_do_not_poison_listing_or_unsafe_garbage_collection()
 
     let mut list = Command::cargo_bin("termtrace").expect("binary should build");
     list.env("TERMTRACE_STATE_DIR", &state)
-        .args(["registry", "list", "--all", "--json"])
+        .args(["session", "list", "--all", "--json"])
         .assert()
         .success()
         .stdout("[]\n");
@@ -152,7 +152,7 @@ fn corrupt_registry_entries_do_not_poison_listing_or_unsafe_garbage_collection()
     let output = apply
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "registry",
+            "session",
             "gc",
             "--older-than-days",
             "0",

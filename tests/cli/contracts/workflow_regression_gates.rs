@@ -52,14 +52,14 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
             .expect("workflow ready output");
 
         let full = wait_idle_output(&session, "full");
-        assert!(full.status.success(), "full wait-idle failed: {full:?}");
+        assert!(full.status.success(), "full idle wait failed: {full:?}");
         let full_value: serde_json::Value =
-            serde_json::from_slice(&full.stdout).expect("full wait-idle JSON");
+            serde_json::from_slice(&full.stdout).expect("full idle wait JSON");
         assert!(contains_key(&full_value, "modes"));
         full_bytes = full_bytes.saturating_add(full.stdout.len());
 
         let agent = wait_idle_output(&session, "agent");
-        assert!(agent.status.success(), "agent wait-idle failed: {agent:?}");
+        assert!(agent.status.success(), "agent idle wait failed: {agent:?}");
         let agent_value = compact_json_line(&agent.stdout);
         assert_eq!(agent_value["ok"], true);
         assert!(!contains_key(&agent_value, "modes"));
@@ -87,17 +87,20 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
             ));
         }
 
-        let mut send = Command::cargo_bin("termtrace").expect("binary should build");
-        let sent = send
-            .args(["--response", "agent", "send"])
+        let mut act = Command::cargo_bin("termtrace").expect("binary should build");
+        let action = act
+            .args(["--response", "agent", "act"])
             .arg(&session)
             .arg(format!("text:{}", fixture.accepted_input))
             .output()
-            .expect("send accepted fixture input");
-        assert!(sent.status.success(), "accepted input failed: {sent:?}");
-        let sent_value = compact_json_line(&sent.stdout);
-        assert_eq!(sent_value["ok"], true);
-        assert_eq!(sent_value["applied"], "all");
+            .expect("act on accepted fixture input");
+        assert!(action.status.success(), "accepted input failed: {action:?}");
+        let action_value = compact_json_line(&action.stdout);
+        assert_eq!(action_value["ok"], true);
+        assert_eq!(
+            action_value["input"]["applied"], "all",
+            "unexpected compact action response: {action_value}"
+        );
 
         let output = child.wait_with_output().expect("workflow completion");
         assert!(output.status.success(), "workflow child failed: {output:?}");
@@ -144,11 +147,11 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
 fn wait_idle_output(session: &Path, response: &str) -> Output {
     return Command::cargo_bin("termtrace")
         .expect("binary should build")
-        .args(["--response", response, "wait-idle"])
+        .args(["--response", response, "wait"])
         .arg(session)
-        .args(["--stable-for", "10ms", "--timeout-ms", "5000"])
+        .args(["--idle", "10ms", "--timeout", "5s"])
         .output()
-        .expect("run wait-idle");
+        .expect("run idle wait");
 }
 
 #[allow(

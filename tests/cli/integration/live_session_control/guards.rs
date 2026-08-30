@@ -54,15 +54,6 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
         {
             let mut command = Command::cargo_bin("termtrace").expect("binary should build");
             command
-                .args(["--response", "agent", "send", "--if-state"])
-                .arg("0".repeat(64))
-                .arg(&session)
-                .arg("text:blocked");
-            command
-        },
-        {
-            let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-            command
                 .args(["--response", "agent", "act", "--if-state"])
                 .arg("0".repeat(64))
                 .arg(&session)

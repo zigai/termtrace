@@ -26,7 +26,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut register = Command::cargo_bin("termtrace").expect("binary should build");
     let registered = register
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "registry", "register"])
+        .args(["--response", "full", "session", "register"])
         .arg("demo")
         .arg("--session")
         .arg(&session)
@@ -49,7 +49,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut resolve = Command::cargo_bin("termtrace").expect("binary should build");
     resolve
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["registry", "resolve", "demo"])
+        .args(["session", "resolve", "demo"])
         .assert()
         .success()
         .stdout(format!(
@@ -60,7 +60,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut structured = Command::cargo_bin("termtrace").expect("binary should build");
     structured
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["registry", "resolve", "demo", "--json"])
+        .args(["session", "resolve", "demo", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains(manifest.session_id.to_string()))
@@ -78,7 +78,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["registry", "register"])
+        .args(["session", "register"])
         .arg("demo")
         .arg("--session")
         .arg(&session)
@@ -88,14 +88,14 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut active_only = Command::cargo_bin("termtrace").expect("binary should build");
     active_only
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["registry", "list", "--json"])
+        .args(["session", "list", "--json"])
         .assert()
         .success()
         .stdout("[]\n");
     let mut all = Command::cargo_bin("termtrace").expect("binary should build");
     let all = all
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["registry", "list", "--all", "--json"])
+        .args(["session", "list", "--all", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""lifecycle":"completed""#))
@@ -117,7 +117,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut human = Command::cargo_bin("termtrace").expect("binary should build");
     let human = human
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["registry", "list", "--all"])
+        .args(["session", "list", "--all"])
         .assert()
         .success()
         .get_output()
@@ -157,7 +157,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut remove = Command::cargo_bin("termtrace").expect("binary should build");
     let removed = remove
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "registry", "remove", "demo"])
+        .args(["--response", "full", "session", "remove", "demo"])
         .assert()
         .success()
         .get_output()
@@ -199,7 +199,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
     let mut register = Command::cargo_bin("termtrace").expect("binary should build");
     register
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["registry", "register", "interrupted", "--session"])
+        .args(["session", "register", "interrupted", "--session"])
         .arg(&session)
         .assert()
         .success();
@@ -215,7 +215,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
     let mut incomplete_control = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_control
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["control", "ping", "interrupted"])
+        .args(["control", "mark", "interrupted", "--label", "probe"])
         .assert()
         .failure()
         .stdout(predicate::str::contains(r#""lifecycle":"incomplete""#))

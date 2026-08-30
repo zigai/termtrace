@@ -208,38 +208,26 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
         .success()
         .stdout(predicate::str::contains(r#""unchanged":true"#));
 
-    let mut show_alias = Command::cargo_bin("termtrace").expect("binary should build");
-    show_alias
-        .env("TERMTRACE_STATE_DIR", &state)
+    let mut show = Command::cargo_bin("termtrace").expect("binary should build");
+    show.env("TERMTRACE_STATE_DIR", &state)
+        .args(["show", "workflow", "--format", "json-compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""source_kind":"live_session""#));
+
+    let mut send = Command::cargo_bin("termtrace").expect("binary should build");
+    send.env("TERMTRACE_STATE_DIR", &state)
+        .args(["--response", "full", "send", "workflow", "--text", "Y"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""bytes_written":1"#));
+
+    let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
+    wait.env("TERMTRACE_STATE_DIR", &state)
         .args([
             "--response",
             "full",
-            "show",
-            "workflow",
-            "--screen",
-            "none",
-            "--since",
-            state_hash,
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(r#""unchanged":true"#));
-
-    let mut input_alias = Command::cargo_bin("termtrace").expect("binary should build");
-    input_alias
-        .env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "input", "workflow", "text:Y"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(r#""applied":"all""#));
-
-    let mut wait_screen_alias = Command::cargo_bin("termtrace").expect("binary should build");
-    wait_screen_alias
-        .env("TERMTRACE_STATE_DIR", &state)
-        .args([
-            "--response",
-            "full",
-            "wait-screen",
+            "wait",
             "workflow",
             "Y",
             "--timeout",
@@ -443,7 +431,7 @@ fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
 
     let mut interleaved = Command::cargo_bin("termtrace").expect("binary should build");
     let rejected = interleaved
-        .args(["--response", "full", "send"])
+        .args(["--response", "full", "act"])
         .arg(&session)
         .arg("raw:B")
         .assert()
@@ -454,7 +442,7 @@ fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
     let rejected: serde_json::Value =
         serde_json::from_slice(&rejected).expect("concurrent rejection JSON");
     assert_eq!(rejected["code"], "action_busy");
-    assert_eq!(rejected["applied"], "none");
+    assert_eq!(rejected["input"]["applied"], "none");
 
     let action_output = action.wait_with_output().expect("atomic action response");
     assert_eq!(action_output.status.code(), Some(1));
@@ -471,7 +459,7 @@ fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
 
     let mut after = Command::cargo_bin("termtrace").expect("binary should build");
     after
-        .args(["--response", "full", "send"])
+        .args(["--response", "full", "act"])
         .arg(&session)
         .arg("raw:B")
         .assert()
@@ -507,7 +495,6 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
     let inspection_bytes = inspect
         .args(["inspect"])
         .arg(&session)
-        .arg("--last-action")
         .assert()
         .success()
         .get_output()
@@ -538,7 +525,6 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
     let diagnostics_bytes = diagnose
         .args(["diagnose"])
         .arg(&session)
-        .arg("--since-last-action")
         .assert()
         .success()
         .get_output()
@@ -553,7 +539,7 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
     );
     assert!(diagnostics["findings"].as_array().is_some());
 
-    let screenshot = temporary.path().join("screen.png");
+    let screenshot = temporary.path().join("screenshot");
     let mut screenshot_command = Command::cargo_bin("termtrace").expect("binary should build");
     screenshot_command
         .arg("screenshot")
@@ -563,7 +549,7 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
         .assert()
         .success();
     assert!(
-        fs_err::read(&screenshot)
+        fs_err::read(screenshot.join("screen.png"))
             .expect("screenshot bytes")
             .starts_with(b"\x89PNG\r\n\x1a\n")
     );
@@ -726,7 +712,7 @@ fn last_action_uses_the_full_journaled_multi_atom_request_boundary() {
     let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
     let output = inspect
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["inspect", "sequence", "--last-action"])
+        .args(["inspect", "sequence"])
         .assert()
         .success()
         .get_output()
@@ -763,7 +749,7 @@ fn last_action_uses_the_full_journaled_multi_atom_request_boundary() {
 }
 
 #[test]
-fn last_action_uses_the_full_journaled_multi_atom_send_boundary() {
+fn last_action_uses_the_full_journaled_multi_atom_action_boundary() {
     let temporary = TempDir::new().expect("temporary directory");
     let state = temporary.path().join("state");
     let request_id = "019fddda-17c8-7000-87da-8785e71ab5d9";
@@ -792,7 +778,7 @@ fn last_action_uses_the_full_journaled_multi_atom_send_boundary() {
         .args([
             "--response",
             "full",
-            "send",
+            "act",
             "sequence-send",
             "text:world",
             "enter",
@@ -826,14 +812,14 @@ fn last_action_uses_the_full_journaled_multi_atom_send_boundary() {
     let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
     let output = inspect
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["inspect", "sequence-send", "--last-action"])
+        .args(["inspect", "sequence-send"])
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
     let report: serde_json::Value =
-        serde_json::from_slice(&output).expect("multi-atom send last-action report");
+        serde_json::from_slice(&output).expect("multi-atom action last-action report");
     assert_eq!(report["action"]["request_id"], request_id);
     assert_eq!(report["action"]["atom_count"], 2);
     assert_eq!(report["action"]["intended_bytes"], 6);

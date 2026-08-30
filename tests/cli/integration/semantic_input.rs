@@ -1,6 +1,7 @@
 //! semantic input CLI integration tests.
 
 use crate::support::*;
+use std::ffi::OsStr;
 
 #[test]
 fn named_key_is_encoded_from_live_application_cursor_mode() {
@@ -24,11 +25,11 @@ fn named_key_is_encoded_from_live_application_cursor_mode() {
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
     wait.arg("wait")
         .arg(&session)
-        .args(["--output", "READY", "--timeout-ms", "5000"])
+        .args(["--output", "READY", "--timeout", "5s"])
         .assert()
         .success();
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
-    send.arg("send").arg(&session).arg("up").assert().success();
+    send.arg("act").arg(&session).arg("up").assert().success();
     let output = child.wait_with_output().expect("key fixture completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
 
@@ -54,7 +55,77 @@ fn named_key_is_encoded_from_live_application_cursor_mode() {
 }
 
 #[test]
-fn send_accepts_natural_modifier_aliases_and_single_character_text() {
+fn send_writes_text_file_and_stdin_bytes_directly() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("direct-send-session");
+    let input_file = temporary.path().join("input.bin");
+    fs_err::write(&input_file, b"\0B").expect("direct input fixture");
+    let child = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,tty; tty.setraw(0); os.write(1,b'READY'); d=b''\nwhile len(d)<11: d+=os.read(0,11-len(d))\nos.write(1,b'GOT:'+d.hex().encode())",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn direct input fixture");
+    wait_for_control(&session);
+    wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("ready output");
+
+    for (argument, value, byte_count) in [
+        ("--text", OsStr::new("alpha"), 5_u64),
+        ("--file", input_file.as_os_str(), 2_u64),
+    ] {
+        let mut send = Command::cargo_bin("termtrace").expect("binary should build");
+        let output = send
+            .args(["--response", "full", "send"])
+            .arg(&session)
+            .arg(argument)
+            .arg(value)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let response: serde_json::Value =
+            serde_json::from_slice(&output).expect("direct send response");
+        assert_eq!(response["bytes_written"], byte_count);
+    }
+
+    let mut stdin_send = Command::cargo_bin("termtrace").expect("binary should build");
+    stdin_send
+        .args(["--response", "full", "send"])
+        .arg(&session)
+        .arg("--stdin")
+        .write_stdin("tail")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""bytes_written":4"#));
+    let output = child.wait_with_output().expect("direct input completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+    wait_for_output(
+        &session,
+        b"GOT:616c70686100427461696c",
+        Duration::from_secs(5),
+    )
+    .expect("exact direct bytes");
+
+    let mut semantic_atom = Command::cargo_bin("termtrace").expect("binary should build");
+    semantic_atom
+        .arg("send")
+        .arg(&session)
+        .arg("enter")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unexpected argument"));
+}
+
+#[test]
+fn act_accepts_natural_modifier_aliases_and_single_character_text() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("natural-key-session");
     let binary = env!("CARGO_BIN_EXE_termtrace");
@@ -76,7 +147,7 @@ fn send_accepts_natural_modifier_aliases_and_single_character_text() {
 
     for atom in ["q", "ctrl+f", "ctrl+down", "enter"] {
         let mut send = Command::cargo_bin("termtrace").expect("binary should build");
-        send.arg("send").arg(&session).arg(atom).assert().success();
+        send.arg("act").arg(&session).arg(atom).assert().success();
     }
     let output = child.wait_with_output().expect("natural key completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
@@ -527,13 +598,13 @@ fn paced_unicode_text_splits_only_at_scalar_boundaries() {
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
     wait.arg("wait")
         .arg(&session)
-        .args(["--output", "READY", "--timeout-ms", "5000"])
+        .args(["--output", "READY", "--timeout", "5s"])
         .assert()
         .success();
 
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
     let sent = send
-        .arg("send")
+        .args(["--response", "full", "act"])
         .arg(&session)
         .args(["--pace", "1ms", "--verbose", "text:é界", "enter"])
         .assert()
@@ -542,7 +613,7 @@ fn paced_unicode_text_splits_only_at_scalar_boundaries() {
         serde_json::from_slice(&sent.get_output().stdout).expect("sequence response");
     assert_eq!(
         response
-            .pointer("/outcomes")
+            .pointer("/input/outcomes")
             .and_then(serde_json::Value::as_array)
             .map(Vec::len),
         Some(3)
@@ -591,11 +662,11 @@ fn semantic_paste_uses_live_bracketed_mode_and_records_wrappers() {
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
     wait.arg("wait")
         .arg(&session)
-        .args(["--output", "READY", "--timeout-ms", "5000"])
+        .args(["--output", "READY", "--timeout", "5s"])
         .assert()
         .success();
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
-    send.arg("send")
+    send.arg("act")
         .arg(&session)
         .arg("paste:one\ntwo")
         .assert()
@@ -643,7 +714,7 @@ fn paced_sequence_encodes_each_atom_after_pumping_mode_changes() {
     let request_id_text = request_id.to_string();
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
     let sent = send
-        .arg("send")
+        .args(["--response", "full", "act"])
         .arg(&session)
         .args([
             "--request-id",
@@ -668,7 +739,7 @@ fn paced_sequence_encodes_each_atom_after_pumping_mode_changes() {
     );
     assert_eq!(
         response
-            .pointer("/outcomes")
+            .pointer("/input/outcomes")
             .and_then(serde_json::Value::as_array)
             .map(Vec::len),
         Some(2)
@@ -736,7 +807,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
     visible
         .arg("wait")
         .arg(&session)
-        .args(["VISIBLE", "--timeout-ms", "5000"])
+        .args(["VISIBLE", "--timeout", "5s"])
         .assert()
         .success();
     let hidden = send_request(&session, &ControlRequest::new(ControlCommand::Snapshot))
@@ -757,7 +828,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
 
     let mut release = Command::cargo_bin("termtrace").expect("binary should build");
     release
-        .arg("send")
+        .arg("act")
         .arg(&session)
         .arg("text:x")
         .assert()
@@ -775,7 +846,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
     visible_wait
         .arg("wait")
         .arg(&session)
-        .args(["BUSY", "--stable-for", "50ms", "--timeout-ms", "1000"])
+        .args(["BUSY", "--stable-for", "50ms", "--timeout", "1s"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""scope":"screen""#))
@@ -789,8 +860,8 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
             "VISIBLE",
             "--stable-for",
             "20ms",
-            "--timeout-ms",
-            "1000",
+            "--timeout",
+            "1s",
         ])
         .assert()
         .success();
@@ -806,7 +877,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
             .arg("wait")
             .arg(&session)
             .args(arguments)
-            .args(["--timeout-ms", "1000"])
+            .args(["--timeout", "1s"])
             .assert()
             .success();
     }

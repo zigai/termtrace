@@ -154,7 +154,7 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
     let mut wait_idle = Command::cargo_bin("termtrace").expect("binary should build");
     wait_idle
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["wait-idle", "fast-success"])
+        .args(["wait", "fast-success", "--idle"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""quality":"completed""#));
@@ -174,13 +174,14 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
         .args([
             "--response",
             "full",
-            "wait-idle",
+            "wait",
             "fast-success",
+            "--idle",
             "--require-live-stability",
         ])
         .assert()
         .failure()
-        .stdout(predicate::str::contains(r#""operation":"wait_idle""#))
+        .stdout(predicate::str::contains(r#""operation":"wait""#))
         .stdout(predicate::str::contains(r#""lifecycle":"completed""#));
 
     let mut unsuccessful = Command::cargo_bin("termtrace").expect("binary should build");

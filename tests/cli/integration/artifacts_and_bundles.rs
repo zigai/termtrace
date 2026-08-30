@@ -190,7 +190,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
     let screenshot = temporary.path().join("semantic-screenshot");
     let mut screenshot_command = Command::cargo_bin("termtrace").expect("binary should build");
     screenshot_command
-        .args(["artifact", "screenshot"])
+        .args(["screenshot"])
         .arg(&session)
         .args(["--out"])
         .arg(&screenshot)
@@ -208,7 +208,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
     let batch = temporary.path().join("semantic-screenshot-batch");
     let mut batch_command = Command::cargo_bin("termtrace").expect("binary should build");
     batch_command
-        .args(["artifact", "screenshot"])
+        .args(["screenshot"])
         .arg(&session)
         .args(["--out"])
         .arg(&batch)
@@ -269,8 +269,11 @@ fn screenshots_serialize_non_utf8_output_paths_without_panicking() {
     let response: serde_json::Value =
         serde_json::from_slice(&output).expect("non-UTF-8 screenshot response JSON");
     assert_eq!(response["kind"], "semantic_screenshot");
-    assert_eq!(response["file_display"], destination.display().to_string());
-    assert!(destination.is_file());
+    assert_eq!(
+        response["directory_display"],
+        destination.display().to_string()
+    );
+    assert!(destination.join("screen.png").is_file());
 }
 
 #[test]
@@ -347,7 +350,7 @@ fn state_hash_selectors_reach_every_exact_state_workflow() {
     let screenshot = temporary.path().join("other/nested/hash-screenshot");
     let mut screenshot_command = Command::cargo_bin("termtrace").expect("binary should build");
     screenshot_command
-        .args(["artifact", "screenshot"])
+        .args(["screenshot"])
         .arg(&session)
         .arg("--state-hash")
         .arg(&final_hash)
@@ -382,7 +385,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
 
     let mut dry_run = Command::cargo_bin("termtrace").expect("binary should build");
     dry_run
-        .args(["--response", "full", "artifact", "bundle", "create"])
+        .args(["--response", "full", "bundle"])
         .arg(&session)
         .args(["--profile", "debug", "--out"])
         .arg(temporary.path().join("unused"))
@@ -397,7 +400,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
 
     let mut create = Command::cargo_bin("termtrace").expect("binary should build");
     create
-        .args(["artifact", "bundle", "create"])
+        .args(["bundle"])
         .arg(&session)
         .args(["--profile", "forensic", "--out"])
         .arg(&bundle)
@@ -414,7 +417,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     assert!(bundle.join("canonical/completion.json").is_file());
     let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
     verify
-        .args(["artifact", "bundle", "verify"])
+        .args(["integrity", "verify-bundle"])
         .arg(&bundle)
         .arg("--source")
         .arg(&session)
@@ -425,7 +428,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
 
     let mut wrong_profile = Command::cargo_bin("termtrace").expect("binary should build");
     wrong_profile
-        .args(["artifact", "bundle", "verify"])
+        .args(["integrity", "verify-bundle"])
         .arg(&bundle)
         .arg("--source")
         .arg(&session)
@@ -444,7 +447,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
         .success();
     let mut wrong_source = Command::cargo_bin("termtrace").expect("binary should build");
     wrong_source
-        .args(["artifact", "bundle", "verify"])
+        .args(["integrity", "verify-bundle"])
         .arg(&bundle)
         .arg("--source")
         .arg(&other_session)
@@ -466,7 +469,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     .expect("write attacker policy metadata");
     let mut reject_policy_metadata = Command::cargo_bin("termtrace").expect("binary should build");
     reject_policy_metadata
-        .args(["artifact", "bundle", "verify"])
+        .args(["integrity", "verify-bundle"])
         .arg(&bundle)
         .arg("--source")
         .arg(&session)
@@ -479,7 +482,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     fs_err::write(&manifest_path, vec![b' '; 1024 * 1024 + 1]).expect("write oversized manifest");
     let mut reject_large_manifest = Command::cargo_bin("termtrace").expect("binary should build");
     reject_large_manifest
-        .args(["artifact", "bundle", "verify"])
+        .args(["integrity", "verify-bundle"])
         .arg(&bundle)
         .arg("--source")
         .arg(&session)
@@ -496,7 +499,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     for destination in [&archive, &archive_copy] {
         let mut create_archive = Command::cargo_bin("termtrace").expect("binary should build");
         create_archive
-            .args(["artifact", "bundle", "create"])
+            .args(["bundle"])
             .arg(&session)
             .args(["--profile", "forensic", "--archive", "--out"])
             .arg(destination)
@@ -518,7 +521,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     );
     let mut verify_archive = Command::cargo_bin("termtrace").expect("binary should build");
     verify_archive
-        .args(["artifact", "bundle", "verify"])
+        .args(["integrity", "verify-bundle"])
         .arg(&archive)
         .arg("--source")
         .arg(&session)
@@ -534,7 +537,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     fs_err::write(&archive_copy, corrupted).expect("write corrupted archive");
     let mut reject_archive = Command::cargo_bin("termtrace").expect("binary should build");
     reject_archive
-        .args(["artifact", "bundle", "verify"])
+        .args(["integrity", "verify-bundle"])
         .arg(&archive_copy)
         .arg("--source")
         .arg(&session)
@@ -545,7 +548,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
     fs_err::write(bundle.join("screen.txt"), b"tampered").expect("tamper bundle");
     let mut tampered = Command::cargo_bin("termtrace").expect("binary should build");
     tampered
-        .args(["artifact", "bundle", "verify"])
+        .args(["integrity", "verify-bundle"])
         .arg(&bundle)
         .arg("--source")
         .arg(&session)

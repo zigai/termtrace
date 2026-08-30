@@ -24,14 +24,14 @@ fn live_control_drives_and_audits_a_detached_session() {
     let mut register = Command::cargo_bin("termtrace").expect("binary should build");
     register
         .env("TERMTRACE_STATE_DIR", &registry_state)
-        .args(["registry", "register", "live-demo", "--session"])
+        .args(["session", "register", "live-demo", "--session"])
         .arg(&session)
         .assert()
         .success();
-    let mut named_ping = Command::cargo_bin("termtrace").expect("binary should build");
-    named_ping
+    let mut named_status = Command::cargo_bin("termtrace").expect("binary should build");
+    named_status
         .env("TERMTRACE_STATE_DIR", &registry_state)
-        .args(["control", "ping", "live-demo"])
+        .args(["status", "live-demo"])
         .assert()
         .success();
     let entry: serde_json::Value = serde_json::from_slice(
@@ -53,7 +53,7 @@ fn live_control_drives_and_audits_a_detached_session() {
     let mut named_list = Command::cargo_bin("termtrace").expect("binary should build");
     named_list
         .env("TERMTRACE_STATE_DIR", &registry_state)
-        .args(["registry", "list", "--json"])
+        .args(["session", "list", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""lifecycle":"live""#))
@@ -97,7 +97,6 @@ fn live_control_drives_and_audits_a_detached_session() {
     ));
 
     for arguments in [
-        vec!["control", "ping", session.to_str().expect("UTF-8 path")],
         vec!["status", session.to_str().expect("UTF-8 path")],
         vec![
             "control",
@@ -125,8 +124,8 @@ fn live_control_drives_and_audits_a_detached_session() {
             session.to_str().expect("UTF-8 path"),
             "--output",
             "agent:hello",
-            "--timeout-ms",
-            "5000",
+            "--timeout",
+            "5s",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -134,7 +133,7 @@ fn live_control_drives_and_audits_a_detached_session() {
         .expect("spawn output waiter");
     thread::sleep(Duration::from_millis(50));
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
-    send.arg("send")
+    send.arg("act")
         .arg(&session)
         .args(["text:hello\n", "--intent", "complete shell read"])
         .assert()

@@ -10,16 +10,15 @@ fn root_help_groups_commands_by_workflow() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Commands:\n  Recording:"))
-        .stdout(predicate::str::contains("\n  Live workflow:"))
-        .stdout(predicate::str::contains("\n  Command groups:"))
-        .stdout(predicate::str::contains("\n  Control:").not())
-        .stdout(predicate::str::contains("\n  Analysis:").not())
-        .stdout(predicate::str::contains("\n  Artifacts:").not())
-        .stdout(predicate::str::contains("\n  Sessions:").not())
-        .stdout(predicate::str::contains("\n  Integrity:").not())
-        .stdout(predicate::str::contains("\n  Tooling:").not())
-        .stdout(predicate::str::contains("\n  Meta:").not())
+        .stdout(predicate::str::contains("Commands:\n  Sessions:"))
+        .stdout(predicate::str::contains("\n  Interaction:"))
+        .stdout(predicate::str::contains("\n  Investigation:"))
+        .stdout(predicate::str::contains("\n  Artifacts:"))
+        .stdout(predicate::str::contains("\n  Automation:"))
+        .stdout(predicate::str::contains("\n  System:"))
+        .stdout(predicate::str::contains("\n  Recording:").not())
+        .stdout(predicate::str::contains("\n  Live workflow:").not())
+        .stdout(predicate::str::contains("\n  Command groups:").not())
         .stdout(predicate::str::contains("bundle-verify").not())
         .stdout(predicate::str::contains("export-asciicast").not())
         .stdout(predicate::str::contains(
@@ -41,6 +40,24 @@ fn commands_subcommand_is_removed() {
         .stderr(predicate::str::contains(
             "unrecognized subcommand 'commands'",
         ));
+}
+
+#[test]
+fn removed_compatibility_and_duplicate_routes_are_rejected() {
+    for arguments in [
+        &["input", "--help"][..],
+        &["wait-screen", "--help"][..],
+        &["rpc", "--help"][..],
+        &["registry", "--help"][..],
+        &["tooling", "driver", "--help"][..],
+        &["control", "ping", "--help"][..],
+        &["artifact", "screenshot", "--help"][..],
+        &["artifact", "video", "--help"][..],
+        &["artifact", "bundle", "--help"][..],
+    ] {
+        let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+        command.args(arguments).assert().failure();
+    }
 }
 
 #[test]
@@ -76,7 +93,7 @@ fn native_screenshot_help_uses_the_solver_without_a_noop_flag() {
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
 
     command
-        .args(["artifact", "screenshot", "--help"])
+        .args(["screenshot", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("omit to solve the"))
@@ -85,31 +102,26 @@ fn native_screenshot_help_uses_the_solver_without_a_noop_flag() {
 }
 
 #[test]
-fn top_level_debug_and_handoff_facades_are_directly_discoverable() {
-    for (command_name, required_option) in [
-        ("inspect", "--last-action"),
-        ("diagnose", "--since-last-action"),
-        ("screenshot", "--out <OUT>"),
-        ("bundle", "--out <OUT>"),
-        ("bug-report", "--out <OUT>"),
-    ] {
+fn top_level_debug_and_handoff_commands_are_directly_discoverable() {
+    for command_name in ["inspect", "diagnose"] {
         let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-        let output = command
+        command
             .args([command_name, "--help"])
             .assert()
             .success()
-            .get_output()
-            .stdout
-            .clone();
-        let help = String::from_utf8(output).expect("UTF-8 help");
-        assert!(
-            help.contains(required_option),
-            "{command_name} help omitted `{required_option}`:\n{help}"
-        );
-        assert!(
-            help.contains("<SESSION>"),
-            "{command_name} help omitted the session operand:\n{help}"
-        );
+            .stdout(predicate::str::contains("<SESSION>"))
+            .stdout(predicate::str::contains("--last-action").not())
+            .stdout(predicate::str::contains("--since-last-action").not());
+    }
+
+    for command_name in ["screenshot", "bundle", "bug-report"] {
+        let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+        command
+            .args([command_name, "--help"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("<SESSION>"))
+            .stdout(predicate::str::contains("--out <OUT>"));
     }
 
     let mut bug_report = Command::cargo_bin("termtrace").expect("binary should build");
@@ -131,7 +143,7 @@ fn top_level_video_exposes_complete_manifested_workflow() {
         .stdout
         .clone();
     let help = String::from_utf8(output).expect("UTF-8 help");
-    assert!(help.contains("Usage: termtrace video [OPTIONS] --out <OUT> <SESSION>"));
+    assert!(help.contains("Usage: termtrace video [OPTIONS]"));
     for option in [
         "--preset",
         "--fps",
@@ -144,6 +156,10 @@ fn top_level_video_exposes_complete_manifested_workflow() {
         "--hold-start",
         "--hold-end",
         "--cursor-style",
+        "--dry-run",
+        "--preview-out",
+        "--edit",
+        "--semantic-raster-profile",
     ] {
         assert!(
             help.contains(option),
@@ -222,8 +238,8 @@ fn complex_selector_help_stays_within_one_hundred_columns() {
             &[][..],
         ),
         (
-            &["artifact", "screenshot", "--help"][..],
-            "termtrace artifact screenshot",
+            &["screenshot", "--help"][..],
+            "termtrace screenshot",
             &[][..],
         ),
         (&["tmux", "--help"][..], "termtrace tmux", &[][..]),
@@ -273,6 +289,41 @@ fn complex_selector_help_stays_within_one_hundred_columns() {
             );
         }
     }
+}
+
+#[test]
+fn wait_help_exposes_the_consolidated_idle_surface() {
+    let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
+    wait.args(["wait", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--idle [<IDLE>]"))
+        .stdout(predicate::str::contains("--allow-incomplete"))
+        .stdout(predicate::str::contains("--require-live-stability"))
+        .stdout(predicate::str::contains("--full-state"))
+        .stdout(predicate::str::contains("--timeout <TIMEOUT>"))
+        .stdout(predicate::str::contains("--timeout-ms").not());
+
+    let mut removed = Command::cargo_bin("termtrace").expect("binary should build");
+    removed
+        .arg("wait-idle")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
+
+    let mut idle_only = Command::cargo_bin("termtrace").expect("binary should build");
+    idle_only
+        .args(["wait", "session", "--screen", "READY", "--full-state"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--idle"));
+
+    let mut conflicting_stability = Command::cargo_bin("termtrace").expect("binary should build");
+    conflicting_stability
+        .args(["wait", "session", "--idle", "--stable-for", "10ms"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
 }
 
 #[test]
@@ -459,10 +510,11 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
     let mut semantic = Command::cargo_bin("termtrace").expect("binary should build");
     semantic
         .env("PATH", "")
-        .args(["artifact", "video", "plan"])
+        .args(["video"])
         .arg(&session)
-        .args(["--source", "semantic", "--fps", "60", "--edit"])
+        .args(["--renderer", "semantic", "--fps", "60", "--edit"])
         .arg(&edit)
+        .arg("--dry-run")
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""version":4"#))
@@ -483,16 +535,17 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
     let mut supersampled = Command::cargo_bin("termtrace").expect("binary should build");
     supersampled
         .env("PATH", "")
-        .args(["artifact", "video", "plan"])
+        .args(["video"])
         .arg(&session)
         .args([
-            "--source",
+            "--renderer",
             "semantic",
             "--semantic-raster-profile",
             "supersampled-2x",
             "--edit",
         ])
         .arg(&edit)
+        .arg("--dry-run")
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -501,16 +554,17 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
 
     let mut invalid_native_profile = Command::cargo_bin("termtrace").expect("binary should build");
     invalid_native_profile
-        .args(["artifact", "video", "plan"])
+        .args(["video"])
         .arg(&session)
         .args([
-            "--source",
+            "--renderer",
             "native",
             "--semantic-raster-profile",
             "direct",
             "--edit",
         ])
         .arg(&edit)
+        .arg("--dry-run")
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -519,31 +573,20 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
 
     let mut native_default = Command::cargo_bin("termtrace").expect("binary should build");
     native_default
-        .args(["artifact", "video", "plan"])
+        .args(["video"])
         .arg(&session)
         .arg("--edit")
         .arg(&edit)
+        .arg("--dry-run")
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "native video source requires a verified capture",
+            "native renderer requires a verified capture manifest",
         ))
         .stderr(predicate::str::contains(
-            "checking the native-video tooling capability",
+            "checking `termtrace doctor --require native-video --explain`",
         ))
-        .stderr(predicate::str::contains("--source semantic"));
-
-    let mut invalid_native_fps = Command::cargo_bin("termtrace").expect("binary should build");
-    invalid_native_fps
-        .args(["artifact", "video", "plan"])
-        .arg(&session)
-        .args(["--source", "native", "--fps", "60", "--edit"])
-        .arg(&edit)
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "--fps configures semantic video only",
-        ));
+        .stderr(predicate::str::contains("--renderer semantic"));
 
     let mut index = Command::cargo_bin("termtrace").expect("binary should build");
     index
@@ -552,29 +595,11 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .assert()
         .success();
 
-    let mut native_show = Command::cargo_bin("termtrace").expect("binary should build");
-    native_show
-        .env("PATH", "")
-        .env("TMPDIR", temporary.path())
-        .arg("show")
-        .arg(&session)
-        .args(["--format", "png", "--renderer", "native"])
-        .assert()
-        .code(1)
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains(
-            "required capability `native-screenshot` is blocked",
-        ))
-        .stderr(predicate::str::contains("native_host_tools_missing"))
-        .stderr(predicate::str::contains("termtrace doctor"))
-        .stderr(predicate::str::contains("native-screenshot --explain"));
-    assert_no_entry_with_prefix(temporary.path(), ".termtrace-native-show-");
-
     let screenshot = temporary.path().join("native-screenshot");
     let mut native_screenshot = Command::cargo_bin("termtrace").expect("binary should build");
     native_screenshot
         .env("PATH", "")
-        .args(["artifact", "screenshot"])
+        .args(["screenshot"])
         .arg(&session)
         .args(["--renderer", "native", "--out"])
         .arg(&screenshot)
@@ -618,11 +643,11 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
     let mut semantic_preview = Command::cargo_bin("termtrace").expect("binary should build");
     semantic_preview
         .env("PATH", "")
-        .args(["artifact", "video", "preview"])
+        .args(["video"])
         .arg(&session)
-        .args(["--source", "semantic", "--fps", "24", "--edit"])
+        .args(["--renderer", "semantic", "--fps", "24", "--edit"])
         .arg(&edit)
-        .arg("--out")
+        .arg("--preview-out")
         .arg(&preview)
         .assert()
         .code(1)
@@ -638,13 +663,13 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
     assert!(!preview.exists(), "blocked preview created its destination");
     assert_no_entry_with_prefix(temporary.path(), ".preview-");
 
-    let export = temporary.path().join("semantic-export");
+    let export = temporary.path().join("semantic-export.mp4");
     let mut semantic_export = Command::cargo_bin("termtrace").expect("binary should build");
     semantic_export
         .env("PATH", "")
-        .args(["artifact", "video", "export"])
+        .args(["video"])
         .arg(&session)
-        .args(["--source", "semantic", "--fps", "24", "--edit"])
+        .args(["--renderer", "semantic", "--fps", "24", "--edit"])
         .arg(&edit)
         .arg("--out")
         .arg(&export)
