@@ -19,14 +19,11 @@ export function finishHookTimeout(operationTimeoutMs: number): number {
     );
 }
 
-export async function closeAfterSetupFailure(
-    client: Termtrace,
-    primaryFailure: unknown,
-): Promise<void> {
+export async function closeAfterSetupFailure(client: Termtrace, cause: unknown): Promise<void> {
     try {
         await client.close();
     } catch (cleanupFailure: unknown) {
-        throwPrimary(primaryFailure, [cleanupFailure], undefined);
+        throwPrimary(cause, [cleanupFailure], undefined);
     }
 }
 
@@ -149,9 +146,7 @@ async function captureFailureArtifacts(
         `session-${boundedArtifactPart(session.sessionId)}`,
         "failure",
     );
-    await collectFailure(failures, async () =>
-        mkdir(artifactRoot, { recursive: true, mode: 0o700 }),
-    );
+    await collectFailure(failures, async () => mkdir(artifactRoot, { recursive: true, mode: 0o700 }));
 
     await collectFailure(failures, async () => {
         const destination = join(artifactRoot, "semantic-screenshot");
@@ -193,10 +188,7 @@ async function captureFailureArtifacts(
             options?.bundleProfile ?? "debug",
             operationTimeoutMs,
         );
-        const bytes = bundle.manifest.members.reduce(
-            (total, member) => total + member.byte_length,
-            0,
-        );
+        const bytes = bundle.manifest.members.reduce((total, member) => total + member.byte_length, 0);
         const maximum = options?.maxBundleBytes ?? DEFAULT_BUNDLE_BYTES;
         if (!Number.isSafeInteger(bytes) || bytes > maximum) {
             throw new RangeError(`failure bundle exceeds the ${maximum}-byte adapter limit`);
@@ -210,9 +202,7 @@ async function captureFailureArtifacts(
             const memberPath = resolve(committedRoot, member.path);
             const localPath = relative(committedRoot, memberPath);
             if (localPath.length === 0 || localPath === ".." || localPath.startsWith(`..${sep}`)) {
-                throw new Error(
-                    "failure bundle manifest contains a path outside its committed directory",
-                );
+                throw new Error("failure bundle manifest contains a path outside its committed directory");
             }
             const memberMetadata = await lstat(memberPath);
             if (!memberMetadata.isFile() || memberMetadata.size !== member.byte_length) {
@@ -226,9 +216,9 @@ async function captureFailureArtifacts(
     return failures;
 }
 
-async function collectFailure(
+async function collectFailure<Result>(
     failures: unknown[],
-    operation: () => Promise<unknown>,
+    operation: () => Promise<Result>,
 ): Promise<void> {
     try {
         await operation();
@@ -238,28 +228,28 @@ async function collectFailure(
 }
 
 function throwPrimary(
-    primaryFailure: unknown,
+    cause: unknown,
     secondaryFailures: readonly unknown[],
     artifacts: MutableArtifacts | undefined,
 ): never {
-    if (!(primaryFailure instanceof Error)) {
-        throw new AggregateError([primaryFailure, ...secondaryFailures], "Terminal test failed", {
-            cause: primaryFailure,
+    if (!(cause instanceof Error)) {
+        throw new AggregateError([cause, ...secondaryFailures], "Terminal test failed", {
+            cause,
         });
     }
     try {
         const diagnostic = artifactDiagnostic(artifacts);
-        if (diagnostic.length > 0 && !primaryFailure.message.includes(diagnostic)) {
-            primaryFailure.message = `${primaryFailure.message}\n${diagnostic}`;
+        if (diagnostic.length > 0 && !cause.message.includes(diagnostic)) {
+            cause.message = `${cause.message}\n${diagnostic}`;
         }
         if (secondaryFailures.length > 0) {
-            Object.defineProperty(primaryFailure, "termtraceSecondaryFailures", {
+            Object.defineProperty(cause, "termtraceSecondaryFailures", {
                 configurable: true,
                 enumerable: false,
                 value: Object.freeze([...secondaryFailures]),
             });
-            if (primaryFailure.cause === undefined) {
-                Object.defineProperty(primaryFailure, "cause", {
+            if (cause.cause === undefined) {
+                Object.defineProperty(cause, "cause", {
                     configurable: true,
                     enumerable: false,
                     value: secondaryFailures[0],
@@ -269,7 +259,7 @@ function throwPrimary(
     } catch {
         // Frozen or exotic Error objects must still remain the primary thrown value.
     }
-    throw primaryFailure;
+    throw cause;
 }
 
 function lifecycleError(

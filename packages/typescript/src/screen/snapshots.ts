@@ -5,6 +5,7 @@ import type {
     ScreenAppearance,
     ScreenCell,
     ScreenFrame,
+    ScreenRow,
     ScreenSpan,
     SpanCell,
 } from "./frame.js";
@@ -15,7 +16,28 @@ export type SnapshotOptions = {
     readonly includeModes?: boolean;
     readonly maxCells?: number;
 };
-export type NormalizedFrame = Readonly<Record<string, unknown>>;
+type NormalizedFrameRow = Pick<ScreenRow, "row" | "softWrapped" | "wrapContinuation" | "text"> & {
+    readonly spans?: ReadonlyArray<ScreenSpan>;
+    readonly cells?: ReadonlyArray<ScreenCell>;
+};
+type NormalizedFrameBase = {
+    readonly version: number;
+    readonly profile: SnapshotProfile;
+    readonly presented: boolean;
+    readonly captureQuality: ScreenFrame["captureQuality"];
+    readonly geometry: ScreenFrame["geometry"];
+    readonly requestedRegion: ScreenFrame["requestedRegion"];
+    readonly returnedRegion: ScreenFrame["returnedRegion"];
+    readonly colors: ScreenFrame["colors"];
+    readonly cursor?: ScreenFrame["cursor"];
+    readonly modes?: ScreenFrame["modes"];
+};
+type NormalizedFrameBaseBuilder = {
+    -readonly [Key in keyof NormalizedFrameBase]: NormalizedFrameBase[Key];
+};
+export type NormalizedFrame = NormalizedFrameBase & {
+    readonly rows: ReadonlyArray<NormalizedFrameRow>;
+};
 
 /** Pure deterministic review representation with volatile actor and evidence identity removed. */
 export function normalizeFrame(
@@ -23,7 +45,7 @@ export function normalizeFrame(
     profile: SnapshotProfile,
     options: SnapshotOptions = {},
 ): NormalizedFrame {
-    const common: Record<string, unknown> = {
+    const common: NormalizedFrameBaseBuilder = {
         version: frame.version,
         profile,
         presented: frame.presented,
@@ -36,7 +58,7 @@ export function normalizeFrame(
     if (options.includeCursor !== false) common.cursor = frame.cursor;
     if (options.includeModes !== false) common.modes = frame.modes;
     if (profile === "text") {
-        common.rows = Object.freeze(
+        const rows = Object.freeze(
             frame.rows.map((row) =>
                 Object.freeze({
                     row: row.row,
@@ -46,10 +68,10 @@ export function normalizeFrame(
                 }),
             ),
         );
-        return Object.freeze(common);
+        return Object.freeze({ ...common, rows });
     }
     if (profile === "spans") {
-        common.rows = Object.freeze(
+        const rows = Object.freeze(
             frame.rows.map((row) =>
                 Object.freeze({
                     row: row.row,
@@ -60,7 +82,7 @@ export function normalizeFrame(
                 }),
             ),
         );
-        return Object.freeze(common);
+        return Object.freeze({ ...common, rows });
     }
     const maximum = options.maxCells ?? 4096;
     if (!Number.isSafeInteger(maximum) || maximum <= 0)
@@ -73,7 +95,7 @@ export function normalizeFrame(
         0,
     );
     if (requested > maximum) throw new ResourceLimitError("cell_count", requested, maximum);
-    common.rows = Object.freeze(
+    const rows = Object.freeze(
         frame.rows.map((row) =>
             Object.freeze({
                 row: row.row,
@@ -84,7 +106,7 @@ export function normalizeFrame(
             }),
         ),
     );
-    return Object.freeze(common);
+    return Object.freeze({ ...common, rows });
 }
 
 function spansFromCells(cells: ReadonlyArray<ScreenCell>): ReadonlyArray<ScreenSpan> {

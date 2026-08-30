@@ -1,7 +1,7 @@
 import { TermtraceProtocolError } from "./transport/protocol.js";
 
-export function exactWireInteger(value: unknown, field: string): number {
-    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+export function exactWireInteger(value: number | null, field: string): number {
+    if (value === null || !Number.isSafeInteger(value) || value < 0)
         throw new TermtraceProtocolError(`${field} must be a nonnegative safe integer`);
     return value;
 }

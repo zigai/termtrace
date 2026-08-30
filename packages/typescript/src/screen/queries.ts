@@ -350,14 +350,12 @@ type TextUnit = {
     readonly startColumn: number;
     readonly endColumn: number;
 };
-function mapRows(
-    rows: ReadonlyArray<ScreenRow>,
-    region?: Region,
-): {
+type MappedRows = {
     readonly text: string;
     readonly units: ReadonlyArray<TextUnit>;
     readonly boundaries: ReadonlySet<number>;
-} {
+};
+function mapRows(rows: ReadonlyArray<ScreenRow>, region?: Region): MappedRows {
     let content = "";
     const units: TextUnit[] = [];
     for (const row of rows) {
@@ -441,25 +439,25 @@ function findTextMatches(
     query: TextQuery,
     exact: boolean,
 ): ReadonlyArray<{ readonly start: number; readonly end: number }> {
-    if (typeof query === "string") {
-        if (exact) return text === query ? [{ start: 0, end: text.length }] : [];
+    if (query instanceof RegExp) {
+        const flags = query.flags.includes("g") ? query.flags : `${query.flags}g`;
+        const pattern = new RegExp(query.source, flags);
+        pattern.lastIndex = 0;
         const matches: Array<{ start: number; end: number }> = [];
-        for (let start = text.indexOf(query); start >= 0; start = text.indexOf(query, start + 1))
-            pushTextMatch(matches, { start, end: start + query.length });
+        for (;;) {
+            const match = pattern.exec(text);
+            if (match === null) break;
+            if (match[0].length === 0)
+                throw new InvalidQueryError("regular expressions must not produce zero-width matches");
+            if (!exact || (match.index === 0 && match[0].length === text.length))
+                pushTextMatch(matches, { start: match.index, end: match.index + match[0].length });
+        }
         return matches;
     }
-    const flags = query.flags.includes("g") ? query.flags : `${query.flags}g`;
-    const pattern = new RegExp(query.source, flags);
-    pattern.lastIndex = 0;
+    if (exact) return text === query ? [{ start: 0, end: text.length }] : [];
     const matches: Array<{ start: number; end: number }> = [];
-    for (;;) {
-        const match = pattern.exec(text);
-        if (match === null) break;
-        if (match[0].length === 0)
-            throw new InvalidQueryError("regular expressions must not produce zero-width matches");
-        if (!exact || (match.index === 0 && match[0].length === text.length))
-            pushTextMatch(matches, { start: match.index, end: match.index + match[0].length });
-    }
+    for (let start = text.indexOf(query); start >= 0; start = text.indexOf(query, start + 1))
+        pushTextMatch(matches, { start, end: start + query.length });
     return matches;
 }
 function pushTextMatch(
@@ -476,7 +474,7 @@ function pushBounded(matches: ScreenMatch[], match: ScreenMatch): void {
     matches.push(match);
 }
 function validateTextQuery(query: TextQuery): void {
-    if (typeof query === "string") {
+    if (!(query instanceof RegExp)) {
         if (query.length === 0) throw new InvalidQueryError("text query must not be empty");
         return;
     }

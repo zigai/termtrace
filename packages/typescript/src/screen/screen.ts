@@ -133,12 +133,14 @@ export class Screen {
     }
 
     async waitForText(expected: string | RegExp, options: WaitOptions = {}): Promise<ScreenFrame> {
-        const result = await this.getByText(expected).wait({
-            timeout: Duration.milliseconds(options.timeoutMs ?? 10_000),
-            interval: Duration.milliseconds(25),
-            stableFor: Duration.milliseconds(options.stableForMs ?? 0),
-            ...(options.signal === undefined ? {} : { signal: options.signal }),
-        });
+        const timeout = Duration.milliseconds(options.timeoutMs ?? 10_000);
+        const interval = Duration.milliseconds(25);
+        const stableFor = Duration.milliseconds(options.stableForMs ?? 0);
+        const waitOptions =
+            options.signal === undefined
+                ? { timeout, interval, stableFor }
+                : { timeout, interval, stableFor, signal: options.signal };
+        const result = await this.getByText(expected).wait(waitOptions);
         return result.frame;
     }
 
@@ -165,12 +167,7 @@ export class Screen {
             data.first_match_monotonic_ns === null || data.first_match_monotonic_ns === undefined
                 ? null
                 : Duration.nanoseconds(
-                      BigInt(
-                          exactWireInteger(
-                              data.first_match_monotonic_ns,
-                              "screen wait first match time",
-                          ),
-                      ),
+                        BigInt(exactWireInteger(data.first_match_monotonic_ns, "screen wait first match time")),
                   );
         return Object.freeze({
             predicate,
@@ -235,13 +232,13 @@ export class Screen {
     }
 
     waitForIdle(options: IdleWaitOptions = {}): Promise<StableCapture> {
-        return this.captureStable({
-            stableFor: Duration.milliseconds(options.stableForMs ?? 100),
-            timeout: Duration.milliseconds(options.timeoutMs ?? 10_000),
-            ...(options.allowIncomplete === undefined
-                ? {}
-                : { allowIncomplete: options.allowIncomplete }),
-        });
+        const stableFor = Duration.milliseconds(options.stableForMs ?? 100);
+        const timeout = Duration.milliseconds(options.timeoutMs ?? 10_000);
+        return this.captureStable(
+            options.allowIncomplete === undefined
+                ? { stableFor, timeout }
+                : { stableFor, timeout, allowIncomplete: options.allowIncomplete },
+        );
     }
 
     screenshot(

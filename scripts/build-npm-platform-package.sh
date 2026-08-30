@@ -25,6 +25,7 @@ trap cleanup EXIT
 rm -rf "$staging"
 mkdir -p "$staging/bin" dist/npm
 install -m 0555 "$binary" "$staging/bin/termtrace"
+install -m 0444 crates/render/assets/fonts/NOTICE "$staging/NOTICE"
 "$staging/bin/termtrace" doctor --require semantic
 python3 - "$staging/package.json" "$version" "$os" "$arch" <<'PY'
 import json
@@ -39,7 +40,7 @@ manifest = {
     "os": [os_name],
     "cpu": [arch],
     "bin": {"termtrace": "bin/termtrace"},
-    "files": ["bin/termtrace"],
+    "files": ["bin/termtrace", "NOTICE"],
     "license": "MIT",
 }
 pathlib.Path(path).write_text(json.dumps(manifest, indent=2) + "\n")

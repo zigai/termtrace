@@ -40,10 +40,7 @@ export const terminalMatchers: TerminalMatchers = {
             received instanceof Screen
                 ? await received.frame({ detail: "spans" })
                 : requireScreenAssertionSubject(received);
-        return assertionResult(
-            () => assertCursor(subject, expected),
-            "expected cursor not to match",
-        );
+        return assertionResult(() => assertCursor(subject, expected), "expected cursor not to match");
     },
     async toExist(received) {
         const matches = await requireLocator(received).all();
@@ -123,33 +120,49 @@ export const vitestMatcherRegistry = {
     toHaveScreenText(this: MatcherState, received: unknown, expected: unknown) {
         return terminalMatchers.toHaveScreenText.call(
             this,
-            received,
+            requireScreenTextSubject(received),
             parseTextExpectation(expected),
         );
     },
     toHaveCursor(this: MatcherState, received: unknown, expected: unknown) {
-        return terminalMatchers.toHaveCursor.call(this, received, parseCursorExpectation(expected));
+        return terminalMatchers.toHaveCursor.call(
+            this,
+            requireScreenTextSubject(received),
+            parseCursorExpectation(expected),
+        );
     },
     toExist(this: MatcherState, received: unknown) {
-        return terminalMatchers.toExist.call(this, received);
+        return terminalMatchers.toExist.call(this, requireLocator(received));
     },
     toHaveCount(this: MatcherState, received: unknown, expected: unknown) {
-        return terminalMatchers.toHaveCount.call(this, received, parseCountExpectation(expected));
+        return terminalMatchers.toHaveCount.call(
+            this,
+            requireLocator(received),
+            parseCountExpectation(expected),
+        );
     },
     toHaveText(this: MatcherState, received: unknown, expected: unknown) {
-        return terminalMatchers.toHaveText.call(this, received, parseTextExpectation(expected));
+        return terminalMatchers.toHaveText.call(
+            this,
+            requireLocator(received),
+            parseTextExpectation(expected),
+        );
     },
     toHaveStyle(this: MatcherState, received: unknown, expected: unknown) {
-        return terminalMatchers.toHaveStyle.call(this, received, parseStyleExpectation(expected));
+        return terminalMatchers.toHaveStyle.call(
+            this,
+            requireLocator(received),
+            parseStyleExpectation(expected),
+        );
     },
     toHaveNoWrappedRows(this: MatcherState, received: unknown) {
-        return terminalMatchers.toHaveNoWrappedRows.call(this, received);
+        return terminalMatchers.toHaveNoWrappedRows.call(this, requireScreenTextSubject(received));
     },
     toHaveNeutralRegion(this: MatcherState, received: unknown) {
-        return terminalMatchers.toHaveNeutralRegion.call(this, received);
+        return terminalMatchers.toHaveNeutralRegion.call(this, requireLocator(received));
     },
     toHaveNoPresentedTransient(this: MatcherState, received: unknown) {
-        return terminalMatchers.toHaveNoPresentedTransient.call(this, received);
+        return terminalMatchers.toHaveNoPresentedTransient.call(this, requireSession(received));
     },
     toMatchTerminalSnapshot(
         this: MatcherState,
@@ -160,7 +173,7 @@ export const vitestMatcherRegistry = {
     ) {
         return terminalMatchers.toMatchTerminalSnapshot.call(
             this,
-            received,
+            requireSnapshotSubject(received),
             parseSnapshotProfile(profile),
             parseSnapshotOptions(options),
             parseSnapshotHint(hint),
@@ -209,6 +222,13 @@ function requireSession(received: unknown): Session {
     throw new TypeError("matcher requires a Termtrace Session");
 }
 
+function requireScreenTextSubject(received: unknown): Session | Screen | ScreenFrame {
+    if (received instanceof Screen) {
+        return received;
+    }
+    return requireScreenAssertionSubject(received);
+}
+
 function requireScreenAssertionSubject(received: unknown): Session | ScreenFrame {
     if (received instanceof Session || received instanceof ScreenFrame) {
         return received;
@@ -216,7 +236,16 @@ function requireScreenAssertionSubject(received: unknown): Session | ScreenFrame
     throw new TypeError("matcher requires a Termtrace Session, Screen, or ScreenFrame");
 }
 
-async function resolveFrame(received: unknown): Promise<ScreenFrame> {
+function requireSnapshotSubject(received: unknown): Session | Screen | ScreenFrame | Locator {
+    if (received instanceof Locator) {
+        return received;
+    }
+    return requireScreenTextSubject(received);
+}
+
+async function resolveFrame(
+    received: Session | Screen | ScreenFrame | Locator,
+): Promise<ScreenFrame> {
     if (received instanceof ScreenFrame) {
         return received;
     }
@@ -238,7 +267,7 @@ async function resolveFrame(received: unknown): Promise<ScreenFrame> {
 }
 
 function textMatches(actual: string, expected: string | RegExp): boolean {
-    if (typeof expected === "string") {
+    if (!(expected instanceof RegExp)) {
         return actual === expected;
     }
     expected.lastIndex = 0;

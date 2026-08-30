@@ -5,13 +5,12 @@ if (evidenceRoot === undefined) {
     throw new Error("TERMTRACE_TEST_EVIDENCE_ROOT is required");
 }
 
+const termtrace =
+    process.env.TERMTRACE_BINARY === undefined
+        ? { evidenceRoot }
+        : { binaryPath: process.env.TERMTRACE_BINARY, evidenceRoot };
 const terminalTest = createTerminalTest({
-    termtrace: {
-        ...(process.env.TERMTRACE_BINARY === undefined
-            ? {}
-            : { binaryPath: process.env.TERMTRACE_BINARY }),
-        evidenceRoot,
-    },
+    termtrace,
     launch: {
         command: ["/bin/sh", "-c", "trap 'exit 0' TERM; printf READY; while :; do sleep .1; done"],
         evidence: "on-failure",

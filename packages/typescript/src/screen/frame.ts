@@ -116,9 +116,7 @@ export type ColorState = {
     readonly cursor: Rgb | null;
     readonly palette: ReadonlyArray<Rgb>;
 };
-export type ScreenFrameSource = Readonly<Record<string, unknown>> & {
-    readonly source: "actor" | "resolved";
-};
+export type ScreenFrameSource = WireScreenFrame["source"];
 
 export class ScreenFrame {
     readonly rows: ReadonlyArray<ScreenRow>;

@@ -1,5 +1,7 @@
 import type { MatcherState, TestAPI } from "vitest";
 
+import type { ScreenFrame } from "../../screen/frame.js";
+import type { Locator } from "../../screen/locator.js";
 import type { Screen } from "../../screen/screen.js";
 import type { Session } from "../../session/session.js";
 import type { SnapshotOptions, SnapshotProfile } from "../../screen/snapshots.js";
@@ -64,31 +66,36 @@ export type TerminalMatcherResult = {
     readonly message: () => string;
 };
 
+type ScreenAssertionSubject = Session | Screen | ScreenFrame;
+type SnapshotSubject = ScreenAssertionSubject | Locator;
+
 export type TerminalMatchers = {
     readonly toHaveScreenText: (
-        received: unknown,
+        received: ScreenAssertionSubject,
         expected: string | RegExp,
     ) => Promise<TerminalMatcherResult>;
     readonly toHaveCursor: (
-        received: unknown,
+        received: ScreenAssertionSubject,
         expected: TerminalCursorExpectation,
     ) => Promise<TerminalMatcherResult>;
-    readonly toExist: (received: unknown) => Promise<TerminalMatcherResult>;
-    readonly toHaveCount: (received: unknown, expected: number) => Promise<TerminalMatcherResult>;
+    readonly toExist: (received: Locator) => Promise<TerminalMatcherResult>;
+    readonly toHaveCount: (received: Locator, expected: number) => Promise<TerminalMatcherResult>;
     readonly toHaveText: (
-        received: unknown,
+        received: Locator,
         expected: string | RegExp,
     ) => Promise<TerminalMatcherResult>;
     readonly toHaveStyle: (
-        received: unknown,
+        received: Locator,
         expected: StyleFilter,
     ) => Promise<TerminalMatcherResult>;
-    readonly toHaveNoWrappedRows: (received: unknown) => Promise<TerminalMatcherResult>;
-    readonly toHaveNeutralRegion: (received: unknown) => Promise<TerminalMatcherResult>;
-    readonly toHaveNoPresentedTransient: (received: unknown) => Promise<TerminalMatcherResult>;
+    readonly toHaveNoWrappedRows: (
+        received: ScreenAssertionSubject,
+    ) => Promise<TerminalMatcherResult>;
+    readonly toHaveNeutralRegion: (received: Locator) => Promise<TerminalMatcherResult>;
+    readonly toHaveNoPresentedTransient: (received: Session) => Promise<TerminalMatcherResult>;
     readonly toMatchTerminalSnapshot: (
         this: MatcherState,
-        received: unknown,
+        received: SnapshotSubject,
         profile?: SnapshotProfile,
         options?: SnapshotOptions,
         hint?: string,

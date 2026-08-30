@@ -84,13 +84,7 @@ export function assertNoMatches(frame: ScreenFrame, spec: LocatorSpec): void {
 
 /** Require the selected match text to equal a string or fully satisfy a native regex. */
 export function assertMatchText(match: ScreenMatch, expected: string | RegExp): void {
-    if (typeof expected === "string") {
-        if (match.text !== expected)
-            throw new AssertionMismatchError(
-                `expected matched text ${JSON.stringify(expected)}, received ${JSON.stringify(bounded(match.text))}`,
-            );
-        return;
-    }
+    if (expected instanceof RegExp) {
     expected.lastIndex = 0;
     const result = expected.exec(match.text);
     expected.lastIndex = 0;
@@ -99,6 +93,12 @@ export function assertMatchText(match: ScreenMatch, expected: string | RegExp): 
             `matched text ${JSON.stringify(bounded(match.text))} does not fully satisfy ${String(expected)}`,
         );
     }
+        return;
+    }
+    if (match.text !== expected)
+        throw new AssertionMismatchError(
+            `expected matched text ${JSON.stringify(expected)}, received ${JSON.stringify(bounded(match.text))}`,
+        );
 }
 
 /** Require every authoritative head cell covered by a match to satisfy a style filter. */
@@ -223,9 +223,7 @@ function cellsInRegion(frame: ScreenFrame, region: Region): ScreenCell[] {
     for (const row of frame.rows) {
         if (row.row < region.top || row.row >= bottom) continue;
         if (row.cells !== null) {
-            cells.push(
-                ...row.cells.filter((cell) => cell.column >= region.left && cell.column < right),
-            );
+            cells.push(...row.cells.filter((cell) => cell.column >= region.left && cell.column < right));
             continue;
         }
         for (const span of row.spans) {

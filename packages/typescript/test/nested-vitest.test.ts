@@ -16,20 +16,14 @@ afterAll(async () => {
 describe("packed Vitest consumer", () => {
     test("keeps root imports optional and exercises real Vitest lifecycle", async () => {
         const repositoryRoot = resolve(packageRoot, "..", "..");
-        const built = await run(
-            ["cargo", "build", "--locked", "--bin", "termtrace"],
-            repositoryRoot,
-        );
+        const built = await run(["cargo", "build", "--locked", "--bin", "termtrace"], repositoryRoot);
         expect(built.exitCode, built.output).toBe(0);
         const packageBuild = await run(["bun", "run", "build"], packageRoot);
         expect(packageBuild.exitCode, packageBuild.output).toBe(0);
         const termtraceBinary = join(repositoryRoot, "target", "debug", "termtrace");
         const packDirectory = join(temporaryRoot, "pack");
         await mkdir(packDirectory, { recursive: true });
-        const packed = await run(
-            ["bun", "pm", "pack", "--destination", packDirectory],
-            packageRoot,
-        );
+        const packed = await run(["bun", "pm", "pack", "--destination", packDirectory], packageRoot);
         expect(packed.exitCode, packed.output).toBe(0);
         const tarballName = (await readdir(packDirectory)).find((entry) => entry.endsWith(".tgz"));
         expect(tarballName).toBeDefined();
@@ -136,23 +130,24 @@ async function writeConsumerPackage(
     tarball: string,
     includeVitest: boolean,
 ): Promise<void> {
-    const packageJson = {
+    const common = {
         name: `termtrace-${basename(directory)}`,
         private: true,
         type: "module",
         dependencies: {
             "@termtrace/test": `file:${tarball}`,
         },
-        ...(includeVitest
+    };
+    const packageJson = includeVitest
             ? {
+                ...common,
                   devDependencies: {
                       "@types/node": "^24.0.0",
                       typescript: "^5.8.3",
                       vitest: "^4.1.3",
                   },
               }
-            : {}),
-    };
+        : common;
     await writeFile(
         join(directory, "package.json"),
         `${JSON.stringify(packageJson, null, 2)}\n`,

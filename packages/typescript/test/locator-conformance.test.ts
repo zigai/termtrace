@@ -20,10 +20,16 @@ import {
     styleQuery,
     textQuery,
     type LocatorSpec,
+    type StyleFilter,
 } from "../src/screen/queries.js";
 import { parseScreenFrame, ScreenFrame, type ScreenAppearance } from "../src/screen/frame.js";
 
 const fixturePath = join(import.meta.dir, "../../../fixtures/conformance/locators/locator.json");
+type MutableStyleFilter = { -readonly [Key in keyof StyleFilter]: StyleFilter[Key] };
+type NormalizedMatch = {
+    readonly text: string;
+    readonly ranges: ReadonlyArray<readonly [number, number, number]>;
+};
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
     if (typeof value !== "object" || value === null || Array.isArray(value))
@@ -65,12 +71,11 @@ function spec(value: unknown): LocatorSpec {
             throw new TypeError("fixture bold value must be a boolean");
         if (resolvedBackground !== undefined && typeof resolvedBackground !== "string")
             throw new TypeError("fixture background must be a string");
-        return styleQuery({
-            ...(bold === undefined ? {} : { bold }),
-            ...(resolvedBackground === undefined
-                ? {}
-                : { resolvedBackground: resolvedBackground as `#${string}` }),
-        });
+        const filter: MutableStyleFilter = {};
+        if (bold !== undefined) filter.bold = bold;
+        if (resolvedBackground !== undefined)
+            filter.resolvedBackground = parseHexColor(resolvedBackground);
+        return styleQuery(filter);
     }
     if (kind === "row") return rowQuery(integer(query.row));
     if (kind === "region") {
@@ -88,10 +93,7 @@ function spec(value: unknown): LocatorSpec {
     throw new TypeError(`unknown fixture query kind ${kind}`);
 }
 
-function normalizedMatches(
-    frame: ScreenFrame,
-    query: unknown,
-): ReadonlyArray<Readonly<Record<string, unknown>>> {
+function normalizedMatches(frame: ScreenFrame, query: unknown): ReadonlyArray<NormalizedMatch> {
     return evaluateQuery(frame, spec(query)).map((match) => {
         expect(match.frame).toBe(frame);
         expect(match.stateHash).toBe("fixture-state-v1");
@@ -100,10 +102,18 @@ function normalizedMatches(
         expect(match.query.length).toBeLessThanOrEqual(240);
         return {
             text: match.text,
-            ranges: match.ranges.map((range) => [range.row, range.startColumn, range.endColumn]),
+            ranges: match.ranges.map((range) => [range.row, range.startColumn, range.endColumn] as const),
         };
     });
 }
+
+function parseHexColor(value: string): `#${string}` {
+    if (!/^#[0-9a-fA-F]{6}$/u.test(value)) throw new TypeError("fixture color must be #RRGGBB");
+    // SAFETY: the preceding anchored expression proves the complete #RRGGBB representation;
+    // TypeScript cannot derive a template-literal type from a regular-expression match.
+    return value as `#${string}`;
+}
+
 function fixtureFrame(): ScreenFrame {
     const payload: unknown = JSON.parse(readFileSync(fixturePath, "utf8"));
     return parseScreenFrame(record(payload).frame);
@@ -189,8 +199,7 @@ test("shared locator conformance corpus matches public contract", () => {
             continue;
         }
         expect(testCase.error).toBeUndefined();
-        if (!Array.isArray(testCase.matches))
-            throw new TypeError("fixture matches must be an array");
+        if (!Array.isArray(testCase.matches)) throw new TypeError("fixture matches must be an array");
         expect(normalizedMatches(frame, testCase.query), string(testCase.name)).toEqual(
             testCase.matches,
         );

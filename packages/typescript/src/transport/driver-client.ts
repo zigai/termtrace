@@ -131,7 +131,7 @@ export class DriverClient {
         await new Promise<void>((resolve) => this.#process.once("exit", () => resolve()));
     }
 
-    async #terminateWithFailure(failure: unknown): Promise<void> {
+    async #terminateWithFailure(cause: unknown): Promise<void> {
         if (this.#closed) {
             return;
         }
@@ -143,14 +143,12 @@ export class DriverClient {
                 ? new Promise<void>((resolve) => this.#process.once("exit", () => resolve()))
                 : Promise.resolve();
         this.#signalProcessTree("SIGTERM");
-        await new Promise<void>((resolve) =>
-            setTimeout(resolve, PROCESS_TREE_TERMINATION_GRACE_MS),
-        );
+        await new Promise<void>((resolve) => setTimeout(resolve, PROCESS_TREE_TERMINATION_GRACE_MS));
         if (process.platform !== "win32" || this.#process.exitCode === null) {
             this.#signalProcessTree("SIGKILL");
         }
         await exited;
-        this.#rejectAll(failure);
+        this.#rejectAll(cause);
     }
 
     #signalProcessTree(signal: NodeJS.Signals): void {

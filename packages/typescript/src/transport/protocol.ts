@@ -127,7 +127,7 @@ export function parseJsonObject(input: unknown): JsonObject {
     for (const [key, value] of Object.entries(input)) {
         parsed[key] = parseJsonValue(value);
     }
-    return parsed;
+    return Object.freeze(parsed);
 }
 
 function failureFromWire(failure: DriverError): DriverFailure {

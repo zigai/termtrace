@@ -93,8 +93,7 @@ describe("parseDriverResponse", () => {
         const parsed = parseDriverResponse(fixture.response, requestId(fixture.response));
         if (parsed._tag !== "Failure") throw new Error("partial-input fixture must be a failure");
         const controlDetails = parsed.failure.details;
-        if (controlDetails === undefined)
-            throw new Error("partial-input control details are missing");
+        if (controlDetails === undefined) throw new Error("partial-input control details are missing");
         let envelopeRequestId: string | undefined;
         const driver = {
             request(
@@ -213,7 +212,7 @@ describe("Keyboard.sequence", () => {
                 captured = command;
                 return Promise.resolve({} as ControlResult);
             },
-        } as unknown as Session;
+        };
         const keyboard = new Keyboard(session);
 
         await keyboard.sequence(
@@ -283,10 +282,12 @@ describe("Keyboard.sequence", () => {
     });
 });
 
-function parseFixtures(input: unknown): {
+type FixtureCollection = {
     readonly valid: FixtureCase[];
     readonly invalid: FixtureCase[];
-} {
+};
+
+function parseFixtures(input: unknown): FixtureCollection {
     if (!isRecord(input) || !Array.isArray(input.valid) || !Array.isArray(input.invalid)) {
         throw new Error("protocol fixture root is invalid");
     }

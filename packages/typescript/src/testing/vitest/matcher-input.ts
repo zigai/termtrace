@@ -3,6 +3,19 @@ import type { StyleFilter } from "../../screen/queries.js";
 import type { SnapshotOptions, SnapshotProfile } from "../../screen/snapshots.js";
 import type { TerminalCursorExpectation } from "./types.js";
 
+type Mutable<Value> = { -readonly [Key in keyof Value]: Value[Key] };
+const BOOLEAN_STYLE_FIELDS = [
+    "bold",
+    "faint",
+    "italic",
+    "blink",
+    "inverse",
+    "invisible",
+    "strikethrough",
+    "overline",
+    "selected",
+] as const;
+
 export function parseTextExpectation(input: unknown): string | RegExp {
     if (typeof input === "string" || input instanceof RegExp) {
         return input;
@@ -15,11 +28,11 @@ export function parseCursorExpectation(input: unknown): TerminalCursorExpectatio
     const row = optionalNonnegativeInteger(value.row, "cursor row");
     const column = optionalNonnegativeInteger(value.column, "cursor column");
     const visible = optionalBoolean(value.visible, "cursor visibility");
-    return Object.freeze({
-        ...(row === undefined ? {} : { row }),
-        ...(column === undefined ? {} : { column }),
-        ...(visible === undefined ? {} : { visible }),
-    });
+    const expectation: Mutable<TerminalCursorExpectation> = {};
+    if (row !== undefined) expectation.row = row;
+    if (column !== undefined) expectation.column = column;
+    if (visible !== undefined) expectation.visible = visible;
+    return Object.freeze(expectation);
 }
 
 export function parseCountExpectation(input: unknown): number {
@@ -38,24 +51,19 @@ export function parseStyleExpectation(input: unknown): StyleFilter {
     const underlineColor = optionalColorSource(value.underlineColor, "underline");
     const resolvedForeground = optionalRgbMatcher(value.resolvedForeground, "resolved foreground");
     const resolvedBackground = optionalRgbMatcher(value.resolvedBackground, "resolved background");
-    return Object.freeze({
-        ...optionalBooleanField(value, "bold"),
-        ...optionalBooleanField(value, "faint"),
-        ...optionalBooleanField(value, "italic"),
-        ...optionalBooleanField(value, "blink"),
-        ...optionalBooleanField(value, "inverse"),
-        ...optionalBooleanField(value, "invisible"),
-        ...optionalBooleanField(value, "strikethrough"),
-        ...optionalBooleanField(value, "overline"),
-        ...optionalBooleanField(value, "selected"),
-        ...(underline === undefined ? {} : { underline }),
-        ...(wideKind === undefined ? {} : { wideKind }),
-        ...(foreground === undefined ? {} : { foreground }),
-        ...(background === undefined ? {} : { background }),
-        ...(underlineColor === undefined ? {} : { underlineColor }),
-        ...(resolvedForeground === undefined ? {} : { resolvedForeground }),
-        ...(resolvedBackground === undefined ? {} : { resolvedBackground }),
-    });
+    const expectation: Mutable<StyleFilter> = {};
+    for (const field of BOOLEAN_STYLE_FIELDS) {
+        const fieldValue = optionalBoolean(value[field], field);
+        if (fieldValue !== undefined) expectation[field] = fieldValue;
+    }
+    if (underline !== undefined) expectation.underline = underline;
+    if (wideKind !== undefined) expectation.wideKind = wideKind;
+    if (foreground !== undefined) expectation.foreground = foreground;
+    if (background !== undefined) expectation.background = background;
+    if (underlineColor !== undefined) expectation.underlineColor = underlineColor;
+    if (resolvedForeground !== undefined) expectation.resolvedForeground = resolvedForeground;
+    if (resolvedBackground !== undefined) expectation.resolvedBackground = resolvedBackground;
+    return Object.freeze(expectation);
 }
 
 export function parseSnapshotProfile(input: unknown): SnapshotProfile {
@@ -79,11 +87,11 @@ export function parseSnapshotOptions(input: unknown): SnapshotOptions {
     if (maxCells === 0) {
         throw new TypeError("maxCells must be positive");
     }
-    return Object.freeze({
-        ...(includeCursor === undefined ? {} : { includeCursor }),
-        ...(includeModes === undefined ? {} : { includeModes }),
-        ...(maxCells === undefined ? {} : { maxCells }),
-    });
+    const options: Mutable<SnapshotOptions> = {};
+    if (includeCursor !== undefined) options.includeCursor = includeCursor;
+    if (includeModes !== undefined) options.includeModes = includeModes;
+    if (maxCells !== undefined) options.maxCells = maxCells;
+    return Object.freeze(options);
 }
 
 export function parseSnapshotHint(input: unknown): string | undefined {
@@ -105,26 +113,6 @@ function optionalBoolean(input: unknown, label: string): boolean | undefined {
         return input;
     }
     throw new TypeError(`${label} must be a boolean`);
-}
-
-function optionalBooleanField(
-    input: Readonly<Record<string, unknown>>,
-    field:
-        | "bold"
-        | "faint"
-        | "italic"
-        | "blink"
-        | "inverse"
-        | "invisible"
-        | "strikethrough"
-        | "overline"
-        | "selected",
-): Readonly<Record<string, boolean>> {
-    const value = optionalBoolean(input[field], field);
-    if (value === undefined) {
-        return Object.freeze({});
-    }
-    return Object.freeze({ [field]: value });
 }
 
 function optionalNonnegativeInteger(input: unknown, label: string): number | undefined {
@@ -173,6 +161,8 @@ function parseHexColor(input: string, label: string): `#${string}` {
     if (!/^#[0-9a-fA-F]{6}$/u.test(input)) {
         throw new TypeError(`${label} must use #RRGGBB syntax`);
     }
+    // SAFETY: the anchored expression proves the complete #RRGGBB representation;
+    // TypeScript cannot derive a template-literal type from a regular-expression match.
     return input as `#${string}`;
 }
 

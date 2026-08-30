@@ -28,6 +28,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY ${TERMTRACE_BINARY} /usr/local/bin/termtrace
+COPY crates/render/assets/fonts/NOTICE /usr/share/licenses/termtrace/NOTICE
 COPY packaging/native/entrypoint.sh /usr/local/bin/termtrace-native-entrypoint
 RUN chmod 0555 /usr/local/bin/termtrace /usr/local/bin/termtrace-native-entrypoint \
     && termtrace doctor --require semantic

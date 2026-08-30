@@ -32,12 +32,11 @@ export function createTerminalTest(options: CreateTerminalTestOptions): Terminal
                 const evidenceRoot = evidenceRootFor(options.termtrace.evidenceRoot, taskIdentity);
                 const launch = await resolveLaunch(options.launch, taskIdentity);
                 const evidencePolicy = launch.evidence ?? "on-failure";
-                const client = await Termtrace.create({
-                    ...(options.termtrace.binaryPath === undefined
-                        ? {}
-                        : { binaryPath: options.termtrace.binaryPath }),
-                    evidenceRoot,
-                });
+                const client = await Termtrace.create(
+                    options.termtrace.binaryPath === undefined
+                        ? { evidenceRoot }
+                        : { binaryPath: options.termtrace.binaryPath, evidenceRoot },
+                );
                 let session: Session;
                 try {
                     signal.throwIfAborted();
@@ -84,8 +83,7 @@ export function createTerminalTest(options: CreateTerminalTestOptions): Terminal
                     if (finalized) return;
                     finalized = true;
                     const frameworkReportedFailure = finishedContext.task.result?.state === "fail";
-                    const bodyFailed =
-                        frameworkReportedFailure || primaryWasCaught || signal.aborted;
+                    const bodyFailed = frameworkReportedFailure || primaryWasCaught || signal.aborted;
                     if (signal.aborted && !primaryWasCaught) {
                         primaryWasCaught = true;
                         primaryFailure = signal.reason;

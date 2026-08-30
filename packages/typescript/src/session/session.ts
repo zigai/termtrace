@@ -67,7 +67,20 @@ export type WaitOptions = {
     readonly signal?: AbortSignal;
 };
 
+type ControlSession = {
+    control(command: JsonObject, options?: MutationOptions): Promise<ControlResult>;
+};
+
 type SessionIdentity = DriverDataOf<"attached">;
+type DriverRequestOptionsBuilder = {
+    -readonly [Key in keyof DriverRequestOptions]: DriverRequestOptions[Key];
+};
+type SequenceActionOptionsBuilder = {
+    -readonly [Key in keyof Pick<
+        ActionOptions,
+        "requestId" | "pace" | "callerIntent" | "verboseAtomOutcomes"
+    >]: ActionOptions[Key];
+};
 
 /** Process-local handle with explicit canonical evidence identity. */
 export class Session implements AsyncDisposable {
@@ -117,6 +130,11 @@ export class Session implements AsyncDisposable {
     async control(command: JsonObject, options: MutationOptions = {}): Promise<ControlResult> {
         const expectedState: JsonValue = options.ifState ?? null;
         try {
+            const requestOptions: DriverRequestOptionsBuilder = {};
+            if (options.requestId !== undefined) requestOptions.requestId = options.requestId;
+            if (options.requestTimeoutMs !== undefined)
+                requestOptions.timeoutMs = options.requestTimeoutMs;
+            if (options.signal !== undefined) requestOptions.signal = options.signal;
             const result = await this.#driver.request(
                 method({
                     method: "control",
@@ -125,13 +143,7 @@ export class Session implements AsyncDisposable {
                     expected_presented_state_hash: expectedState,
                 }),
                 "control",
-                {
-                    ...(options.requestId === undefined ? {} : { requestId: options.requestId }),
-                    ...(options.requestTimeoutMs === undefined
-                        ? {}
-                        : { timeoutMs: options.requestTimeoutMs }),
-                    ...(options.signal === undefined ? {} : { signal: options.signal }),
-                },
+                requestOptions,
             );
             return result.data;
         } catch (cause: unknown) {
@@ -145,16 +157,12 @@ export class Session implements AsyncDisposable {
                 );
             }
             if (failure.code === "action_busy") throw new ActionBusyError(failure.message);
-            if (failure.code === "input_sequence_busy")
-                throw new InputSequenceBusyError(failure.message);
+            if (failure.code === "input_sequence_busy") throw new InputSequenceBusyError(failure.message);
             if (failure.code === "invalid_atom") throw new InvalidAtomError(failure.message);
-            if (failure.code === "invalid_duration")
-                throw new InvalidDurationError(failure.message);
+            if (failure.code === "invalid_duration") throw new InvalidDurationError(failure.message);
             if (failure.code === "invalid_query") throw new InvalidQueryError(failure.message);
-            if (failure.code === "invalid_screen_region")
-                throw new InvalidRegionError(failure.message);
-            if (failure.code === "protocol_mismatch")
-                throw new ProtocolMismatchError(failure.message);
+            if (failure.code === "invalid_screen_region") throw new InvalidRegionError(failure.message);
+            if (failure.code === "protocol_mismatch") throw new ProtocolMismatchError(failure.message);
             if (
                 failure.code === "input_sequence_incomplete" &&
                 failure.details?.input_sequence !== undefined &&
@@ -306,7 +314,7 @@ export class Session implements AsyncDisposable {
 }
 
 export class Keyboard {
-    constructor(private readonly session: Session) {}
+    constructor(private readonly session: ControlSession) {}
 
     press(key: string, options: MutationOptions = {}): Promise<ControlResult> {
         return this.session.control(
@@ -358,16 +366,12 @@ export class Keyboard {
         const requestId = options.requestId ?? randomUUID();
         const pace = Duration.milliseconds(options.paceMs ?? 0);
         if (pace.nanoseconds * BigInt(atoms.length) > 60_000_000_000n) {
-            throw new InvalidDurationError(
-                "total input sequence pacing must not exceed 60 seconds",
-            );
+            throw new InvalidDurationError("total input sequence pacing must not exceed 60 seconds");
         }
-        const encoded = encodeAction(atoms, {
-            requestId,
-            pace,
-            ...(options.callerIntent === undefined ? {} : { callerIntent: options.callerIntent }),
-            ...(options.verbose === undefined ? {} : { verboseAtomOutcomes: options.verbose }),
-        });
+        const actionOptions: SequenceActionOptionsBuilder = { requestId, pace };
+        if (options.callerIntent !== undefined) actionOptions.callerIntent = options.callerIntent;
+        if (options.verbose !== undefined) actionOptions.verboseAtomOutcomes = options.verbose;
+        const encoded = encodeAction(atoms, actionOptions);
         return this.session.control(
             method({
                 command: "input_sequence",
@@ -381,7 +385,7 @@ export class Keyboard {
 }
 
 export class Pointer {
-    constructor(private readonly session: Session) {}
+    constructor(private readonly session: ControlSession) {}
 
     click(
         column: number,

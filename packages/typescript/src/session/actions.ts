@@ -239,8 +239,7 @@ export function parseActionResult(
             quality: wirePostcondition.quality,
         });
     }
-    const atomOutcomes =
-        wireInput.atoms === undefined ? null : wireInput.atoms.map(parseAtomOutcome);
+    const atomOutcomes = wireInput.atoms === undefined ? null : wireInput.atoms.map(parseAtomOutcome);
     const result: ActionResult = Object.freeze({
         requestId: wireInput.sequence_id,
         input: Object.freeze({
@@ -287,8 +286,7 @@ function encodeAtom(
                 caller_intent: callerIntent,
             });
         case "bytes":
-            if (atom.bytes.byteLength === 0)
-                throw new InvalidAtomError("bytes atom must not be empty");
+            if (atom.bytes.byteLength === 0) throw new InvalidAtomError("bytes atom must not be empty");
             return Object.freeze({
                 input: "bytes",
                 operation_id: id,
@@ -360,25 +358,21 @@ function encodePostcondition(
     }
 }
 function normalizeKey(key: KeyInput): KeyInput {
-    if (typeof key === "string") {
-        const named = [
-            "enter",
-            "escape",
-            "tab",
-            "backspace",
-            "delete",
-            "insert",
-            "home",
-            "end",
-            "page_up",
-            "page_down",
-            "arrow_up",
-            "arrow_down",
-            "arrow_left",
-            "arrow_right",
-        ] as const;
-        if (!named.some((value) => value === key))
-            throw new InvalidAtomError("key name is not supported");
+    switch (key) {
+        case "enter":
+        case "escape":
+        case "tab":
+        case "backspace":
+        case "delete":
+        case "insert":
+        case "home":
+        case "end":
+        case "page_up":
+        case "page_down":
+        case "arrow_up":
+        case "arrow_down":
+        case "arrow_left":
+        case "arrow_right":
         return key;
     }
     if ("function" in key) {

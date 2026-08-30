@@ -61,7 +61,7 @@ jobs:
           root="termtrace-${{ matrix.target }}"
           mkdir -p "dist/$root/clients/python" "dist/$root/clients/typescript"
           install -m 0555 "target/${{ matrix.target }}/release/termtrace" "dist/$root/termtrace"
-          install -m 0444 LICENSE README.md "dist/$root/"
+          install -m 0444 LICENSE README.md crates/render/assets/fonts/NOTICE "dist/$root/"
           install -m 0444 packages/python/pyproject.toml packages/python/README.md "dist/$root/clients/python/"
           cp -R packages/python/termtrace "dist/$root/clients/python/"
           install -m 0444 packages/typescript/package.json packages/typescript/README.md "dist/$root/clients/typescript/"

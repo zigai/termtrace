@@ -78,7 +78,12 @@ function frameFor(rows: ReadonlyArray<ReadonlyArray<TestCell>>, stateHash = "sta
         `${stateHash}-frame`,
         true,
         "live",
-        Object.freeze({ source: "actor" }),
+        Object.freeze({
+            source: "actor",
+            boundaries: wireBoundaries,
+            observed_monotonic_ns: 0,
+            session_id: "00000000-0000-0000-0000-000000000001",
+        }),
         Object.freeze({ cols: rows[0]?.length ?? 1, rows: rows.length }),
         Object.freeze({ top: 0, left: 0, width: rows[0]?.length ?? 1, height: rows.length }),
         Object.freeze({ top: 0, left: 0, width: rows[0]?.length ?? 1, height: rows.length }),
@@ -316,8 +321,7 @@ describe("lazy locator request accounting", () => {
             .single()
             .catch((cause: unknown) => cause);
         expect(error).toBeInstanceOf(MultipleMatchesError);
-        if (!(error instanceof MultipleMatchesError))
-            throw new Error("expected MultipleMatchesError");
+        if (!(error instanceof MultipleMatchesError)) throw new Error("expected MultipleMatchesError");
         expect(error.stateHash).toBe("ambiguous-state");
         expect(error.ranges[0]?.[0]).toEqual({ row: 0, startColumn: 0, endColumn: 1 });
     });
@@ -368,11 +372,15 @@ describe("Screen rich-frame requests", () => {
     test("preserves already-aborted wait cancellation without capturing", async () => {
         let requests = 0;
         const session = {
+            completed: false,
+            control(): Promise<never> {
+                return Promise.reject(new Error("control is outside this screen test seam"));
+            },
             request(): Promise<never> {
                 requests += 1;
                 return Promise.reject(new Error("capture must not start"));
             },
-        } as unknown as Session;
+        };
         const screen = new Screen(session);
         const controller = new AbortController();
         controller.abort(new Error("cancelled screen wait"));
@@ -390,6 +398,10 @@ describe("Screen rich-frame requests", () => {
             captureStarted = resolve;
         });
         const session = {
+            completed: false,
+            control(): Promise<never> {
+                return Promise.reject(new Error("control is outside this screen test seam"));
+            },
             request(
                 methodFields: JsonObject,
                 expectedKind: string,
@@ -401,7 +413,7 @@ describe("Screen rich-frame requests", () => {
                 captureStarted?.();
                 return new Promise<never>(() => {});
             },
-        } as unknown as Session;
+        };
         const screen = new Screen(session);
         const controller = new AbortController();
         const reason = new Error("cancel in-flight screen capture");
