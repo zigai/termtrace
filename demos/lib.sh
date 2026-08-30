@@ -35,7 +35,7 @@ wait_for_control() {
     local stderr_log=$2
     local attempt
     for attempt in $(seq 1 200); do
-        if [[ -S $session/control.sock ]] && "$TERMTRACE_BIN" control ping "$session" >/dev/null 2>&1; then
+        if [[ -S $session/control.sock ]] && "$TERMTRACE_BIN" status "$session" >/dev/null 2>&1; then
             return 0
         fi
         if [[ -n ${RECORDER_PID:-} ]] && ! kill -0 "$RECORDER_PID" 2>/dev/null; then

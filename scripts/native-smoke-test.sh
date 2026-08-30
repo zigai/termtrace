@@ -854,7 +854,7 @@ run target/debug/termtrace --response full analyze index --session "$output"
 
 step "Capturing full video and a strict screenshot"
 run target/debug/termtrace --response full artifact capture --session "$output" --fps 24
-run target/debug/termtrace --response full artifact screenshot "$output" \
+run target/debug/termtrace --response full screenshot "$output" \
     --renderer native --at 12.2s --viewport "$SMOKE_VIEWPORT" --strict \
     --out "$output/native-single"
 

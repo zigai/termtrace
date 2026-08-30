@@ -64,12 +64,12 @@ measure() {
 
 mkdir -p "$(dirname "$output")"
 : >"$output"
-measure stable-observe "$binary" wait-idle "$session" --stable-for 10ms
+measure stable-observe "$binary" wait "$session" --idle 10ms
 jq -e '.kind == "stable_snapshot" and (has("semantic_state_zstd") | not) and .boundary != null' "$work/stable-observe.stdout" >/dev/null
-measure atomic-input-sequence "$binary" send "$session" text:go enter
-jq -e '.kind == "input_sequence_applied" and .atom_count == 2 and (has("atoms") | not) and .boundary != null' "$work/atomic-input-sequence.stdout" >/dev/null
-"$binary" wait "$session" Done --timeout-ms 5000 >/dev/null
-"$binary" wait "$session" 259 --timeout-ms 5000 >/dev/null
+measure atomic-input-sequence "$binary" --response full act "$session" text:go enter
+jq -e '.type == "action" and .input.atoms == 2 and .boundaries != null' "$work/atomic-input-sequence.stdout" >/dev/null
+"$binary" wait "$session" Done --timeout 5s >/dev/null
+"$binary" wait "$session" 259 --timeout 5s >/dev/null
 measure live-status "$binary" status "$session"
 jq -e '.kind == "status" and .boundary != null and (has("boundaries") | not)' "$work/live-status.stdout" >/dev/null
 "$binary" stop "$session" --wait >/dev/null

@@ -62,24 +62,25 @@ measure() {
     local iteration=$2
     local record_result=${3:-true}
     local destination="$work/$operation-$record_result-$iteration"
-    local started_ns ended_ns elapsed_ns artifact_hash
+    local started_ns ended_ns elapsed_ns artifact_hash video
     started_ns=$(date +%s%N)
     case "$operation" in
         semantic-video-export)
-            "$binary" artifact video export "$session" \
-                --source semantic \
+            video="$destination.mp4"
+            "$binary" video "$session" \
+                --renderer semantic \
                 --fps 24 \
                 --semantic-raster-profile "$semantic_raster_profile" \
                 --edit "$edit" \
-                --out "$destination" >/dev/null
-            artifact_hash=$(jq -r '.output_video_hash' "$destination/manifest.json")
+                --out "$video" >/dev/null
+            artifact_hash=$(jq -r '.output_video_hash' "$video.termtrace/manifest.json")
             ;;
         presentation-preview)
-            "$binary" artifact video preview "$session" \
-                --source semantic \
+            "$binary" video "$session" \
+                --renderer semantic \
                 --semantic-raster-profile "$semantic_raster_profile" \
                 --edit "$edit" \
-                --out "$destination" >/dev/null
+                --preview-out "$destination" >/dev/null
             artifact_hash=$(jq -r '.members[] | select(.path == "preview.mp4") | .blake3' "$destination/manifest.json")
             ;;
         *)

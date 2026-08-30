@@ -25,9 +25,8 @@ trap 'stop_recorder_on_error "$SESSION"' EXIT
 RECORDER_PID=$!
 
 wait_for_control "$SESSION" "$STDERR_LOG"
-"$TERMTRACE_BIN" control ping "$SESSION" >"$DEMO_DIRECTORY/ping.json"
 "$TERMTRACE_BIN" status "$SESSION" >"$DEMO_DIRECTORY/status-before.json"
-"$TERMTRACE_BIN" wait "$SESSION" SHOWCASE_READY --timeout-ms 15000 \
+"$TERMTRACE_BIN" wait "$SESSION" SHOWCASE_READY --timeout 15s \
     >"$DEMO_DIRECTORY/wait-ready.json"
 "$TERMTRACE_BIN" control mark "$SESSION" --label showcase-ready \
     >"$DEMO_DIRECTORY/mark-ready.json"
@@ -38,16 +37,15 @@ wait_for_control "$SESSION" "$STDERR_LOG"
     --rows 36 \
     --pixel-width 1080 \
     --pixel-height 648 >"$DEMO_DIRECTORY/resize.json"
-"$TERMTRACE_BIN" wait "$SESSION" RESIZED:120x36 --timeout-ms 5000 \
+"$TERMTRACE_BIN" wait "$SESSION" RESIZED:120x36 --timeout 5s \
     >"$DEMO_DIRECTORY/wait-resize.json"
 
 printf 'continue-from-file\n' >"$DEMO_DIRECTORY/agent-input.bin"
 "$TERMTRACE_BIN" send \
     "$SESSION" \
-    "raw-file:$DEMO_DIRECTORY/agent-input.bin" \
-    --intent 'continue the showcase with exact file bytes' \
+    --file "$DEMO_DIRECTORY/agent-input.bin" \
     >"$DEMO_DIRECTORY/send-file.json"
-"$TERMTRACE_BIN" wait "$SESSION" AGENT_INPUT:continue-from-file --timeout-ms 5000 \
+"$TERMTRACE_BIN" wait "$SESSION" AGENT_INPUT:continue-from-file --timeout 5s \
     >"$DEMO_DIRECTORY/wait-input.json"
 
 for signal_name in user1 user2 hangup interrupt; do
@@ -55,7 +53,7 @@ for signal_name in user1 user2 hangup interrupt; do
         >"$DEMO_DIRECTORY/signal-$signal_name.json"
 done
 for signal_name in SIGUSR1 SIGUSR2 SIGHUP SIGINT; do
-    "$TERMTRACE_BIN" wait "$SESSION" "SIGNAL:$signal_name" --timeout-ms 5000 \
+    "$TERMTRACE_BIN" wait "$SESSION" "SIGNAL:$signal_name" --timeout 5s \
         >"$DEMO_DIRECTORY/wait-$signal_name.json"
 done
 "$TERMTRACE_BIN" control mark "$SESSION" --label signals-observed \

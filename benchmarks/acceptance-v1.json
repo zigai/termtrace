@@ -79,7 +79,7 @@
     {
       "id": "cli-command-count-parity",
       "kind": "ergonomics",
-      "workflows": ["start", "send", "wait", "show", "control resize", "restart", "stop", "artifact screenshot", "test", "artifact video export"],
+      "workflows": ["start", "act", "send", "wait", "show", "control resize", "restart", "stop", "screenshot", "test", "video"],
       "maximum_commands_per_workflow": 1,
       "maximum_required_identifiers_per_workflow": 1
     },
@@ -113,7 +113,7 @@
     {
       "id": "input-ack-p95",
       "kind": "latency",
-      "operation": "send text:x",
+      "operation": "send --text x",
       "fixture": "fullscreen-query-heavy",
       "cache_policy": "warm",
       "percentile": 95,
@@ -122,7 +122,7 @@
     {
       "id": "semantic-screenshot-p95",
       "kind": "latency",
-      "operation": "show --format png --renderer semantic",
+      "operation": "screenshot --renderer semantic",
       "fixture": "fullscreen-query-heavy",
       "cache_policy": "warm",
       "percentile": 95,
@@ -131,7 +131,7 @@
     {
       "id": "native-screenshot-p95",
       "kind": "latency",
-      "operation": "show --format png --renderer native",
+      "operation": "screenshot --renderer native",
       "fixture": "fullscreen-query-heavy",
       "cache_policy": "warm",
       "percentile": 95,

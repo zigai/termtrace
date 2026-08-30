@@ -5,13 +5,13 @@
   "workflows": [
     {
       "id": "stable-observe",
-      "command": "wait-idle SESSION --stable-for 10ms",
+      "command": "wait SESSION --idle 10ms",
       "maximum_stdout_bytes": 4096,
       "maximum_commands": 1
     },
     {
       "id": "atomic-input-sequence",
-      "command": "send SESSION text:go enter",
+      "command": "act SESSION text:go enter",
       "maximum_stdout_bytes": 2048,
       "maximum_commands": 1
     },
