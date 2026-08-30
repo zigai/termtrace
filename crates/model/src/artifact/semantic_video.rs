@@ -2,12 +2,13 @@
 
 use std::path::PathBuf;
 
+use crate::artifact::save::{SemanticFontResource, SemanticRasterProfile};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Current semantic-video source format.
-pub const SEMANTIC_VIDEO_VERSION: u32 = 2;
+pub const SEMANTIC_VIDEO_VERSION: u32 = 4;
 
 /// Fixed canvas used for every frame of one semantic video source.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -53,10 +54,12 @@ pub struct SemanticVideoSourcePlan {
     pub canvas: SemanticVideoCanvas,
     /// Semantic renderer identity.
     pub renderer: String,
-    /// Bundled deterministic font family.
-    pub font_family: String,
-    /// BLAKE3 identity of the bundled font bytes.
-    pub font_hash: String,
+    /// Deterministic rasterization quality profile.
+    pub raster_profile: SemanticRasterProfile,
+    /// Ordered bundled font resources in serialized role order.
+    pub fonts: Vec<SemanticFontResource>,
+    /// Aggregate BLAKE3 identity of all decompressed bundled faces.
+    pub font_set_blake3: String,
     /// Stable state-to-frame scheduling policy.
     pub scheduling_policy: String,
 }

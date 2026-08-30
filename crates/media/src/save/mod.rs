@@ -26,7 +26,7 @@ use termtrace_evidence::{
 use termtrace_model::{
     artifact::save::{
         SaveFormat, SaveManifest, SaveOutcome, SavedFile, ScreenshotBatchEntry,
-        ScreenshotBatchManifest, SemanticImageResource,
+        ScreenshotBatchManifest, SemanticImageResource, SemanticRasterProfile,
     },
     execution::event::Event,
     execution::session::{SessionCompletion, SessionManifest},
@@ -38,9 +38,9 @@ use termtrace_model::{
     value::ByteString,
 };
 use termtrace_render::{
-    Error as RenderError, SEMANTIC_CELL_HEIGHT, SEMANTIC_CELL_WIDTH, SEMANTIC_FONT_BYTES,
-    SEMANTIC_FONT_FAMILY, SEMANTIC_FONT_SIZE, SEMANTIC_FONT_SOURCE, SEMANTIC_PNG_RENDERER,
-    SEMANTIC_SVG_RENDERER, render_png, render_svg, semantic_font_hash,
+    Error as RenderError, SEMANTIC_CELL_HEIGHT, SEMANTIC_CELL_WIDTH, SEMANTIC_FONT_SIZE,
+    SEMANTIC_PNG_RENDERER, SEMANTIC_SVG_RENDERER, SEMANTIC_SYMBOLS_BASELINE,
+    SEMANTIC_SYMBOLS_FONT_SIZE, SEMANTIC_TEXT_BASELINE, render_png, render_svg, semantic_font_set,
 };
 use termtrace_terminal::Format;
 
@@ -203,7 +203,7 @@ pub fn save(
         }
         let save_manifest = SaveManifest {
             format: "termtrace-save".to_owned(),
-            version: 2,
+            version: 4,
             session_id: source_manifest.session_id,
             canonical_session: ByteString::from(canonical.as_os_str().as_bytes()),
             state_point: point,
@@ -216,7 +216,7 @@ pub fn save(
                 .iter()
                 .any(|format| matches!(format, SaveFormat::Svg | SaveFormat::Png))
             {
-                semantic_image_resources()
+                semantic_image_resources()?
             } else {
                 Vec::new()
             },
@@ -301,14 +301,14 @@ pub fn save_screenshot_batch(
             let entry_directory = staging.join(&directory);
             create_private_directory(&entry_directory)?;
             let bytes = match format {
-                SaveFormat::Svg => render_svg(&inspection.state),
+                SaveFormat::Svg => render_svg(&inspection.state).map_err(render_error)?,
                 SaveFormat::Png => render_png(&inspection.state).map_err(render_error)?,
                 _ => return Err(save_error("batch format must be SVG or PNG")),
             };
             write_secure(&entry_directory.join(filename), &bytes)?;
             let save_manifest = SaveManifest {
                 format: "termtrace-save".to_owned(),
-                version: 2,
+                version: 4,
                 session_id: source_manifest.session_id,
                 canonical_session: ByteString::from(canonical.as_os_str().as_bytes()),
                 state_point: point.clone(),
@@ -324,7 +324,7 @@ pub fn save_screenshot_batch(
                     truth_layer: Some("semantic_rendering".to_owned()),
                     renderer: Some(renderer.to_owned()),
                 }],
-                semantic_image_resources: semantic_image_resources(),
+                semantic_image_resources: semantic_image_resources()?,
             };
             let manifest_path = entry_directory.join("save-manifest.json");
             write_secure(
@@ -340,7 +340,7 @@ pub fn save_screenshot_batch(
         }
         let manifest = ScreenshotBatchManifest {
             format: "termtrace-screenshot-batch".to_owned(),
-            version: 1,
+            version: 3,
             image_format: format,
             entries,
         };
@@ -463,7 +463,7 @@ fn render_saved_file(
         SaveFormat::Svg => RenderedFile {
             path: "screen.svg".to_owned(),
             media_type: "image/svg+xml",
-            bytes: render_svg(&inspection.state),
+            bytes: render_svg(&inspection.state).map_err(render_error)?,
             truth_layer: Some("semantic_rendering"),
             renderer: Some(SEMANTIC_SVG_RENDERER),
         },
@@ -520,19 +520,22 @@ fn state_selector(log: &EventLog, point: &StatePoint) -> Result<StateSelector> {
     }
 }
 
-fn semantic_image_resources() -> Vec<SemanticImageResource> {
-    return vec![SemanticImageResource {
-        font_family: SEMANTIC_FONT_FAMILY.to_owned(),
-        font_source: SEMANTIC_FONT_SOURCE.to_owned(),
-        font_byte_count: u64::try_from(SEMANTIC_FONT_BYTES.len()).unwrap_or(u64::MAX),
-        font_blake3: semantic_font_hash(),
-        fallback_policy: "bundled_font_only_missing_glyph_box".to_owned(),
+fn semantic_image_resources() -> Result<Vec<SemanticImageResource>> {
+    let font_set = semantic_font_set().map_err(render_error)?;
+    return Ok(vec![SemanticImageResource {
+        fonts: font_set.resources().cloned().collect(),
+        font_set_blake3: font_set.font_set_blake3().to_owned(),
+        fallback_policy: "style_face_then_symbols_nerd_font_then_missing_glyph_box".to_owned(),
+        raster_profile: SemanticRasterProfile::Supersampled2x,
         font_size: SEMANTIC_FONT_SIZE,
+        text_baseline: SEMANTIC_TEXT_BASELINE,
+        symbols_font_size: SEMANTIC_SYMBOLS_FONT_SIZE,
+        symbols_baseline: SEMANTIC_SYMBOLS_BASELINE,
         cell_width: SEMANTIC_CELL_WIDTH,
         cell_height: SEMANTIC_CELL_HEIGHT,
         padding: 0,
         background_policy: "opaque_terminal_background".to_owned(),
-    }];
+    }]);
 }
 
 fn pretty_json(value: &impl serde::Serialize, path: &Path) -> Result<Vec<u8>> {

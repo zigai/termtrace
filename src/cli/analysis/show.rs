@@ -504,7 +504,7 @@ fn write_observation_metadata(observation: &Observation) -> Result<()> {
 
 fn render_show_image(state: &SemanticState, format: ShowFormat) -> Result<Vec<u8>> {
     return match format {
-        ShowFormat::Svg => Ok(render_svg(state)),
+        ShowFormat::Svg => render_svg(state).into_diagnostic(),
         ShowFormat::Png => render_png(state).into_diagnostic(),
         _ => Err(miette::miette!("show image renderer requires SVG or PNG")),
     };

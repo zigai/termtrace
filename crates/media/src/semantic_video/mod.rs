@@ -15,9 +15,12 @@ use termtrace_evidence::{
     session::validate_completed_log,
 };
 use termtrace_model::{
-    artifact::semantic_video::{
-        SEMANTIC_VIDEO_VERSION, SemanticFrameSpan, SemanticVideoCanvas,
-        SemanticVideoSourceManifest, SemanticVideoSourcePlan,
+    artifact::{
+        save::SemanticRasterProfile,
+        semantic_video::{
+            SEMANTIC_VIDEO_VERSION, SemanticFrameSpan, SemanticVideoCanvas,
+            SemanticVideoSourceManifest, SemanticVideoSourcePlan,
+        },
     },
     execution::event::{Event, OperationStatus},
     protocol::capability::SEMANTIC_VIDEO_CAPABILITY,
@@ -25,8 +28,8 @@ use termtrace_model::{
     terminal::state::SemanticState,
 };
 use termtrace_render::{
-    Error as RenderError, SEMANTIC_CELL_HEIGHT, SEMANTIC_CELL_WIDTH, SEMANTIC_FONT_FAMILY,
-    SEMANTIC_PNG_RENDERER, render_video_rgba, semantic_font_hash,
+    Error as RenderError, SEMANTIC_CELL_HEIGHT, SEMANTIC_CELL_WIDTH, SEMANTIC_PNG_RENDERER,
+    render_video_rgba, semantic_font_set,
 };
 
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
@@ -43,6 +46,7 @@ pub fn plan(
     fps: u16,
     start_monotonic_ns: u64,
     end_monotonic_ns: u64,
+    raster_profile: SemanticRasterProfile,
 ) -> Result<SemanticVideoSourcePlan> {
     if !(1..=120).contains(&fps) {
         return Err(video_error("semantic video FPS must be between 1 and 120"));
@@ -64,6 +68,7 @@ pub fn plan(
     })?;
     let frame_count =
         frame_ceil(end_monotonic_ns.saturating_sub(start_monotonic_ns), fps).saturating_add(1);
+    let font_set = semantic_font_set().map_err(render_error)?;
     return Ok(SemanticVideoSourcePlan {
         version: SEMANTIC_VIDEO_VERSION,
         session: session.as_ref().to_path_buf(),
@@ -83,8 +88,9 @@ pub fn plan(
             policy: "max_grid_top_left_v1".to_owned(),
         },
         renderer: SEMANTIC_PNG_RENDERER.to_owned(),
-        font_family: SEMANTIC_FONT_FAMILY.to_owned(),
-        font_hash: semantic_font_hash(),
+        raster_profile,
+        fonts: font_set.resources().cloned().collect(),
+        font_set_blake3: font_set.font_set_blake3().to_owned(),
         scheduling_policy: "latest_presented_at_frame_start_v1".to_owned(),
     });
 }
@@ -269,8 +275,13 @@ impl<'scheduler, W: Write> SemanticFrameScheduler<'scheduler, W> {
             self.suppressed_state_count = self.suppressed_state_count.saturating_add(1);
             return Ok(());
         }
-        let pixels = render_video_rgba(state, self.source.canvas.cols, self.source.canvas.rows)
-            .map_err(render_error)?;
+        let pixels = render_video_rgba(
+            state,
+            self.source.canvas.cols,
+            self.source.canvas.rows,
+            self.source.raster_profile,
+        )
+        .map_err(render_error)?;
         if pixels.len() != self.expected_bytes {
             return Err(video_error(
                 "semantic renderer returned an invalid RGBA frame",
@@ -354,6 +365,7 @@ fn maximum_applied_geometry(log: &EventLog) -> (u16, u16) {
 }
 
 fn validate_source_plan(source: &SemanticVideoSourcePlan) -> Result<()> {
+    let font_set = semantic_font_set().map_err(render_error)?;
     let expected_width = source.canvas.cols.checked_mul(SEMANTIC_CELL_WIDTH);
     let expected_height = source.canvas.rows.checked_mul(SEMANTIC_CELL_HEIGHT);
     let expected_frames = frame_ceil(
@@ -378,8 +390,8 @@ fn validate_source_plan(source: &SemanticVideoSourcePlan) -> Result<()> {
         || Some(source.canvas.height) != expected_height
         || source.canvas.policy != "max_grid_top_left_v1"
         || source.renderer != SEMANTIC_PNG_RENDERER
-        || source.font_family != SEMANTIC_FONT_FAMILY
-        || source.font_hash != semantic_font_hash()
+        || !font_set.resources().eq(source.fonts.iter())
+        || source.font_set_blake3 != font_set.font_set_blake3()
         || source.scheduling_policy != "latest_presented_at_frame_start_v1"
     {
         return Err(video_error("semantic video source plan is invalid"));
@@ -591,7 +603,9 @@ mod tests {
     #[test]
     fn ordered_frame_scheduler_rasterizes_once_and_maps_the_complete_span() {
         let mut engine = GhosttyVt::new(2, 2, 0).expect("semantic engine");
+        engine.write(b"A");
         let state = engine.snapshot().expect("semantic state");
+        let font_set = semantic_font_set().expect("semantic font set");
         let source = SemanticVideoSourcePlan {
             version: SEMANTIC_VIDEO_VERSION,
             session: PathBuf::from("session"),
@@ -611,8 +625,9 @@ mod tests {
                 policy: "max_grid_top_left_v1".to_owned(),
             },
             renderer: SEMANTIC_PNG_RENDERER.to_owned(),
-            font_family: SEMANTIC_FONT_FAMILY.to_owned(),
-            font_hash: semantic_font_hash(),
+            raster_profile: SemanticRasterProfile::Direct,
+            fonts: font_set.resources().cloned().collect(),
+            font_set_blake3: font_set.font_set_blake3().to_owned(),
             scheduling_policy: "latest_presented_at_frame_start_v1".to_owned(),
         };
         let record = StateRecord {
@@ -641,6 +656,17 @@ mod tests {
         let mut scheduler = SemanticFrameScheduler::new(&source, &mut bytes, frame_bytes);
         scheduler.emit(&record, &state, 2).expect("schedule span");
         let summary = scheduler.finish().expect("finish schedule");
+        let mut supersampled_source = source.clone();
+        supersampled_source.raster_profile = SemanticRasterProfile::Supersampled2x;
+        let mut supersampled_bytes = Vec::new();
+        let mut supersampled_scheduler =
+            SemanticFrameScheduler::new(&supersampled_source, &mut supersampled_bytes, frame_bytes);
+        supersampled_scheduler
+            .emit(&record, &state, 2)
+            .expect("schedule supersampled span");
+        let supersampled_summary = supersampled_scheduler
+            .finish()
+            .expect("finish supersampled schedule");
 
         assert_eq!(bytes.len(), frame_bytes * 2);
         assert_eq!(summary.written_frames, 2);
@@ -650,6 +676,14 @@ mod tests {
         assert_eq!(
             summary.pixel_stream_hash,
             blake3::hash(&bytes).to_hex().to_string()
+        );
+        assert_eq!(
+            supersampled_summary.pixel_stream_hash,
+            blake3::hash(&supersampled_bytes).to_hex().to_string()
+        );
+        assert_ne!(
+            summary.pixel_stream_hash,
+            supersampled_summary.pixel_stream_hash
         );
         assert_eq!(summary.spans[0].state_id, 7);
         assert_eq!(

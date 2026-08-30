@@ -272,8 +272,8 @@ pub(super) fn presentation_source_identity_hash(source: &PresentationSource) -> 
                 "frame_count": plan.frame_count,
                 "canvas": &plan.canvas,
                 "renderer": &plan.renderer,
-                "font_family": &plan.font_family,
-                "font_hash": &plan.font_hash,
+                "fonts": &plan.fonts,
+                "font_set_blake3": &plan.font_set_blake3,
                 "scheduling_policy": &plan.scheduling_policy,
             });
             let bytes = serde_json::to_vec(&identity).map_err(|source| {

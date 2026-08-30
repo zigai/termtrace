@@ -189,6 +189,72 @@
       ],
       "type": "object"
     },
+    "SemanticFontResource": {
+      "additionalProperties": false,
+      "description": "Exact identity of one bundled semantic font face.",
+      "properties": {
+        "decompressed_blake3": {
+          "description": "BLAKE3 of the decompressed TTF bytes.",
+          "type": "string"
+        },
+        "decompressed_size": {
+          "description": "Decompressed TTF byte count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "family": {
+          "description": "Termtrace-scoped family used by semantic renderers.",
+          "type": "string"
+        },
+        "repository_source": {
+          "description": "Repository-relative source asset.",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/SemanticFontRole",
+          "description": "Stable face role."
+        }
+      },
+      "required": [
+        "role",
+        "family",
+        "repository_source",
+        "decompressed_size",
+        "decompressed_blake3"
+      ],
+      "type": "object"
+    },
+    "SemanticFontRole": {
+      "description": "Stable role of one bundled semantic font face.",
+      "oneOf": [
+        {
+          "const": "regular",
+          "description": "Plain JetBrains Mono text.",
+          "type": "string"
+        },
+        {
+          "const": "bold",
+          "description": "Bold JetBrains Mono text.",
+          "type": "string"
+        },
+        {
+          "const": "italic",
+          "description": "Italic JetBrains Mono text.",
+          "type": "string"
+        },
+        {
+          "const": "bold-italic",
+          "description": "Bold italic JetBrains Mono text.",
+          "type": "string"
+        },
+        {
+          "const": "symbols-fallback",
+          "description": "Symbols Nerd Font fallback.",
+          "type": "string"
+        }
+      ]
+    },
     "SemanticImageResource": {
       "additionalProperties": false,
       "description": "Exact font and layout resources used by semantic image output.",
@@ -215,18 +281,8 @@
           "description": "Deterministic missing-glyph policy.",
           "type": "string"
         },
-        "font_blake3": {
-          "description": "BLAKE3 of exact font bytes.",
-          "type": "string"
-        },
-        "font_byte_count": {
-          "description": "Exact font byte count.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "font_family": {
-          "description": "Embedded font family.",
+        "font_set_blake3": {
+          "description": "Aggregate BLAKE3 identity of all decompressed bundled faces.",
           "type": "string"
         },
         "font_size": {
@@ -236,9 +292,12 @@
           "minimum": 0,
           "type": "integer"
         },
-        "font_source": {
-          "description": "Repository-relative font source.",
-          "type": "string"
+        "fonts": {
+          "description": "Ordered bundled font resources in serialized role order.",
+          "items": {
+            "$ref": "#/$defs/SemanticFontResource"
+          },
+          "type": "array"
         },
         "padding": {
           "description": "Fixed outer padding.",
@@ -246,21 +305,63 @@
           "maximum": 65535,
           "minimum": 0,
           "type": "integer"
+        },
+        "raster_profile": {
+          "$ref": "#/$defs/SemanticRasterProfile",
+          "description": "Deterministic rasterization quality profile."
+        },
+        "symbols_baseline": {
+          "description": "Symbols fallback baseline in semantic SVG units.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "symbols_font_size": {
+          "description": "Symbols fallback font size in semantic SVG units.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text_baseline": {
+          "description": "Text baseline in semantic SVG units.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [
-        "font_family",
-        "font_source",
-        "font_byte_count",
-        "font_blake3",
+        "fonts",
+        "font_set_blake3",
         "fallback_policy",
+        "raster_profile",
         "font_size",
+        "text_baseline",
+        "symbols_font_size",
+        "symbols_baseline",
         "cell_width",
         "cell_height",
         "padding",
         "background_policy"
       ],
       "type": "object"
+    },
+    "SemanticRasterProfile": {
+      "description": "Deterministic semantic rasterization quality profile.",
+      "oneOf": [
+        {
+          "const": "direct",
+          "description": "Rasterize directly at the target dimensions.",
+          "type": "string"
+        },
+        {
+          "const": "supersampled-2x",
+          "description": "Rasterize at twice the target dimensions and downsample once.",
+          "type": "string"
+        }
+      ]
     },
     "StatePoint": {
       "description": "Shared state selection vocabulary.",

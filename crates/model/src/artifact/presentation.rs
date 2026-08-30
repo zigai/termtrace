@@ -6,8 +6,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    artifact::metadata::ArtifactMember, artifact::semantic_video::SemanticVideoSourcePlan,
-    terminal::replay::SourceRange, value::geometry::TerminalGeometryReport,
+    artifact::{
+        metadata::ArtifactMember, save::SemanticRasterProfile,
+        semantic_video::SemanticVideoSourcePlan,
+    },
+    terminal::replay::SourceRange,
+    value::geometry::TerminalGeometryReport,
 };
 
 /// Current edit-plan format version.
@@ -522,6 +526,8 @@ pub enum PresentationSourceRequest {
     Semantic {
         /// Constant semantic source frame rate.
         fps: u16,
+        /// Deterministic rasterization quality profile.
+        raster_profile: SemanticRasterProfile,
     },
 }
 

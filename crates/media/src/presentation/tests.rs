@@ -290,6 +290,21 @@ fn exports_multi_clip_h264_presentation_atomically() {
             .contains("drawbox=x=2:y=26:w=60:h=30")
     );
     assert!(outcome.directory.join("branding.txt").is_file());
+    let staged_regular = outcome.directory.join("fonts/JetBrainsMono-Regular.ttf");
+    assert_eq!(
+        fs_err::read(staged_regular).expect("read staged regular font"),
+        termtrace_render::semantic_font_set()
+            .expect("semantic font set")
+            .regular_face_bytes()
+    );
+    for unexpected in [
+        "JetBrainsMono-Bold.ttf",
+        "JetBrainsMono-Italic.ttf",
+        "JetBrainsMono-BoldItalic.ttf",
+        "SymbolsNerdFont-Regular.ttf",
+    ] {
+        assert!(!outcome.directory.join("fonts").join(unexpected).exists());
+    }
     assert!(
         fs_err::read_to_string(outcome.directory.join("source-frame-hashes.framemd5"))
             .expect("read decoded source hashes")

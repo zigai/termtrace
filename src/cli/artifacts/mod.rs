@@ -38,7 +38,7 @@ use termtrace_media::presentation::{
 use termtrace_media::save::{save, save_screenshot_batch};
 use termtrace_model::{
     artifact::bundle::BundleVerificationPolicy,
-    artifact::save::SaveFormat,
+    artifact::save::{SaveFormat, SemanticRasterProfile},
     execution::event::Event,
     execution::session::CaptureTarget,
     protocol::capability::{
@@ -57,8 +57,8 @@ use crate::cli::{
     artifacts::args::{
         BugReportFacadeArgs, BundleArgs, BundleFacadeArgs, BundleProfileArg, BundleVerifyArgs,
         CaptureArgs, ExportArgs, SaveArgs, ScreenshotArgs, ScreenshotFacadeArgs, ScreenshotFormat,
-        VideoArgs, VideoCommand, VideoCursorStyleArg, VideoFacadeArgs, VideoPresetArg,
-        VideoSourceArg, VideoSourceArgs,
+        SemanticRasterProfileArg, VideoArgs, VideoCommand, VideoCursorStyleArg, VideoFacadeArgs,
+        VideoPresetArg, VideoSourceArg, VideoSourceArgs,
     },
     output::{write_json_line, write_progress},
     session_helpers::{
@@ -173,6 +173,11 @@ pub(super) fn run_video_facade(
         return write_session_lifecycle(response, &resolved, "video", ExitCode::FAILURE);
     }
     let session = resolved.path;
+    if arguments.renderer == VideoSourceArg::Native && arguments.semantic_raster_profile.is_some() {
+        return Err(miette::miette!(
+            "--semantic-raster-profile configures semantic video only"
+        ));
+    }
     if arguments.renderer == VideoSourceArg::Native
         && !session.join("visual/manifest.json").is_file()
     {
@@ -211,10 +216,13 @@ pub(super) fn run_video_facade(
     let provisional_fps = requested_fps.unwrap_or(default_fps);
     let hold_start = arguments.hold_start.unwrap_or(default_hold_start);
     let hold_end = arguments.hold_end.unwrap_or(default_hold_end);
+    let raster_profile =
+        semantic_raster_profile(arguments.preset, arguments.semantic_raster_profile);
     let source = match arguments.renderer {
         VideoSourceArg::Native => PresentationSourceRequest::Native,
         VideoSourceArg::Semantic => PresentationSourceRequest::Semantic {
             fps: provisional_fps,
+            raster_profile,
         },
     };
 
@@ -351,6 +359,19 @@ fn video_preset_timing(preset: VideoPresetArg) -> (u16, Duration, Duration) {
         VideoPresetArg::Docs => (30, Duration::from_millis(500), Duration::from_millis(1_000)),
         VideoPresetArg::Social => (60, Duration::from_millis(250), Duration::from_millis(750)),
         VideoPresetArg::Lossless => (60, Duration::ZERO, Duration::ZERO),
+    };
+}
+
+fn semantic_raster_profile(
+    preset: VideoPresetArg,
+    explicit: Option<SemanticRasterProfileArg>,
+) -> SemanticRasterProfile {
+    if let Some(explicit) = explicit {
+        return explicit.into();
+    }
+    return match preset {
+        VideoPresetArg::Docs | VideoPresetArg::Social => SemanticRasterProfile::Direct,
+        VideoPresetArg::Lossless => SemanticRasterProfile::Supersampled2x,
     };
 }
 
@@ -517,6 +538,9 @@ fn video_sidecar_path(output: &Path) -> PathBuf {
 
 fn video_source_request(arguments: VideoSourceArgs) -> Result<PresentationSourceRequest> {
     return match arguments.source {
+        VideoSourceArg::Native if arguments.semantic_raster_profile.is_some() => Err(
+            miette::miette!("--semantic-raster-profile configures semantic video only"),
+        ),
         VideoSourceArg::Native if arguments.fps.is_some() => Err(miette::miette!(
             "--fps configures semantic video only; native FPS comes from the capture manifest"
         )),
@@ -528,7 +552,12 @@ fn video_source_request(arguments: VideoSourceArgs) -> Result<PresentationSource
                     "semantic video FPS must be between 1 and 120"
                 ));
             }
-            Ok(PresentationSourceRequest::Semantic { fps })
+            Ok(PresentationSourceRequest::Semantic {
+                fps,
+                raster_profile: arguments
+                    .semantic_raster_profile
+                    .map_or(SemanticRasterProfile::Direct, SemanticRasterProfile::from),
+            })
         }
     };
 }
@@ -971,8 +1000,64 @@ mod tests {
             (None, PRESENTATION_CAPABILITY)
         );
         assert_eq!(
-            video_render_capability_ids(PresentationSourceRequest::Semantic { fps: 24 }),
+            video_render_capability_ids(PresentationSourceRequest::Semantic {
+                fps: 24,
+                raster_profile: SemanticRasterProfile::Direct,
+            }),
             (Some(SEMANTIC_VIDEO_CAPABILITY), PRESENTATION_CAPABILITY)
+        );
+    }
+
+    #[test]
+    fn semantic_raster_profiles_follow_source_and_preset_precedence() {
+        assert_eq!(
+            semantic_raster_profile(VideoPresetArg::Docs, None),
+            SemanticRasterProfile::Direct
+        );
+        assert_eq!(
+            semantic_raster_profile(VideoPresetArg::Social, None),
+            SemanticRasterProfile::Direct
+        );
+        assert_eq!(
+            semantic_raster_profile(VideoPresetArg::Lossless, None),
+            SemanticRasterProfile::Supersampled2x
+        );
+        assert_eq!(
+            semantic_raster_profile(
+                VideoPresetArg::Lossless,
+                Some(SemanticRasterProfileArg::Direct),
+            ),
+            SemanticRasterProfile::Direct
+        );
+        assert_eq!(
+            semantic_raster_profile(
+                VideoPresetArg::Docs,
+                Some(SemanticRasterProfileArg::Supersampled2x),
+            ),
+            SemanticRasterProfile::Supersampled2x
+        );
+
+        assert_eq!(
+            video_source_request(VideoSourceArgs {
+                source: VideoSourceArg::Semantic,
+                fps: None,
+                semantic_raster_profile: None,
+            })
+            .expect("advanced semantic source defaults are valid"),
+            PresentationSourceRequest::Semantic {
+                fps: 24,
+                raster_profile: SemanticRasterProfile::Direct,
+            }
+        );
+        let native_error = video_source_request(VideoSourceArgs {
+            source: VideoSourceArg::Native,
+            fps: None,
+            semantic_raster_profile: Some(SemanticRasterProfileArg::Direct),
+        })
+        .expect_err("native semantic raster profile must be rejected");
+        assert_eq!(
+            native_error.to_string(),
+            "--semantic-raster-profile configures semantic video only"
         );
     }
 }

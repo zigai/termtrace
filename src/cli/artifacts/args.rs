@@ -3,7 +3,11 @@ use std::{path::PathBuf, time::Duration};
 use clap::{ArgGroup, Args, Subcommand, ValueEnum};
 use termtrace_engine::timeline::parse_time_offset_ns;
 use termtrace_model::{
-    artifact::bundle::BundleProfile, artifact::save::SaveFormat, execution::session::CaptureTarget,
+    artifact::{
+        bundle::BundleProfile,
+        save::{SaveFormat, SemanticRasterProfile},
+    },
+    execution::session::CaptureTarget,
 };
 
 use crate::cli::{
@@ -288,6 +292,24 @@ pub(in crate::cli) enum VideoSourceArg {
     /// Deterministic pixels generated from canonical semantic replay.
     Semantic,
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(in crate::cli) enum SemanticRasterProfileArg {
+    /// Rasterize directly at the output dimensions.
+    Direct,
+    /// Rasterize at twice the output dimensions and downsample once.
+    #[value(name = "supersampled-2x")]
+    Supersampled2x,
+}
+
+impl From<SemanticRasterProfileArg> for SemanticRasterProfile {
+    fn from(value: SemanticRasterProfileArg) -> Self {
+        return match value {
+            SemanticRasterProfileArg::Direct => Self::Direct,
+            SemanticRasterProfileArg::Supersampled2x => Self::Supersampled2x,
+        };
+    }
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(in crate::cli) enum VideoPresetArg {
     /// Crisp, compact H.264 suitable for documentation.
@@ -322,6 +344,9 @@ pub(in crate::cli) struct VideoFacadeArgs {
     /// Semantic replay or verified native pixels; native never falls back.
     #[arg(long, value_enum, default_value_t = VideoSourceArg::Native)]
     pub(in crate::cli) renderer: VideoSourceArg,
+    /// Semantic rasterization quality; invalid for native rendering.
+    #[arg(long, value_enum)]
+    pub(in crate::cli) semantic_raster_profile: Option<SemanticRasterProfileArg>,
     /// Exact even output dimensions as `WIDTHxHEIGHT`.
     #[arg(long, value_parser = parse_capture_target, conflicts_with = "scale")]
     pub(in crate::cli) resolution: Option<CaptureTarget>,
@@ -356,6 +381,9 @@ pub(in crate::cli) struct VideoSourceArgs {
     /// Semantic source frame rate; invalid for native capture.
     #[arg(long)]
     pub(in crate::cli) fps: Option<u16>,
+    /// Semantic rasterization quality; invalid for native capture.
+    #[arg(long, value_enum)]
+    pub(in crate::cli) semantic_raster_profile: Option<SemanticRasterProfileArg>,
 }
 
 #[derive(Debug, Args)]

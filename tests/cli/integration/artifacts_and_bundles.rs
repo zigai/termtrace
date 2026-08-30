@@ -11,7 +11,12 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
     record
         .args(["record", "--no-input", "--out"])
         .arg(&session)
-        .args(["--", "/bin/sh", "-c", "printf '\\033[35mSAVED\\033[0m'"])
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf 'A\\033[1mA\\033[22;3mA\\033[1mA\\033[0m AgÉgj ─│█ 界\\r\\n\\033[58;2;255;0;255m\\033[4:1m1 \\033[4:2m2 \\033[4:3m3 \\033[4:4m4 \\033[4:5m5\\033[0m \\033[9mstrike\\033[0m \\033[53moverline\\033[0m'; printf '\\033[2 q\\033[1;1H'",
+        ])
         .assert()
         .success();
     let mut save = Command::cargo_bin("termtrace").expect("binary should build");
@@ -41,22 +46,90 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         manifest["sensitivity"],
         "terminal_screen_may_contain_secrets"
     );
-    assert_eq!(manifest["version"], 2);
+    assert_eq!(manifest["version"], 4);
     assert_eq!(manifest["files"].as_array().map(Vec::len), Some(7));
+    let image_resource = &manifest["semantic_image_resources"][0];
+    let fonts = image_resource["fonts"].as_array().expect("font resources");
+    assert_eq!(fonts.len(), 5);
+    let roles: Vec<&str> = fonts
+        .iter()
+        .map(|font| return font["role"].as_str().expect("font role"))
+        .collect();
     assert_eq!(
-        manifest["semantic_image_resources"][0]["font_family"],
-        "Termtrace Fira Code"
+        roles,
+        [
+            "regular",
+            "bold",
+            "italic",
+            "bold-italic",
+            "symbols-fallback"
+        ]
+    );
+    let families: Vec<&str> = fonts
+        .iter()
+        .map(|font| return font["family"].as_str().expect("font family"))
+        .collect();
+    assert_eq!(
+        families,
+        [
+            "Termtrace JetBrains Mono",
+            "Termtrace JetBrains Mono",
+            "Termtrace JetBrains Mono",
+            "Termtrace JetBrains Mono",
+            "Termtrace Symbols Nerd Font"
+        ]
+    );
+    for font in fonts {
+        assert!(
+            font["repository_source"]
+                .as_str()
+                .is_some_and(|source| return source.starts_with("crates/render/assets/fonts/"))
+        );
+        assert!(
+            font["decompressed_size"]
+                .as_u64()
+                .is_some_and(|size| return size > 0)
+        );
+        assert_eq!(font["decompressed_blake3"].as_str().map(str::len), Some(64));
+    }
+    assert_eq!(
+        image_resource["font_set_blake3"],
+        "013d52d10b90498adec2d19598f4040731dc00cf1539e748f05d86d355f919ec"
     );
     assert_eq!(
-        manifest["semantic_image_resources"][0]["font_blake3"]
-            .as_str()
-            .map(str::len),
-        Some(64)
+        image_resource["fallback_policy"],
+        "style_face_then_symbols_nerd_font_then_missing_glyph_box"
+    );
+    assert_eq!(image_resource["raster_profile"], "supersampled-2x");
+    assert_eq!(image_resource["font_size"], 20);
+    assert_eq!(image_resource["text_baseline"], 20);
+    assert_eq!(image_resource["symbols_font_size"], 12);
+    assert_eq!(image_resource["symbols_baseline"], 16);
+    assert_eq!(image_resource["cell_width"], 12);
+    assert_eq!(image_resource["cell_height"], 24);
+    let manifested_files = manifest["files"].as_array().expect("manifested files");
+    assert_eq!(
+        manifested_files
+            .iter()
+            .find(|file| return file["path"] == "screen.svg")
+            .map(|file| return &file["renderer"]),
+        Some(&serde_json::Value::String(
+            "termtrace-semantic-svg-v4".to_owned()
+        ))
+    );
+    assert_eq!(
+        manifested_files
+            .iter()
+            .find(|file| return file["path"] == "screen.png")
+            .map(|file| return &file["renderer"]),
+        Some(&serde_json::Value::String(
+            "termtrace-semantic-png-resvg-v4".to_owned()
+        ))
     );
     assert!(
         fs_err::read_to_string(destination.join("screen.txt"))
             .expect("screen text")
-            .contains("SAVED")
+            .contains("AAAA")
     );
     assert!(
         fs_err::read(destination.join("screen.vt"))
@@ -66,12 +139,38 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
     assert!(
         fs_err::read_to_string(destination.join("screen.html"))
             .expect("saved HTML")
-            .contains("SAVED")
+            .contains(">A<")
     );
     let svg = fs_err::read_to_string(destination.join("screen.svg")).expect("saved SVG");
     assert!(svg.contains("data-truth-layer=\"semantic_rendering\""));
-    assert!(svg.contains("data:font/ttf;base64,"));
-    assert!(svg.contains(">S</text>") && svg.contains(">D</text>"));
+    assert_eq!(svg.matches("@font-face").count(), 5);
+    assert!(
+        svg.matches("font-family=\"Termtrace JetBrains Mono\"")
+            .count()
+            >= 4
+    );
+    assert!(
+        svg.matches("font-family=\"Termtrace Symbols Nerd Font\"")
+            .count()
+            >= 2
+    );
+    for attributes in [
+        "font-weight=\"normal\" font-style=\"normal\"",
+        "font-weight=\"bold\" font-style=\"normal\"",
+        "font-weight=\"normal\" font-style=\"italic\"",
+        "font-weight=\"bold\" font-style=\"italic\"",
+    ] {
+        assert!(svg.contains(attributes));
+    }
+    assert!(svg.contains("></text>") && svg.contains("></text>"));
+    assert!(svg.contains("shape-rendering=\"crispEdges\""));
+    assert!(svg.contains("stroke=\"#ff00ff\" stroke-width=\"1\""));
+    assert!(svg.contains("stroke-dasharray=\"1 2\" stroke-linecap=\"round\""));
+    assert!(svg.contains("stroke-dasharray=\"4 2\""));
+    assert!(svg.contains("<path d=\"M "));
+    assert!(svg.contains(" y1=\"14\"") || svg.contains(" y1=\"38\""));
+    assert!(svg.contains(" y1=\"25\""));
+    assert!(!svg.contains("opacity=\"0.55\""));
     let png = fs_err::read(destination.join("screen.png")).expect("saved PNG");
     assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
     assert_eq!(
@@ -121,6 +220,12 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         &fs_err::read(batch.join("batch-manifest.json")).expect("batch manifest"),
     )
     .expect("batch manifest JSON");
+    assert_eq!(batch_manifest["version"], 3);
+    assert_eq!(batch_manifest["entries"][0]["manifest"]["version"], 4);
+    assert_eq!(
+        batch_manifest["entries"][0]["manifest"]["semantic_image_resources"],
+        manifest["semantic_image_resources"]
+    );
     assert_eq!(batch_manifest["entries"].as_array().map(Vec::len), Some(2));
     assert!(batch.join("state-0000/screen.png").is_file());
     assert!(batch.join("state-0001/screen.png").is_file());

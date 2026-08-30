@@ -158,7 +158,10 @@ pub(in crate::cli) fn run_diff(
             let (before, after) = image_states
                 .as_ref()
                 .ok_or_else(|| return miette::miette!("missing visual diff states"))?;
-            write_stdout(response, render_diff_svg(before, after, &difference))?
+            write_stdout(
+                response,
+                render_diff_svg(before, after, &difference).into_diagnostic()?,
+            )?
         }
         DiffFormat::Png => {
             let (before, after) = image_states

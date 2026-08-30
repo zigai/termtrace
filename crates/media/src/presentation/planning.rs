@@ -191,7 +191,10 @@ pub fn plan_with_source(
                 None,
             )
         }
-        PresentationSourceRequest::Semantic { fps } => {
+        PresentationSourceRequest::Semantic {
+            fps,
+            raster_profile,
+        } => {
             if edit.clips.iter().any(|clip| {
                 return clip.from.native_frame.is_some() || clip.to.native_frame.is_some();
             }) {
@@ -206,7 +209,14 @@ pub fn plan_with_source(
                 semantic_start = semantic_start.min(range.start_monotonic_ns);
                 semantic_end = semantic_end.max(range.end_monotonic_ns);
             }
-            let semantic = plan_semantic_video(session, &log, fps, semantic_start, semantic_end)?;
+            let semantic = plan_semantic_video(
+                session,
+                &log,
+                fps,
+                semantic_start,
+                semantic_end,
+                raster_profile,
+            )?;
             let geometry = TerminalGeometryReport {
                 cols: semantic.canvas.cols,
                 rows: semantic.canvas.rows,

@@ -28,22 +28,82 @@ pub enum SaveFormat {
     Png,
 }
 
+/// Stable role of one bundled semantic font face.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SemanticFontRole {
+    /// Plain JetBrains Mono text.
+    Regular,
+    /// Bold JetBrains Mono text.
+    Bold,
+    /// Italic JetBrains Mono text.
+    Italic,
+    /// Bold italic JetBrains Mono text.
+    BoldItalic,
+    /// Symbols Nerd Font fallback.
+    SymbolsFallback,
+}
+
+impl SemanticFontRole {
+    /// Stable serialized role identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Regular => return "regular",
+            Self::Bold => return "bold",
+            Self::Italic => return "italic",
+            Self::BoldItalic => return "bold-italic",
+            Self::SymbolsFallback => return "symbols-fallback",
+        }
+    }
+}
+/// Deterministic semantic rasterization quality profile.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SemanticRasterProfile {
+    /// Rasterize directly at the target dimensions.
+    Direct,
+    /// Rasterize at twice the target dimensions and downsample once.
+    #[serde(rename = "supersampled-2x")]
+    Supersampled2x,
+}
+
+/// Exact identity of one bundled semantic font face.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticFontResource {
+    /// Stable face role.
+    pub role: SemanticFontRole,
+    /// Termtrace-scoped family used by semantic renderers.
+    pub family: String,
+    /// Repository-relative source asset.
+    pub repository_source: String,
+    /// Decompressed TTF byte count.
+    pub decompressed_size: u64,
+    /// BLAKE3 of the decompressed TTF bytes.
+    pub decompressed_blake3: String,
+}
+
 /// Exact font and layout resources used by semantic image output.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SemanticImageResource {
-    /// Embedded font family.
-    pub font_family: String,
-    /// Repository-relative font source.
-    pub font_source: String,
-    /// Exact font byte count.
-    pub font_byte_count: u64,
-    /// BLAKE3 of exact font bytes.
-    pub font_blake3: String,
+    /// Ordered bundled font resources in serialized role order.
+    pub fonts: Vec<SemanticFontResource>,
+    /// Aggregate BLAKE3 identity of all decompressed bundled faces.
+    pub font_set_blake3: String,
     /// Deterministic missing-glyph policy.
     pub fallback_policy: String,
+    /// Deterministic rasterization quality profile.
+    pub raster_profile: SemanticRasterProfile,
     /// Font size in semantic SVG units.
     pub font_size: u16,
+    /// Text baseline in semantic SVG units.
+    pub text_baseline: u16,
+    /// Symbols fallback font size in semantic SVG units.
+    pub symbols_font_size: u16,
+    /// Symbols fallback baseline in semantic SVG units.
+    pub symbols_baseline: u16,
     /// Fixed semantic cell width.
     pub cell_width: u16,
     /// Fixed semantic cell height.
@@ -133,4 +193,23 @@ pub struct ScreenshotBatchManifest {
     pub image_format: SaveFormat,
     /// Ordered exact-state entries.
     pub entries: Vec<ScreenshotBatchEntry>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SemanticRasterProfile;
+
+    #[test]
+    fn semantic_raster_profiles_have_exact_persisted_names() {
+        assert_eq!(
+            serde_json::to_string(&SemanticRasterProfile::Direct)
+                .expect("serialize direct raster profile"),
+            "\"direct\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SemanticRasterProfile::Supersampled2x)
+                .expect("serialize supersampled raster profile"),
+            "\"supersampled-2x\""
+        );
+    }
 }

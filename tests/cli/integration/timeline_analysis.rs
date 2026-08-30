@@ -242,7 +242,7 @@ fn diff_reports_complete_cell_changes_and_enforces_expectations() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("termtrace-semantic-diff-svg-v2"))
+        .stdout(predicate::str::contains("termtrace-semantic-diff-svg-v4"))
         .stdout(predicate::str::contains("#ff3b30"));
 
     let mut rejected = Command::cargo_bin("termtrace").expect("binary should build");

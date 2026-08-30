@@ -465,9 +465,57 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .arg(&edit)
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""version":2"#))
+        .stdout(predicate::str::contains(r#""version":4"#))
         .stdout(predicate::str::contains(r#""kind":"semantic""#))
-        .stdout(predicate::str::contains(r#""fps":60"#));
+        .stdout(predicate::str::contains(r#""fps":60"#))
+        .stdout(predicate::str::contains(r#""raster_profile":"direct""#))
+        .stdout(predicate::str::contains(
+            r#""font_set_blake3":"013d52d10b90498adec2d19598f4040731dc00cf1539e748f05d86d355f919ec""#,
+        ))
+        .stdout(predicate::str::contains(r#""role":"regular""#))
+        .stdout(predicate::str::contains(r#""role":"bold""#))
+        .stdout(predicate::str::contains(r#""role":"italic""#))
+        .stdout(predicate::str::contains(r#""role":"bold-italic""#))
+        .stdout(predicate::str::contains(
+            r#""role":"symbols-fallback""#,
+        ));
+
+    let mut supersampled = Command::cargo_bin("termtrace").expect("binary should build");
+    supersampled
+        .env("PATH", "")
+        .args(["artifact", "video", "plan"])
+        .arg(&session)
+        .args([
+            "--source",
+            "semantic",
+            "--semantic-raster-profile",
+            "supersampled-2x",
+            "--edit",
+        ])
+        .arg(&edit)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            r#""raster_profile":"supersampled-2x""#,
+        ));
+
+    let mut invalid_native_profile = Command::cargo_bin("termtrace").expect("binary should build");
+    invalid_native_profile
+        .args(["artifact", "video", "plan"])
+        .arg(&session)
+        .args([
+            "--source",
+            "native",
+            "--semantic-raster-profile",
+            "direct",
+            "--edit",
+        ])
+        .arg(&edit)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--semantic-raster-profile configures semantic video only",
+        ));
 
     let mut native_default = Command::cargo_bin("termtrace").expect("binary should build");
     native_default

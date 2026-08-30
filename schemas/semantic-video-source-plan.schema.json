@@ -1,5 +1,86 @@
 {
   "$defs": {
+    "SemanticFontResource": {
+      "additionalProperties": false,
+      "description": "Exact identity of one bundled semantic font face.",
+      "properties": {
+        "decompressed_blake3": {
+          "description": "BLAKE3 of the decompressed TTF bytes.",
+          "type": "string"
+        },
+        "decompressed_size": {
+          "description": "Decompressed TTF byte count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "family": {
+          "description": "Termtrace-scoped family used by semantic renderers.",
+          "type": "string"
+        },
+        "repository_source": {
+          "description": "Repository-relative source asset.",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/SemanticFontRole",
+          "description": "Stable face role."
+        }
+      },
+      "required": [
+        "role",
+        "family",
+        "repository_source",
+        "decompressed_size",
+        "decompressed_blake3"
+      ],
+      "type": "object"
+    },
+    "SemanticFontRole": {
+      "description": "Stable role of one bundled semantic font face.",
+      "oneOf": [
+        {
+          "const": "regular",
+          "description": "Plain JetBrains Mono text.",
+          "type": "string"
+        },
+        {
+          "const": "bold",
+          "description": "Bold JetBrains Mono text.",
+          "type": "string"
+        },
+        {
+          "const": "italic",
+          "description": "Italic JetBrains Mono text.",
+          "type": "string"
+        },
+        {
+          "const": "bold-italic",
+          "description": "Bold italic JetBrains Mono text.",
+          "type": "string"
+        },
+        {
+          "const": "symbols-fallback",
+          "description": "Symbols Nerd Font fallback.",
+          "type": "string"
+        }
+      ]
+    },
+    "SemanticRasterProfile": {
+      "description": "Deterministic semantic rasterization quality profile.",
+      "oneOf": [
+        {
+          "const": "direct",
+          "description": "Rasterize directly at the target dimensions.",
+          "type": "string"
+        },
+        {
+          "const": "supersampled-2x",
+          "description": "Rasterize at twice the target dimensions and downsample once.",
+          "type": "string"
+        }
+      ]
+    },
     "SemanticVideoCanvas": {
       "additionalProperties": false,
       "description": "Fixed canvas used for every frame of one semantic video source.",
@@ -78,13 +159,16 @@
       "minimum": 0,
       "type": "integer"
     },
-    "font_family": {
-      "description": "Bundled deterministic font family.",
+    "font_set_blake3": {
+      "description": "Aggregate BLAKE3 identity of all decompressed bundled faces.",
       "type": "string"
     },
-    "font_hash": {
-      "description": "BLAKE3 identity of the bundled font bytes.",
-      "type": "string"
+    "fonts": {
+      "description": "Ordered bundled font resources in serialized role order.",
+      "items": {
+        "$ref": "#/$defs/SemanticFontResource"
+      },
+      "type": "array"
     },
     "fps": {
       "description": "Constant semantic source frame rate.",
@@ -98,6 +182,10 @@
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "raster_profile": {
+      "$ref": "#/$defs/SemanticRasterProfile",
+      "description": "Deterministic rasterization quality profile."
     },
     "renderer": {
       "description": "Semantic renderer identity.",
@@ -144,8 +232,9 @@
     "frame_count",
     "canvas",
     "renderer",
-    "font_family",
-    "font_hash",
+    "raster_profile",
+    "fonts",
+    "font_set_blake3",
     "scheduling_policy"
   ],
   "title": "SemanticVideoSourcePlan",

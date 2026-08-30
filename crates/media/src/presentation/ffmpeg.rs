@@ -11,7 +11,7 @@ use termtrace_model::artifact::presentation::{
     ChangeVisualization, CursorMaskFrame, NormalizedAnnotation, PixelTransform, PresentationPlan,
     PreviewOptions,
 };
-use termtrace_render::SEMANTIC_FONT_BYTES;
+use termtrace_render::semantic_font_set;
 
 use crate::{Error, Result};
 
@@ -377,7 +377,7 @@ pub(super) fn append_pixel_transforms(
                     write_secure(&staging.join(&name), label.as_bytes())?;
                     let next = format!("transform{sequence}");
                     filters.push(format!(
-                        "[{prior}]drawtext=fontfile='fonts/FiraCode-Regular.ttf':textfile='{}':fontcolor=cyan:fontsize=18:box=1:boxcolor=black@0.7:x={}:y={}[{next}]",
+                        "[{prior}]drawtext=fontfile='fonts/JetBrainsMono-Regular.ttf':textfile='{}':fontcolor=cyan:fontsize=18:box=1:boxcolor=black@0.7:x={}:y={}[{next}]",
                         filter_path_value(Path::new(&name))?,
                         x.saturating_add(4),
                         y.saturating_sub(24),
@@ -392,7 +392,7 @@ pub(super) fn append_pixel_transforms(
         ensure_presentation_font(staging)?;
         write_secure(&staging.join("branding.txt"), branding.as_bytes())?;
         filters.push(format!(
-            "[{prior}]drawtext=fontfile='fonts/FiraCode-Regular.ttf':textfile='branding.txt':fontcolor=white@0.8:fontsize=16:box=1:boxcolor=black@0.55:x=w-tw-12:y=12[branded]"
+            "[{prior}]drawtext=fontfile='fonts/JetBrainsMono-Regular.ttf':textfile='branding.txt':fontcolor=white@0.8:fontsize=16:box=1:boxcolor=black@0.55:x=w-tw-12:y=12[branded]"
         ));
         prior = "branded".to_owned();
     }
@@ -435,7 +435,10 @@ fn ensure_presentation_font(staging: &Path) -> Result<()> {
             source,
         };
     })?;
-    let font = fonts.join("FiraCode-Regular.ttf");
+    let font = fonts.join("JetBrainsMono-Regular.ttf");
+    let font_bytes = semantic_font_set()
+        .map_err(|error| return plan_error(format!("load presentation font: {error}")))?
+        .regular_face_bytes();
     if font.exists() {
         let bytes = fs_err::read(&font).map_err(|source| {
             return Error::Filesystem {
@@ -443,11 +446,11 @@ fn ensure_presentation_font(staging: &Path) -> Result<()> {
                 source,
             };
         })?;
-        if bytes != SEMANTIC_FONT_BYTES {
+        if bytes != font_bytes {
             return Err(plan_error("staged presentation font changed unexpectedly"));
         }
     } else {
-        write_secure(&font, SEMANTIC_FONT_BYTES)?;
+        write_secure(&font, font_bytes)?;
     }
     return Ok(());
 }

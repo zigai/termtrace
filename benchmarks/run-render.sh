@@ -6,6 +6,7 @@ readonly binary="${TERMTRACE_BINARY:-$root/target/release/termtrace}"
 readonly warmups="${RENDER_WARMUPS:-1}"
 readonly repetitions="${RENDER_REPETITIONS:-3}"
 readonly output="${OUTPUT:-$root/benchmarks/results/render.jsonl}"
+readonly semantic_raster_profile="${SEMANTIC_RASTER_PROFILE:-direct}"
 readonly work="$(mktemp -d)"
 
 cleanup() {
@@ -17,6 +18,13 @@ if [[ ! "$warmups" =~ ^[0-9]+$ || ! "$repetitions" =~ ^[1-9][0-9]*$ ]]; then
     printf 'RENDER_WARMUPS and RENDER_REPETITIONS must be nonnegative/positive integers\n' >&2
     exit 2
 fi
+case "$semantic_raster_profile" in
+    direct | supersampled-2x) ;;
+    *)
+        printf 'SEMANTIC_RASTER_PROFILE must be direct or supersampled-2x\n' >&2
+        exit 2
+        ;;
+esac
 if [[ ! -x "$binary" ]]; then
     printf 'Termtrace binary is not executable: %s\n' "$binary" >&2
     exit 2
@@ -53,7 +61,7 @@ measure() {
     local operation=$1
     local iteration=$2
     local record_result=${3:-true}
-    local destination="$work/$operation-$iteration"
+    local destination="$work/$operation-$record_result-$iteration"
     local started_ns ended_ns elapsed_ns artifact_hash
     started_ns=$(date +%s%N)
     case "$operation" in
@@ -61,6 +69,7 @@ measure() {
             "$binary" artifact video export "$session" \
                 --source semantic \
                 --fps 24 \
+                --semantic-raster-profile "$semantic_raster_profile" \
                 --edit "$edit" \
                 --out "$destination" >/dev/null
             artifact_hash=$(jq -r '.output_video_hash' "$destination/manifest.json")
@@ -68,6 +77,7 @@ measure() {
         presentation-preview)
             "$binary" artifact video preview "$session" \
                 --source semantic \
+                --semantic-raster-profile "$semantic_raster_profile" \
                 --edit "$edit" \
                 --out "$destination" >/dev/null
             artifact_hash=$(jq -r '.members[] | select(.path == "preview.mp4") | .blake3' "$destination/manifest.json")
