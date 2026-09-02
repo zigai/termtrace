@@ -21,7 +21,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
         .success();
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
     wait.env("TERMTRACE_STATE_DIR", &state)
-        .args(["wait", "demo", "SHOWME", "--timeout", "5s"])
+        .args(["wait", "demo", "--screen", "SHOWME", "--timeout", "5s"])
         .assert()
         .success();
     let mut live_show = Command::cargo_bin("termtrace").expect("binary should build");
@@ -398,6 +398,7 @@ fn synchronization_commands_reject_incomplete_stability() {
         .args([
             "wait",
             "stable-contract",
+            "--screen",
             "READY",
             "--stable-for",
             "200ms",

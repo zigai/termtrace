@@ -229,6 +229,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
             "full",
             "wait",
             "workflow",
+            "--screen",
             "Y",
             "--timeout",
             "1s",

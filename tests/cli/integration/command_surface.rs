@@ -327,6 +327,22 @@ fn wait_help_exposes_the_consolidated_idle_surface() {
 }
 
 #[test]
+fn wait_requires_the_screen_flag_for_screen_predicates() {
+    let mut positional = Command::cargo_bin("termtrace").expect("binary should build");
+    positional
+        .args(["wait", "session", "READY"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unexpected argument 'READY'"));
+
+    let mut flagged = Command::cargo_bin("termtrace").expect("binary should build");
+    flagged
+        .args(["wait", "session", "--screen", "READY", "--help"])
+        .assert()
+        .success();
+}
+
+#[test]
 fn nested_command_paths_dispatch() {
     let mut keys = Command::cargo_bin("termtrace").expect("binary should build");
     keys.args(["control", "keys"])

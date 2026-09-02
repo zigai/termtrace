@@ -807,7 +807,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
     visible
         .arg("wait")
         .arg(&session)
-        .args(["VISIBLE", "--timeout", "5s"])
+        .args(["--screen", "VISIBLE", "--timeout", "5s"])
         .assert()
         .success();
     let hidden = send_request(&session, &ControlRequest::new(ControlCommand::Snapshot))
@@ -846,7 +846,14 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
     visible_wait
         .arg("wait")
         .arg(&session)
-        .args(["BUSY", "--stable-for", "50ms", "--timeout", "1s"])
+        .args([
+            "--screen",
+            "BUSY",
+            "--stable-for",
+            "50ms",
+            "--timeout",
+            "1s",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""scope":"screen""#))

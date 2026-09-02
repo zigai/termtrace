@@ -216,14 +216,12 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
         .start()
         .expect("launch through Rust facade");
     wait_for_output(session.path(), b"READY", Duration::from_secs(5)).expect("ready output");
-    assert!(matches!(
-        session.screen().snapshot().expect("screen snapshot"),
-        ControlData::Snapshot {
-            cols: 90,
-            rows: 25,
-            ..
-        }
-    ));
+    let frame = session
+        .screen()
+        .frame(ScreenProjectionRequest::default())
+        .expect("screen frame");
+    assert_eq!(frame.geometry.cols, 90);
+    assert_eq!(frame.geometry.rows, 25);
     assert!(
         session
             .screen()
@@ -246,8 +244,13 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
     assert_eq!(
         session
             .screen()
-            .wait_for_idle(Duration::from_millis(20), Duration::from_secs(2))
-            .expect("facade atomic idle")
+            .capture_stable(StableCaptureOptions {
+                stable_for: Duration::from_millis(20),
+                timeout: Duration::from_secs(2),
+                projection: ScreenProjectionRequest::default(),
+                allow_incomplete: false,
+            })
+            .expect("facade atomic stable capture")
             .quality,
         StableCaptureQuality::Stable
     );

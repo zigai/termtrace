@@ -66,7 +66,7 @@ fn python_sync_and_async_clients_parse_driver_completion_contract() {
     let binary = env!("CARGO_BIN_EXE_termtrace");
     let sync_code = r#"import json, sys
 from pathlib import Path
-from termtrace import EnvironmentOptions, Terminal, assert_screen_text, assert_terminal_snapshot
+from termtrace import EnvironmentOptions, Terminal, assert_frame_text, assert_terminal_snapshot
 with Terminal(binary_path=sys.argv[1]) as terminal:
     Path(sys.argv[3]).mkdir(parents=True, exist_ok=True)
     session = terminal.attach(sys.argv[2])
@@ -81,7 +81,7 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
     assert session.events.page(metadata_only=True).next_event_seq >= 0
     semantic_image = session.screen.screenshot(Path(sys.argv[3]) / "python-semantic-image")
     assert Path(semantic_image.primary).is_file()
-    assert_screen_text(session, "PYTHON")
+    assert_frame_text(session.screen.frame(), "PYTHON")
     snapshot = Path(sys.argv[3]) / "completed.snapshot.json"
     assert_terminal_snapshot(session, snapshot, update=True)
     assert_terminal_snapshot(session, snapshot)

@@ -182,6 +182,7 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
                     "unset": [],
                     "color": "never"
                 },
+                "geometry": { "cols": 200, "rows": 100 },
                 "outputByteBudget": 1_000_000,
                 "timeoutMs": 1000
             },
@@ -218,6 +219,25 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
     assert!(failure.join("final-screen.json").is_file());
     assert!(failure.join("final-screen.txt").is_file());
     assert!(failure.join("final-screen.png").is_file());
+    let final_snapshot: ControlData = serde_json::from_slice(
+        &fs_err::read(failure.join("final-screen.json")).expect("final screen snapshot"),
+    )
+    .expect("final screen snapshot JSON");
+    let ControlData::Snapshot {
+        viewport_text,
+        cols,
+        rows,
+        ..
+    } = final_snapshot
+    else {
+        panic!("final screen artifact must retain the actor snapshot payload");
+    };
+    assert_eq!((cols, rows), (200, 100));
+    assert!(viewport_text.contains("Ready"));
+    assert_eq!(
+        fs_err::read_to_string(failure.join("final-screen.txt")).expect("final screen text"),
+        viewport_text
+    );
     assert!(failure.join("timeline.json").is_file());
     assert!(failure.join("diagnose.json").is_file());
     let canonical = Path::new(
