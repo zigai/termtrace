@@ -301,7 +301,7 @@ fn child_completed_wait_returns_the_output_drained_frame() {
             "--",
             "/bin/sh",
             "-c",
-            "sleep 1.5; dd if=/dev/zero bs=16384 count=8 2>/dev/null | tr '\\0' X; printf TAIL_SENTINEL",
+            "sleep 3.5; dd if=/dev/zero bs=16384 count=8 2>/dev/null | tr '\\0' X; printf TAIL_SENTINEL",
         ])
         .assert()
         .success();

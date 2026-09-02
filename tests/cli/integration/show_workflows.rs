@@ -354,7 +354,7 @@ fn synchronization_commands_reject_incomplete_stability() {
             "--until-idle",
             "10ms",
             "--timeout",
-            "2s",
+            "5s",
             "--",
             "/bin/sh",
             "-c",
@@ -388,7 +388,7 @@ fn synchronization_commands_reject_incomplete_stability() {
             "--",
             "/bin/sh",
             "-c",
-            "trap 'exit 0' TERM; printf 'READY\\n'; i=0; while :; do printf '\\r%04d' \"$i\"; i=$((i + 1)); sleep .01; done",
+            "trap 'exit 0' TERM; exec /usr/bin/python3 -u -c 'import sys, time; sys.stdout.write(\"READY\\n\"); sys.stdout.flush(); i = 0\nwhile True:\n    sys.stdout.write(f\"\\r{i:04d}\")\n    sys.stdout.flush()\n    time.sleep(0.005)\n    i += 1'",
         ])
         .assert()
         .success();

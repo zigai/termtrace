@@ -85,7 +85,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
             "--",
             "/usr/bin/python3",
             "-c",
-            "import os,time\nfor i in range(500): os.write(1, f'\\r{i}'.encode()); time.sleep(.005)",
+            "import os, time\ni = 0\nwhile True:\n    os.write(1, f'\\r{i}'.encode())\n    time.sleep(0.005)\n    i += 1",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

@@ -1,21 +1,80 @@
 //! Shared imports and helpers for CLI integration tests.
 
-pub(crate) use assert_cmd::Command;
+use assert_cmd::Command as AssertCommand;
+pub(crate) use assert_cmd::cargo::CargoError;
 pub(crate) use predicates::prelude::*;
 pub(crate) use std::{
     collections::{BTreeMap, BTreeSet},
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fs::{self, File, Permissions},
     io::{BufRead, BufReader, Read, Write},
+    ops::{Deref, DerefMut},
     os::unix::{
         ffi::{OsStrExt, OsStringExt},
         fs::{PermissionsExt, symlink},
     },
     path::{Path, PathBuf},
-    process::{Command as StdCommand, Output, Stdio},
+    process::{Command as ProcessCommand, Output, Stdio},
     thread,
     time::{Duration, Instant},
 };
+
+#[derive(Debug)]
+pub(crate) struct Command(AssertCommand);
+
+impl Command {
+    pub(crate) fn cargo_bin<S: AsRef<str>>(name: S) -> Result<Self, CargoError> {
+        let mut command = AssertCommand::cargo_bin(name)?;
+        command.env_remove("TERMTRACE_RESPONSE");
+        return Ok(Self(command));
+    }
+
+    pub(crate) fn new<S: AsRef<OsStr>>(program: S) -> Self {
+        let mut command = AssertCommand::new(program);
+        command.env_remove("TERMTRACE_RESPONSE");
+        return Self(command);
+    }
+}
+
+impl Deref for Command {
+    type Target = AssertCommand;
+
+    fn deref(&self) -> &Self::Target {
+        return &self.0;
+    }
+}
+
+impl DerefMut for Command {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        return &mut self.0;
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct StdCommand(ProcessCommand);
+
+impl StdCommand {
+    pub(crate) fn new<S: AsRef<OsStr>>(program: S) -> Self {
+        let mut command = ProcessCommand::new(program.as_ref());
+        command.env_remove("TERMTRACE_RESPONSE");
+        return Self(command);
+    }
+}
+
+impl Deref for StdCommand {
+    type Target = ProcessCommand;
+
+    fn deref(&self) -> &Self::Target {
+        return &self.0;
+    }
+}
+
+impl DerefMut for StdCommand {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        return &mut self.0;
+    }
+}
+
 pub(crate) use tempfile::TempDir;
 pub(crate) use termtrace_engine::{
     inspection::{inspect_session, wait_for_completion, wait_for_output},

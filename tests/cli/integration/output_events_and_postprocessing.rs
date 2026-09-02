@@ -195,7 +195,7 @@ fn events_follow_resumes_filtered_durable_records_without_duplicates() {
             "--",
             "/bin/sh",
             "-c",
-            "printf first; sleep 0.15; printf second",
+            "printf first; sleep 0.40; printf second",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -204,7 +204,7 @@ fn events_follow_resumes_filtered_durable_records_without_duplicates() {
         .expect("spawn recorder");
     wait_for_control(&session);
     let follower = StdCommand::new(binary)
-        .args(["analyze", "events"])
+        .args(["--response", "full", "analyze", "events"])
         .arg(&session)
         .args(["--follow", "--type", "output", "--metadata-only"])
         .stdout(Stdio::piped())

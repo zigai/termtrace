@@ -328,7 +328,7 @@ fn restart_verifies_resupplied_environment_and_requires_explicit_change() {
         .args(["stop", "secret-restart", "--wait"])
         .assert()
         .success();
-    let mut pending = vec![state.clone()];
+    let mut pending = vec![state];
     while let Some(path) = pending.pop() {
         if path.is_dir() {
             pending.extend(
