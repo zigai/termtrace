@@ -26,10 +26,6 @@ class Duration:
             raise InvalidDurationError("duration nanoseconds must fit u64")
 
     @classmethod
-    def nanoseconds_exact(cls, value: int) -> Duration:
-        return cls(value)
-
-    @classmethod
     def milliseconds(cls, value: int | float | Decimal | str) -> Duration:
         return cls(_exact_units(value, NANOSECONDS_PER_MILLISECOND))
 

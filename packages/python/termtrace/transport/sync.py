@@ -14,7 +14,7 @@ from typing import IO, TYPE_CHECKING, Literal, Self, TypeVar
 import msgspec
 
 from termtrace.environment import EnvironmentOptions
-from termtrace.errors import RequestTimeoutError, TermtraceProtocolError
+from termtrace.errors import ProtocolMismatchError, RequestTimeoutError
 from termtrace.transport.binary import resolve_binary
 from termtrace.transport.protocol import (
     DriverAttachedData,
@@ -47,7 +47,7 @@ class DriverTransport:
             stderr=subprocess.DEVNULL,
         )
         if self._process.stdin is None or self._process.stdout is None:
-            raise TermtraceProtocolError("driver pipes were not created")
+            raise ProtocolMismatchError("driver pipes were not created")
         self._stdin = self._process.stdin
         self._stdout = self._process.stdout
         self._lock = threading.Lock()
@@ -62,7 +62,7 @@ class DriverTransport:
         timeout: float | None = None,
     ) -> ResponseDataT:
         if self._closed:
-            raise TermtraceProtocolError("driver is closed")
+            raise ProtocolMismatchError("driver is closed")
         correlation_id, payload = correlated_request(method, request_id, timeout)
         deadline = None if timeout is None else time.monotonic() + timeout
         acquired = self._lock.acquire() if timeout is None else self._lock.acquire(timeout=timeout)
@@ -85,7 +85,7 @@ class DriverTransport:
         finally:
             self._lock.release()
         if not line:
-            raise TermtraceProtocolError("driver closed before its correlated response")
+            raise ProtocolMismatchError("driver closed before its correlated response")
         return decode_driver_response(line, correlation_id, response_type)
 
     def _readline(self, timeout: float | None) -> bytes:
@@ -115,7 +115,7 @@ class DriverTransport:
             self._read_buffer.extend(chunk)
             if len(self._read_buffer) > DRIVER_RESPONSE_STREAM_LIMIT:
                 self._abort()
-                raise TermtraceProtocolError("driver response exceeded the bounded stream limit")
+                raise ProtocolMismatchError("driver response exceeded the bounded stream limit")
 
     def _abort(self) -> None:
         self._closed = True

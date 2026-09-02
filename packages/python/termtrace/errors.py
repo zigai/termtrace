@@ -253,8 +253,4 @@ class LocatorTimeoutError(TermtraceError, TimeoutError):
         self.query = bounded_text(query)
 
 
-class TermtraceProtocolError(ProtocolMismatchError):
-    """Compatibility name for malformed or uncorrelated driver responses."""
-
-
 __all__ = [name for name in globals() if name.endswith("Error") or name == "bounded_text"]

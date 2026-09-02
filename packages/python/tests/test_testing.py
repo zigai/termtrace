@@ -10,7 +10,6 @@ from typing import cast
 
 import pytest
 
-import termtrace.testing.sync as testing_sync
 from termtrace.session.sync import Session
 from termtrace.testing.lifecycle import (
     EvidencePolicy,
@@ -145,6 +144,7 @@ def make_owner(
     close_error: bool = False,
     stop_interruption: BaseException | None = None,
     update_snapshots: bool = False,
+    adapter: str = "pytest",
 ) -> tuple[TermtraceTest, FakeTerminal, FakeSession]:
     config = TermtraceTestConfig(
         command=("ignored",),
@@ -153,6 +153,7 @@ def make_owner(
         evidence_policy=policy,
         update_snapshots=update_snapshots,
         run_id="0123456789abcdef0123456789abcdef",
+        adapter=adapter,
         test_id="tests/test_adapter.py::test_case[value]",
     )
     evidence = create_evidence_directory(config)
@@ -364,32 +365,8 @@ def test_artifact_digest_enforces_aggregate_hash_budget(tmp_path: Path) -> None:
         _artifact_digest(second, budget)
 
 
-def test_snapshot_updates_only_under_explicit_policy(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    observed: list[bool] = []
-
-    def fake_snapshot(
-        frame: object,
-        path: Path,
-        *,
-        profile: str,
-        update: bool,
-    ) -> object:
-        observed.append(update)
-        return object()
-
-    monkeypatch.setattr(testing_sync, "assert_snapshot_file", fake_snapshot)
-    normal, _, _ = make_owner(tmp_path / "normal")
-    updating, _, _ = make_owner(tmp_path / "update", update_snapshots=True)
-    normal.assert_snapshot("screen")
-    updating.assert_snapshot("screen")
-    assert observed == [False, True]
-
-
 def test_failure_artifacts_follow_completion_and_are_verified(tmp_path: Path) -> None:
-    owner, _, session = make_owner(tmp_path)
+    owner, _, session = make_owner(tmp_path, adapter="custom-sync")
     report = owner.finalize(outcome="assertion_failed")
     assert report.evidence_directory is not None
     manifest = json.loads(
@@ -407,4 +384,5 @@ def test_failure_artifacts_follow_completion_and_are_verified(tmp_path: Path) ->
     assert report.secondary_failures == ()
     assert len(report.verified_artifacts) == 3
     assert manifest["format"] == "termtrace-test-evidence-v1"
+    assert manifest["adapter"] == "custom-sync"
     assert all(not Path(item["path"]).is_absolute() for item in manifest["artifacts"])

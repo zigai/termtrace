@@ -226,6 +226,24 @@ def test_never_matches(termtrace_test):
     assert "READY" in mismatch.stdout
     assert "Termtrace evidence:" in mismatch.stdout
 
+    async_snapshot = next(tmp_path.rglob("async-ready.json"))
+    original = async_snapshot.read_text(encoding="utf-8")
+    async_snapshot.write_text(original.replace("READY", "STALE"), encoding="utf-8")
+    async_mismatch = run_nested_pytest(
+        tmp_path,
+        "-q",
+        "-p",
+        "pytest_asyncio.plugin",
+        "-k",
+        "test_async_ready",
+        "--termtrace-evidence-root",
+        str(evidence_root),
+        environment=environment,
+    )
+    assert async_mismatch.returncode != 0
+    assert "terminal snapshot differs" in async_mismatch.stdout
+    assert "Termtrace evidence:" in async_mismatch.stdout
+
     timeout = run_nested_pytest(
         tmp_path,
         "-q",
@@ -242,9 +260,11 @@ def test_never_matches(termtrace_test):
     assert "Termtrace evidence:" in timeout.stdout
 
     manifests: list[Path] = list(evidence_root.rglob("termtrace-test-evidence.json"))
-    assert len(manifests) == 2
+    assert len(manifests) == 3
+    adapters: list[str] = []
     for manifest_path in manifests:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        adapters.append(manifest["adapter"])
         assert manifest["retention_reason"] == "test_failure"
         assert "semantic_screenshot" in manifest["lifecycle_phases"]
         assert "screen_bundle" in manifest["lifecycle_phases"]
@@ -255,3 +275,5 @@ def test_never_matches(termtrace_test):
         completion_files: list[Path] = list(attempt_root.rglob("completion.json"))
         assert completion_files
         assert not list(attempt_root.rglob("control.sock"))
+    assert adapters.count("pytest") == 2
+    assert adapters.count("pytest-asyncio") == 1

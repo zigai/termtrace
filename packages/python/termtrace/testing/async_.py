@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
 from collections.abc import Awaitable
-from dataclasses import replace
 from pathlib import Path
 from types import TracebackType
 from typing import Literal, Self, TypeVar
@@ -28,14 +26,11 @@ from termtrace.testing.lifecycle import (
     FinalizationReport,
     TermtraceTestConfig,
     TestOutcome,
-    _artifact_digest,
-    _ArtifactHashBudget,
     _bounded_error,
     _contained_path,
-    _evidence_run_id,
     _session_evidence_policy,
-    _test_hash,
     _validate_snapshot_name,
+    _write_evidence_manifest,
     classify_outcome,
     create_evidence_directory,
 )
@@ -131,7 +126,6 @@ class AsyncTermtraceTest:
     async def start(cls, config: TermtraceTestConfig) -> AsyncTermtraceTest:
         if not config.command:
             raise ValueError("terminal test command must not be empty")
-        config = replace(config, adapter="pytest-asyncio")
         evidence_directory = create_evidence_directory(config)
         terminal: AsyncTerminal | None = None
         try:
@@ -368,11 +362,14 @@ class AsyncTermtraceTest:
         if retained:
             try:
                 manifest_path = await asyncio.to_thread(
-                    self._write_manifest,
-                    outcome,
-                    artifacts,
-                    secondary,
-                    phases,
+                    _write_evidence_manifest,
+                    config=self.config,
+                    evidence_directory=self.evidence_directory,
+                    session_id=self.session.session_id,
+                    outcome=outcome,
+                    artifacts=artifacts,
+                    secondary_errors=secondary,
+                    lifecycle_phases=phases,
                 )
                 artifacts.append(manifest_path)
                 phases.append("manifest_written")
@@ -394,11 +391,14 @@ class AsyncTermtraceTest:
                 secondary.append(_bounded_error("evidence discard", e))
                 try:
                     manifest_path = await asyncio.to_thread(
-                        self._write_manifest,
-                        outcome,
-                        artifacts,
-                        secondary,
-                        phases,
+                        _write_evidence_manifest,
+                        config=self.config,
+                        evidence_directory=self.evidence_directory,
+                        session_id=self.session.session_id,
+                        outcome=outcome,
+                        artifacts=artifacts,
+                        secondary_errors=secondary,
+                        lifecycle_phases=phases,
                     )
                     artifacts.append(manifest_path)
                     phases.append("manifest_written")
@@ -418,43 +418,6 @@ class AsyncTermtraceTest:
             lifecycle_phases=tuple(phases),
         )
         return report, cancellation
-
-    def _write_manifest(
-        self,
-        outcome: TestOutcome,
-        artifacts: list[Path],
-        secondary: list[str],
-        phases: list[str],
-    ) -> Path:
-        relative_artifacts: list[dict[str, str]] = []
-        budget = _ArtifactHashBudget()
-        for artifact in artifacts:
-            relative_artifacts.append(
-                {
-                    "path": artifact.relative_to(self.evidence_directory).as_posix(),
-                    "sha256": _artifact_digest(artifact, budget),
-                }
-            )
-        manifest = {
-            "format": "termtrace-test-evidence-v1",
-            "adapter": "pytest-asyncio",
-            "run_id": _evidence_run_id(self.config, self.evidence_directory),
-            "worker_id": self.config.worker_id,
-            "test_hash": _test_hash(self.config.test_id),
-            "attempt": self.config.attempt,
-            "session_id": self.session.session_id,
-            "outcome": outcome,
-            "retention_reason": "policy" if outcome == "passed" else "test_failure",
-            "artifacts": relative_artifacts,
-            "secondary_errors": secondary[:16],
-            "lifecycle_phases": phases,
-        }
-        destination = self.evidence_directory / "termtrace-test-evidence.json"
-        destination.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        return destination
 
     async def __aenter__(self) -> Self:
         return self

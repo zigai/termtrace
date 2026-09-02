@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
+import termtrace.testing.lifecycle as testing_lifecycle
 from termtrace.session.async_ import AsyncSession
-from termtrace.testing import async_ as async_testing
 from termtrace.testing.async_ import AsyncTermtraceTest
 from termtrace.testing.lifecycle import (
     TermtraceTestConfig,
@@ -107,6 +108,7 @@ async def test_async_owner_awaits_exactly_one_finalization(tmp_path: Path) -> No
         evidence_policy="always",
         run_id="0123456789abcdef0123456789abcdef",
         test_id="async-case",
+        adapter="custom-async",
     )
     evidence = create_evidence_directory(config)
     session = FakeAsyncSession(evidence)
@@ -135,6 +137,8 @@ async def test_async_owner_awaits_exactly_one_finalization(tmp_path: Path) -> No
     ]
     assert first.secondary_failures == ()
     assert len(first.verified_artifacts) == 3
+    manifest = json.loads((evidence / "termtrace-test-evidence.json").read_text(encoding="utf-8"))
+    assert manifest["adapter"] == "custom-async"
 
 
 @pytest.mark.asyncio
@@ -224,7 +228,7 @@ async def test_async_manifest_uses_aggregate_hash_budget(
         evidence,
     )
     monkeypatch.setattr(
-        async_testing,
+        testing_lifecycle,
         "_ArtifactHashBudget",
         lambda: _ArtifactHashBudget(bytes_remaining=1, members_remaining=100),
     )

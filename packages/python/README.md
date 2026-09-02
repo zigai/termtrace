@@ -30,7 +30,7 @@ with Terminal(evidence_root=Path(".termtrace-evidence")) as terminal:
         assert command.text == "Commands"
 ```
 
-`Frame`, `Observation`, `SemanticDiff`, `DiagnosticReport`, `Completion`, `VerificationReport`, and related return values are concrete generated models. Invalid or version-skewed driver messages raise `TermtraceProtocolError` without including the raw payload.
+`Frame`, `Observation`, `SemanticDiff`, `DiagnosticReport`, `Completion`, `VerificationReport`, and related return values are concrete generated models. Invalid or version-skewed driver messages raise `ProtocolMismatchError` without including the raw payload.
 
 Use `AsyncTerminal` for the equivalent native-asyncio lifecycle.
 

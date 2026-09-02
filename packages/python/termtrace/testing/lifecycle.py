@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import uuid
@@ -204,6 +205,47 @@ def _artifact_digest(path: Path, budget: _ArtifactHashBudget | None = None) -> s
                 active_budget.consume_bytes(len(chunk))
                 digest.update(chunk)
     return digest.hexdigest()
+
+
+def _write_evidence_manifest(
+    *,
+    config: TermtraceTestConfig,
+    evidence_directory: Path,
+    session_id: str,
+    outcome: TestOutcome,
+    artifacts: Sequence[Path],
+    secondary_errors: Sequence[str],
+    lifecycle_phases: Sequence[str],
+) -> Path:
+    relative_artifacts: list[dict[str, str]] = []
+    budget = _ArtifactHashBudget()
+    for artifact in artifacts:
+        relative_artifacts.append(
+            {
+                "path": artifact.relative_to(evidence_directory).as_posix(),
+                "sha256": _artifact_digest(artifact, budget),
+            }
+        )
+    manifest = {
+        "format": "termtrace-test-evidence-v1",
+        "adapter": config.adapter,
+        "run_id": _evidence_run_id(config, evidence_directory),
+        "worker_id": config.worker_id,
+        "test_hash": _test_hash(config.test_id),
+        "attempt": config.attempt,
+        "session_id": session_id,
+        "outcome": outcome,
+        "retention_reason": "policy" if outcome == "passed" else "test_failure",
+        "artifacts": relative_artifacts,
+        "secondary_errors": list(secondary_errors[:16]),
+        "lifecycle_phases": list(lifecycle_phases),
+    }
+    destination = evidence_directory / "termtrace-test-evidence.json"
+    destination.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return destination
 
 
 def _bounded_error(phase: str, e: BaseException) -> str:

@@ -139,7 +139,7 @@ def test_exact_duration_rejects_fractional_nanoseconds_and_overflow() -> None:
     with pytest.raises(InvalidDurationError):
         Duration.seconds("0.0000000001")
     with pytest.raises(InvalidDurationError):
-        Duration.nanoseconds_exact(1 << 64)
+        Duration(1 << 64)
 
 
 def test_pure_queries_preserve_wide_columns_spaces_order_and_strict_cardinality() -> None:

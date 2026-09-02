@@ -12,9 +12,9 @@ from termtrace import (
     Frame,
     InputSequenceBusyError,
     InputSequenceFailureDetails,
+    ProtocolMismatchError,
     ResourceLimitError,
     TermtraceOperationError,
-    TermtraceProtocolError,
     TimelineEntry,
 )
 from termtrace.transport.generated.driver_response import ScreenFrameFailureDetails
@@ -67,7 +67,7 @@ class DriverResponseTests(unittest.TestCase):
     def test_rejects_uncorrelated_response(self) -> None:
         hello = self.cases["valid"][0]["response"]
 
-        with self.assertRaisesRegex(TermtraceProtocolError, "request ID"):
+        with self.assertRaisesRegex(ProtocolMismatchError, "request ID"):
             decode_driver_response(
                 json.dumps(hello).encode(),
                 "00000000-0000-0000-0000-000000000099",
@@ -162,7 +162,7 @@ class DriverResponseTests(unittest.TestCase):
         for case in self.cases["invalid"]:
             with self.subTest(case=case["name"]):
                 response = case["response"]
-                with self.assertRaises(TermtraceProtocolError) as captured:
+                with self.assertRaises(ProtocolMismatchError) as captured:
                     decode_driver_response(
                         json.dumps(response).encode(),
                         response["request_id"],
@@ -176,7 +176,7 @@ class DriverResponseTests(unittest.TestCase):
         encoded = encode_driver_request({"method": "hello"}, request_id)
 
         self.assertEqual(json.loads(encoded)["request_id"], request_id)
-        with self.assertRaises(TermtraceProtocolError) as captured:
+        with self.assertRaises(ProtocolMismatchError) as captured:
             encode_driver_request(
                 {"method": "hello", "secret_payload": "SECRET_SENTINEL"}, request_id
             )

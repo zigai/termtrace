@@ -26,9 +26,6 @@ else:
         pytest_asyncio = None
 
 from termtrace.environment import EnvironmentOptions
-from termtrace.screen.snapshot import FrameSnapshot
-from termtrace.session.sync import Session
-from termtrace.testing.assertions import assert_cursor, assert_screen_text, assert_snapshot_file
 from termtrace.testing.async_ import AsyncTermtraceTest
 from termtrace.testing.lifecycle import (
     EvidencePolicy,
@@ -68,50 +65,6 @@ class AsyncTestFactory(Protocol):
         output_byte_budget: int | None = None,
         binary_path: str | Path | None = None,
     ) -> Awaitable[AsyncTermtraceTest]: ...
-
-
-class TermtraceAssertions:
-    """Backward-compatible per-test assertion facade."""
-
-    def __init__(self, *, update_snapshots: bool) -> None:
-        self.update_snapshots = update_snapshots
-
-    def screen_text(self, session: Session, expected: str) -> None:
-        assert_screen_text(session, expected)
-
-    def cursor(
-        self,
-        session: Session,
-        *,
-        row: int | None = None,
-        column: int | None = None,
-        visible: bool | None = None,
-    ) -> None:
-        assert_cursor(
-            session.screen.frame(),
-            row=row,
-            column=column,
-            visible=visible,
-        )
-
-    def no_presented_transient(self, session: Session) -> None:
-        report = session.semantic.diagnose(("transient",))
-        if any(item.code == "presented_transient" for item in report.findings):
-            raise AssertionError("presented transient found")
-
-    def snapshot(
-        self,
-        session: Session,
-        path: str | Path,
-        *,
-        stable_for: float = 0.25,
-    ) -> FrameSnapshot:
-        capture = session.screen.capture_stable(stable_for=stable_for)
-        return assert_snapshot_file(
-            capture.frame,
-            path,
-            update=self.update_snapshots,
-        )
 
 
 def pytest_addoption(parser: Any) -> None:
@@ -202,13 +155,6 @@ def pytest_runtest_teardown(item: Any, nextitem: Any) -> Generator[None, Result[
 
 
 @pytest.fixture
-def termtrace_assertions(request: Any) -> TermtraceAssertions:
-    return TermtraceAssertions(
-        update_snapshots=bool(request.config.getoption("--termtrace-update-snapshots"))
-    )
-
-
-@pytest.fixture
 def termtrace_test_factory(request: Any) -> Iterator[SyncTestFactory]:
     owners: list[TermtraceTest] = []
     base = _base_config(request)
@@ -260,7 +206,7 @@ if pytest_asyncio is not None:
         request: Any,
     ) -> AsyncIterator[AsyncTestFactory]:
         owners: list[AsyncTermtraceTest] = []
-        base = _base_config(request)
+        base = replace(_base_config(request), adapter="pytest-asyncio")
 
         async def factory(
             command: Sequence[str | Path],

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import shutil
 import threading
 from pathlib import Path
@@ -27,14 +26,11 @@ from termtrace.testing.lifecycle import (
     LifecycleState,
     TermtraceTestConfig,
     TestOutcome,
-    _artifact_digest,
-    _ArtifactHashBudget,
     _bounded_error,
     _contained_path,
-    _evidence_run_id,
     _session_evidence_policy,
-    _test_hash,
     _validate_snapshot_name,
+    _write_evidence_manifest,
     classify_outcome,
     create_evidence_directory,
 )
@@ -364,7 +360,15 @@ class TermtraceTest:
         manifest_path: Path | None = None
         if retained:
             try:
-                manifest_path = self._write_manifest(outcome, artifacts, secondary, phases)
+                manifest_path = _write_evidence_manifest(
+                    config=self.config,
+                    evidence_directory=self.evidence_directory,
+                    session_id=self.session.session_id,
+                    outcome=outcome,
+                    artifacts=artifacts,
+                    secondary_errors=secondary,
+                    lifecycle_phases=phases,
+                )
                 artifacts.append(manifest_path)
                 phases.append("manifest_written")
             except Exception as e:
@@ -380,7 +384,15 @@ class TermtraceTest:
                 retained = True
                 secondary.append(_bounded_error("evidence discard", e))
                 try:
-                    manifest_path = self._write_manifest(outcome, artifacts, secondary, phases)
+                    manifest_path = _write_evidence_manifest(
+                        config=self.config,
+                        evidence_directory=self.evidence_directory,
+                        session_id=self.session.session_id,
+                        outcome=outcome,
+                        artifacts=artifacts,
+                        secondary_errors=secondary,
+                        lifecycle_phases=phases,
+                    )
                     artifacts.append(manifest_path)
                     phases.append("manifest_written")
                 except Exception as manifest_error:
@@ -403,41 +415,6 @@ class TermtraceTest:
             lifecycle_phases=tuple(phases),
         )
         return report, interruption
-
-    def _write_manifest(
-        self,
-        outcome: TestOutcome,
-        artifacts: list[Path],
-        secondary: list[str],
-        phases: list[str],
-    ) -> Path:
-        relative_artifacts: list[dict[str, str]] = []
-        budget = _ArtifactHashBudget()
-        for artifact in artifacts:
-            relative = artifact.relative_to(self.evidence_directory)
-            relative_artifacts.append(
-                {"path": relative.as_posix(), "sha256": _artifact_digest(artifact, budget)}
-            )
-        manifest = {
-            "format": "termtrace-test-evidence-v1",
-            "adapter": self.config.adapter,
-            "run_id": _evidence_run_id(self.config, self.evidence_directory),
-            "worker_id": self.config.worker_id,
-            "test_hash": _test_hash(self.config.test_id),
-            "attempt": self.config.attempt,
-            "session_id": self.session.session_id,
-            "outcome": outcome,
-            "retention_reason": "policy" if outcome == "passed" else "test_failure",
-            "artifacts": relative_artifacts,
-            "secondary_errors": secondary[:16],
-            "lifecycle_phases": phases,
-        }
-        destination = self.evidence_directory / "termtrace-test-evidence.json"
-        destination.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        return destination
 
     def __enter__(self) -> Self:
         return self

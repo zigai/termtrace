@@ -14,7 +14,6 @@ from termtrace.errors import (
     ResourceLimitError,
     StaleStateError,
     TermtraceOperationError,
-    TermtraceProtocolError,
 )
 from termtrace.transport.generated.driver_request import DriverRequest as WireDriverRequest
 from termtrace.transport.generated.driver_response import (
@@ -84,7 +83,7 @@ def encode_driver_request(method: JsonObject, request_id: str) -> bytes:
             strict=True,
         )
     except msgspec.ValidationError:
-        raise TermtraceProtocolError("client request does not match the protocol schema") from None
+        raise ProtocolMismatchError("client request does not match the protocol schema") from None
     return msgspec.json.encode(request)
 
 
@@ -98,9 +97,9 @@ def decode_driver_response(
         response = _RESPONSE_DECODER.decode(encoded)
     except msgspec.DecodeError:
         # Raw protocol data can contain terminal content, input, or environment data.
-        raise TermtraceProtocolError("driver response does not match the protocol schema") from None
+        raise ProtocolMismatchError("driver response does not match the protocol schema") from None
     if response.version != 5 or response.request_id != expected_request_id:
-        raise TermtraceProtocolError("driver response version or request ID does not match")
+        raise ProtocolMismatchError("driver response version or request ID does not match")
     result = response.result
     if isinstance(result, DriverErrorResult):
         evidence = result.evidence if isinstance(result.evidence, str) else None
@@ -176,7 +175,7 @@ def decode_driver_response(
             details=details,
         )
     if not isinstance(result.data, expected_type):
-        raise TermtraceProtocolError("driver returned an unexpected result kind")
+        raise ProtocolMismatchError("driver returned an unexpected result kind")
     return result.data
 
 

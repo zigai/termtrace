@@ -221,15 +221,6 @@ def regex(pattern: str, flags: int = 0) -> Pattern[str]:
     return re.compile(pattern, flags)
 
 
-def assert_screen_text(subject: ScreenFrame | _ScreenSubject, expected: str | Pattern[str]) -> None:
-    """Compatibility helper accepting a frame or a sync session with screen.frame()."""
-    if isinstance(subject, ScreenFrame):
-        assert_frame_text(subject, expected)
-        return
-    screen = subject.screen
-    assert_frame_text(screen.frame(), expected)
-
-
 def stable_terminal_snapshot(session: _ScreenSubject, *, stable_for: float = 0.25) -> FrameSnapshot:
     capture = session.screen.capture_stable(stable_for=stable_for)
     return normalize_frame(capture.frame, "spans")
@@ -262,7 +253,6 @@ __all__ = [
     "assert_no_matches",
     "assert_no_wrapped_rows",
     "assert_normalized_frame",
-    "assert_screen_text",
     "assert_snapshot_file",
     "assert_terminal_snapshot",
     "regex",

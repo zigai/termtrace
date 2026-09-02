@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal, Self, TypeVar
 import msgspec
 
 from termtrace.environment import EnvironmentOptions
-from termtrace.errors import RequestTimeoutError, TermtraceProtocolError
+from termtrace.errors import ProtocolMismatchError, RequestTimeoutError
 from termtrace.transport.binary import resolve_binary
 from termtrace.transport.protocol import (
     DriverAttachedData,
@@ -33,7 +33,7 @@ class AsyncTerminal:
 
     def __init__(self, process: asyncio.subprocess.Process, evidence_root: Path | None) -> None:
         if process.stdin is None or process.stdout is None:
-            raise TermtraceProtocolError("driver pipes were not created")
+            raise ProtocolMismatchError("driver pipes were not created")
         self._process = process
         self._stdin = process.stdin
         self._stdout = process.stdout
@@ -122,13 +122,13 @@ class AsyncTerminal:
         request_timeout: float | None = None,
     ) -> ResponseDataT:
         if self._closed:
-            raise TermtraceProtocolError("driver is closed")
+            raise ProtocolMismatchError("driver is closed")
         correlation_id, payload = correlated_request(method, request_id, request_timeout)
         try:
             async with asyncio.timeout(request_timeout):
                 async with self._lock:
                     if self._closed:
-                        raise TermtraceProtocolError("driver is closed")
+                        raise ProtocolMismatchError("driver is closed")
                     self._stdin.write(payload + b"\n")
                     await self._stdin.drain()
                     line = await self._stdout.readline()
@@ -140,7 +140,7 @@ class AsyncTerminal:
             self._abort_transport()
             raise
         if not line:
-            raise TermtraceProtocolError("driver closed before its correlated response")
+            raise ProtocolMismatchError("driver closed before its correlated response")
         return decode_driver_response(line, correlation_id, response_type)
 
     def _abort_transport(self) -> None:

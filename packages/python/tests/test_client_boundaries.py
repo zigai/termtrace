@@ -7,7 +7,7 @@ import pytest
 
 from termtrace import BytesAtom, KeyAtom, PasteAtom, TextAtom
 from termtrace.atoms import encode_input_sequence
-from termtrace.errors import RequestTimeoutError, TermtraceProtocolError
+from termtrace.errors import ProtocolMismatchError, RequestTimeoutError
 from termtrace.session.async_ import AsyncSession
 from termtrace.session.sync import Session
 from termtrace.transport.async_ import AsyncTerminal
@@ -69,7 +69,7 @@ def test_async_request_cancellation_closes_desynchronized_transport() -> None:
         request.cancel()
         with pytest.raises(asyncio.CancelledError):
             await request
-        with pytest.raises(TermtraceProtocolError, match="driver is closed"):
+        with pytest.raises(ProtocolMismatchError, match="driver is closed"):
             await terminal.request({"method": "hello"}, DriverHelloData)
 
         await terminal.close()
@@ -97,7 +97,7 @@ def test_sync_request_timeout_terminates_desynchronized_transport(
         )
     assert captured.value.uncertain is True
     assert captured.value.retry_safety == "unsafe"
-    with pytest.raises(TermtraceProtocolError, match="driver is closed"):
+    with pytest.raises(ProtocolMismatchError, match="driver is closed"):
         transport.request({"method": "hello"}, DriverHelloData)
     transport.close()
 
