@@ -1,8 +1,11 @@
 use std::{
+    cell::RefCell,
     collections::BTreeSet,
     fs::File,
-    io::{self, Read as _, Write as _},
+    io::{self, Read as _},
+    ops::Range,
     path::{Component, Path, PathBuf},
+    rc::Rc,
     str,
 };
 
@@ -10,6 +13,7 @@ use nix::{
     errno::Errno,
     fcntl::{RenameFlags, renameat2},
 };
+use tar_archive::{Archive, Builder, EntryType, Header};
 use termtrace_model::artifact::bundle::BundleManifest;
 use uuid::Uuid;
 
@@ -48,19 +52,24 @@ pub fn archive(
     let staging = parent.join(format!(".bundle-archive-{}.tmp", Uuid::now_v7()));
     let mut cleanup = Cleanup::file(staging.clone());
     let file = secure_file(&staging)?;
-    let mut encoder = zstd::stream::write::Encoder::new(file, 9)
+    let encoder = zstd::stream::write::Encoder::new(file, 9)
         .map_err(|source| return Error::filesystem(&staging, source))?;
-    encoder
+    let mut builder = Builder::new(encoder);
+    builder
+        .get_mut()
         .include_checksum(true)
         .map_err(|source| return Error::filesystem(&staging, source))?;
     let mut files: Vec<PathBuf> = Vec::new();
     collect_regular_files(directory, directory, &mut files)?;
     files.sort();
     for relative in files {
-        write_tar_file(&mut encoder, directory, &relative)?;
+        write_tar_file(&mut builder, directory, &relative)?;
     }
-    encoder
-        .write_all(&[0_u8; 1024])
+    builder
+        .finish()
+        .map_err(|source| return Error::filesystem(&staging, source))?;
+    let encoder = builder
+        .into_inner()
         .map_err(|source| return Error::filesystem(&staging, source))?;
     let file = encoder
         .finish()
@@ -152,204 +161,211 @@ impl Drop for Cleanup {
     }
 }
 
-fn write_tar_file(writer: &mut impl io::Write, root: &Path, relative: &Path) -> Result<()> {
+fn write_tar_file<W: io::Write>(
+    builder: &mut Builder<W>,
+    root: &Path,
+    relative: &Path,
+) -> Result<()> {
     let path = relative
         .to_str()
         .ok_or_else(|| return Error::invalid("bundle archive paths must be UTF-8"))?;
     let source = root.join(relative);
     let (mut input, size) = open_regular_nofollow(&source)?;
-    let mut header = [0_u8; 512];
-    write_tar_path(&mut header, path)?;
-    write_octal(&mut header, 100, 8, 0o600)?;
-    write_octal(&mut header, 108, 8, 0)?;
-    write_octal(&mut header, 116, 8, 0)?;
-    write_octal(&mut header, 124, 12, size)?;
-    write_octal(&mut header, 136, 12, 0)?;
-    header[148..156].fill(b' ');
-    header[156] = b'0';
-    header[257..263].copy_from_slice(b"ustar\0");
-    header[263..265].copy_from_slice(b"00");
-    let checksum = header.iter().map(|byte| return u64::from(*byte)).sum();
-    write_checksum(&mut header, checksum)?;
-    writer
-        .write_all(&header)
+    let mut header = Header::new_ustar();
+    header
+        .set_path(path)
         .map_err(|source_error| return Error::filesystem(&source, source_error))?;
-    let copied = io::copy(&mut input, writer)
+    header.set_mode(0o600);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_size(size);
+    header.set_mtime(0);
+    header.set_entry_type(EntryType::Regular);
+    header.set_cksum();
+
+    let read_limit = size
+        .checked_add(1)
+        .ok_or_else(|| return Error::invalid("bundle member size overflow"))?;
+    let mut contents = input.by_ref().take(read_limit);
+    builder
+        .append(&header, &mut contents)
         .map_err(|source_error| return Error::filesystem(&source, source_error))?;
+    let copied = read_limit.saturating_sub(contents.limit());
     if copied != size {
         return Err(Error::invalid("bundle member changed while archiving"));
     }
-    let padding = usize::try_from((512 - size % 512) % 512).unwrap_or(511);
-    let zeroes = [0_u8; 512];
-    let padding_bytes = zeroes
-        .get(..padding)
-        .ok_or_else(|| return Error::invalid("tar padding exceeds one block"))?;
-    writer
-        .write_all(padding_bytes)
-        .map_err(|source_error| return Error::filesystem(&source, source_error))?;
     return Ok(());
 }
 
-pub(super) fn write_tar_path(header: &mut [u8; 512], path: &str) -> Result<()> {
-    if path.len() <= 100 {
-        header
-            .get_mut(..path.len())
-            .ok_or_else(|| return Error::invalid("tar member name exceeds its field"))?
-            .copy_from_slice(path.as_bytes());
+#[derive(Default)]
+struct TarReadState {
+    position: u64,
+    padding: Option<Range<u64>>,
+}
+
+#[derive(Clone)]
+struct TarReadTracker(Rc<RefCell<TarReadState>>);
+
+impl TarReadTracker {
+    fn new() -> Self {
+        return Self(Rc::new(RefCell::new(TarReadState::default())));
+    }
+
+    fn register_padding(&self, file_position: u64, size: u64) -> Result<()> {
+        let padding_start = file_position
+            .checked_add(size)
+            .ok_or_else(|| return Error::invalid("bundle archive size overflow"))?;
+        let padded_size = size
+            .checked_add(511)
+            .ok_or_else(|| return Error::invalid("bundle archive size overflow"))?
+            & !511;
+        let padding_end = file_position
+            .checked_add(padded_size)
+            .ok_or_else(|| return Error::invalid("bundle archive size overflow"))?;
+        if padding_start == padding_end {
+            return Ok(());
+        }
+
+        let mut state = self.0.borrow_mut();
+        if state.padding.is_some() || state.position > padding_start {
+            return Err(Error::invalid("tar archive member positions are invalid"));
+        }
+        state.padding = Some(padding_start..padding_end);
         return Ok(());
     }
-    let split = path
-        .char_indices()
-        .filter(|(_, character)| return *character == '/')
-        .map(|(index, _)| return index)
-        .rev()
-        .find(|index| return *index <= 155 && path.len().saturating_sub(*index + 1) <= 100)
-        .ok_or_else(|| return Error::invalid("bundle path exceeds USTAR limits"))?;
-    let (prefix, name) = path.split_at(split);
-    let name = name.trim_start_matches('/');
-    header
-        .get_mut(..name.len())
-        .ok_or_else(|| return Error::invalid("tar member name exceeds its field"))?
-        .copy_from_slice(name.as_bytes());
-    header
-        .get_mut(345..345 + prefix.len())
-        .ok_or_else(|| return Error::invalid("tar member prefix exceeds its field"))?
-        .copy_from_slice(prefix.as_bytes());
-    return Ok(());
 }
 
-pub(super) fn write_octal(
-    header: &mut [u8; 512],
-    offset: usize,
-    width: usize,
-    value: u64,
-) -> Result<()> {
-    let encoded = format!("{:0width$o}\0", value, width = width.saturating_sub(1));
-    let target = header
-        .get_mut(offset..offset.saturating_add(width))
-        .ok_or_else(|| return Error::invalid("tar numeric header overflowed"))?;
-    if encoded.len() != width {
-        return Err(Error::invalid("tar numeric value exceeds field width"));
-    }
-    target.copy_from_slice(encoded.as_bytes());
-    return Ok(());
+struct PaddingCheckedReader<R> {
+    inner: R,
+    tracker: TarReadTracker,
 }
 
-pub(super) fn write_checksum(header: &mut [u8; 512], checksum: u64) -> Result<()> {
-    let encoded = format!("{checksum:06o}\0 ");
-    if encoded.len() != 8 {
-        return Err(Error::invalid("tar checksum exceeds field width"));
+impl<R: io::Read> io::Read for PaddingCheckedReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        let mut state = self.tracker.0.borrow_mut();
+        let read_start = state.position;
+        let read_end = read_start
+            .checked_add(u64::try_from(read).map_err(|source| {
+                return io::Error::new(io::ErrorKind::InvalidData, source);
+            })?)
+            .ok_or_else(|| {
+                return io::Error::new(io::ErrorKind::InvalidData, "tar position overflow");
+            })?;
+        state.position = read_end;
+
+        let Some(padding) = state.padding.clone() else {
+            return Ok(read);
+        };
+        let overlap_start = read_start.max(padding.start);
+        let overlap_end = read_end.min(padding.end);
+        if overlap_start < overlap_end {
+            let start = usize::try_from(overlap_start - read_start).map_err(|source| {
+                return io::Error::new(io::ErrorKind::InvalidData, source);
+            })?;
+            let end = usize::try_from(overlap_end - read_start).map_err(|source| {
+                return io::Error::new(io::ErrorKind::InvalidData, source);
+            })?;
+            let overlap = buf.get(start..end).ok_or_else(|| {
+                return io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "tar padding range exceeds decoded input",
+                );
+            })?;
+            if overlap.iter().any(|byte| return *byte != 0) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "tar archive member has nonzero padding",
+                ));
+            }
+        }
+        if read_end >= padding.end {
+            state.padding = None;
+        }
+        return Ok(read);
     }
-    header[148..156].copy_from_slice(encoded.as_bytes());
-    return Ok(());
 }
 
 pub(super) fn extract_archive(archive: &Path, destination: &Path) -> Result<()> {
     let (file, _) = open_regular_nofollow(archive)?;
-    let mut decoder = zstd::stream::read::Decoder::new(file)
+    let decoder = zstd::stream::read::Decoder::new(file)
         .map_err(|source| return Error::filesystem(archive, source))?;
+    let tracker = TarReadTracker::new();
+    let reader = PaddingCheckedReader {
+        inner: decoder,
+        tracker: tracker.clone(),
+    };
+    let mut tar_archive = Archive::new(reader);
     let mut paths: BTreeSet<PathBuf> = BTreeSet::new();
     let mut total_size = 0_u64;
-    let maximum_archive_members = u64::try_from(MAX_BUNDLE_MEMBERS)
-        .unwrap_or(u64::MAX)
-        .saturating_add(1);
-    for entry_count in 0..=maximum_archive_members {
-        let mut header = [0_u8; 512];
-        decoder
-            .read_exact(&mut header)
-            .map_err(|source| return Error::filesystem(archive, source))?;
-        if header.iter().all(|byte| return *byte == 0) {
-            let mut terminator = [0_u8; 512];
-            decoder
-                .read_exact(&mut terminator)
-                .map_err(|source| return Error::filesystem(archive, source))?;
-            if !terminator.iter().all(|byte| return *byte == 0) {
-                return Err(Error::invalid("tar archive has an invalid terminator"));
+    {
+        let entries = tar_archive
+            .entries()
+            .map_err(|source| return Error::filesystem(archive, source))?
+            .raw(true);
+        for (entry_count, entry) in entries.enumerate() {
+            if entry_count >= MAX_BUNDLE_MEMBERS {
+                return Err(Error::invalid("bundle archive has too many members"));
             }
-            let mut trailing = [0_u8; 1];
-            let trailing_bytes = decoder
-                .read(&mut trailing)
-                .map_err(|source| return Error::filesystem(archive, source))?;
-            if trailing_bytes != 0 {
+            let mut entry = entry.map_err(|source| {
+                return Error::invalid(format!("tar archive is invalid: {source}"));
+            })?;
+            if !entry.header().entry_type().is_file() {
                 return Err(Error::invalid(
-                    "tar archive contains trailing decoded content",
+                    "bundle archive contains a non-regular member",
                 ));
             }
-            return Ok(());
-        }
-        if entry_count == maximum_archive_members {
-            return Err(Error::invalid("bundle archive has too many members"));
-        }
-        verify_tar_checksum(&header)?;
-        let path = tar_path(&header)?;
-        validate_archive_path(&path)?;
-        if !paths.insert(path.clone()) {
-            return Err(Error::invalid("bundle archive contains a duplicate path"));
-        }
-        let type_flag = header[156];
-        if type_flag != b'0' && type_flag != 0 {
-            return Err(Error::invalid(
-                "bundle archive contains a non-regular member",
-            ));
-        }
-        let size = parse_tar_octal(&header[124..136])?;
-        if path == Path::new("manifest.json") && size > MAX_BUNDLE_MANIFEST_BYTES {
-            return Err(Error::invalid("bundle manifest exceeds its byte limit"));
-        }
-        total_size = total_size
-            .checked_add(size)
-            .ok_or_else(|| return Error::invalid("bundle archive size overflow"))?;
-        if total_size > MAX_ARCHIVE_EXPANDED_BYTES {
-            return Err(Error::invalid("bundle archive expands beyond 8 GiB"));
-        }
-        create_private_parents(destination, &path)?;
-        let target = destination.join(&path);
-        let mut writer = secure_file(&target)?;
-        let copied = io::copy(&mut decoder.by_ref().take(size), &mut writer)
-            .map_err(|source| return Error::filesystem(&target, source))?;
-        if copied != size {
-            return Err(Error::invalid("bundle archive member is truncated"));
-        }
-        writer
-            .sync_all()
-            .map_err(|source| return Error::filesystem(&target, source))?;
-        let padding = usize::try_from((512 - size % 512) % 512).unwrap_or(511);
-        let mut padding_bytes = [0_u8; 512];
-        let padding_slice = padding_bytes
-            .get_mut(..padding)
-            .ok_or_else(|| return Error::invalid("tar padding exceeds one block"))?;
-        decoder
-            .read_exact(padding_slice)
-            .map_err(|source| return Error::filesystem(archive, source))?;
-        if padding_slice.iter().any(|byte| return *byte != 0) {
-            return Err(Error::invalid("tar member padding is nonzero"));
+            tracker.register_padding(entry.raw_file_position(), entry.size())?;
+            let path_bytes = entry.path_bytes();
+            let path_text = str::from_utf8(path_bytes.as_ref())
+                .map_err(|_| return Error::invalid("tar paths must be UTF-8"))?;
+            let path = PathBuf::from(path_text);
+            validate_archive_path(&path)?;
+            if !paths.insert(path.clone()) {
+                return Err(Error::invalid("bundle archive contains a duplicate path"));
+            }
+            let size = entry.size();
+            if path == Path::new("manifest.json") && size > MAX_BUNDLE_MANIFEST_BYTES {
+                return Err(Error::invalid("bundle manifest exceeds its byte limit"));
+            }
+            total_size = total_size
+                .checked_add(size)
+                .ok_or_else(|| return Error::invalid("bundle archive size overflow"))?;
+            if total_size > MAX_ARCHIVE_EXPANDED_BYTES {
+                return Err(Error::invalid("bundle archive expands beyond 8 GiB"));
+            }
+            create_private_parents(destination, &path)?;
+            let target = destination.join(&path);
+            let mut writer = secure_file(&target)?;
+            let copied = io::copy(&mut entry, &mut writer)
+                .map_err(|source| return Error::filesystem(&target, source))?;
+            if copied != size {
+                return Err(Error::invalid("bundle archive member is truncated"));
+            }
+            writer
+                .sync_all()
+                .map_err(|source| return Error::filesystem(&target, source))?;
         }
     }
-    return Err(Error::invalid("bundle archive has no terminator"));
-}
 
-fn tar_path(header: &[u8; 512]) -> Result<PathBuf> {
-    let name = tar_text(&header[..100])?;
-    let prefix = tar_text(&header[345..500])?;
-    if name.is_empty() {
-        return Err(Error::invalid("tar member name is empty"));
+    let mut reader = tar_archive.into_inner();
+    let mut terminator = [0_u8; 512];
+    reader
+        .read_exact(&mut terminator)
+        .map_err(|source| return Error::filesystem(archive, source))?;
+    if !terminator.iter().all(|byte| return *byte == 0) {
+        return Err(Error::invalid("tar archive has an invalid terminator"));
     }
-    return Ok(if prefix.is_empty() {
-        PathBuf::from(name)
-    } else {
-        PathBuf::from(prefix).join(name)
-    });
-}
-
-fn tar_text(field: &[u8]) -> Result<&str> {
-    let length = field
-        .iter()
-        .position(|byte| return *byte == 0)
-        .unwrap_or(field.len());
-    let text = field
-        .get(..length)
-        .ok_or_else(|| return Error::invalid("tar text field length is invalid"))?;
-    return str::from_utf8(text).map_err(|_| return Error::invalid("tar paths must be UTF-8"));
+    let mut trailing = [0_u8; 1];
+    let trailing_bytes = reader
+        .read(&mut trailing)
+        .map_err(|source| return Error::filesystem(archive, source))?;
+    if trailing_bytes != 0 {
+        return Err(Error::invalid(
+            "tar archive contains trailing decoded content",
+        ));
+    }
+    return Ok(());
 }
 
 fn validate_archive_path(path: &Path) -> Result<()> {
@@ -359,30 +375,6 @@ fn validate_archive_path(path: &Path) -> Result<()> {
             .any(|component| return !matches!(component, Component::Normal(_)))
     {
         return Err(Error::invalid("bundle archive member path is unsafe"));
-    }
-    return Ok(());
-}
-
-fn parse_tar_octal(field: &[u8]) -> Result<u64> {
-    let value = tar_text(field)?.trim();
-    if value.is_empty() {
-        return Ok(0);
-    }
-    return u64::from_str_radix(value, 8)
-        .map_err(|_| return Error::invalid("tar numeric field is invalid"));
-}
-
-fn verify_tar_checksum(header: &[u8; 512]) -> Result<()> {
-    let expected = parse_tar_octal(&header[148..156])?;
-    let actual = header.iter().enumerate().fold(0_u64, |sum, (index, byte)| {
-        return sum.saturating_add(if (148..156).contains(&index) {
-            u64::from(b' ')
-        } else {
-            u64::from(*byte)
-        });
-    });
-    if actual != expected {
-        return Err(Error::invalid("tar header checksum is invalid"));
     }
     return Ok(());
 }

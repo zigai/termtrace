@@ -219,6 +219,39 @@ fn indexed_range_preserves_control_spanning_output_events() {
     assert!(bytes < 100, "spanning range read {bytes} control bytes");
     assert!(events < 10, "spanning range read {events} control events");
 }
+
+#[test]
+fn unindexed_range_preserves_csi_spanning_output_events() {
+    let mut log = ranged_timeline_log();
+    for (event, data) in
+        log.events
+            .iter_mut()
+            .zip([b"\x1b".as_slice(), b"[".as_slice(), b"31m".as_slice()])
+    {
+        event.event = Event::Output {
+            data: ByteString::from(data),
+        };
+    }
+    let range = Some(SourceRange {
+        start_monotonic_ns: 3,
+        end_monotonic_ns: 4,
+    });
+    let expected =
+        build_timeline(&log, true, true, range).expect("canonical unindexed spanning range");
+    let page =
+        build_timeline_page(&log, true, true, range, 0, 10_000).expect("unindexed spanning range");
+
+    assert!(expected.iter().any(|entry| {
+        return matches!(
+            &entry.item,
+            TimelineItem::VtToken { token }
+                if token.raw.as_bytes() == b"\x1b[31m" && token.source.len() == 3
+        );
+    }));
+    assert_eq!(page.entries, expected);
+    assert_eq!(page.next_offset, None);
+}
+
 #[test]
 fn streaming_pages_match_full_timeline_with_controls() {
     let log = ranged_timeline_log();

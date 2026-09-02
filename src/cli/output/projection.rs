@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::*;
 
 pub(super) fn append_bounded_text(output: &mut String, value: &str) -> bool {
@@ -131,14 +133,6 @@ pub(super) fn bounded_capture_projection(value: &serde_json::Value) -> Option<se
 
 pub(super) fn selected(fields: &[ResponseField], field: ResponseField) -> bool {
     return fields.contains(&field);
-}
-
-#[cfg(test)]
-pub(super) fn compact_value(
-    value: serde_json::Value,
-    fields: &[ResponseField],
-) -> Option<serde_json::Value> {
-    return compact_value_with_paths(value, fields, false);
 }
 
 pub(super) fn compact_value_with_paths(
@@ -678,66 +672,106 @@ pub(super) fn bounded_agent_response(response: serde_json::Value) -> Result<Vec<
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
-        let mut compact = if ok {
-            serde_json::json!({
-                "v": CLI_RESPONSE_VERSION,
-                "ok": true,
-                "type": response_type,
-                "truncated": true,
-                "response_bytes": response_bytes,
+        let applied = if ok {
+            response_string_value(response.get("applied"), "applied").and_then(|value| {
+                return value
+                    .map(|value| return applied_from_str(&value))
+                    .transpose();
+            })
+        } else if response.get("applied").is_some() {
+            response_string_value(response.get("applied"), "applied").and_then(|value| {
+                return value
+                    .map(|value| return applied_from_str(&value))
+                    .transpose();
             })
         } else {
-            serde_json::json!({
-                "v": CLI_RESPONSE_VERSION,
-                "ok": false,
-                "type": response_type,
-                "code": nested_string(Some(&response), "code")
-                    .unwrap_or_else(|| return "operation_failed".to_owned()),
-                "applied": nested_string(Some(&response), "applied")
-                    .unwrap_or_else(|| return "unknown".to_owned()),
-                "retry": nested_string(Some(&response), "retry")
-                    .unwrap_or_else(|| return "same_request_id_only".to_owned()),
-                "session_state": nested_string(Some(&response), "session_state")
-                    .unwrap_or_else(|| return "unknown".to_owned()),
-                "truncated": true,
-                "response_bytes": response_bytes,
-            })
+            let value = nested_string(Some(&response), "applied")
+                .unwrap_or_else(|| return "unknown".to_owned());
+            applied_from_str(&value).map(Some)
         };
-        if let Some(compact) = compact.as_object_mut() {
-            for key in [
-                "applied",
-                "retry",
-                "session_state",
-                "request_id",
-                "state",
-                "state_id",
-                "state_hash",
-                "event_seq",
-                "quality",
-                "size",
-                "session",
-                "path",
-            ] {
-                if let Some(value) = response.get(key).cloned() {
-                    compact.insert(key.to_owned(), value);
-                }
+        let retry = if ok {
+            response_string_value(response.get("retry"), "retry").and_then(|value| {
+                return value.map(|value| return retry_from_str(&value)).transpose();
+            })
+        } else if response.get("retry").is_some() {
+            response_string_value(response.get("retry"), "retry").and_then(|value| {
+                return value.map(|value| return retry_from_str(&value)).transpose();
+            })
+        } else {
+            let value = nested_string(Some(&response), "retry")
+                .unwrap_or_else(|| return "same_request_id_only".to_owned());
+            retry_from_str(&value).map(Some)
+        };
+        let session_state = if ok {
+            response_string_value(response.get("session_state"), "session_state").and_then(
+                |value| {
+                    return value
+                        .map(|value| return session_state_from_str(&value))
+                        .transpose();
+                },
+            )
+        } else if response.get("session_state").is_some() {
+            response_string_value(response.get("session_state"), "session_state").and_then(
+                |value| {
+                    return value
+                        .map(|value| return session_state_from_str(&value))
+                        .transpose();
+                },
+            )
+        } else {
+            let value = nested_string(Some(&response), "session_state")
+                .unwrap_or_else(|| return "unknown".to_owned());
+            session_state_from_str(&value).map(Some)
+        };
+        let mut fields = BTreeMap::new();
+        for key in [
+            "state",
+            "state_id",
+            "state_hash",
+            "event_seq",
+            "quality",
+            "size",
+            "session",
+            "path",
+        ] {
+            if let Some(value) = response.get(key).cloned() {
+                fields.insert(key.to_owned(), value);
             }
         }
         if let Some(pagination) = pagination_projection(&response)
-            && let (Some(target), Some(source)) = (compact.as_object_mut(), pagination.as_object())
+            && let Some(source) = pagination.as_object()
         {
             for key in ["page", "output_page", "next_offset", "next_cursor"] {
                 if let Some(value) = source.get(key).cloned() {
-                    target.insert(key.to_owned(), value);
+                    fields.insert(key.to_owned(), value);
                 }
             }
         }
-        compact = typed_envelope(
-            compact
-                .as_object()
-                .cloned()
-                .unwrap_or_else(serde_json::Map::new),
-        );
+        let compact = match (applied, retry, session_state) {
+            (Ok(applied), Ok(retry), Ok(session_state)) => typed_envelope(CliResponseEnvelope {
+                version: CLI_RESPONSE_VERSION,
+                ok,
+                response_type,
+                code: (!ok).then(|| {
+                    return nested_string(Some(&response), "code")
+                        .unwrap_or_else(|| return "operation_failed".to_owned());
+                }),
+                applied,
+                retry,
+                session_state,
+                request_id: response
+                    .get("request_id")
+                    .filter(|value| return !value.is_null())
+                    .cloned(),
+                message: None,
+                truncated: Some(true),
+                response_bytes: Some(u64::try_from(response_bytes).unwrap_or(u64::MAX)),
+                fields,
+            }),
+            (Err(message), _, _) | (_, Err(message), _) | (_, _, Err(message)) => {
+                response_encoding_failure(message)
+            }
+        };
         encoded = serde_json::to_vec(&compact).into_diagnostic()?;
     }
     encoded.push(b'\n');

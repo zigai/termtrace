@@ -8,7 +8,7 @@ use std::{
         unix::net::{SocketAddr, UnixStream},
     },
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use nix::{
@@ -16,15 +16,25 @@ use nix::{
     unistd::getuid,
 };
 
+use termtrace_engine::{
+    inspection::wait_for_completion,
+    observation::{
+        CaptureQuality, StatePoint, project_screen_frame, resolved_screen_state_for_session,
+        state_text,
+    },
+    recording::control::evaluate_screen_predicate,
+};
 use termtrace_evidence::session::read_manifest;
 use termtrace_model::{
     protocol::control::{
         ActionPostcondition, CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest,
         ControlResponse, ControlResult, InputSequenceAtom, MAX_CONTROL_MESSAGE_BYTES,
-        ScreenPredicate,
+        ScreenPredicate, ScreenWaitQuality,
     },
-    terminal::inspection::ScreenWaitOutcome,
-    terminal::screen::ScreenProjectionRequest,
+    terminal::{
+        inspection::ScreenWaitOutcome,
+        screen::{ScreenFrameSource, ScreenProjectionRequest},
+    },
 };
 
 use crate::{Error, Result};
@@ -101,9 +111,11 @@ pub fn wait_for_screen(
     stable_for: Duration,
     timeout: Duration,
 ) -> Result<ScreenWaitOutcome> {
+    let session_directory = session_directory.as_ref();
+    let started_at = Instant::now();
     let stable_for_ns = u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX);
     let timeout_ns = u64::try_from(timeout.as_nanos()).unwrap_or(u64::MAX);
-    let result = request(
+    let result = match request(
         session_directory,
         ControlCommand::WaitScreen {
             predicate: predicate.clone(),
@@ -111,7 +123,20 @@ pub fn wait_for_screen(
             timeout_ns,
             projection: ScreenProjectionRequest::default(),
         },
-    )?;
+    ) {
+        Ok(result) => result,
+        Err(error) if completion_transition_error(&error) => {
+            let remaining = timeout.saturating_sub(started_at.elapsed());
+            if let Err(completion_error) = wait_for_completion(session_directory, remaining) {
+                if session_directory.join("completion.json").is_file() {
+                    return Err(completion_error.into());
+                }
+                return Err(error);
+            }
+            return completed_screen_wait(session_directory, predicate, stable_for_ns);
+        }
+        Err(error) => return Err(error),
+    };
     let ControlData::ScreenWait {
         matched,
         first_match_monotonic_ns,
@@ -133,6 +158,50 @@ pub fn wait_for_screen(
         observed_monotonic_ns,
         stable_for_ns,
         quality,
+        frame,
+    });
+}
+
+fn completion_transition_error(error: &Error) -> bool {
+    return matches!(
+        error,
+        Error::ControlUnavailable { .. }
+            | Error::ControlTimeout { .. }
+            | Error::ControlTransport { .. }
+    );
+}
+
+fn completed_screen_wait(
+    session: &Path,
+    predicate: ScreenPredicate,
+    stable_for_ns: u64,
+) -> Result<ScreenWaitOutcome> {
+    let (state, source, presented) =
+        resolved_screen_state_for_session(session, StatePoint::LatestPresented, false)?;
+    let frame = project_screen_frame(
+        &state,
+        &ScreenProjectionRequest::default(),
+        source,
+        presented,
+        CaptureQuality::Completed,
+    )
+    .map_err(Error::ScreenFrame)?;
+    let viewport_text = state_text(&state);
+    let matched = evaluate_screen_predicate(&predicate, &state, &viewport_text, &frame.state_hash);
+    let observed_monotonic_ns = match &frame.source {
+        ScreenFrameSource::Actor {
+            observed_monotonic_ns,
+            ..
+        } => *observed_monotonic_ns,
+        ScreenFrameSource::Resolved { monotonic_ns, .. } => monotonic_ns.unwrap_or_default(),
+    };
+    return Ok(ScreenWaitOutcome {
+        predicate,
+        matched,
+        first_match_monotonic_ns: None,
+        observed_monotonic_ns,
+        stable_for_ns,
+        quality: ScreenWaitQuality::ChildCompleted,
         frame,
     });
 }

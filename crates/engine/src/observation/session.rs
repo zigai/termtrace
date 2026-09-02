@@ -24,12 +24,16 @@ use termtrace_model::{
     terminal::state::SemanticState,
     value::ByteString,
 };
+use termtrace_terminal::Format;
 
 use super::{
     CachedSemanticState, frame_from_state, frame_hash, load_checkpoint, observation_error,
     publish_checkpoint, publish_endpoint_checkpoint,
 };
-use crate::replay::{EndpointInspection, inspect, inspect_latest_presented_fast};
+use crate::replay::{
+    EndpointInspection, RenderedStateFormats, inspect, inspect_latest_presented_fast,
+    inspect_with_formats,
+};
 use crate::{Error, Result};
 
 const MAX_LIVE_SEMANTIC_STATE_BYTES: u64 = 32 * 1024 * 1024;
@@ -68,6 +72,50 @@ pub fn observe_session_with_options(
         ));
     }
     return observe_completed(&canonical, manifest.session_id, state_point, include_hidden);
+}
+
+/// Observe a completed session and format the selected state in the same replay.
+///
+/// # Errors
+///
+/// Returns the same errors as [`observe_session_with_options`] and fails when
+/// any requested formatter cannot produce output.
+pub fn observe_completed_with_formats(
+    session: &Path,
+    state_point: StatePoint,
+    include_hidden: bool,
+    formats: &[Format],
+) -> Result<(Observation, RenderedStateFormats)> {
+    let canonical = session.canonicalize().map_err(|source| {
+        return Error::Filesystem {
+            path: session.to_path_buf(),
+            source,
+        };
+    })?;
+    let manifest = read_manifest(&canonical)?;
+    let log = EventLog::read(canonical.join("events.jsonl"))?;
+    let completion = validate_completed_log(&canonical, &log)?;
+    let selector = state_selector(&log, &state_point)?;
+    let (inspection, rendered) = inspect_with_formats(&log, selector, formats)?;
+    let state = CachedSemanticState {
+        state_id: Some(inspection.record.state_id),
+        event_seq: inspection.record.event_seq,
+        event_byte_offset: inspection.record.event_byte_offset,
+        monotonic_ns: Some(inspection.record.monotonic_ns),
+        state_hash: inspection.record.state_hash,
+        presented: inspection.record.presented,
+        state: inspection.state,
+    };
+    let observation = completed_observation_from_cached(
+        &canonical,
+        manifest.session_id,
+        state_point,
+        &completion,
+        &state,
+        include_hidden,
+        ObservationResolution::CanonicalReplay,
+    )?;
+    return Ok((observation, rendered));
 }
 /// Build a truth-labeled observation from one actor-owned live snapshot.
 ///
@@ -287,7 +335,10 @@ fn resolve_completed_state(
     }
     if matches!(point, StatePoint::StateHash { .. })
         && let Some(state) = load_checkpoint(session, &StatePoint::LatestPresented, completion)?
-        && state_hash_matches_point(&state, point)
+        && matches!(
+            point,
+            StatePoint::StateHash { state_hash } if state.state_hash == *state_hash
+        )
     {
         return Ok((state, ObservationResolution::ValidatedCheckpoint));
     }
@@ -305,7 +356,10 @@ fn resolve_completed_state(
             tracing::warn!(%error, "could not publish endpoint replay checkpoint");
         }
         if matches!(point, StatePoint::LatestPresented)
-            || endpoint_hash_matches_point(&endpoint, point)
+            || matches!(
+                point,
+                StatePoint::StateHash { state_hash } if endpoint.state_hash == *state_hash
+            )
         {
             return Ok((
                 cached_state_from_endpoint(endpoint),
@@ -330,14 +384,6 @@ fn resolve_completed_state(
         },
         ObservationResolution::CanonicalReplay,
     ));
-}
-
-fn state_hash_matches_point(state: &CachedSemanticState, point: &StatePoint) -> bool {
-    return matches!(point, StatePoint::StateHash { state_hash } if state.state_hash == *state_hash);
-}
-
-fn endpoint_hash_matches_point(state: &EndpointInspection, point: &StatePoint) -> bool {
-    return matches!(point, StatePoint::StateHash { state_hash } if state.state_hash == *state_hash);
 }
 
 fn cached_state_from_endpoint(state: EndpointInspection) -> CachedSemanticState {

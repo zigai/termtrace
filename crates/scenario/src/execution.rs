@@ -21,7 +21,7 @@ use termtrace_model::{
     terminal::state::KeyModifiers,
     value::ByteString,
 };
-use termtrace_sdk::{Session, Terminal};
+use termtrace_sdk::{Session, StableCaptureOptions, Terminal, send_request};
 use uuid::Uuid;
 
 use crate::{
@@ -77,7 +77,11 @@ pub fn run(
                 steps.push(result);
             }
             Err(failure) => {
-                let final_snapshot = session.screen().snapshot().ok();
+                let final_snapshot = send_request(
+                    session.path(),
+                    &ControlRequest::new(ControlCommand::Snapshot),
+                )
+                .ok();
                 let _stop_result =
                     session.stop(Some(Duration::from_millis(scenario.launch.timeout_ms)));
                 let failure_artifacts = failure_root.join(session.session_id().to_string());
@@ -268,12 +272,14 @@ fn execute_step(
         ScenarioStep::MatchScreenSnapshot(snapshot) => {
             let capture = session
                 .screen()
-                .wait_for_idle(
-                    Duration::from_millis(snapshot.stable_for_ms),
-                    Duration::from_millis(
+                .capture_stable(StableCaptureOptions {
+                    stable_for: Duration::from_millis(snapshot.stable_for_ms),
+                    timeout: Duration::from_millis(
                         snapshot.timeout_ms.unwrap_or(scenario.launch.timeout_ms),
                     ),
-                )
+                    projection: Default::default(),
+                    allow_incomplete: false,
+                })
                 .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
             let state_hash = capture.frame.state_hash.clone();
             let baseline = rich_frame_snapshot(&capture.frame);

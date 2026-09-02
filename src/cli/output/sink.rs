@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::*;
 
 pub(in crate::cli) fn finish_response(
@@ -84,33 +86,38 @@ pub(in crate::cli) fn write_clap_error(error: clap::Error, mode: ResponseMode) -
         ResponseMode::Quiet => {}
         ResponseMode::Agent => {
             let response = if success {
-                typed_envelope(
-                    serde_json::json!({
-                        "v": CLI_RESPONSE_VERSION,
-                        "ok": true,
-                        "type": "help",
-                        "output": error.to_string(),
-                    })
-                    .as_object()
-                    .cloned()
-                    .unwrap_or_default(),
-                )
+                typed_envelope(CliResponseEnvelope {
+                    version: CLI_RESPONSE_VERSION,
+                    ok: true,
+                    response_type: "help".to_owned(),
+                    code: None,
+                    applied: None,
+                    retry: None,
+                    session_state: None,
+                    request_id: None,
+                    message: None,
+                    truncated: None,
+                    response_bytes: None,
+                    fields: BTreeMap::from([(
+                        "output".to_owned(),
+                        serde_json::Value::String(error.to_string()),
+                    )]),
+                })
             } else {
-                typed_envelope(
-                    serde_json::json!({
-                        "v": CLI_RESPONSE_VERSION,
-                        "ok": false,
-                        "type": "arguments",
-                        "code": "invalid_arguments",
-                        "applied": "none",
-                        "retry": "safe_new_request",
-                        "session_state": "unknown",
-                        "message": error.to_string().trim(),
-                    })
-                    .as_object()
-                    .cloned()
-                    .unwrap_or_default(),
-                )
+                typed_envelope(CliResponseEnvelope {
+                    version: CLI_RESPONSE_VERSION,
+                    ok: false,
+                    response_type: "arguments".to_owned(),
+                    code: Some("invalid_arguments".to_owned()),
+                    applied: Some(Applied::None),
+                    retry: Some(Retry::SafeNewRequest),
+                    session_state: Some(SessionState::Unknown),
+                    request_id: None,
+                    message: Some(error.to_string().trim().to_owned()),
+                    truncated: None,
+                    response_bytes: None,
+                    fields: BTreeMap::new(),
+                })
             };
             if let Ok(output) = bounded_agent_response(response) {
                 let _ = direct_stdout(&output);

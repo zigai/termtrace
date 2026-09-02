@@ -101,7 +101,7 @@ fn resolve_source_range(
     }));
 }
 
-fn timeline_event(event: &Event) -> bool {
+pub(crate) fn timeline_event(event: &Event) -> bool {
     return !matches!(
         event,
         Event::Output { .. }

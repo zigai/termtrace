@@ -56,7 +56,7 @@ pub(super) fn valid_blake3_hash(hash: &str) -> bool {
 impl SessionActor<'_> {
     pub(in crate::recording) fn evaluate_screen_waiters(
         &mut self,
-        child_completed: bool,
+        child_exited: bool,
         output_closed: bool,
     ) -> Result<()> {
         if self.screen_waiters.is_empty() {
@@ -95,7 +95,8 @@ impl SessionActor<'_> {
                 .matching_state
                 .as_ref()
                 .is_some_and(|(_, since, _)| return since.elapsed() >= waiter.stable_for);
-            let deadline = now >= waiter.deadline;
+            let child_completed = child_exited && output_closed;
+            let deadline = !child_exited && now >= waiter.deadline;
             let finished = stable || child_completed || output_closed || deadline;
             if !finished {
                 index += 1;

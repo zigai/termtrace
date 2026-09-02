@@ -22,7 +22,7 @@ use termtrace_model::{
         PresentationSourceRequest,
     },
     artifact::visual::{VisualManifest, visual_directory_name_for},
-    execution::event::Event,
+    execution::{event::Event, session::SessionManifest},
     terminal::replay::SourceRange,
     terminal::state::{CursorState, CursorStyle},
     value::geometry::TerminalGeometryReport,
@@ -123,203 +123,42 @@ pub fn plan_with_source(
     validate_completed_log(session, &log)?;
     let session_manifest = read_manifest(session)?;
     let states = replay(&log)?.states;
-    let (
+    let ResolvedSource {
         source,
         fps,
         source_width,
         source_height,
         source_geometry,
-        capture_start,
+        capture_start_ns: capture_start,
         capture_range,
         semantic_final_frame,
-    ) = match source_request {
-        PresentationSourceRequest::Native => {
-            let visual = session.join(visual_directory_name_for(None, StateSelection::All));
-            let manifest_path = visual.join("manifest.json");
-            let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
-                if source.kind() == ErrorKind::NotFound {
-                    return missing_native_capture_error(session, &manifest_path);
-                }
-                return Error::Filesystem {
-                    path: manifest_path.clone(),
-                    source,
-                };
-            })?;
-            let manifest: VisualManifest =
-                serde_json::from_slice(&manifest_bytes).map_err(|source| {
-                    return Error::InvalidJson {
-                        path: manifest_path.clone(),
-                        json_path: "$".to_owned(),
-                        source,
-                    };
-                })?;
-            validate_visual_manifest_binding(
-                &manifest,
-                session_manifest
-                    .ghostty_visual
-                    .as_ref()
-                    .map(|profile| return profile.effective_config_hash.as_str()),
-                &log.header.colors.source,
-            )?;
-            verify_artifact_members(&visual, &manifest.members)?;
-            if manifest.session_id != log.header.session_id {
-                return Err(plan_error(
-                    "native capture session identity does not match canonical evidence",
-                ));
-            }
-            let source_video = visual.join("session.mkv");
-            let source_video_hash = manifest
-                .members
-                .iter()
-                .find(|member| return member.path == "session.mkv")
-                .map(|member| return member.blake3.clone())
-                .ok_or_else(|| return plan_error("native capture manifest has no session video"))?;
-            let capture_start = manifest
-                .source_range
-                .map_or(0, |capture| return capture.start_monotonic_ns);
-            (
-                PresentationSource::Native {
-                    video: source_video,
-                    video_hash: source_video_hash,
-                },
-                manifest.fps,
-                manifest.width,
-                manifest.height,
-                manifest.geometry_report,
-                capture_start,
-                manifest.source_range,
-                None,
-            )
-        }
-        PresentationSourceRequest::Semantic {
-            fps,
-            raster_profile,
-        } => {
-            if edit.clips.iter().any(|clip| {
-                return clip.from.native_frame.is_some() || clip.to.native_frame.is_some();
-            }) {
-                return Err(plan_error(
-                    "nativeFrame edit selectors are invalid for a semantic video source",
-                ));
-            }
-            let mut semantic_start = u64::MAX;
-            let mut semantic_end = 0_u64;
-            for clip in &edit.clips {
-                let range = resolve_clip(&log, &states, clip, 0, fps)?;
-                semantic_start = semantic_start.min(range.start_monotonic_ns);
-                semantic_end = semantic_end.max(range.end_monotonic_ns);
-            }
-            let semantic = plan_semantic_video(
-                session,
-                &log,
-                fps,
-                semantic_start,
-                semantic_end,
-                raster_profile,
-            )?;
-            let geometry = TerminalGeometryReport {
-                cols: semantic.canvas.cols,
-                rows: semantic.canvas.rows,
-                cell_width: semantic.canvas.cell_width,
-                cell_height: semantic.canvas.cell_height,
-                text_width: semantic.canvas.width,
-                text_height: semantic.canvas.height,
-            };
-            let final_frame = (semantic.end_monotonic_ns, semantic.frame_count);
-            (
-                PresentationSource::Semantic {
-                    plan: semantic.clone(),
-                },
-                semantic.fps,
-                semantic.canvas.width,
-                semantic.canvas.height,
-                geometry,
-                semantic.start_monotonic_ns,
-                None,
-                Some(final_frame),
-            )
-        }
-    };
-    let mut hashed_edit = edit.clone();
-    let mut subtitle_hashes = Vec::new();
-    for (index, subtitle) in hashed_edit.subtitles.iter_mut().enumerate() {
-        subtitle_hashes.push(hash_file(&subtitle.ass)?);
-        subtitle.ass = PathBuf::from(format!("resource-{index}.ass"));
-    }
-    let edit_identity = serde_json::json!({
-        "edit": hashed_edit,
-        "subtitle_hashes": subtitle_hashes,
-    });
-    let edit_plan_hash = blake3::hash(&serde_json::to_vec(&edit_identity).map_err(|source| {
-        return Error::InvalidJson {
-            path: PathBuf::from("<edit-plan>"),
-            json_path: "$".to_owned(),
-            source,
-        };
-    })?)
-    .to_hex()
-    .to_string();
-    let mut output_start_frame = 0_u64;
-    let mut clips = Vec::new();
-    for clip in &edit.clips {
-        let range = resolve_clip(&log, &states, clip, capture_start, fps)?;
-        if clips.iter().any(|existing: &NormalizedClip| {
-            return ranges_overlap(range, existing.source_range);
-        }) {
-            return Err(plan_error("edit clips must not overlap in source time"));
-        }
-        if capture_range.is_some_and(|capture| {
-            return range.start_monotonic_ns < capture.start_monotonic_ns
-                || range.end_monotonic_ns > capture.end_monotonic_ns;
-        }) {
-            return Err(plan_error(
-                "edit clip lies outside the native capture range",
-            ));
-        }
-        let source_start_frame = frame_floor(range.start_monotonic_ns - capture_start, fps);
-        let source_end_frame = semantic_final_frame.map_or_else(
-            || return frame_ceil(range.end_monotonic_ns - capture_start, fps),
-            |(semantic_end, final_frame)| {
-                return if range.end_monotonic_ns == semantic_end {
-                    final_frame
-                } else {
-                    frame_ceil(range.end_monotonic_ns - capture_start, fps)
-                };
-            },
-        );
-        let source_frames = source_end_frame.saturating_sub(source_start_frame);
-        let retimed_frame_count = ceil_ratio(
-            source_frames.saturating_mul(u64::from(clip.speed.denominator)),
-            u64::from(clip.speed.numerator),
-        );
-        let hold_frame_count = ceil_ratio(clip.hold_ms.saturating_mul(u64::from(fps)), 1000);
-        let output_end_frame = output_start_frame
-            .saturating_add(retimed_frame_count)
-            .saturating_add(hold_frame_count);
-        clips.push(NormalizedClip {
-            source_range: range,
-            source_start_frame,
-            source_end_frame,
-            output_start_frame,
-            output_end_frame,
-            retimed_frame_count,
-            hold_frame_count,
-            speed: clip.speed,
-            caption: clip.caption.clone(),
-        });
-        output_start_frame = output_end_frame;
-    }
-    if output_start_frame == 0 || output_start_frame > u64::from(fps) * 60 * 60 * 24 {
-        return Err(plan_error(
-            "presentation duration must contain between one frame and 24 hours",
-        ));
-    }
+    } = resolve_source(
+        session,
+        edit,
+        source_request,
+        &log,
+        &states,
+        &session_manifest,
+    )?;
+    let edit_plan_hash = hash_edit_identity(edit)?;
+    let NormalizedClips {
+        clips,
+        output_frame_count,
+    } = normalize_clips(
+        &log,
+        &states,
+        edit,
+        capture_start,
+        fps,
+        capture_range,
+        semantic_final_frame,
+    )?;
     let annotations = normalize_annotations(
         &log,
         &states,
         edit,
         &clips,
-        output_start_frame,
+        output_frame_count,
         capture_start,
         fps,
     )?;
@@ -386,6 +225,234 @@ pub fn plan_with_source(
         layout: edit.layout.clone(),
         delivery: edit.delivery.clone(),
         transforms: edit.transforms.clone(),
+        output_frame_count,
+    });
+}
+
+struct ResolvedSource {
+    source: PresentationSource,
+    fps: u16,
+    source_width: u16,
+    source_height: u16,
+    source_geometry: TerminalGeometryReport,
+    capture_start_ns: u64,
+    capture_range: Option<SourceRange>,
+    semantic_final_frame: Option<(u64, u64)>,
+}
+
+struct NormalizedClips {
+    clips: Vec<NormalizedClip>,
+    output_frame_count: u64,
+}
+
+fn resolve_source(
+    session: &Path,
+    edit: &EditPlan,
+    source_request: PresentationSourceRequest,
+    log: &EventLog,
+    states: &[StateRecord],
+    session_manifest: &SessionManifest,
+) -> Result<ResolvedSource> {
+    return match source_request {
+        PresentationSourceRequest::Native => {
+            let visual = session.join(visual_directory_name_for(None, StateSelection::All));
+            let manifest_path = visual.join("manifest.json");
+            let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
+                if source.kind() == ErrorKind::NotFound {
+                    return missing_native_capture_error(session, &manifest_path);
+                }
+                return Error::Filesystem {
+                    path: manifest_path.clone(),
+                    source,
+                };
+            })?;
+            let manifest: VisualManifest =
+                serde_json::from_slice(&manifest_bytes).map_err(|source| {
+                    return Error::InvalidJson {
+                        path: manifest_path.clone(),
+                        json_path: "$".to_owned(),
+                        source,
+                    };
+                })?;
+            validate_visual_manifest_binding(
+                &manifest,
+                session_manifest
+                    .ghostty_visual
+                    .as_ref()
+                    .map(|profile| return profile.effective_config_hash.as_str()),
+                &log.header.colors.source,
+            )?;
+            verify_artifact_members(&visual, &manifest.members)?;
+            if manifest.session_id != log.header.session_id {
+                return Err(plan_error(
+                    "native capture session identity does not match canonical evidence",
+                ));
+            }
+            let source_video = visual.join("session.mkv");
+            let source_video_hash = manifest
+                .members
+                .iter()
+                .find(|member| return member.path == "session.mkv")
+                .map(|member| return member.blake3.clone())
+                .ok_or_else(|| return plan_error("native capture manifest has no session video"))?;
+            let capture_start_ns = manifest
+                .source_range
+                .map_or(0, |capture| return capture.start_monotonic_ns);
+            Ok(ResolvedSource {
+                source: PresentationSource::Native {
+                    video: source_video,
+                    video_hash: source_video_hash,
+                },
+                fps: manifest.fps,
+                source_width: manifest.width,
+                source_height: manifest.height,
+                source_geometry: manifest.geometry_report,
+                capture_start_ns,
+                capture_range: manifest.source_range,
+                semantic_final_frame: None,
+            })
+        }
+        PresentationSourceRequest::Semantic {
+            fps,
+            raster_profile,
+        } => {
+            if edit.clips.iter().any(|clip| {
+                return clip.from.native_frame.is_some() || clip.to.native_frame.is_some();
+            }) {
+                return Err(plan_error(
+                    "nativeFrame edit selectors are invalid for a semantic video source",
+                ));
+            }
+            let mut semantic_start = u64::MAX;
+            let mut semantic_end = 0_u64;
+            for clip in &edit.clips {
+                let range = resolve_clip(log, states, clip, 0, fps)?;
+                semantic_start = semantic_start.min(range.start_monotonic_ns);
+                semantic_end = semantic_end.max(range.end_monotonic_ns);
+            }
+            let semantic = plan_semantic_video(
+                session,
+                log,
+                fps,
+                semantic_start,
+                semantic_end,
+                raster_profile,
+            )?;
+            let geometry = TerminalGeometryReport {
+                cols: semantic.canvas.cols,
+                rows: semantic.canvas.rows,
+                cell_width: semantic.canvas.cell_width,
+                cell_height: semantic.canvas.cell_height,
+                text_width: semantic.canvas.width,
+                text_height: semantic.canvas.height,
+            };
+            let final_frame = (semantic.end_monotonic_ns, semantic.frame_count);
+            Ok(ResolvedSource {
+                source: PresentationSource::Semantic {
+                    plan: semantic.clone(),
+                },
+                fps: semantic.fps,
+                source_width: semantic.canvas.width,
+                source_height: semantic.canvas.height,
+                source_geometry: geometry,
+                capture_start_ns: semantic.start_monotonic_ns,
+                capture_range: None,
+                semantic_final_frame: Some(final_frame),
+            })
+        }
+    };
+}
+
+fn hash_edit_identity(edit: &EditPlan) -> Result<String> {
+    let mut hashed_edit = edit.clone();
+    let mut subtitle_hashes = Vec::new();
+    for (index, subtitle) in hashed_edit.subtitles.iter_mut().enumerate() {
+        subtitle_hashes.push(hash_file(&subtitle.ass)?);
+        subtitle.ass = PathBuf::from(format!("resource-{index}.ass"));
+    }
+    let edit_identity = serde_json::json!({
+        "edit": hashed_edit,
+        "subtitle_hashes": subtitle_hashes,
+    });
+    return Ok(
+        blake3::hash(&serde_json::to_vec(&edit_identity).map_err(|source| {
+            return Error::InvalidJson {
+                path: PathBuf::from("<edit-plan>"),
+                json_path: "$".to_owned(),
+                source,
+            };
+        })?)
+        .to_hex()
+        .to_string(),
+    );
+}
+
+fn normalize_clips(
+    log: &EventLog,
+    states: &[StateRecord],
+    edit: &EditPlan,
+    capture_start_ns: u64,
+    fps: u16,
+    capture_range: Option<SourceRange>,
+    semantic_final_frame: Option<(u64, u64)>,
+) -> Result<NormalizedClips> {
+    let mut output_start_frame = 0_u64;
+    let mut clips = Vec::new();
+    for clip in &edit.clips {
+        let range = resolve_clip(log, states, clip, capture_start_ns, fps)?;
+        if clips.iter().any(|existing: &NormalizedClip| {
+            return ranges_overlap(range, existing.source_range);
+        }) {
+            return Err(plan_error("edit clips must not overlap in source time"));
+        }
+        if capture_range.is_some_and(|capture| {
+            return range.start_monotonic_ns < capture.start_monotonic_ns
+                || range.end_monotonic_ns > capture.end_monotonic_ns;
+        }) {
+            return Err(plan_error(
+                "edit clip lies outside the native capture range",
+            ));
+        }
+        let source_start_frame = frame_floor(range.start_monotonic_ns - capture_start_ns, fps);
+        let source_end_frame = semantic_final_frame.map_or_else(
+            || return frame_ceil(range.end_monotonic_ns - capture_start_ns, fps),
+            |(semantic_end, final_frame)| {
+                return if range.end_monotonic_ns == semantic_end {
+                    final_frame
+                } else {
+                    frame_ceil(range.end_monotonic_ns - capture_start_ns, fps)
+                };
+            },
+        );
+        let source_frames = source_end_frame.saturating_sub(source_start_frame);
+        let retimed_frame_count = ceil_ratio(
+            source_frames.saturating_mul(u64::from(clip.speed.denominator)),
+            u64::from(clip.speed.numerator),
+        );
+        let hold_frame_count = ceil_ratio(clip.hold_ms.saturating_mul(u64::from(fps)), 1000);
+        let output_end_frame = output_start_frame
+            .saturating_add(retimed_frame_count)
+            .saturating_add(hold_frame_count);
+        clips.push(NormalizedClip {
+            source_range: range,
+            source_start_frame,
+            source_end_frame,
+            output_start_frame,
+            output_end_frame,
+            retimed_frame_count,
+            hold_frame_count,
+            speed: clip.speed,
+            caption: clip.caption.clone(),
+        });
+        output_start_frame = output_end_frame;
+    }
+    if output_start_frame == 0 || output_start_frame > u64::from(fps) * 60 * 60 * 24 {
+        return Err(plan_error(
+            "presentation duration must contain between one frame and 24 hours",
+        ));
+    }
+    return Ok(NormalizedClips {
+        clips,
         output_frame_count: output_start_frame,
     });
 }

@@ -152,8 +152,8 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
         .events
         .iter()
         .filter_map(|record| match &record.event {
-            Event::Output { data } => Some(data.as_bytes()),
-            _ => None,
+            Event::Output { data } => return Some(data.as_bytes()),
+            _ => return None,
         })
         .flatten()
         .copied()
@@ -168,9 +168,9 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
         .import_provenance
         .as_ref()
         .is_none_or(|provenance| {
-            provenance.source_kind != "ansi_stream"
+            return provenance.source_kind != "ansi_stream"
                 || provenance.byte_count != u64::try_from(bytes.len()).unwrap_or(u64::MAX)
-                || provenance.blake3 != hash
+                || provenance.blake3 != hash;
         })
     {
         return Err(miette::miette!(
@@ -262,7 +262,10 @@ pub(super) fn run_video_facade(
     } else {
         let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
         validate_completed_log(&session, &log).into_diagnostic()?;
-        let final_monotonic_ns = log.events.last().map_or(0, |record| record.monotonic_ns);
+        let final_monotonic_ns = log
+            .events
+            .last()
+            .map_or(0, |record| return record.monotonic_ns);
         let mut selected = resolve_source_selection(
             &log,
             None,
@@ -294,7 +297,7 @@ pub(super) fn run_video_facade(
             plan_presentation(&session, &edit, source).into_diagnostic()?
         }
     };
-    if requested_fps.is_some_and(|fps| fps != plan.fps) {
+    if requested_fps.is_some_and(|fps| return fps != plan.fps) {
         return Err(miette::miette!(
             "requested {} FPS but the verified native capture is {} FPS; recapture at the requested rate",
             requested_fps.unwrap_or(plan.fps),
@@ -353,9 +356,11 @@ pub(super) fn run_video_facade(
     );
     let outcome = export_presentation(&plan, &sidecar).into_diagnostic()?;
     fs_err::hard_link(&outcome.video, &output)
-        .map_err(|source| Error::Filesystem {
-            path: output.clone(),
-            source,
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: output.clone(),
+                source,
+            };
         })
         .into_diagnostic()?;
     write_progress(

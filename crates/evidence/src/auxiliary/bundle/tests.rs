@@ -1,12 +1,11 @@
-use std::io::Write as _;
+use std::{io, path::Path};
 
+use tar_archive::{Builder, EntryType, Header};
 use tempfile::TempDir;
+use zstd::stream::encode_all;
 
 use super::*;
-use super::{
-    tar::{extract_archive, write_checksum, write_octal, write_tar_path},
-    verify::read_bounded_regular_file,
-};
+use super::{tar::extract_archive, verify::read_bounded_regular_file};
 
 #[test]
 fn direct_and_archived_manifests_share_the_byte_limit() {
@@ -23,22 +22,23 @@ fn direct_and_archived_manifests_share_the_byte_limit() {
 
     let archive = temporary.path().join("oversized.tar.zst");
     let file = fs_err::File::create(&archive).expect("archive file");
-    let mut encoder = zstd::stream::write::Encoder::new(file, 1).expect("zstd encoder");
-    let mut header = [0_u8; 512];
-    write_tar_path(&mut header, "manifest.json").expect("manifest tar path");
-    write_octal(&mut header, 100, 8, 0o600).expect("tar mode");
-    write_octal(&mut header, 108, 8, 0).expect("tar uid");
-    write_octal(&mut header, 116, 8, 0).expect("tar gid");
-    write_octal(&mut header, 124, 12, MAX_BUNDLE_MANIFEST_BYTES + 1).expect("tar size");
-    write_octal(&mut header, 136, 12, 0).expect("tar time");
-    header[148..156].fill(b' ');
-    header[156] = b'0';
-    header[257..263].copy_from_slice(b"ustar\0");
-    header[263..265].copy_from_slice(b"00");
-    let checksum = header.iter().map(|byte| return u64::from(*byte)).sum();
-    write_checksum(&mut header, checksum).expect("tar checksum");
-    encoder.write_all(&header).expect("archive header");
-    encoder.finish().expect("finish archive");
+    let encoder = zstd::stream::write::Encoder::new(file, 1).expect("zstd encoder");
+    let mut builder = Builder::new(encoder);
+    let mut header = Header::new_ustar();
+    header.set_path("manifest.json").expect("manifest tar path");
+    header.set_mode(0o600);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_size(MAX_BUNDLE_MANIFEST_BYTES + 1);
+    header.set_mtime(0);
+    header.set_entry_type(EntryType::Regular);
+    header.set_cksum();
+    builder
+        .append(&header, io::empty())
+        .expect("archive member");
+    builder.finish().expect("finish tar archive");
+    let encoder = builder.into_inner().expect("finish tar builder");
+    encoder.finish().expect("finish compressed archive");
 
     let destination = temporary.path().join("extracted");
     create_private_directory(&destination).expect("extraction directory");
@@ -46,6 +46,77 @@ fn direct_and_archived_manifests_share_the_byte_limit() {
         .expect_err("archive manifest must be bounded before extraction");
     assert!(archive_error.to_string().contains("manifest exceeds"));
     assert!(!destination.join("manifest.json").exists());
+}
+
+#[test]
+fn raw_tar_iteration_rejects_extension_headers_before_their_payload() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let extension_types = [
+        EntryType::GNULongName,
+        EntryType::GNULongLink,
+        EntryType::GNUSparse,
+        EntryType::XHeader,
+        EntryType::XGlobalHeader,
+    ];
+
+    for (index, entry_type) in extension_types.into_iter().enumerate() {
+        let mut builder = Builder::new(Vec::new());
+        let mut header = Header::new_gnu();
+        header.set_path("extension").expect("extension tar path");
+        header.set_mode(0o600);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_size(1);
+        header.set_mtime(0);
+        header.set_entry_type(entry_type);
+        header.set_cksum();
+        builder
+            .append(&header, b"xy".as_slice())
+            .expect("extension member");
+        builder.finish().expect("finish tar archive");
+        let tar_bytes = builder.into_inner().expect("finish tar builder");
+
+        let archive = temporary.path().join(format!("extension-{index}.tar.zst"));
+        write_compressed_tar(&archive, &tar_bytes);
+        let destination = temporary.path().join(format!("extension-{index}"));
+        create_private_directory(&destination).expect("extraction directory");
+        let error = extract_archive(&archive, &destination)
+            .expect_err("extension member must be rejected before its payload");
+        assert!(error.to_string().contains("non-regular member"));
+    }
+}
+
+#[test]
+fn archive_rejects_nonzero_member_padding() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let mut builder = Builder::new(Vec::new());
+    let mut header = Header::new_ustar();
+    header.set_path("member").expect("member tar path");
+    header.set_mode(0o600);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_size(1);
+    header.set_mtime(0);
+    header.set_entry_type(EntryType::Regular);
+    header.set_cksum();
+    builder
+        .append(&header, b"xy".as_slice())
+        .expect("archive member with nonzero padding");
+    builder.finish().expect("finish tar archive");
+    let tar_bytes = builder.into_inner().expect("finish tar builder");
+
+    let archive = temporary.path().join("nonzero-padding.tar.zst");
+    write_compressed_tar(&archive, &tar_bytes);
+    let destination = temporary.path().join("nonzero-padding");
+    create_private_directory(&destination).expect("extraction directory");
+    let error = extract_archive(&archive, &destination)
+        .expect_err("nonzero member padding must be rejected");
+    assert!(error.to_string().contains("nonzero padding"));
+}
+
+fn write_compressed_tar(path: &Path, tar_bytes: &[u8]) {
+    let compressed = encode_all(tar_bytes, 1).expect("compress public tar builder output");
+    fs_err::write(path, compressed).expect("write compressed tar archive");
 }
 
 #[test]

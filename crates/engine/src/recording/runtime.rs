@@ -65,10 +65,8 @@ pub(super) fn consume_runtime(
     drop(sender);
 
     let result = (|| {
-        while !actor.progress.output_closed
-            || actor.exit_status.is_none()
-            || actor.pending_input_sequence.is_some()
-        {
+        let mut control_shutdown_started = false;
+        loop {
             let receive_timeout = actor.pending_input_sequence.as_ref().map_or(
                 Duration::from_millis(10),
                 |pending| {
@@ -102,15 +100,10 @@ pub(super) fn consume_runtime(
                     actor.drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
                 }
             }
-            actor.advance_input_sequence(
-                actor.exit_status.is_some() && actor.progress.output_closed,
-                actor.progress.output_closed,
-            )?;
+            let child_exited = actor.exit_status.is_some();
+            actor.advance_input_sequence(child_exited, actor.progress.output_closed)?;
             actor.event_log.flush_due()?;
-            actor.evaluate_screen_waiters(
-                actor.exit_status.is_some() && actor.progress.output_closed,
-                actor.progress.output_closed,
-            )?;
+            actor.evaluate_screen_waiters(child_exited, actor.progress.output_closed)?;
 
             if actor.progress.resource_limit.is_none()
                 && let Some(limit) = actor.resource_limits.output_bytes
@@ -184,6 +177,18 @@ pub(super) fn consume_runtime(
                 terminate_process_group(actor.spawned.pid);
                 actor.process_group_killed = true;
                 actor.drain_deadline = Some(Instant::now() + DESCENDANT_DRAIN_TIMEOUT);
+            }
+            if actor.progress.output_closed
+                && actor.exit_status.is_some()
+                && actor.pending_input_sequence.is_none()
+            {
+                if !control_shutdown_started {
+                    workers.begin_control_shutdown()?;
+                    control_shutdown_started = true;
+                }
+                if workers.control_shutdown_finished() {
+                    break;
+                }
             }
         }
         actor.evaluate_screen_waiters(true, actor.progress.output_closed)?;

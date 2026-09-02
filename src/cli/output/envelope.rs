@@ -1,31 +1,177 @@
+use std::collections::BTreeMap;
+
 use super::*;
 
-pub(super) fn typed_envelope(
-    response: serde_json::Map<String, serde_json::Value>,
+pub(super) fn typed_envelope(response: CliResponseEnvelope) -> serde_json::Value {
+    return serde_json::to_value(response).unwrap_or_else(|error| {
+        return response_encoding_failure(error.to_string());
+    });
+}
+
+pub(super) fn response_encoding_failure(message: String) -> serde_json::Value {
+    return serde_json::json!({
+        "v": CLI_RESPONSE_VERSION,
+        "ok": false,
+        "type": "response_encoding",
+        "code": "serialization_failed",
+        "applied": Applied::None,
+        "retry": Retry::SafeNewRequest,
+        "session_state": SessionState::Unknown,
+        "message": message,
+    });
+}
+
+pub(super) fn applied_from_str(value: &str) -> Result<Applied, String> {
+    return match value {
+        "none" => Ok(Applied::None),
+        "all" => Ok(Applied::All),
+        "partial" => Ok(Applied::Partial),
+        "unknown" => Ok(Applied::Unknown),
+        _ => Err(format!("unknown applied value `{value}`")),
+    };
+}
+
+pub(super) fn retry_from_str(value: &str) -> Result<Retry, String> {
+    return match value {
+        "not_needed" => Ok(Retry::NotNeeded),
+        "safe_new_request" => Ok(Retry::SafeNewRequest),
+        "same_request_id_only" => Ok(Retry::SameRequestIdOnly),
+        "inspect_before_retry" => Ok(Retry::InspectBeforeRetry),
+        "unsafe" => Ok(Retry::Unsafe),
+        _ => Err(format!("unknown retry value `{value}`")),
+    };
+}
+
+pub(super) fn session_state_from_str(value: &str) -> Result<SessionState, String> {
+    return match value {
+        "live" => Ok(SessionState::Live),
+        "ended" => Ok(SessionState::Ended),
+        "completed" => Ok(SessionState::Completed),
+        "pending" => Ok(SessionState::Pending),
+        "unknown" => Ok(SessionState::Unknown),
+        _ => Err(format!("unknown session state value `{value}`")),
+    };
+}
+pub(super) fn response_string_value(
+    value: Option<&serde_json::Value>,
+    key: &str,
+) -> Result<Option<String>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let serde_json::Value::String(value) = value else {
+        return Err(format!("response field `{key}` must be a string"));
+    };
+    return Ok(Some(value.clone()));
+}
+fn take_string(
+    fields: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+) -> Result<Option<String>, String> {
+    let Some(value) = fields.remove(key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let serde_json::Value::String(value) = value else {
+        return Err(format!("response field `{key}` must be a string"));
+    };
+    return Ok(Some(value));
+}
+
+fn take_bool(
+    fields: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+) -> Result<Option<bool>, String> {
+    let Some(value) = fields.remove(key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let serde_json::Value::Bool(value) = value else {
+        return Err(format!("response field `{key}` must be a boolean"));
+    };
+    return Ok(Some(value));
+}
+
+fn take_u64(
+    fields: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+) -> Result<Option<u64>, String> {
+    let Some(value) = fields.remove(key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let Some(value) = value.as_u64() else {
+        return Err(format!(
+            "response field `{key}` must be an unsigned integer"
+        ));
+    };
+    return Ok(Some(value));
+}
+
+fn envelope_from_fields(
+    ok: bool,
+    response_type: String,
+    mut fields: BTreeMap<String, serde_json::Value>,
+) -> Result<CliResponseEnvelope, String> {
+    fields.remove("v");
+    fields.remove("ok");
+    fields.remove("type");
+    let code = take_string(&mut fields, "code")?;
+    let applied = take_string(&mut fields, "applied")?
+        .map(|value| return applied_from_str(&value))
+        .transpose()?;
+    let retry = take_string(&mut fields, "retry")?
+        .map(|value| return retry_from_str(&value))
+        .transpose()?;
+    let session_state = take_string(&mut fields, "session_state")?
+        .map(|value| return session_state_from_str(&value))
+        .transpose()?;
+    let request_id = fields
+        .remove("request_id")
+        .filter(|value| return !value.is_null());
+    let message = take_string(&mut fields, "message")?;
+    let truncated = take_bool(&mut fields, "truncated")?;
+    let response_bytes = take_u64(&mut fields, "response_bytes")?;
+    return Ok(CliResponseEnvelope {
+        version: CLI_RESPONSE_VERSION,
+        ok,
+        response_type,
+        code,
+        applied,
+        retry,
+        session_state,
+        request_id,
+        message,
+        truncated,
+        response_bytes,
+        fields,
+    });
+}
+
+fn typed_envelope_from_fields(
+    ok: bool,
+    response_type: String,
+    fields: BTreeMap<String, serde_json::Value>,
 ) -> serde_json::Value {
-    return serde_json::from_value::<CliResponseEnvelope>(serde_json::Value::Object(response))
-        .and_then(serde_json::to_value)
-        .unwrap_or_else(|error| {
-            return serde_json::json!({
-                "v": CLI_RESPONSE_VERSION,
-                "ok": false,
-                "type": "response_encoding",
-                "code": "serialization_failed",
-                "applied": Applied::None,
-                "retry": Retry::SafeNewRequest,
-                "session_state": SessionState::Unknown,
-                "message": error.to_string(),
-            });
-        });
+    return match envelope_from_fields(ok, response_type, fields) {
+        Ok(response) => typed_envelope(response),
+        Err(message) => response_encoding_failure(message),
+    };
 }
 
 pub(super) fn compact_success(state: &ResponseState) -> serde_json::Value {
     let last = state.values.last();
     let kind = response_type(last, &state.command_type);
-    let mut response = serde_json::Map::new();
-    response.insert("v".to_owned(), serde_json::json!(CLI_RESPONSE_VERSION));
-    response.insert("ok".to_owned(), serde_json::Value::Bool(true));
-    response.insert("type".to_owned(), serde_json::Value::String(kind));
+    let mut response = BTreeMap::new();
     if state.values.len() == 1 {
         if let Some(serde_json::Value::Object(value)) =
             state.values.first().cloned().and_then(|value| {
@@ -103,7 +249,7 @@ pub(super) fn compact_success(state: &ResponseState) -> serde_json::Value {
             serde_json::Value::String(session_state(last, &state.command_type, true)),
         );
     }
-    return typed_envelope(response);
+    return typed_envelope_from_fields(true, kind, response);
 }
 
 pub(super) fn retry_for_applied(applied: &str) -> &'static str {
@@ -119,13 +265,8 @@ pub(super) fn compact_failure(
     error: Option<&miette::Report>,
 ) -> serde_json::Value {
     let last = state.values.last();
-    let mut response = serde_json::Map::new();
-    response.insert("v".to_owned(), serde_json::json!(CLI_RESPONSE_VERSION));
-    response.insert("ok".to_owned(), serde_json::Value::Bool(false));
-    response.insert(
-        "type".to_owned(),
-        serde_json::Value::String(response_type(last, &state.command_type)),
-    );
+    let response_type = response_type(last, &state.command_type);
+    let mut response = BTreeMap::new();
     response.insert(
         "code".to_owned(),
         serde_json::Value::String(
@@ -185,5 +326,5 @@ pub(super) fn compact_failure(
     {
         response.insert("message".to_owned(), serde_json::Value::String(message));
     }
-    return typed_envelope(response);
+    return typed_envelope_from_fields(false, response_type, response);
 }

@@ -2,9 +2,9 @@ use super::{
     ACTION_RESPONSE_BYTES, MAX_AGENT_RESPONSE_BYTES, MAX_CAPTURE_BYTES, ResponseField,
     ResponseMode, ResponseState, START_RESPONSE_BYTES, STOP_RESPONSE_BYTES,
     WAIT_STATUS_RESPONSE_BYTES, bounded_agent_response, bounded_capture_projection,
-    capture_raw_into, compact_success, compact_task_value, compact_value, enforce_success_budget,
-    human_screen_summary, human_summary, pagination_projection, progress_enabled,
-    response_size_without_screen, retry_for_applied,
+    capture_raw_into, compact_success, compact_task_value, compact_value_with_paths,
+    enforce_success_budget, human_screen_summary, human_summary, pagination_projection,
+    progress_enabled, response_size_without_screen, retry_for_applied,
 };
 
 #[test]
@@ -17,7 +17,7 @@ fn compact_fields_hide_forensic_tables_by_default() {
         "observed_monotonic_ns": 42,
         "nullable": null,
     });
-    let compact = compact_value(source.clone(), &[]).unwrap_or_default();
+    let compact = compact_value_with_paths(source.clone(), &[], false).unwrap_or_default();
     assert_eq!(compact["state_hash"], "abc");
     assert!(compact.get("cursor").is_none());
     assert!(compact.get("modes").is_none());
@@ -31,7 +31,7 @@ fn compact_fields_hide_forensic_tables_by_default() {
         ResponseField::Boundary,
         ResponseField::Timing,
     ];
-    let expanded = compact_value(source, &fields).unwrap_or_default();
+    let expanded = compact_value_with_paths(source, &fields, false).unwrap_or_default();
     assert!(expanded.get("cursor").is_some());
     assert!(expanded.get("modes").is_some());
     assert!(expanded.get("boundary").is_some());

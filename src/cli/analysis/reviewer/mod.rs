@@ -36,16 +36,67 @@ use termtrace_engine::{
     Error, Result,
     analysis::diagnostics::native_correlations,
     observation::state_text,
-    replay::{CollectedReplay, StateInspection, StateRecord, StateSelector, inspect, replay},
+    replay::{inspect, visit_states},
 };
 use termtrace_evidence::{event_log::EventLog, session::validate_completed_log};
 use termtrace_media::native_capture::validated_visual_manifests;
-use termtrace_model::{execution::event::Event, terminal::analysis::NativeCorrelation};
+use termtrace_model::{
+    execution::event::Event,
+    terminal::{
+        analysis::NativeCorrelation,
+        replay::{StateRecord, StateSelector},
+    },
+};
+
+struct ReviewEntry {
+    record: StateRecord,
+}
+
+struct RenderedViewport {
+    text: String,
+    cursor_row: Option<u16>,
+    cursor_column: Option<u16>,
+    cursor_visible: bool,
+}
+
+#[derive(Default)]
+struct SelectedViewportCache {
+    rendered: Option<(usize, RenderedViewport)>,
+}
+
+impl SelectedViewportCache {
+    fn ensure_with(
+        &mut self,
+        selected: usize,
+        render: impl FnOnce() -> Result<RenderedViewport>,
+    ) -> Result<()> {
+        if self
+            .rendered
+            .as_ref()
+            .is_some_and(|(cached, _)| return *cached == selected)
+        {
+            return Ok(());
+        }
+        self.rendered = Some((selected, render()?));
+        return Ok(());
+    }
+
+    fn get(&self, selected: usize) -> Result<&RenderedViewport> {
+        let Some((cached, rendered)) = &self.rendered else {
+            return Err(review_error("selected reviewer viewport cache is empty"));
+        };
+        if *cached != selected {
+            return Err(review_error("selected reviewer viewport is not rendered"));
+        }
+        return Ok(rendered);
+    }
+}
 
 struct ReviewModel {
     log: EventLog,
-    replay: CollectedReplay,
+    entries: Vec<ReviewEntry>,
     selected: usize,
+    selected_viewport: SelectedViewportCache,
     presented_only: bool,
     search_query: Option<String>,
     search_matches: Vec<usize>,
@@ -62,19 +113,30 @@ impl ReviewModel {
         let session = session.as_ref().to_path_buf();
         let log = EventLog::read(session.join("events.jsonl"))?;
         validate_completed_log(&session, &log)?;
-        let replay = replay(&log)?;
-        if replay.states.is_empty() {
+        if let Some(query) = search_query {
+            validate_search_query(query)?;
+        }
+        let mut entries: Vec<ReviewEntry> = Vec::new();
+        let mut search_matches: Vec<usize> = Vec::new();
+        visit_states(&log, |record, state| {
+            if let Some(query) = search_query
+                && state_text(state).contains(query)
+            {
+                search_matches.push(entries.len());
+            }
+            entries.push(ReviewEntry {
+                record: record.clone(),
+            });
+            return Ok(());
+        })?;
+        if entries.is_empty() {
             return Err(review_error(
                 "completed session contains no semantic states",
             ));
         }
         let selected = match around_marker {
-            Some(label) => marker_state_index(&log, &replay.states, label)?,
-            None => replay.states.len().saturating_sub(1),
-        };
-        let search_matches = match search_query {
-            Some(query) => search_state_indexes(&log, &replay.states, query)?,
-            None => Vec::new(),
+            Some(label) => marker_state_index(&log, &entries, label)?,
+            None => entries.len().saturating_sub(1),
         };
         let visual_evidence = validated_visual_manifests(&session).map_err(|source| {
             return Error::InvalidReplay {
@@ -84,8 +146,9 @@ impl ReviewModel {
         let native_correlations = native_correlations(&log, &visual_evidence);
         return Ok(Self {
             log,
-            replay,
+            entries,
             selected,
+            selected_viewport: SelectedViewportCache::default(),
             presented_only: true,
             search_query: search_query.map(str::to_owned),
             search_matches,
@@ -94,19 +157,30 @@ impl ReviewModel {
         });
     }
 
-    fn selected_record(&self) -> Result<&StateRecord> {
+    fn selected_entry(&self) -> Result<&ReviewEntry> {
         return self
-            .replay
-            .states
+            .entries
             .get(self.selected)
             .ok_or_else(|| return review_error("selected reviewer state is out of bounds"));
     }
 
-    fn selected_inspection(&self) -> Result<StateInspection> {
-        return inspect(
-            &self.log,
-            StateSelector::StateId(self.selected_record()?.state_id),
-        );
+    fn refresh_selected_viewport(&mut self) -> Result<()> {
+        let selected = self.selected;
+        let state_id = self.selected_entry()?.record.state_id;
+        let log = &self.log;
+        return self.selected_viewport.ensure_with(selected, || {
+            let inspection = inspect(log, StateSelector::StateId(state_id))?;
+            return Ok(RenderedViewport {
+                text: sanitize_text(&state_text(&inspection.state)),
+                cursor_row: inspection.state.cursor.row,
+                cursor_column: inspection.state.cursor.column,
+                cursor_visible: inspection.state.cursor.visible,
+            });
+        });
+    }
+
+    fn selected_viewport(&self) -> Result<&RenderedViewport> {
+        return self.selected_viewport.get(self.selected);
     }
 
     fn move_selection(&mut self, direction: isize) {
@@ -117,16 +191,16 @@ impl ReviewModel {
             } else {
                 candidate
                     .saturating_add(1)
-                    .min(self.replay.states.len().saturating_sub(1))
+                    .min(self.entries.len().saturating_sub(1))
             };
-            let Some(state) = self.replay.states.get(candidate) else {
+            let Some(entry) = self.entries.get(candidate) else {
                 return;
             };
-            if !self.presented_only || state.presented {
+            if !self.presented_only || entry.record.presented {
                 self.selected = candidate;
                 return;
             }
-            if candidate == 0 || candidate + 1 == self.replay.states.len() {
+            if candidate == 0 || candidate + 1 == self.entries.len() {
                 return;
             }
         }
@@ -134,10 +208,9 @@ impl ReviewModel {
 
     fn jump_event(&mut self, direction: isize, marker: bool) {
         let selected_time = self
-            .replay
-            .states
+            .entries
             .get(self.selected)
-            .map_or(0, |state| return state.monotonic_ns);
+            .map_or(0, |entry| return entry.record.monotonic_ns);
         let candidates = self
             .log
             .events
@@ -161,10 +234,9 @@ impl ReviewModel {
         };
         if let Some(time) = target
             && let Some(index) = self
-                .replay
-                .states
+                .entries
                 .iter()
-                .position(|state| return state.monotonic_ns >= *time)
+                .position(|entry| return entry.record.monotonic_ns >= *time)
         {
             self.selected = index;
         }
@@ -213,6 +285,7 @@ pub(in crate::cli) fn run(
     search_query: Option<&str>,
 ) -> Result<()> {
     let mut model = ReviewModel::open(session, around_marker, search_query)?;
+    model.refresh_selected_viewport()?;
     let interrupted = Arc::new(AtomicBool::new(false));
     register_signal(SIGINT, Arc::clone(&interrupted)).map_err(|source| {
         return Error::Filesystem {
@@ -231,6 +304,7 @@ pub(in crate::cli) fn run(
         Terminal::new(CrosstermBackend::new(io::stdout())).map_err(terminal_error)?;
     terminal.clear().map_err(terminal_error)?;
     while !interrupted.load(Ordering::Relaxed) {
+        model.refresh_selected_viewport()?;
         draw(&mut terminal, &model)?;
         if !event::poll(Duration::from_millis(100)).map_err(terminal_error)? {
             continue;
@@ -263,9 +337,9 @@ pub(in crate::cli) fn run(
 }
 
 fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) -> Result<()> {
-    let selected = model.selected_record()?;
-    let inspection = model.selected_inspection()?;
-    let viewport = sanitize_text(&state_text(&inspection.state));
+    let entry = model.selected_entry()?;
+    let selected = &entry.record;
+    let viewport = model.selected_viewport()?;
     terminal
         .draw(|frame| {
             let [main, status] = Layout::default()
@@ -281,14 +355,12 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) 
                 ])
                 .areas(main);
             let start = model.selected.saturating_sub(10);
-            let timeline = model
-                .replay
-                .states
-                .iter()
+            let timeline = model.entries.iter()
                 .enumerate()
                 .skip(start)
                 .take(21)
-                .map(|(index, state)| {
+                .map(|(index, entry)| {
+                    let state = &entry.record;
                     let marker = if index == model.selected { ">" } else { " " };
                     let presentation = if state.presented { "P" } else { "H" };
                     return ListItem::new(format!(
@@ -305,7 +377,7 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) 
                 timeline_area,
             );
             frame.render_widget(
-                Paragraph::new(viewport.clone())
+                Paragraph::new(viewport.text.as_str())
                     .block(Block::default().title(" semantic viewport ").borders(Borders::ALL))
                     .wrap(Wrap { trim: false }),
                 viewport_area,
@@ -344,9 +416,9 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) 
                 selected.state_hash,
                 selected.ghostty_dirty,
                 selected.ghostty_dirty_rows,
-                inspection.state.cursor.row,
-                inspection.state.cursor.column,
-                inspection.state.cursor.visible,
+                viewport.cursor_row,
+                viewport.cursor_column,
+                viewport.cursor_visible,
                 if model.presented_only { "presented" } else { "all" },
                 model.search_query.as_deref().unwrap_or("-") ,
                 model.search_matches.len(),
@@ -371,23 +443,16 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) 
     return Ok(());
 }
 
-fn search_state_indexes(log: &EventLog, states: &[StateRecord], query: &str) -> Result<Vec<usize>> {
+fn validate_search_query(query: &str) -> Result<()> {
     if query.is_empty() || query.len() > 4096 {
         return Err(review_error(
             "review search must contain 1 through 4096 bytes",
         ));
     }
-    let mut matches = Vec::new();
-    for (index, state) in states.iter().enumerate() {
-        let inspection = inspect(log, StateSelector::StateId(state.state_id))?;
-        if state_text(&inspection.state).contains(query) {
-            matches.push(index);
-        }
-    }
-    return Ok(matches);
+    return Ok(());
 }
 
-fn marker_state_index(log: &EventLog, states: &[StateRecord], label: &str) -> Result<usize> {
+fn marker_state_index(log: &EventLog, entries: &[ReviewEntry], label: &str) -> Result<usize> {
     let matches = log
         .events
         .iter()
@@ -401,10 +466,10 @@ fn marker_state_index(log: &EventLog, states: &[StateRecord], label: &str) -> Re
             matches.len()
         )));
     };
-    return states
+    return entries
         .iter()
-        .position(|state| return state.monotonic_ns >= marker.monotonic_ns)
-        .or_else(|| return states.len().checked_sub(1))
+        .position(|entry| return entry.record.monotonic_ns >= marker.monotonic_ns)
+        .or_else(|| return entries.len().checked_sub(1))
         .ok_or_else(|| return review_error("review contains no state near marker"));
 }
 
@@ -436,7 +501,9 @@ fn review_error(reason: impl Into<String>) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_text;
+    use std::cell::Cell;
+
+    use super::{RenderedViewport, SelectedViewportCache, sanitize_text};
 
     #[test]
     fn recorded_control_characters_are_inert_in_rendered_text() {
@@ -446,5 +513,40 @@ mod tests {
         assert!(!sanitized.contains('\u{7}'));
         assert!(!sanitized.contains('\r'));
         assert!(sanitized.contains("safe"));
+    }
+
+    #[test]
+    fn selected_viewport_cache_replays_only_for_selection_changes() {
+        let replay_count = Cell::new(0);
+        let mut cache = SelectedViewportCache::default();
+        let render = || {
+            replay_count.set(replay_count.get() + 1);
+            return Ok(RenderedViewport {
+                text: format!("viewport {}", replay_count.get()),
+                cursor_row: None,
+                cursor_column: None,
+                cursor_visible: false,
+            });
+        };
+
+        cache.ensure_with(4, render).expect("first selected render");
+        cache
+            .ensure_with(4, render)
+            .expect("unchanged selected render");
+        assert_eq!(replay_count.get(), 1);
+        assert_eq!(
+            cache.get(4).expect("cached selected viewport").text,
+            "viewport 1"
+        );
+
+        cache
+            .ensure_with(5, render)
+            .expect("changed selected render");
+        assert_eq!(replay_count.get(), 2);
+        assert!(cache.get(4).is_err(), "previous viewport must be evicted");
+        assert_eq!(
+            cache.get(5).expect("replacement selected viewport").text,
+            "viewport 2"
+        );
     }
 }

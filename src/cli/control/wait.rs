@@ -31,9 +31,8 @@ pub(in crate::cli) fn run_wait(
             &wait_for_output(session, output.as_bytes(), timeout).into_diagnostic()?,
         );
     }
-    let screen = arguments.screen.or(arguments.screen_compat);
     let predicate = match (
-        screen,
+        arguments.screen,
         arguments.screen_absent,
         arguments.screen_regex,
         arguments.row_contains,

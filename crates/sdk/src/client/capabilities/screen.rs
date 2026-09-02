@@ -29,14 +29,6 @@ impl Screen<'_> {
         return self.session;
     }
 
-    /// Return the latest actor-presented compact compatibility snapshot.
-    pub fn snapshot(&self) -> Result<ControlData> {
-        return send_request(
-            &self.session.path,
-            &ControlRequest::new(ControlCommand::Snapshot),
-        );
-    }
-
     /// Return one bounded rich latest-presented frame from a live or completed session.
     pub fn frame(&self, projection: ScreenProjectionRequest) -> Result<ScreenFrame> {
         if self.session.path.join("completion.json").is_file() {
@@ -110,10 +102,6 @@ impl Screen<'_> {
 
     /// Atomically capture one exact rich frame under actor stability ordering.
     pub fn capture_stable(&self, options: StableCaptureOptions) -> Result<StableScreenCapture> {
-        return self.capture_stable_inner(options);
-    }
-
-    fn capture_stable_inner(&self, options: StableCaptureOptions) -> Result<StableScreenCapture> {
         validate_stable_options(options)?;
         let stable_for_ns = exact_duration_ns("stable_for", options.stable_for)?;
         if self.session.path.join("completion.json").is_file() {
@@ -167,33 +155,5 @@ impl Screen<'_> {
             });
         }
         return Ok(capture);
-    }
-
-    /// Compatibility shorthand for a strict spans-detail stable capture.
-    pub fn wait_for_idle(
-        &self,
-        stable_for: Duration,
-        timeout: Duration,
-    ) -> Result<StableScreenCapture> {
-        return self.capture_stable(StableCaptureOptions {
-            stable_for,
-            timeout,
-            projection: ScreenProjectionRequest::default(),
-            allow_incomplete: false,
-        });
-    }
-
-    /// Compatibility shorthand retaining incomplete stable outcomes.
-    pub fn wait_for_idle_outcome(
-        &self,
-        stable_for: Duration,
-        timeout: Duration,
-    ) -> Result<StableScreenCapture> {
-        return self.capture_stable(StableCaptureOptions {
-            stable_for,
-            timeout,
-            projection: ScreenProjectionRequest::default(),
-            allow_incomplete: true,
-        });
     }
 }

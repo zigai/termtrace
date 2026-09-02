@@ -403,6 +403,14 @@ impl RuntimeWorkers {
         });
     }
 
+    pub(super) fn begin_control_shutdown(&self) -> Result<()> {
+        return self.control.begin_shutdown();
+    }
+
+    pub(super) fn control_shutdown_finished(&self) -> bool {
+        return self.control.shutdown_finished();
+    }
+
     pub(super) fn finish<T>(self, primary: Result<T>) -> Result<T> {
         let control_stop = self.control.stop();
         let input_stop = self.input.map_or(Ok(()), InputWorker::stop);

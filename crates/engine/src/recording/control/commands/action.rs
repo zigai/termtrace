@@ -49,7 +49,7 @@ impl PendingInputSequence {
 impl SessionActor<'_> {
     pub(in crate::recording) fn advance_input_sequence(
         &mut self,
-        child_completed: bool,
+        child_exited: bool,
         output_closed: bool,
     ) -> Result<()> {
         let Some(mut pending) = self.pending_input_sequence.take() else {
@@ -60,7 +60,8 @@ impl SessionActor<'_> {
                 &pending.postcondition,
                 Some(ActionPostcondition::Screen { .. })
             );
-        if !screen_postcondition_ready && Instant::now() < pending.next_deadline() {
+        if !screen_postcondition_ready && !output_closed && Instant::now() < pending.next_deadline()
+        {
             self.pending_input_sequence = Some(pending);
             return Ok(());
         }
@@ -70,7 +71,7 @@ impl SessionActor<'_> {
                 &self.event_log,
                 self.session_id,
                 &self.live,
-                child_completed,
+                child_exited,
                 output_closed,
             ) {
                 Ok(Some(data)) => Ok(data),
@@ -99,7 +100,7 @@ impl SessionActor<'_> {
                         &self.event_log,
                         self.session_id,
                         &self.live,
-                        child_completed,
+                        child_exited,
                         output_closed,
                     ) {
                         Ok(Some(data)) => Ok(data),

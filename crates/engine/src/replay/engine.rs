@@ -299,11 +299,8 @@ pub fn inspect_many(log: &EventLog, selectors: &[StateSelector]) -> Result<Vec<S
     }
     let mut selected = vec![None; selectors.len()];
     replay_for_inspection(log, None, |record, state, _| {
-        for (index, selector) in selectors.iter().enumerate() {
+        for (selector, slot) in selectors.iter().zip(&mut selected) {
             if state_selector_matches(selector, &record) {
-                let slot = selected.get_mut(index).ok_or_else(|| {
-                    return invalid_replay("state selector index exceeded result storage");
-                })?;
                 *slot = Some(StateInspection {
                     record: record.clone(),
                     state: state.clone(),
@@ -326,14 +323,24 @@ pub fn inspect_many(log: &EventLog, selectors: &[StateSelector]) -> Result<Vec<S
 }
 
 pub(crate) fn inspect_latest_presented_fast(log: &EventLog) -> Result<EndpointInspection> {
+    return inspect_latest_presented_fast_with_limits(log, DEFAULT_REPLAY_LIMITS);
+}
+
+pub(super) fn inspect_latest_presented_fast_with_limits(
+    log: &EventLog,
+    limits: ReplayLimits,
+) -> Result<EndpointInspection> {
     use termtrace_terminal::{PresentationAction, PresentationTracker};
 
+    let mut budget = ReplayBudget::new(log.header.cols, log.header.rows, limits)?;
     let mut engine = GhosttyVt::new(log.header.cols, log.header.rows, 100_000)?;
     engine.apply_terminal_colors(&log.header.colors)?;
+    budget.charge_capture()?;
     let mut presented = engine.snapshot()?;
-    let mut tracker = PresentationTracker::new(presented.modes.synchronized_output);
+    let mut synchronized_output = presented.modes.synchronized_output;
+    let mut tracker = PresentationTracker::new(synchronized_output);
     let mut resize_intents: HashMap<Uuid, ResizeGeometry> = HashMap::new();
-    let mut output_bytes = 0_u64;
+    let mut unsnapshotted_changes = false;
     let mut presented_event_seq = None;
     let mut presented_event_byte_offset = None;
     let mut presented_monotonic_ns = None;
@@ -343,19 +350,13 @@ pub(crate) fn inspect_latest_presented_fast(log: &EventLog) -> Result<EndpointIn
     for record in &log.events {
         match &record.event {
             Event::Output { data } => {
-                output_bytes = output_bytes
-                    .checked_add(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX))
-                    .ok_or_else(|| return invalid_replay("endpoint replay output byte overflow"))?;
-                if output_bytes > MAX_REPLAY_OUTPUT_BYTES {
-                    return Err(invalid_replay(format!(
-                        "endpoint replay exceeded {MAX_REPLAY_OUTPUT_BYTES} output bytes"
-                    )));
-                }
+                budget.charge_output(data.as_bytes().len())?;
                 for (offset, byte) in data.as_bytes().iter().enumerate() {
                     match tracker.push(*byte) {
                         PresentationAction::Immediate => {
                             engine.write(slice::from_ref(byte));
                             drop(engine.take_responses());
+                            unsnapshotted_changes = true;
                             last_applied_source = (
                                 Some(record.seq),
                                 Some(u64::try_from(offset).unwrap_or(u64::MAX)),
@@ -370,46 +371,45 @@ pub(crate) fn inspect_latest_presented_fast(log: &EventLog) -> Result<EndpointIn
                             );
                         }
                         PresentationAction::Sequence { bytes, command } => {
-                            if command == Some(true) {
-                                let before = engine.snapshot()?;
-                                if !before.modes.synchronized_output {
-                                    presented = before;
+                            if command == Some(true) && !synchronized_output {
+                                if unsnapshotted_changes {
+                                    budget.charge_capture()?;
+                                    presented = engine.snapshot()?;
                                     (
                                         presented_event_seq,
                                         presented_event_byte_offset,
                                         presented_monotonic_ns,
                                     ) = last_applied_source;
                                 }
+                                synchronized_output = true;
+                                let _ = tracker.reconcile(true);
                             }
+                            let was_synchronized = synchronized_output;
                             engine.write(&bytes);
                             drop(engine.take_responses());
+                            unsnapshotted_changes = true;
                             last_applied_source = (
                                 Some(record.seq),
                                 Some(u64::try_from(offset).unwrap_or(u64::MAX)),
                                 Some(record.monotonic_ns),
                             );
-                            if command == Some(false) {
-                                let after = engine.snapshot()?;
-                                if !after.modes.synchronized_output {
-                                    presented = after;
+                            if command == Some(false) && was_synchronized {
+                                budget.charge_capture()?;
+                                let latest = engine.snapshot()?;
+                                synchronized_output = latest.modes.synchronized_output;
+                                let _ = tracker.reconcile(synchronized_output);
+                                if !synchronized_output {
+                                    presented = latest;
                                     (
                                         presented_event_seq,
                                         presented_event_byte_offset,
                                         presented_monotonic_ns,
                                     ) = last_applied_source;
                                 }
+                                unsnapshotted_changes = false;
                             }
                         }
                     }
-                }
-                let latest = engine.snapshot()?;
-                if !latest.modes.synchronized_output {
-                    presented = latest;
-                    (
-                        presented_event_seq,
-                        presented_event_byte_offset,
-                        presented_monotonic_ns,
-                    ) = last_applied_source;
                 }
             }
             Event::ResizeIntent {
@@ -437,6 +437,8 @@ pub(crate) fn inspect_latest_presented_fast(log: &EventLog) -> Result<EndpointIn
                 let geometry = resize_intents.remove(operation_id).ok_or_else(|| {
                     return invalid_replay("applied resize result is missing its intent");
                 })?;
+                budget.set_geometry(geometry.cols, geometry.rows)?;
+                budget.charge_capture()?;
                 engine.resize(
                     geometry.cols,
                     geometry.rows,
@@ -444,8 +446,10 @@ pub(crate) fn inspect_latest_presented_fast(log: &EventLog) -> Result<EndpointIn
                     cell_size(geometry.pixel_height, geometry.rows),
                 )?;
                 let latest = engine.snapshot()?;
+                synchronized_output = latest.modes.synchronized_output;
+                let _ = tracker.reconcile(synchronized_output);
                 last_applied_source = (Some(record.seq), None, Some(record.monotonic_ns));
-                if !latest.modes.synchronized_output {
+                if !synchronized_output {
                     presented = latest;
                     (
                         presented_event_seq,
@@ -453,6 +457,7 @@ pub(crate) fn inspect_latest_presented_fast(log: &EventLog) -> Result<EndpointIn
                         presented_monotonic_ns,
                     ) = last_applied_source;
                 }
+                unsnapshotted_changes = false;
             }
             Event::ResizeResult { operation_id, .. } => {
                 resize_intents.remove(operation_id);
@@ -466,15 +471,16 @@ pub(crate) fn inspect_latest_presented_fast(log: &EventLog) -> Result<EndpointIn
         engine.write(&pending);
         last_applied_source = last_buffered_source;
         drop(engine.take_responses());
-        let latest = engine.snapshot()?;
-        if !latest.modes.synchronized_output {
-            presented = latest;
-            (
-                presented_event_seq,
-                presented_event_byte_offset,
-                presented_monotonic_ns,
-            ) = last_applied_source;
-        }
+        unsnapshotted_changes = true;
+    }
+    if !synchronized_output && unsnapshotted_changes {
+        budget.charge_capture()?;
+        presented = engine.snapshot()?;
+        (
+            presented_event_seq,
+            presented_event_byte_offset,
+            presented_monotonic_ns,
+        ) = last_applied_source;
     }
     let state_hash = semantic_state_hash(&presented)?;
     return Ok(EndpointInspection {

@@ -19,6 +19,7 @@ use tempfile::TempDir;
 use super::super::{
     control::{MutationHistory, spawn_control_server},
     input::encode_paste,
+    model::RuntimeMessage,
 };
 use super::*;
 use termtrace_evidence::{
@@ -779,7 +780,7 @@ fn presentation_tracker_recognizes_only_synchronized_output_mode_commands() {
 }
 
 #[test]
-fn control_shutdown_cancels_an_inflight_request() {
+fn graceful_control_shutdown_drains_an_inflight_request() {
     let (sender, receiver) = mpsc::sync_channel(1);
     let socket_name = control_socket_name(Uuid::now_v7());
     let worker = spawn_control_server(&socket_name, sender).expect("control server");
@@ -790,17 +791,24 @@ fn control_shutdown_cancels_an_inflight_request() {
         serde_json::to_writer(&mut stream, &request).expect("encode request");
         stream.write_all(b"\n").expect("terminate request");
         let mut response = Vec::new();
-        stream.read_to_end(&mut response).expect("read shutdown");
+        stream.read_to_end(&mut response).expect("read response");
+        return response;
     });
     let pending = receiver
         .recv_timeout(Duration::from_secs(1))
         .expect("inflight request");
-
-    let started = Instant::now();
-    worker.stop().expect("cancel control server");
-    assert!(started.elapsed() < Duration::from_secs(1));
-    drop(pending);
-    client.join().expect("join control client");
+    worker.begin_shutdown().expect("begin graceful shutdown");
+    let RuntimeMessage::Control { request, response } = pending else {
+        panic!("unexpected runtime message");
+    };
+    response
+        .send(cached_test_response(request.request_id, 1))
+        .expect("serve inflight response");
+    let encoded = client.join().expect("join control client");
+    let served: ControlResponse =
+        serde_json::from_slice(&encoded).expect("decode drained response");
+    assert_eq!(served.request_id, request.request_id);
+    worker.stop().expect("finish control server");
 }
 
 #[test]

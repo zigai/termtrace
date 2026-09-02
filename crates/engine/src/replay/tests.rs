@@ -3,6 +3,7 @@ use std::str::from_utf8;
 use uuid::Uuid;
 use zstd::stream::decode_all;
 
+use super::engine::inspect_latest_presented_fast_with_limits;
 use super::*;
 use termtrace_evidence::{artifact::create_private_directory, event_log::EventLog};
 use termtrace_model::{
@@ -48,31 +49,59 @@ fn output_log_with_geometry(data: &[u8], cols: u16, rows: u16) -> EventLog {
 }
 
 #[test]
-fn endpoint_replay_does_not_charge_hypothetical_state_serialization() {
+fn fast_endpoint_replay_charges_only_input_output_bytes() {
     let log = output_log_with_geometry(b"x", 200, 100);
-    let mut selected = None;
-    let mut hypothetical_bytes = 0_usize;
-    visit_states(&log, |record, state| {
-        assert_eq!(
-            semantic_state_hash(state).expect("direct semantic hash"),
-            record.state_hash
-        );
-        hypothetical_bytes = hypothetical_bytes.saturating_add(
-            serde_json::to_vec(record)
-                .expect("state record serialization")
-                .len(),
-        );
-        if record.state_id == 1 {
-            selected = Some(state.clone());
-        }
-        return Ok(());
-    })
-    .expect("small recording with a large terminal state must replay");
-    assert!(selected.is_some());
-    assert!(
-        hypothetical_bytes > 512 * 1024,
-        "test geometry must amplify one recorded byte into a large hypothetical response"
+    reset_test_replay_output_bytes();
+
+    let inspection = inspect_latest_presented_fast(&log).expect("fast endpoint replay");
+
+    assert_eq!(inspection.state.cols, 200);
+    assert_eq!(inspection.state.rows, 100);
+    assert_eq!(
+        test_replay_output_bytes(),
+        1,
+        "fast endpoint replay must charge the input once without state-record replay"
     );
+}
+
+#[test]
+fn fast_endpoint_budgets_deferred_snapshots_across_many_output_records() {
+    let mut log = output_log_with_geometry(b"", 200, 100);
+    log.events = (0_u64..256)
+        .map(|seq| {
+            return EventRecord {
+                seq,
+                monotonic_ns: seq.saturating_add(1),
+                prev_hash: "0".repeat(64),
+                hash: "1".repeat(64),
+                event: Event::Output {
+                    data: ByteString::from(b"x".as_slice()),
+                },
+            };
+        })
+        .collect();
+    let limits = ReplayLimits {
+        output_bytes: 256,
+        capture_attempts: 2,
+        cell_work: 40_000,
+        ..DEFAULT_REPLAY_LIMITS
+    };
+
+    let inspection =
+        inspect_latest_presented_fast_with_limits(&log, limits).expect("bounded fast replay");
+    assert_eq!(inspection.event_seq, Some(255));
+    assert_eq!(inspection.event_byte_offset, Some(0));
+    assert_eq!(inspection.monotonic_ns, Some(256));
+
+    let error = inspect_latest_presented_fast_with_limits(
+        &log,
+        ReplayLimits {
+            cell_work: 39_999,
+            ..limits
+        },
+    )
+    .expect_err("each unavoidable full snapshot must consume viewport cell work");
+    assert!(error.to_string().contains("cell-work limit"));
 }
 
 #[test]

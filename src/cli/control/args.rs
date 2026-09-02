@@ -42,7 +42,6 @@ pub(in crate::cli) enum ControlSubcommand {
         .multiple(false)
         .args([
             "screen",
-            "screen_compat",
             "output",
             "idle",
             "screen_absent",
@@ -66,9 +65,6 @@ pub(in crate::cli) struct WaitArgs {
     /// Exact UTF-8 text required in the latest presented viewport.
     #[arg(long)]
     pub(in crate::cli) screen: Option<String>,
-    /// Compatibility form for the former positional screen predicate.
-    #[arg(index = 2, hide = true)]
-    pub(in crate::cli) screen_compat: Option<String>,
     /// Exact UTF-8 text to find in canonical output history.
     #[arg(long)]
     pub(in crate::cli) output: Option<String>,

@@ -24,8 +24,8 @@ use termtrace_model::{
 use termtrace_terminal::{VtFramer, frame_event_records};
 
 use crate::replay::{
-    ReplaySeed, load_nearest_replay_seed, visit_states_range, visit_states_range_while,
-    visit_states_seeded_while,
+    ReplaySeed, load_nearest_replay_seed, timeline_event, visit_states_range,
+    visit_states_range_while, visit_states_seeded_while,
 };
 use crate::{Error, Result};
 
@@ -384,22 +384,6 @@ impl<'log> AuxiliaryTimelineCursor<'log> {
                 });
             })
             .unwrap_or(0);
-        let token_start = start_key.map_or(0, |_| {
-            if log
-                .events
-                .get(first_relevant)
-                .is_some_and(|record| return matches!(record.event, Event::Output { .. }))
-            {
-                return first_relevant;
-            }
-            return log
-                .events
-                .get(..first_relevant)
-                .unwrap_or_default()
-                .iter()
-                .rposition(|record| return matches!(record.event, Event::Output { .. }))
-                .unwrap_or(first_relevant);
-        });
         let (tokens, open_error) = if include_controls {
             match IndexedTokenTimelineCursor::open(
                 log,
@@ -413,7 +397,7 @@ impl<'log> AuxiliaryTimelineCursor<'log> {
                         log,
                         range,
                         record_metrics,
-                        event_index: token_start,
+                        event_index: 0,
                         byte_offset: 0,
                         framer: Some(VtFramer::default()),
                         pending: VecDeque::new(),
@@ -675,31 +659,7 @@ pub fn build_timeline(
         if !include_hidden_states && !state.presented {
             return Ok(());
         }
-        let changed_rows = state
-            .delta
-            .rows
-            .iter()
-            .map(|row| return row.row)
-            .collect::<Vec<_>>();
-        let changed_cells = state.delta.rows.iter().fold(0_u64, |count, row| {
-            return count.saturating_add(u64::try_from(row.cells.len()).unwrap_or(u64::MAX));
-        });
-        entries.push(TimelineEntry {
-            monotonic_ns: state.monotonic_ns,
-            event_seq: state.event_seq,
-            item: TimelineItem::SemanticState {
-                state_id: state.state_id,
-                event_byte_offset: state.event_byte_offset,
-                state_hash: state.state_hash.clone(),
-                presented: state.presented,
-                ghostty_dirty: state.ghostty_dirty,
-                changed_rows,
-                changed_cells,
-                cursor_changed: state.delta.cursor.is_some(),
-                modes_changed: state.delta.modes.is_some(),
-                metadata_changed: state.delta.metadata.is_some(),
-            },
-        });
+        entries.push(semantic_timeline_entry(state));
         return Ok(());
     })?;
     for record in &log.events {
@@ -756,28 +716,7 @@ pub fn build_timeline(
             }
         }
     }
-    entries.sort_by_key(|entry| {
-        let state_order = match &entry.item {
-            TimelineItem::CanonicalEvent { .. } => 0,
-            TimelineItem::VtToken { .. } => 1,
-            TimelineItem::SemanticState { .. } => 2,
-        };
-        return (
-            entry.monotonic_ns,
-            entry.event_seq.unwrap_or(0),
-            state_order,
-            match &entry.item {
-                TimelineItem::SemanticState {
-                    event_byte_offset, ..
-                } => event_byte_offset.unwrap_or(0),
-                TimelineItem::VtToken { token } => token
-                    .source
-                    .first()
-                    .map_or(0, |segment| return segment.start_byte_offset),
-                TimelineItem::CanonicalEvent { .. } => 0,
-            },
-        );
-    });
+    entries.sort_by_key(timeline_key);
     return Ok(entries);
 }
 
@@ -886,16 +825,6 @@ pub fn build_timeline_page(
         entries: collector.entries,
         next_offset,
     });
-}
-
-fn timeline_event(event: &Event) -> bool {
-    return !matches!(
-        event,
-        Event::Output { .. }
-            | Event::InputResult { .. }
-            | Event::ResizeResult { .. }
-            | Event::SignalResult { .. }
-    );
 }
 
 #[cfg(test)]

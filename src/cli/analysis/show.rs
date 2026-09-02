@@ -1,19 +1,15 @@
 use std::{
     io::{self, Write as _},
-    path::Path,
     process::ExitCode,
 };
 
 use miette::{IntoDiagnostic as _, Result};
-use termtrace_engine::{
-    diff::inspect_point,
-    observation::{CaptureQuality, Observation, observe_validated_prefix},
-    replay::format_state,
+use termtrace_engine::observation::{
+    CaptureQuality, Observation, observe_completed_with_formats, observe_validated_prefix,
 };
-use termtrace_evidence::{event_log::EventLog, session::validate_completed_log};
 use termtrace_model::{
     protocol::control::{ScreenPredicate, ScreenWaitQuality, StateHashComparison},
-    terminal::{observation::StatePoint, replay::StateSelector},
+    terminal::observation::StatePoint,
 };
 use termtrace_sdk::{observe_session_with_options, wait_for_screen};
 use termtrace_terminal::Format as GhosttyFormat;
@@ -87,9 +83,33 @@ pub(in crate::cli) fn run_show(
         stable_hash = Some(stable_wait.frame.state_hash);
     }
 
-    let mut observation =
-        observe_session_with_options(&session, point.clone(), arguments.include_hidden)
+    let engine_format = match arguments.format {
+        ShowFormat::Vt => Some(GhosttyFormat::Vt),
+        ShowFormat::Html => Some(GhosttyFormat::Html),
+        _ => None,
+    };
+    let (mut observation, formatted) = match engine_format {
+        Some(format) => {
+            let (observation, rendered) = observe_completed_with_formats(
+                &session,
+                point,
+                arguments.include_hidden,
+                &[format],
+            )
             .into_diagnostic()?;
+            let formatted = rendered
+                .into_iter()
+                .next()
+                .map(|(_, bytes)| return bytes)
+                .ok_or_else(|| miette::miette!("selected formatter produced no output"))?;
+            (observation, Some(formatted))
+        }
+        None => (
+            observe_session_with_options(&session, point, arguments.include_hidden)
+                .into_diagnostic()?,
+            None,
+        ),
+    };
     if let Some(state_hash) = stable_hash {
         if observation.state_hash != state_hash {
             return Err(miette::miette!(
@@ -98,16 +118,6 @@ pub(in crate::cli) fn run_show(
         }
         observation.capture_quality = CaptureQuality::Stable;
     }
-
-    let formatted = match arguments.format {
-        ShowFormat::Vt => Some(format_completed_state(&session, &point, GhosttyFormat::Vt)?),
-        ShowFormat::Html => Some(format_completed_state(
-            &session,
-            &point,
-            GhosttyFormat::Html,
-        )?),
-        _ => None,
-    };
     if arguments.metadata {
         write_observation_metadata(&observation)?;
     }
@@ -153,20 +163,4 @@ fn write_observation_metadata(observation: &Observation) -> Result<()> {
     )
     .into_diagnostic()?;
     return Ok(());
-}
-
-fn format_completed_state(
-    session: &Path,
-    point: &StatePoint,
-    format: GhosttyFormat,
-) -> Result<Vec<u8>> {
-    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
-    validate_completed_log(session, &log).into_diagnostic()?;
-    let inspection = inspect_point(&log, point).into_diagnostic()?;
-    return format_state(
-        &log,
-        StateSelector::StateId(inspection.record.state_id),
-        format,
-    )
-    .into_diagnostic();
 }

@@ -37,7 +37,7 @@ pub(super) fn evaluate_action_postcondition(
     event_log: &EventLogWriter,
     session_id: Uuid,
     live: &LiveTerminal,
-    child_completed: bool,
+    child_exited: bool,
     output_closed: bool,
 ) -> Result<Option<ControlData>> {
     let input = pending.input.clone().ok_or_else(|| {
@@ -80,6 +80,7 @@ pub(super) fn evaluate_action_postcondition(
     let state_hash = presented_state_hash(live)?;
     let viewport_text = semantic_viewport_text(&live.presented);
     let now = Instant::now();
+    let child_completed = child_exited && output_closed;
     let started_at = pending.postcondition_started_at.unwrap_or(now);
     return match postcondition {
         ActionPostcondition::None => Err(terminal_error(
@@ -97,7 +98,7 @@ pub(super) fn evaluate_action_postcondition(
             let stable = pending.matching_state.as_ref().is_some_and(|(_, since)| {
                 return since.elapsed() >= Duration::from_nanos(*stable_for_ns);
             });
-            let deadline = now >= started_at + Duration::from_nanos(*timeout_ns);
+            let deadline = !child_exited && now >= started_at + Duration::from_nanos(*timeout_ns);
             if !stable && !child_completed && !output_closed && !deadline {
                 return Ok(None);
             }
@@ -142,7 +143,7 @@ pub(super) fn evaluate_action_postcondition(
         } => {
             let matched =
                 evaluate_screen_predicate(predicate, &live.presented, &viewport_text, &state_hash);
-            let deadline = now >= started_at + Duration::from_nanos(*timeout_ns);
+            let deadline = !child_exited && now >= started_at + Duration::from_nanos(*timeout_ns);
             if !matched && !child_completed && !output_closed && !deadline {
                 return Ok(None);
             }

@@ -38,6 +38,7 @@ use super::transport::{control_response_timeout, control_socket_address, validat
 use crate::{Error, Result};
 
 pub(in crate::recording) struct ControlWorker {
+    stop_accepting: OwnedFd,
     cancel: OwnedFd,
     thread: thread::JoinHandle<()>,
 }
@@ -65,33 +66,49 @@ pub(in crate::recording) fn spawn_control_server(
     listener.set_nonblocking(true).map_err(|error| {
         return terminal_error("configure abstract control socket", error.to_string());
     })?;
+    let (stop_accepting_read, stop_accepting) = pipe().map_err(|error| {
+        return terminal_error(
+            "create control listener cancellation pipe",
+            error.to_string(),
+        );
+    })?;
     let (cancel_read, cancel) = pipe().map_err(|error| {
-        return terminal_error("create control cancellation pipe", error.to_string());
+        return terminal_error(
+            "create control request cancellation pipe",
+            error.to_string(),
+        );
     })?;
     let thread = thread::Builder::new()
         .name("termtrace-control-server".to_owned())
         .spawn(move || {
-            if let Err(error) = control_server_loop(&listener, &cancel_read, &sender) {
+            if let Err(error) =
+                control_server_loop(&listener, &stop_accepting_read, &cancel_read, &sender)
+            {
                 let _ = sender.try_send(RuntimeMessage::ControlServerFailed(error.to_string()));
             }
         })
         .map_err(|error| return terminal_error("spawn control server", error.to_string()))?;
     tracing::debug!(socket = socket_name, "abstract control socket ready");
-    return Ok(ControlWorker { cancel, thread });
+    return Ok(ControlWorker {
+        stop_accepting,
+        cancel,
+        thread,
+    });
 }
 
 fn control_server_loop(
     listener: &UnixListener,
+    stop_accepting: &OwnedFd,
     cancel: &OwnedFd,
     sender: &mpsc::SyncSender<RuntimeMessage>,
 ) -> Result<()> {
     let active = AtomicUsize::new(0);
     return thread::scope(|scope| {
         loop {
-            let (listener_ready, cancel_ready) = {
+            let (listener_ready, stop_accepting_ready) = {
                 let mut descriptors = [
                     PollFd::new(listener.as_fd(), PollFlags::POLLIN),
-                    PollFd::new(cancel.as_fd(), PollFlags::POLLIN),
+                    PollFd::new(stop_accepting.as_fd(), PollFlags::POLLIN),
                 ];
                 match poll(&mut descriptors, PollTimeout::NONE) {
                     Ok(_) => (poll_ready(&descriptors[0]), poll_ready(&descriptors[1])),
@@ -101,7 +118,7 @@ fn control_server_loop(
                     }
                 }
             };
-            if cancel_ready {
+            if !listener_ready && stop_accepting_ready {
                 return Ok(());
             }
             if !listener_ready {
@@ -131,6 +148,9 @@ fn control_server_loop(
                         ));
                     }
                 }
+            }
+            if stop_accepting_ready {
+                return Ok(());
             }
         }
     });
@@ -384,7 +404,22 @@ fn actor_frame_boundaries(frame: &ScreenFrame) -> Option<ActorBoundaries> {
 }
 
 impl ControlWorker {
+    pub(in crate::recording) fn begin_shutdown(&self) -> Result<()> {
+        return match fd_write(&self.stop_accepting, b"x") {
+            Ok(_) | Err(Errno::EPIPE) => Ok(()),
+            Err(error) => Err(terminal_error(
+                "stop accepting control connections",
+                error.to_string(),
+            )),
+        };
+    }
+
+    pub(in crate::recording) fn shutdown_finished(&self) -> bool {
+        return self.thread.is_finished();
+    }
+
     pub(in crate::recording) fn stop(self) -> Result<()> {
+        let stop_accepting_result = self.begin_shutdown();
         let cancel_result = match fd_write(&self.cancel, b"x") {
             Ok(_) | Err(Errno::EPIPE) => Ok(()),
             Err(error) => Err(terminal_error("cancel control server", error.to_string())),
@@ -393,7 +428,8 @@ impl ControlWorker {
             .thread
             .join()
             .map_err(|_| return terminal_error("join control server", "control thread panicked"));
-        return finish_with_cleanup(cancel_result, join_result);
+        let result = finish_with_cleanup(stop_accepting_result, cancel_result);
+        return finish_with_cleanup(result, join_result);
     }
 }
 
