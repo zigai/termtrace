@@ -8,7 +8,7 @@ repos:
         entry: cargo fmt --all
         language: system
         pass_filenames: false
-        files: ^(?:build\.rs|src/.*\.rs|tests/.*\.rs)$
+        files: ^(?:build\.rs|(?:crates|src|tests)/.*\.rs)$
 
       - id: ruff-check
         name: ruff check
@@ -18,7 +18,7 @@ repos:
         language: system
         types: [python]
         files: ^packages/python/(?:termtrace|scripts|tests)/
-        exclude: ^packages/python/termtrace/_generated/
+        exclude: ^packages/python/termtrace/(?:transport/)?generated/
 
       - id: ruff-format
         name: ruff format
@@ -28,4 +28,19 @@ repos:
         language: system
         types: [python]
         files: ^packages/python/(?:termtrace|scripts|tests)/
-        exclude: ^packages/python/termtrace/_generated/
+        exclude: ^packages/python/termtrace/(?:transport/)?generated/
+
+      - id: oxfmt
+        name: oxfmt
+        entry: bun run --cwd packages/typescript format
+        language: system
+        pass_filenames: false
+        files: ^packages/typescript/
+        exclude: ^packages/typescript/(?:lib|src/transport/generated)/
+
+      - id: shfmt
+        name: shfmt
+        entry: shfmt -i 4 -ci -w
+        language: system
+        types: [shell]
+        exclude: ^vendor/

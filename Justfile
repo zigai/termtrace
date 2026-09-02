@@ -36,17 +36,19 @@ lint:
   uv run --project packages/python --locked --group dev mypy packages/python/termtrace packages/python/tests
   uv run --project packages/python --locked --group dev ruff check packages/python/termtrace packages/python/scripts packages/python/tests
 
-# format Rust and language-client sources
+# format Rust, language-client sources, and shell scripts
 format:
   cargo fmt --all
   bun run --cwd packages/typescript format
   uv run --project packages/python --locked --group dev ruff format packages/python/termtrace packages/python/scripts packages/python/tests
+  shfmt -i 4 -ci -w benchmarks demos fixtures packaging scripts tests install.sh
 
 # verify formatting without modifying files
 format-check:
   cargo fmt --all -- --check
   bun run --cwd packages/typescript format:check
   uv run --project packages/python --locked --group dev ruff format --check packages/python/termtrace packages/python/scripts packages/python/tests
+  shfmt -i 4 -ci -d benchmarks demos fixtures packaging scripts tests install.sh
 
 # run the complete native recording, replay, video, and screenshot smoke test
 smoke:
