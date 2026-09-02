@@ -61,6 +61,7 @@ pub(in crate::cli) fn run_start(
     command
         .arg(executable)
         .args(record_arguments)
+        .env_remove("TERMTRACE_RESPONSE")
         .stdin(if environment_stdin.is_some() {
             Stdio::piped()
         } else {

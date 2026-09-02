@@ -39,6 +39,7 @@ pub(in crate::cli) fn run_restart(
             &encoded_overrides,
             arguments.environment_spec.as_deref(),
         ))
+        .env_remove("TERMTRACE_RESPONSE")
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))

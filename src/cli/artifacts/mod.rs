@@ -111,6 +111,7 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
     write_secure(&input, &bytes).into_diagnostic()?;
     let hash = blake3::hash(&bytes).to_hex().to_string();
     let process = ProcessCommand::new(env::current_exe().into_diagnostic()?)
+        .env_remove("TERMTRACE_RESPONSE")
         .args(["record", "--no-input", "--out"])
         .arg(&arguments.out)
         .args([
