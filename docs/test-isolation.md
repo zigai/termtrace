@@ -24,7 +24,11 @@ result while retaining its own public API path.
 
 ```rust,no_run
 use std::{ffi::OsString, time::Duration};
-use termtrace::{client::Terminal, environment::ColorPolicy};
+use termtrace::{
+    client::Terminal,
+    environment::ColorPolicy,
+    screen::StableCaptureOptions,
+};
 
 let terminal = Terminal::new("termtrace", "test-evidence");
 let mut session = terminal
@@ -36,9 +40,12 @@ let mut session = terminal
     .output_byte_budget(4 * 1024 * 1024)
     .start()?;
 
-let exact = session
-    .screen()
-    .wait_for_idle(Duration::from_millis(100), Duration::from_secs(10))?;
+let exact = session.screen().capture_stable(StableCaptureOptions {
+    stable_for: Duration::from_millis(100),
+    timeout: Duration::from_secs(10),
+    projection: Default::default(),
+    allow_incomplete: false,
+})?;
 session.stop(Some(Duration::from_secs(5)))?;
 # Ok::<(), termtrace::Error>(())
 ```
@@ -162,8 +169,8 @@ Failure copies replace explicit environment values with `<redacted>`. The canoni
 
 Restarts compare the reconstructed map with the predecessor commitment. Resupply explicit secrets through `restart --environment-spec`; add `--allow-environment-change` only for an intentional successor override.
 
-## Limits and typed idle outcomes
+## Limits and typed stable-capture outcomes
 
 Output budgets retain every observed byte and then terminate the process group. This avoids the false evidence created by transcript truncation.
 
-Atomic idle capture can return `stable`, `child_completed`, `output_closed`, or `deadline`. CLI and clients reject every non-`stable` result by default. Opt in to incomplete outcomes only when the caller will inspect the quality explicitly.
+Atomic stable capture can return `stable`, `child_completed`, `output_closed`, or `deadline`. CLI and clients reject every non-`stable` result by default. Opt in to incomplete outcomes only when the caller will inspect the quality explicitly.
