@@ -471,7 +471,13 @@ pub(super) fn process_id_has_role(
     };
     let mut arguments = command_line.split(|byte| return *byte == 0);
     let _program = arguments.next();
-    let group = arguments.next();
+    let mut group = arguments.next();
+    while let Some(arg) = group {
+        if arg == b"tmux" {
+            break;
+        }
+        group = arguments.next();
+    }
     let action = arguments.next();
     return Ok(Some(group == Some(b"tmux") && action == Some(role)));
 }

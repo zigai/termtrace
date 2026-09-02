@@ -160,7 +160,10 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
         },
         ghostty_profile,
         term,
-        environment: EnvironmentSpec::default(),
+        environment: EnvironmentSpec {
+            unset: [String::from("TERMTRACE_RESPONSE")].into_iter().collect(),
+            ..EnvironmentSpec::default()
+        },
         colors,
         forward_stdin: true,
         continue_after_output_mirror_closes: true,
@@ -213,7 +216,10 @@ fn exec_unrecorded_command(command: Vec<OsString>) -> Result<ExitCode> {
     let program = arguments
         .next()
         .ok_or_else(|| return miette::miette!("tmux pane command is empty"))?;
-    let error = ProcessCommand::new(&program).args(arguments).exec();
+    let error = ProcessCommand::new(&program)
+        .args(arguments)
+        .env_remove("TERMTRACE_RESPONSE")
+        .exec();
     return Err(miette::miette!(
         "could not execute unrecorded tmux pane command {}: {error}",
         Path::new(&program).display()

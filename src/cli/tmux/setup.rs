@@ -449,29 +449,29 @@ pub(super) fn rollback_tmux_setup(client: &TmuxClient, original_command: &[u8]) 
 }
 
 pub(super) fn tmux_wrapper_command(setup: &PreparedTmuxSetup) -> OsString {
-    let mut command = b"exec env TERMTRACE_RESPONSE=quiet ".to_vec();
+    let mut command = b"exec env ".to_vec();
     command.extend_from_slice(TMUX_WRAPPER_BINARY_ENV.as_bytes());
     command.push(b'=');
     command.extend_from_slice(&shell_quote(setup.tmux.as_os_str().as_bytes()));
     command.push(b' ');
     command.extend_from_slice(&shell_quote(setup.termtrace.as_os_str().as_bytes()));
-    command.extend_from_slice(b" tmux run");
+    command.extend_from_slice(b" tmux run --response quiet");
     return OsString::from_vec(command);
 }
 
 pub(super) fn tmux_hook_command() -> OsString {
     return OsString::from(
-        "run-shell -b \"exec env TERMTRACE_RESPONSE=quiet TERMTRACE_TMUX_BINARY=#{q:@termtrace-tmux-executable} #{q:@termtrace-executable} tmux guard --pane '#{pane_id}'\"",
+        "run-shell -b \"exec env TERMTRACE_TMUX_BINARY=#{q:@termtrace-tmux-executable} #{q:@termtrace-executable} tmux guard --response quiet --pane '#{pane_id}'\"",
     );
 }
 
 pub(super) fn supervisor_shell_command(setup: &PreparedTmuxSetup) -> OsString {
-    let mut command = b"exec env TERMTRACE_RESPONSE=quiet ".to_vec();
+    let mut command = b"exec env ".to_vec();
     command.extend_from_slice(TMUX_WRAPPER_BINARY_ENV.as_bytes());
     command.push(b'=');
     command.extend_from_slice(&shell_quote(setup.tmux.as_os_str().as_bytes()));
     command.push(b' ');
     command.extend_from_slice(&shell_quote(setup.termtrace.as_os_str().as_bytes()));
-    command.extend_from_slice(b" tmux supervise");
+    command.extend_from_slice(b" tmux supervise --response quiet");
     return OsString::from_vec(command);
 }
