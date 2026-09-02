@@ -166,7 +166,10 @@ cleanup() {
 trap 'capture_unexpected_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
 trap cleanup EXIT
 
-if ! (set -o noclobber; : >"$log") 2>/dev/null; then
+if ! (
+    set -o noclobber
+    : >"$log"
+) 2>/dev/null; then
     die "diagnostic log already exists or could not be created: $log"
 fi
 report_failure=true
@@ -552,7 +555,7 @@ validate_smoke_artifacts() {
       .screenshot_probe.streams[0].width == 1280 and
       .screenshot_probe.streams[0].height == 720
     ' "manifest v5; source/config hashes; 1280x720 H.264 at 24 FPS; non-empty packets; PNG screenshot" \
-      '{version, source_event_hash, effective_config_hash, fps, source_range,
+        '{version, source_event_hash, effective_config_hash, fps, source_range,
         width, height, capture_kind,
         video_codec: .video_probe.streams[0].codec_name,
         video_width: .video_probe.streams[0].width,
@@ -576,7 +579,7 @@ validate_smoke_artifacts() {
       ([.[].frame] == ([.[].frame] | sort)) and
       any(.[]; .presented)
     ' "ordered, schema-complete full-video map with at least one presented frame" \
-      '{count: length,
+        '{count: length,
         first: (.[0] // null),
         last: (.[-1] // null),
         presented: ([.[] | select(.presented == true)] | length)}' slurp
@@ -600,7 +603,7 @@ validate_smoke_artifacts() {
       .screenshot_probe.streams[0].width == 1280 and
       .screenshot_probe.streams[0].height == 720
     ' "manifest v5; range [11000000000,12350000000); source/config hashes; 1280x720 H.264 at 24 FPS; non-empty packets; PNG screenshot" \
-      '{version, source_event_hash, effective_config_hash, source_range, fps,
+        '{version, source_event_hash, effective_config_hash, source_range, fps,
         width, height, capture_kind,
         video_codec: .video_probe.streams[0].codec_name,
         video_width: .video_probe.streams[0].width,
@@ -625,7 +628,7 @@ validate_smoke_artifacts() {
       ([.[].frame] == ([.[].frame] | sort)) and
       any(.[]; .presented)
     ' "ordered, schema-complete map entries in [11000000000,12350000000) with at least one presented frame" \
-      '{count: length,
+        '{count: length,
         first: (.[0] // null),
         last: (.[-1] // null),
         presented: ([.[] | select(.presented == true)] | length)}' slurp
@@ -682,7 +685,7 @@ validate_smoke_artifacts() {
       (.ghostty_visual.effective_config_hash |
         type == "string" and test("^[0-9a-f]{64}$"))
     ' "session manifest v12 with the requested visual overrides and 64-character hashes" \
-      '{version, source_config: (.ghostty_visual.source_config != null),
+        '{version, source_config: (.ghostty_visual.source_config != null),
         overrides: .ghostty_visual.overrides,
         replay_profile: .ghostty_visual.replay_profile,
         replay_profile_hash: .ghostty_visual.replay_profile_hash,
@@ -736,7 +739,7 @@ validate_smoke_artifacts() {
         "$output/native-single/final.png" png "$SMOKE_VIEWPORT_WIDTH" "$SMOKE_VIEWPORT_HEIGHT"
     check_missing "point_screenshot_has_no_video" "$output/native-single/session.mkv"
     check_jq "point_screenshot_manifest_contract" \
-      "$output/native-single/manifest.json" '
+        "$output/native-single/manifest.json" '
       .version == 5 and
       .source_range == null and
       .width == 1280 and
@@ -763,7 +766,7 @@ validate_smoke_artifacts() {
       .screenshot_probe.streams[0].height == 720 and
       .video_probe == null
     ' "manifest v5 with stable 1280x720 native screenshot evidence, typed state/endpoint fields, and at least three valid frame samples" \
-      '{version, source_range, width, height, effective_config_hash,
+        '{version, source_range, width, height, effective_config_hash,
         capture_kind, presentation_evidence, guarantee_level,
         selected_state_id, selected_state_hash,
         endpoint_event_seq, endpoint_event_byte_offset,
@@ -792,7 +795,7 @@ validate_smoke_artifacts() {
         "visual-range-11000000000-12350000000"
       ] - $directories | length == 0)
     ' "catalog includes the five expected full, ranged, and point-capture artifact roots" \
-      '{count: length, directories: map(.artifact_directory)}' slurp
+        '{count: length, directories: map(.artifact_directory)}' slurp
     check_files_differ "full_and_range_screenshots_differ" \
         "$output/visual/final.png" "$range_visual/final.png"
     check_session_integrity

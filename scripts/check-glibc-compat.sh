@@ -8,10 +8,12 @@ fi
 
 binary=$1
 maximum=$2
+
 if [[ ! -x "$binary" ]]; then
     echo "binary is not executable: $binary" >&2
     exit 2
 fi
+
 if ! command -v objdump >/dev/null 2>&1; then
     echo "objdump is required to inspect GLIBC symbols" >&2
     exit 2

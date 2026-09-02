@@ -25,8 +25,10 @@ trap 'stop_recorder_on_error "$SESSION"' EXIT
 RECORDER_PID=$!
 
 wait_for_control "$SESSION" "$STDERR_LOG"
+
 "$TERMTRACE_BIN" status "$SESSION" >"$DEMO_DIRECTORY/status-before.json"
-"$TERMTRACE_BIN" wait "$SESSION" SHOWCASE_READY --timeout 15s \
+
+"$TERMTRACE_BIN" wait "$SESSION" --screen SHOWCASE_READY --timeout 15s \
     >"$DEMO_DIRECTORY/wait-ready.json"
 "$TERMTRACE_BIN" control mark "$SESSION" --label showcase-ready \
     >"$DEMO_DIRECTORY/mark-ready.json"
@@ -37,7 +39,7 @@ wait_for_control "$SESSION" "$STDERR_LOG"
     --rows 36 \
     --pixel-width 1080 \
     --pixel-height 648 >"$DEMO_DIRECTORY/resize.json"
-"$TERMTRACE_BIN" wait "$SESSION" RESIZED:120x36 --timeout 5s \
+"$TERMTRACE_BIN" wait "$SESSION" --screen RESIZED:120x36 --timeout 5s \
     >"$DEMO_DIRECTORY/wait-resize.json"
 
 printf 'continue-from-file\n' >"$DEMO_DIRECTORY/agent-input.bin"
@@ -45,15 +47,14 @@ printf 'continue-from-file\n' >"$DEMO_DIRECTORY/agent-input.bin"
     "$SESSION" \
     --file "$DEMO_DIRECTORY/agent-input.bin" \
     >"$DEMO_DIRECTORY/send-file.json"
-"$TERMTRACE_BIN" wait "$SESSION" AGENT_INPUT:continue-from-file --timeout 5s \
+"$TERMTRACE_BIN" wait "$SESSION" --screen AGENT_INPUT:continue-from-file --timeout 5s \
     >"$DEMO_DIRECTORY/wait-input.json"
-
 for signal_name in user1 user2 hangup interrupt; do
     "$TERMTRACE_BIN" control signal "$SESSION" --signal "$signal_name" \
         >"$DEMO_DIRECTORY/signal-$signal_name.json"
 done
 for signal_name in SIGUSR1 SIGUSR2 SIGHUP SIGINT; do
-    "$TERMTRACE_BIN" wait "$SESSION" "SIGNAL:$signal_name" --timeout 5s \
+    "$TERMTRACE_BIN" wait "$SESSION" --screen "SIGNAL:$signal_name" --timeout 5s \
         >"$DEMO_DIRECTORY/wait-$signal_name.json"
 done
 "$TERMTRACE_BIN" control mark "$SESSION" --label signals-observed \
@@ -68,16 +69,18 @@ derive_and_capture "$SESSION" "$DEMO_DIRECTORY"
 mkdir -m 700 "$DEMO_DIRECTORY/recovered"
 cp "$SESSION/events.jsonl" "$DEMO_DIRECTORY/damaged-events.jsonl"
 printf '{"truncated_tail":' >>"$DEMO_DIRECTORY/damaged-events.jsonl"
+
 "$TERMTRACE_BIN" integrity recover \
     --event-log "$DEMO_DIRECTORY/damaged-events.jsonl" \
     --out "$DEMO_DIRECTORY/recovered/events.jsonl" \
     >"$DEMO_DIRECTORY/recovery-report.json"
+
 cmp "$SESSION/events.jsonl" "$DEMO_DIRECTORY/recovered/events.jsonl"
+
 "$TERMTRACE_BIN" analyze index --session "$DEMO_DIRECTORY/recovered" --live-snapshot \
     >"$DEMO_DIRECTORY/recovered-index.json"
 "$TERMTRACE_BIN" analyze inspect --session "$DEMO_DIRECTORY/recovered" --format text \
     >"$DEMO_DIRECTORY/recovered-final-screen.txt"
-
 mkdir -m 700 "$DEMO_DIRECTORY/tampered"
 while IFS= read -r line; do
     jq -c '
@@ -89,16 +92,19 @@ while IFS= read -r line; do
   ' <<<"$line"
 done <"$SESSION/events.jsonl" >"$DEMO_DIRECTORY/tampered/events.jsonl"
 chmod 600 "$DEMO_DIRECTORY/tampered/events.jsonl"
+
 set +e
 "$TERMTRACE_BIN" analyze index --session "$DEMO_DIRECTORY/tampered" --live-snapshot \
     >"$DEMO_DIRECTORY/tamper.stdout.log" \
     2>"$DEMO_DIRECTORY/tamper-rejected.log"
 TAMPER_STATUS=$?
 set -e
+
 if ((TAMPER_STATUS == 0)); then
     printf 'tampered event log was unexpectedly accepted\n' >&2
     exit 1
 fi
+
 printf '%s\n' "$TAMPER_STATUS" >"$DEMO_DIRECTORY/tamper-exit-status.txt"
 
 "$TERMTRACE_BIN" tooling schemas --out "$DEMO_DIRECTORY/generated-schemas" \

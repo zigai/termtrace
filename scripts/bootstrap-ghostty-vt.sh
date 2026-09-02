@@ -35,8 +35,8 @@ readonly archive_name="zig-${zig_arch}-linux-${zig_version}.tar.xz"
 readonly archive="$tools/downloads/$archive_name"
 readonly zig_root="$tools/zig-${zig_arch}-linux-${zig_version}"
 readonly zig="$zig_root/zig"
-mkdir -p "$tools/downloads"
 
+mkdir -p "$tools/downloads"
 if [[ ! -x "$zig" ]]; then
     curl --fail --location --retry 3 \
         --output "$archive" \
@@ -51,12 +51,15 @@ if [[ "$($zig version)" != "$zig_version" ]]; then
 fi
 
 cd "$ghostty"
+
 target_args=()
 if [[ -n "${TERMTRACE_ZIG_TARGET:-}" ]]; then
     target_args+=("-Dtarget=${TERMTRACE_ZIG_TARGET}")
 fi
 
 "$zig" build -Demit-lib-vt=true -Doptimize=ReleaseFast "${target_args[@]}"
+
 test -f zig-out/lib/libghostty-vt.a
 test -f zig-out/include/ghostty/vt.h
+
 printf 'libghostty-vt ready at %s\n' "$ghostty/zig-out"

@@ -23,9 +23,11 @@ mkdir -p "$(dirname "$output")"
 : >"$output"
 
 cd "$root"
+
 if [[ ! -x "$binary" ]]; then
     cargo build --release --all-features --manifest-path "$root/Cargo.toml"
 fi
+
 if [[ ! -x "$binary" ]]; then
     printf 'Termtrace binary is not executable: %s\n' "$binary" >&2
     exit 2
@@ -35,11 +37,13 @@ for mode in strict bounded throughput; do
     for ((iteration = 1; iteration <= repetitions; iteration += 1)); do
         session="$sessions/$mode-$iteration.termtrace"
         started_ns="$(date +%s%N)"
+
         "$binary" record --no-input --durability "$mode" \
             --out "$session" -- /bin/sh -c 'head -c "$1" /dev/zero' sh "$payload_bytes" \
             >/dev/null &
         recorder_pid="$!"
         maximum_rss_kib=0
+
         while kill -0 "$recorder_pid" 2>/dev/null; do
             if [[ -r "/proc/$recorder_pid/status" ]]; then
                 current_rss_kib="$(awk '/^VmHWM:/ { print $2 }' "/proc/$recorder_pid/status" 2>/dev/null || true)"
@@ -49,8 +53,10 @@ for mode in strict bounded throughput; do
             fi
             sleep 0.01
         done
+
         wait "$recorder_pid"
         elapsed_ns="$(($(date +%s%N) - started_ns))"
+
         jq -cn \
             --arg mode "$mode" \
             --argjson iteration "$iteration" \
@@ -66,6 +72,7 @@ for mode in strict bounded throughput; do
         maximum_rss_bytes: ($maximum_rss_kib * 1024),
         durability: $completion[0].durability
       }' >>"$output"
+
         rm -rf "$session"
     done
 done

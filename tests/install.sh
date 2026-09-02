@@ -28,7 +28,9 @@ build_archive() {
 printf '#!/bin/sh\nexit 0\n' >"$root/termtrace"
 chmod 0555 "$root/termtrace"
 build_archive
+
 TERMTRACE_DOWNLOAD_BASE="file://$assets" ./install.sh --install-dir "$install_dir"
+
 cmp "$root/termtrace" "$install_dir/termtrace"
 test -f "$work/share/termtrace/clients/python/pyproject.toml"
 test -f "$work/share/termtrace/clients/typescript/lib/index.js"
@@ -37,9 +39,11 @@ rm -f "$root/termtrace"
 printf '#!/bin/sh\nexit 1\n' >"$root/termtrace"
 chmod 0555 "$root/termtrace"
 build_archive
+
 if TERMTRACE_DOWNLOAD_BASE="file://$assets" ./install.sh --install-dir "$install_dir"; then
     echo "installer accepted a candidate that failed its capability check" >&2
     exit 1
 fi
+
 printf '#!/bin/sh\nexit 0\n' | cmp - "$install_dir/termtrace"
 test -z "$(find "$install_dir" -name '.termtrace.*' -print -quit)"

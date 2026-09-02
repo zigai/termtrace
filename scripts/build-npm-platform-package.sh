@@ -16,17 +16,23 @@ case "$os/$arch" in
         exit 2
         ;;
 esac
+
 version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
 staging="packages/npm-staging/cli-$os-$arch"
+
 cleanup() {
     rm -rf "$staging"
 }
 trap cleanup EXIT
+
 rm -rf "$staging"
 mkdir -p "$staging/bin" dist/npm
+
 install -m 0555 "$binary" "$staging/bin/termtrace"
 install -m 0444 crates/render/assets/fonts/NOTICE "$staging/NOTICE"
+
 "$staging/bin/termtrace" doctor --require semantic
+
 python3 - "$staging/package.json" "$version" "$os" "$arch" <<'PY'
 import json
 import pathlib
@@ -45,4 +51,5 @@ manifest = {
 }
 pathlib.Path(path).write_text(json.dumps(manifest, indent=2) + "\n")
 PY
+
 (cd "$staging" && npm pack --pack-destination ../../../dist/npm)

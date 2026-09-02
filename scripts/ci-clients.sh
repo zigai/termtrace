@@ -9,11 +9,13 @@ scripts/generate-client-protocol.sh
 git diff --exit-code -- \
     packages/python/termtrace/_generated \
     packages/typescript/src/generated
+
 bun run --cwd packages/typescript format:check
 bun run --cwd packages/typescript lint
 bun run --cwd packages/typescript typecheck
 bun run --cwd packages/typescript test
 node --check packages/typescript/bin/termtrace.js
+
 uv run --project packages/python --locked --group dev \
     pytest -q packages/python/tests
 uv run --project packages/python --locked --group dev \
