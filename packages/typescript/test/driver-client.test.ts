@@ -7,6 +7,7 @@ import { expect, test } from "bun:test";
 
 import { DriverClient } from "../src/transport/driver-client.js";
 import { RequestTimeoutError } from "../src/errors.js";
+import { TermtraceProtocolError, type DriverMethod } from "../src/transport/protocol.js";
 
 test("rejects requests issued after the driver exits", async () => {
     const directory = mkdtempSync(join(tmpdir(), "termtrace-driver-client-"));
@@ -26,6 +27,39 @@ test("rejects requests issued after the driver exits", async () => {
                 requestId: "00000000-0000-0000-0000-000000000002",
             }),
         ).rejects.toThrow("driver is closed");
+    } finally {
+        await client.close();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test("rejects malformed runtime input without consuming request correlation", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "termtrace-driver-validation-"));
+    const binary = join(directory, "driver");
+    const requestFile = join(directory, "request.json");
+    const requestId = "00000000-0000-0000-0000-000000000030";
+    writeFileSync(
+        binary,
+        `#!/bin/sh\nIFS= read -r request\nprintf '%s' "$request" > '${requestFile}'\nprintf '%s\\n' '{"version":5,"request_id":"${requestId}","result":{"status":"ok","data":{"kind":"hello","driver_protocol_version":5,"control_protocol_version":15,"event_log_version":6,"state_format_version":5,"methods":["hello"],"max_request_bytes":4194304,"max_response_bytes":4194304}}}'\n`,
+    );
+    chmodSync(binary, 0o700);
+    const client = new DriverClient(binary);
+
+    try {
+        const malformedMethod: DriverMethod = { method: "hello" };
+        Object.defineProperty(malformedMethod, "toJSON", { enumerable: true, value: () => null });
+        const malformedRequest = client.request(malformedMethod, "hello", {
+            requestId: "00000000-0000-0000-0000-000000000029",
+        });
+        await expect(malformedRequest).rejects.toBeInstanceOf(TermtraceProtocolError);
+
+        await expect(
+            client.request({ method: "hello" }, "hello", { requestId }),
+        ).resolves.toMatchObject({ kind: "hello" });
+        expect(JSON.parse(readFileSync(requestFile, "utf8"))).toMatchObject({
+            request_id: requestId,
+            method: { method: "hello" },
+        });
     } finally {
         await client.close();
         rmSync(directory, { recursive: true, force: true });

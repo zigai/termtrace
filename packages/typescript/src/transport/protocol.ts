@@ -30,6 +30,24 @@ export type JsonValue =
     | { readonly [key: string]: JsonValue };
 
 export type JsonObject = { readonly [key: string]: JsonValue };
+type RequestConstruction<Value> =
+    Value extends ReadonlyArray<infer Item>
+        ? ReadonlyArray<RequestConstruction<Item>>
+        : Value extends object
+          ? { readonly [Key in keyof Value]: RequestConstruction<Value[Key]> }
+          : Value;
+export type DriverRequest = RequestConstruction<WireDriverRequest>;
+export type DriverMethod = DriverRequest["method"];
+export type DriverMethodName = DriverMethod["method"];
+export type DriverMethodOf<Method extends DriverMethodName> = Extract<
+    DriverMethod,
+    { readonly method: Method }
+>;
+export type ControlCommand = DriverMethodOf<"control">["command"];
+type WithoutSessionHandle<Method> = Method extends { readonly handle: string }
+    ? Omit<Method, "handle">
+    : never;
+export type SessionMethodFields = WithoutSessionHandle<DriverMethod>;
 
 type DriverResult = WireDriverResponse["result"];
 type DriverSuccess = Extract<DriverResult, { readonly status: "ok" }>;
@@ -80,12 +98,12 @@ export type DriverResponse =
     | { readonly _tag: "Failure"; readonly failure: DriverFailure };
 
 /** Parse and correlate one untrusted driver response without exposing payload data in failures. */
-export function parseDriverResponse(input: unknown, expectedRequestId: string): DriverResponse {
+export function parseDriverResponse(input: JsonValue, expectedRequestId: string): DriverResponse {
     if (!validateDriverResponse(input)) {
         throw new TermtraceProtocolError("driver response does not match the protocol schema");
     }
     // SAFETY: the generated Ajv validator has proved the complete generated wire contract.
-    const root = input as WireDriverResponse;
+    const root = input as JsonObject & WireDriverResponse;
     if (root.version !== 5 || root.request_id !== expectedRequestId) {
         throw new TermtraceProtocolError("driver response version or request ID does not match");
     }
@@ -107,27 +125,25 @@ export function expectDriverData<Kind extends DriverDataKind>(
     return data as DriverDataOf<Kind>;
 }
 
-/** Validate and serialize one client-authored request without exposing its payload in failures. */
-export function encodeDriverRequest(method: JsonObject, requestId: string): string {
-    const request = { version: 5, request_id: requestId, method };
+/** Canonicalize and validate one client-authored request without exposing its payload in failures. */
+export function encodeDriverRequest(method: DriverMethod, requestId: string): string {
+    let encoded: string;
+    let request: unknown;
+    try {
+        const authoredRequest: DriverRequest = { version: 5, request_id: requestId, method };
+        const serialized = JSON.stringify(authoredRequest);
+        if (serialized === undefined) {
+            throw new Error("request serialization returned undefined");
+        }
+        encoded = serialized;
+        request = JSON.parse(encoded);
+    } catch {
+        throw new TermtraceProtocolError("client request does not match the protocol schema");
+    }
     if (!validateDriverRequest(request)) {
         throw new TermtraceProtocolError("client request does not match the protocol schema");
     }
-    // SAFETY: the generated Ajv validator proved the complete generated request contract.
-    const validated = request as WireDriverRequest;
-    return JSON.stringify(validated);
-}
-
-/** Copy one trusted request builder result into the exact JSON value domain. */
-export function parseJsonObject(input: unknown): JsonObject {
-    if (typeof input !== "object" || input === null || Array.isArray(input)) {
-        throw new TypeError("driver request method must be a JSON object");
-    }
-    const parsed: Record<string, JsonValue> = {};
-    for (const [key, value] of Object.entries(input)) {
-        parsed[key] = parseJsonValue(value);
-    }
-    return Object.freeze(parsed);
+    return encoded;
 }
 
 function failureFromWire(failure: DriverError): DriverFailure {
@@ -140,17 +156,4 @@ function failureFromWire(failure: DriverError): DriverFailure {
         evidence: failure.evidence ?? undefined,
         details: failure.details ?? undefined,
     };
-}
-
-function parseJsonValue(input: unknown): JsonValue {
-    if (input === null || typeof input === "boolean" || typeof input === "string") {
-        return input;
-    }
-    if (typeof input === "number" && Number.isFinite(input)) {
-        return input;
-    }
-    if (Array.isArray(input)) {
-        return input.map(parseJsonValue);
-    }
-    return parseJsonObject(input);
 }

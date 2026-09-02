@@ -146,7 +146,9 @@ async function captureFailureArtifacts(
         `session-${boundedArtifactPart(session.sessionId)}`,
         "failure",
     );
-    await collectFailure(failures, async () => mkdir(artifactRoot, { recursive: true, mode: 0o700 }));
+    await collectFailure(failures, async () =>
+        mkdir(artifactRoot, { recursive: true, mode: 0o700 }),
+    );
 
     await collectFailure(failures, async () => {
         const destination = join(artifactRoot, "semantic-screenshot");
@@ -188,7 +190,10 @@ async function captureFailureArtifacts(
             options?.bundleProfile ?? "debug",
             operationTimeoutMs,
         );
-        const bytes = bundle.manifest.members.reduce((total, member) => total + member.byte_length, 0);
+        const bytes = bundle.manifest.members.reduce(
+            (total, member) => total + member.byte_length,
+            0,
+        );
         const maximum = options?.maxBundleBytes ?? DEFAULT_BUNDLE_BYTES;
         if (!Number.isSafeInteger(bytes) || bytes > maximum) {
             throw new RangeError(`failure bundle exceeds the ${maximum}-byte adapter limit`);
@@ -202,7 +207,9 @@ async function captureFailureArtifacts(
             const memberPath = resolve(committedRoot, member.path);
             const localPath = relative(committedRoot, memberPath);
             if (localPath.length === 0 || localPath === ".." || localPath.startsWith(`..${sep}`)) {
-                throw new Error("failure bundle manifest contains a path outside its committed directory");
+                throw new Error(
+                    "failure bundle manifest contains a path outside its committed directory",
+                );
             }
             const memberMetadata = await lstat(memberPath);
             if (!memberMetadata.isFile() || memberMetadata.size !== member.byte_length) {

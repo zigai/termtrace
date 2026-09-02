@@ -87,12 +87,6 @@ const BOOLEAN_STYLE_FILTER_FIELDS = [
     "overline",
     "selected",
 ] as const;
-const WIDE_KINDS: Readonly<Record<WideKind, true>> = Object.freeze({
-    narrow: true,
-    wide: true,
-    spacer_tail: true,
-    spacer_head: true,
-});
 
 export function textQuery(
     query: TextQuery,
@@ -107,8 +101,8 @@ export function textQuery(
     });
 }
 export function styleQuery(style: StyleFilter): LocatorSpec {
-    validateStyleFilter(style);
-    return Object.freeze({ kind: "style", style: Object.freeze({ ...style }) });
+    const parsed = parseStyleFilter(style);
+    return Object.freeze({ kind: "style", style: Object.freeze({ ...parsed.filter }) });
 }
 export function rowQuery(row: number): LocatorSpec {
     if (!Number.isSafeInteger(row) || row < 0)
@@ -198,6 +192,7 @@ function evaluateStyle(
     description: string,
     region?: Region,
 ): ScreenMatch[] {
+    const parsedFilter = parseStyleFilter(filter);
     const matches: ScreenMatch[] = [];
     for (const row of frame.rows) {
         const cells = materializeRow(row).filter(
@@ -216,7 +211,7 @@ function evaluateStyle(
                 (cell.wideKind === "narrow" ||
                     cell.wideKind === "wide" ||
                     filter.wideKind === cell.wideKind);
-            const selected = displayed && cell !== undefined && matchesStyle(cell, filter);
+            const selected = displayed && cell !== undefined && matchesStyle(cell, parsedFilter);
             if (selected) {
                 if (start < 0) start = index;
                 continue;
@@ -307,13 +302,14 @@ function matchSatisfies(frame: ScreenFrame, match: ScreenMatch, spec: LocatorSpe
             );
         }
         case "style": {
+            const parsedFilter = parseStyleFilter(spec.style);
             const cells = cellsForMatch(frame, match).filter(
                 (cell) =>
                     cell.wideKind === "narrow" ||
                     cell.wideKind === "wide" ||
                     spec.style.wideKind === cell.wideKind,
             );
-            return cells.length > 0 && cells.every((cell) => matchesStyle(cell, spec.style));
+            return cells.length > 0 && cells.every((cell) => matchesStyle(cell, parsedFilter));
         }
         case "text":
             return findTextMatches(match.text, spec.query, spec.exact === true).length > 0;
@@ -448,7 +444,9 @@ function findTextMatches(
             const match = pattern.exec(text);
             if (match === null) break;
             if (match[0].length === 0)
-                throw new InvalidQueryError("regular expressions must not produce zero-width matches");
+                throw new InvalidQueryError(
+                    "regular expressions must not produce zero-width matches",
+                );
             if (!exact || (match.index === 0 && match[0].length === text.length))
                 pushTextMatch(matches, { start: match.index, end: match.index + match[0].length });
         }
@@ -490,7 +488,7 @@ function validateSpec(spec: LocatorSpec): void {
             validateTextQuery(spec.query);
             return;
         case "style":
-            validateStyleFilter(spec.style);
+            parseStyleFilter(spec.style);
             return;
         case "row":
             if (!Number.isSafeInteger(spec.row) || spec.row < 0)
@@ -522,8 +520,20 @@ function evaluateRegionOnly(region: Region): void {
     )
         throw new InvalidRegionError("query region must be nonempty nonnegative safe integers");
 }
-function validateStyleFilter(style: unknown): asserts style is StyleFilter {
-    if (typeof style !== "object" || style === null || Array.isArray(style))
+type ParsedColorMatcher = {
+    readonly source: ColorSource | undefined;
+    readonly resolved: Rgb | undefined;
+};
+type ParsedStyleFilter = {
+    readonly filter: StyleFilter;
+    readonly sourceForeground: ColorSource | undefined;
+    readonly sourceBackground: ColorSource | undefined;
+    readonly resolvedForeground: Rgb | null | undefined;
+    readonly resolvedBackground: Rgb | null | undefined;
+};
+
+function parseStyleFilter(style: StyleFilter): ParsedStyleFilter {
+    if (style === undefined || style === null || Array.isArray(style))
         throw new InvalidQueryError("style query must be an object");
     const values = Object.fromEntries(Object.entries(style));
     const fields = Object.keys(values);
@@ -537,88 +547,130 @@ function validateStyleFilter(style: unknown): asserts style is StyleFilter {
         throw new InvalidQueryError(`${undefinedField} style filter must not be undefined`);
     for (const field of BOOLEAN_STYLE_FILTER_FIELDS) {
         const value = values[field];
-        if (value !== undefined && typeof value !== "boolean")
+        if (value !== undefined && value !== true && value !== false)
             throw new InvalidQueryError(`${field} style filter must be boolean`);
     }
     const underline = values.underline;
+    const parsedUnderline = Number(underline);
     if (
         underline !== undefined &&
-        (!isSafeInteger(underline) || underline < -2_147_483_648 || underline > 2_147_483_647)
+        (!Number.isSafeInteger(parsedUnderline) ||
+            parsedUnderline !== underline ||
+            parsedUnderline < -2_147_483_648 ||
+            parsedUnderline > 2_147_483_647)
     )
         throw new InvalidQueryError("underline style filter must be a signed 32-bit integer");
     const wideKind = values.wideKind;
     if (
         wideKind !== undefined &&
-        (typeof wideKind !== "string" || !Object.hasOwn(WIDE_KINDS, wideKind))
+        wideKind !== "narrow" &&
+        wideKind !== "wide" &&
+        wideKind !== "spacer_tail" &&
+        wideKind !== "spacer_head"
     )
         throw new InvalidQueryError("wideKind style filter is invalid");
-    validateColorMatcher(values.foreground, "foreground", true);
-    validateColorMatcher(values.background, "background", true);
-    validateColorMatcher(values.underlineColor, "underlineColor", false);
-    validateResolvedColor(values.resolvedForeground, "resolvedForeground");
-    validateResolvedColor(values.resolvedBackground, "resolvedBackground");
+
+    const foreground = parseColorMatcher(style.foreground, "foreground");
+    const background = parseColorMatcher(style.background, "background");
+    if (style.underlineColor !== undefined)
+        colorSourceSchema.parse(style.underlineColor, "underlineColor");
+    return Object.freeze({
+        filter: style,
+        sourceForeground: foreground.source,
+        sourceBackground: background.source,
+        resolvedForeground:
+            foreground.resolved ??
+            parseResolvedColor(style.resolvedForeground, "resolvedForeground"),
+        resolvedBackground:
+            background.resolved ??
+            parseResolvedColor(style.resolvedBackground, "resolvedBackground"),
+    });
 }
-function validateColorMatcher(value: unknown, field: string, allowHex: boolean): void {
-    if (value === undefined) return;
-    if (allowHex && typeof value === "string") {
-        parseHexRgb(value);
-        return;
-    }
-    validateColorSource(value, field);
-}
-function validateColorSource(value: unknown, field: string): void {
-    if (typeof value !== "object" || value === null || Array.isArray(value))
-        throw new InvalidQueryError(`${field} style filter must be a color source`);
-    const source = Object.fromEntries(Object.entries(value));
-    if (source.kind === "none") {
-        if (Object.keys(source).length !== 1)
-            throw new InvalidQueryError(`${field} none color source has unknown fields`);
-        return;
-    }
-    if (source.kind === "palette") {
+
+const rgbSchema = Object.freeze({
+    parse(value: unknown, field: string): Rgb {
+        if (value === null || Array.isArray(value))
+            throw new InvalidQueryError(`${field} style filter must be an RGB color`);
+        const channels = Object.fromEntries(Object.entries(Object(value)));
+        const r = Number(channels.r);
+        const g = Number(channels.g);
+        const b = Number(channels.b);
         if (
-            Object.keys(source).length !== 2 ||
-            !isSafeInteger(source.value) ||
-            source.value < 0 ||
-            source.value > 255
+            Object.keys(channels).length !== 3 ||
+            !Number.isSafeInteger(r) ||
+            r !== channels.r ||
+            r < 0 ||
+            r > 255 ||
+            !Number.isSafeInteger(g) ||
+            g !== channels.g ||
+            g < 0 ||
+            g > 255 ||
+            !Number.isSafeInteger(b) ||
+            b !== channels.b ||
+            b < 0 ||
+            b > 255
         )
-            throw new InvalidQueryError(`${field} palette color source is invalid`);
-        return;
-    }
-    if (source.kind === "rgb") {
-        if (Object.keys(source).length !== 2)
-            throw new InvalidQueryError(`${field} RGB color source has unknown fields`);
-        validateRgb(source.value, field);
-        return;
-    }
-    throw new InvalidQueryError(`${field} color source kind is invalid`);
+            throw new InvalidQueryError(`${field} RGB color must contain integer r, g, b channels`);
+        return Object.freeze({ r, g, b });
+    },
+});
+
+const colorSourceSchema = Object.freeze({
+    parse(value: unknown, field: string): ColorSource {
+        if (value === null || Array.isArray(value))
+            throw new InvalidQueryError(`${field} style filter must be a color source`);
+        const source = Object.fromEntries(Object.entries(Object(value)));
+        if (source.kind === "none") {
+            if (Object.keys(source).length !== 1)
+                throw new InvalidQueryError(`${field} none color source has unknown fields`);
+            return Object.freeze({ kind: "none" });
+        }
+        if (source.kind === "palette") {
+            const palette = Number(source.value);
+            if (
+                Object.keys(source).length !== 2 ||
+                !Number.isSafeInteger(palette) ||
+                palette !== source.value ||
+                palette < 0 ||
+                palette > 255
+            )
+                throw new InvalidQueryError(`${field} palette color source is invalid`);
+            return Object.freeze({ kind: "palette", value: palette });
+        }
+        if (source.kind === "rgb") {
+            if (Object.keys(source).length !== 2)
+                throw new InvalidQueryError(`${field} RGB color source has unknown fields`);
+            return Object.freeze({ kind: "rgb", value: rgbSchema.parse(source.value, field) });
+        }
+        throw new InvalidQueryError(`${field} color source kind is invalid`);
+    },
+});
+
+function parseColorMatcher(
+    value: ColorSource | `#${string}` | undefined,
+    field: string,
+): ParsedColorMatcher {
+    if (value === undefined) return Object.freeze({ source: undefined, resolved: undefined });
+    const fields = Object.fromEntries(Object.entries(value));
+    if (fields.kind === undefined)
+        return Object.freeze({ source: undefined, resolved: parseHexRgb(String(value)) });
+    return Object.freeze({
+        source: colorSourceSchema.parse(value, field),
+        resolved: undefined,
+    });
 }
-function validateResolvedColor(value: unknown, field: string): void {
-    if (value === undefined || value === null) return;
-    if (typeof value === "string") {
-        parseHexRgb(value);
-        return;
-    }
-    validateRgb(value, field);
+
+function parseResolvedColor(
+    value: Rgb | `#${string}` | null | undefined,
+    field: string,
+): Rgb | null | undefined {
+    if (value === undefined || value === null) return value;
+    const fields = Object.fromEntries(Object.entries(value));
+    if (Object.hasOwn(fields, "r") || Object.hasOwn(fields, "g") || Object.hasOwn(fields, "b"))
+        return rgbSchema.parse(value, field);
+    return parseHexRgb(String(value));
 }
-function validateRgb(value: unknown, field: string): void {
-    if (typeof value !== "object" || value === null || Array.isArray(value))
-        throw new InvalidQueryError(`${field} style filter must be an RGB color`);
-    const rgb = Object.fromEntries(Object.entries(value));
-    if (
-        Object.keys(rgb).length !== 3 ||
-        !isColorChannel(rgb.r) ||
-        !isColorChannel(rgb.g) ||
-        !isColorChannel(rgb.b)
-    )
-        throw new InvalidQueryError(`${field} RGB color must contain integer r, g, b channels`);
-}
-function isColorChannel(value: unknown): value is number {
-    return isSafeInteger(value) && value >= 0 && value <= 255;
-}
-function isSafeInteger(value: unknown): value is number {
-    return typeof value === "number" && Number.isSafeInteger(value);
-}
+
 function parseHexRgb(value: string): Rgb {
     if (!/^#[0-9a-fA-F]{6}$/u.test(value))
         throw new InvalidQueryError("resolved colors must use #RRGGBB syntax");
@@ -627,9 +679,6 @@ function parseHexRgb(value: string): Rgb {
         g: Number.parseInt(value.slice(3, 5), 16),
         b: Number.parseInt(value.slice(5, 7), 16),
     });
-}
-function normalizeRgbMatcher(value: Rgb | `#${string}` | null | undefined): Rgb | null | undefined {
-    return typeof value === "string" ? parseHexRgb(value) : value;
 }
 function flattenSpecs(specs: ReadonlyArray<LocatorSpec>): LocatorSpec[] {
     const flattened: LocatorSpec[] = [];
@@ -707,18 +756,9 @@ function cellEndColumn(cell: ScreenCell): number {
     return cell.column + (cell.wideKind === "wide" ? 2 : 1);
 }
 
-function matchesStyle(cell: ScreenCell, filter: StyleFilter): boolean {
+function matchesStyle(cell: ScreenCell, parsed: ParsedStyleFilter): boolean {
+    const filter = parsed.filter;
     const style = cell.appearance.style;
-    const sourceForeground = typeof filter.foreground === "string" ? undefined : filter.foreground;
-    const sourceBackground = typeof filter.background === "string" ? undefined : filter.background;
-    const resolvedForeground =
-        typeof filter.foreground === "string"
-            ? parseHexRgb(filter.foreground)
-            : normalizeRgbMatcher(filter.resolvedForeground);
-    const resolvedBackground =
-        typeof filter.background === "string"
-            ? parseHexRgb(filter.background)
-            : normalizeRgbMatcher(filter.resolvedBackground);
     return (
         optionalEqual(filter.bold, style.bold) &&
         optionalEqual(filter.faint, style.faint) &&
@@ -731,24 +771,24 @@ function matchesStyle(cell: ScreenCell, filter: StyleFilter): boolean {
         optionalEqual(filter.underline, style.underline) &&
         optionalEqual(filter.selected, cell.appearance.selected) &&
         optionalEqual(filter.wideKind, cell.wideKind) &&
-        optionalDeepEqual(sourceForeground, style.foreground) &&
-        optionalDeepEqual(sourceBackground, style.background) &&
+        optionalDeepEqual(parsed.sourceForeground, style.foreground) &&
+        optionalDeepEqual(parsed.sourceBackground, style.background) &&
         optionalDeepEqual(filter.underlineColor, style.underlineColor) &&
-        optionalDeepEqual(resolvedForeground, cell.appearance.resolvedForeground) &&
-        optionalDeepEqual(resolvedBackground, cell.appearance.resolvedBackground)
+        optionalDeepEqual(parsed.resolvedForeground, cell.appearance.resolvedForeground) &&
+        optionalDeepEqual(parsed.resolvedBackground, cell.appearance.resolvedBackground)
     );
 }
 
 /** Return whether every authoritative head cell covered by a match has the style. */
 export function matchHasStyle(match: ScreenMatch, filter: StyleFilter): boolean {
-    validateStyleFilter(filter);
+    const parsedFilter = parseStyleFilter(filter);
     const cells = cellsForMatch(match.frame, match).filter(
         (cell) =>
             cell.wideKind === "narrow" ||
             cell.wideKind === "wide" ||
             filter.wideKind === cell.wideKind,
     );
-    return cells.length > 0 && cells.every((cell) => matchesStyle(cell, filter));
+    return cells.length > 0 && cells.every((cell) => matchesStyle(cell, parsedFilter));
 }
 function optionalEqual<T>(expected: T | undefined, actual: T): boolean {
     return expected === undefined || expected === actual;

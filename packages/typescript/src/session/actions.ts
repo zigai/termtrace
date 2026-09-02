@@ -205,12 +205,21 @@ export function encodeAction(
     });
 }
 
+const controlResultSchema = Object.freeze({
+    parse(input: unknown): ControlResult {
+        if (!validateControlData(input))
+            throw new ProtocolMismatchError("action result does not match the protocol schema");
+        // SAFETY: the generated Ajv validator proved the complete ControlData definition.
+        return input as ControlResult;
+    },
+});
+
 export function parseActionResult(
     input: unknown,
     expectedRequestId: string,
     allowIncomplete: boolean,
 ): ActionResult {
-    const value = parseWireActionResult(input);
+    const value = controlResultSchema.parse(input);
     if (value.kind !== "action_applied")
         throw new ProtocolMismatchError("action response kind is invalid");
     const wireInput = value.input;
@@ -239,7 +248,8 @@ export function parseActionResult(
             quality: wirePostcondition.quality,
         });
     }
-    const atomOutcomes = wireInput.atoms === undefined ? null : wireInput.atoms.map(parseAtomOutcome);
+    const atomOutcomes =
+        wireInput.atoms === undefined ? null : wireInput.atoms.map(parseAtomOutcome);
     const result: ActionResult = Object.freeze({
         requestId: wireInput.sequence_id,
         input: Object.freeze({
@@ -286,7 +296,8 @@ function encodeAtom(
                 caller_intent: callerIntent,
             });
         case "bytes":
-            if (atom.bytes.byteLength === 0) throw new InvalidAtomError("bytes atom must not be empty");
+            if (atom.bytes.byteLength === 0)
+                throw new InvalidAtomError("bytes atom must not be empty");
             return Object.freeze({
                 input: "bytes",
                 operation_id: id,
@@ -373,7 +384,7 @@ function normalizeKey(key: KeyInput): KeyInput {
         case "arrow_down":
         case "arrow_left":
         case "arrow_right":
-        return key;
+            return key;
     }
     if ("function" in key) {
         if (!Number.isSafeInteger(key.function) || key.function < 1 || key.function > 24)
@@ -395,12 +406,6 @@ function operationId(requestId: string, index: number): string {
     return `${prefix}${(BigInt(`0x${tail}`) ^ BigInt(index + 1)).toString(16).padStart(12, "0")}`;
 }
 
-function parseWireActionResult(input: unknown): ControlResult {
-    if (!validateControlData(input))
-        throw new ProtocolMismatchError("action result does not match the protocol schema");
-    // SAFETY: the generated Ajv validator proved the complete ControlData definition.
-    return input as ControlResult;
-}
 type WireActionResult = Extract<ControlResult, { readonly kind: "action_applied" }>;
 type WireAtomOutcome = NonNullable<WireActionResult["input"]["atoms"]>[number];
 type WireBoundaries = WireActionResult["boundaries"];

@@ -14,6 +14,15 @@ import { Locator } from "../src/screen/locator.js";
 import { Screen, Session, type JsonObject } from "../src/index.js";
 import { allOf, evaluateQuery, regionQuery, styleQuery, textQuery } from "../src/screen/queries.js";
 import {
+    expectDriverData,
+    parseDriverResponse,
+    type DriverDataKind,
+    type DriverDataOf,
+    type SessionMethodFields,
+} from "../src/transport/protocol.js";
+import type { DriverRequestOptions } from "../src/transport/driver-client.js";
+import type { SessionDriver } from "../src/session/session.js";
+import {
     ScreenFrame,
     parseScreenFrame,
     type CellStyle,
@@ -321,7 +330,8 @@ describe("lazy locator request accounting", () => {
             .single()
             .catch((cause: unknown) => cause);
         expect(error).toBeInstanceOf(MultipleMatchesError);
-        if (!(error instanceof MultipleMatchesError)) throw new Error("expected MultipleMatchesError");
+        if (!(error instanceof MultipleMatchesError))
+            throw new Error("expected MultipleMatchesError");
         expect(error.stateHash).toBe("ambiguous-state");
         expect(error.ranges[0]?.[0]).toEqual({ row: 0, startColumn: 0, endColumn: 1 });
     });
@@ -331,20 +341,40 @@ describe("Screen rich-frame requests", () => {
     test("forwards historical points and requires requested stability", async () => {
         const frame = frameFor([[{ grapheme: "o" }, { grapheme: "k" }]], "stable-state");
         const wire = wireFrame(frame);
-        const requests: JsonObject[] = [];
+        const requests: Array<Extract<SessionMethodFields, { readonly method: "screen_frame" }>> =
+            [];
         const requestOptions: Array<{ readonly signal?: AbortSignal }> = [];
-        const session = {
-            request(
-                methodFields: JsonObject,
-                expectedKind: string,
-                options: { readonly signal?: AbortSignal } = {},
-            ): Promise<{ readonly frame: JsonObject }> {
-                expect(expectedKind).toBe("screen_frame");
+        const session: ConstructorParameters<typeof Screen>[0] = {
+            completed: false,
+            control(): Promise<never> {
+                return Promise.reject(new Error("control is outside this screen test seam"));
+            },
+            request<Kind extends DriverDataKind>(
+                methodFields: SessionMethodFields,
+                expectedKind: Kind,
+                options: DriverRequestOptions = {},
+            ): Promise<DriverDataOf<Kind>> {
+                if (methodFields.method !== "screen_frame")
+                    throw new Error("screen test received a non-frame request");
                 requests.push(methodFields);
                 requestOptions.push(options);
-                return Promise.resolve({ frame: wire });
+                const requestId = "00000000-0000-0000-0000-000000000012";
+                const response = parseDriverResponse(
+                    {
+                        version: 5,
+                        request_id: requestId,
+                        result: {
+                            status: "ok",
+                            data: { kind: "screen_frame", frame: wire },
+                        },
+                    },
+                    requestId,
+                );
+                if (response._tag === "Failure")
+                    throw new Error("screen test response must be successful");
+                return Promise.resolve(expectDriverData(response.data, expectedKind));
             },
-        } as unknown as Session;
+        };
         const screen = new Screen(session);
 
         const controller = new AbortController();
@@ -397,18 +427,20 @@ describe("Screen rich-frame requests", () => {
         const started = new Promise<void>((resolve) => {
             captureStarted = resolve;
         });
-        const session = {
+        const session: ConstructorParameters<typeof Screen>[0] = {
             completed: false,
             control(): Promise<never> {
                 return Promise.reject(new Error("control is outside this screen test seam"));
             },
-            request(
-                methodFields: JsonObject,
-                expectedKind: string,
-                options: { readonly signal?: AbortSignal } = {},
+            request<Kind extends DriverDataKind>(
+                methodFields: SessionMethodFields,
+                expectedKind: Kind,
+                options: DriverRequestOptions = {},
             ): Promise<never> {
-                expect(methodFields.method).toBe("screen_frame");
-                expect(expectedKind).toBe("screen_frame");
+                expect([methodFields.method, expectedKind]).toEqual([
+                    "screen_frame",
+                    "screen_frame",
+                ]);
                 if (options.signal !== undefined) captureSignals.push(options.signal);
                 captureStarted?.();
                 return new Promise<never>(() => {});
@@ -465,41 +497,49 @@ describe("actions and snapshots", () => {
     test("reuses a generated action ID for the control envelope", async () => {
         const frame = frameFor([[{ grapheme: "x" }]]);
         let envelopeRequestId: string | undefined;
-        const driver = {
-            request(
-                methodFields: JsonObject,
-                expectedKind: string,
-                options: { readonly requestId?: string } = {},
-            ): Promise<{ readonly kind: "control"; readonly data: JsonObject }> {
-                expect(methodFields.method).toBe("control");
-                expect(expectedKind).toBe("control");
-                if (options.requestId === undefined)
+        const driver: SessionDriver = {
+            request(methodFields, expectedKind, options) {
+                expect([methodFields.method, expectedKind]).toEqual(["control", "control"]);
+                if (options?.requestId === undefined)
                     throw new Error("action control request ID was not generated");
                 envelopeRequestId = options.requestId;
-                return Promise.resolve({
-                    kind: "control",
-                    data: {
-                        kind: "action_applied",
-                        boundaries: wireBoundaries,
-                        input: {
-                            sequence_id: options.requestId,
-                            atom_count: 1,
-                            bytes_written: 1,
-                            first_intent_event_seq: 1,
-                            last_result_event_seq: 2,
-                            pace_ns: 0,
-                        },
-                        postcondition: {
-                            kind: "none",
-                            matched: true,
-                            frame: wireFrame(frame),
+                const response = parseDriverResponse(
+                    {
+                        version: 5,
+                        request_id: options.requestId,
+                        result: {
+                            status: "ok",
+                            data: {
+                                kind: "control",
+                                data: {
+                                    kind: "action_applied",
+                                    boundaries: wireBoundaries,
+                                    input: {
+                                        sequence_id: options.requestId,
+                                        atom_count: 1,
+                                        bytes_written: 1,
+                                        first_intent_event_seq: 1,
+                                        last_result_event_seq: 2,
+                                        pace_ns: 0,
+                                    },
+                                    postcondition: {
+                                        kind: "none",
+                                        matched: true,
+                                        frame: wireFrame(frame),
+                                    },
+                                },
+                            },
                         },
                     },
-                });
+                    options.requestId,
+                );
+                if (response._tag === "Failure")
+                    throw new Error("action test response must be successful");
+                return Promise.resolve(expectDriverData(response.data, expectedKind));
             },
         };
         const session = new Session(
-            driver as never,
+            driver,
             {
                 canonical_session: "/tmp/action.termtrace",
                 completed: false,

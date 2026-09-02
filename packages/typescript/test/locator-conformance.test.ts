@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { Ajv } from "ajv";
+import { parseJson } from "ajv/dist/runtime/parseJson.js";
 import { expect, test } from "bun:test";
 import { Duration } from "../src/session/actions.js";
 import {
@@ -23,6 +25,7 @@ import {
     type StyleFilter,
 } from "../src/screen/queries.js";
 import { parseScreenFrame, ScreenFrame, type ScreenAppearance } from "../src/screen/frame.js";
+import type { JsonObject, JsonValue } from "../src/index.js";
 
 const fixturePath = join(import.meta.dir, "../../../fixtures/conformance/locators/locator.json");
 type MutableStyleFilter = { -readonly [Key in keyof StyleFilter]: StyleFilter[Key] };
@@ -30,70 +33,191 @@ type NormalizedMatch = {
     readonly text: string;
     readonly ranges: ReadonlyArray<readonly [number, number, number]>;
 };
+type FixtureQuery =
+    | {
+          readonly kind: "text";
+          readonly value: string;
+          readonly exact?: boolean;
+          readonly cross_soft_wraps?: boolean;
+      }
+    | { readonly kind: "regex"; readonly pattern: string }
+    | { readonly kind: "style"; readonly bold?: boolean; readonly resolved_background?: string }
+    | { readonly kind: "row"; readonly row: number }
+    | {
+          readonly kind: "region";
+          readonly top: number;
+          readonly left: number;
+          readonly width: number;
+          readonly height: number;
+      }
+    | { readonly kind: "all"; readonly specs: FixtureQuery[] };
+type FixtureFrame = JsonObject & {
+    readonly data: JsonObject & { readonly rows: JsonObject[] };
+};
+type FixtureCase = {
+    readonly name: string;
+    readonly query: FixtureQuery;
+    readonly matches?: NormalizedMatch[];
+    readonly error?: "invalid_query";
+};
+type LocatorCorpus = {
+    readonly version: number;
+    readonly frame: FixtureFrame;
+    readonly cases: FixtureCase[];
+};
 
-function record(value: unknown): Readonly<Record<string, unknown>> {
-    if (typeof value !== "object" || value === null || Array.isArray(value))
-        throw new TypeError("fixture value must be an object");
-    return Object.fromEntries(Object.entries(value));
-}
+const querySchema = {
+    oneOf: [
+        {
+            type: "object",
+            required: ["kind", "value"],
+            properties: {
+                kind: { const: "text" },
+                value: { type: "string" },
+                exact: { type: "boolean" },
+                cross_soft_wraps: { type: "boolean" },
+            },
+            additionalProperties: false,
+        },
+        {
+            type: "object",
+            required: ["kind", "pattern"],
+            properties: { kind: { const: "regex" }, pattern: { type: "string" } },
+            additionalProperties: false,
+        },
+        {
+            type: "object",
+            required: ["kind"],
+            properties: {
+                kind: { const: "style" },
+                bold: { type: "boolean" },
+                resolved_background: { type: "string" },
+            },
+            additionalProperties: false,
+        },
+        {
+            type: "object",
+            required: ["kind", "row"],
+            properties: { kind: { const: "row" }, row: { type: "integer" } },
+            additionalProperties: false,
+        },
+        {
+            type: "object",
+            required: ["kind", "top", "left", "width", "height"],
+            properties: {
+                kind: { const: "region" },
+                top: { type: "integer" },
+                left: { type: "integer" },
+                width: { type: "integer" },
+                height: { type: "integer" },
+            },
+            additionalProperties: false,
+        },
+        {
+            type: "object",
+            required: ["kind", "specs"],
+            properties: {
+                kind: { const: "all" },
+                specs: { type: "array", items: { $ref: "#/$defs/query" } },
+            },
+            additionalProperties: false,
+        },
+    ],
+};
+const validateCorpus = new Ajv().compile<LocatorCorpus>({
+    type: "object",
+    required: ["version", "frame", "cases"],
+    additionalProperties: false,
+    properties: {
+        version: { const: 1 },
+        frame: {
+            type: "object",
+            required: ["data"],
+            properties: {
+                data: {
+                    type: "object",
+                    required: ["rows"],
+                    properties: {
+                        rows: { type: "array", items: { type: "object" } },
+                    },
+                    additionalProperties: true,
+                },
+            },
+            additionalProperties: true,
+        },
+        cases: {
+            type: "array",
+            items: {
+                type: "object",
+                required: ["name", "query"],
+                properties: {
+                    name: { type: "string" },
+                    query: { $ref: "#/$defs/query" },
+                    matches: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            required: ["text", "ranges"],
+                            additionalProperties: false,
+                            properties: {
+                                text: { type: "string" },
+                                ranges: {
+                                    type: "array",
+                                    items: {
+                                        type: "array",
+                                        minItems: 3,
+                                        maxItems: 3,
+                                        items: { type: "integer" },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    error: { const: "invalid_query" },
+                },
+                additionalProperties: false,
+            },
+        },
+    },
+    $defs: { query: querySchema },
+});
+const fixtureJson = parseJson(readFileSync(fixturePath, "utf8"), 0);
+if (!validateCorpus(fixtureJson)) throw new TypeError("locator corpus does not match its schema");
+const corpus = fixtureJson;
 
-function string(value: unknown): string {
-    if (typeof value !== "string") throw new TypeError("fixture value must be a string");
-    return value;
-}
-
-function integer(value: unknown): number {
-    if (typeof value !== "number" || !Number.isSafeInteger(value))
-        throw new TypeError("fixture value must be an integer");
-    return value;
-}
-
-function boolean(value: unknown, fallback: boolean): boolean {
-    if (value === undefined) return fallback;
-    if (typeof value !== "boolean") throw new TypeError("fixture value must be a boolean");
-    return value;
-}
-
-function spec(value: unknown): LocatorSpec {
-    const query = record(value);
-    const kind = string(query.kind);
-    if (kind === "text") {
-        return textQuery(string(query.value), {
-            exact: boolean(query.exact, false),
-            crossSoftWrap: boolean(query.cross_soft_wraps, false),
+function spec(query: FixtureQuery): LocatorSpec {
+    if (query.kind === "text") {
+        return textQuery(query.value, {
+            exact: query.exact ?? false,
+            crossSoftWrap: query.cross_soft_wraps ?? false,
         });
     }
-    if (kind === "regex") return textQuery(new RegExp(string(query.pattern)));
-    if (kind === "style") {
-        const bold = query.bold;
-        const resolvedBackground = query.resolved_background;
-        if (bold !== undefined && typeof bold !== "boolean")
-            throw new TypeError("fixture bold value must be a boolean");
-        if (resolvedBackground !== undefined && typeof resolvedBackground !== "string")
-            throw new TypeError("fixture background must be a string");
+    if (query.kind === "regex") return textQuery(new RegExp(query.pattern));
+    if (query.kind === "style") {
         const filter: MutableStyleFilter = {};
-        if (bold !== undefined) filter.bold = bold;
-        if (resolvedBackground !== undefined)
-            filter.resolvedBackground = parseHexColor(resolvedBackground);
+        if (query.bold !== undefined) filter.bold = query.bold;
+        if (query.resolved_background !== undefined)
+            filter.resolvedBackground = parseHexColor(query.resolved_background);
         return styleQuery(filter);
     }
-    if (kind === "row") return rowQuery(integer(query.row));
-    if (kind === "region") {
+    if (query.kind === "row") return rowQuery(query.row);
+    if (query.kind === "region") {
         return regionQuery({
-            top: integer(query.top),
-            left: integer(query.left),
-            width: integer(query.width),
-            height: integer(query.height),
+            top: query.top,
+            left: query.left,
+            width: query.width,
+            height: query.height,
         });
     }
-    if (kind === "all") {
-        if (!Array.isArray(query.specs)) throw new TypeError("fixture specs must be an array");
-        return allOf(...query.specs.map(spec));
-    }
-    throw new TypeError(`unknown fixture query kind ${kind}`);
+    if (query.kind === "all") return allOf(...query.specs.map(spec));
+    const exhaustive: never = query;
+    throw new TypeError(`unknown fixture query ${String(exhaustive)}`);
 }
 
-function normalizedMatches(frame: ScreenFrame, query: unknown): ReadonlyArray<NormalizedMatch> {
+function normalizedMatches(
+    frame: ScreenFrame,
+    query: FixtureQuery,
+): ReadonlyArray<NormalizedMatch> {
     return evaluateQuery(frame, spec(query)).map((match) => {
         expect(match.frame).toBe(frame);
         expect(match.stateHash).toBe("fixture-state-v1");
@@ -102,7 +226,9 @@ function normalizedMatches(frame: ScreenFrame, query: unknown): ReadonlyArray<No
         expect(match.query.length).toBeLessThanOrEqual(240);
         return {
             text: match.text,
-            ranges: match.ranges.map((range) => [range.row, range.startColumn, range.endColumn] as const),
+            ranges: match.ranges.map(
+                (range) => [range.row, range.startColumn, range.endColumn] as const,
+            ),
         };
     });
 }
@@ -115,28 +241,21 @@ function parseHexColor(value: string): `#${string}` {
 }
 
 function fixtureFrame(): ScreenFrame {
-    const payload: unknown = JSON.parse(readFileSync(fixturePath, "utf8"));
-    return parseScreenFrame(record(payload).frame);
+    return parseScreenFrame(corpus.frame);
 }
 
 function textOnlyFixtureFrame(): ScreenFrame {
-    const payload: unknown = JSON.parse(readFileSync(fixturePath, "utf8"));
-    const frame = record(record(payload).frame);
-    const data = record(frame.data);
-    if (!Array.isArray(data.rows)) throw new TypeError("fixture rows must be an array");
+    const frame = corpus.frame;
     return parseScreenFrame({
         ...frame,
         data: {
             detail: "text",
-            rows: data.rows.map((value) => {
-                const row = record(value);
-                return {
-                    row: row.row,
-                    soft_wrapped: row.soft_wrapped,
-                    wrap_continuation: row.wrap_continuation,
-                    text: row.text,
-                };
-            }),
+            rows: frame.data.rows.map((row) => ({
+                row: row.row,
+                soft_wrapped: row.soft_wrapped,
+                wrap_continuation: row.wrap_continuation,
+                text: row.text,
+            })),
         },
     });
 }
@@ -182,33 +301,35 @@ function literalFrame(text: string): ScreenFrame {
         ],
     );
 }
+function malformedStyleFilter(
+    ...properties: ReadonlyArray<readonly [string, JsonValue | undefined]>
+): StyleFilter {
+    const filter: MutableStyleFilter = {};
+    for (const [name, value] of properties) {
+        Object.defineProperty(filter, name, { value, enumerable: true });
+    }
+    return filter;
+}
 
 test("shared locator conformance corpus matches public contract", () => {
-    const payload: unknown = JSON.parse(readFileSync(fixturePath, "utf8"));
-    const corpus = record(payload);
     expect(corpus.version).toBe(1);
     const frame = parseScreenFrame(corpus.frame);
     expect(frame.presented).toBe(false);
     expect(frame.captureQuality).toBe("incomplete");
-    if (!Array.isArray(corpus.cases)) throw new TypeError("fixture cases must be an array");
 
-    for (const value of corpus.cases) {
-        const testCase = record(value);
+    for (const testCase of corpus.cases) {
         if (testCase.error === "invalid_query") {
             expect(() => normalizedMatches(frame, testCase.query)).toThrow(InvalidQueryError);
             continue;
         }
         expect(testCase.error).toBeUndefined();
-        if (!Array.isArray(testCase.matches)) throw new TypeError("fixture matches must be an array");
-        expect(normalizedMatches(frame, testCase.query), string(testCase.name)).toEqual(
-            testCase.matches,
-        );
+        if (testCase.matches === undefined) throw new TypeError("fixture matches must be an array");
+        expect(normalizedMatches(frame, testCase.query), testCase.name).toEqual(testCase.matches);
     }
 });
 
 test("runner-neutral assertions are strict and evidence-bound", () => {
-    const payload: unknown = JSON.parse(readFileSync(fixturePath, "utf8"));
-    const frame = parseScreenFrame(record(payload).frame);
+    const frame = parseScreenFrame(corpus.frame);
     const error = assertScreenMatch(frame, textQuery("ERROR"));
     assertMatchStyle(error, { bold: true });
     expect(() => assertMatchStyle(error, { bold: false })).toThrow();
@@ -221,22 +342,23 @@ test("runner-neutral assertions are strict and evidence-bound", () => {
 });
 
 test("style filters reject unknown and malformed runtime fields", () => {
-    const invalid: unknown[] = [
-        { bld: true },
-        { bold: undefined },
-        { bold: true, bld: true },
-        { bold: "yes" },
-        { underline: 1.5 },
-        { wideKind: "wide_tail" },
-        { foreground: { kind: "none", value: 1 } },
-        { foreground: { kind: "palette", value: 256 } },
-        { foreground: { kind: "rgb", value: { r: 0, g: 0, b: 300 } } },
-        { underlineColor: "#ffffff" },
-        { resolvedForeground: { r: 0, g: 0 } },
-        { resolvedBackground: { r: 0, g: 0, b: 0, alpha: 1 } },
+    const invalid: StyleFilter[] = [
+        malformedStyleFilter(["bld", true]),
+        malformedStyleFilter(["bold", undefined]),
+        malformedStyleFilter(["bold", true], ["bld", true]),
+        malformedStyleFilter(["bold", "yes"]),
+        malformedStyleFilter(["underline", 1.5]),
+        malformedStyleFilter(["wideKind", "wide_tail"]),
+        malformedStyleFilter(["foreground", { kind: "none", value: 1 }]),
+        malformedStyleFilter(["foreground", { kind: "palette", value: 256 }]),
+        malformedStyleFilter(["foreground", { kind: "rgb", value: { r: 0, g: 0, b: 300 } }]),
+        malformedStyleFilter(["underlineColor", "#ffffff"]),
+        malformedStyleFilter(["resolvedForeground", { r: 0, g: 0 }]),
+        malformedStyleFilter(["resolvedBackground", { r: 0, g: 0, b: 0, alpha: 1 }]),
     ];
-    for (const filter of invalid)
-        expect(() => styleQuery(filter as never)).toThrow(InvalidQueryError);
+    for (const filter of invalid) {
+        expect(() => styleQuery(filter)).toThrow(InvalidQueryError);
+    }
 
     expect(() =>
         styleQuery({

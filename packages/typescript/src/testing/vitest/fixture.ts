@@ -83,7 +83,8 @@ export function createTerminalTest(options: CreateTerminalTestOptions): Terminal
                     if (finalized) return;
                     finalized = true;
                     const frameworkReportedFailure = finishedContext.task.result?.state === "fail";
-                    const bodyFailed = frameworkReportedFailure || primaryWasCaught || signal.aborted;
+                    const bodyFailed =
+                        frameworkReportedFailure || primaryWasCaught || signal.aborted;
                     if (signal.aborted && !primaryWasCaught) {
                         primaryWasCaught = true;
                         primaryFailure = signal.reason;
@@ -123,7 +124,7 @@ async function resolveLaunch(
     launch: CreateTerminalTestOptions["launch"],
     taskIdentity: TerminalTestTask,
 ): Promise<TerminalLaunchOptions> {
-    const resolved = typeof launch === "function" ? await launch({ task: taskIdentity }) : launch;
+    const resolved = launch instanceof Function ? await launch({ task: taskIdentity }) : launch;
     if (resolved.command.length === 0) {
         throw new TypeError("terminal test launch command must not be empty");
     }

@@ -9,13 +9,13 @@ import {
     encodeDriverRequest,
     expectDriverData,
     parseDriverResponse,
-    parseJsonObject,
     TermtraceOperationError,
     TermtraceProtocolError,
     type DriverData,
     type DriverDataKind,
     type DriverDataOf,
-    type JsonObject,
+    type DriverMethod,
+    type JsonValue,
 } from "./protocol.js";
 
 const PROCESS_TREE_TERMINATION_GRACE_MS = 1_000;
@@ -68,7 +68,7 @@ export class DriverClient {
     }
 
     request<Kind extends DriverDataKind>(
-        method: JsonObject,
+        method: DriverMethod,
         expectedKind: Kind,
         options: DriverRequestOptions = {},
     ): Promise<DriverDataOf<Kind>> {
@@ -87,6 +87,12 @@ export class DriverClient {
         const requestId = options.requestId ?? randomUUID();
         const timeoutMs = options.timeoutMs;
         const signal = options.signal;
+        let encodedRequest: string;
+        try {
+            encodedRequest = encodeDriverRequest(method, requestId);
+        } catch (cause: unknown) {
+            return Promise.reject(cause);
+        }
         return new Promise<DriverDataOf<Kind>>((resolve, reject) => {
             const accept = (data: DriverData): void => {
                 try {
@@ -115,7 +121,7 @@ export class DriverClient {
                 timer,
                 abortSubscription,
             });
-            this.#process.stdin.write(`${encodeDriverRequest(method, requestId)}\n`);
+            this.#process.stdin.write(`${encodedRequest}\n`);
         });
     }
 
@@ -143,7 +149,9 @@ export class DriverClient {
                 ? new Promise<void>((resolve) => this.#process.once("exit", () => resolve()))
                 : Promise.resolve();
         this.#signalProcessTree("SIGTERM");
-        await new Promise<void>((resolve) => setTimeout(resolve, PROCESS_TREE_TERMINATION_GRACE_MS));
+        await new Promise<void>((resolve) =>
+            setTimeout(resolve, PROCESS_TREE_TERMINATION_GRACE_MS),
+        );
         if (process.platform !== "win32" || this.#process.exitCode === null) {
             this.#signalProcessTree("SIGKILL");
         }
@@ -174,7 +182,7 @@ export class DriverClient {
         }
         this.#clearPendingGuards(pending);
         try {
-            const input: unknown = JSON.parse(line);
+            const input: JsonValue = JSON.parse(line);
             const response = parseDriverResponse(input, pending.requestId);
             if (response._tag === "Failure") {
                 pending.reject(new TermtraceOperationError(response.failure));
@@ -202,8 +210,4 @@ export class DriverClient {
         clearTimeout(pending.timer);
         pending.abortSubscription?.[Symbol.dispose]();
     }
-}
-
-export function method(fields: unknown): JsonObject {
-    return parseJsonObject(fields);
 }

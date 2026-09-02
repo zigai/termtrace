@@ -1,5 +1,5 @@
-import { DriverClient, method } from "./transport/driver-client.js";
-import type { JsonObject, JsonValue } from "./transport/protocol.js";
+import { DriverClient } from "./transport/driver-client.js";
+import type { DriverMethodOf } from "./transport/protocol.js";
 import { Session } from "./session/session.js";
 
 export type TermtraceOptions = {
@@ -39,7 +39,7 @@ export class Termtrace implements AsyncDisposable {
         const driver = new DriverClient(
             options.binaryPath ?? process.env.TERMTRACE_BINARY ?? "termtrace",
         );
-        await driver.request(method({ method: "hello" }), "hello");
+        await driver.request({ method: "hello" }, "hello");
         return new Termtrace(driver, options.evidenceRoot);
     }
 
@@ -51,7 +51,7 @@ export class Termtrace implements AsyncDisposable {
         const viewport = options.viewport ?? { cols: 160, rows: 45 };
         const command = options.command.map((argument) => Buffer.from(argument).toString("base64"));
         const data = await this.#driver.request(
-            method({
+            {
                 method: "launch",
                 evidence_root: evidenceRoot,
                 command,
@@ -62,14 +62,14 @@ export class Termtrace implements AsyncDisposable {
                 resource_limits: {
                     output_bytes: options.outputByteBudget ?? null,
                 },
-            }),
+            },
             "attached",
         );
         return new Session(this.#driver, data, true, options.evidence ?? "always");
     }
 
     async attach(session: string): Promise<Session> {
-        const data = await this.#driver.request(method({ method: "attach", session }), "attached");
+        const data = await this.#driver.request({ method: "attach", session }, "attached");
         return new Session(this.#driver, data, false, "manual");
     }
 
@@ -81,9 +81,10 @@ export class Termtrace implements AsyncDisposable {
         await this.close();
     }
 }
+type EnvironmentSpec = NonNullable<DriverMethodOf<"launch">["environment"]>;
 
-function encodeEnvironment(options: EnvironmentOptions | undefined): JsonObject {
-    const set: Record<string, JsonValue> = {};
+function encodeEnvironment(options: EnvironmentOptions | undefined): EnvironmentSpec {
+    const set: Record<string, string> = {};
     for (const [name, value] of Object.entries(options?.set ?? {})) {
         const bytes = Buffer.from(value);
         set[name] = bytes.toString("base64");

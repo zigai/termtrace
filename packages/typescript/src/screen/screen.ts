@@ -11,15 +11,16 @@ import {
     type StatePoint,
     type ScreenFrame,
 } from "./frame.js";
-import { method, type DriverRequestOptions } from "../transport/driver-client.js";
+import type { DriverRequestOptions } from "../transport/driver-client.js";
 import {
     TermtraceProtocolError,
     type Artifact,
     type ControlResult,
+    type ControlCommand,
     type DriverDataKind,
     type DriverDataOf,
-    type JsonObject,
     type ScreenPredicate,
+    type SessionMethodFields,
 } from "../transport/protocol.js";
 import {
     exactWireInteger,
@@ -29,9 +30,9 @@ import {
 
 type ScreenSession = {
     readonly completed: boolean;
-    control(command: JsonObject): Promise<ControlResult>;
+    control(command: ControlCommand): Promise<ControlResult>;
     request<Kind extends DriverDataKind>(
-        methodFields: JsonObject,
+        methodFields: SessionMethodFields,
         expectedKind: Kind,
         options?: DriverRequestOptions,
     ): Promise<DriverDataOf<Kind>>;
@@ -150,15 +151,13 @@ export class Screen {
     ): Promise<ScreenWait> {
         const timeoutMs = nonnegativeDuration(options.timeoutMs ?? 10_000, "timeoutMs");
         const stableForMs = nonnegativeDuration(options.stableForMs ?? 0, "stableForMs");
-        const data = await this.session.control(
-            method({
-                command: "wait_screen",
-                predicate,
-                stable_for_ns: millisecondsToNanoseconds(stableForMs, "stableForMs"),
-                timeout_ns: millisecondsToNanoseconds(timeoutMs, "timeoutMs"),
-                projection: encodeFrameRequest(),
-            }),
-        );
+        const data = await this.session.control({
+            command: "wait_screen",
+            predicate,
+            stable_for_ns: millisecondsToNanoseconds(stableForMs, "stableForMs"),
+            timeout_ns: millisecondsToNanoseconds(timeoutMs, "timeoutMs"),
+            projection: encodeFrameRequest(),
+        });
         if (data.kind !== "screen_wait")
             throw new TermtraceProtocolError("screen wait response has an invalid kind");
         const observed = exactWireInteger(data.observed_monotonic_ns, "screen wait observed time");
@@ -167,7 +166,12 @@ export class Screen {
             data.first_match_monotonic_ns === null || data.first_match_monotonic_ns === undefined
                 ? null
                 : Duration.nanoseconds(
-                        BigInt(exactWireInteger(data.first_match_monotonic_ns, "screen wait first match time")),
+                      BigInt(
+                          exactWireInteger(
+                              data.first_match_monotonic_ns,
+                              "screen wait first match time",
+                          ),
+                      ),
                   );
         return Object.freeze({
             predicate,
@@ -202,14 +206,12 @@ export class Screen {
                 frame: await this.frame(options.frame ?? {}),
             });
         }
-        const data = await this.session.control(
-            method({
-                command: "capture_stable",
-                stable_for_ns: options.stableFor.toWireNumber("stableFor"),
-                timeout_ns: options.timeout.toWireNumber("timeout"),
-                projection: encodeFrameRequest(options.frame),
-            }),
-        );
+        const data = await this.session.control({
+            command: "capture_stable",
+            stable_for_ns: options.stableFor.toWireNumber("stableFor"),
+            timeout_ns: options.timeout.toWireNumber("timeout"),
+            projection: encodeFrameRequest(options.frame),
+        });
         if (data.kind !== "stable_snapshot")
             throw new TermtraceProtocolError("stable capture response has an invalid kind");
         const first = exactWireInteger(

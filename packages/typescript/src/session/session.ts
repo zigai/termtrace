@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { DriverClient, method, type DriverRequestOptions } from "../transport/driver-client.js";
+import type { DriverRequestOptions } from "../transport/driver-client.js";
 import {
     Duration,
     encodeAction,
@@ -28,16 +28,18 @@ import {
     type Artifact,
     type BundleResult,
     type ControlResult,
+    type ControlCommand,
     type DiagnoseReport,
     type DriverDataKind,
+    type DriverMethod,
     type DriverDataOf,
+    type DriverMethodOf,
     type EventPage,
-    type JsonObject,
-    type JsonValue,
     type Observation,
     type SemanticDiff,
     type SessionCompletion,
     type TimelinePage,
+    type SessionMethodFields,
     type VerificationReport,
     type WaitOutcome,
 } from "../transport/protocol.js";
@@ -57,6 +59,8 @@ export type MutationOptions = {
 
 export type KeyboardAtom = InputAtom;
 
+export type Key = Extract<ControlCommand, { readonly command: "key" }>["key"];
+export type DiagnosticCheck = DriverMethodOf<"diagnose">["checks"][number];
 export type InputSequenceOptions = MutationOptions & {
     readonly paceMs?: number;
     readonly verbose?: boolean;
@@ -66,9 +70,16 @@ export type WaitOptions = {
     readonly stableForMs?: number;
     readonly signal?: AbortSignal;
 };
+export type SessionDriver = {
+    request<Kind extends DriverDataKind>(
+        method: DriverMethod,
+        expectedKind: Kind,
+        options?: DriverRequestOptions,
+    ): Promise<DriverDataOf<Kind>>;
+};
 
 type ControlSession = {
-    control(command: JsonObject, options?: MutationOptions): Promise<ControlResult>;
+    control(command: ControlCommand, options?: MutationOptions): Promise<ControlResult>;
 };
 
 type SessionIdentity = DriverDataOf<"attached">;
@@ -94,7 +105,7 @@ export class Session implements AsyncDisposable {
     readonly evidence: Evidence;
     readonly sessionId: string;
     readonly canonicalSession: string;
-    readonly #driver: DriverClient;
+    readonly #driver: SessionDriver;
     readonly #handle: string;
     readonly #owned: boolean;
     readonly #evidencePolicy: "always" | "on-failure" | "manual";
@@ -102,7 +113,7 @@ export class Session implements AsyncDisposable {
     #completed = false;
 
     constructor(
-        driver: DriverClient,
+        driver: SessionDriver,
         identity: SessionIdentity,
         owned: boolean,
         evidencePolicy: "always" | "on-failure" | "manual",
@@ -127,8 +138,8 @@ export class Session implements AsyncDisposable {
         return this.#completed;
     }
 
-    async control(command: JsonObject, options: MutationOptions = {}): Promise<ControlResult> {
-        const expectedState: JsonValue = options.ifState ?? null;
+    async control(command: ControlCommand, options: MutationOptions = {}): Promise<ControlResult> {
+        const expectedState = options.ifState ?? null;
         try {
             const requestOptions: DriverRequestOptionsBuilder = {};
             if (options.requestId !== undefined) requestOptions.requestId = options.requestId;
@@ -136,12 +147,12 @@ export class Session implements AsyncDisposable {
                 requestOptions.timeoutMs = options.requestTimeoutMs;
             if (options.signal !== undefined) requestOptions.signal = options.signal;
             const result = await this.#driver.request(
-                method({
+                {
                     method: "control",
                     handle: this.#handle,
                     command,
                     expected_presented_state_hash: expectedState,
-                }),
+                },
                 "control",
                 requestOptions,
             );
@@ -157,12 +168,16 @@ export class Session implements AsyncDisposable {
                 );
             }
             if (failure.code === "action_busy") throw new ActionBusyError(failure.message);
-            if (failure.code === "input_sequence_busy") throw new InputSequenceBusyError(failure.message);
+            if (failure.code === "input_sequence_busy")
+                throw new InputSequenceBusyError(failure.message);
             if (failure.code === "invalid_atom") throw new InvalidAtomError(failure.message);
-            if (failure.code === "invalid_duration") throw new InvalidDurationError(failure.message);
+            if (failure.code === "invalid_duration")
+                throw new InvalidDurationError(failure.message);
             if (failure.code === "invalid_query") throw new InvalidQueryError(failure.message);
-            if (failure.code === "invalid_screen_region") throw new InvalidRegionError(failure.message);
-            if (failure.code === "protocol_mismatch") throw new ProtocolMismatchError(failure.message);
+            if (failure.code === "invalid_screen_region")
+                throw new InvalidRegionError(failure.message);
+            if (failure.code === "protocol_mismatch")
+                throw new ProtocolMismatchError(failure.message);
             if (
                 failure.code === "input_sequence_incomplete" &&
                 failure.details?.input_sequence !== undefined &&
@@ -193,7 +208,7 @@ export class Session implements AsyncDisposable {
     }
     async act(atoms: ReadonlyArray<InputAtom>, options: ActionOptions = {}): Promise<ActionResult> {
         const encoded = encodeAction(atoms, options);
-        const data = await this.control(method(encoded.command), {
+        const data = await this.control(encoded.command, {
             ...options,
             requestId: encoded.requestId,
         });
@@ -201,12 +216,12 @@ export class Session implements AsyncDisposable {
     }
 
     request<Kind extends DriverDataKind>(
-        methodFields: JsonObject,
+        methodFields: SessionMethodFields,
         expectedKind: Kind,
         options: DriverRequestOptions = {},
     ): Promise<DriverDataOf<Kind>> {
         return this.#driver.request(
-            method({ ...methodFields, handle: this.#handle }),
+            { ...methodFields, handle: this.#handle },
             expectedKind,
             options,
         );
@@ -214,7 +229,7 @@ export class Session implements AsyncDisposable {
 
     async completion(): Promise<SessionCompletion> {
         const result = await this.#driver.request(
-            method({ method: "completion", handle: this.#handle }),
+            { method: "completion", handle: this.#handle },
             "completion",
         );
         this.#completed = true;
@@ -223,7 +238,7 @@ export class Session implements AsyncDisposable {
 
     async complete(timeoutMs: number, requestTimeoutMs?: number): Promise<SessionCompletion> {
         const result = await this.#driver.request(
-            method({ method: "complete", handle: this.#handle, timeout_ms: timeoutMs }),
+            { method: "complete", handle: this.#handle, timeout_ms: timeoutMs },
             "completion",
             requestTimeoutMs === undefined ? {} : { timeoutMs: requestTimeoutMs },
         );
@@ -233,12 +248,12 @@ export class Session implements AsyncDisposable {
 
     async waitForOutput(data: Uint8Array, timeoutMs: number): Promise<WaitOutcome> {
         const result = await this.#driver.request(
-            method({
+            {
                 method: "wait_output",
                 handle: this.#handle,
                 data: Buffer.from(data).toString("base64"),
                 timeout_ms: timeoutMs,
-            }),
+            },
             "output_wait",
         );
         return result.outcome;
@@ -276,7 +291,7 @@ export class Session implements AsyncDisposable {
         if (this.#owned && this.#evidencePolicy !== "manual") {
             await this.#ensureCompleted();
         }
-        await this.#driver.request(method({ method: "detach", handle: this.#handle }), "detached");
+        await this.#driver.request({ method: "detach", handle: this.#handle }, "detached");
         this.#closed = true;
     }
 
@@ -288,13 +303,13 @@ export class Session implements AsyncDisposable {
         await this.#ensureCompleted();
         if (passed && this.#evidencePolicy === "on-failure") {
             await this.#driver.request(
-                method({ method: "discard_completed", handle: this.#handle }),
+                { method: "discard_completed", handle: this.#handle },
                 "discarded",
             );
             this.#closed = true;
             return;
         }
-        await this.#driver.request(method({ method: "detach", handle: this.#handle }), "detached");
+        await this.#driver.request({ method: "detach", handle: this.#handle }, "detached");
         this.#closed = true;
     }
 
@@ -316,13 +331,12 @@ export class Session implements AsyncDisposable {
 export class Keyboard {
     constructor(private readonly session: ControlSession) {}
 
-    press(key: string, options: MutationOptions = {}): Promise<ControlResult> {
+    press(key: Key, options: MutationOptions = {}): Promise<ControlResult> {
         return this.session.control(
             {
                 command: "key",
                 key,
                 modifiers: { shift: false, control: false, alt: false, super_key: false },
-                caller_intent: options.callerIntent ?? null,
             },
             options,
         );
@@ -337,7 +351,6 @@ export class Keyboard {
             {
                 command: "paste",
                 data: Buffer.from(text).toString("base64"),
-                caller_intent: options.callerIntent ?? null,
             },
             options,
         );
@@ -366,19 +379,21 @@ export class Keyboard {
         const requestId = options.requestId ?? randomUUID();
         const pace = Duration.milliseconds(options.paceMs ?? 0);
         if (pace.nanoseconds * BigInt(atoms.length) > 60_000_000_000n) {
-            throw new InvalidDurationError("total input sequence pacing must not exceed 60 seconds");
+            throw new InvalidDurationError(
+                "total input sequence pacing must not exceed 60 seconds",
+            );
         }
         const actionOptions: SequenceActionOptionsBuilder = { requestId, pace };
         if (options.callerIntent !== undefined) actionOptions.callerIntent = options.callerIntent;
         if (options.verbose !== undefined) actionOptions.verboseAtomOutcomes = options.verbose;
         const encoded = encodeAction(atoms, actionOptions);
         return this.session.control(
-            method({
+            {
                 command: "input_sequence",
                 atoms: encoded.command.atoms,
                 pace_ns: pace.toWireNumber("paceMs"),
                 include_atom_outcomes: options.verbose ?? false,
-            }),
+            },
             { ...options, requestId },
         );
     }
@@ -522,7 +537,7 @@ export class Semantic {
     }
 
     async diagnose(
-        checks: ReadonlyArray<string> = [],
+        checks: ReadonlyArray<DiagnosticCheck> = [],
         broadChangePercent = 50,
     ): Promise<DiagnoseReport> {
         const result = await this.session.request(

@@ -179,9 +179,18 @@ export function encodeFrameRequest(
     } satisfies ScreenProjectionRequest);
 }
 
+const wireScreenFrameSchema = Object.freeze({
+    parse(input: unknown): WireScreenFrame {
+        if (!validateScreenFrame(input))
+            throw new ProtocolMismatchError("screen frame does not match the protocol schema");
+        // SAFETY: the generated Ajv validator proved the complete ScreenFrame definition.
+        return input as WireScreenFrame;
+    },
+});
+
 /** Parse a generated rich-frame DTO and project it into the immutable domain model. */
 export function parseScreenFrame(input: unknown): ScreenFrame {
-    const frame = parseWireScreenFrame(input);
+    const frame = wireScreenFrameSchema.parse(input);
     if (frame.version !== 1)
         throw new ProtocolMismatchError(`unsupported screen frame version ${frame.version}`);
     if (frame.geometry.cols === 0 || frame.geometry.rows === 0)
@@ -214,13 +223,6 @@ export function parseScreenFrame(input: unknown): ScreenFrame {
         parseColors(frame.colors),
         rows,
     );
-}
-
-function parseWireScreenFrame(input: unknown): WireScreenFrame {
-    if (!validateScreenFrame(input))
-        throw new ProtocolMismatchError("screen frame does not match the protocol schema");
-    // SAFETY: the generated Ajv validator proved the complete ScreenFrame definition.
-    return input as WireScreenFrame;
 }
 
 function parseRows(data: WireScreenFrame["data"], region: Region): ReadonlyArray<ScreenRow> {
