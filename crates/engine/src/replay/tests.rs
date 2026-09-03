@@ -1,5 +1,6 @@
 use std::str::from_utf8;
 
+use proptest::{collection, prelude::*};
 use uuid::Uuid;
 use zstd::stream::decode_all;
 
@@ -180,9 +181,9 @@ fn replay_enforces_output_and_capture_work_budgets() {
 
 #[test]
 fn validated_checkpoint_seed_skips_long_session_canonical_output_prefix() {
-    let data = vec![b'x'; 16 * 1_024];
+    let data = vec![b'x'; 2 * 1_024];
     let log = output_log(&data);
-    let checkpoint_offset = 12 * 1_024;
+    let checkpoint_offset = 1_024;
     let mut seed = None;
     replay_with(&log, None, |record, state, engine| {
         if record.event_byte_offset == Some(checkpoint_offset) {
@@ -191,7 +192,9 @@ fn validated_checkpoint_seed_skips_long_session_canonical_output_prefix() {
                     record,
                     state: state.clone(),
                 },
-                engine_vt: engine.format_replay_seed()?,
+                engine_vt: engine
+                    .format_replay_seed()?
+                    .expect("serializable primary-screen checkpoint"),
             });
         }
         return Ok(());
@@ -244,7 +247,9 @@ fn alternate_screen_checkpoint_seed_is_rejected_before_replay() {
                     record,
                     state: state.clone(),
                 },
-                engine_vt: engine.format_replay_seed()?,
+                engine_vt: engine
+                    .format_replay_seed()?
+                    .expect("serializable alternate-screen checkpoint"),
             });
         }
         return Ok(());
@@ -435,4 +440,64 @@ fn row_delta_emits_and_reconstructs_wrap_facts_without_cell_changes() {
         semantic_state_hash(&reconstructed).expect("reconstructed hash"),
         semantic_state_hash(&current).expect("current hash")
     );
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn arbitrary_replay_checkpoint_is_lossless_or_explicitly_unavailable(
+        data in collection::vec(0x20_u8..0x7f, 1..128),
+        checkpoint_selector in any::<usize>(),
+    ) {
+        let log = output_log(&data);
+        let checkpoint_index = checkpoint_selector % data.len();
+        let checkpoint_offset = checkpoint_index as u64;
+        let mut seed = None;
+        let mut unserialized_checkpoint = None;
+        replay_with(&log, None, |record, state, engine| {
+            if record.event_byte_offset == Some(checkpoint_offset) {
+                if let Some(engine_vt) = engine.format_replay_seed()? {
+                    seed = Some(ReplaySeed {
+                        inspection: StateInspection {
+                            record,
+                            state: state.clone(),
+                        },
+                        engine_vt,
+                    });
+                } else {
+                    unserialized_checkpoint = Some(state.clone());
+                }
+            }
+            return Ok(());
+        })
+        .expect("checkpoint source replay");
+
+        let Some(seed) = seed else {
+            let state = unserialized_checkpoint.expect("selected checkpoint state");
+            prop_assert_eq!(
+                state.cursor.column,
+                Some(log.header.cols.saturating_sub(1))
+            );
+            return Ok(());
+        };
+        let remaining = data.len().saturating_sub(checkpoint_index.saturating_add(1)) as u64;
+        let seeded = replay_with_seed_and_limits(
+            &log,
+            None,
+            seed,
+            ReplayLimits {
+                output_bytes: remaining,
+                ..DEFAULT_REPLAY_LIMITS
+            },
+            |_, _, _| return Ok(()),
+        )
+        .expect("checkpoint replay");
+        let canonical = replay(&log).expect("canonical replay");
+        prop_assert_eq!(
+            seeded.final_state_hash,
+            canonical.artifacts.final_state_hash
+        );
+        prop_assert_eq!(seeded.state_count, canonical.artifacts.state_count);
+    }
 }
