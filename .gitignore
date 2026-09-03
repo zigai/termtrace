@@ -32,6 +32,7 @@ node_modules/
 
 # Coverage, profiling, and crash outputs
 /coverage/
+/mutants.out*/
 *.profraw
 *.profdata
 perf.data
