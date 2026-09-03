@@ -3,9 +3,7 @@ use super::*;
 #[test]
 fn tmux_kill_pane_closes_canonical_recording() {
     let temporary = TempDir::new().expect("temporary directory");
-    let Some(server) = PrivateTmux::new(&temporary, "/bin/sh") else {
-        return;
-    };
+    let server = PrivateTmux::new(&temporary, "/bin/sh");
     let session = server.pane_session("%0");
     let killed = server
         .command()
@@ -28,9 +26,7 @@ fn tmux_kill_pane_closes_canonical_recording() {
 #[test]
 fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
     let temporary = TempDir::new().expect("temporary directory");
-    let Some(server) = PrivateTmux::unmanaged(&temporary, "/bin/sh") else {
-        return;
-    };
+    let server = PrivateTmux::unmanaged(&temporary, "/bin/sh");
     let original_default_command = "printf 'TMUX_DEFAULT_COMMAND\\n'; exec /bin/sh";
     let configured = server
         .command()
@@ -70,21 +66,7 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
     assert_eq!(enabled["existing_panes"], 1);
     assert_eq!(enabled["existing_unrecorded_panes"], 1);
     assert_eq!(enabled["retroactive"], false);
-
-    thread::sleep(Duration::from_millis(900));
-    assert!(
-        server.pane_exists("%0"),
-        "live enable closed the existing pane"
-    );
-    let surviving_pid = trim_newline(
-        server
-            .command()
-            .args(["display-message", "-p", "-t", "%0", "#{pane_pid}"])
-            .output()
-            .expect("query grandfathered pane")
-            .stdout,
-    );
-    assert_eq!(surviving_pid, original_pid);
+    server.wait_for_process_marker("%0", "@termtrace-grandfathered-pid");
 
     let recorded_pane = tmux_new_window(&server, &[]);
     let recording = server.pane_session(&recorded_pane);
@@ -95,6 +77,15 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
         .expect("close recorded pane");
     assert!(sent.success(), "recorded pane did not accept input");
     wait_for_path(&recording.join("completion.json"));
+    let surviving_pid = trim_newline(
+        server
+            .command()
+            .args(["display-message", "-p", "-t", "%0", "#{pane_pid}"])
+            .output()
+            .expect("query grandfathered pane after recorded workflow")
+            .stdout,
+    );
+    assert_eq!(surviving_pid, original_pid);
     let manifest = read_manifest(&recording).expect("default-command recording manifest");
     assert_eq!(
         manifest
@@ -120,26 +111,9 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
             .any(|window| return window == b"TMUX_DEFAULT_COMMAND")
     );
 
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let status = loop {
-        let output = Command::cargo_bin("termtrace")
-            .expect("binary should build")
-            .args(["tmux", "status", "--json", "--tmux"])
-            .arg(&server.binary)
-            .args(["-L", server.socket.as_str()])
-            .output()
-            .expect("query live-enable coverage");
-        assert!(output.status.success(), "tmux status failed: {output:?}");
-        let status = compact_json_line(&output.stdout);
-        if status["unrecorded_panes"] == 1 {
-            break status;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "live-enable coverage did not settle: {status}"
-        );
-        thread::sleep(Duration::from_millis(25));
-    };
+    let status = server.wait_for_status("live-enable coverage to settle", |status| {
+        return status["unrecorded_panes"] == 1;
+    });
     assert_eq!(status["enabled"], true);
 
     let mut disable = Command::cargo_bin("termtrace").expect("binary should build");
@@ -167,9 +141,7 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
 #[test]
 fn tmux_new_recording_allocates_a_socket_instead_of_reusing_default_server() {
     let temporary = TempDir::new().expect("temporary directory");
-    let Some(server) = PrivateTmux::unmanaged_default(&temporary, "/bin/sh") else {
-        return;
-    };
+    let server = PrivateTmux::unmanaged_default(&temporary, "/bin/sh");
     let root = temporary.path().to_str().expect("UTF-8 temporary path");
     let tmux = server.binary.to_str().expect("UTF-8 tmux path");
     let tmux_tmpdir = server
@@ -188,6 +160,7 @@ fn tmux_new_recording_allocates_a_socket_instead_of_reusing_default_server() {
     let output = Command::cargo_bin("termtrace")
         .expect("binary should build")
         .env("TMUX_TMPDIR", tmux_tmpdir)
+        .env_remove("TMUX")
         .args([
             "tmux",
             "record",
@@ -248,6 +221,7 @@ fn tmux_new_recording_allocates_a_socket_instead_of_reusing_default_server() {
     Command::cargo_bin("termtrace")
         .expect("binary should build")
         .env("TMUX_TMPDIR", tmux_tmpdir)
+        .env_remove("TMUX")
         .args(["tmux", "stop", "isolated", "--output-root", root, "--wait"])
         .assert()
         .success()
@@ -255,6 +229,7 @@ fn tmux_new_recording_allocates_a_socket_instead_of_reusing_default_server() {
     let _ = StdCommand::new(&server.binary)
         .args(["-L", allocated_socket.as_str(), "kill-server"])
         .env("TMUX_TMPDIR", tmux_tmpdir)
+        .env_remove("TMUX")
         .status();
 }
 
@@ -263,9 +238,7 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
     let temporary = TempDir::new().expect("temporary directory");
     fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
         .expect("secure aggregate root");
-    let Some(binary) = tmux_binary() else {
-        return;
-    };
+    let binary = tmux_binary();
     let socket = format!("termtrace-identity-test-{}", uuid::Uuid::now_v7());
     let root = temporary.path().to_str().expect("UTF-8 temporary path");
     let tmux = binary.to_str().expect("UTF-8 tmux path");
@@ -320,8 +293,12 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
         .args(["-L", socket.as_str(), "kill-server"])
         .status()
         .expect("stop original tmux server");
-    thread::sleep(Duration::from_millis(200));
     assert!(killed.success());
+    wait_for_tmux_server_exit(
+        original["server_pid"]
+            .as_u64()
+            .expect("original tmux server PID"),
+    );
     let replacement = StdCommand::new(&binary)
         .args([
             "-L",

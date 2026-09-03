@@ -3,9 +3,7 @@ use super::*;
 #[test]
 fn tmux_default_pane_is_a_complete_termtrace_recording() {
     let temporary = TempDir::new().expect("temporary directory");
-    let Some(server) = PrivateTmux::new(&temporary, "/bin/sh") else {
-        return;
-    };
+    let server = PrivateTmux::new(&temporary, "/bin/sh");
     let pane = "%0";
     let session = server.pane_session(pane);
 
@@ -28,7 +26,7 @@ fn tmux_default_pane_is_a_complete_termtrace_recording() {
         .status()
         .expect("resize tmux window");
     assert!(resized.success(), "tmux window was not resized");
-    thread::sleep(Duration::from_millis(50));
+    wait_for_recorded_resize(&session, 100, 30);
 
     let sent = server
         .command()
@@ -110,9 +108,7 @@ fn tmux_strict_mode_blocks_creation_and_respawn_bypasses() {
         .iter()
         .map(String::as_str)
         .collect::<Vec<_>>();
-    let Some(server) = PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &setup_args) else {
-        return;
-    };
+    let server = PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &setup_args);
 
     let bypass = tmux_new_window(&server, &["/bin/sleep", "30"]);
     server.wait_for_pane_absent(&bypass);
@@ -195,35 +191,18 @@ fn tmux_default_warn_coverage_never_terminates_uncovered_panes() {
         .iter()
         .map(String::as_str)
         .collect::<Vec<_>>();
-    let Some(server) = PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &setup_args) else {
-        return;
-    };
+    let server = PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &setup_args);
 
     let bypass = tmux_new_window(&server, &["/bin/sleep", "30"]);
-    thread::sleep(Duration::from_millis(1_000));
+    let status = server.wait_for_status("warn coverage to report the uncovered pane", |status| {
+        return status["strict"] == false
+            && status["unrecorded_panes"].as_u64().unwrap_or_default() >= 1;
+    });
     assert!(
         server.pane_exists(&bypass),
         "default warn coverage terminated an uncovered pane"
     );
 
-    let status: serde_json::Value = serde_json::from_slice(
-        &Command::cargo_bin("termtrace")
-            .expect("binary should build")
-            .args([
-                "tmux",
-                "status",
-                "-L",
-                server.socket.as_str(),
-                "--tmux",
-                server.binary.to_str().expect("UTF-8 tmux path"),
-                "--json",
-            ])
-            .assert()
-            .success()
-            .get_output()
-            .stdout,
-    )
-    .expect("structured tmux status");
     assert_eq!(status["strict"], false);
     assert!(
         status["unrecorded_panes"].as_u64().unwrap_or_default() >= 1,
@@ -259,5 +238,9 @@ fn tmux_default_warn_coverage_never_terminates_uncovered_panes() {
     assert!(killed.success());
     wait_for_completion(&recording, Duration::from_secs(30))
         .expect("long tmux pane completion evidence");
+    assert!(
+        server.pane_exists(&bypass),
+        "warn coverage terminated its uncovered pane during a recorded workflow"
+    );
     assert_late_checkpoint_inspection(&recording);
 }

@@ -3,18 +3,13 @@ use super::*;
 #[test]
 fn tmux_explicit_scope_records_only_forced_or_explicit_panes() {
     let temporary = TempDir::new().expect("temporary directory");
-    let Some(server) =
-        PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &["--explicit-only"])
-    else {
-        return;
-    };
+    let server = PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &["--explicit-only"]);
 
     server.wait_for_process_marker("%0", "@termtrace-excluded-pid");
     assert!(server.pane_option("%0", "@termtrace-session").is_empty());
 
     let ordinary = tmux_new_window(&server, &[]);
     server.wait_for_process_marker(&ordinary, "@termtrace-excluded-pid");
-    thread::sleep(Duration::from_millis(700));
     assert!(
         server.pane_exists(&ordinary),
         "strict enforcement closed an intentionally excluded pane"
@@ -49,11 +44,7 @@ fn tmux_explicit_scope_records_only_forced_or_explicit_panes() {
 #[test]
 fn tmux_session_scope_records_only_the_selected_session() {
     let temporary = TempDir::new().expect("temporary directory");
-    let Some(server) =
-        PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &["--explicit-only"])
-    else {
-        return;
-    };
+    let server = PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &["--explicit-only"]);
     server.wait_for_process_marker("%0", "@termtrace-excluded-pid");
 
     let mut scope = Command::cargo_bin("termtrace").expect("binary should build");
@@ -77,7 +68,6 @@ fn tmux_session_scope_records_only_the_selected_session() {
 
     let excluded = tmux_new_session(&server, "excluded", &[]);
     server.wait_for_process_marker(&excluded, "@termtrace-excluded-pid");
-    thread::sleep(Duration::from_millis(700));
     assert!(server.pane_exists(&excluded));
     assert!(
         server
@@ -98,11 +88,7 @@ fn tmux_session_scope_records_only_the_selected_session() {
 #[test]
 fn tmux_pane_scope_records_that_pane_after_its_process_restarts() {
     let temporary = TempDir::new().expect("temporary directory");
-    let Some(server) =
-        PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &["--explicit-only"])
-    else {
-        return;
-    };
+    let server = PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &["--explicit-only"]);
     server.wait_for_process_marker("%0", "@termtrace-excluded-pid");
     let other = tmux_new_window(&server, &[]);
     server.wait_for_process_marker(&other, "@termtrace-excluded-pid");
@@ -153,11 +139,7 @@ fn tmux_pane_scope_records_that_pane_after_its_process_restarts() {
 #[test]
 fn tmux_window_scope_records_new_panes_only_in_that_window() {
     let temporary = TempDir::new().expect("temporary directory");
-    let Some(server) =
-        PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &["--explicit-only"])
-    else {
-        return;
-    };
+    let server = PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &["--explicit-only"]);
     server.wait_for_process_marker("%0", "@termtrace-excluded-pid");
 
     let mut scope = Command::cargo_bin("termtrace").expect("binary should build");
@@ -178,7 +160,6 @@ fn tmux_window_scope_records_new_panes_only_in_that_window() {
     let recording = server.pane_session(&selected);
     let excluded = tmux_new_window(&server, &[]);
     server.wait_for_process_marker(&excluded, "@termtrace-excluded-pid");
-    thread::sleep(Duration::from_millis(700));
     assert!(server.pane_exists(&excluded));
 
     let sent = server

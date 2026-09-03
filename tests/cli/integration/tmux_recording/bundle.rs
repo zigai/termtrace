@@ -121,9 +121,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
     let temporary = TempDir::new().expect("temporary directory");
     fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
         .expect("secure aggregate root");
-    let Some(binary) = tmux_binary() else {
-        return;
-    };
+    let binary = tmux_binary();
     let socket = format!("termtrace-aggregate-test-{}", uuid::Uuid::now_v7());
     let root = temporary.path().to_str().expect("UTF-8 temporary path");
     let tmux = binary.to_str().expect("UTF-8 tmux path");

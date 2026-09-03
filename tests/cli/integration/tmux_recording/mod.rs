@@ -46,16 +46,12 @@ struct PrivateTmux {
     reason = "tmux test helpers stop immediately when an isolated server violates its contract"
 )]
 impl PrivateTmux {
-    fn new(temporary: &TempDir, shell: &str) -> Option<Self> {
+    fn new(temporary: &TempDir, shell: &str) -> Self {
         return Self::new_with_config_args(temporary, shell, &[]);
     }
 
-    fn new_with_config_args(
-        temporary: &TempDir,
-        shell: &str,
-        config_arguments: &[&str],
-    ) -> Option<Self> {
-        let binary = tmux_binary()?;
+    fn new_with_config_args(temporary: &TempDir, shell: &str, config_arguments: &[&str]) -> Self {
+        let binary = tmux_binary();
         fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
             .expect("secure tmux test root");
         let socket = format!("termtrace-test-{}", uuid::Uuid::now_v7());
@@ -104,16 +100,16 @@ impl PrivateTmux {
             .status()
             .expect("start private tmux server");
         assert!(status.success(), "private tmux server did not start");
-        return Some(Self {
+        return Self {
             binary,
             socket,
             session: "recorded".to_owned(),
             tmux_tmpdir: None,
-        });
+        };
     }
 
-    fn unmanaged(temporary: &TempDir, shell: &str) -> Option<Self> {
-        let binary = tmux_binary()?;
+    fn unmanaged(temporary: &TempDir, shell: &str) -> Self {
+        let binary = tmux_binary();
         fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
             .expect("secure tmux test root");
         let socket = format!("termtrace-test-{}", uuid::Uuid::now_v7());
@@ -138,23 +134,23 @@ impl PrivateTmux {
             .status()
             .expect("start unmanaged private tmux server");
         assert!(status.success(), "private tmux server did not start");
-        return Some(Self {
+        return Self {
             binary,
             socket,
             session: "existing".to_owned(),
             tmux_tmpdir: None,
-        });
+        };
     }
 
-    fn unmanaged_default(temporary: &TempDir, shell: &str) -> Option<Self> {
-        let binary = tmux_binary()?;
+    fn unmanaged_default(temporary: &TempDir, shell: &str) -> Self {
+        let binary = tmux_binary();
         fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
             .expect("secure isolated tmux test root");
         let tmux_tmpdir = temporary.path().join("tmux-sockets");
         fs::create_dir_all(&tmux_tmpdir).expect("create isolated tmux socket root");
         fs::set_permissions(&tmux_tmpdir, Permissions::from_mode(0o700))
             .expect("secure isolated tmux socket root");
-        let status = StdCommand::new(&binary)
+        let output = StdCommand::new(&binary)
             .args([
                 "-f",
                 "/dev/null",
@@ -170,24 +166,27 @@ impl PrivateTmux {
                 "30",
             ])
             .env("TMUX_TMPDIR", &tmux_tmpdir)
+            .env_remove("TMUX")
             .env("SHELL", shell)
-            .status()
+            .output()
             .expect("start isolated default tmux server");
         assert!(
-            status.success(),
-            "isolated default tmux server did not start"
+            output.status.success(),
+            "isolated default tmux server did not start: {}",
+            String::from_utf8_lossy(&output.stderr)
         );
-        return Some(Self {
+        return Self {
             binary,
             socket: "default".to_owned(),
             session: "existing".to_owned(),
             tmux_tmpdir: Some(tmux_tmpdir),
-        });
+        };
     }
 
     fn command(&self) -> StdCommand {
         let mut command = StdCommand::new(&self.binary);
         command.args(["-L", self.socket.as_str()]);
+        command.env_remove("TMUX");
         if let Some(tmux_tmpdir) = &self.tmux_tmpdir {
             command.env("TMUX_TMPDIR", tmux_tmpdir);
         }
@@ -209,6 +208,37 @@ impl PrivateTmux {
             assert!(
                 Instant::now() < deadline,
                 "tmux pane did not publish its recording path"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn wait_for_status(
+        &self,
+        description: &str,
+        predicate: impl Fn(&serde_json::Value) -> bool,
+    ) -> serde_json::Value {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let output = Command::cargo_bin("termtrace")
+                .expect("binary should build")
+                .args(["tmux", "status", "--json", "--tmux"])
+                .arg(&self.binary)
+                .args(["-L", self.socket.as_str()])
+                .output()
+                .expect("query tmux status");
+            assert!(
+                output.status.success(),
+                "tmux status failed while waiting for {description}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let status = compact_json_line(&output.stdout);
+            if predicate(&status) {
+                return status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {description}: last status={status}"
             );
             thread::sleep(Duration::from_millis(20));
         }
@@ -299,6 +329,64 @@ impl PrivateTmux {
     }
 }
 
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "tmux test helpers stop immediately when runtime evidence violates the test contract"
+)]
+fn wait_for_recorded_resize(session: &Path, cols: u16, rows: u16) {
+    let events = session.join("events.jsonl");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let diagnostic = match EventLog::read(&events) {
+            Ok(log) => {
+                let observed = log
+                    .events
+                    .iter()
+                    .filter_map(|record| match &record.event {
+                        Event::ResizeIntent { cols, rows, .. } => return Some((*cols, *rows)),
+                        _ => return None,
+                    })
+                    .collect::<Vec<_>>();
+                if observed.contains(&(cols, rows)) {
+                    return;
+                }
+                format!("observed resize intents={observed:?}")
+            }
+            Err(error) => format!("event log was not readable: {error}"),
+        };
+        assert!(
+            Instant::now() < deadline,
+            "recording {} did not observe resize {cols}x{rows}: {diagnostic}",
+            session.display()
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[allow(
+    clippy::expect_used,
+    reason = "tmux test helper stops when the isolated server cannot be inspected"
+)]
+fn wait_for_tmux_server_exit(server_pid: u64) {
+    let server_pid = server_pid.to_string();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let output = StdCommand::new("kill")
+            .args(["-0", server_pid.as_str()])
+            .output()
+            .expect("probe original tmux server PID");
+        if !output.status.success() {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "original tmux server process {server_pid} remained alive after kill-server"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
 impl Drop for PrivateTmux {
     fn drop(&mut self) {
         let _ = self
@@ -371,17 +459,20 @@ fn trim_newline(mut bytes: Vec<u8>) -> Vec<u8> {
     return bytes;
 }
 
-fn tmux_binary() -> Option<PathBuf> {
+fn tmux_binary() -> PathBuf {
     let binary = if Path::new("/usr/bin/tmux").is_file() {
         PathBuf::from("/usr/bin/tmux")
     } else {
         PathBuf::from("tmux")
     };
-    return StdCommand::new(&binary)
+    let status = StdCommand::new(&binary)
         .arg("-V")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| return status.success())
-        .then_some(binary);
+        .status();
+    assert!(
+        status.as_ref().is_ok_and(|status| return status.success()),
+        "tmux is required by the CLI integration suite: {status:?}"
+    );
+    return binary;
 }
