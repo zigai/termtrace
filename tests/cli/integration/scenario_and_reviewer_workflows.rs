@@ -1,6 +1,9 @@
 //! scenario and reviewer workflows CLI integration tests.
 
 use crate::support::*;
+use std::sync::mpsc;
+
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 #[test]
 fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
@@ -424,4 +427,199 @@ fn reviewer_exposes_scriptable_commands_without_a_session() {
         ))
         .stdout(predicate::str::contains("next_state"))
         .stdout(predicate::str::contains("next_marker"));
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "reviewer fixture setup must stop when the CLI cannot create its recording"
+)]
+fn recorded_reviewer_session(temporary: &TempDir, name: &str) -> PathBuf {
+    let session = temporary.path().join(name);
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf REVIEWER"])
+        .assert()
+        .success();
+    return session;
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "real-PTY lifecycle assertions must stop when their terminal fixture cannot run"
+)]
+fn reviewer_pty_output(session: &Path, signal: Option<&str>) -> Vec<u8> {
+    let pty = native_pty_system()
+        .openpty(PtySize {
+            rows: 24,
+            cols: 100,
+            pixel_width: 1_000,
+            pixel_height: 480,
+        })
+        .expect("reviewer PTY");
+    let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_termtrace"));
+    command.args([
+        "analyze",
+        "review",
+        session.to_str().expect("UTF-8 reviewer session"),
+    ]);
+    let mut child = pty.slave.spawn_command(command).expect("spawn reviewer");
+    drop(pty.slave);
+    let mut reader = pty.master.try_clone_reader().expect("clone PTY reader");
+    let (chunk_sender, chunk_receiver) = mpsc::channel();
+    let reader_thread = thread::spawn(move || {
+        let mut output = Vec::new();
+        let mut buffer = [0_u8; 4_096];
+        while let Ok(count) = reader.read(&mut buffer) {
+            if count == 0 {
+                break;
+            }
+            let chunk = buffer.iter().copied().take(count).collect::<Vec<_>>();
+            output.extend_from_slice(&chunk);
+            if chunk_sender.send(chunk).is_err() {
+                break;
+            }
+        }
+        return output;
+    });
+    let mut writer = pty.master.take_writer().expect("take PTY writer");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut entered_alternate_screen = false;
+    let mut observed = Vec::new();
+    while Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match chunk_receiver.recv_timeout(remaining) {
+            Ok(chunk) => {
+                observed.extend_from_slice(&chunk);
+                if observed
+                    .windows(b"\x1b[?1049h".len())
+                    .any(|window| return window == b"\x1b[?1049h")
+                {
+                    entered_alternate_screen = true;
+                    break;
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    if !entered_alternate_screen {
+        child.kill().expect("terminate stalled reviewer");
+        let _status = child.wait().expect("reap stalled reviewer");
+    }
+    assert!(
+        entered_alternate_screen,
+        "reviewer did not enter the alternate screen: {}",
+        String::from_utf8_lossy(&observed)
+    );
+
+    if let Some(signal) = signal {
+        let process_id = child.process_id().expect("reviewer process ID");
+        let status = StdCommand::new("/bin/kill")
+            .arg(format!("-{signal}"))
+            .arg(process_id.to_string())
+            .status()
+            .expect("signal reviewer");
+        assert!(status.success(), "reviewer signal delivery failed");
+    } else {
+        writer.write_all(b"q").expect("quit reviewer");
+        writer.flush().expect("flush reviewer input");
+    }
+    let status = child.wait().expect("wait for reviewer");
+    assert!(status.success(), "reviewer did not exit successfully");
+    drop(writer);
+    drop(pty.master);
+    let output = reader_thread.join().expect("join reviewer PTY reader");
+    assert!(
+        output
+            .windows(b"\x1b[?1049l".len())
+            .any(|window| return window == b"\x1b[?1049l"),
+        "reviewer did not leave the alternate screen: {}",
+        String::from_utf8_lossy(&output)
+    );
+    assert!(
+        output
+            .windows(b"\x1b[?1000l".len())
+            .any(|window| return window == b"\x1b[?1000l"),
+        "reviewer did not disable mouse capture: {}",
+        String::from_utf8_lossy(&output)
+    );
+    return output;
+}
+
+#[test]
+fn reviewer_restores_real_pty_after_quit_and_termination_signal() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = recorded_reviewer_session(&temporary, "reviewer-lifecycle");
+
+    let quit_output = reviewer_pty_output(&session, None);
+    assert!(
+        quit_output
+            .windows(b"\x1b[?25h".len())
+            .any(|window| return window == b"\x1b[?25h"),
+        "normal reviewer exit did not restore the cursor"
+    );
+    let _signal_output = reviewer_pty_output(&session, Some("TERM"));
+}
+
+#[test]
+fn reviewer_rolls_back_raw_mode_when_terminal_setup_fails() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = recorded_reviewer_session(&temporary, "reviewer-setup-failure");
+    let pty = native_pty_system()
+        .openpty(PtySize {
+            rows: 24,
+            cols: 100,
+            pixel_width: 1_000,
+            pixel_height: 480,
+        })
+        .expect("reviewer rollback PTY");
+    let script = r#"
+before=$(stty -g) || exit 91
+"$1" analyze review "$2" >/dev/full
+reviewer_status=$?
+after=$(stty -g) || exit 92
+if [ "$before" = "$after" ]; then
+    restored=yes
+else
+    restored=no
+fi
+printf '\n__TERMTRACE_REVIEWER_ROLLBACK__=%s reviewer_status=%s\n' "$restored" "$reviewer_status"
+"#;
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.args([
+        "-c",
+        script,
+        "termtrace-reviewer-rollback",
+        env!("CARGO_BIN_EXE_termtrace"),
+        session.to_str().expect("UTF-8 reviewer session"),
+    ]);
+    let mut child = pty
+        .slave
+        .spawn_command(command)
+        .expect("spawn rollback shell");
+    drop(pty.slave);
+    let mut reader = pty.master.try_clone_reader().expect("clone PTY reader");
+    let reader_thread = thread::spawn(move || {
+        let mut output = Vec::new();
+        let _read_result = reader.read_to_end(&mut output);
+        return output;
+    });
+    let status = child.wait().expect("wait for rollback shell");
+    assert!(status.success(), "rollback shell failed");
+    drop(pty.master);
+    let output = reader_thread.join().expect("join rollback PTY reader");
+    assert!(
+        output
+            .windows(b"__TERMTRACE_REVIEWER_ROLLBACK__=yes".len())
+            .any(|window| return window == b"__TERMTRACE_REVIEWER_ROLLBACK__=yes"),
+        "reviewer setup failure left the PTY altered: {}",
+        String::from_utf8_lossy(&output)
+    );
+    assert!(
+        !output
+            .windows(b"reviewer_status=0".len())
+            .any(|window| return window == b"reviewer_status=0"),
+        "reviewer terminal setup unexpectedly succeeded"
+    );
 }
