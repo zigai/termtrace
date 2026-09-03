@@ -19,6 +19,7 @@ termtrace-model = { path = "../model" }
 
 [dev-dependencies]
 tempfile = "3.23.0"
+proptest = "1.11.0"
 
 [lints]
 workspace = true

@@ -10,5 +10,8 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 termtrace-model = { path = "../model" }
 
+[dev-dependencies]
+proptest = "1.11.0"
+
 [lints]
 workspace = true
