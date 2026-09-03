@@ -22,11 +22,15 @@ architecture:
 validate:
   cargo check --locked --workspace --all-targets --all-features
 
-# run Rust, TypeScript, and Python tests
+# run fast hermetic Rust, TypeScript, and Python tests for each change (requires bootstrap, Bun, and uv)
 test:
-  cargo test --locked --workspace --all-features
+  cargo test --locked --workspace --lib --bins
   bun run --cwd packages/typescript test
   uv run --project packages/python --locked --group dev pytest -q packages/python/tests
+
+# run CLI/tmux integration on each pull request (requires bootstrap, tmux, and Ghostty on PATH)
+integration:
+  cargo test --locked --test cli
 
 # lint Rust and type-check and lint the language clients
 lint:
@@ -54,7 +58,13 @@ format-check:
 smoke:
   @scripts/native-smoke-test.sh
 
-# run every non-mutating repository check
+# run performance and resource benchmarks on demand (requires native capture tooling)
+bench:
+  @benchmarks/run-agent-workflows.sh
+  @benchmarks/run-durability.sh
+  @benchmarks/run-render.sh
+
+# run required local checks for each change (requires bootstrap, Bun, uv, and shfmt)
 check: architecture format-check lint validate test
 
 # list available commands

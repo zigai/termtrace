@@ -22,11 +22,36 @@ jobs:
       - uses: dtolnay/rust-toolchain@46511b1c83438f0dd37c02d843619ece5a4abb5b # 1.97.1
         with:
           components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          shared-key: ci
+          cache-workspace-crates: true
       - name: Install cargo-machete
         run: cargo install cargo-machete --version 0.9.2 --locked
       - name: Install headless Ghostty config fixture
         run: echo "$GITHUB_WORKSPACE/tests/fixtures/bin" >> "$GITHUB_PATH"
       - run: scripts/ci-rust.sh
+
+  integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@46511b1c83438f0dd37c02d843619ece5a4abb5b # 1.97.1
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          shared-key: ci
+          cache-workspace-crates: true
+      - name: Install required tmux integration dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes tmux
+          tmux -V
+      - name: Install headless Ghostty config fixture
+        run: echo "$GITHUB_WORKSPACE/tests/fixtures/bin" >> "$GITHUB_PATH"
+      - name: Bootstrap pinned Ghostty
+        run: scripts/bootstrap.sh
+      - run: cargo test --locked --test cli
 
   clients:
     runs-on: ubuntu-24.04
@@ -40,3 +65,24 @@ jobs:
       - name: Bootstrap pinned Ghostty
         run: scripts/bootstrap.sh
       - run: scripts/ci-clients.sh
+
+  native-smoke:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@46511b1c83438f0dd37c02d843619ece5a4abb5b # 1.97.1
+      - name: Bootstrap native dependencies
+        run: scripts/bootstrap.sh
+      - name: Run native capture smoke test
+        run: scripts/native-smoke-test.sh --output "$RUNNER_TEMP/native-smoke.termtrace" --keep-log
+      - name: Upload native smoke failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-smoke-failure
+          path: |
+            ${{ runner.temp }}/native-smoke.termtrace
+            ${{ runner.temp }}/native-smoke.termtrace.smoke.log
+          if-no-files-found: warn
