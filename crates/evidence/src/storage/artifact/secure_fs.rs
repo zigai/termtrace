@@ -10,8 +10,9 @@ use nix::{
     errno::Errno,
     fcntl::{OFlag, OpenHow, RenameFlags, ResolveFlag, open, openat2, renameat2},
     sys::stat::{Mode, SFlag, fstat, mkdirat},
-    unistd::{Uid, fsync},
+    unistd::{Uid, UnlinkatFlags, fsync, unlinkat},
 };
+use uuid::Uuid;
 
 use crate::storage::{Error, Result};
 
@@ -286,24 +287,108 @@ pub fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> R
     return sync_fd(&directory, session);
 }
 
-/// Create, write, and durably publish a new owner-only regular file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SecureWriteStage {
+    Created,
+    DataSynced,
+    Renamed,
+}
+
+/// Atomically create, write, and durably publish a new owner-only regular file.
 ///
 /// # Errors
 ///
-/// Returns an error when the path is unsafe, already exists, or cannot be written and synced.
+/// Returns an error when the path is unsafe, already exists, or cannot be written, renamed, and
+/// synced. Before the atomic rename, a failure leaves no destination file.
 pub fn write_secure(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut writer = secure_writer(path)?;
-    writer
-        .write_all(bytes)
-        .and_then(|()| return writer.flush())
-        .and_then(|()| return writer.get_ref().sync_data())
-        .map_err(|source| {
+    return write_secure_with_hook(path, bytes, |_| return Ok(()));
+}
+
+fn write_secure_with_hook(
+    path: &Path,
+    bytes: &[u8],
+    mut after_stage: impl FnMut(SecureWriteStage) -> Result<()>,
+) -> Result<()> {
+    let parent_path = path.parent().ok_or_else(|| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
+        };
+    })?;
+    let parent = open_parent_directory(path, true)?;
+    let destination_name = safe_file_name(path)?;
+    let staging_name = format!(".termtrace-write-{}.tmp", Uuid::now_v7());
+    let staging_path = parent_path.join(&staging_name);
+    let staging = open_file_at(
+        &parent,
+        OsStr::new(&staging_name),
+        OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::from_bits_truncate(0o600),
+        &staging_path,
+    )?;
+    validate_private_regular_file_fd(&staging, &staging_path)?;
+    let mut staging = File::from(staging);
+    let mut renamed = false;
+    let result = (|| {
+        after_stage(SecureWriteStage::Created)?;
+        staging.write_all(bytes).map_err(|source| {
             return Error::Filesystem {
-                path: path.to_path_buf(),
+                path: staging_path.clone(),
                 source,
             };
         })?;
-    return sync_parent_directory(path);
+        staging.sync_data().map_err(|source| {
+            return Error::Filesystem {
+                path: staging_path.clone(),
+                source,
+            };
+        })?;
+        after_stage(SecureWriteStage::DataSynced)?;
+        renameat2(
+            &parent,
+            OsStr::new(&staging_name),
+            &parent,
+            destination_name,
+            RenameFlags::RENAME_NOREPLACE,
+        )
+        .map_err(|error| {
+            if error == Errno::EEXIST {
+                return Error::DestinationExists {
+                    path: path.to_path_buf(),
+                };
+            }
+            return nix_filesystem(path, error);
+        })?;
+        renamed = true;
+        after_stage(SecureWriteStage::Renamed)?;
+        return sync_fd(&parent, parent_path);
+    })();
+    if result.is_err() && !renamed {
+        let _cleanup_result = unlinkat(
+            &parent,
+            OsStr::new(&staging_name),
+            UnlinkatFlags::NoRemoveDir,
+        )
+        .and_then(|()| return fsync(&parent));
+    }
+    return result;
+}
+
+#[cfg(test)]
+pub(super) fn write_secure_with_failure(
+    path: &Path,
+    bytes: &[u8],
+    failure: SecureWriteStage,
+) -> Result<()> {
+    return write_secure_with_hook(path, bytes, |stage| {
+        if stage == failure {
+            return Err(Error::Filesystem {
+                path: path.to_path_buf(),
+                source: IoError::other(format!("injected secure-write failure after {stage:?}")),
+            });
+        }
+        return Ok(());
+    });
 }
 
 pub(crate) fn sync_parent_directory(path: &Path) -> Result<()> {
