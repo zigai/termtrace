@@ -1,0 +1,26 @@
+{
+  "format": "termtrace-rejected-version-corpus",
+  "version": 1,
+  "cases": [
+    {
+      "surface": "event_log",
+      "rejected_version": 5,
+      "expected_error": "unsupported format version 5"
+    },
+    {
+      "surface": "session_manifest",
+      "rejected_version": 11,
+      "expected_error": "unsupported session format version 11"
+    },
+    {
+      "surface": "completion_manifest",
+      "rejected_version": 4,
+      "expected_error": "unsupported completion format version 4"
+    },
+    {
+      "surface": "completion_validation",
+      "rejected_version": 0,
+      "expected_error": "unsupported completion validation version 0"
+    }
+  ]
+}

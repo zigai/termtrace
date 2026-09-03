@@ -9,7 +9,9 @@ use nix::{fcntl::OFlag, sys::stat::Mode};
 
 use tempfile::TempDir;
 
-use super::secure_fs::{open_file_at, open_parent_directory};
+use super::secure_fs::{
+    SecureWriteStage, open_file_at, open_parent_directory, write_secure_with_failure,
+};
 use super::*;
 
 #[test]
@@ -163,6 +165,44 @@ fn retained_parent_descriptor_prevents_create_redirection() {
         b"safe"
     );
     assert!(!outside.join("artifact.json").exists());
+}
+
+#[test]
+fn secure_write_is_never_partially_published_at_injected_failure_boundaries() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let directory = temporary.path().join("atomic-writes");
+    create_private_directory(&directory).expect("private output directory");
+    let payload = b"complete authoritative payload";
+
+    for stage in [SecureWriteStage::Created, SecureWriteStage::DataSynced] {
+        let destination = directory.join(format!("before-rename-{stage:?}.json"));
+        write_secure_with_failure(&destination, payload, stage)
+            .expect_err("injected pre-rename failure");
+        assert!(
+            !destination.exists(),
+            "pre-rename failure exposed a destination at {stage:?}"
+        );
+    }
+
+    let destination = directory.join("after-rename.json");
+    write_secure_with_failure(&destination, payload, SecureWriteStage::Renamed)
+        .expect_err("injected directory-sync failure");
+    assert_eq!(
+        fs_err::read(&destination).expect("fully renamed payload"),
+        payload
+    );
+    assert!(
+        fs_err::read_dir(&directory)
+            .expect("atomic write directory")
+            .all(|entry| {
+                return !entry
+                    .expect("atomic write entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".termtrace-write-");
+            }),
+        "injected failures must not leave staging files"
+    );
 }
 
 #[test]

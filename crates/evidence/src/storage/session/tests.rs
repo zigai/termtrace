@@ -14,7 +14,9 @@ use termtrace_model::{
 };
 use uuid::Uuid;
 
-use super::validation::{validate_manifest, validate_replay_profile_file};
+use super::validation::{
+    validate_completion_format, validate_manifest, validate_replay_profile_file,
+};
 use super::*;
 use crate::{
     Error,
@@ -267,4 +269,60 @@ fn completed_validation_rejects_pending_mutation() {
         error,
         Error::InvalidEvidence { reason } if reason.contains("pending mutation")
     ));
+}
+
+#[test]
+fn persisted_format_readers_reject_version_corpus_without_compatibility_fallbacks() {
+    let corpus: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../fixtures/conformance/protocol/rejected-versions.json"
+    ))
+    .expect("rejected version corpus");
+    assert_eq!(corpus["format"], "termtrace-rejected-version-corpus");
+    assert_eq!(corpus["version"], 1);
+
+    for case in corpus["cases"].as_array().expect("version cases") {
+        let surface = case["surface"].as_str().expect("version surface");
+        let rejected_version =
+            u32::try_from(case["rejected_version"].as_u64().expect("rejected version"))
+                .expect("u32 rejected version");
+        let expected_error = case["expected_error"].as_str().expect("expected error");
+        let (temporary, _) = completed_fixture(Vec::new());
+        let session = temporary.path().join("session");
+
+        let error = match surface {
+            "event_log" => {
+                let path = session.join("events.jsonl");
+                let encoded = fs_err::read_to_string(&path).expect("event log");
+                let mut header: serde_json::Value =
+                    serde_json::from_str(encoded.trim_end()).expect("event header");
+                header["version"] = serde_json::json!(rejected_version);
+                let mut rejected = serde_json::to_vec(&header).expect("rejected event header");
+                rejected.push(b'\n');
+                fs_err::write(&path, rejected).expect("write rejected event header");
+                EventLog::read(&path).expect_err("old event version must be rejected")
+            }
+            "session_manifest" => {
+                let mut manifest = read_manifest(&session).expect("session manifest");
+                manifest.version = rejected_version;
+                validate_manifest(&manifest).expect_err("old session version must be rejected")
+            }
+            "completion_manifest" => {
+                let mut completion = read_completion(&session).expect("completion manifest");
+                completion.version = rejected_version;
+                validate_completion_format(&completion)
+                    .expect_err("old completion version must be rejected")
+            }
+            "completion_validation" => {
+                let mut completion = read_completion(&session).expect("completion manifest");
+                completion.validation_version = rejected_version;
+                validate_completion_format(&completion)
+                    .expect_err("old completion validation version must be rejected")
+            }
+            other => panic!("unknown rejected-version surface `{other}`"),
+        };
+        assert!(
+            error.to_string().contains(expected_error),
+            "{surface} emitted unexpected rejection: {error}"
+        );
+    }
 }

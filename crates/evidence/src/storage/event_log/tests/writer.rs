@@ -1,5 +1,6 @@
 use std::{fs::Permissions, os::unix::fs::PermissionsExt as _, thread, time::Duration};
 
+use proptest::{collection, prelude::*};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -9,7 +10,7 @@ use termtrace_model::{
 
 use crate::{
     Error,
-    event_log::{DurabilityMode, DurabilityPolicy, EventLogWriter, SessionClock},
+    event_log::{DurabilityMode, DurabilityPolicy, EventLog, EventLogWriter, SessionClock},
 };
 
 use super::support::{header, secure_directory};
@@ -168,4 +169,48 @@ fn rejects_geometry_outside_the_shared_terminal_policy() {
         )
         .expect_err("oversized live resize must fail before persistence");
     assert!(matches!(error, Error::InvalidEventLog { line: 2, .. }));
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(128))]
+
+    #[test]
+    fn arbitrary_output_bytes_round_trip_with_contiguous_hashes(
+        payloads in collection::vec(
+            collection::vec(any::<u8>(), 0..64),
+            0..16,
+        ),
+    ) {
+        let temporary = TempDir::new().expect("temporary directory");
+        let path = temporary.path().join("session/events.jsonl");
+        secure_directory(path.parent().expect("parent"));
+        let clock = SessionClock::now().expect("valid clock");
+        let mut writer =
+            EventLogWriter::create(&path, &header(&clock), clock).expect("create event log");
+        let header_hash = writer.current_hash();
+        for payload in &payloads {
+            writer
+                .append(Event::Output {
+                    data: ByteString::from(payload.as_slice()),
+                })
+                .expect("append arbitrary output");
+        }
+        let final_hash = writer.current_hash();
+        drop(writer);
+
+        let log = EventLog::read(&path).expect("read arbitrary output log");
+        prop_assert_eq!(log.events.len(), payloads.len());
+        let mut previous_hash = header_hash;
+        for (index, (record, expected)) in log.events.iter().zip(&payloads).enumerate() {
+            prop_assert_eq!(record.seq, index as u64);
+            prop_assert_eq!(&record.prev_hash, &previous_hash);
+            let Event::Output { data } = &record.event else {
+                prop_assert!(false, "writer changed an output event variant");
+                continue;
+            };
+            prop_assert_eq!(data.as_bytes(), expected.as_slice());
+            previous_hash.clone_from(&record.hash);
+        }
+        prop_assert_eq!(previous_hash, final_hash);
+    }
 }
