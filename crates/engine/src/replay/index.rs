@@ -463,12 +463,11 @@ pub(crate) fn write_index(
             && !state.modes.alternate_screen
             && record.state_id % REPLAY_CHECKPOINT_STATE_INTERVAL == 0;
         let mut checkpoint = false;
-        if checkpoint_candidate {
+        if checkpoint_candidate && let Some(engine_vt) = engine.format_replay_seed()? {
             let inspection = StateInspection {
                 record: record.clone(),
                 state: state.clone(),
             };
-            let engine_vt = engine.format_replay_seed()?;
             let seed = ReplaySeed {
                 inspection: inspection.clone(),
                 engine_vt: engine_vt.clone(),

@@ -120,8 +120,21 @@ pub(super) fn format(terminal: sys::GhosttyTerminal, format: Format) -> Result<V
     return format_with_unwrap(terminal, format, false);
 }
 
-pub(super) fn format_replay_seed(terminal: sys::GhosttyTerminal) -> Result<Vec<u8>> {
-    return format_with_unwrap(terminal, Format::Vt, true);
+pub(super) fn format_replay_seed(terminal: sys::GhosttyTerminal) -> Result<Option<Vec<u8>>> {
+    let mut pending_wrap = false;
+    // SAFETY: `terminal` is the live handle owned by `GhosttyVt`, and the selected key writes one
+    // initialized `bool` through the non-null, correctly aligned output pointer.
+    check("get cursor pending-wrap state", unsafe {
+        sys::ghostty_terminal_get(
+            terminal,
+            sys::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP,
+            (&raw mut pending_wrap).cast::<c_void>(),
+        )
+    })?;
+    if pending_wrap {
+        return Ok(None);
+    }
+    return format_with_unwrap(terminal, Format::Vt, true).map(Some);
 }
 
 fn format_with_unwrap(

@@ -463,12 +463,14 @@ impl GhosttyVt {
     /// Format a VT stream that reconstructs the current terminal as a replay seed.
     ///
     /// Soft-wrapped rows are unwrapped so replay can apply the seed at a
-    /// different terminal width without preserving incidental line breaks.
+    /// different terminal width without preserving incidental line breaks. Returns `None` while
+    /// the cursor has a pending wrap because that behaviorally relevant state has no lossless VT
+    /// serialization.
     ///
     /// # Errors
     ///
-    /// Returns an error when formatter creation or output fails.
-    pub fn format_replay_seed(&self) -> Result<Vec<u8>> {
+    /// Returns an error when formatter creation, state inspection, or output fails.
+    pub fn format_replay_seed(&self) -> Result<Option<Vec<u8>>> {
         return snapshot::format_replay_seed(self.terminal);
     }
 }
@@ -614,6 +616,31 @@ mod tests {
                 .title
                 .as_bytes(),
             b"bounded"
+        );
+    }
+
+    #[test]
+    fn replay_seed_refuses_unserialized_pending_wrap_state() {
+        let mut terminal = GhosttyVt::new(2, 2, 0).expect("create terminal");
+        assert!(
+            terminal
+                .format_replay_seed()
+                .expect("initial replay seed")
+                .is_some()
+        );
+        terminal.write(b"ab");
+        assert!(
+            terminal
+                .format_replay_seed()
+                .expect("pending-wrap replay seed")
+                .is_none()
+        );
+        terminal.write(b"c");
+        assert!(
+            terminal
+                .format_replay_seed()
+                .expect("post-wrap replay seed")
+                .is_some()
         );
     }
 
