@@ -29,17 +29,21 @@ trap cleanup EXIT HUP INT TERM
 
 session=$work/agent-workflow.termtrace
 
-"$binary" record --no-input --out "$session" -- /bin/sh -c \
+"$binary" record --no-input --cols 80 --rows 24 --out "$session" -- /bin/sh -c \
     'trap "exit 0" TERM; printf Ready; IFS= read -r line; printf "Done\n"; i=0; while [ "$i" -lt 260 ]; do printf "\r%03d" "$i"; i=$((i + 1)); done; while :; do sleep .1; done' \
     >"$work/record.stdout" 2>"$work/record.stderr" &
 recorder=$!
 
+ready=false
 for _ in $(seq 1 500); do
-    [[ -S "$session/control.sock" ]] && break
+    if "$binary" status "$session" >/dev/null 2>&1; then
+        ready=true
+        break
+    fi
     sleep 0.01
 done
 
-[[ -S "$session/control.sock" ]] || {
+[[ "$ready" == true ]] || {
     echo "fixture did not become ready" >&2
     exit 1
 }
@@ -69,18 +73,16 @@ measure() {
 
 mkdir -p "$(dirname "$output")"
 : >"$output"
-
 measure stable-observe "$binary" wait "$session" --idle 10ms
-jq -e '.kind == "stable_snapshot" and (has("semantic_state_zstd") | not) and .boundary != null' "$work/stable-observe.stdout" >/dev/null
+jq -e '.kind == "stable_snapshot" and (has("semantic_state_zstd") | not) and .session_state == "unknown" and .state != null' "$work/stable-observe.stdout" >/dev/null
 
-measure atomic-input-sequence "$binary" --response full act "$session" text:go enter
+measure atomic-input-sequence "$binary" --fields boundary act "$session" text:go enter
 jq -e '.type == "action" and .input.atoms == 2 and .boundaries != null' "$work/atomic-input-sequence.stdout" >/dev/null
 
 "$binary" wait "$session" --screen Done --timeout 5s >/dev/null
 "$binary" wait "$session" --screen 259 --timeout 5s >/dev/null
-
 measure live-status "$binary" status "$session"
-jq -e '.kind == "status" and .boundary != null and (has("boundaries") | not)' "$work/live-status.stdout" >/dev/null
+jq -e '.kind == "status" and .lifecycle == "live" and .session_state == "live" and (has("boundaries") | not)' "$work/live-status.stdout" >/dev/null
 
 "$binary" stop "$session" --wait >/dev/null
 wait "$recorder"

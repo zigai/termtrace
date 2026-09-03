@@ -11,8 +11,8 @@
     },
     {
       "id": "atomic-input-sequence",
-      "command": "act SESSION text:go enter",
-      "maximum_stdout_bytes": 2048,
+      "command": "--fields boundary act SESSION text:go enter",
+      "maximum_stdout_bytes": 4096,
       "maximum_commands": 1
     },
     {
@@ -38,7 +38,7 @@
   "invariants": [
     "no_compressed_semantic_state_in_default_output",
     "one_guard_for_complete_input_sequence",
-    "one_compact_canonical_boundary",
+    "typed_live_session_state",
     "pagination_metadata_when_truncated",
     "no_worktree_sdk_scaffolding"
   ]
