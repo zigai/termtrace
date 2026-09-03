@@ -266,8 +266,9 @@ struct TerminalModeGuard;
 impl TerminalModeGuard {
     fn enter() -> Result<Self> {
         enable_raw_mode().map_err(terminal_error)?;
+        let guard = Self;
         execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture).map_err(terminal_error)?;
-        return Ok(Self);
+        return Ok(guard);
     }
 }
 
