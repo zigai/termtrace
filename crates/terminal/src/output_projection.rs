@@ -151,6 +151,9 @@ impl ControlStripper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::iter;
+
+    use proptest::{collection, prelude::*};
 
     #[test]
     fn strips_controls_across_chunks_and_flags_alternate_screen() {
@@ -161,5 +164,75 @@ mod tests {
         assert!(stripper.alternate_screen_observed());
         assert_eq!(stripper.source_byte_count(), 28);
         assert_eq!(stripper.output_byte_count(), 11);
+    }
+
+    #[test]
+    fn strips_c0_and_eight_bit_control_families() {
+        let mut stripper = ControlStripper::default();
+        let output = stripper
+            .feed(b"\x01\x7f\x80\x9b31mA\x9d0;title\x07B\x90payload\x1b\\C\x9fpayload\x1b\\D");
+
+        assert_eq!(output, b"ABCD");
+        assert!(!stripper.alternate_screen_observed());
+    }
+
+    #[test]
+    fn strips_seven_bit_control_families_and_recovers_from_false_string_escapes() {
+        let mut stripper = ControlStripper::default();
+        let output = stripper
+            .feed(b"\x1b]0;title\x07A\x1bPdata\x1b\\B\x1bcC\x1b]0;title\x1b\\D\x1b]0;a\x1bx\x07E");
+
+        assert_eq!(output, b"ABCDE");
+    }
+
+    #[test]
+    fn recognizes_each_supported_alternate_screen_sequence() {
+        let untouched = ControlStripper::default();
+        assert!(!untouched.alternate_screen_observed());
+
+        for sequence in [b"\x1b[?47h".as_slice(), b"\x1b[?1047h", b"\x1b[?1049h"] {
+            let mut stripper = ControlStripper::default();
+            assert!(stripper.feed(sequence).is_empty());
+            assert!(stripper.alternate_screen_observed());
+        }
+    }
+
+    #[test]
+    fn bounded_control_retention_does_not_classify_truncated_sequences() {
+        let mut sequence = b"\x1b[".to_vec();
+        sequence.extend(iter::repeat_n(b'0', 4_091));
+        sequence.extend_from_slice(b"?47h");
+        let mut stripper = ControlStripper::default();
+
+        assert!(stripper.feed(&sequence).is_empty());
+        assert!(!stripper.alternate_screen_observed());
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        #[test]
+        fn arbitrary_chunking_preserves_projection(
+            bytes in collection::vec(any::<u8>(), 0..512),
+            chunk_size in 1_usize..64,
+        ) {
+            let mut contiguous = ControlStripper::default();
+            let expected = contiguous.feed(&bytes);
+            let expected_alternate_screen = contiguous.alternate_screen_observed();
+
+            let mut chunked = ControlStripper::default();
+            let mut actual = Vec::new();
+            for chunk in bytes.chunks(chunk_size) {
+                actual.extend(chunked.feed(chunk));
+            }
+
+            prop_assert_eq!(&actual, &expected);
+            prop_assert_eq!(
+                chunked.alternate_screen_observed(),
+                expected_alternate_screen
+            );
+            prop_assert_eq!(chunked.source_byte_count(), bytes.len() as u64);
+            prop_assert_eq!(chunked.output_byte_count(), actual.len() as u64);
+        }
     }
 }
