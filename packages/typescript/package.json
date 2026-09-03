@@ -60,6 +60,9 @@
     "@termtrace/cli-linux-arm64": "0.1.0",
     "@termtrace/cli-linux-x64": "0.1.0"
   },
+  "overrides": {
+    "fast-uri": "3.1.6"
+  },
   "engines": {
     "node": ">=20"
   },
