@@ -76,7 +76,7 @@ pub(super) fn encode_key(
         sys::ghostty_key_event_set_action(event.0, sys::GhosttyKeyAction_GHOSTTY_KEY_ACTION_PRESS);
         sys::ghostty_key_event_set_key(event.0, physical_key);
         sys::ghostty_key_event_set_mods(event.0, modifier_bits(modifiers));
-        if let Some(text) = text {
+        if let Some(text) = text.as_ref() {
             sys::ghostty_key_event_set_utf8(event.0, text.as_ptr().cast::<c_char>(), text.len());
             sys::ghostty_key_event_set_unshifted_codepoint(event.0, u32::from(text[0]));
         }
