@@ -287,7 +287,9 @@ impl VtFramer {
 
     fn push(&mut self, byte: TaggedByte) -> Result<()> {
         if self.token.len() >= self.max_token_bytes {
-            return Err(framer_error("VT token exceeds configured byte bound"));
+            return Err(Error::InvalidVtStream {
+                reason: "VT token exceeds configured byte bound".to_owned(),
+            });
         }
         self.token.push(byte);
         return Ok(());
@@ -387,12 +389,6 @@ fn describe(kind: VtTokenKind, raw: &[u8]) -> String {
         VtTokenKind::Apc => "APC string".to_owned(),
         VtTokenKind::Unknown => "unknown or malformed sequence".to_owned(),
         VtTokenKind::Incomplete => "incomplete sequence".to_owned(),
-    };
-}
-
-fn framer_error(reason: impl Into<String>) -> Error {
-    return Error::InvalidVtStream {
-        reason: reason.into(),
     };
 }
 
