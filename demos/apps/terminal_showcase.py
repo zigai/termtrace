@@ -21,7 +21,6 @@ class TerminalShowcase:
     def __init__(self) -> None:
         self.input_fd = sys.stdin.fileno()
         self.original_termios = termios.tcgetattr(self.input_fd)
-        self.seen_signals: set[int] = set()
         self.should_terminate = False
 
     def run(self) -> None:
@@ -48,7 +47,6 @@ class TerminalShowcase:
         self._line(f"RESIZED:{size.columns}x{size.lines}", color="38;5;45")
 
     def _handle_signal(self, number: int, _frame: FrameType | None) -> None:
-        self.seen_signals.add(number)
         name = signal.Signals(number).name
         self._line(f"SIGNAL:{name}", color="38;5;214")
         if number == signal.SIGTERM:

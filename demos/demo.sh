@@ -82,15 +82,13 @@ cmp "$SESSION/events.jsonl" "$DEMO_DIRECTORY/recovered/events.jsonl"
 "$TERMTRACE_BIN" analyze inspect --session "$DEMO_DIRECTORY/recovered" --format text \
     >"$DEMO_DIRECTORY/recovered-final-screen.txt"
 mkdir -m 700 "$DEMO_DIRECTORY/tampered"
-while IFS= read -r line; do
-    jq -c '
-    if .event.type? == "output" then
-      .event.data = (if (.event.data | startswith("A")) then "B" else "A" end) + .event.data[1:]
-    else
-      .
-    end
-  ' <<<"$line"
-done <"$SESSION/events.jsonl" >"$DEMO_DIRECTORY/tampered/events.jsonl"
+jq -c '
+  if .event.type? == "output" then
+    .event.data = (if (.event.data | startswith("A")) then "B" else "A" end) + .event.data[1:]
+  else
+    .
+  end
+' "$SESSION/events.jsonl" >"$DEMO_DIRECTORY/tampered/events.jsonl"
 chmod 600 "$DEMO_DIRECTORY/tampered/events.jsonl"
 
 set +e
