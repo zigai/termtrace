@@ -15,10 +15,9 @@ use zstd::stream::decode_all;
 
 use termtrace_model::scenario::{Scenario, ScenarioReport};
 
-use crate::{Error, Result, document::validate_snapshot_name, error::invalid};
+use crate::{Error, Result, error::invalid};
 
 pub(crate) fn snapshot_path(failure_root: &Path, name: &str) -> Result<PathBuf> {
-    validate_snapshot_name(name)?;
     let artifact_root = failure_root
         .parent()
         .ok_or_else(|| return invalid("scenario failure root has no artifact parent"))?;

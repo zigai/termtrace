@@ -11,6 +11,8 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 serde_path_to_error = "0.1.20"
 uuid = { version = "1.18.1", features = ["serde", "v7"] }
+thiserror = "2.0.17"
+xmlwriter = "0.1.0"
 zstd = "0.13.3"
 termtrace-model = { path = "../model" }
 termtrace-evidence = { path = "../evidence" }

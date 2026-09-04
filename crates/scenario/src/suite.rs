@@ -1,6 +1,5 @@
 use std::{
     collections::VecDeque,
-    fmt::Write as _,
     path::{Path, PathBuf},
     result::Result as StdResult,
     sync::{Arc, Mutex, mpsc},
@@ -18,7 +17,7 @@ use crate::{
     Error, Result,
     document::{expand_matrix, read},
     error::{invalid, operation},
-    run,
+    execution::run_validated,
 };
 
 /// Execution and selection settings for a deterministic scenario suite.
@@ -169,7 +168,7 @@ fn run_case(
 ) -> Result<ScenarioCaseReport> {
     let mut attempts: Vec<ScenarioAttemptReport> = Vec::new();
     for attempt in 1..=u32::from(options.reruns).saturating_add(1) {
-        let report = run(
+        let report = run_validated(
             &scenario,
             &options.binary,
             &options.evidence_root,
@@ -201,32 +200,34 @@ pub fn scenario_junit(report: &ScenarioSuiteReport) -> String {
                 .is_none_or(|attempt| return attempt.report.status == ScenarioStatus::Failed);
         })
         .count();
-    let mut xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"termtrace\" tests=\"{}\" failures=\"{failure_count}\">",
-        report.cases.len()
-    );
+    let mut w = xmlwriter::XmlWriter::new(xmlwriter::Options::default());
+    w.start_element("testsuite");
+    w.write_attribute("name", "termtrace");
+    w.write_attribute("tests", &report.cases.len());
+    w.write_attribute("failures", &failure_count);
     for case in &report.cases {
         let final_attempt = case.attempts.last();
         let name = final_attempt.map_or_else(
             || return case.scenario.display().to_string(),
             |attempt| return attempt.report.name.clone(),
         );
-        let _write = write!(xml, "\n  <testcase name=\"{}\">", xml_escape(&name));
+        w.start_element("testcase");
+        w.write_attribute("name", &name);
         if let Some(failure) =
             final_attempt.and_then(|attempt| return attempt.report.failure.as_ref())
         {
-            let _write = write!(
-                xml,
-                "\n    <failure message=\"{}\">step {} ({})</failure>\n  ",
-                xml_escape(&failure.message),
-                failure.step_index,
-                xml_escape(&failure.step_kind)
-            );
+            w.start_element("failure");
+            w.write_attribute("message", &failure.message);
+            w.write_text(&format!(
+                "step {} ({})",
+                failure.step_index, failure.step_kind
+            ));
+            w.end_element();
         }
-        xml.push_str("</testcase>");
+        w.end_element();
     }
-    xml.push_str("\n</testsuite>\n");
-    return xml;
+    w.end_element();
+    return w.end_document();
 }
 
 /// Securely publish deterministic JUnit XML for a suite report.
@@ -234,13 +235,4 @@ pub fn write_scenario_junit(path: impl AsRef<Path>, report: &ScenarioSuiteReport
     write_secure(path.as_ref(), scenario_junit(report).as_bytes())
         .map_err(|error| return operation("write JUnit report", error))?;
     return Ok(());
-}
-
-fn xml_escape(value: &str) -> String {
-    return value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;");
 }

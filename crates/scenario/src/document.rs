@@ -113,7 +113,6 @@ pub(super) fn validate(scenario: &Scenario) -> Result<()> {
 
 /// Expand a bounded Cartesian matrix into independently named scenarios.
 pub(super) fn expand_matrix(document: Scenario) -> Result<Vec<(String, Scenario)>> {
-    validate(&document)?;
     if document.matrix.is_empty() {
         return Ok(vec![(String::new(), document)]);
     }
@@ -285,7 +284,9 @@ mod tests {
     }
     #[test]
     fn scenario_environment_distinguishes_text_and_explicit_bytes() {
-        let scenario: Scenario = serde_json::from_value(serde_json::json!({
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let path = temporary.path().join("scenario.json");
+        let json = serde_json::json!({
             "version": 2,
             "name": "environment",
             "launch": {
@@ -296,52 +297,49 @@ mod tests {
                 }
             },
             "steps": [{ "stop": {} }]
-        }))
-        .expect("scenario JSON");
-
+        });
+        fs_err::write(&path, serde_json::to_vec(&json).expect("scenario JSON"))
+            .expect("write scenario");
+        let scenario = read(&path).expect("read scenario document");
+        let spec =
+            to_environment_spec(&scenario.launch.environment).expect("convert to environment spec");
         assert_eq!(
-            scenario
-                .launch
-                .environment
-                .set
-                .get("PI_SKIP_VERSION_CHECK")
-                .expect("text value")
-                .as_bytes(),
-            b"1"
+            spec.set.get("PI_SKIP_VERSION_CHECK").map(|b| b.as_bytes()),
+            Some(b"1".as_slice())
         );
         assert_eq!(
-            scenario
-                .launch
-                .environment
-                .set
-                .get("UNICODE")
-                .expect("UTF-8 value")
-                .as_bytes(),
-            "λ".as_bytes()
+            spec.set.get("UNICODE").map(|b| b.as_bytes()),
+            Some("λ".as_bytes())
         );
         assert_eq!(
-            scenario
-                .launch
-                .environment
-                .set_bytes
-                .get("BINARY")
-                .expect("byte value")
-                .base64
-                .as_bytes(),
-            [1, 2]
+            spec.set.get("BINARY").map(|b| b.as_bytes()),
+            Some(&[1, 2][..])
         );
 
-        let encoded = serde_json::to_value(&scenario).expect("serialized scenario");
-        assert_eq!(
-            encoded["launch"]["environment"]["set"]["PI_SKIP_VERSION_CHECK"],
-            "1"
-        );
-        assert_eq!(
-            encoded["launch"]["environment"]["setBytes"]["BINARY"]["base64"],
-            "AQI="
+        let duplicate_json = serde_json::json!({
+            "version": 2,
+            "name": "dup",
+            "launch": {
+                "command": ["/bin/true"],
+                "environment": {
+                    "set": { "COLLISION": "text" },
+                    "setBytes": { "COLLISION": { "base64": "AQI=" } }
+                }
+            },
+            "steps": [{ "stop": {} }]
+        });
+        let dup_path = temporary.path().join("dup.json");
+        fs_err::write(
+            &dup_path,
+            serde_json::to_vec(&duplicate_json).expect("dup JSON"),
+        )
+        .expect("write dup");
+        let err = read(&dup_path).expect_err("duplicate key must fail");
+        assert!(
+            err.to_string()
+                .contains("duplicates launch.environment.set.COLLISION")
         );
     }
-
     #[test]
     fn scenario_read_reports_environment_value_path() {
         let temporary = tempfile::tempdir().expect("temporary directory");

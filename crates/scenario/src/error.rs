@@ -1,77 +1,42 @@
-use std::{error::Error as StdError, fmt, io, path::PathBuf, result::Result as StdResult};
+use std::{fmt, io, path::PathBuf, result::Result as StdResult};
 
 /// Failure while parsing, validating, executing, or reporting scenarios.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// A filesystem operation failed.
+    #[error("filesystem operation failed for `{}`: {source}", path.display())]
     Filesystem {
         /// Path involved in the failed operation.
         path: PathBuf,
         /// Underlying I/O failure.
+        #[source]
         source: io::Error,
     },
     /// A strict scenario or snapshot JSON document was invalid.
+    #[error("invalid JSON in `{}` at `{json_path}`: {source}", path.display())]
     InvalidJson {
         /// Path of the invalid document.
         path: PathBuf,
         /// JSON path at which decoding failed.
         json_path: String,
         /// Underlying JSON decoding failure.
+        #[source]
         source: serde_json::Error,
     },
     /// A scenario contract invariant was violated.
+    #[error("invalid scenario: {reason}")]
     InvalidScenario {
         /// Scenario contract violation.
         reason: String,
     },
     /// A lower-layer operation failed.
+    #[error("scenario {operation} failed: {message}")]
     Operation {
         /// Stable lower-layer operation name.
         operation: &'static str,
         /// Safe lower-layer failure detail.
         message: String,
     },
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Filesystem { path, source } => {
-                return write!(
-                    f,
-                    "filesystem operation failed for `{}`: {source}",
-                    path.display()
-                );
-            }
-            Self::InvalidJson {
-                path,
-                json_path,
-                source,
-            } => {
-                return write!(
-                    f,
-                    "invalid JSON in `{}` at `{json_path}`: {source}",
-                    path.display()
-                );
-            }
-            Self::InvalidScenario { reason } => {
-                return write!(f, "invalid scenario: {reason}");
-            }
-            Self::Operation { operation, message } => {
-                return write!(f, "scenario {operation} failed: {message}");
-            }
-        }
-    }
-}
-
-impl StdError for Error {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        match self {
-            Self::Filesystem { source, .. } => return Some(source),
-            Self::InvalidJson { source, .. } => return Some(source),
-            Self::InvalidScenario { .. } | Self::Operation { .. } => return None,
-        }
-    }
 }
 
 /// Result returned by scenario operations.

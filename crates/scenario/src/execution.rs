@@ -9,7 +9,7 @@ use std::{
 use termtrace_engine::{
     analysis::diagnostics::diagnose,
     observation::{StatePoint, observe_session_with_options, state_text},
-    replay::{StateSelector, inspect, replay},
+    replay::{StateSelector, inspect_many, replay},
     timeline::build_timeline_page,
 };
 use termtrace_evidence::{event_log::EventLog, session::validate_completed_log};
@@ -44,6 +44,22 @@ pub fn run(
     update_snapshots: bool,
 ) -> Result<ScenarioReport> {
     validate(scenario)?;
+    return run_validated(
+        scenario,
+        binary,
+        evidence_root,
+        failure_root,
+        update_snapshots,
+    );
+}
+
+pub(crate) fn run_validated(
+    scenario: &Scenario,
+    binary: impl Into<PathBuf>,
+    evidence_root: impl Into<PathBuf>,
+    failure_root: impl Into<PathBuf>,
+    update_snapshots: bool,
+) -> Result<ScenarioReport> {
     let failure_root = failure_root.into();
     let terminal = Terminal::new(binary, evidence_root);
     let command = scenario.launch.command.iter().map(OsString::from);
@@ -197,14 +213,9 @@ fn execute_step(
             let predicate = match (&wait.contains, &wait.absent) {
                 (Some(text), None) => ScreenPredicate::Contains { text: text.clone() },
                 (None, Some(text)) => ScreenPredicate::Absent { text: text.clone() },
-                (Some(_), Some(_)) | (None, None) => {
-                    return Err(step_failure(
-                        index,
-                        step,
-                        request_ids,
-                        "invalid screen predicate",
-                    ));
-                }
+                _ => unreachable!(
+                    "validated scenario wait step requires exactly one of contains or absent"
+                ),
             };
             let matched = session
                 .screen()
@@ -401,10 +412,11 @@ fn rich_frame_snapshot(frame: &ScreenFrame) -> ScenarioFrameSnapshot {
 }
 
 fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Result<()> {
-    let [start_label, end_label] = assertion.between_markers.as_slice() else {
-        return Err(invalid(
-            "timeline assertion requires exactly two marker labels",
-        ));
+    let [start_label, end_label] = match assertion.between_markers.as_slice() {
+        [start, end] => [start.as_str(), end.as_str()],
+        _ => {
+            unreachable!("validated scenario timeline assertion requires exactly two marker labels")
+        }
     };
     let log = EventLog::read(session.join("events.jsonl"))
         .map_err(|error| return operation("read timeline assertion event log", error))?;
@@ -440,13 +452,20 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
         .filter(|state| return state.monotonic_ns >= start && state.monotonic_ns <= end)
         .collect();
     if let Some(text) = &assertion.no_presented_screen_contains {
-        for state in &ranged_states {
-            let inspected = inspect(&log, StateSelector::StateId(state.state_id))
-                .map_err(|error| return operation("inspect timeline assertion state", error))?;
-            if state.presented && state_text(&inspected.state).contains(text) {
-                return Err(invalid(format!(
-                    "a presented state between `{start_label}` and `{end_label}` contained forbidden text"
-                )));
+        let presented_selectors: Vec<_> = ranged_states
+            .iter()
+            .filter(|state| return state.presented)
+            .map(|state| return StateSelector::StateId(state.state_id))
+            .collect();
+        if !presented_selectors.is_empty() {
+            let inspections = inspect_many(&log, &presented_selectors)
+                .map_err(|error| return operation("inspect timeline assertion states", error))?;
+            for inspected in inspections {
+                if state_text(&inspected.state).contains(text) {
+                    return Err(invalid(format!(
+                        "a presented state between `{start_label}` and `{end_label}` contained forbidden text"
+                    )));
+                }
             }
         }
     }

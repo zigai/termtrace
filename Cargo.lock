@@ -2267,7 +2267,9 @@ dependencies = [
  "termtrace-model",
  "termtrace-render",
  "termtrace-sdk",
+ "thiserror 2.0.18",
  "uuid",
+ "xmlwriter",
  "zstd",
 ]
 
