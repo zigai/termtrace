@@ -16,11 +16,11 @@ use termtrace_model::value::ByteString;
 use crate::cli::output::{write_json_line, write_stdout};
 
 use super::{
-    GUARDED_HOOKS, OPTION_AGGREGATE_MANIFEST, OPTION_ALLOW_UNRECORDED, OPTION_CELL_HEIGHT,
-    OPTION_CELL_WIDTH, OPTION_COVERAGE, OPTION_GHOSTTY_CONFIG, OPTION_ORIGINAL_COMMAND,
-    OPTION_ORIGINAL_SHELL, OPTION_OUTPUT_ROOT, OPTION_PROFILE_MODE, OPTION_SCOPE, OPTION_TERM,
-    OPTION_TERMTRACE, OPTION_TMUX, OPTION_VERSION, RESERVED_OPTIONS, TMUX_HOOK_INDEX,
-    TMUX_INTEGRATION_VERSION, TMUX_WRAPPER_BINARY_ENV,
+    GUARDED_HOOKS, OPTION_AGGREGATE_MANIFEST, OPTION_CELL_HEIGHT, OPTION_CELL_WIDTH,
+    OPTION_COVERAGE, OPTION_GHOSTTY_CONFIG, OPTION_ORIGINAL_COMMAND, OPTION_ORIGINAL_SHELL,
+    OPTION_OUTPUT_ROOT, OPTION_PROFILE_MODE, OPTION_SCOPE, OPTION_TERM, OPTION_TERMTRACE,
+    OPTION_TMUX, OPTION_VERSION, RESERVED_OPTIONS, TMUX_HOOK_INDEX, TMUX_INTEGRATION_VERSION,
+    TMUX_WRAPPER_BINARY_ENV,
     args::{
         TmuxConfigArgs, TmuxConnectionArgs, TmuxCoverageMode, TmuxEnableArgs,
         TmuxGhosttyProfileMode, TmuxSetupArgs,
@@ -97,14 +97,6 @@ pub(super) fn enable_prepared_tmux_setup(
             ));
         }
         client.set_option(OPTION_COVERAGE, OsStr::new(setup.coverage.as_str()))?;
-        client.set_option(
-            OPTION_ALLOW_UNRECORDED,
-            OsStr::new(if setup.coverage == TmuxCoverageMode::Strict {
-                "0"
-            } else {
-                "1"
-            }),
-        )?;
         client.set_option(
             OPTION_AGGREGATE_MANIFEST,
             setup
@@ -263,16 +255,11 @@ pub(super) fn setup_from_options(
     termtrace: Vec<u8>,
     tmux: Vec<u8>,
 ) -> Result<PreparedTmuxSetup> {
-    let profile_mode = match option_text(client, OPTION_PROFILE_MODE)?.as_str() {
-        "auto" => TmuxGhosttyProfileMode::Auto,
-        "required" => TmuxGhosttyProfileMode::Required,
-        "off" => TmuxGhosttyProfileMode::Off,
-        other => {
-            return Err(miette::miette!(
-                "unsupported Ghostty profile mode `{other}`"
-            ));
-        }
-    };
+    let profile_text = option_text(client, OPTION_PROFILE_MODE)?;
+    let profile_mode = <TmuxGhosttyProfileMode as clap::ValueEnum>::from_str(&profile_text, true)
+        .map_err(|_| {
+        return miette::miette!("unsupported Ghostty profile mode `{profile_text}`");
+    })?;
     return Ok(PreparedTmuxSetup {
         termtrace: PathBuf::from(OsString::from_vec(termtrace)),
         tmux: PathBuf::from(OsString::from_vec(tmux)),
@@ -280,9 +267,11 @@ pub(super) fn setup_from_options(
             .ok_or_else(|| return miette::miette!("configured tmux output root is empty"))?,
         profile_mode,
         ghostty_config: option_path(client, OPTION_GHOSTTY_CONFIG)?,
-        coverage: match option_text(client, OPTION_COVERAGE)?.as_str() {
-            "strict" => TmuxCoverageMode::Strict,
-            _ => TmuxCoverageMode::Warn,
+        coverage: {
+            let cov_text = option_text(client, OPTION_COVERAGE)?;
+            <TmuxCoverageMode as clap::ValueEnum>::from_str(&cov_text, true).map_err(|_| {
+                return miette::miette!("unsupported tmux coverage mode `{cov_text}`");
+            })?
         },
         aggregate_manifest: option_path(client, OPTION_AGGREGATE_MANIFEST)?,
         cell_width: parse_option(client, OPTION_CELL_WIDTH)?,
@@ -335,15 +324,6 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
         &mut output,
         OPTION_COVERAGE,
         setup.coverage.as_str().as_bytes(),
-    );
-    append_config_option(
-        &mut output,
-        OPTION_ALLOW_UNRECORDED,
-        if setup.coverage == TmuxCoverageMode::Strict {
-            b"0"
-        } else {
-            b"1"
-        },
     );
     append_config_option(
         &mut output,
@@ -406,14 +386,6 @@ pub(super) fn apply_tmux_setup(
             .map_or_else(|| return OsStr::new(""), |path| return path.as_os_str()),
     )?;
     client.set_option(OPTION_COVERAGE, OsStr::new(setup.coverage.as_str()))?;
-    client.set_option(
-        OPTION_ALLOW_UNRECORDED,
-        OsStr::new(if setup.coverage == TmuxCoverageMode::Strict {
-            "0"
-        } else {
-            "1"
-        }),
-    )?;
     client.set_option(
         OPTION_AGGREGATE_MANIFEST,
         setup

@@ -1,6 +1,6 @@
 use std::{env, fmt::Write as _};
 
-use clap::{CommandFactory as _, Parser, Subcommand};
+use clap::{CommandFactory as _, Parser, Subcommand, ValueEnum as _};
 
 use crate::cli::{
     analysis::args::{
@@ -149,91 +149,8 @@ pub(super) enum Command {
     Wait(WaitArgs),
 }
 
-/// Completion generation uses the public command graph and omits internal commands.
-#[derive(Debug, Parser)]
-#[command(
-    name = "termtrace",
-    version,
-    about = "Record native terminal pixels and every semantic terminal state"
-)]
-pub(super) struct CompletionCli {
-    #[arg(long, global = true, env = "TERMTRACE_LOG", default_value = "warn")]
-    pub(super) log: tracing::Level,
-
-    /// Select concise human, strict agent, forensic full, or exit-only output.
-    #[arg(
-        long,
-        global = true,
-        env = "TERMTRACE_RESPONSE",
-        default_value = "auto",
-        value_name = "PROFILE"
-    )]
-    pub(super) response: ResponseMode,
-
-    /// Include advanced compact-response fields.
-    #[arg(long, global = true, value_delimiter = ',', value_name = "FIELD")]
-    pub(super) fields: Vec<ResponseField>,
-
-    #[command(subcommand)]
-    command: CompletionCommand,
-}
-
-#[derive(Debug, Subcommand)]
-enum CompletionCommand {
-    /// Run a command in a PTY and preserve its byte-exact event stream.
-    Record(RecordArgs),
-    /// Execute one strict evidence-native terminal scenario.
-    Test(TestArgs),
-    /// Start a detached recording and publish a name after readiness.
-    Start(StartArgs),
-    /// Stop a named session and atomically publish an immutable successor.
-    Restart(RestartArgs),
-    /// Request graceful termination of a live session child.
-    Stop(StopArgs),
-    /// Record managed tmux panes for their full lifetime.
-    Tmux(TmuxArgs),
-    /// Print machine-readable live session status.
-    Status(StatusArgs),
-    /// Apply terminal input and wait for an optional presented-state postcondition.
-    Act(ActArgs),
-    /// Send text, file, or standard-input bytes to a live child PTY.
-    Send(SendArgs),
-    /// Wait for an explicit presented-screen, output-history, or idle predicate.
-    Wait(WaitArgs),
-    /// Show a truth-labeled live or completed terminal viewport.
-    Show(ShowArgs),
-    /// Return a compact representation of the latest presented screen.
-    Screen(ScreenArgs),
-    /// Live session control commands.
-    Control(ControlArgs),
-    /// Replay, inspect, compare, and diagnose terminal evidence.
-    Analyze(AnalyzeArgs),
-    /// Render, capture, and publish terminal artifacts.
-    Artifact(ArtifactArgs),
-    /// Summarize the most recent canonical input action.
-    Inspect(InspectFacadeArgs),
-    /// Run diagnostics bounded to the most recent canonical input action.
-    Diagnose(DiagnoseFacadeArgs),
-    /// Create a manifested screenshot artifact.
-    Screenshot(ScreenshotArgs),
-    /// Create a sensitivity-labeled evidence bundle.
-    Bundle(BundleArgs),
-    /// Publish a bounded manifested debugging evidence export without raw byte streams.
-    BugReport(BugReportFacadeArgs),
-    /// Plan, preview, or export a manifested presentation video.
-    Video(VideoFacadeArgs),
-    /// Manage friendly session names and retention.
-    Session(RegistryArgs),
-    /// Verify, sign, and recover canonical evidence.
-    Integrity(IntegrityArgs),
-    /// Runtime, SDK, and shell integration tools.
-    Tooling(ToolingArgs),
-    /// Probe built-in and optional host capabilities.
-    Doctor(DoctorArgs),
-    /// Report build and runtime component versions.
-    Version(VersionArgs),
-    /// Serve the versioned language-neutral JSONL process protocol.
-    Agent,
+pub(super) fn completion_command() -> clap::Command {
+    return Cli::command();
 }
 fn bound_help_width(command: clap::Command) -> clap::Command {
     return command
@@ -337,14 +254,7 @@ pub(super) fn requested_response_mode() -> ResponseMode {
 }
 
 fn response_mode_name(value: &str) -> Option<ResponseMode> {
-    return match value {
-        "auto" => Some(ResponseMode::Auto),
-        "human" => Some(ResponseMode::Human),
-        "agent" => Some(ResponseMode::Agent),
-        "full" => Some(ResponseMode::Full),
-        "quiet" => Some(ResponseMode::Quiet),
-        _ => None,
-    };
+    return ResponseMode::from_str(value, false).ok();
 }
 
 pub(super) fn command_contract(matches: &clap::ArgMatches) -> (String, bool) {

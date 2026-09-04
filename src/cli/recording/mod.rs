@@ -83,7 +83,7 @@ mod start;
 
 use geometry::resolve_record_geometry;
 use record::durability_policy_for;
-use restart::{empty_restart_overrides, restarted_record_options};
+use restart::restarted_record_options;
 
 pub(super) use geometry::run_geometry_probe;
 pub(super) use record::run_record;

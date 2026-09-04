@@ -295,7 +295,6 @@ impl SessionActor<'_> {
                     &data,
                 )?;
             }
-            RuntimeMessage::InputClosed => {}
             RuntimeMessage::InputFailed(reason) => {
                 return Err(terminal_error("read standard input", reason));
             }

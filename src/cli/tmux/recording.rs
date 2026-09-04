@@ -9,6 +9,7 @@ use std::{
     time::Duration,
 };
 
+use super::args::TmuxGhosttyProfileMode;
 use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::{
     analysis::profile::{builtin_terminal_colors, terminal_colors_for_profile},
@@ -90,14 +91,18 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
         configured_term
     };
     let ghostty_config = option_path(&client, OPTION_GHOSTTY_CONFIG)?;
-    let profile_mode = option_text(&client, OPTION_PROFILE_MODE)?;
-    let ghostty_profile = match profile_mode.as_str() {
-        "off" => None,
-        "required" => Some(
+    let profile_text = option_text(&client, OPTION_PROFILE_MODE)?;
+    let profile_mode = <TmuxGhosttyProfileMode as clap::ValueEnum>::from_str(&profile_text, true)
+        .map_err(|_| {
+        return miette::miette!("unsupported configured Ghostty profile mode `{profile_text}`");
+    })?;
+    let ghostty_profile = match profile_mode {
+        TmuxGhosttyProfileMode::Off => None,
+        TmuxGhosttyProfileMode::Required => Some(
             resolve_ghostty_profile(ghostty_config.as_deref(), GhosttyVisualOverrides::default())
                 .into_diagnostic()?,
         ),
-        "auto" => match resolve_ghostty_profile(
+        TmuxGhosttyProfileMode::Auto => match resolve_ghostty_profile(
             ghostty_config.as_deref(),
             GhosttyVisualOverrides::default(),
         ) {
@@ -108,11 +113,6 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
             }
             Err(error) => return Err(error).into_diagnostic(),
         },
-        other => {
-            return Err(miette::miette!(
-                "unsupported configured Ghostty profile mode `{other}`"
-            ));
-        }
     };
     let colors = ghostty_profile
         .as_ref()

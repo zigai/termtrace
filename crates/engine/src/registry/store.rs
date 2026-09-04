@@ -214,10 +214,7 @@ impl SessionRegistry {
             let entry = match read_registry_record_nofollow(&path) {
                 Ok(RegistryRecord::Entry(entry)) => entry,
                 Ok(RegistryRecord::Reservation(_)) => continue,
-                Err(error) => {
-                    let _isolated_error = error;
-                    continue;
-                }
+                Err(_) => continue,
             };
             let row = inspect_entry(&entry);
             if include_all || row.lifecycle == RegistryLifecycle::Live {
@@ -294,24 +291,22 @@ impl SessionRegistry {
         });
     }
 
-    pub(super) fn encode_entry(&self, entry: &RegistryEntry) -> Result<Vec<u8>> {
-        return serde_json::to_vec_pretty(entry).map_err(|source| {
+    fn encode_record(&self, alias: &str, value: &impl serde::Serialize) -> Result<Vec<u8>> {
+        return serde_json::to_vec_pretty(value).map_err(|source| {
             return Error::InvalidJson {
-                path: self.entry_path(&entry.alias),
+                path: self.entry_path(alias),
                 json_path: "$".to_owned(),
                 source,
             };
         });
     }
 
+    pub(super) fn encode_entry(&self, entry: &RegistryEntry) -> Result<Vec<u8>> {
+        return self.encode_record(&entry.alias, entry);
+    }
+
     pub(super) fn encode_reservation(&self, reservation: &AliasReservation) -> Result<Vec<u8>> {
-        return serde_json::to_vec_pretty(reservation).map_err(|source| {
-            return Error::InvalidJson {
-                path: self.entry_path(&reservation.alias),
-                json_path: "$".to_owned(),
-                source,
-            };
-        });
+        return self.encode_record(&reservation.alias, reservation);
     }
 
     pub(super) fn lock(&self) -> Result<Flock<File>> {
@@ -412,21 +407,18 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         }
     }
     let responsive_identity = recorder_process_identity(&canonical);
-    match (entry.recorder_pid, entry.recorder_process_start_ticks) {
-        (Some(pid), Some(start_ticks)) if responsive_identity == Some((pid, start_ticks)) => {
+    if let Some(identity) = entry.recorder_pid.zip(entry.recorder_process_start_ticks) {
+        if responsive_identity == Some(identity) {
             row.lifecycle = RegistryLifecycle::Live;
-        }
-        (Some(_), Some(_)) => {
+        } else {
             row.lifecycle = RegistryLifecycle::Stale;
             row.diagnostic =
                 Some("recorder PID/start identity or control socket is stale".to_owned());
         }
-        (None, None) if responsive_identity.is_some() => row.lifecycle = RegistryLifecycle::Live,
-        (None, None) => row.lifecycle = RegistryLifecycle::Incomplete,
-        _ => {
-            row.lifecycle = RegistryLifecycle::Incompatible;
-            row.diagnostic = Some("partial recorder process identity".to_owned());
-        }
+    } else if responsive_identity.is_some() {
+        row.lifecycle = RegistryLifecycle::Live;
+    } else {
+        row.lifecycle = RegistryLifecycle::Incomplete;
     }
     return row;
 }
@@ -490,12 +482,8 @@ pub(super) fn validate_owner_directory(path: &Path) -> Result<()> {
     return Ok(());
 }
 
-#[allow(
-    clippy::verbose_file_reads,
-    reason = "the already-opened O_NOFOLLOW descriptor must be read without reopening its path"
-)]
 pub(super) fn read_registry_record_nofollow(path: &Path) -> Result<RegistryRecord> {
-    let mut file = OpenOptions::new()
+    let file = OpenOptions::new()
         .read(true)
         .custom_flags(O_NOFOLLOW)
         .open(path)
@@ -506,40 +494,13 @@ pub(super) fn read_registry_record_nofollow(path: &Path) -> Result<RegistryRecor
             };
         })?;
     validate_entry_file(path, &file)?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|source| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        };
-    })?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|source| {
+    return serde_json::from_reader(file).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
             json_path: "$".to_owned(),
             source,
         };
-    })?;
-    if value.get("owner_token").is_some() {
-        return serde_json::from_value(value)
-            .map(RegistryRecord::Reservation)
-            .map_err(|source| {
-                return Error::InvalidJson {
-                    path: path.to_path_buf(),
-                    json_path: "$".to_owned(),
-                    source,
-                };
-            });
-    }
-    return serde_json::from_value(value)
-        .map(RegistryRecord::Entry)
-        .map_err(|source| {
-            return Error::InvalidJson {
-                path: path.to_path_buf(),
-                json_path: "$".to_owned(),
-                source,
-            };
-        });
+    });
 }
 
 pub(super) fn read_entry_nofollow(path: &Path) -> Result<RegistryEntry> {
@@ -559,7 +520,7 @@ pub(super) fn validate_entry_file(path: &Path, file: &File) -> Result<()> {
             source,
         };
     })?;
-    if metadata.mode() & 0o170_000 != 0o100_000
+    if !metadata.is_file()
         || metadata.uid() != getuid().as_raw()
         || metadata.mode() & 0o777 != 0o600
     {

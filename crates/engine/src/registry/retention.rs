@@ -130,7 +130,7 @@ impl SessionRegistry {
                 })?;
             completed_sessions.push((session, completion.session_id, completed_at));
         }
-        completed_sessions.sort_by(|left, right| return right.2.cmp(&left.2));
+        completed_sessions.sort_by_key(|entry| std::cmp::Reverse(entry.2));
         let retention = Duration::from_secs(older_than_days.saturating_mul(86_400));
         let cutoff = SystemTime::now()
             .checked_sub(retention)
@@ -207,8 +207,7 @@ impl SessionRegistry {
             let session = match read_registry_record_nofollow(&path) {
                 Ok(RegistryRecord::Entry(entry)) => entry.session_path(),
                 Ok(RegistryRecord::Reservation(reservation)) => reservation.session_path(),
-                Err(error) => {
-                    let _isolated_error = error;
+                Err(_) => {
                     corrupt_entries = corrupt_entries.saturating_add(1);
                     continue;
                 }
@@ -249,11 +248,7 @@ pub(super) fn directory_bytes_nofollow(directory: &Path) -> Result<u64> {
         }
         if file_type.is_dir() {
             total = total.saturating_add(directory_bytes_nofollow(&path)?);
-        } else if file_type.is_block_device()
-            || file_type.is_char_device()
-            || file_type.is_fifo()
-            || file_type.is_socket()
-        {
+        } else if !file_type.is_file() {
             return Err(registry_error(
                 "measure managed session",
                 "managed session contains a non-file member",

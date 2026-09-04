@@ -17,7 +17,7 @@ use termtrace_media::{
     playback::{PlaybackOptions, playback},
     presentation::markers as list_markers,
 };
-use termtrace_model::terminal::reviewer::ReviewerCapabilities;
+use termtrace_model::terminal::{replay::StateSelection, reviewer::ReviewerCapabilities};
 
 use crate::cli::{
     analysis::args::{
@@ -26,14 +26,14 @@ use crate::cli::{
     },
     analysis::reviewer::run as run_reviewer,
     output::{row_text, write_json_line, write_stdout},
-    session_helpers::{resolve_cli_range, resolve_session_ref, selection},
+    session_helpers::{resolve_cli_range, resolve_session_path},
 };
 
 pub(in crate::cli) fn run_markers(
     response: &mut ResponseWriter,
     arguments: MarkersArgs,
 ) -> Result<ExitCode> {
-    let session = resolve_session_ref(arguments.session)?;
+    let session = resolve_session_path(arguments.session)?;
     return write_json_line(
         response,
         &list_markers(session, arguments.fps).into_diagnostic()?,
@@ -50,7 +50,7 @@ pub(in crate::cli) fn run_review(
     let session = arguments.session.ok_or_else(|| {
         return miette::miette!("review requires SESSION unless --commands is used");
     })?;
-    let session = resolve_session_ref(session)?;
+    let session = resolve_session_path(session)?;
     if let (Some(destination), Some(state_id)) = (&arguments.export_state, arguments.state) {
         return write_json_line(
             response,
@@ -64,12 +64,7 @@ pub(in crate::cli) fn run_review(
         let visual_evidence = validated_visual_manifests(&session).into_diagnostic()?;
         return write_json_line(
             response,
-            &summarize_review(
-                session,
-                arguments.around_marker.as_deref(),
-                &visual_evidence,
-            )
-            .into_diagnostic()?,
+            &summarize_review(session, &visual_evidence).into_diagnostic()?,
         );
     }
     run_reviewer(
@@ -93,7 +88,11 @@ pub(in crate::cli) fn run_index(
     }
     let (start_monotonic_ns, end_monotonic_ns) =
         resolve_cli_range(&arguments.session, &arguments.range)?;
-    let state_selection = selection(arguments.presented_only);
+    let state_selection = if arguments.presented_only {
+        StateSelection::Presented
+    } else {
+        StateSelection::All
+    };
     let outcome = index_session_with_options(
         arguments.session,
         IndexOptions {
@@ -218,11 +217,11 @@ pub(in crate::cli) fn run_cache(
 ) -> Result<ExitCode> {
     return match arguments.command {
         CacheCommand::Status(arguments) => {
-            let session = resolve_session_ref(arguments.session)?;
+            let session = resolve_session_path(arguments.session)?;
             write_json_line(response, &replay_cache_status(&session).into_diagnostic()?)
         }
         CacheCommand::Prune(arguments) => {
-            let session = resolve_session_ref(arguments.session)?;
+            let session = resolve_session_path(arguments.session)?;
             write_json_line(response, &prune_replay_cache(&session).into_diagnostic()?)
         }
     };

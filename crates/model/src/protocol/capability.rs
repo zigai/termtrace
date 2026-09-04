@@ -99,6 +99,11 @@ mod tests {
     #[test]
     fn stable_capability_ids_include_semantic_video() {
         assert!(CAPABILITY_IDS.contains(&SEMANTIC_VIDEO_CAPABILITY));
-        assert_eq!(CAPABILITY_IDS.len(), 7);
+        let unique_ids: std::collections::BTreeSet<_> = CAPABILITY_IDS.iter().copied().collect();
+        assert_eq!(
+            unique_ids.len(),
+            CAPABILITY_IDS.len(),
+            "capability IDs must be unique"
+        );
     }
 }

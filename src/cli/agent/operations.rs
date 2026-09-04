@@ -50,12 +50,10 @@ use uuid::Uuid;
 
 use crate::cli::tooling::require_capability;
 
-use super::{
-    protocol::{
-        DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION, DriverData,
-        DriverMethod, DriverRequest, DriverResponse, DriverResult, DriverScreenshotRenderer,
-    },
-    runtime::Driver,
+use super::runtime::{Driver, SessionOwnership};
+use termtrace_model::protocol::driver::{
+    DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION, DriverData,
+    DriverMethod, DriverRequest, DriverResponse, DriverResult, DriverScreenshotRenderer,
 };
 
 impl Driver {
@@ -116,13 +114,7 @@ impl Driver {
                     command,
                     expected_presented_state_hash,
                 } => {
-                    let path = self.sessions.get(handle).ok_or_else(|| {
-                        return driver_failure(
-                            "unknown_handle",
-                            "session handle is not attached",
-                            None,
-                        );
-                    })?;
+                    let path = self.session_path(handle)?;
                     let mut control = ControlRequest::new(command.clone());
                     control.request_id = request.request_id;
                     control.expected_presented_state_hash = expected_presented_state_hash.clone();
@@ -158,13 +150,7 @@ impl Driver {
                     data,
                     timeout_ms,
                 } => {
-                    let path = self.sessions.get(handle).ok_or_else(|| {
-                        return driver_failure(
-                            "unknown_handle",
-                            "session handle is not attached",
-                            None,
-                        );
-                    })?;
+                    let path = self.session_path(handle)?;
                     wait_for_output(path, data.as_bytes(), Duration::from_millis(*timeout_ms))
                         .map(|outcome| return DriverData::OutputWait { outcome })
                         .map_err(|error| {
@@ -172,13 +158,7 @@ impl Driver {
                         })
                 }
                 DriverMethod::Completion { handle } => {
-                    let path = self.sessions.get(handle).ok_or_else(|| {
-                        return driver_failure(
-                            "unknown_handle",
-                            "session handle is not attached",
-                            None,
-                        );
-                    })?;
+                    let path = self.session_path(handle)?;
                     read_completion(path)
                         .map(|completion| return DriverData::Completion { completion })
                         .map_err(|error| {
@@ -195,14 +175,21 @@ impl Driver {
                     Ok(DriverData::Completion { completion })
                 }
                 DriverMethod::DiscardCompleted { handle } => {
-                    if !self.launched.contains(handle) {
+                    let session = self.sessions.get(handle).ok_or_else(|| {
+                        return driver_failure(
+                            "unknown_handle",
+                            "session handle is not attached",
+                            None,
+                        );
+                    })?;
+                    if !matches!(session.ownership, SessionOwnership::Launched { .. }) {
                         return Err(driver_failure(
                             "evidence_not_driver_owned",
                             "only evidence launched by this driver can be discarded",
-                            self.sessions.get(handle).cloned(),
+                            Some(session.path.clone()),
                         ));
                     }
-                    let path = self.session_path(handle)?.clone();
+                    let path = session.path.clone();
                     let _log = completed_driver_log(&path)?;
                     self.reap_recorder(handle, &path)?;
                     fs_err::remove_dir_all(&path).map_err(|error| {
@@ -218,7 +205,6 @@ impl Driver {
                         })?;
                     }
                     self.sessions.remove(handle);
-                    self.launched.remove(handle);
                     Ok(DriverData::Discarded {
                         evidence_removed: true,
                     })
@@ -541,7 +527,7 @@ impl Driver {
                     })
                 }
                 DriverMethod::Detach { handle } => {
-                    self.launched.remove(handle);
+                    self.detach_recorder(handle);
                     if self.sessions.remove(handle).is_none() {
                         return Err(driver_failure(
                             "unknown_handle",
@@ -549,7 +535,6 @@ impl Driver {
                             None,
                         ));
                     }
-                    self.detach_recorder(handle);
                     Ok(DriverData::Detached)
                 }
             };
@@ -569,7 +554,7 @@ impl Driver {
     }
 
     fn session_path(&self, handle: &Uuid) -> StdResult<&PathBuf, Box<DriverResult>> {
-        return self.sessions.get(handle).ok_or_else(|| {
+        return self.sessions.get(handle).map(|s| &s.path).ok_or_else(|| {
             return driver_failure("unknown_handle", "session handle is not attached", None);
         });
     }
@@ -583,7 +568,13 @@ impl Driver {
         let manifest = read_manifest(&canonical)
             .map_err(|error| return driver_failure_from_error(error, Some(canonical.clone())))?;
         let handle = Uuid::now_v7();
-        self.sessions.insert(handle, canonical.clone());
+        self.sessions.insert(
+            handle,
+            super::runtime::AttachedSession {
+                path: canonical.clone(),
+                ownership: super::runtime::SessionOwnership::External,
+            },
+        );
         return Ok(DriverData::Attached {
             handle,
             session_id: manifest.session_id,
@@ -633,11 +624,13 @@ impl Driver {
         let session_id = session.session_id();
         let (canonical_session, recorder) = session.into_detached_parts();
         let handle = Uuid::now_v7();
-        self.sessions.insert(handle, canonical_session.clone());
-        self.launched.insert(handle);
-        if let Some(recorder) = recorder {
-            self.recorders.insert(handle, recorder);
-        }
+        self.sessions.insert(
+            handle,
+            super::runtime::AttachedSession {
+                path: canonical_session.clone(),
+                ownership: super::runtime::SessionOwnership::Launched { recorder },
+            },
+        );
         return Ok(DriverData::Attached {
             handle,
             session_id,
@@ -647,7 +640,13 @@ impl Driver {
     }
 
     fn reap_recorder(&mut self, handle: &Uuid, path: &Path) -> StdResult<(), Box<DriverResult>> {
-        let Some(mut recorder) = self.recorders.remove(handle) else {
+        let Some(session) = self.sessions.get_mut(handle) else {
+            return Ok(());
+        };
+        let super::runtime::SessionOwnership::Launched { recorder } = &mut session.ownership else {
+            return Ok(());
+        };
+        let Some(mut recorder) = recorder.take() else {
             return Ok(());
         };
         recorder.wait().map_err(|error| {
@@ -661,7 +660,13 @@ impl Driver {
     }
 
     fn detach_recorder(&mut self, handle: &Uuid) {
-        let Some(mut recorder) = self.recorders.remove(handle) else {
+        let Some(session) = self.sessions.get_mut(handle) else {
+            return;
+        };
+        let super::runtime::SessionOwnership::Launched { recorder } = &mut session.ownership else {
+            return;
+        };
+        let Some(mut recorder) = recorder.take() else {
             return;
         };
         thread::spawn(move || {

@@ -135,9 +135,10 @@ fn hash_semantic_row(row: &RowState) -> Result<blake3::Hash> {
         wrap_continuation: row.wrap_continuation,
         cells: &row.cells,
     };
-    let encoded = serde_json::to_vec(&normalized)
+    let mut hasher = blake3::Hasher::new();
+    serde_json::to_writer(&mut hasher, &normalized)
         .map_err(|source| return json_error(PathBuf::from("<semantic-row>"), source))?;
-    return Ok(blake3::hash(&encoded));
+    return Ok(hasher.finalize());
 }
 
 /// Hash a normalized semantic state with the replay state-hash contract.
@@ -158,11 +159,10 @@ pub fn semantic_state_hash(state: &SemanticState) -> Result<String> {
         active_style: &state.active_style,
         metadata: &state.metadata,
     };
-    let encoded = serde_json::to_vec(&metadata)
-        .map_err(|source| return json_error(PathBuf::from("<semantic-metadata>"), source))?;
     let mut hash = blake3::Hasher::new();
     hash.update(b"termtrace-semantic-state-v2\0");
-    hash.update(&encoded);
+    serde_json::to_writer(&mut hash, &metadata)
+        .map_err(|source| return json_error(PathBuf::from("<semantic-metadata>"), source))?;
     for row in &state.grid {
         hash.update(hash_semantic_row(row)?.as_bytes());
     }
@@ -213,22 +213,13 @@ pub(crate) fn visit_states_range(
         && let Some(seed) =
             replay_seed_for_selector(log, &StateSelector::MonotonicNs(range.start_monotonic_ns))?
     {
-        return visit_states_range_seeded(log, range, seed, visitor);
+        replay_with_seed(log, Some(range), seed, |record, state, _| {
+            visitor(&record, state)?;
+            return Ok(());
+        })?;
+        return Ok(());
     }
     replay_for_inspection(log, source_range, |record, state, _| {
-        visitor(&record, state)?;
-        return Ok(());
-    })?;
-    return Ok(());
-}
-
-fn visit_states_range_seeded(
-    log: &EventLog,
-    source_range: SourceRange,
-    seed: ReplaySeed,
-    mut visitor: impl FnMut(&StateRecord, &SemanticState) -> Result<()>,
-) -> Result<()> {
-    replay_with_seed(log, Some(source_range), seed, |record, state, _| {
         visitor(&record, state)?;
         return Ok(());
     })?;
@@ -749,12 +740,9 @@ fn replay_with_limits_and_formats_control(
             break;
         }
         if !emitted_range_baseline
-            && source_range
-                .is_some_and(|range| return record.monotonic_ns >= range.start_monotonic_ns)
+            && let Some(range) = source_range
+            && record.monotonic_ns >= range.start_monotonic_ns
         {
-            let range = source_range.ok_or_else(|| {
-                return invalid_replay("range baseline requested without a source range");
-            })?;
             // Capture before applying an event exactly at `start`. This preserves
             // the [start, end) contract: state 0 is the boundary state, and the
             // event at the inclusive boundary remains an observable transition.
@@ -1272,11 +1260,10 @@ impl ReplayBuilder {
             active_style: &state.active_style,
             metadata: &state.metadata,
         };
-        let encoded = serde_json::to_vec(&metadata)
-            .map_err(|source| return json_error(PathBuf::from("<semantic-metadata>"), source))?;
         let mut hash = blake3::Hasher::new();
         hash.update(b"termtrace-semantic-state-v2\0");
-        hash.update(&encoded);
+        serde_json::to_writer(&mut hash, &metadata)
+            .map_err(|source| return json_error(PathBuf::from("<semantic-metadata>"), source))?;
         for row_hash in &self.row_hashes {
             hash.update(row_hash.as_bytes());
         }

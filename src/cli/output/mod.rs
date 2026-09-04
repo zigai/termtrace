@@ -36,15 +36,29 @@ pub(super) enum ResponseMode {
     Quiet,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ResolvedResponseMode {
+    Human,
+    Agent,
+    Full,
+    Quiet,
+}
+
 impl ResponseMode {
-    pub(super) fn resolve(self) -> Self {
-        if self != Self::Auto {
-            return self;
+    pub(super) fn resolve(self) -> ResolvedResponseMode {
+        match self {
+            Self::Full => ResolvedResponseMode::Full,
+            Self::Quiet => ResolvedResponseMode::Quiet,
+            Self::Human => ResolvedResponseMode::Human,
+            Self::Agent => ResolvedResponseMode::Agent,
+            Self::Auto => {
+                if io::stdout().is_terminal() {
+                    ResolvedResponseMode::Human
+                } else {
+                    ResolvedResponseMode::Agent
+                }
+            }
         }
-        if io::stdout().is_terminal() {
-            return Self::Human;
-        }
-        return Self::Agent;
     }
 }
 
@@ -58,7 +72,7 @@ pub(super) enum ResponseField {
 
 #[derive(Debug)]
 struct ResponseState {
-    mode: ResponseMode,
+    mode: ResolvedResponseMode,
     fields: Vec<ResponseField>,
     command_type: String,
     mutating: bool,
@@ -76,7 +90,7 @@ pub(super) struct ResponseWriter {
 
 impl ResponseWriter {
     pub(super) fn new(
-        mode: ResponseMode,
+        mode: ResolvedResponseMode,
         fields: Vec<ResponseField>,
         command_type: String,
         mutating: bool,
@@ -95,13 +109,9 @@ impl ResponseWriter {
         };
     }
 
-    fn mode(&self) -> ResponseMode {
+    pub(in crate::cli) fn mode(&self) -> ResolvedResponseMode {
         return self.state.mode;
     }
-}
-
-fn progress_enabled(mode: ResponseMode) -> bool {
-    return mode != ResponseMode::Quiet;
 }
 
 mod envelope;

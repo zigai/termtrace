@@ -18,13 +18,12 @@ use super::{
         actor_failure_retry, control_command_mutates, driver_error, driver_failure_from_error,
         driver_failure_with_retry, driver_response_is_cacheable,
     },
-    protocol::{
-        DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
-        DRIVER_RESPONSE_CACHE_BYTES, DriverData, DriverMethod, DriverRequest, DriverResponse,
-        DriverResult,
-    },
-    runtime::{Driver, bounded_response, serialized_size},
+    runtime::{DRIVER_RESPONSE_CACHE_BYTES, Driver, bounded_response, serialized_size},
     serve,
+};
+use termtrace_model::protocol::driver::{
+    DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION, DriverData,
+    DriverMethod, DriverRequest, DriverResponse, DriverResult,
 };
 
 #[test]

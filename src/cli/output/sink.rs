@@ -14,13 +14,9 @@ pub(in crate::cli) fn finish_response(
     let success = code == ExitCode::SUCCESS && error.is_none();
 
     let write_result = match state.mode {
-        ResponseMode::Auto => {
-            direct_stderr("internal error: auto response mode was not resolved");
-            return ExitCode::FAILURE;
-        }
-        ResponseMode::Full => Ok(ExitCode::SUCCESS),
-        ResponseMode::Quiet => Ok(ExitCode::SUCCESS),
-        ResponseMode::Human => {
+        ResolvedResponseMode::Full => Ok(ExitCode::SUCCESS),
+        ResolvedResponseMode::Quiet => Ok(ExitCode::SUCCESS),
+        ResolvedResponseMode::Human => {
             if success {
                 if !state.raw.is_empty() {
                     direct_stdout(&state.raw)
@@ -37,7 +33,7 @@ pub(in crate::cli) fn finish_response(
                 Ok(ExitCode::SUCCESS)
             }
         }
-        ResponseMode::Agent => {
+        ResolvedResponseMode::Agent => {
             let response = if success {
                 enforce_success_budget(compact_success(&state), &state.command_type, &state.fields)
             } else {
@@ -49,7 +45,10 @@ pub(in crate::cli) fn finish_response(
         }
     };
     if let Some(error) = error
-        && !matches!(state.mode, ResponseMode::Quiet | ResponseMode::Human)
+        && !matches!(
+            state.mode,
+            ResolvedResponseMode::Quiet | ResolvedResponseMode::Human
+        )
     {
         direct_stderr(&report_message(&error));
     }
@@ -70,21 +69,17 @@ pub(in crate::cli) fn write_clap_error(error: clap::Error, mode: ResponseMode) -
     } else {
         ExitCode::from(u8::try_from(error.exit_code()).unwrap_or(2))
     };
-    let mode = if success && mode == ResponseMode::Auto {
-        ResponseMode::Human
+    let resolved_mode = if success && mode == ResponseMode::Auto {
+        ResolvedResponseMode::Human
     } else {
         mode.resolve()
     };
-    match mode {
-        ResponseMode::Auto => {
-            direct_stderr("internal error: auto response mode was not resolved");
-            return ExitCode::FAILURE;
-        }
-        ResponseMode::Full | ResponseMode::Human => {
+    match resolved_mode {
+        ResolvedResponseMode::Full | ResolvedResponseMode::Human => {
             let _ = error.print();
         }
-        ResponseMode::Quiet => {}
-        ResponseMode::Agent => {
+        ResolvedResponseMode::Quiet => {}
+        ResolvedResponseMode::Agent => {
             let response = if success {
                 typed_envelope(CliResponseEnvelope {
                     version: CLI_RESPONSE_VERSION,
@@ -136,10 +131,9 @@ pub(in crate::cli) struct ResponseOutput<'response> {
 impl io::Write for ResponseOutput<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         return match self.response.mode() {
-            ResponseMode::Full => io::stdout().lock().write(buf),
-            ResponseMode::Quiet => Ok(buf.len()),
-            ResponseMode::Auto => Err(io::Error::other("auto response mode was not resolved")),
-            ResponseMode::Human | ResponseMode::Agent => {
+            ResolvedResponseMode::Full => io::stdout().lock().write(buf),
+            ResolvedResponseMode::Quiet => Ok(buf.len()),
+            ResolvedResponseMode::Human | ResolvedResponseMode::Agent => {
                 capture_raw(self.response, buf);
                 Ok(buf.len())
             }
@@ -147,7 +141,7 @@ impl io::Write for ResponseOutput<'_> {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        if self.response.mode() == ResponseMode::Full {
+        if self.response.mode() == ResolvedResponseMode::Full {
             return io::stdout().lock().flush();
         }
         return Ok(());
@@ -163,7 +157,7 @@ pub(in crate::cli) fn write_follow_stdout(
     output: &[u8],
 ) -> Result<bool> {
     return match response.mode() {
-        ResponseMode::Full => {
+        ResolvedResponseMode::Full => {
             let stdout = io::stdout();
             let mut stdout = stdout.lock();
             match stdout
@@ -175,9 +169,8 @@ pub(in crate::cli) fn write_follow_stdout(
                 Err(error) => Err(error).into_diagnostic(),
             }
         }
-        ResponseMode::Quiet => Ok(true),
-        ResponseMode::Auto => Err(miette::miette!("auto response mode was not resolved")),
-        ResponseMode::Human | ResponseMode::Agent => {
+        ResolvedResponseMode::Quiet => Ok(true),
+        ResolvedResponseMode::Human | ResolvedResponseMode::Agent => {
             capture_raw(response, output);
             Ok(true)
         }
@@ -188,12 +181,12 @@ pub(in crate::cli) fn write_follow_json_line(
     response: &mut ResponseWriter,
     value: &impl serde::Serialize,
 ) -> Result<bool> {
-    if response.mode() == ResponseMode::Full {
+    if response.mode() == ResolvedResponseMode::Full {
         let mut encoded = serde_json::to_vec(value).into_diagnostic()?;
         encoded.push(b'\n');
         return write_follow_stdout(response, &encoded);
     }
-    if response.mode() != ResponseMode::Quiet {
+    if response.mode() != ResolvedResponseMode::Quiet {
         capture_json(response, value)?;
     }
     return Ok(true);
@@ -204,14 +197,13 @@ pub(in crate::cli) fn write_json_line(
     value: &impl serde::Serialize,
 ) -> Result<ExitCode> {
     return match response.mode() {
-        ResponseMode::Full => {
+        ResolvedResponseMode::Full => {
             let mut encoded = serde_json::to_vec(value).into_diagnostic()?;
             encoded.push(b'\n');
             direct_stdout(&encoded)
         }
-        ResponseMode::Quiet => Ok(ExitCode::SUCCESS),
-        ResponseMode::Auto => Err(miette::miette!("auto response mode was not resolved")),
-        ResponseMode::Human | ResponseMode::Agent => {
+        ResolvedResponseMode::Quiet => Ok(ExitCode::SUCCESS),
+        ResolvedResponseMode::Human | ResolvedResponseMode::Agent => {
             capture_json(response, value)?;
             Ok(ExitCode::SUCCESS)
         }
@@ -223,10 +215,9 @@ pub(in crate::cli) fn write_stdout(
     output: impl AsRef<[u8]>,
 ) -> Result<ExitCode> {
     return match response.mode() {
-        ResponseMode::Full => direct_stdout(output.as_ref()),
-        ResponseMode::Quiet => Ok(ExitCode::SUCCESS),
-        ResponseMode::Auto => Err(miette::miette!("auto response mode was not resolved")),
-        ResponseMode::Human | ResponseMode::Agent => {
+        ResolvedResponseMode::Full => direct_stdout(output.as_ref()),
+        ResolvedResponseMode::Quiet => Ok(ExitCode::SUCCESS),
+        ResolvedResponseMode::Human | ResolvedResponseMode::Agent => {
             capture_raw(response, output.as_ref());
             Ok(ExitCode::SUCCESS)
         }

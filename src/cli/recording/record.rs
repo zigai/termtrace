@@ -87,7 +87,7 @@ pub(in crate::cli) fn run_record(
             .map(serde_json::from_str)
             .transpose()
             .into_diagnostic()?
-            .unwrap_or_else(empty_restart_overrides);
+            .unwrap_or_default();
         let options = restarted_record_options(
             out,
             session_alias,

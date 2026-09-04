@@ -1,6 +1,7 @@
 use crate::cli::output::ResponseWriter;
 
 use std::{
+    borrow::Cow,
     path::Path,
     process::ExitCode,
     thread,
@@ -26,14 +27,14 @@ use crate::cli::{
         paginate, projection_warning, write_follow_json_line, write_follow_stdout, write_json_line,
         write_projection_warning, write_stdout,
     },
-    session_helpers::resolve_session_ref,
+    session_helpers::resolve_session_path,
 };
 
 pub(in crate::cli) fn run_output(
     response: &mut ResponseWriter,
     arguments: OutputArgs,
 ) -> Result<ExitCode> {
-    let session = resolve_session_ref(arguments.session)?;
+    let session = resolve_session_path(arguments.session)?;
     if arguments.follow {
         if arguments.manifest.is_some() {
             return Err(miette::miette!(
@@ -90,7 +91,7 @@ pub(in crate::cli) fn run_output(
     let source = output;
     let (output, quality, dropped, alternate_screen) = if arguments.strip_controls {
         let mut stripper = ControlStripper::default();
-        let output = stripper.feed(&source);
+        let stripped = stripper.feed(&source);
         let alternate_screen = stripper.alternate_screen_observed();
         let quality = if alternate_screen {
             OutputProjectionQuality::UnsuitableForFullScreen
@@ -98,7 +99,7 @@ pub(in crate::cli) fn run_output(
             OutputProjectionQuality::LossyLineOriented
         };
         (
-            output,
+            Cow::Owned(stripped),
             quality,
             stripper
                 .source_byte_count()
@@ -107,7 +108,7 @@ pub(in crate::cli) fn run_output(
         )
     } else {
         (
-            source.clone(),
+            Cow::Borrowed(source.as_slice()),
             OutputProjectionQuality::ExactBytes,
             0,
             false,
@@ -246,7 +247,7 @@ pub(in crate::cli) fn run_events(
     response: &mut ResponseWriter,
     arguments: EventsArgs,
 ) -> Result<ExitCode> {
-    let session = resolve_session_ref(arguments.session)?;
+    let session = resolve_session_path(arguments.session)?;
     if arguments.follow {
         if arguments.range.from_marker.is_some()
             || arguments.range.to_marker.is_some()

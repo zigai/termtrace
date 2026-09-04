@@ -152,7 +152,7 @@ pub(in crate::cli) struct RestartArgs {
     pub(in crate::cli) command: Vec<OsString>,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(in crate::cli) struct RestartOverrides {
     pub(in crate::cli) cwd: Option<ByteString>,

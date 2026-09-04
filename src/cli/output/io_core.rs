@@ -1,7 +1,7 @@
 use super::*;
 
 pub(in crate::cli) fn write_progress(response: &ResponseWriter, message: impl Display) {
-    if !progress_enabled(response.mode()) {
+    if response.mode() == ResolvedResponseMode::Quiet {
         return;
     }
     let stderr = io::stderr();

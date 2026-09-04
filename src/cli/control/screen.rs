@@ -15,27 +15,25 @@ pub(in crate::cli) fn run_screen(
     let session = resolved.path;
     let observation = observe_session_with_options(&session, StatePoint::LatestPresented, false)
         .into_diagnostic()?;
-    let mut output = serde_json::json!({
-        "v": 1,
-        "ok": true,
-        "type": "screen",
-        "session": session,
-        "lifecycle": lifecycle,
-        "state": observation.state_hash,
-        "quality": observation.capture_quality,
-        "size": [observation.frame.cols, observation.frame.rows],
-        "ended": observation.source_completed,
-    });
     if arguments.since.as_deref() == Some(observation.state_hash.as_str()) {
-        output
-            .as_object_mut()
-            .ok_or_else(|| miette::miette!("screen response is not an object"))?
-            .insert("unchanged".to_owned(), serde_json::Value::Bool(true));
+        let output = ScreenResponse {
+            v: 1,
+            ok: true,
+            response_type: "screen",
+            session: &session,
+            lifecycle,
+            state: &observation.state_hash,
+            quality: observation.capture_quality,
+            size: [observation.frame.cols, observation.frame.rows],
+            ended: observation.source_completed,
+            unchanged: Some(true),
+            screen: None,
+        };
         return write_json_line(response, &output);
     }
     let screen = match arguments.screen {
-        ScreenEncoding::Exact => serde_json::Value::String(observation.frame.viewport_text),
-        ScreenEncoding::Text => serde_json::Value::String(
+        ScreenEncoding::Exact => Some(serde_json::Value::String(observation.frame.viewport_text)),
+        ScreenEncoding::Text => Some(serde_json::Value::String(
             observation
                 .frame
                 .viewport_text
@@ -43,8 +41,8 @@ pub(in crate::cli) fn run_screen(
                     return character == ' ' || character == '\n' || character == '\r';
                 })
                 .to_owned(),
-        ),
-        ScreenEncoding::Sparse => sparse_screen(&observation.frame.viewport_text),
+        )),
+        ScreenEncoding::Sparse => Some(sparse_screen(&observation.frame.viewport_text)),
         ScreenEncoding::Diff => {
             let since = arguments
                 .since
@@ -58,54 +56,95 @@ pub(in crate::cli) fn run_screen(
                 let _ = request(&session, ControlCommand::Status).into_diagnostic()?;
                 observe_validated_prefix(&session, point, false).into_diagnostic()?
             };
-            diff_screen(
+            Some(diff_screen(
                 &prior.frame.viewport_text,
                 &observation.frame.viewport_text,
                 since,
-            )
+            ))
         }
-        ScreenEncoding::None => serde_json::Value::Null,
+        ScreenEncoding::None => None,
     };
-    if arguments.screen != ScreenEncoding::None {
-        output
-            .as_object_mut()
-            .ok_or_else(|| miette::miette!("screen response is not an object"))?
-            .insert("screen".to_owned(), screen);
-    }
+    let output = ScreenResponse {
+        v: 1,
+        ok: true,
+        response_type: "screen",
+        session: &session,
+        lifecycle,
+        state: &observation.state_hash,
+        quality: observation.capture_quality,
+        size: [observation.frame.cols, observation.frame.rows],
+        ended: observation.source_completed,
+        unchanged: None,
+        screen,
+    };
     return write_json_line(response, &output);
 }
 
+#[derive(serde::Serialize)]
+struct ScreenResponse<'a> {
+    v: u32,
+    ok: bool,
+    #[serde(rename = "type")]
+    response_type: &'static str,
+    session: &'a Path,
+    lifecycle: RegistryLifecycle,
+    state: &'a str,
+    quality: CaptureQuality,
+    size: [u16; 2],
+    ended: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unchanged: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    screen: Option<serde_json::Value>,
+}
+
+#[derive(serde::Serialize)]
+pub(super) struct SparseScreenResponse<'a> {
+    encoding: &'static str,
+    rows: Vec<(usize, &'a str)>,
+    blank_rows_omitted: usize,
+}
+
+#[derive(serde::Serialize)]
+pub(super) struct DiffScreenResponse<'a> {
+    encoding: &'static str,
+    since: String,
+    rows: Vec<(usize, &'a str)>,
+}
+
 pub(super) fn sparse_screen(viewport_text: &str) -> serde_json::Value {
-    let rows: Vec<serde_json::Value> = viewport_text
+    let rows: Vec<(usize, &str)> = viewport_text
         .lines()
         .enumerate()
         .filter_map(|(row, text)| {
             let text = text.trim_end();
-            return (!text.is_empty()).then(|| serde_json::json!([row, text]));
+            return (!text.is_empty()).then(|| (row, text));
         })
         .collect();
     let total_rows = viewport_text.lines().count();
-    return serde_json::json!({
-        "encoding": "rows",
-        "rows": rows,
-        "blank_rows_omitted": total_rows.saturating_sub(rows.len()),
-    });
+    let response = SparseScreenResponse {
+        encoding: "rows",
+        blank_rows_omitted: total_rows.saturating_sub(rows.len()),
+        rows,
+    };
+    return serde_json::to_value(&response).expect("sparse screen serialization");
 }
 
 pub(super) fn diff_screen(before: &str, after: &str, since: String) -> serde_json::Value {
     let before_rows: Vec<&str> = before.lines().collect();
     let after_rows: Vec<&str> = after.lines().collect();
     let row_count = before_rows.len().max(after_rows.len());
-    let rows: Vec<serde_json::Value> = (0..row_count)
+    let rows: Vec<(usize, &str)> = (0..row_count)
         .filter_map(|row| {
             let old = before_rows.get(row).copied().unwrap_or_default();
             let new = after_rows.get(row).copied().unwrap_or_default();
-            return (old != new).then(|| serde_json::json!([row, new.trim_end()]));
+            return (old != new).then(|| (row, new.trim_end()));
         })
         .collect();
-    return serde_json::json!({
-        "encoding": "diff_rows",
-        "since": since,
-        "rows": rows,
-    });
+    let response = DiffScreenResponse {
+        encoding: "diff_rows",
+        since,
+        rows,
+    };
+    return serde_json::to_value(&response).expect("diff screen serialization");
 }

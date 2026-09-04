@@ -64,7 +64,7 @@ use crate::cli::{
     },
     output::{write_json_line, write_progress},
     session_helpers::{
-        resolve_cli_range, resolve_session, resolve_session_ref, selection, write_session_lifecycle,
+        resolve_cli_range, resolve_session, resolve_session_path, write_session_lifecycle,
     },
     tooling::require_cli_capability,
 };
@@ -196,14 +196,6 @@ pub(super) fn run_video_facade(
     response: &mut ResponseWriter,
     arguments: VideoFacadeArgs,
 ) -> Result<ExitCode> {
-    let mode_count = usize::from(arguments.out.is_some())
-        + usize::from(arguments.dry_run)
-        + usize::from(arguments.preview_out.is_some());
-    if mode_count != 1 {
-        return Err(miette::miette!(
-            "exactly one of --out, --dry-run, or --preview-out is required"
-        ));
-    }
     let sidecar = if let Some(out) = arguments.out.as_ref() {
         if out.extension() != Some(OsStr::new("mp4")) {
             return Err(miette::miette!(
@@ -240,11 +232,10 @@ pub(super) fn run_video_facade(
             session.display()
         ));
     }
-    let (default_fps, default_hold_start, default_hold_end) = video_preset_timing(arguments.preset);
+    let preset_config = VideoPresetConfig::from_preset(arguments.preset);
     let requested_fps = arguments.fps;
-    let provisional_fps = requested_fps.unwrap_or(default_fps);
-    let raster_profile =
-        semantic_raster_profile(arguments.preset, arguments.semantic_raster_profile);
+    let provisional_fps = requested_fps.unwrap_or(preset_config.fps);
+    let raster_profile = preset_config.raster_profile(arguments.semantic_raster_profile);
     let source = match arguments.renderer {
         VideoSourceArg::Native => PresentationSourceRequest::Native,
         VideoSourceArg::Semantic => PresentationSourceRequest::Semantic {
@@ -253,6 +244,8 @@ pub(super) fn run_video_facade(
         },
     };
 
+    let hold_start = arguments.hold_start.unwrap_or(preset_config.hold_start);
+    let hold_end = arguments.hold_end.unwrap_or(preset_config.hold_end);
     write_progress(
         response,
         format_args!("Planning video from {}...", session.display()),
@@ -286,8 +279,6 @@ pub(super) fn run_video_facade(
             ));
         }
         let ranges = video_clip_ranges(&log, selected, arguments.trim_idle);
-        let hold_start = arguments.hold_start.unwrap_or(default_hold_start);
-        let hold_end = arguments.hold_end.unwrap_or(default_hold_end);
         let provisional =
             facade_edit_plan(&arguments, &ranges, provisional_fps, hold_start, hold_end)?;
         let first_plan = plan_presentation(&session, &provisional, source).into_diagnostic()?;
@@ -417,14 +408,15 @@ fn facade_edit_plan(
             denominator: 1,
         });
     }
-    let delivery = video_preset_delivery(arguments.preset);
+    let preset_config = VideoPresetConfig::from_preset(arguments.preset);
+    let delivery = preset_config.delivery;
     return Ok(EditPlan {
         version: EDIT_PLAN_VERSION,
         clips,
         delivery,
         transforms,
         render_config: Some(VideoRenderConfig {
-            preset: video_preset_name(arguments.preset).to_owned(),
+            preset: preset_config.name.to_owned(),
             renderer: match arguments.renderer {
                 VideoSourceArg::Native => "native",
                 VideoSourceArg::Semantic => "semantic",
@@ -453,56 +445,72 @@ fn facade_edit_plan(
     });
 }
 
-fn video_preset_timing(preset: VideoPresetArg) -> (u16, Duration, Duration) {
-    return match preset {
-        VideoPresetArg::Docs => (30, Duration::from_millis(500), Duration::from_millis(1_000)),
-        VideoPresetArg::Social => (60, Duration::from_millis(250), Duration::from_millis(750)),
-        VideoPresetArg::Lossless => (60, Duration::ZERO, Duration::ZERO),
-    };
+struct VideoPresetConfig {
+    name: &'static str,
+    fps: u16,
+    hold_start: Duration,
+    hold_end: Duration,
+    delivery: PresentationDelivery,
+    default_raster_profile: SemanticRasterProfile,
 }
 
+impl VideoPresetConfig {
+    fn from_preset(preset: VideoPresetArg) -> Self {
+        match preset {
+            VideoPresetArg::Docs => Self {
+                name: "docs",
+                fps: 30,
+                hold_start: Duration::from_millis(500),
+                hold_end: Duration::from_millis(1_000),
+                delivery: PresentationDelivery {
+                    codec: "h264".to_owned(),
+                    pixel_format: "yuv420p".to_owned(),
+                    crf: 18,
+                    encoder_preset: "slow".to_owned(),
+                },
+                default_raster_profile: SemanticRasterProfile::Direct,
+            },
+            VideoPresetArg::Social => Self {
+                name: "social",
+                fps: 60,
+                hold_start: Duration::from_millis(250),
+                hold_end: Duration::from_millis(750),
+                delivery: PresentationDelivery {
+                    codec: "h264".to_owned(),
+                    pixel_format: "yuv420p".to_owned(),
+                    crf: 20,
+                    encoder_preset: "medium".to_owned(),
+                },
+                default_raster_profile: SemanticRasterProfile::Direct,
+            },
+            VideoPresetArg::Lossless => Self {
+                name: "lossless",
+                fps: 60,
+                hold_start: Duration::ZERO,
+                hold_end: Duration::ZERO,
+                delivery: PresentationDelivery {
+                    codec: "h264_rgb".to_owned(),
+                    pixel_format: "rgb24".to_owned(),
+                    crf: 0,
+                    encoder_preset: "veryslow".to_owned(),
+                },
+                default_raster_profile: SemanticRasterProfile::Supersampled2x,
+            },
+        }
+    }
+
+    fn raster_profile(&self, explicit: Option<SemanticRasterProfileArg>) -> SemanticRasterProfile {
+        explicit
+            .map(Into::into)
+            .unwrap_or(self.default_raster_profile)
+    }
+}
+#[cfg(test)]
 fn semantic_raster_profile(
     preset: VideoPresetArg,
     explicit: Option<SemanticRasterProfileArg>,
 ) -> SemanticRasterProfile {
-    if let Some(explicit) = explicit {
-        return explicit.into();
-    }
-    return match preset {
-        VideoPresetArg::Docs | VideoPresetArg::Social => SemanticRasterProfile::Direct,
-        VideoPresetArg::Lossless => SemanticRasterProfile::Supersampled2x,
-    };
-}
-
-fn video_preset_delivery(preset: VideoPresetArg) -> PresentationDelivery {
-    return match preset {
-        VideoPresetArg::Docs => PresentationDelivery {
-            codec: "h264".to_owned(),
-            pixel_format: "yuv420p".to_owned(),
-            crf: 18,
-            encoder_preset: "slow".to_owned(),
-        },
-        VideoPresetArg::Social => PresentationDelivery {
-            codec: "h264".to_owned(),
-            pixel_format: "yuv420p".to_owned(),
-            crf: 20,
-            encoder_preset: "medium".to_owned(),
-        },
-        VideoPresetArg::Lossless => PresentationDelivery {
-            codec: "h264_rgb".to_owned(),
-            pixel_format: "rgb24".to_owned(),
-            crf: 0,
-            encoder_preset: "veryslow".to_owned(),
-        },
-    };
-}
-
-fn video_preset_name(preset: VideoPresetArg) -> &'static str {
-    return match preset {
-        VideoPresetArg::Docs => "docs",
-        VideoPresetArg::Social => "social",
-        VideoPresetArg::Lossless => "lossless",
-    };
+    return VideoPresetConfig::from_preset(preset).raster_profile(explicit);
 }
 
 fn duration_millis(duration: Duration, flag: &str) -> Result<u64> {
@@ -516,49 +524,41 @@ fn facade_video_clips(
     hold_start_ms: u64,
     hold_end_ms: u64,
 ) -> Result<Vec<EditClip>> {
-    let mut clips: Vec<EditClip> = ranges
-        .iter()
-        .copied()
-        .map(|range| return edit_clip(range, 0))
-        .collect();
-    if clips.is_empty() {
+    let Some((&first, rest)) = ranges.split_first() else {
         return Err(miette::miette!("video range contains no source activity"));
-    }
+    };
+    let mut clips = Vec::with_capacity(ranges.len() + 1);
     if hold_start_ms > 0 {
         let frame_ns = 1_000_000_000_u64.div_ceil(u64::from(fps));
-        let first = ranges.first().copied().ok_or_else(|| {
-            return miette::miette!("video range contains no source activity");
-        })?;
         let split = first
             .start_monotonic_ns
             .saturating_add(frame_ns)
             .min(first.end_monotonic_ns);
-        *clips.first_mut().ok_or_else(|| {
-            return miette::miette!("video range contains no source activity");
-        })? = edit_clip(
+        clips.push(edit_clip(
             SourceRange {
                 start_monotonic_ns: first.start_monotonic_ns,
                 end_monotonic_ns: split,
             },
             hold_start_ms,
-        );
+        ));
         if split < first.end_monotonic_ns {
-            clips.insert(
-                1,
-                edit_clip(
-                    SourceRange {
-                        start_monotonic_ns: split,
-                        end_monotonic_ns: first.end_monotonic_ns,
-                    },
-                    0,
-                ),
-            );
+            clips.push(edit_clip(
+                SourceRange {
+                    start_monotonic_ns: split,
+                    end_monotonic_ns: first.end_monotonic_ns,
+                },
+                0,
+            ));
         }
+    } else {
+        clips.push(edit_clip(first, 0));
     }
-    let last = clips
-        .last_mut()
-        .ok_or_else(|| return miette::miette!("video range contains no clips"))?;
-    last.hold_ms = last.hold_ms.saturating_add(hold_end_ms);
+    for &range in rest {
+        clips.push(edit_clip(range, 0));
+    }
+    if let Some(last) = clips.last_mut() {
+        last.hold_ms = last.hold_ms.saturating_add(hold_end_ms);
+    }
     return Ok(clips);
 }
 
@@ -582,16 +582,15 @@ fn video_clip_ranges(log: &EventLog, selected: SourceRange, trim_idle: bool) -> 
     if !trim_idle {
         return vec![selected];
     }
-    let activity: Vec<u64> = log
+    let mut activity = log
         .events
         .iter()
         .filter(|record| {
             return selected.contains(record.monotonic_ns)
                 && matches!(&record.event, Event::Output { .. });
         })
-        .map(|record| return record.monotonic_ns)
-        .collect();
-    let Some(first) = activity.first().copied() else {
+        .map(|record| return record.monotonic_ns);
+    let Some(first) = activity.next() else {
         return vec![selected];
     };
     let mut ranges: Vec<SourceRange> = Vec::new();
@@ -599,7 +598,7 @@ fn video_clip_ranges(log: &EventLog, selected: SourceRange, trim_idle: bool) -> 
         .saturating_sub(VIDEO_IDLE_CONTEXT_NS)
         .max(selected.start_monotonic_ns);
     let mut previous = first;
-    for timestamp in activity.into_iter().skip(1) {
+    for timestamp in activity {
         if timestamp.saturating_sub(previous) > VIDEO_IDLE_THRESHOLD_NS {
             ranges.push(SourceRange {
                 start_monotonic_ns: start,
@@ -661,11 +660,6 @@ pub(super) fn run_capture(
 ) -> Result<ExitCode> {
     let (start_monotonic_ns, end_monotonic_ns) =
         resolve_cli_range(&arguments.session, &arguments.range)?;
-    if arguments.width.is_some() != arguments.height.is_some() {
-        return Err(miette::miette!(
-            "--width and --height must be supplied together"
-        ));
-    }
     require_cli_capability(NATIVE_VIDEO_CAPABILITY)?;
     let viewport = match (arguments.width, arguments.height) {
         (Some(width), Some(height)) => Some(CaptureTarget { width, height }),
@@ -685,7 +679,11 @@ pub(super) fn run_capture(
         fps: arguments.fps,
         start_monotonic_ns,
         end_monotonic_ns,
-        state_selection: selection(arguments.presented_only),
+        state_selection: if arguments.presented_only {
+            StateSelection::Presented
+        } else {
+            StateSelection::All
+        },
         geometry_solver,
         kind: CaptureKind::Video,
         destination: None,
@@ -702,22 +700,16 @@ pub(super) fn run_capture(
 }
 
 pub(super) fn run_save(response: &mut ResponseWriter, arguments: SaveArgs) -> Result<ExitCode> {
-    let session = resolve_session_ref(arguments.session)?;
-    let point = match (
+    let session = resolve_session_path(arguments.session)?;
+    let point = crate::cli::session_helpers::resolve_state_point(
         arguments.state,
         arguments.state_hash,
         arguments.event_seq,
         arguments.at,
         arguments.at_marker,
-    ) {
-        (Some(state_id), None, None, None, None) => StatePoint::StateId { state_id },
-        (None, Some(state_hash), None, None, None) => StatePoint::StateHash { state_hash },
-        (None, None, Some(event_seq), None, None) => StatePoint::EventSeq { event_seq },
-        (None, None, None, Some(monotonic_ns), None) => StatePoint::MonotonicNs { monotonic_ns },
-        (None, None, None, None, Some(label)) => StatePoint::Marker { label },
-        (None, None, None, None, None) => StatePoint::LatestPresented,
-        _ => return Err(miette::miette!("exactly one save selector may be supplied")),
-    };
+        Some(StatePoint::LatestPresented),
+        "save",
+    )?;
     let formats = arguments
         .format
         .into_iter()
@@ -747,7 +739,7 @@ pub(super) fn run_screenshot(
     response: &mut ResponseWriter,
     arguments: ScreenshotArgs,
 ) -> Result<ExitCode> {
-    let session = resolve_session_ref(arguments.session)?;
+    let session = resolve_session_path(arguments.session)?;
     let mut points = Vec::new();
     points.extend(
         arguments
@@ -936,7 +928,7 @@ pub(super) fn run_bundle(response: &mut ResponseWriter, arguments: BundleArgs) -
     if arguments.dry_run {
         return write_json_line(response, &plan_bundle(profile));
     }
-    let session = resolve_session_ref(arguments.session)?;
+    let session = resolve_session_path(arguments.session)?;
     if arguments.archive {
         if arguments.out.exists() {
             return Err(Error::ArtifactExists {
@@ -980,7 +972,7 @@ pub(super) fn run_bundle_verify(
     response: &mut ResponseWriter,
     arguments: BundleVerifyArgs,
 ) -> Result<ExitCode> {
-    let source = resolve_session_ref(arguments.source)?;
+    let source = resolve_session_path(arguments.source)?;
     let policy = BundleVerificationPolicy::new(source, arguments.profile.into());
     let manifest = if arguments.bundle.is_dir() {
         verify_profile(&arguments.bundle, &policy).into_diagnostic()?

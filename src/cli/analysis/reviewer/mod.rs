@@ -41,16 +41,12 @@ use termtrace_engine::{
 use termtrace_evidence::{event_log::EventLog, session::validate_completed_log};
 use termtrace_media::native_capture::validated_visual_manifests;
 use termtrace_model::{
-    execution::event::Event,
+    execution::event::{Event, EventRecord},
     terminal::{
         analysis::NativeCorrelation,
         replay::{StateRecord, StateSelector},
     },
 };
-
-struct ReviewEntry {
-    record: StateRecord,
-}
 
 struct RenderedViewport {
     text: String,
@@ -94,7 +90,7 @@ impl SelectedViewportCache {
 
 struct ReviewModel {
     log: EventLog,
-    entries: Vec<ReviewEntry>,
+    entries: Vec<StateRecord>,
     selected: usize,
     selected_viewport: SelectedViewportCache,
     presented_only: bool,
@@ -116,7 +112,7 @@ impl ReviewModel {
         if let Some(query) = search_query {
             validate_search_query(query)?;
         }
-        let mut entries: Vec<ReviewEntry> = Vec::new();
+        let mut entries: Vec<StateRecord> = Vec::new();
         let mut search_matches: Vec<usize> = Vec::new();
         visit_states(&log, |record, state| {
             if let Some(query) = search_query
@@ -124,9 +120,7 @@ impl ReviewModel {
             {
                 search_matches.push(entries.len());
             }
-            entries.push(ReviewEntry {
-                record: record.clone(),
-            });
+            entries.push(record.clone());
             return Ok(());
         })?;
         if entries.is_empty() {
@@ -157,7 +151,7 @@ impl ReviewModel {
         });
     }
 
-    fn selected_entry(&self) -> Result<&ReviewEntry> {
+    fn selected_entry(&self) -> Result<&StateRecord> {
         return self
             .entries
             .get(self.selected)
@@ -166,7 +160,7 @@ impl ReviewModel {
 
     fn refresh_selected_viewport(&mut self) -> Result<()> {
         let selected = self.selected;
-        let state_id = self.selected_entry()?.record.state_id;
+        let state_id = self.selected_entry()?.state_id;
         let log = &self.log;
         return self.selected_viewport.ensure_with(selected, || {
             let inspection = inspect(log, StateSelector::StateId(state_id))?;
@@ -196,7 +190,7 @@ impl ReviewModel {
             let Some(entry) = self.entries.get(candidate) else {
                 return;
             };
-            if !self.presented_only || entry.record.presented {
+            if !self.presented_only || entry.presented {
                 self.selected = candidate;
                 return;
             }
@@ -210,33 +204,35 @@ impl ReviewModel {
         let selected_time = self
             .entries
             .get(self.selected)
-            .map_or(0, |entry| return entry.record.monotonic_ns);
-        let candidates = self
-            .log
-            .events
-            .iter()
-            .filter(|record| {
-                return if marker {
-                    matches!(record.event, Event::Marker { .. })
-                } else {
-                    matches!(record.event, Event::InputIntent { .. })
-                };
-            })
-            .map(|record| return record.monotonic_ns)
-            .collect::<Vec<_>>();
+            .map_or(0, |entry| return entry.monotonic_ns);
+        let predicate = |record: &&EventRecord| {
+            if marker {
+                matches!(record.event, Event::Marker { .. })
+            } else {
+                matches!(record.event, Event::InputIntent { .. })
+            }
+        };
         let target = if direction < 0 {
-            candidates
+            self.log
+                .events
                 .iter()
                 .rev()
-                .find(|time| return **time < selected_time)
+                .filter(predicate)
+                .map(|record| record.monotonic_ns)
+                .find(|time| *time < selected_time)
         } else {
-            candidates.iter().find(|time| return **time > selected_time)
+            self.log
+                .events
+                .iter()
+                .filter(predicate)
+                .map(|record| record.monotonic_ns)
+                .find(|time| *time > selected_time)
         };
         if let Some(time) = target
             && let Some(index) = self
                 .entries
                 .iter()
-                .position(|entry| return entry.record.monotonic_ns >= *time)
+                .position(|entry| return entry.monotonic_ns >= time)
         {
             self.selected = index;
         }
@@ -338,8 +334,7 @@ pub(in crate::cli) fn run(
 }
 
 fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) -> Result<()> {
-    let entry = model.selected_entry()?;
-    let selected = &entry.record;
+    let selected = model.selected_entry()?;
     let viewport = model.selected_viewport()?;
     terminal
         .draw(|frame| {
@@ -361,7 +356,7 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) 
                 .skip(start)
                 .take(21)
                 .map(|(index, entry)| {
-                    let state = &entry.record;
+                    let state = entry;
                     let marker = if index == model.selected { ">" } else { " " };
                     let presentation = if state.presented { "P" } else { "H" };
                     return ListItem::new(format!(
@@ -453,7 +448,7 @@ fn validate_search_query(query: &str) -> Result<()> {
     return Ok(());
 }
 
-fn marker_state_index(log: &EventLog, entries: &[ReviewEntry], label: &str) -> Result<usize> {
+fn marker_state_index(log: &EventLog, entries: &[StateRecord], label: &str) -> Result<usize> {
     let matches = log
         .events
         .iter()
@@ -469,7 +464,7 @@ fn marker_state_index(log: &EventLog, entries: &[ReviewEntry], label: &str) -> R
     };
     return entries
         .iter()
-        .position(|entry| return entry.record.monotonic_ns >= marker.monotonic_ns)
+        .position(|entry| return entry.monotonic_ns >= marker.monotonic_ns)
         .or_else(|| return entries.len().checked_sub(1))
         .ok_or_else(|| return review_error("review contains no state near marker"));
 }

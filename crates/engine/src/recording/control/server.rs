@@ -45,10 +45,6 @@ pub(in crate::recording) struct ControlWorker {
 
 const MAX_CONTROL_CONNECTIONS: usize = 256;
 
-fn increment_connection_count(count: usize, maximum: usize) -> Option<usize> {
-    return (count < maximum).then_some(count + 1);
-}
-
 struct ConnectionPermit<'counter> {
     active: &'counter AtomicUsize,
 }
@@ -133,7 +129,7 @@ fn control_server_loop(
                     Ok((stream, _)) => {
                         let permit =
                             active.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
-                                return increment_connection_count(count, MAX_CONTROL_CONNECTIONS);
+                                return (count < MAX_CONTROL_CONNECTIONS).then_some(count + 1);
                             });
                         if permit.is_err() {
                             continue;
@@ -535,7 +531,7 @@ mod tests {
                 threads.push(loom_thread::spawn(move || {
                     let acquired = active
                         .fetch_update(LoomOrdering::Relaxed, LoomOrdering::Relaxed, |count| {
-                            return increment_connection_count(count, 1);
+                            return (count < 1).then_some(count + 1);
                         })
                         .is_ok();
                     if acquired {

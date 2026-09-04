@@ -37,9 +37,8 @@ struct ReviewSource {
 impl ReviewSource {
     fn open(
         session: impl AsRef<Path>,
-        around_marker: Option<&str>,
         visual_evidence: &[ValidatedVisualManifest],
-    ) -> Result<(Self, usize)> {
+    ) -> Result<Self> {
         let session = session.as_ref().to_path_buf();
         let log = EventLog::read(session.join("events.jsonl"))?;
         validate_completed_log(&session, &log)?;
@@ -53,10 +52,6 @@ impl ReviewSource {
                 "completed session contains no semantic states",
             ));
         }
-        let selected = match around_marker {
-            Some(label) => marker_state_index(&log, &records, label)?,
-            None => records.len().saturating_sub(1),
-        };
         let native_correlation_count = u64::try_from(
             native_correlations(&log, visual_evidence)
                 .values()
@@ -64,15 +59,12 @@ impl ReviewSource {
                 .sum::<usize>(),
         )
         .unwrap_or(u64::MAX);
-        return Ok((
-            Self {
-                session,
-                log,
-                records,
-                native_correlation_count,
-            },
-            selected,
-        ));
+        return Ok(Self {
+            session,
+            log,
+            records,
+            native_correlation_count,
+        });
     }
 
     fn summary(&self) -> ReviewSummary {
@@ -106,14 +98,9 @@ impl ReviewSource {
 /// Load and summarize a validated completed session without changing it.
 pub fn summarize(
     session: impl AsRef<Path>,
-    around_marker: Option<&str>,
     visual_evidence: &[ValidatedVisualManifest],
 ) -> Result<ReviewSummary> {
-    let (source, selected) = ReviewSource::open(session, around_marker, visual_evidence)?;
-    let _selected_state = source
-        .records
-        .get(selected)
-        .ok_or_else(|| return review_error("selected reviewer state is out of bounds"))?;
+    let source = ReviewSource::open(session, visual_evidence)?;
     return Ok(source.summary());
 }
 
@@ -227,26 +214,6 @@ fn export_into(
     fs::rename(temporary, destination)
         .map_err(|source_error| return filesystem_error(destination, source_error))?;
     return Ok(manifest);
-}
-fn marker_state_index(log: &EventLog, records: &[StateRecord], label: &str) -> Result<usize> {
-    let matches: Vec<_> = log
-        .events
-        .iter()
-        .filter(
-            |record| matches!(&record.event, Event::Marker { label: value, .. } if value == label),
-        )
-        .collect();
-    let [marker] = matches.as_slice() else {
-        return Err(review_error(format!(
-            "review marker `{label}` must occur exactly once, found {}",
-            matches.len()
-        )));
-    };
-    return records
-        .iter()
-        .position(|record| return record.monotonic_ns >= marker.monotonic_ns)
-        .or_else(|| return records.len().checked_sub(1))
-        .ok_or_else(|| return review_error("review contains no state near marker"));
 }
 
 fn validate_query(query: &str) -> Result<()> {

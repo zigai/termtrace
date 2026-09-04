@@ -58,35 +58,31 @@ pub(super) fn evaluate_action_postcondition(
             "missing action screen projection",
         );
     })?;
-    if matches!(postcondition, ActionPostcondition::None) {
-        let boundaries = actor_boundaries(event_log);
-        let frame = actor_screen_frame(
-            session_id,
-            event_log,
-            live,
-            boundaries.clone(),
-            projection,
-            CaptureQuality::Live,
-        )?;
-        return Ok(Some(ControlData::ActionApplied {
-            input,
-            postcondition: ActionPostconditionResult::None {
-                matched: true,
-                frame,
-            },
-            boundaries,
-        }));
-    }
     let state_hash = presented_state_hash(live)?;
     let viewport_text = semantic_viewport_text(&live.presented);
     let now = Instant::now();
     let child_completed = child_exited && output_closed;
     let started_at = pending.postcondition_started_at.unwrap_or(now);
     return match postcondition {
-        ActionPostcondition::None => Err(terminal_error(
-            "evaluate actor-ordered action",
-            "unexpected empty action postcondition",
-        )),
+        ActionPostcondition::None => {
+            let boundaries = actor_boundaries(event_log);
+            let frame = actor_screen_frame(
+                session_id,
+                event_log,
+                live,
+                boundaries.clone(),
+                projection,
+                CaptureQuality::Live,
+            )?;
+            Ok(Some(ControlData::ActionApplied {
+                input,
+                postcondition: ActionPostconditionResult::None {
+                    matched: true,
+                    frame,
+                },
+                boundaries,
+            }))
+        }
         ActionPostcondition::Idle {
             stable_for_ns,
             timeout_ns,

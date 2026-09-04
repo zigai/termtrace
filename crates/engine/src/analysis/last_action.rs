@@ -1,6 +1,9 @@
 //! Task-oriented analysis of the most recent canonical input action.
 
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 use termtrace_evidence::{
     event_log::EventLog,
@@ -285,18 +288,19 @@ fn action_boundary(
 }
 
 fn output_summary(log: &EventLog, intent_event_seq: u64) -> ActionOutputSummary {
-    let mut event_count = 0_u64;
-    let mut byte_count = 0_u64;
-    for record in &log.events {
-        if record.seq <= intent_event_seq {
-            continue;
-        }
-        if let Event::Output { data } = &record.event {
-            event_count = event_count.saturating_add(1);
-            byte_count =
-                byte_count.saturating_add(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX));
-        }
-    }
+    let (event_count, byte_count) = log
+        .events
+        .iter()
+        .filter(|record| return record.seq > intent_event_seq)
+        .filter_map(|record| match &record.event {
+            Event::Output { data } => {
+                return Some(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX));
+            }
+            _ => return None,
+        })
+        .fold((0_u64, 0_u64), |(events, bytes), len| {
+            return (events.saturating_add(1), bytes.saturating_add(len));
+        });
     return ActionOutputSummary {
         event_count,
         byte_count,
@@ -309,13 +313,11 @@ fn changed_modes(change: Option<&ValueChange<ModeState>>) -> Vec<ActionModeChang
     };
     let before = terminal_mode_map(&change.before.values);
     let after = terminal_mode_map(&change.after.values);
-    let mut keys = before
+    let keys = before
         .keys()
         .chain(after.keys())
         .copied()
-        .collect::<Vec<_>>();
-    keys.sort_unstable();
-    keys.dedup();
+        .collect::<BTreeSet<_>>();
     return keys
         .into_iter()
         .filter_map(|(ansi, number)| {

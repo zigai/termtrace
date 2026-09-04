@@ -39,8 +39,8 @@ use crate::cli::output::write_json_line;
 use super::{
     OPTION_AGGREGATE_MANIFEST, OPTION_COVERAGE, OPTION_PANE_SESSION,
     args::{
-        TmuxBundleArgs, TmuxCoverageMode, TmuxRecordArgs, TmuxStatusArgs, TmuxStopArgs,
-        TmuxVideoArgs, TmuxVideoPreset, TmuxVideoRenderer,
+        TmuxBundleArgs, TmuxCoverageMode, TmuxRecordArgs, TmuxStopArgs, TmuxVideoArgs,
+        TmuxVideoPreset, TmuxVideoRenderer,
     },
     client::{TmuxClient, option_path, option_text, same_executable},
     setup::{enable_prepared_tmux_setup, prepare_tmux_setup, tmux_config_fragment},
@@ -54,11 +54,6 @@ pub(in crate::cli) fn run_tmux_record(
     mut arguments: TmuxRecordArgs,
 ) -> Result<ExitCode> {
     validate_recording_name(&arguments.name)?;
-    if arguments.command.is_empty() {
-        return Err(miette::miette!(
-            "tmux record requires a tmux client command"
-        ));
-    }
     let recording_id = uuid::Uuid::now_v7();
     if arguments.new
         && arguments.connection.socket_name.is_none()
@@ -198,13 +193,10 @@ pub(in crate::cli) fn run_tmux_record(
 
 pub(in crate::cli) fn run_tmux_recording_status(
     response: &mut ResponseWriter,
-    arguments: TmuxStatusArgs,
+    output_root: Option<&Path>,
+    name: &str,
 ) -> Result<ExitCode> {
-    let name = arguments
-        .recording
-        .as_deref()
-        .ok_or_else(|| return miette::miette!("tmux recording name is required"))?;
-    let manifest_path = recording_manifest_path(arguments.output_root.as_deref(), name)?;
+    let manifest_path = recording_manifest_path(output_root, name)?;
     let manifest = read_tmux_manifest(&manifest_path)?;
     let client = client_from_manifest(&manifest);
     if let Ok(server_identity) = observed_tmux_server_identity(&client) {
@@ -274,7 +266,13 @@ pub(in crate::cli) fn run_tmux_stop(
         .arg("full")
         .arg("tmux")
         .arg("disable");
-    append_connection_arguments(&mut disable, &client);
+    disable.arg("--tmux").arg(&client.executable);
+    if let Some(socket_name) = &client.socket_name {
+        disable.arg("-L").arg(socket_name);
+    }
+    if let Some(socket_path) = &client.socket_path {
+        disable.arg("-S").arg(socket_path);
+    }
     let _ = disable.output();
     let manifest = {
         let _manifest_lock = lock_tmux_manifest(&manifest_path)?;
@@ -371,10 +369,9 @@ pub(in crate::cli) fn run_tmux_bundle(
 }
 
 pub(super) fn coverage_from_options(client: &TmuxClient) -> Result<TmuxCoverageMode> {
-    return Ok(match option_text(client, OPTION_COVERAGE)?.as_str() {
-        "strict" => TmuxCoverageMode::Strict,
-        _ => TmuxCoverageMode::Warn,
-    });
+    let text = option_text(client, OPTION_COVERAGE)?;
+    <TmuxCoverageMode as clap::ValueEnum>::from_str(&text, true)
+        .map_err(|_| return miette::miette!("unsupported tmux coverage mode `{text}`"))
 }
 
 pub(super) fn refresh_configured_aggregate_manifest(client: &TmuxClient) -> Result<()> {
@@ -884,16 +881,6 @@ fn configured_tmux_command(
     }
     command.extend(requested.iter().skip(1).cloned());
     return Ok(command);
-}
-
-fn append_connection_arguments(command: &mut ProcessCommand, client: &TmuxClient) {
-    command.arg("--tmux").arg(&client.executable);
-    if let Some(socket_name) = &client.socket_name {
-        command.arg("-L").arg(socket_name);
-    }
-    if let Some(socket_path) = &client.socket_path {
-        command.arg("-S").arg(socket_path);
-    }
 }
 
 fn client_from_manifest(manifest: &TmuxRecordingManifest) -> TmuxClient {

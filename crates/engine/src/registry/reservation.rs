@@ -9,10 +9,6 @@ impl SessionRegistry {
     /// schema/identity mismatch, or existing alias reservation/binding.
     pub fn register(&self, alias: &str, session: &Path) -> Result<RegistryEntry> {
         let _lock = self.lock()?;
-        return self.register_locked(alias, session);
-    }
-
-    fn register_locked(&self, alias: &str, session: &Path) -> Result<RegistryEntry> {
         validate_alias(alias)?;
         if self.entry_path(alias).exists() {
             return Err(registry_error(

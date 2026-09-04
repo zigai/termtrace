@@ -5,11 +5,11 @@ use std::{
     env,
     ffi::OsStr,
     fs::{self, File, OpenOptions, Permissions},
-    io::{ErrorKind, Read as _},
+    io::ErrorKind,
     os::linux::net::SocketAddrExt as _,
     os::unix::{
         ffi::OsStrExt as _,
-        fs::{FileTypeExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
+        fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
         net::{SocketAddr, UnixStream},
     },
     path::{Path, PathBuf},
@@ -45,10 +45,28 @@ const REGISTRY_DIRECTORY: &str = "registry";
 const REGISTRY_RESERVATION_FORMAT: &str = "termtrace-session-registry-reservation";
 const REGISTRY_RESERVATION_VERSION: u32 = 1;
 
+pub use liveness::recorder_identity;
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RegistryRecord {
-    Entry(RegistryEntry),
     Reservation(AliasReservation),
+    Entry(RegistryEntry),
+}
+
+impl<'de> serde::Deserialize<'de> for RegistryRecord {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.get("owner_token").is_some() {
+            return serde_json::from_value(value)
+                .map(Self::Reservation)
+                .map_err(serde::de::Error::custom);
+        }
+        return serde_json::from_value(value)
+            .map(Self::Entry)
+            .map_err(serde::de::Error::custom);
+    }
 }
 
 /// Secure storage boundary for named session aliases.

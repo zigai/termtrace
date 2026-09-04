@@ -148,20 +148,20 @@ pub(super) fn find_text_regions(state: &SemanticState, needle: &str) -> Vec<Text
         }
         for (start, _) in text.match_indices(needle) {
             let end = start.saturating_add(needle.len());
-            let matching = cells
-                .iter()
-                .filter(|(cell_start, cell_end, _, _)| {
-                    return *cell_start < end && *cell_end > start;
-                })
-                .collect::<Vec<_>>();
-            let (Some(first), Some(last)) = (matching.first(), matching.last()) else {
+            let mut matching = cells.iter().filter(|(cell_start, cell_end, _, _)| {
+                return *cell_start < end && *cell_end > start;
+            });
+            let Some(first) = matching.next() else {
                 continue;
             };
+            let (last, concealed) = matching.fold((first, first.3), |(_, concealed), cell| {
+                return (cell, concealed || cell.3);
+            });
             regions.push(TextRegion {
                 start_column: first.2,
                 end_column: last.2.saturating_add(1),
                 row: row.row,
-                concealed: matching.iter().any(|cell| return cell.3),
+                concealed,
             });
         }
     }

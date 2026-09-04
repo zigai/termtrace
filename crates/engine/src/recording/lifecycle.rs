@@ -75,6 +75,18 @@ struct IncompleteSessionDiagnostic<'diagnostic> {
     closure_failure: Option<&'diagnostic SessionFailure>,
     durable_boundary: Option<CanonicalBoundary>,
 }
+#[cfg(test)]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub(super) struct IncompleteSessionDiagnosticRecord {
+    pub(super) format: String,
+    pub(super) version: u32,
+    pub(super) lifecycle: String,
+    pub(super) session_id: Uuid,
+    pub(super) session_manifest_hash: String,
+    pub(super) failure: SessionFailure,
+    pub(super) closure_failure: Option<SessionFailure>,
+    pub(super) durable_boundary: Option<CanonicalBoundary>,
+}
 
 /// the canonical event log cannot be durably committed.
 pub fn record(options: &RecordOptions) -> Result<RecordOutcome> {
@@ -98,7 +110,8 @@ pub fn record_with_output(
 
 fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordOutcome> {
     let pty_size = validate_options(options)?;
-    let effective_environment = EffectiveEnvironment::resolve(&options.environment, &options.term)?;
+    let effective_environment =
+        EffectiveEnvironment::resolve_validated(&options.environment, &options.term)?;
     // Resolve this once and pass the same owned path to provenance and spawn.
     // Leaving cwd unset is not equivalent: portable-pty falls back to $HOME,
     // which would make a wrapper command silently leave the caller's project.
@@ -256,7 +269,11 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
             return finish_with_cleanup(Err(error), closure_result);
         }
     };
-    let (spawned, mut event_log) = actor.into_process_and_log();
+    let SessionActor {
+        spawned,
+        mut event_log,
+        ..
+    } = actor;
     drop(spawned);
     let exit_code = i32::try_from(runtime.status.exit_code()).ok();
     let signal_name = runtime.status.signal().map(str::to_owned);

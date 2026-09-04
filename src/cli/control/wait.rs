@@ -15,6 +15,11 @@ pub(in crate::cli) fn run_wait(
     if let Some(stable_for) = arguments.idle {
         return run_idle_wait(response, arguments, stable_for);
     }
+    let predicate = if arguments.output.is_none() {
+        Some(parse_screen_predicate(&arguments)?)
+    } else {
+        None
+    };
     let resolved = resolve_session(arguments.session)?;
     if resolved.lifecycle != RegistryLifecycle::Live {
         return write_session_lifecycle(response, &resolved, "wait", ExitCode::FAILURE);
@@ -31,88 +36,7 @@ pub(in crate::cli) fn run_wait(
             &wait_for_output(session, output.as_bytes(), timeout).into_diagnostic()?,
         );
     }
-    let predicate = match (
-        arguments.screen,
-        arguments.screen_absent,
-        arguments.screen_regex,
-        arguments.row_contains,
-        arguments.region_contains,
-        arguments.cursor_at,
-        arguments.cursor_visible,
-        arguments.cursor_shape,
-        arguments.mode,
-        arguments.mode_disabled,
-        arguments.state_changed,
-        arguments.state_unchanged,
-    ) {
-        (Some(text), None, None, None, None, None, None, None, None, None, None, None) => {
-            ScreenPredicate::Contains { text }
-        }
-        (None, Some(text), None, None, None, None, None, None, None, None, None, None) => {
-            ScreenPredicate::Absent { text }
-        }
-        (None, None, Some(pattern), None, None, None, None, None, None, None, None, None) => {
-            ScreenPredicate::MatchesRegex { pattern }
-        }
-        (None, None, None, Some(value), None, None, None, None, None, None, None, None) => {
-            let (row, text) = parse_row_predicate(&value)?;
-            ScreenPredicate::RowContains { row, text }
-        }
-        (None, None, None, None, Some(value), None, None, None, None, None, None, None) => {
-            let (region, text) = parse_region_predicate(&value)?;
-            ScreenPredicate::RegionContains { region, text }
-        }
-        (None, None, None, None, None, Some(value), None, None, None, None, None, None) => {
-            let (column, row) = parse_cursor_position(&value)?;
-            ScreenPredicate::Cursor {
-                column: Some(column),
-                row: Some(row),
-                visible: None,
-                shape: None,
-            }
-        }
-        (None, None, None, None, None, None, Some(visible), None, None, None, None, None) => {
-            ScreenPredicate::Cursor {
-                column: None,
-                row: None,
-                visible: Some(visible),
-                shape: None,
-            }
-        }
-        (None, None, None, None, None, None, None, Some(shape), None, None, None, None) => {
-            ScreenPredicate::Cursor {
-                column: None,
-                row: None,
-                visible: None,
-                shape: Some(shape.into()),
-            }
-        }
-        (None, None, None, None, None, None, None, None, Some(mode), None, None, None) => {
-            ScreenPredicate::Mode {
-                mode: mode.into(),
-                enabled: true,
-            }
-        }
-        (None, None, None, None, None, None, None, None, None, Some(mode), None, None) => {
-            ScreenPredicate::Mode {
-                mode: mode.into(),
-                enabled: false,
-            }
-        }
-        (None, None, None, None, None, None, None, None, None, None, Some(hash), None) => {
-            ScreenPredicate::StateHash {
-                hash,
-                comparison: StateHashComparison::Changed,
-            }
-        }
-        (None, None, None, None, None, None, None, None, None, None, None, Some(hash)) => {
-            ScreenPredicate::StateHash {
-                hash,
-                comparison: StateHashComparison::Unchanged,
-            }
-        }
-        _ => return Err(miette::miette!("exactly one wait predicate is required")),
-    };
+    let predicate = predicate.expect("predicate parsed");
     let outcome =
         wait_for_screen(session, predicate, arguments.stable_for, timeout).into_diagnostic()?;
     let matched = outcome.matched
@@ -245,4 +169,87 @@ pub(super) fn write_completed_stable_snapshot(
             "boundary": observation.boundary,
         }),
     );
+}
+
+fn parse_screen_predicate(arguments: &WaitArgs) -> Result<ScreenPredicate> {
+    let mut predicate = None;
+    let mut set = |pred: Result<ScreenPredicate>| -> Result<()> {
+        if predicate.is_some() {
+            return Err(miette::miette!("exactly one wait predicate is required"));
+        }
+        predicate = Some(pred?);
+        return Ok(());
+    };
+
+    if let Some(text) = &arguments.screen {
+        set(Ok(ScreenPredicate::Contains { text: text.clone() }))?;
+    }
+    if let Some(text) = &arguments.screen_absent {
+        set(Ok(ScreenPredicate::Absent { text: text.clone() }))?;
+    }
+    if let Some(pattern) = &arguments.screen_regex {
+        set(Ok(ScreenPredicate::MatchesRegex {
+            pattern: pattern.clone(),
+        }))?;
+    }
+    if let Some(value) = &arguments.row_contains {
+        let (row, text) = parse_row_predicate(value)?;
+        set(Ok(ScreenPredicate::RowContains { row, text }))?;
+    }
+    if let Some(value) = &arguments.region_contains {
+        let (region, text) = parse_region_predicate(value)?;
+        set(Ok(ScreenPredicate::RegionContains { region, text }))?;
+    }
+    if let Some(value) = &arguments.cursor_at {
+        let (column, row) = parse_cursor_position(value)?;
+        set(Ok(ScreenPredicate::Cursor {
+            column: Some(column),
+            row: Some(row),
+            visible: None,
+            shape: None,
+        }))?;
+    }
+    if let Some(visible) = arguments.cursor_visible {
+        set(Ok(ScreenPredicate::Cursor {
+            column: None,
+            row: None,
+            visible: Some(visible),
+            shape: None,
+        }))?;
+    }
+    if let Some(shape) = arguments.cursor_shape {
+        set(Ok(ScreenPredicate::Cursor {
+            column: None,
+            row: None,
+            visible: None,
+            shape: Some(shape.into()),
+        }))?;
+    }
+    if let Some(mode) = arguments.mode {
+        set(Ok(ScreenPredicate::Mode {
+            mode: mode.into(),
+            enabled: true,
+        }))?;
+    }
+    if let Some(mode) = arguments.mode_disabled {
+        set(Ok(ScreenPredicate::Mode {
+            mode: mode.into(),
+            enabled: false,
+        }))?;
+    }
+    if let Some(hash) = &arguments.state_changed {
+        set(Ok(ScreenPredicate::StateHash {
+            hash: hash.clone(),
+            comparison: StateHashComparison::Changed,
+        }))?;
+    }
+    if let Some(hash) = &arguments.state_unchanged {
+        set(Ok(ScreenPredicate::StateHash {
+            hash: hash.clone(),
+            comparison: StateHashComparison::Unchanged,
+        }))?;
+    }
+
+    return predicate
+        .ok_or_else(|| return miette::miette!("exactly one wait predicate is required"));
 }

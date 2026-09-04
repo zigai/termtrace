@@ -14,7 +14,6 @@ use std::{
     process::{Command as ProcessCommand, ExitCode, ExitStatus},
 };
 
-use clap::CommandFactory as _;
 use clap_complete::generate;
 use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::{
@@ -35,7 +34,7 @@ use termtrace_model::{
     value::ByteString,
 };
 
-use crate::cli::command::CompletionCli;
+use crate::cli::command::completion_command;
 
 use crate::cli::{
     agent::serve as serve_driver,
@@ -375,7 +374,7 @@ pub(super) fn run_completions(
     response: &mut ResponseWriter,
     arguments: CompletionsArgs,
 ) -> Result<ExitCode> {
-    let mut command = CompletionCli::command();
+    let mut command = completion_command();
     let mut output = Vec::new();
     generate(arguments.shell, &mut command, "termtrace", &mut output);
     return write_stdout(response, output);

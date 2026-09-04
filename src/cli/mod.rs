@@ -26,7 +26,9 @@ mod tooling;
 use command::{
     Cli, command_contract, preserves_requested_output, requested_response_mode, root_command,
 };
-use output::{ResponseMode, ResponseWriter, finish_response, write_clap_error};
+use output::{
+    ResolvedResponseMode, ResponseMode, ResponseWriter, finish_response, write_clap_error,
+};
 
 fn init_diagnostics(level: tracing::Level) {
     let filter = EnvFilter::builder()
@@ -53,12 +55,12 @@ pub(crate) fn run() -> ExitCode {
     };
     let response_mode =
         if cli.response == ResponseMode::Auto && preserves_requested_output(&cli.command) {
-            ResponseMode::Full
+            ResolvedResponseMode::Full
         } else {
             cli.response.resolve()
         };
     let mut response = ResponseWriter::new(response_mode, cli.fields, command_type, mutating);
-    if response_mode != ResponseMode::Quiet {
+    if response_mode != ResolvedResponseMode::Quiet {
         init_diagnostics(cli.log);
     }
     let result = dispatch::dispatch(&mut response, cli.command);

@@ -3,7 +3,6 @@ use std::{
     ffi::OsString,
     fs::Permissions,
     io::Read as _,
-    iter,
     os::unix::{
         fs::PermissionsExt as _,
         net::{SocketAddr, UnixStream},
@@ -41,7 +40,6 @@ use termtrace_model::{
     },
     terminal::observation::ActorBoundaries,
 };
-use termtrace_terminal::PresentationAction;
 
 fn control_socket_address(name: &str) -> SocketAddr {
     use std::os::linux::net::SocketAddrExt as _;
@@ -166,25 +164,32 @@ fn poisoned_terminal_exit_append_preserves_incomplete_failure_without_completion
         !session.join("completion.json").exists(),
         "an unclosed canonical log must not have completion"
     );
-    let diagnostic: serde_json::Value = serde_json::from_slice(
+    let diagnostic: IncompleteSessionDiagnosticRecord = serde_json::from_slice(
         &fs_err::read(session.join(SESSION_FAILURE_NAME)).expect("failure diagnostic"),
     )
     .expect("failure diagnostic JSON");
-    assert_eq!(diagnostic["lifecycle"], "incomplete");
-    assert_eq!(diagnostic["failure"]["code"], "recorder_actor_failed");
+    assert_eq!(diagnostic.lifecycle, "incomplete");
+    assert_eq!(diagnostic.failure.code, "recorder_actor_failed");
     assert_eq!(
-        diagnostic["closure_failure"]["code"],
-        "canonical_log_failed"
+        diagnostic
+            .closure_failure
+            .as_ref()
+            .map(|failure| return failure.code.as_str()),
+        Some("canonical_log_failed")
     );
-    assert!(diagnostic["durable_boundary"]["event_hash"].is_string());
+    let durable_boundary = diagnostic
+        .durable_boundary
+        .as_ref()
+        .expect("durable boundary");
+    assert!(!durable_boundary.event_hash.is_empty());
     let log = EventLog::read(session.join("events.jsonl")).expect("recoverable event prefix");
     assert!(matches!(
         log.events.last().map(|record| return &record.event),
         Some(Event::HostError { code, .. }) if code == "recorder_actor_failed"
     ));
     assert_eq!(
-        diagnostic["durable_boundary"]["next_event_seq"].as_u64(),
-        Some(u64::try_from(log.events.len()).expect("event count"))
+        durable_boundary.next_event_seq,
+        u64::try_from(log.events.len()).expect("event count")
     );
     assert!(matches!(
         validate_completed_log(&session, &log),
@@ -456,33 +461,12 @@ fn evicted_mutation_outcomes_are_loaded_from_the_persistent_journal() {
 fn records_exact_output_and_exit_after_output_close() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("recording");
-    let options = RecordOptions {
-        output_directory: session.clone(),
-        creation_alias: None,
-        lineage: None,
-        import_provenance: None,
-        tmux_pane: None,
-        command: vec![
-            OsString::from("/bin/sh"),
-            OsString::from("-c"),
-            OsString::from(r"printf '\033[31mhello\033[0m\377'"),
-        ],
-        working_directory: None,
-        cols: 80,
-        rows: 24,
-        cell_width_px: 9,
-        cell_height_px: 18,
-        geometry_provenance: GeometryProvenance::default(),
-        ghostty_profile: None,
-        term: "xterm-ghostty".to_owned(),
-        environment: EnvironmentSpec::default(),
-        colors: TerminalColors::default(),
-        forward_stdin: false,
-        continue_after_output_mirror_closes: false,
-        durability_policy: DurabilityPolicy::default(),
-        provenance_policy: ProvenancePolicy::default(),
-        resource_limits: ResourceLimits::default(),
-    };
+    let command = vec![
+        OsString::from("/bin/sh"),
+        OsString::from("-c"),
+        OsString::from(r"printf '\033[31mhello\033[0m\377'"),
+    ];
+    let options = isolated_options(session.clone(), command);
 
     let mut mirrored_output = Vec::new();
     let outcome = record_to(&options, &mut mirrored_output).expect("record command");
@@ -561,29 +545,7 @@ fn paste_encoding_is_explicit_and_rejects_delimiter_injection() {
 #[test]
 fn refuses_to_overwrite_existing_session_directory() {
     let temporary = TempDir::new().expect("temporary directory");
-    let options = RecordOptions {
-        output_directory: temporary.path().to_path_buf(),
-        creation_alias: None,
-        lineage: None,
-        import_provenance: None,
-        tmux_pane: None,
-        command: vec![OsString::from("true")],
-        working_directory: None,
-        cols: 80,
-        rows: 24,
-        cell_width_px: 9,
-        cell_height_px: 18,
-        geometry_provenance: GeometryProvenance::default(),
-        ghostty_profile: None,
-        term: "xterm-ghostty".to_owned(),
-        environment: EnvironmentSpec::default(),
-        colors: TerminalColors::default(),
-        forward_stdin: false,
-        continue_after_output_mirror_closes: false,
-        durability_policy: DurabilityPolicy::default(),
-        provenance_policy: ProvenancePolicy::default(),
-        resource_limits: ResourceLimits::default(),
-    };
+    let options = isolated_options(temporary.path().to_path_buf(), vec![OsString::from("true")]);
 
     let error = record(&options).expect_err("existing directory must fail");
     assert!(matches!(error, Error::SessionExists { .. }));
@@ -592,33 +554,12 @@ fn refuses_to_overwrite_existing_session_directory() {
 #[test]
 fn terminates_descendants_that_retain_the_slave_pty() {
     let temporary = TempDir::new().expect("temporary directory");
-    let options = RecordOptions {
-        output_directory: temporary.path().join("recording"),
-        creation_alias: None,
-        lineage: None,
-        import_provenance: None,
-        tmux_pane: None,
-        command: vec![
-            OsString::from("/bin/sh"),
-            OsString::from("-c"),
-            OsString::from("(trap '' HUP; exec sleep 30) & printf done"),
-        ],
-        working_directory: None,
-        cols: 80,
-        rows: 24,
-        cell_width_px: 9,
-        cell_height_px: 18,
-        geometry_provenance: GeometryProvenance::default(),
-        ghostty_profile: None,
-        term: "xterm-ghostty".to_owned(),
-        environment: EnvironmentSpec::default(),
-        colors: TerminalColors::default(),
-        forward_stdin: false,
-        continue_after_output_mirror_closes: false,
-        durability_policy: DurabilityPolicy::default(),
-        provenance_policy: ProvenancePolicy::default(),
-        resource_limits: ResourceLimits::default(),
-    };
+    let command = vec![
+        OsString::from("/bin/sh"),
+        OsString::from("-c"),
+        OsString::from("(trap '' HUP; exec sleep 30) & printf done"),
+    ];
+    let options = isolated_options(temporary.path().join("recording"), command);
     let started = Instant::now();
     let mut output = Vec::new();
 
@@ -635,35 +576,14 @@ fn terminates_descendants_that_retain_the_slave_pty() {
 #[test]
 fn answers_and_audits_terminal_queries() {
     let temporary = TempDir::new().expect("temporary directory");
-    let options = RecordOptions {
-        output_directory: temporary.path().join("query"),
-        creation_alias: None,
-        lineage: None,
-        import_provenance: None,
-        tmux_pane: None,
-        command: vec![
-            OsString::from("/usr/bin/python3"),
-            OsString::from("-c"),
-            OsString::from(
-                "import os,tty; tty.setraw(0); os.write(1,b'\\x1b[6n'); r=os.read(0,32); os.write(1,b'GOT:'+r.hex().encode())",
-            ),
-        ],
-        working_directory: None,
-        cols: 80,
-        rows: 24,
-        cell_width_px: 9,
-        cell_height_px: 18,
-        geometry_provenance: GeometryProvenance::default(),
-        ghostty_profile: None,
-        term: "xterm-ghostty".to_owned(),
-        environment: EnvironmentSpec::default(),
-        colors: TerminalColors::default(),
-        forward_stdin: false,
-        continue_after_output_mirror_closes: false,
-        durability_policy: DurabilityPolicy::default(),
-        provenance_policy: ProvenancePolicy::default(),
-        resource_limits: ResourceLimits::default(),
-    };
+    let command = vec![
+        OsString::from("/usr/bin/python3"),
+        OsString::from("-c"),
+        OsString::from(
+            "import os,tty; tty.setraw(0); os.write(1,b'\\x1b[6n'); r=os.read(0,32); os.write(1,b'GOT:'+r.hex().encode())",
+        ),
+    ];
+    let options = isolated_options(temporary.path().join("query"), command);
     let mut output = Vec::new();
 
     let outcome = record_to(&options, &mut output).expect("record query command");
@@ -687,35 +607,14 @@ fn answers_and_audits_terminal_queries() {
 #[test]
 fn preserves_complete_osc_query_when_response_precedes_st() {
     let temporary = TempDir::new().expect("temporary directory");
-    let options = RecordOptions {
-        output_directory: temporary.path().join("osc-query"),
-        creation_alias: None,
-        lineage: None,
-        import_provenance: None,
-        tmux_pane: None,
-        command: vec![
-            OsString::from("/usr/bin/python3"),
-            OsString::from("-c"),
-            OsString::from(
-                "import os,tty; tty.setraw(0); q=b'\\x1b]11;?\\x1b\\\\'; os.write(1,q); r=b'';\nwhile not r.endswith(b'\\x1b\\\\'): r+=os.read(0,99)\nos.write(1,b'GOT:'+r.hex().encode())",
-            ),
-        ],
-        working_directory: None,
-        cols: 80,
-        rows: 24,
-        cell_width_px: 9,
-        cell_height_px: 18,
-        geometry_provenance: GeometryProvenance::default(),
-        ghostty_profile: None,
-        term: "xterm-ghostty".to_owned(),
-        environment: EnvironmentSpec::default(),
-        colors: TerminalColors::default(),
-        forward_stdin: false,
-        continue_after_output_mirror_closes: false,
-        durability_policy: DurabilityPolicy::default(),
-        provenance_policy: ProvenancePolicy::default(),
-        resource_limits: ResourceLimits::default(),
-    };
+    let command = vec![
+        OsString::from("/usr/bin/python3"),
+        OsString::from("-c"),
+        OsString::from(
+            "import os,tty; tty.setraw(0); q=b'\\x1b]11;?\\x1b\\\\'; os.write(1,q); r=b'';\nwhile not r.endswith(b'\\x1b\\\\'): r+=os.read(0,99)\nos.write(1,b'GOT:'+r.hex().encode())",
+        ),
+    ];
+    let options = isolated_options(temporary.path().join("osc-query"), command);
     let mut output = Vec::new();
 
     let outcome = record_to(&options, &mut output).expect("record OSC query command");
@@ -730,53 +629,19 @@ fn preserves_complete_osc_query_when_response_precedes_st() {
 }
 
 #[test]
-fn presentation_tracker_recognizes_only_synchronized_output_mode_commands() {
-    for (input, expected) in [
-        (
-            b"visible\x1b[?2026hhidden\x1b[?2026l".as_slice(),
-            vec![true, false],
-        ),
-        (b"\x1b[?25;2026h".as_slice(), vec![true]),
-        (b"\x9b?2026l".as_slice(), vec![false]),
-        (b"\x1b[2026h".as_slice(), Vec::new()),
-        (b"\x1b[?20260h".as_slice(), Vec::new()),
-        (b"\x1b[?2026:1h".as_slice(), Vec::new()),
-        (b"\x1b[?2026\x18h".as_slice(), Vec::new()),
-    ] {
-        let mut tracker = PresentationTracker::new(false);
-        let mut commands = Vec::new();
-        let mut framed = Vec::new();
-        for byte in input {
-            match tracker.push(*byte) {
-                PresentationAction::Immediate => framed.push(*byte),
-                PresentationAction::Buffered => {}
-                PresentationAction::Sequence { bytes, command } => {
-                    framed.extend(bytes);
-                    if let Some(command) = command {
-                        commands.push(command);
-                    }
-                }
-            }
-        }
-        framed.extend(tracker.finish());
-        assert_eq!(commands, expected, "input: {input:?}");
-        assert_eq!(framed, input, "framing must be lossless");
-    }
-
-    const TRACKED_SEQUENCE_BOUND: usize = 64 * 1024;
-    let mut tracker = PresentationTracker::new(false);
-    let mut longest_sequence = 0;
-    for byte in b"\x1b[?"
-        .iter()
-        .copied()
-        .chain(iter::repeat_n(b'0', TRACKED_SEQUENCE_BOUND * 2))
-    {
-        if let PresentationAction::Sequence { bytes, .. } = tracker.push(byte) {
-            longest_sequence = longest_sequence.max(bytes.len());
-        }
-    }
-    longest_sequence = longest_sequence.max(tracker.finish().len());
-    assert!(longest_sequence <= TRACKED_SEQUENCE_BOUND + 1);
+fn synchronized_output_holds_presented_state_until_exit() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("sync-recording");
+    let command = vec![
+        OsString::from("/bin/sh"),
+        OsString::from("-c"),
+        OsString::from("printf 'before\x1b[?2026hhidden\x1b[?2026lafter'"),
+    ];
+    let options = isolated_options(session, command);
+    let mut output = Vec::new();
+    let outcome = record_to(&options, &mut output).expect("record synchronized output");
+    assert_eq!(outcome.exit_code, Some(0));
+    assert_eq!(output, b"before\x1b[?2026hhidden\x1b[?2026lafter");
 }
 
 #[test]

@@ -161,14 +161,19 @@ pub fn index_session_with_options(
             final_state_hash: artifacts.final_state_hash,
         });
     });
-    if result.is_err() && staging.exists() {
-        let cleanup = fs_err::remove_dir_all(&staging).map_err(|source| {
-            return Error::Filesystem {
-                path: staging,
-                source,
-            };
-        });
-        return finish_with_cleanup(result, cleanup);
+    if let Err(primary) = result {
+        if staging.exists() {
+            if let Err(source) = fs_err::remove_dir_all(&staging) {
+                return Err(Error::CleanupFailed {
+                    primary: Box::new(primary),
+                    cleanup: Box::new(Error::Filesystem {
+                        path: staging,
+                        source,
+                    }),
+                });
+            }
+        }
+        return Err(primary);
     }
     return result;
 }
@@ -218,6 +223,13 @@ pub(crate) fn load_nearest_replay_seed(
     }
     verify_artifact_members(directory, &manifest.members)?;
     let checkpoint_selector = match selector {
+        StateSelector::Final => Some(CheckpointSelector::Final),
+        StateSelector::LatestPresented => Some(CheckpointSelector::LatestPresented),
+        StateSelector::StateId(state_id) => Some(CheckpointSelector::StateId(*state_id)),
+        StateSelector::EventSeq(event_seq) => Some(CheckpointSelector::EventSeq(*event_seq)),
+        StateSelector::MonotonicNs(monotonic_ns) => {
+            Some(CheckpointSelector::MonotonicNs(*monotonic_ns))
+        }
         StateSelector::StateHash(state_hash) => {
             let index_path = directory.join("state-index.jsonl");
             let file = fs_err::File::open(&index_path).map_err(|source| {
@@ -241,9 +253,8 @@ pub(crate) fn load_nearest_replay_seed(
                     break;
                 }
             }
-            target_state_id.map(StateSelector::StateId)
+            target_state_id.map(CheckpointSelector::StateId)
         }
-        _ => Some(selector.clone()),
     };
     let Some(checkpoint_selector) = checkpoint_selector else {
         return Ok(None);
@@ -283,15 +294,23 @@ pub(crate) fn load_nearest_replay_seed(
     return Ok(selected);
 }
 
-fn checkpoint_precedes_selector(record: &StateRecord, selector: &StateSelector) -> bool {
+#[derive(Clone, Debug)]
+enum CheckpointSelector {
+    Final,
+    LatestPresented,
+    StateId(u64),
+    EventSeq(u64),
+    MonotonicNs(u64),
+}
+
+fn checkpoint_precedes_selector(record: &StateRecord, selector: &CheckpointSelector) -> bool {
     return match selector {
-        StateSelector::Final | StateSelector::LatestPresented => true,
-        StateSelector::StateId(state_id) => record.state_id <= *state_id,
-        StateSelector::StateHash(state_hash) => record.state_hash == *state_hash,
-        StateSelector::EventSeq(event_seq) => record
+        CheckpointSelector::Final | CheckpointSelector::LatestPresented => true,
+        CheckpointSelector::StateId(state_id) => record.state_id <= *state_id,
+        CheckpointSelector::EventSeq(event_seq) => record
             .event_seq
             .is_none_or(|value| return value <= *event_seq),
-        StateSelector::MonotonicNs(monotonic_ns) => record.monotonic_ns <= *monotonic_ns,
+        CheckpointSelector::MonotonicNs(monotonic_ns) => record.monotonic_ns <= *monotonic_ns,
     };
 }
 
@@ -613,18 +632,4 @@ fn write_json_line(writer: &mut impl Write, value: &impl Serialize, path: &Path)
             source,
         };
     });
-}
-
-fn finish_with_cleanup<T>(primary: Result<T>, cleanup: Result<()>) -> Result<T> {
-    match (primary, cleanup) {
-        (Ok(value), Ok(())) => return Ok(value),
-        (Ok(_), Err(cleanup)) => return Err(cleanup),
-        (Err(primary), Ok(())) => return Err(primary),
-        (Err(primary), Err(cleanup)) => {
-            return Err(Error::CleanupFailed {
-                primary: Box::new(primary),
-                cleanup: Box::new(cleanup),
-            });
-        }
-    }
 }

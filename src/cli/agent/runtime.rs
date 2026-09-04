@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     io::{BufRead, Error as IoError, Result as IoResult, Write},
     path::PathBuf,
     process::Child,
@@ -14,11 +14,13 @@ use uuid::Uuid;
 use super::{
     framing::{DriverFrame, read_frame},
     operations::{driver_error, driver_failure_with_retry, driver_response_is_cacheable},
-    protocol::{
-        DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
-        DRIVER_RESPONSE_CACHE_BYTES, DriverData, DriverRequest, DriverResponse, DriverResult,
-    },
 };
+use termtrace_model::protocol::driver::{
+    DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION, DriverData,
+    DriverRequest, DriverResponse, DriverResult,
+};
+
+pub(super) const DRIVER_RESPONSE_CACHE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Serve requests until clean input EOF.
 pub(in crate::cli) fn serve(mut input: impl BufRead, mut output: impl Write) -> Result<()> {
@@ -67,11 +69,20 @@ pub(in crate::cli) fn serve(mut input: impl BufRead, mut output: impl Write) -> 
     return Ok(());
 }
 
+#[derive(Debug)]
+pub(super) enum SessionOwnership {
+    External,
+    Launched { recorder: Option<Child> },
+}
+
+pub(super) struct AttachedSession {
+    pub(super) path: PathBuf,
+    pub(super) ownership: SessionOwnership,
+}
+
 #[derive(Default)]
 pub(super) struct Driver {
-    pub(super) sessions: HashMap<Uuid, PathBuf>,
-    pub(super) launched: HashSet<Uuid>,
-    pub(super) recorders: HashMap<Uuid, Child>,
+    pub(super) sessions: HashMap<Uuid, AttachedSession>,
     pub(super) cached: HashMap<Uuid, CachedDriverResponse>,
     order: VecDeque<Uuid>,
     pub(super) cached_bytes: usize,

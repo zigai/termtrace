@@ -1,6 +1,6 @@
 use crate::cli::output::ResponseWriter;
 
-use std::{fmt::Write as _, mem::take, process::ExitCode};
+use std::{fmt::Write as _, mem::take, path::PathBuf, process::ExitCode};
 
 use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::{
@@ -33,14 +33,14 @@ use crate::cli::{
         id_list, optional_display, paginate, quoted_text, stable_enum_label, write_json_line,
         write_stdout,
     },
-    session_helpers::{resolve_session, resolve_session_ref, write_session_lifecycle},
+    session_helpers::{resolve_session, resolve_session_path, write_session_lifecycle},
 };
 
 pub(in crate::cli) fn run_timeline(
     response: &mut ResponseWriter,
     arguments: TimelineArgs,
 ) -> Result<ExitCode> {
-    let session = resolve_session_ref(arguments.session)?;
+    let session = resolve_session_path(arguments.session)?;
     let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
     validate_completed_log(&session, &log).into_diagnostic()?;
     let range = resolve_source_selection(
@@ -122,7 +122,7 @@ pub(in crate::cli) fn run_diff(
     response: &mut ResponseWriter,
     arguments: DiffArgs,
 ) -> Result<ExitCode> {
-    let session = resolve_session_ref(arguments.session)?;
+    let session = resolve_session_path(arguments.session)?;
     let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
     validate_completed_log(&session, &log).into_diagnostic()?;
     let from = diff_point(
@@ -183,7 +183,7 @@ pub(in crate::cli) fn run_explain(
     response: &mut ResponseWriter,
     arguments: ExplainArgs,
 ) -> Result<ExitCode> {
-    let session = resolve_session_ref(arguments.session)?;
+    let session = resolve_session_path(arguments.session)?;
     let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
     validate_completed_log(&session, &log).into_diagnostic()?;
     let target = diff_point(
@@ -241,7 +241,7 @@ pub(in crate::cli) fn run_diagnose(
     response: &mut ResponseWriter,
     arguments: DiagnoseArgs,
 ) -> Result<ExitCode> {
-    let session = resolve_session_ref(arguments.session)?;
+    let session = resolve_session_path(arguments.session)?;
     let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
     validate_completed_log(&session, &log).into_diagnostic()?;
     let visual_evidence = validated_visual_manifests(&session).into_diagnostic()?;
@@ -276,44 +276,48 @@ pub(in crate::cli) fn run_diagnose(
     return Ok(ExitCode::SUCCESS);
 }
 
+fn run_last_action_facade<T: serde::Serialize>(
+    response: &mut ResponseWriter,
+    session: PathBuf,
+    broad_change_percent: u8,
+    operation: &'static str,
+    select: impl FnOnce(&termtrace_model::terminal::analysis::LastActionAnalysis) -> &T,
+) -> Result<ExitCode> {
+    let resolved = resolve_session(session)?;
+    if resolved.lifecycle != RegistryLifecycle::Completed {
+        return write_session_lifecycle(response, &resolved, operation, ExitCode::FAILURE);
+    }
+    let log = EventLog::read(resolved.path.join("events.jsonl")).into_diagnostic()?;
+    validate_completed_log(&resolved.path, &log).into_diagnostic()?;
+    let analysis =
+        analyze_last_action(&resolved.path, &log, broad_change_percent).into_diagnostic()?;
+    return write_json_line(response, select(&analysis));
+}
+
 pub(in crate::cli) fn run_inspect_facade(
     response: &mut ResponseWriter,
     arguments: InspectFacadeArgs,
 ) -> Result<ExitCode> {
-    let resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle != RegistryLifecycle::Completed {
-        return write_session_lifecycle(
-            response,
-            &resolved,
-            "inspect_last_action",
-            ExitCode::FAILURE,
-        );
-    }
-    let log = EventLog::read(resolved.path.join("events.jsonl")).into_diagnostic()?;
-    validate_completed_log(&resolved.path, &log).into_diagnostic()?;
-    let analysis = analyze_last_action(&resolved.path, &log, arguments.broad_change_percent)
-        .into_diagnostic()?;
-    return write_json_line(response, &analysis.inspection);
+    return run_last_action_facade(
+        response,
+        arguments.session,
+        arguments.broad_change_percent,
+        "inspect_last_action",
+        |analysis| return &analysis.inspection,
+    );
 }
 
 pub(in crate::cli) fn run_diagnose_facade(
     response: &mut ResponseWriter,
     arguments: DiagnoseFacadeArgs,
 ) -> Result<ExitCode> {
-    let resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle != RegistryLifecycle::Completed {
-        return write_session_lifecycle(
-            response,
-            &resolved,
-            "diagnose_since_last_action",
-            ExitCode::FAILURE,
-        );
-    }
-    let log = EventLog::read(resolved.path.join("events.jsonl")).into_diagnostic()?;
-    validate_completed_log(&resolved.path, &log).into_diagnostic()?;
-    let analysis = analyze_last_action(&resolved.path, &log, arguments.broad_change_percent)
-        .into_diagnostic()?;
-    return write_json_line(response, &analysis.diagnostics);
+    return run_last_action_facade(
+        response,
+        arguments.session,
+        arguments.broad_change_percent,
+        "diagnose_since_last_action",
+        |analysis| return &analysis.diagnostics,
+    );
 }
 
 fn explain_text(report: &ExplainReport) -> Result<String> {
@@ -400,18 +404,15 @@ fn diff_point(
     monotonic_ns: Option<u64>,
     marker: Option<String>,
 ) -> Result<StatePoint> {
-    return match (state, state_hash, event_seq, monotonic_ns, marker) {
-        (Some(state_id), None, None, None, None) => Ok(StatePoint::StateId { state_id }),
-        (None, Some(state_hash), None, None, None) => Ok(StatePoint::StateHash { state_hash }),
-        (None, None, Some(event_seq), None, None) => Ok(StatePoint::EventSeq { event_seq }),
-        (None, None, None, Some(monotonic_ns), None) => {
-            Ok(StatePoint::MonotonicNs { monotonic_ns })
-        }
-        (None, None, None, None, Some(label)) => Ok(StatePoint::Marker { label }),
-        _ => Err(miette::miette!(
-            "exactly one diff endpoint selector is required"
-        )),
-    };
+    crate::cli::session_helpers::resolve_state_point(
+        state,
+        state_hash,
+        event_seq,
+        monotonic_ns,
+        marker,
+        None,
+        "diff endpoint",
+    )
 }
 
 fn diff_text(difference: &SemanticDiff) -> Result<String> {

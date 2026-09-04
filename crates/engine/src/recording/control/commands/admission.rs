@@ -330,55 +330,6 @@ impl SessionActor<'_> {
                     }),
                 },
             },
-            (
-                Err(Error::InputSequenceIncomplete {
-                    sequence_id,
-                    failed_atom_index,
-                    failed_operation_id,
-                    atoms_applied,
-                    bytes_written,
-                    failed_atom_bytes_written,
-                    first_intent_event_seq,
-                    last_result_event_seq,
-                    reason,
-                }),
-                _,
-            ) => {
-                let atom_count = match &request.command {
-                    ControlCommand::InputSequence { atoms, .. } => {
-                        u32::try_from(atoms.len()).unwrap_or(u32::MAX)
-                    }
-                    _ => 0,
-                };
-                ControlResponse {
-                    version: CONTROL_PROTOCOL_VERSION,
-                    request_id: request.request_id,
-                    result: ControlResult::Error {
-                        code: "input_sequence_incomplete".to_owned(),
-                        message: format!(
-                            "input sequence `{sequence_id}` stopped at atom {failed_atom_index}: {reason}"
-                        ),
-                        details: Some(ControlErrorDetails {
-                            current_presented_state_hash: current_state_hash,
-                            boundaries: actor_boundaries(&self.event_log),
-                            scope: "input_sequence_attempted_prefix".to_owned(),
-                            input_sequence: Some(InputSequenceFailureDetails {
-                                sequence_id: *sequence_id,
-                                atom_count,
-                                atoms_applied: *atoms_applied,
-                                failed_atom_index: *failed_atom_index,
-                                failed_operation_id: *failed_operation_id,
-                                bytes_written: *bytes_written,
-                                failed_atom_bytes_written: *failed_atom_bytes_written,
-                                first_intent_event_seq: *first_intent_event_seq,
-                                last_result_event_seq: *last_result_event_seq,
-                                resume_from_atom_index: failed_atom_index.saturating_add(1),
-                            }),
-                            screen_frame: None,
-                        }),
-                    },
-                }
-            }
             (Ok(data), _) => ControlResponse {
                 version: CONTROL_PROTOCOL_VERSION,
                 request_id: request.request_id,
@@ -422,10 +373,7 @@ impl SessionActor<'_> {
         match outcome {
             Ok(_)
             | Err(
-                Error::ControlRejected { .. }
-                | Error::InputSequenceIncomplete { .. }
-                | Error::GhosttyVt { .. }
-                | Error::ScreenFrame(_),
+                Error::ControlRejected { .. } | Error::GhosttyVt { .. } | Error::ScreenFrame(_),
             ) => {
                 return Ok(());
             }

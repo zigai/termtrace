@@ -2,7 +2,6 @@
 
 mod framing;
 mod operations;
-mod protocol;
 mod runtime;
 
 #[cfg(test)]

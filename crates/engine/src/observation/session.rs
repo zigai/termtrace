@@ -551,27 +551,6 @@ pub fn semantic_state_from_live_snapshot(snapshot: ControlData) -> Result<(Seman
     return Ok((state, state_hash));
 }
 
-/// Observe a completed canonical session created for a one-off command.
-///
-/// # Errors
-///
-/// Returns an error when the session is incomplete, invalid, or the requested
-/// state cannot be resolved.
-pub fn observe_one_off_session(
-    session: &Path,
-    state_point: StatePoint,
-    include_hidden: bool,
-) -> Result<Observation> {
-    let mut observation = observe_session_with_options(session, state_point, include_hidden)?;
-    if !observation.source_completed {
-        return Err(observation_error(
-            "one-off command did not produce completed canonical evidence",
-        ));
-    }
-    observation.source_kind = ObservationSourceKind::OneOffCommand;
-    return Ok(observation);
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::{Read as _, repeat};

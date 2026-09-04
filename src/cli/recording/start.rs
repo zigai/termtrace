@@ -97,7 +97,7 @@ pub(in crate::cli) fn run_start(
             );
         }
         if paths.session.join("session.json").is_file()
-            && registry.recorder_identity(&paths.session).is_some()
+            && termtrace_engine::registry::recorder_identity(&paths.session).is_some()
         {
             let ready_at = ready_since.get_or_insert_with(Instant::now);
             if ready_at.elapsed() >= Duration::from_millis(30) {
@@ -217,32 +217,29 @@ fn report_start_outcome(
     });
     let mut synchronization_ok = true;
     if synchronization.requested() {
-        let postcondition = if completion.is_some() {
-            synchronization_ok = false;
-            serde_json::json!({
-                "matched": false,
-                "ended": true,
-                "quality": "completed_before_match",
-            })
+        let (matched, postcondition) = if completion.is_some() {
+            (
+                false,
+                serde_json::json!({
+                    "matched": false,
+                    "ended": true,
+                    "quality": "completed_before_match",
+                }),
+            )
         } else {
             match start_postcondition(&entry.session_path(), synchronization) {
-                Ok(postcondition) => {
-                    synchronization_ok = postcondition
-                        .get("matched")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false);
-                    postcondition
-                }
-                Err(error) => {
-                    synchronization_ok = false;
+                Ok((matched, postcondition)) => (matched, postcondition),
+                Err(error) => (
+                    false,
                     serde_json::json!({
                         "matched": false,
                         "ended": entry.session_path().join("completion.json").is_file(),
                         "error": error.to_string(),
-                    })
-                }
+                    }),
+                ),
             }
         };
+        synchronization_ok = matched;
         output
             .as_object_mut()
             .ok_or_else(|| miette::miette!("start response is not an object"))?
@@ -264,7 +261,7 @@ fn report_start_outcome(
 fn start_postcondition(
     session: &Path,
     synchronization: &StartSynchronization,
-) -> Result<serde_json::Value> {
+) -> Result<(bool, serde_json::Value)> {
     if let Some(stable_for) = synchronization.until_idle {
         let data = send_request(
             session,
@@ -280,47 +277,51 @@ fn start_postcondition(
                 "actor returned the wrong stable-capture payload"
             ));
         };
-        return Ok(serde_json::json!({
-            "matched": quality == StableCaptureQuality::Stable,
-            "kind": "idle",
-            "quality": quality,
-            "state_hash": frame.state_hash,
-            "frame_hash": frame.frame_hash,
-            "frame": frame,
-        }));
+        let matched_ok = quality == StableCaptureQuality::Stable;
+        return Ok((
+            matched_ok,
+            serde_json::json!({
+                "matched": quality == StableCaptureQuality::Stable,
+                "kind": "idle",
+                "quality": quality,
+                "state_hash": frame.state_hash,
+                "frame_hash": frame.frame_hash,
+                "frame": frame,
+            }),
+        ));
     }
     let (kind, predicate) = match (
         &synchronization.until_screen,
         &synchronization.until_screen_regex,
     ) {
-        (Some(text), None) => ("screen", ScreenPredicate::Contains { text: text.clone() }),
-        (None, Some(pattern)) => (
+        (Some(text), _) => ("screen", ScreenPredicate::Contains { text: text.clone() }),
+        (_, Some(pattern)) => (
             "screen_regex",
             ScreenPredicate::MatchesRegex {
                 pattern: pattern.clone(),
             },
         ),
-        _ => {
-            return Err(miette::miette!(
-                "exactly one start postcondition is required"
-            ));
-        }
+        (None, None) => unreachable!("start postcondition was requested"),
     };
     let matched = wait_for_screen(session, predicate, Duration::ZERO, synchronization.timeout)
         .into_diagnostic()?;
-    return Ok(serde_json::json!({
-        "matched": matched.matched,
-        "kind": kind,
-        "state": matched.frame.state_hash,
-        "frame_hash": matched.frame.frame_hash,
-        "quality": matched.quality,
-        "size": [matched.frame.geometry.cols, matched.frame.geometry.rows],
-        "ended": matches!(
-            matched.quality,
-            ScreenWaitQuality::ChildCompleted | ScreenWaitQuality::OutputClosed
-        ),
-        "frame": matched.frame,
-    }));
+    let matched_ok = matched.matched;
+    return Ok((
+        matched_ok,
+        serde_json::json!({
+            "matched": matched.matched,
+            "kind": kind,
+            "state": matched.frame.state_hash,
+            "frame_hash": matched.frame.frame_hash,
+            "quality": matched.quality,
+            "size": [matched.frame.geometry.cols, matched.frame.geometry.rows],
+            "ended": matches!(
+                matched.quality,
+                ScreenWaitQuality::ChildCompleted | ScreenWaitQuality::OutputClosed
+            ),
+            "frame": matched.frame,
+        }),
+    ));
 }
 pub(super) fn detached_record_arguments(
     alias: &str,

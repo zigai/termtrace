@@ -104,12 +104,7 @@ pub fn inspect_point(log: &EventLog, point: &StatePoint) -> Result<StateInspecti
     return inspect(log, selector);
 }
 
-/// Resolve several shared state points in one canonical replay.
-///
-/// # Errors
-///
-/// Returns an error when replay fails or any marker/selector cannot resolve.
-pub fn inspect_points(log: &EventLog, points: &[StatePoint]) -> Result<Vec<StateInspection>> {
+fn inspect_points(log: &EventLog, points: &[StatePoint]) -> Result<Vec<StateInspection>> {
     let selectors = points
         .iter()
         .map(|point| return state_selector(log, point))

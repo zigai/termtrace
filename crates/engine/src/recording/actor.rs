@@ -80,8 +80,4 @@ impl<'runtime> SessionActor<'runtime> {
             resource_limits,
         };
     }
-
-    pub(super) fn into_process_and_log(self) -> (SpawnedCommand, EventLogWriter) {
-        return (self.spawned, self.event_log);
-    }
 }

@@ -5,10 +5,7 @@ use std::collections::{HashMap, VecDeque};
 use uuid::Uuid;
 
 use termtrace_evidence::request_journal::{MutationJournal, guarded_command_hash};
-use termtrace_model::{
-    execution::request_journal::MutationJournalRecord,
-    protocol::control::{ControlCommand, ControlResponse},
-};
+use termtrace_model::protocol::control::{ControlCommand, ControlResponse};
 
 use super::super::{input::input_sequence_operation_id, support::control_error_response};
 use crate::Result;
@@ -98,11 +95,6 @@ impl MutationHistory {
             event_hash,
             response,
         )?;
-        self.cache_record(record);
-        return Ok(());
-    }
-
-    fn cache_record(&mut self, record: MutationJournalRecord) {
         self.cache(
             record.request_id,
             CachedMutation {
@@ -110,6 +102,7 @@ impl MutationHistory {
                 response: record.response,
             },
         );
+        return Ok(());
     }
 
     fn cache(&mut self, request_id: Uuid, value: CachedMutation) {

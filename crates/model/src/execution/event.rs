@@ -461,15 +461,35 @@ impl EventProjection {
 }
 
 fn event_metadata(event: &Event) -> serde_json::Value {
-    let Ok(mut value) = serde_json::to_value(event) else {
-        return serde_json::Value::Null;
-    };
-    if let Some(object) = value.as_object_mut() {
-        object.remove("data");
-        object.remove("query");
-        object.remove("response");
+    match event {
+        Event::Output { .. } => serde_json::json!({
+            "type": "output",
+        }),
+        Event::InputIntent {
+            operation_id,
+            source,
+            input_kind,
+            descriptor,
+            terminal_modes_hash,
+            semantic_input,
+            caller_intent,
+            ..
+        } => serde_json::json!({
+            "type": "input_intent",
+            "operation_id": operation_id,
+            "source": source,
+            "input_kind": input_kind,
+            "descriptor": descriptor,
+            "terminal_modes_hash": terminal_modes_hash,
+            "semantic_input": semantic_input,
+            "caller_intent": caller_intent,
+        }),
+        Event::QueryResponse { responder, .. } => serde_json::json!({
+            "type": "query_response",
+            "responder": responder,
+        }),
+        other => serde_json::to_value(other).unwrap_or(serde_json::Value::Null),
     }
-    return value;
 }
 
 /// Stable snake-case event variant name.

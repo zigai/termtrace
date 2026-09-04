@@ -14,7 +14,7 @@ use termtrace_evidence::event_log::EventLog;
 use termtrace_model::{
     protocol::control::{ControlCommand, ControlData},
     registry::RegistryLifecycle,
-    terminal::replay::StateSelection,
+    terminal::observation::StatePoint,
     value::ByteString,
 };
 use termtrace_sdk::{control_endpoint_is_reachable, request};
@@ -66,8 +66,34 @@ pub(super) fn resolve_session(target: PathBuf) -> Result<ResolvedSessionRef> {
     });
 }
 
-pub(super) fn resolve_session_ref(target: PathBuf) -> Result<PathBuf> {
-    return Ok(resolve_session(target)?.path);
+pub(super) fn resolve_session_path(target: PathBuf) -> Result<PathBuf> {
+    let bytes = target.as_os_str().as_bytes();
+    if let Some(path) = bytes.strip_prefix(b"path:") {
+        if path.is_empty() {
+            return Err(miette::miette!("path: session reference is empty"));
+        }
+        return Ok(PathBuf::from(OsString::from_vec(path.to_vec())));
+    }
+    if let Some(name) = bytes.strip_prefix(b"name:") {
+        let name = str::from_utf8(name)
+            .map_err(|_| miette::miette!("name: session reference must be valid UTF-8"))?;
+        let entry = SessionRegistry::open_default()
+            .into_diagnostic()?
+            .resolve(name)
+            .into_diagnostic()?;
+        return Ok(entry.session_path());
+    }
+    if bytes.contains(&b'/') || bytes.starts_with(b".") {
+        return Ok(target);
+    }
+    let name = target
+        .to_str()
+        .ok_or_else(|| miette::miette!("non-UTF-8 session paths require the path: prefix"))?;
+    let entry = SessionRegistry::open_default()
+        .into_diagnostic()?
+        .resolve(name)
+        .into_diagnostic()?;
+    return Ok(entry.session_path());
 }
 
 pub(super) fn write_session_lifecycle(
@@ -170,9 +196,28 @@ pub(super) fn resolve_cli_range(
     }));
 }
 
-pub(super) fn selection(presented_only: bool) -> StateSelection {
-    if presented_only {
-        return StateSelection::Presented;
+pub(super) fn resolve_state_point(
+    state: Option<u64>,
+    state_hash: Option<String>,
+    event_seq: Option<u64>,
+    at: Option<u64>,
+    at_marker: Option<String>,
+    default: Option<StatePoint>,
+    context: &str,
+) -> Result<StatePoint> {
+    match (state, state_hash, event_seq, at, at_marker) {
+        (Some(state_id), None, None, None, None) => Ok(StatePoint::StateId { state_id }),
+        (None, Some(state_hash), None, None, None) => Ok(StatePoint::StateHash { state_hash }),
+        (None, None, Some(event_seq), None, None) => Ok(StatePoint::EventSeq { event_seq }),
+        (None, None, None, Some(monotonic_ns), None) => {
+            Ok(StatePoint::MonotonicNs { monotonic_ns })
+        }
+        (None, None, None, None, Some(label)) => Ok(StatePoint::Marker { label }),
+        (None, None, None, None, None) => {
+            default.ok_or_else(|| miette::miette!("exactly one {context} selector is required"))
+        }
+        _ => Err(miette::miette!(
+            "exactly one {context} selector may be supplied"
+        )),
     }
-    return StateSelection::All;
 }

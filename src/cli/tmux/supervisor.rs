@@ -78,8 +78,8 @@ pub(in crate::cli) fn run_tmux_status(
     response: &mut ResponseWriter,
     arguments: TmuxStatusArgs,
 ) -> Result<ExitCode> {
-    if arguments.recording.is_some() {
-        return run_tmux_recording_status(response, arguments);
+    if let Some(recording) = arguments.recording.as_deref() {
+        return run_tmux_recording_status(response, arguments.output_root.as_deref(), recording);
     }
     let client = TmuxClient::from_connection(arguments.connection);
     let report = tmux_status_report(&client)?;

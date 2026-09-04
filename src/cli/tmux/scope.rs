@@ -122,15 +122,10 @@ pub(super) fn initial_scope_policy(
     windows: &[OsString],
     panes: &[OsString],
 ) -> Result<TmuxScopePolicy> {
-    let has_targets = !sessions.is_empty() || !windows.is_empty() || !panes.is_empty();
-    if explicit_only && has_targets {
-        return Err(miette::miette!(
-            "--explicit-only cannot be combined with scope selectors"
-        ));
-    }
     if explicit_only {
         return Ok(TmuxScopePolicy::explicit());
     }
+    let has_targets = !sessions.is_empty() || !windows.is_empty() || !panes.is_empty();
     if !has_targets {
         return Ok(TmuxScopePolicy::all());
     }
@@ -175,19 +170,13 @@ pub(super) fn requested_scope_policy(
     windows: &[OsString],
     panes: &[OsString],
 ) -> Result<Option<TmuxScopePolicy>> {
-    let has_targets = !sessions.is_empty() || !windows.is_empty() || !panes.is_empty();
-    let choices = usize::from(all) + usize::from(explicit_only) + usize::from(has_targets);
-    if choices > 1 {
-        return Err(miette::miette!(
-            "--all, --explicit-only, and target selectors are mutually exclusive"
-        ));
-    }
     if all {
         return Ok(Some(TmuxScopePolicy::all()));
     }
     if explicit_only {
         return Ok(Some(TmuxScopePolicy::explicit()));
     }
+    let has_targets = !sessions.is_empty() || !windows.is_empty() || !panes.is_empty();
     if !has_targets {
         return Ok(None);
     }

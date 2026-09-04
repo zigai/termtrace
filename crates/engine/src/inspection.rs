@@ -6,6 +6,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::replay::inspect;
+use crate::{Error, Result};
 use termtrace_evidence::{
     event_log::{EventLog, EventLogCursor},
     session::validate_completed_log,
@@ -15,12 +17,7 @@ use termtrace_model::{
     execution::event::Event,
     execution::session::SessionCompletion,
     terminal::replay::{StateInspection, StateSelector},
-    terminal::state::SemanticState,
 };
-
-use crate::observation::state_text;
-use crate::replay::inspect;
-use crate::{Error, Result};
 
 /// Reconstruct one complete semantic state directly from canonical evidence.
 pub fn inspect_session(
@@ -33,11 +30,6 @@ pub fn inspect_session(
         validate_completed_log(session, &log)?;
     }
     return inspect(&log, selector);
-}
-
-/// Render a semantic state as compact agent-readable viewport text.
-pub fn inspect_state_text(state: &SemanticState) -> String {
-    return state_text(state);
 }
 
 /// Wait until exact bytes appear in the bounded canonical output stream.
@@ -116,25 +108,22 @@ struct OutputMatcher<'needle> {
 }
 
 impl<'needle> OutputMatcher<'needle> {
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "needle is non-empty and matched < needle.len()"
+    )]
     fn new(needle: &'needle [u8]) -> Self {
         let mut prefix_lengths: Vec<usize> = vec![0; needle.len()];
         let mut matched = 0;
         for index in 1..needle.len() {
-            let Some(byte) = needle.get(index).copied() else {
-                break;
-            };
-            while matched > 0 && needle.get(matched).copied() != Some(byte) {
-                matched = prefix_lengths
-                    .get(matched.saturating_sub(1))
-                    .copied()
-                    .unwrap_or(0);
+            let byte = needle[index];
+            while matched > 0 && needle[matched] != byte {
+                matched = prefix_lengths[matched - 1];
             }
-            if needle.get(matched).copied() == Some(byte) {
-                matched = matched.saturating_add(1);
+            if needle[matched] == byte {
+                matched += 1;
             }
-            if let Some(length) = prefix_lengths.get_mut(index) {
-                *length = matched;
-            }
+            prefix_lengths[index] = matched;
         }
         return Self {
             needle,
@@ -144,17 +133,17 @@ impl<'needle> OutputMatcher<'needle> {
         };
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "self.matched < self.needle.len() and output_offset is bounded by event data"
+    )]
     fn push(&mut self, bytes: &[u8]) -> Option<u64> {
-        for byte in bytes {
-            while self.matched > 0 && self.needle.get(self.matched) != Some(byte) {
-                self.matched = self
-                    .prefix_lengths
-                    .get(self.matched.saturating_sub(1))
-                    .copied()
-                    .unwrap_or(0);
+        for &byte in bytes {
+            while self.matched > 0 && self.needle[self.matched] != byte {
+                self.matched = self.prefix_lengths[self.matched - 1];
             }
-            if self.needle.get(self.matched) == Some(byte) {
-                self.matched = self.matched.saturating_add(1);
+            if self.needle[self.matched] == byte {
+                self.matched += 1;
             }
             self.output_offset = self.output_offset.saturating_add(1);
             if self.matched == self.needle.len() {

@@ -1,7 +1,7 @@
 use std::{
     fs::OpenOptions,
     io::{BufReader, ErrorKind, Read as _},
-    os::unix::fs::{FileTypeExt as _, OpenOptionsExt as _, PermissionsExt as _},
+    os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -71,13 +71,7 @@ pub(super) fn load_checkpoint(
             };
         })?;
         let file_type = metadata.file_type();
-        if file_type.is_dir()
-            || file_type.is_block_device()
-            || file_type.is_char_device()
-            || file_type.is_fifo()
-            || file_type.is_socket()
-            || metadata.permissions().mode() & 0o077 != 0
-        {
+        if !file_type.is_file() || metadata.permissions().mode() & 0o077 != 0 {
             return Err(observation_error(
                 "replay checkpoint must be a regular owner-only file",
             ));
@@ -421,13 +415,7 @@ fn replay_cache_entries(directory: &Path) -> Result<Vec<ReplayCacheEntry>> {
             };
         })?;
         let file_type = metadata.file_type();
-        if file_type.is_dir()
-            || file_type.is_symlink()
-            || file_type.is_block_device()
-            || file_type.is_char_device()
-            || file_type.is_fifo()
-            || file_type.is_socket()
-        {
+        if !file_type.is_file() {
             return Err(observation_error(
                 "replay checkpoint cache contains a non-regular member",
             ));
@@ -506,37 +494,18 @@ fn hash_file(path: &Path) -> Result<(u64, String)> {
         };
     })?;
     let file_type = metadata.file_type();
-    if file_type.is_dir()
-        || file_type.is_symlink()
-        || file_type.is_block_device()
-        || file_type.is_char_device()
-        || file_type.is_fifo()
-        || file_type.is_socket()
-        || metadata.len() > MAX_CANONICAL_EVENT_LOG_BYTES
-    {
+    if !file_type.is_file() || metadata.len() > MAX_CANONICAL_EVENT_LOG_BYTES {
         return Err(observation_error(
             "canonical event log must be a bounded regular file",
         ));
     }
     let mut reader = BufReader::new(file);
     let mut hasher = blake3::Hasher::new();
-    let mut byte_count = 0_u64;
-    let mut buffer = vec![0_u8; 128 * 1024].into_boxed_slice();
-    loop {
-        let read = reader.read(&mut buffer).map_err(|source| {
-            return Error::Filesystem {
-                path: path.to_path_buf(),
-                source,
-            };
+    hasher
+        .update_reader(&mut reader)
+        .map_err(|source| Error::Filesystem {
+            path: path.to_path_buf(),
+            source,
         })?;
-        if read == 0 {
-            break;
-        }
-        let bytes = buffer.get(..read).ok_or_else(|| {
-            return observation_error("checkpoint hash buffer bounds are invalid");
-        })?;
-        hasher.update(bytes);
-        byte_count = byte_count.saturating_add(u64::try_from(read).unwrap_or(u64::MAX));
-    }
-    return Ok((byte_count, hasher.finalize().to_hex().to_string()));
+    return Ok((metadata.len(), hasher.finalize().to_hex().to_string()));
 }

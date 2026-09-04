@@ -30,6 +30,13 @@ impl EffectiveEnvironment {
     pub fn resolve(spec: &EnvironmentSpec, term: &str) -> Result<Self> {
         spec.validate()
             .map_err(|error| return environment_error(error.to_string()))?;
+        return Self::resolve_validated(spec, term);
+    }
+
+    pub(in crate::recording) fn resolve_validated(
+        spec: &EnvironmentSpec,
+        term: &str,
+    ) -> Result<Self> {
         let ambient: BTreeMap<OsString, OsString> = env::vars_os().collect();
         return Self::resolve_from_snapshot(spec, term, &ambient);
     }
@@ -232,25 +239,44 @@ mod tests {
 
     #[test]
     fn parallel_resolution_is_isolated_and_deterministic() {
-        let spec = Arc::new(EnvironmentSpec {
+        let spec_a = Arc::new(EnvironmentSpec {
             base: EnvironmentBase::Clear,
-            set: BTreeMap::from([("FIXED".to_owned(), ByteString::from(b"value".as_slice()))]),
+            set: BTreeMap::from([("VAR_A".to_owned(), ByteString::from(b"val_a".as_slice()))]),
             ..EnvironmentSpec::default()
         });
-        let workers: [_; 32] = array::from_fn(|_| {
-            let spec = Arc::clone(&spec);
+        let spec_b = Arc::new(EnvironmentSpec {
+            base: EnvironmentBase::Clear,
+            set: BTreeMap::from([("VAR_B".to_owned(), ByteString::from(b"val_b".as_slice()))]),
+            ..EnvironmentSpec::default()
+        });
+        let expected_a = EffectiveEnvironment::resolve(&spec_a, "xterm-test")
+            .expect("resolve a")
+            .policy()
+            .effective_digest
+            .clone();
+        let expected_b = EffectiveEnvironment::resolve(&spec_b, "xterm-test")
+            .expect("resolve b")
+            .policy()
+            .effective_digest
+            .clone();
+        assert_ne!(expected_a, expected_b);
+
+        let workers: [_; 16] = array::from_fn(|i| {
+            let (spec, expected, present, absent) = if i % 2 == 0 {
+                (Arc::clone(&spec_a), expected_a.clone(), "VAR_A", "VAR_B")
+            } else {
+                (Arc::clone(&spec_b), expected_b.clone(), "VAR_B", "VAR_A")
+            };
             return thread::spawn(move || {
-                return EffectiveEnvironment::resolve(&spec, "xterm-test")
-                    .expect("parallel resolution")
-                    .policy()
-                    .effective_digest
-                    .clone();
+                let resolved = EffectiveEnvironment::resolve(&spec, "xterm-test")
+                    .expect("parallel resolution");
+                assert_eq!(resolved.policy().effective_digest, expected);
+                assert!(resolved.variables().contains_key(OsStr::new(present)));
+                assert!(!resolved.variables().contains_key(OsStr::new(absent)));
             });
         });
-        let digests = workers
-            .into_iter()
-            .map(|worker| return worker.join().expect("resolution worker"))
-            .collect::<BTreeSet<_>>();
-        assert_eq!(digests.len(), 1);
+        for worker in workers {
+            worker.join().expect("resolution worker");
+        }
     }
 }

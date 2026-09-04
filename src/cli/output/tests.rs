@@ -1,10 +1,10 @@
 use super::{
-    ACTION_RESPONSE_BYTES, MAX_AGENT_RESPONSE_BYTES, MAX_CAPTURE_BYTES, ResponseField,
-    ResponseMode, ResponseState, START_RESPONSE_BYTES, STOP_RESPONSE_BYTES,
+    ACTION_RESPONSE_BYTES, MAX_AGENT_RESPONSE_BYTES, MAX_CAPTURE_BYTES, ResolvedResponseMode,
+    ResponseField, ResponseState, START_RESPONSE_BYTES, STOP_RESPONSE_BYTES,
     WAIT_STATUS_RESPONSE_BYTES, bounded_agent_response, bounded_capture_projection,
     capture_raw_into, compact_success, compact_task_value, compact_value_with_paths,
     enforce_success_budget, human_screen_summary, human_summary, pagination_projection,
-    progress_enabled, response_size_without_screen, retry_for_applied,
+    response_size_without_screen, retry_for_applied,
 };
 
 #[test]
@@ -223,7 +223,7 @@ fn response_state(
 ) -> ResponseState {
     let captured_bytes = serde_json::to_vec(&value).expect("response fixture").len();
     return ResponseState {
-        mode: ResponseMode::Agent,
+        mode: ResolvedResponseMode::Agent,
         fields,
         command_type: command_type.to_owned(),
         mutating,
@@ -552,6 +552,4 @@ fn human_task_summaries_preserve_status_findings_mutation_and_paths() {
         video,
         "Video written to /tmp/demo.mp4 (1280×720, 30 FPS, semantic)\n"
     );
-    assert!(progress_enabled(ResponseMode::Human));
-    assert!(!progress_enabled(ResponseMode::Quiet));
 }

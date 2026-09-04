@@ -170,8 +170,7 @@ pub(super) fn resolve_record_geometry(
             let profile = ghostty_profile.ok_or_else(|| {
                 return miette::miette!("fitted geometry requires a resolved Ghostty profile");
             })?;
-            let fitted = probe_ghostty_geometry(target, profile).into_diagnostic()?;
-            let report = fitted.report;
+            let report = probe_ghostty_geometry(target, profile).into_diagnostic()?;
             let geometry = SessionGeometry {
                 cols: report.cols,
                 rows: report.rows,

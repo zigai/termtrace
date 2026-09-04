@@ -1,10 +1,8 @@
 use super::*;
 
-impl SessionRegistry {
-    /// Return the live recorder PID/start pair observed through socket credentials.
-    pub fn recorder_identity(&self, session: &Path) -> Option<(u32, u64)> {
-        return recorder_process_identity(session);
-    }
+/// Return the live recorder PID/start pair observed through socket credentials.
+pub fn recorder_identity(session: &Path) -> Option<(u32, u64)> {
+    return recorder_process_identity(session);
 }
 
 pub(super) fn recorder_process_identity(session: &Path) -> Option<(u32, u64)> {

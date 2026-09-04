@@ -17,29 +17,23 @@ use termtrace_terminal::Format as GhosttyFormat;
 use crate::cli::{
     analysis::args::{ShowArgs, ShowFormat},
     output::{ResponseWriter, stable_enum_label, write_json_line, write_stdout},
-    session_helpers::resolve_session_ref,
+    session_helpers::{resolve_session_path, resolve_state_point},
 };
 
 pub(in crate::cli) fn run_show(
     response: &mut ResponseWriter,
     arguments: ShowArgs,
 ) -> Result<ExitCode> {
-    let point = match (
+    let point = resolve_state_point(
         arguments.state,
         arguments.state_hash,
         arguments.event_seq,
         arguments.at,
         arguments.at_marker,
-    ) {
-        (Some(state_id), None, None, None, None) => StatePoint::StateId { state_id },
-        (None, Some(state_hash), None, None, None) => StatePoint::StateHash { state_hash },
-        (None, None, Some(event_seq), None, None) => StatePoint::EventSeq { event_seq },
-        (None, None, None, Some(monotonic_ns), None) => StatePoint::MonotonicNs { monotonic_ns },
-        (None, None, None, None, Some(label)) => StatePoint::Marker { label },
-        (None, None, None, None, None) => StatePoint::LatestPresented,
-        _ => return Err(miette::miette!("exactly one show selector may be supplied")),
-    };
-    let session = resolve_session_ref(arguments.session)?;
+        Some(StatePoint::LatestPresented),
+        "show",
+    )?;
+    let session = resolve_session_path(arguments.session)?;
 
     if arguments.recover_prefix {
         if !arguments.stable_for.is_zero()

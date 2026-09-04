@@ -75,17 +75,17 @@ fn reservation_excludes_concurrent_owners_and_promotes_only_the_winner() {
         .into_iter()
         .find_map(Result::ok)
         .expect("winning reservation");
-    let encoded: serde_json::Value = serde_json::from_slice(
+    let reservation_record: AliasReservation = serde_json::from_slice(
         &fs_err::read(registry.entry_path("demo")).expect("reservation record"),
     )
     .expect("reservation JSON");
-    assert_eq!(encoded["owner_token"], reservation.owner_token.to_string());
+    assert_eq!(reservation_record.owner_token, reservation.owner_token);
     assert_eq!(
-        encoded["pending_session"],
-        serde_json::to_value(&reservation.pending_session).expect("pending path JSON")
+        reservation_record.pending_session,
+        reservation.pending_session
     );
-    assert!(encoded["created_unix_ns"].is_number());
-    assert!(encoded["lease_expires_unix_ns"].is_number());
+    assert!(reservation_record.created_unix_ns > 0);
+    assert!(reservation_record.lease_expires_unix_ns > 0);
     let mut wrong_owner = reservation.clone();
     wrong_owner.owner_token = Uuid::now_v7();
     assert!(registry.release(&wrong_owner).is_err());

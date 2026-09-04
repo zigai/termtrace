@@ -48,7 +48,7 @@ pub(in crate::cli) fn run_restart(
     let deadline = Instant::now() + timeout;
     loop {
         if paths.session.join("session.json").is_file()
-            && registry.recorder_identity(&paths.session).is_some()
+            && termtrace_engine::registry::recorder_identity(&paths.session).is_some()
         {
             let successor_manifest = read_manifest(&paths.session).into_diagnostic()?;
             if successor_manifest.lineage.as_ref() != Some(&expected_lineage) {
@@ -276,26 +276,6 @@ pub(super) fn restart_environment(
         ));
     }
     return Ok(environment);
-}
-
-pub(super) fn empty_restart_overrides() -> RestartOverrides {
-    return RestartOverrides {
-        cwd: None,
-        cols: None,
-        rows: None,
-        cell_width: None,
-        cell_height: None,
-        term: None,
-        durability: None,
-        durability_max_interval_ms: None,
-        durability_max_uncommitted_bytes: None,
-        provenance: None,
-        provenance_environment: Vec::new(),
-        output_byte_budget: None,
-        clear_output_byte_budget: false,
-        allow_environment_change: false,
-        command: None,
-    };
 }
 
 pub(super) fn restart_overrides_from_args(arguments: &RestartArgs) -> Result<RestartOverrides> {

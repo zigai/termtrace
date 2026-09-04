@@ -32,7 +32,6 @@ const OPTION_ORIGINAL_COMMAND: &str = "@termtrace-original-default-command";
 const OPTION_ORIGINAL_SHELL: &str = "@termtrace-original-default-shell";
 const OPTION_PROFILE_MODE: &str = "@termtrace-ghostty-profile";
 const OPTION_GHOSTTY_CONFIG: &str = "@termtrace-ghostty-config";
-const OPTION_ALLOW_UNRECORDED: &str = "@termtrace-allow-unrecorded";
 const OPTION_CELL_WIDTH: &str = "@termtrace-cell-width";
 const OPTION_COVERAGE: &str = "@termtrace-coverage";
 const OPTION_AGGREGATE_MANIFEST: &str = "@termtrace-aggregate-manifest";
@@ -63,7 +62,6 @@ const RESERVED_OPTIONS: &[&str] = &[
     OPTION_ORIGINAL_SHELL,
     OPTION_PROFILE_MODE,
     OPTION_GHOSTTY_CONFIG,
-    OPTION_ALLOW_UNRECORDED,
     OPTION_COVERAGE,
     OPTION_AGGREGATE_MANIFEST,
     OPTION_CELL_WIDTH,

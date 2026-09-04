@@ -215,14 +215,29 @@ pub(in crate::cli) fn run_status(
     if resolved.lifecycle != RegistryLifecycle::Live {
         return write_session_lifecycle(response, &resolved, "status", ExitCode::SUCCESS);
     }
-    let mut status =
-        compact_control_data(&request(resolved.path, ControlCommand::Status).into_diagnostic()?)?;
-    let status = status
-        .as_object_mut()
-        .ok_or_else(|| miette::miette!("live status response is not an object"))?;
-    status.insert("session".to_owned(), serde_json::json!(session_label));
-    status.insert("lifecycle".to_owned(), serde_json::json!("live"));
-    return write_json_line(response, status);
+    let data = request(resolved.path, ControlCommand::Status).into_diagnostic()?;
+    if let ControlData::Status { pid, boundaries } = data {
+        let status = LiveStatusResponse {
+            kind: "status",
+            session: &session_label,
+            lifecycle: "live",
+            pid,
+            boundary: compact_boundaries(&boundaries),
+        };
+        return write_json_line(response, &status);
+    }
+    return Err(miette::miette!(
+        "unexpected status response from recording actor"
+    ));
+}
+
+#[derive(serde::Serialize)]
+struct LiveStatusResponse<'a> {
+    kind: &'static str,
+    session: &'a str,
+    lifecycle: &'static str,
+    pid: Option<u32>,
+    boundary: serde_json::Value,
 }
 
 pub(in crate::cli) fn run_stop(

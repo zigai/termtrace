@@ -37,14 +37,6 @@ pub fn require(report: &CapabilityReport, id: &str) -> Result<()> {
     });
 }
 
-/// Require each runtime capability in caller-selected order.
-pub fn require_all(report: &CapabilityReport, ids: &[&str]) -> Result<()> {
-    for id in ids {
-        require(report, id)?;
-    }
-    return Ok(());
-}
-
 /// Probe engine-owned capabilities and merge bounded probes supplied by other owners.
 ///
 /// The caller supplies media, rendering, export, and receipt-signing probes. Duplicate,

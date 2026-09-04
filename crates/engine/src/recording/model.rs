@@ -96,7 +96,6 @@ pub(super) enum RuntimeMessage {
     OutputClosed,
     ReadFailed(String),
     Input(Vec<u8>),
-    InputClosed,
     InputFailed(String),
     Resize(TerminalGeometry),
     ResizeFailed(String),

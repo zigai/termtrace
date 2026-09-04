@@ -129,16 +129,63 @@ pub(super) fn action_postcondition(arguments: &ActArgs) -> ActionPostcondition {
     return ActionPostcondition::None;
 }
 
+#[derive(serde::Serialize)]
+pub(super) struct ActionObservation<'a> {
+    pub(super) state: &'a str,
+    #[serde(flatten)]
+    pub(super) frame: &'a ScreenFrame,
+}
+
+#[cfg(test)]
 pub(super) fn action_observation(frame: &ScreenFrame) -> Result<serde_json::Value> {
-    let mut observation = serde_json::to_value(frame).into_diagnostic()?;
-    observation
-        .as_object_mut()
-        .ok_or_else(|| miette::miette!("action frame response is not an object"))?
-        .insert(
-            "state".to_owned(),
-            serde_json::Value::String(frame.state_hash.clone()),
-        );
-    return Ok(observation);
+    return serde_json::to_value(ActionObservation {
+        state: &frame.state_hash,
+        frame,
+    })
+    .into_diagnostic();
+}
+
+#[derive(serde::Serialize)]
+pub(super) struct ActionInputSummary<'a> {
+    pub(super) applied: &'static str,
+    pub(super) atoms: u32,
+    pub(super) bytes: u64,
+    pub(super) pace_ns: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) outcomes: Option<&'a [InputSequenceAtomOutcome]>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(super) enum ActionPostconditionSummary<'a> {
+    None {
+        matched: bool,
+        outcome: &'static str,
+    },
+    Idle {
+        matched: bool,
+        outcome: &'a StableCaptureQuality,
+    },
+    Screen {
+        matched: bool,
+        outcome: &'a ScreenPostconditionQuality,
+    },
+}
+
+#[derive(serde::Serialize)]
+pub(super) struct ActionAppliedOutput<'a> {
+    pub(super) v: u32,
+    pub(super) ok: bool,
+    #[serde(rename = "type")]
+    pub(super) response_type: &'static str,
+    pub(super) request_id: uuid::Uuid,
+    pub(super) input: ActionInputSummary<'a>,
+    pub(super) postcondition: ActionPostconditionSummary<'a>,
+    pub(super) observation: ActionObservation<'a>,
+    pub(super) ended: bool,
+    pub(super) boundaries: &'a ActorBoundaries,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) code: Option<&'static str>,
 }
 
 pub(super) fn action_applied_response(
@@ -160,89 +207,132 @@ pub(super) fn action_applied_response(
             "recording actor returned an action input identifier that does not match the request"
         ));
     }
-    let mut input_summary = serde_json::json!({
-        "applied": "all",
-        "atoms": input.atom_count,
-        "bytes": input.bytes_written,
-        "pace_ns": input.pace_ns,
-    });
-    if !input.atoms.is_empty() {
-        input_summary
-            .as_object_mut()
-            .ok_or_else(|| miette::miette!("action input response is not an object"))?
-            .insert(
-                "outcomes".to_owned(),
-                serde_json::to_value(&input.atoms).into_diagnostic()?,
-            );
-    }
-    let (postcondition, observation, ended, matched) = match postcondition {
+    let input_summary = ActionInputSummary {
+        applied: "all",
+        atoms: input.atom_count,
+        bytes: input.bytes_written,
+        pace_ns: input.pace_ns,
+        outcomes: if !input.atoms.is_empty() {
+            Some(&input.atoms)
+        } else {
+            None
+        },
+    };
+    let (postcondition_summary, ended, matched, frame) = match postcondition {
         ActionPostconditionResult::None { matched, frame } => (
-            serde_json::json!({
-                "kind": "none",
-                "matched": matched,
-                "outcome": "matched",
-            }),
-            action_observation(frame)?,
+            ActionPostconditionSummary::None {
+                matched: *matched,
+                outcome: "matched",
+            },
             false,
             *matched,
+            frame,
         ),
         ActionPostconditionResult::Idle {
             matched,
             quality,
             frame,
         } => (
-            serde_json::json!({
-                "kind": "idle",
-                "matched": matched,
-                "outcome": quality,
-            }),
-            action_observation(frame)?,
+            ActionPostconditionSummary::Idle {
+                matched: *matched,
+                outcome: quality,
+            },
             matches!(
                 quality,
                 StableCaptureQuality::ChildCompleted | StableCaptureQuality::OutputClosed
             ),
             *matched,
+            frame,
         ),
         ActionPostconditionResult::Screen {
             matched,
             quality,
             frame,
         } => (
-            serde_json::json!({
-                "kind": "screen",
-                "matched": matched,
-                "outcome": quality,
-            }),
-            action_observation(frame)?,
+            ActionPostconditionSummary::Screen {
+                matched: *matched,
+                outcome: quality,
+            },
             matches!(
                 quality,
                 ScreenPostconditionQuality::ChildCompleted
                     | ScreenPostconditionQuality::OutputClosed
             ),
             *matched,
+            frame,
         ),
     };
-    let mut output = serde_json::json!({
-        "v": 1,
-        "ok": matched,
-        "type": "action",
-        "request_id": request_id,
-        "input": input_summary,
-        "postcondition": postcondition,
-        "observation": observation,
-        "ended": ended,
-        "boundaries": boundaries,
-    });
-    if !matched {
-        output
-            .as_object_mut()
-            .ok_or_else(|| miette::miette!("action response is not an object"))?
-            .insert(
-                "code".to_owned(),
-                serde_json::Value::String("postcondition_failed".to_owned()),
-            );
-    }
-    return Ok((output, matched));
+    let output = ActionAppliedOutput {
+        v: 1,
+        ok: matched,
+        response_type: "action",
+        request_id,
+        input: input_summary,
+        postcondition: postcondition_summary,
+        observation: ActionObservation {
+            state: &frame.state_hash,
+            frame,
+        },
+        ended,
+        boundaries,
+        code: if !matched {
+            Some("postcondition_failed")
+        } else {
+            None
+        },
+    };
+    return Ok((serde_json::to_value(&output).into_diagnostic()?, matched));
+}
+
+#[derive(serde::Serialize)]
+pub(super) struct ActionFailedPrefix {
+    pub(super) atoms: u32,
+    pub(super) bytes: u64,
+    pub(super) failed_atom: u32,
+    pub(super) failed_operation_id: uuid::Uuid,
+    pub(super) failed_atom_bytes: u64,
+    pub(super) first_intent_event_seq: u64,
+    pub(super) last_result_event_seq: u64,
+    pub(super) resume_from_atom: u32,
+}
+
+#[derive(serde::Serialize)]
+pub(super) struct ActionFailedInputSummary {
+    pub(super) applied: &'static str,
+    pub(super) atoms: u32,
+    pub(super) bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) prefix: Option<ActionFailedPrefix>,
+    pub(super) retry: &'static str,
+}
+
+#[derive(serde::Serialize)]
+pub(super) struct ActionErrorPostcondition {
+    pub(super) kind: &'static str,
+    pub(super) matched: bool,
+    pub(super) outcome: &'static str,
+}
+
+#[derive(serde::Serialize)]
+pub(super) struct ActionErrorObservation<'a> {
+    pub(super) state: &'a str,
+    pub(super) scope: &'a str,
+}
+
+#[derive(serde::Serialize)]
+pub(super) struct ActionErrorOutput<'a> {
+    pub(super) v: u32,
+    pub(super) ok: bool,
+    #[serde(rename = "type")]
+    pub(super) response_type: &'static str,
+    pub(super) code: String,
+    pub(super) message: String,
+    pub(super) request_id: uuid::Uuid,
+    pub(super) input: ActionFailedInputSummary,
+    pub(super) postcondition: ActionErrorPostcondition,
+    pub(super) observation: Option<ActionErrorObservation<'a>>,
+    pub(super) ended: bool,
+    pub(super) boundaries: Option<&'a ActorBoundaries>,
 }
 
 pub(super) fn action_error_response(
@@ -259,75 +349,54 @@ pub(super) fn action_error_response(
         {
             (
                 "partial",
-                serde_json::json!(sequence.atoms_applied),
-                serde_json::json!(sequence.bytes_written),
-                serde_json::json!({
-                    "atoms": sequence.atoms_applied,
-                    "bytes": sequence.bytes_written,
-                    "failed_atom": sequence.failed_atom_index,
-                    "failed_operation_id": sequence.failed_operation_id,
-                    "failed_atom_bytes": sequence.failed_atom_bytes_written,
-                    "first_intent_event_seq": sequence.first_intent_event_seq,
-                    "last_result_event_seq": sequence.last_result_event_seq,
-                    "resume_from_atom": sequence.resume_from_atom_index,
+                sequence.atoms_applied,
+                sequence.bytes_written,
+                Some(ActionFailedPrefix {
+                    atoms: sequence.atoms_applied,
+                    bytes: sequence.bytes_written,
+                    failed_atom: sequence.failed_atom_index,
+                    failed_operation_id: sequence.failed_operation_id,
+                    failed_atom_bytes: sequence.failed_atom_bytes_written,
+                    first_intent_event_seq: sequence.first_intent_event_seq,
+                    last_result_event_seq: sequence.last_result_event_seq,
+                    resume_from_atom: sequence.resume_from_atom_index,
                 }),
             )
         }
-        Some(_) => (
-            "none",
-            serde_json::json!(0),
-            serde_json::json!(0),
-            serde_json::Value::Null,
-        ),
-        None => (
-            "none",
-            serde_json::json!(0),
-            serde_json::json!(0),
-            serde_json::Value::Null,
-        ),
+        _ => ("none", 0, 0, None),
     };
-    let input = if prefix.is_null() {
-        serde_json::json!({
-            "applied": applied,
-            "atoms": atoms,
-            "bytes": bytes,
-            "retry": input_retry(applied),
-        })
-    } else {
-        serde_json::json!({
-            "applied": applied,
-            "atoms": atoms,
-            "bytes": bytes,
-            "prefix": prefix,
-            "retry": input_retry(applied),
-        })
+    let input = ActionFailedInputSummary {
+        applied,
+        atoms,
+        bytes,
+        prefix,
+        retry: input_retry(applied),
     };
-    let observation = details.map_or(serde_json::Value::Null, |details| {
-        return serde_json::json!({
-            "state": details.current_presented_state_hash,
-            "scope": details.scope,
-        });
+    let observation = details.map(|details| {
+        return ActionErrorObservation {
+            state: &details.current_presented_state_hash,
+            scope: &details.scope,
+        };
     });
-    let boundaries = details.map_or(serde_json::Value::Null, |details| {
-        return serde_json::json!(details.boundaries);
-    });
-    return serde_json::json!({
-        "v": 1,
-        "ok": false,
-        "type": "action",
-        "code": code,
-        "message": message,
-        "request_id": request_id,
-        "input": input,
-        "postcondition": {
-            "kind": "not_started",
-            "matched": false,
-            "outcome": "not_started",
+    let boundaries = details.map(|details| return &details.boundaries);
+    let output = ActionErrorOutput {
+        v: 1,
+        ok: false,
+        response_type: "action",
+        code,
+        message,
+        request_id,
+        input,
+        postcondition: ActionErrorPostcondition {
+            kind: "not_started",
+            matched: false,
+            outcome: "not_started",
         },
-        "observation": observation,
-        "ended": ended,
-        "boundaries": boundaries,
-    });
+        observation,
+        ended,
+        boundaries,
+    };
+    return serde_json::to_value(&output).expect("action error serialization");
 }
 
 pub(super) fn input_retry(applied: &str) -> &'static str {
@@ -356,7 +425,7 @@ mod action_response_tests {
     };
     use termtrace_terminal::{GhosttyVt, project_screen_frame};
 
-    use super::{action_applied_response, action_error_response};
+    use super::{action_applied_response, action_error_response, action_observation};
 
     #[test]
     fn action_success_retains_input_observation_request_and_boundaries() {
@@ -490,5 +559,43 @@ mod action_response_tests {
         assert_eq!(response["postcondition"]["outcome"], "not_started");
         assert_eq!(response["observation"]["state"], "d".repeat(64));
         assert_eq!(response["boundaries"]["observed"]["next_event_seq"], 8);
+    }
+
+    #[test]
+    fn action_observation_serializes_state_and_flattened_frame() {
+        let request_id =
+            uuid::Uuid::parse_str("018f47d2-7ad0-7000-8000-000000000001").expect("request UUID");
+        let boundaries: ActorBoundaries = serde_json::from_value(serde_json::json!({
+            "durable": {
+                "next_event_seq": 1,
+                "event_hash": "a".repeat(64),
+                "output_bytes": 0
+            },
+            "observed": {
+                "next_event_seq": 2,
+                "event_hash": "b".repeat(64),
+                "output_bytes": 16
+            }
+        }))
+        .expect("actor boundaries");
+        let mut engine = GhosttyVt::new(80, 24, 0).expect("semantic engine");
+        engine.write(b"observation test");
+        let state = engine.snapshot().expect("semantic state");
+        let frame = project_screen_frame(
+            &state,
+            &ScreenProjectionRequest::default(),
+            ScreenFrameSource::Actor {
+                session_id: request_id,
+                boundaries,
+                observed_monotonic_ns: 1,
+            },
+            true,
+            CaptureQuality::Live,
+        )
+        .expect("rich frame");
+        let value = action_observation(&frame).expect("observation JSON");
+        assert_eq!(value["state"], frame.state_hash);
+        assert_eq!(value["state_hash"], frame.state_hash);
+        assert_eq!(value["version"], 1);
     }
 }

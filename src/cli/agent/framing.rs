@@ -6,7 +6,7 @@ use std::{
 
 use termtrace_sdk::{Error, Result};
 
-use super::protocol::{DRIVER_MAX_REQUEST_BYTES, DriverRequest};
+use termtrace_model::protocol::driver::{DRIVER_MAX_REQUEST_BYTES, DriverRequest};
 
 pub(super) enum DriverFrame {
     Request(DriverRequest),
