@@ -1,11 +1,10 @@
 import asyncio
-import json
 import re
 import time
-from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 
+import msgspec
 import pytest
 
 from termtrace.duration import Duration
@@ -29,68 +28,101 @@ from termtrace.testing.assertions import (
     assert_no_matches,
     assert_no_wrapped_rows,
 )
+from termtrace.transport.generated import driver_response as response_wire
 
 FIXTURE_PATH = Path(__file__).parents[3] / "fixtures" / "conformance" / "locators" / "locator.json"
 
 
-def _mapping(value: object) -> Mapping[str, object]:
-    assert isinstance(value, dict)
-    assert all(isinstance(key, str) for key in value)
-    return value
+class ConformanceMatch(msgspec.Struct):
+    text: str
+    ranges: list[list[int]]
 
 
-def _integer(value: object) -> int:
-    assert isinstance(value, int)
-    return value
+class _TextQuery(msgspec.Struct, tag_field="kind", tag="text"):
+    value: str
+    exact: bool = False
+    cross_soft_wraps: bool = False
 
 
-def _string(value: object) -> str:
-    assert isinstance(value, str)
-    return value
+class _RegexQuery(msgspec.Struct, tag_field="kind", tag="regex"):
+    pattern: str
 
 
-def _spec(value: object) -> LocatorSpec:
-    query = _mapping(value)
-    kind = _string(query["kind"])
-    if kind == "text":
-        exact = query.get("exact", False)
-        cross_soft_wraps = query.get("cross_soft_wraps", False)
-        assert isinstance(exact, bool)
-        assert isinstance(cross_soft_wraps, bool)
-        return text(
-            _string(query["value"]),
-            exact=exact,
-            cross_soft_wraps=cross_soft_wraps,
+class _StyleQuery(msgspec.Struct, tag_field="kind", tag="style"):
+    bold: bool | None = None
+    resolved_background: str | None = None
+
+
+class _RowQuery(msgspec.Struct, tag_field="kind", tag="row"):
+    row: int
+
+
+class _RegionQuery(msgspec.Struct, tag_field="kind", tag="region"):
+    top: int
+    left: int
+    width: int
+    height: int
+
+
+class _AllQuery(msgspec.Struct, tag_field="kind", tag="all"):
+    specs: list[object]
+
+
+_FixtureQuery = _TextQuery | _RegexQuery | _StyleQuery | _RowQuery | _RegionQuery | _AllQuery
+
+
+class ConformanceCase(msgspec.Struct):
+    name: str
+    query: _FixtureQuery
+    matches: list[ConformanceMatch] | None = None
+    error: str | None = None
+
+
+class LocatorCorpus(msgspec.Struct):
+    version: int
+    frame: response_wire.ScreenFrame
+    cases: list[ConformanceCase]
+
+
+def _spec(value: _FixtureQuery | LocatorSpec | object) -> LocatorSpec:
+    if isinstance(value, LocatorSpec):
+        return value
+    parsed = (
+        value
+        if isinstance(
+            value, (_TextQuery, _RegexQuery, _StyleQuery, _RowQuery, _RegionQuery, _AllQuery)
         )
-    if kind == "regex":
-        return text(re.compile(_string(query["pattern"])))
-    if kind == "style":
-        bold = query.get("bold")
-        resolved_background = query.get("resolved_background")
-        assert bold is None or isinstance(bold, bool)
-        assert resolved_background is None or isinstance(resolved_background, str)
-        return style(StyleFilter(bold=bold, background=resolved_background))
-    if kind == "row":
-        return row(_integer(query["row"]))
-    if kind == "region":
+        else msgspec.convert(value, type=_FixtureQuery, strict=True)
+    )
+    if isinstance(parsed, _TextQuery):
+        return text(
+            parsed.value,
+            exact=parsed.exact,
+            cross_soft_wraps=parsed.cross_soft_wraps,
+        )
+    if isinstance(parsed, _RegexQuery):
+        return text(re.compile(parsed.pattern))
+    if isinstance(parsed, _StyleQuery):
+        return style(StyleFilter(bold=parsed.bold, background=parsed.resolved_background))
+    if isinstance(parsed, _RowQuery):
+        return row(parsed.row)
+    if isinstance(parsed, _RegionQuery):
         return region(
             Region(
-                top=_integer(query["top"]),
-                left=_integer(query["left"]),
-                width=_integer(query["width"]),
-                height=_integer(query["height"]),
+                top=parsed.top,
+                left=parsed.left,
+                width=parsed.width,
+                height=parsed.height,
             )
         )
-    if kind == "all":
-        specs = query["specs"]
-        assert isinstance(specs, list)
-        return AllSpec(tuple(_spec(item) for item in specs))
-    raise AssertionError(f"unknown fixture query kind {kind}")
+    return AllSpec(tuple(_spec(item) for item in parsed.specs))
 
 
-def _normalized_matches(frame: ScreenFrame, query: object) -> list[dict[str, object]]:
+def _normalized_matches(
+    frame: ScreenFrame, query: _FixtureQuery | LocatorSpec | object
+) -> list[ConformanceMatch]:
     matches = evaluate(frame, _spec(query))
-    normalized: list[dict[str, object]] = []
+    normalized: list[ConformanceMatch] = []
     for match in matches:
         assert match.frame is frame
         assert match.state_hash == "fixture-state-v1"
@@ -100,37 +132,30 @@ def _normalized_matches(frame: ScreenFrame, query: object) -> list[dict[str, obj
         ranges: list[list[int]] = [
             [value.row, value.start_column, value.end_column] for value in match.ranges
         ]
-        normalized.append({"text": match.text, "ranges": ranges})
+        normalized.append(ConformanceMatch(text=match.text, ranges=ranges))
     return normalized
 
 
 def test_shared_locator_conformance_corpus_matches_public_contract() -> None:
-    payload: object = json.loads(FIXTURE_PATH.read_text())
-    corpus = _mapping(payload)
-    assert corpus["version"] == 1
-    frame = normalize_frame(_mapping(corpus["frame"]))
+    corpus = msgspec.json.decode(FIXTURE_PATH.read_bytes(), type=LocatorCorpus)
+    assert corpus.version == 1
+    frame = normalize_frame(corpus.frame)
     assert frame.presented is False
     assert frame.capture_quality == "incomplete"
-    cases = corpus["cases"]
-    assert isinstance(cases, list)
 
-    for value in cases:
-        test_case = _mapping(value)
-        error = test_case.get("error")
-        if error == "invalid_query":
+    for test_case in corpus.cases:
+        if test_case.error == "invalid_query":
             with pytest.raises(InvalidQueryError):
-                _normalized_matches(frame, test_case["query"])
+                _normalized_matches(frame, test_case.query)
             continue
-        assert error is None
-        expected = test_case.get("matches")
-        assert isinstance(expected, list)
-        assert _normalized_matches(frame, test_case["query"]) == expected, test_case["name"]
+        assert test_case.error is None
+        assert test_case.matches is not None
+        assert _normalized_matches(frame, test_case.query) == test_case.matches, test_case.name
 
 
 def test_runner_neutral_style_wrap_and_region_assertions() -> None:
-    payload: object = json.loads(FIXTURE_PATH.read_text())
-    corpus = _mapping(payload)
-    frame = normalize_frame(_mapping(corpus["frame"]))
+    corpus = msgspec.json.decode(FIXTURE_PATH.read_bytes(), type=LocatorCorpus)
+    frame = normalize_frame(corpus.frame)
     matches = evaluate(frame, text("ERROR"))
     assert len(matches) == 1
     assert_match_style(matches[0], StyleFilter(bold=True))
@@ -144,8 +169,8 @@ def test_runner_neutral_style_wrap_and_region_assertions() -> None:
 
 
 def _fixture_frame() -> ScreenFrame:
-    payload: object = json.loads(FIXTURE_PATH.read_text())
-    return normalize_frame(_mapping(_mapping(payload)["frame"]))
+    corpus = msgspec.json.decode(FIXTURE_PATH.read_bytes(), type=LocatorCorpus)
+    return normalize_frame(corpus.frame)
 
 
 def test_row_query_must_be_inside_returned_projection() -> None:

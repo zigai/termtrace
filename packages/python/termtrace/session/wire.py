@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Annotated, TypeVar
+from typing import TypeVar
 
 import msgspec
 
@@ -29,33 +29,6 @@ from termtrace.transport.protocol import JsonObject
 
 WireT = TypeVar("WireT", bound=msgspec.Struct)
 OptionalT = TypeVar("OptionalT")
-
-
-class _StableCapturePayload(
-    msgspec.Struct,
-    tag_field="kind",
-    tag="stable_snapshot",
-):
-    quality: response_wire.StableCaptureQuality
-    first_observed_monotonic_ns: Annotated[int, msgspec.Meta(ge=0)]
-    observed_monotonic_ns: Annotated[int, msgspec.Meta(ge=0)]
-    stable_for_ns: Annotated[int, msgspec.Meta(ge=0)]
-    frame: response_wire.ScreenFrame
-
-
-class _ScreenWaitPayload(
-    msgspec.Struct,
-    tag_field="kind",
-    tag="screen_wait",
-):
-    matched: bool
-    quality: response_wire.ScreenWaitQuality
-    observed_monotonic_ns: Annotated[int, msgspec.Meta(ge=0)]
-    stable_for_ns: Annotated[int, msgspec.Meta(ge=0)]
-    frame: response_wire.ScreenFrame
-    first_match_monotonic_ns: Annotated[int, msgspec.Meta(ge=0)] | None | msgspec.UnsetType = (
-        msgspec.UNSET
-    )
 
 
 def encode_postcondition(
@@ -119,11 +92,7 @@ def normalize_action(
 def normalize_stable_capture(
     value: response_wire.ControlData | Mapping[str, object],
 ) -> StableCapture:
-    wire_value = (
-        value
-        if isinstance(value, response_wire.ControlData10)
-        else _parse(value, _StableCapturePayload, "stable capture")
-    )
+    wire_value = _parse(value, response_wire.ControlData10, "stable capture")
     return StableCapture(
         quality=wire_value.quality.value,
         first_observed_at=Duration(wire_value.first_observed_monotonic_ns),
@@ -136,11 +105,7 @@ def normalize_stable_capture(
 def normalize_screen_wait(
     value: response_wire.ControlData | Mapping[str, object],
 ) -> ScreenWaitResult:
-    wire_value = (
-        value
-        if isinstance(value, response_wire.ControlData11)
-        else _parse(value, _ScreenWaitPayload, "screen wait")
-    )
+    wire_value = _parse(value, response_wire.ControlData11, "screen wait")
     first_match = _optional(wire_value.first_match_monotonic_ns)
     return ScreenWaitResult(
         matched=wire_value.matched,

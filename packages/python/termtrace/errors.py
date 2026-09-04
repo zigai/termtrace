@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from termtrace.session.actions import ActionResult, StableCapture
 
 MAX_DIAGNOSTIC_CHARS = 512
-MAX_DIAGNOSTIC_MATCHES = 8
 
 
 def bounded_text(value: str, maximum: int = MAX_DIAGNOSTIC_CHARS) -> str:

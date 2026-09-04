@@ -9,6 +9,7 @@ from termtrace.screen.frame import FrameRequest, Region
 from termtrace.session.actions import ActionOptions
 from termtrace.session.async_ import AsyncScreen, AsyncSession
 from termtrace.session.sync import Screen, Session
+from termtrace.transport.generated import driver_response as response_wire
 from termtrace.transport.protocol import ControlResult, DriverScreenFrameData, JsonObject
 
 
@@ -118,18 +119,30 @@ class _SyncSession:
             strict=True,
         )
 
-    def control(self, command: dict[str, object]) -> dict[str, object]:
+    def control(self, command: dict[str, object]) -> ControlResult:
         self.requests.append(command)
         if command["command"] == "capture_stable":
-            return {
-                "kind": "stable_snapshot",
-                "quality": "stable",
-                "first_observed_monotonic_ns": 1,
-                "observed_monotonic_ns": 2,
-                "stable_for_ns": 1,
-                "frame": _wire_frame("stable"),
-            }
-        return _wire_frame("captured")
+            return msgspec.convert(
+                {
+                    "kind": "stable_snapshot",
+                    "quality": "stable",
+                    "first_observed_monotonic_ns": 1,
+                    "observed_monotonic_ns": 2,
+                    "stable_for_ns": 1,
+                    "frame": _wire_frame("stable"),
+                    "semantic_state_zstd": "",
+                },
+                type=response_wire.ControlData10,
+                strict=True,
+            )
+        return msgspec.convert(
+            {
+                "kind": "screen_frame",
+                "frame": _wire_frame("captured"),
+            },
+            type=response_wire.ControlData9,
+            strict=True,
+        )
 
 
 class _AsyncSession:
@@ -153,18 +166,30 @@ class _AsyncSession:
             strict=True,
         )
 
-    async def control(self, command: dict[str, object]) -> dict[str, object]:
+    async def control(self, command: dict[str, object]) -> ControlResult:
         self.requests.append(command)
         if command["command"] == "capture_stable":
-            return {
-                "kind": "stable_snapshot",
-                "quality": "stable",
-                "first_observed_monotonic_ns": 1,
-                "observed_monotonic_ns": 2,
-                "stable_for_ns": 1,
-                "frame": _wire_frame("stable"),
-            }
-        return _wire_frame("captured")
+            return msgspec.convert(
+                {
+                    "kind": "stable_snapshot",
+                    "quality": "stable",
+                    "first_observed_monotonic_ns": 1,
+                    "observed_monotonic_ns": 2,
+                    "stable_for_ns": 1,
+                    "frame": _wire_frame("stable"),
+                    "semantic_state_zstd": "",
+                },
+                type=response_wire.ControlData10,
+                strict=True,
+            )
+        return msgspec.convert(
+            {
+                "kind": "screen_frame",
+                "frame": _wire_frame("captured"),
+            },
+            type=response_wire.ControlData9,
+            strict=True,
+        )
 
 
 class _ActionSession(Session):

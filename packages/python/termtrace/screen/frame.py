@@ -42,14 +42,6 @@ class Region:
     def contains(self, row: int, column: int) -> bool:
         return self.top <= row < self.bottom and self.left <= column < self.right
 
-    def to_wire(self) -> dict[str, int]:
-        return {
-            "top": self.top,
-            "left": self.left,
-            "right": self.right,
-            "bottom": self.bottom,
-        }
-
 
 @dataclass(frozen=True, slots=True)
 class FrameRequest:
@@ -61,12 +53,6 @@ class FrameRequest:
             raise ValueError(f"unsupported frame detail {self.detail!r}")
         if self.detail == "cells" and self.region is None:
             raise InvalidRegionError("exact cell detail requires an explicit region")
-
-    def to_wire(self) -> dict[str, str | dict[str, int] | None]:
-        return {
-            "detail": self.detail,
-            "region": self.region.to_wire() if self.region is not None else None,
-        }
 
 
 @dataclass(frozen=True, slots=True)

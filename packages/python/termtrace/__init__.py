@@ -134,7 +134,6 @@ from termtrace.testing.assertions import (
     assert_normalized_frame,
     assert_snapshot_file,
     assert_terminal_snapshot,
-    regex,
     stable_terminal_snapshot,
 )
 from termtrace.testing.async_ import AsyncTermtraceTest
@@ -305,7 +304,6 @@ __all__ = [
     "evaluate",
     "match_has_style",
     "normalize_frame",
-    "regex",
     "region",
     "row",
     "stable_terminal_snapshot",

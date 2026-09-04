@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -62,9 +62,6 @@ class TermtraceTestConfig:
     worker_id: str = "main"
     test_id: str = "terminal-test"
     attempt: int = 0
-
-    def with_command(self, command: Sequence[str | Path]) -> TermtraceTestConfig:
-        return replace(self, command=tuple(command))
 
 
 @dataclass(frozen=True, slots=True)

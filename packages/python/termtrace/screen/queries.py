@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from re import Pattern
 
@@ -212,11 +213,11 @@ def _flatten(
     spec: LocatorSpec,
 ) -> tuple[set[int] | None, Region | None, StyleFilter | None, TextSpec | None]:
     specs: list[LocatorSpec] = []
-    pending: list[LocatorSpec] = [spec]
+    pending: deque[LocatorSpec] = deque([spec])
     while pending:
-        item = pending.pop(0)
+        item = pending.popleft()
         if isinstance(item, AllSpec):
-            pending[0:0] = item.specs
+            pending.extendleft(reversed(item.specs))
             continue
         specs.append(item)
     rows: set[int] | None = None

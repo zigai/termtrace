@@ -4,6 +4,9 @@ import copy
 import json
 import unittest
 from pathlib import Path
+from typing import Any
+
+import msgspec
 
 from termtrace import (
     ActionBusyError,
@@ -39,6 +42,16 @@ FIXTURES = (
 )
 
 
+class ProtocolTestCase(msgspec.Struct):
+    name: str
+    response: dict[str, Any]
+
+
+class ProtocolConformanceCorpus(msgspec.Struct):
+    valid: list[ProtocolTestCase]
+    invalid: list[ProtocolTestCase]
+
+
 class DriverResponseTests(unittest.TestCase):
     def test_package_root_preserves_public_model_exports(self) -> None:
         self.assertIs(ControlResult, ModelControlResult)
@@ -46,11 +59,11 @@ class DriverResponseTests(unittest.TestCase):
         self.assertIs(TimelineEntry, ModelTimelineEntry)
 
     def setUp(self) -> None:
-        self.cases = json.loads(FIXTURES.read_text(encoding="utf-8"))
+        self.corpus = msgspec.json.decode(FIXTURES.read_bytes(), type=ProtocolConformanceCorpus)
 
     def test_decodes_generated_success_variants(self) -> None:
-        hello = self.cases["valid"][0]["response"]
-        attached = self.cases["valid"][1]["response"]
+        hello = self.corpus.valid[0].response
+        attached = self.corpus.valid[1].response
 
         parsed_hello = decode_driver_response(
             json.dumps(hello).encode(), hello["request_id"], DriverHelloData
@@ -65,7 +78,7 @@ class DriverResponseTests(unittest.TestCase):
         self.assertEqual(parsed_attached.canonical_session, "/tmp/example.termtrace")
 
     def test_rejects_uncorrelated_response(self) -> None:
-        hello = self.cases["valid"][0]["response"]
+        hello = self.corpus.valid[0].response
 
         with self.assertRaisesRegex(ProtocolMismatchError, "request ID"):
             decode_driver_response(
@@ -75,7 +88,7 @@ class DriverResponseTests(unittest.TestCase):
             )
 
     def test_preserves_structured_operation_error(self) -> None:
-        response = self.cases["valid"][2]["response"]
+        response = self.corpus.valid[2].response
 
         with self.assertRaises(TermtraceOperationError) as captured:
             decode_driver_response(
@@ -91,7 +104,7 @@ class DriverResponseTests(unittest.TestCase):
         self.assertEqual(captured.exception.request_id, response["request_id"])
 
     def test_typed_driver_errors_preserve_retry_evidence_and_details(self) -> None:
-        source = self.cases["valid"][2]["response"]
+        source = self.corpus.valid[2].response
         error_types = (
             ("action_busy", ActionBusyError),
             ("input_sequence_busy", InputSequenceBusyError),
@@ -137,7 +150,7 @@ class DriverResponseTests(unittest.TestCase):
                     self.assertEqual(screen_frame.maximum, 1_000_000)
 
     def test_preserves_exact_partial_input_sequence_details(self) -> None:
-        response = self.cases["valid"][3]["response"]
+        response = self.corpus.valid[3].response
 
         with self.assertRaises(TermtraceOperationError) as captured:
             decode_driver_response(
@@ -159,9 +172,9 @@ class DriverResponseTests(unittest.TestCase):
         self.assertEqual(sequence.resume_from_atom_index, 2)
 
     def test_rejects_every_invalid_shared_fixture_without_payload_leakage(self) -> None:
-        for case in self.cases["invalid"]:
-            with self.subTest(case=case["name"]):
-                response = case["response"]
+        for case in self.corpus.invalid:
+            with self.subTest(case=case.name):
+                response = case.response
                 with self.assertRaises(ProtocolMismatchError) as captured:
                     decode_driver_response(
                         json.dumps(response).encode(),
@@ -175,7 +188,13 @@ class DriverResponseTests(unittest.TestCase):
 
         encoded = encode_driver_request({"method": "hello"}, request_id)
 
-        self.assertEqual(json.loads(encoded)["request_id"], request_id)
+        class RequestEnvelope(msgspec.Struct):
+            request_id: str
+
+        self.assertEqual(
+            msgspec.json.decode(encoded, type=RequestEnvelope).request_id,
+            request_id,
+        )
         with self.assertRaises(ProtocolMismatchError) as captured:
             encode_driver_request(
                 {"method": "hello", "secret_payload": "SECRET_SENTINEL"}, request_id

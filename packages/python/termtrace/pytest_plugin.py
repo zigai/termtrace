@@ -333,10 +333,6 @@ def _pytest_item_outcome(item: Any) -> TestOutcome:
     return "error"
 
 
-def _pytest_outcome(request: Any) -> TestOutcome:
-    return _pytest_item_outcome(request.node)
-
-
 def _defer_evidence_discard(request: Any, directory: Path) -> None:
     deferred: list[Path] | None = getattr(request.node, "_termtrace_deferred_discards", None)
     if deferred is None:
@@ -356,7 +352,7 @@ def _store_finalization_reports(request: Any, reports: list[FinalizationReport])
 
 
 def _finalize_sync_owners(request: Any, owners: list[TermtraceTest]) -> None:
-    outcome = _pytest_outcome(request)
+    outcome = _pytest_item_outcome(request.node)
     reports: list[FinalizationReport] = []
     for owner in reversed(owners):
         reports.append(owner.finalize(outcome=outcome))
@@ -368,7 +364,7 @@ async def _finalize_async_owners(
     request: Any,
     owners: list[AsyncTermtraceTest],
 ) -> None:
-    outcome = _pytest_outcome(request)
+    outcome = _pytest_item_outcome(request.node)
     reports: list[FinalizationReport] = []
     for owner in reversed(owners):
         reports.append(await owner.finalize(outcome=outcome))

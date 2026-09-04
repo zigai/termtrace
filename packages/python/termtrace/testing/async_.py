@@ -17,7 +17,6 @@ from termtrace.session.async_ import AsyncKeyboard, AsyncScreen, AsyncSession
 from termtrace.testing.assertions import (
     assert_cursor,
     assert_frame_text,
-    assert_match_text,
     assert_matches,
     assert_no_matches,
     assert_snapshot_file,
@@ -66,9 +65,6 @@ class AsyncTerminalAssertions:
     ) -> None:
         selected = frame or await self._owner.session.screen.frame()
         assert_no_matches(selected, spec)
-
-    def match_text(self, match: ScreenMatch, expected: str) -> None:
-        assert_match_text(match, expected)
 
     async def cursor(
         self,

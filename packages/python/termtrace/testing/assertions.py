@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import difflib
 import json
-import re
 from pathlib import Path
 from re import Pattern
 from typing import Protocol
@@ -171,31 +171,14 @@ def assert_snapshot_file(
 
 
 def _snapshot_diff(expected: str, actual: str, target: Path) -> str:
-    expected_lines: list[str] = expected.splitlines()
-    actual_lines: list[str] = actual.splitlines()
-    common_length = min(len(expected_lines), len(actual_lines))
-    first_difference = next(
-        (index for index in range(common_length) if expected_lines[index] != actual_lines[index]),
-        common_length,
+    diff_lines = difflib.unified_diff(
+        expected.splitlines(keepends=True),
+        actual.splitlines(keepends=True),
+        fromfile=str(target),
+        tofile="presented-frame",
+        n=3,
     )
-    start = max(0, first_difference - 3)
-    end = first_difference + 4
-    lines: list[str] = [
-        f"--- {target}",
-        "+++ presented-frame",
-        f"@@ lines {start + 1}-{end} @@",
-    ]
-    for index in range(start, min(end, max(len(expected_lines), len(actual_lines)))):
-        expected_line = expected_lines[index] if index < len(expected_lines) else "<missing>"
-        actual_line = actual_lines[index] if index < len(actual_lines) else "<missing>"
-        if expected_line == actual_line:
-            lines.append(f" {expected_line}")
-            continue
-        lines.append(f"-{expected_line}")
-        lines.append(f"+{actual_line}")
-    if start > 0 or end < max(len(expected_lines), len(actual_lines)):
-        lines.append("... snapshot diff context truncated ...")
-    return "\n".join(lines)
+    return "".join(diff_lines)
 
 
 def assert_cursor(
@@ -215,10 +198,6 @@ def assert_cursor(
         mismatches.append(f"visible expected {visible}, got {cursor.visible}")
     if mismatches:
         raise AssertionError("cursor mismatch: " + "; ".join(mismatches))
-
-
-def regex(pattern: str, flags: int = 0) -> Pattern[str]:
-    return re.compile(pattern, flags)
 
 
 def stable_terminal_snapshot(session: _ScreenSubject, *, stable_for: float = 0.25) -> FrameSnapshot:
@@ -255,6 +234,5 @@ __all__ = [
     "assert_normalized_frame",
     "assert_snapshot_file",
     "assert_terminal_snapshot",
-    "regex",
     "stable_terminal_snapshot",
 ]

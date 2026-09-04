@@ -1,6 +1,7 @@
 import asyncio
 import math
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -133,14 +134,12 @@ def test_atomic_input_sequence_builder_is_typed_bounded_and_correlated() -> None
     atoms = command["atoms"]
     assert isinstance(atoms, list)
     assert len(atoms) == 4
-    operation_ids = {atom["operation_id"] for atom in atoms if isinstance(atom, dict)}
-    assert len(operation_ids) == 4
-    assert [atom["operation_id"] for atom in atoms if isinstance(atom, dict)] == [
-        "00000000-0000-0000-0000-000000000021",
-        "00000000-0000-0000-0000-000000000022",
-        "00000000-0000-0000-0000-000000000023",
-        "00000000-0000-0000-0000-000000000024",
+    operation_ids = [
+        str(uuid.UUID(str(atom["operation_id"]))) for atom in atoms if isinstance(atom, dict)
     ]
+    assert len(operation_ids) == 4
+    assert len(set(operation_ids)) == 4
+    assert sequence_id not in operation_ids
     assert [atom["caller_intent"] for atom in atoms if isinstance(atom, dict)] == [
         "submit text",
         "submit key",
