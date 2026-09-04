@@ -67,7 +67,7 @@ impl ControlStripper {
                 0x1b => self.begin(StripState::Escape, byte),
                 0x9b => self.begin(StripState::Csi, byte),
                 0x9d => self.begin(StripState::Osc, byte),
-                0x90 | 0x9f => self.begin(StripState::String, byte),
+                0x90 | 0x98 | 0x9e | 0x9f => self.begin(StripState::String, byte),
                 b'\n' | b'\r' | b'\t' => output.push(byte),
                 0x00..=0x1f | 0x7f | 0x80..=0x9f => {}
                 _ => output.push(byte),
@@ -77,7 +77,11 @@ impl ControlStripper {
                 self.state = match byte {
                     b'[' => StripState::Csi,
                     b']' => StripState::Osc,
-                    b'P' | b'_' | b'^' => StripState::String,
+                    b'P' | b'_' | b'^' | b'X' => StripState::String,
+                    0x18 | 0x1a => {
+                        self.finish_control();
+                        StripState::Ground
+                    }
                     0x30..=0x7e => {
                         self.finish_control();
                         StripState::Ground
@@ -87,7 +91,10 @@ impl ControlStripper {
             }
             StripState::Csi => {
                 self.push_control(byte);
-                if (0x40..=0x7e).contains(&byte) {
+                if byte == 0x18 || byte == 0x1a {
+                    self.finish_control();
+                    self.state = StripState::Ground;
+                } else if (0x40..=0x7e).contains(&byte) {
                     self.finish_control();
                     self.state = StripState::Ground;
                 }
@@ -95,7 +102,11 @@ impl ControlStripper {
             StripState::Osc => {
                 self.push_control(byte);
                 match byte {
-                    0x07 => {
+                    0x07 | 0x9c => {
+                        self.finish_control();
+                        self.state = StripState::Ground;
+                    }
+                    0x18 | 0x1a => {
                         self.finish_control();
                         self.state = StripState::Ground;
                     }
@@ -105,13 +116,25 @@ impl ControlStripper {
             }
             StripState::String => {
                 self.push_control(byte);
-                if byte == 0x1b {
-                    self.state = StripState::StringEscape;
+                match byte {
+                    0x07 | 0x9c => {
+                        self.finish_control();
+                        self.state = StripState::Ground;
+                    }
+                    0x18 | 0x1a => {
+                        self.finish_control();
+                        self.state = StripState::Ground;
+                    }
+                    0x1b => self.state = StripState::StringEscape,
+                    _ => {}
                 }
             }
             StripState::OscEscape | StripState::StringEscape => {
                 self.push_control(byte);
                 if byte == b'\\' {
+                    self.finish_control();
+                    self.state = StripState::Ground;
+                } else if byte == 0x18 || byte == 0x1a {
                     self.finish_control();
                     self.state = StripState::Ground;
                 } else {
@@ -206,6 +229,13 @@ mod tests {
 
         assert!(stripper.feed(&sequence).is_empty());
         assert!(!stripper.alternate_screen_observed());
+    }
+
+    #[test]
+    fn recognizes_eight_bit_st_and_cancel_controls() {
+        let mut stripper = ControlStripper::default();
+        let output = stripper.feed(b"\x9d0;title\x9cHello\x1b[31\x18World\x1bXsos\x9cDone");
+        assert_eq!(output, b"HelloWorldDone");
     }
 
     proptest! {

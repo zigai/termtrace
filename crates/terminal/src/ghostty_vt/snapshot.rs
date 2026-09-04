@@ -421,6 +421,17 @@ impl Snapshot<'_> {
                         (&raw mut handles.cells).cast::<c_void>(),
                     )
                 })?;
+                let mut selection = sys::GhosttyRenderStateRowSelection {
+                    size: size_of::<sys::GhosttyRenderStateRowSelection>(),
+                    ..Default::default()
+                };
+                let has_selection = unsafe {
+                    sys::ghostty_render_state_row_get(
+                        handles.row,
+                        sys::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION,
+                        (&raw mut selection).cast::<c_void>(),
+                    ) == sys::GhosttyResult_GHOSTTY_SUCCESS
+                };
                 let mut cells = Vec::with_capacity(usize::from(cols));
                 for column in 0..cols {
                     if !unsafe { sys::ghostty_render_state_row_cells_next(handles.cells) } {
@@ -429,7 +440,9 @@ impl Snapshot<'_> {
                             result: sys::GhosttyResult_GHOSTTY_NO_VALUE,
                         });
                     }
-                    cells.push(read_cell(handles.cells, column)?);
+                    let selected =
+                        has_selection && column >= selection.start_x && column <= selection.end_x;
+                    cells.push(read_cell(handles.cells, column, selected)?);
                 }
                 RowState {
                     row,
@@ -600,7 +613,11 @@ fn raw_cell_get<T: Default>(
     return Ok(value);
 }
 
-fn read_cell(cells: sys::GhosttyRenderStateRowCells, column: u16) -> Result<CellState> {
+fn read_cell(
+    cells: sys::GhosttyRenderStateRowCells,
+    column: u16,
+    selected: bool,
+) -> Result<CellState> {
     let mut style = sys::GhosttyStyle {
         size: size_of::<sys::GhosttyStyle>(),
         ..Default::default()
@@ -625,11 +642,7 @@ fn read_cell(cells: sys::GhosttyRenderStateRowCells, column: u16) -> Result<Cell
             cells,
             sys::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR,
         )?,
-        selected: cell_get(
-            cells,
-            "get cell selection",
-            sys::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED,
-        )?,
+        selected,
     });
 }
 

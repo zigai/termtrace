@@ -214,13 +214,14 @@ impl CsiModeParser {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
 enum QueryKind {
     #[default]
     None,
     Escape,
     Csi,
     Osc,
+    String,
     Single,
 }
 
@@ -240,6 +241,10 @@ impl QueryTracker {
 
     /// Feed one byte, returning whether the tracked query is complete.
     pub fn push(&mut self, byte: u8) -> bool {
+        if byte == 0x18 || byte == 0x1a {
+            self.clear();
+            return false;
+        }
         match self.kind {
             QueryKind::None => match byte {
                 0x1b => {
@@ -255,6 +260,11 @@ impl QueryTracker {
                 0x9d => {
                     self.sequence.push(byte);
                     self.kind = QueryKind::Osc;
+                    return false;
+                }
+                0x90 | 0x98 | 0x9e | 0x9f => {
+                    self.sequence.push(byte);
+                    self.kind = QueryKind::String;
                     return false;
                 }
                 0x05 => {
@@ -275,6 +285,10 @@ impl QueryTracker {
                         self.kind = QueryKind::Osc;
                         return false;
                     }
+                    b'P' | b'_' | b'^' | b'X' => {
+                        self.kind = QueryKind::String;
+                        return false;
+                    }
                     _ => return true,
                 }
             }
@@ -283,9 +297,10 @@ impl QueryTracker {
                 return (0x40..=0x7e).contains(&byte)
                     || self.sequence.len() > MAX_TRACKED_SEQUENCE_BYTES;
             }
-            QueryKind::Osc => {
+            QueryKind::Osc | QueryKind::String => {
                 self.sequence.push(byte);
                 return byte == 0x07
+                    || byte == 0x9c
                     || self.sequence.ends_with(b"\x1b\\")
                     || self.sequence.len() > MAX_TRACKED_SEQUENCE_BYTES;
             }
@@ -303,5 +318,88 @@ impl QueryTracker {
     pub fn clear(&mut self) {
         self.sequence.clear();
         self.kind = QueryKind::None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::iter;
+
+    #[test]
+    fn presentation_tracker_recognizes_only_synchronized_output_mode_commands() {
+        for (input, expected) in [
+            (
+                b"visible\x1b[?2026hhidden\x1b[?2026l".as_slice(),
+                vec![true, false],
+            ),
+            (b"\x1b[?25;2026h".as_slice(), vec![true]),
+            (b"\x9b?2026l".as_slice(), vec![false]),
+            (b"\x1b[2026h".as_slice(), Vec::new()),
+            (b"\x1b[?20260h".as_slice(), Vec::new()),
+            (b"\x1b[?2026:1h".as_slice(), Vec::new()),
+            (b"\x1b[?2026\x18h".as_slice(), Vec::new()),
+        ] {
+            let mut tracker = PresentationTracker::new(false);
+            let mut commands = Vec::new();
+            let mut framed = Vec::new();
+            for byte in input {
+                match tracker.push(*byte) {
+                    PresentationAction::Immediate => framed.push(*byte),
+                    PresentationAction::Buffered => {}
+                    PresentationAction::Sequence { bytes, command } => {
+                        framed.extend(bytes);
+                        if let Some(command) = command {
+                            commands.push(command);
+                        }
+                    }
+                }
+            }
+            framed.extend(tracker.finish());
+            assert_eq!(commands, expected, "input: {input:?}");
+            assert_eq!(framed, input, "framing must be lossless");
+        }
+
+        const TRACKED_SEQUENCE_BOUND: usize = 64 * 1024;
+        let mut tracker = PresentationTracker::new(false);
+        let mut longest_sequence = 0;
+        for byte in b"\x1b[?"
+            .iter()
+            .copied()
+            .chain(iter::repeat_n(b'0', TRACKED_SEQUENCE_BOUND * 2))
+        {
+            if let PresentationAction::Sequence { bytes, .. } = tracker.push(byte) {
+                longest_sequence = longest_sequence.max(bytes.len());
+            }
+        }
+        longest_sequence = longest_sequence.max(tracker.finish().len());
+        assert!(longest_sequence <= TRACKED_SEQUENCE_BOUND + 1);
+    }
+
+    #[test]
+    fn query_tracker_tracks_dcs_and_handles_st_and_cancellation() {
+        let mut tracker = QueryTracker::default();
+        // DCS sequence ESC P $ q " p ESC \
+        for byte in b"\x1bP$q\"p" {
+            assert!(!tracker.push(*byte));
+            assert!(tracker.is_tracking());
+        }
+        assert!(!tracker.push(0x1b));
+        assert!(tracker.push(b'\\'));
+        assert_eq!(tracker.bytes(), b"\x1bP$q\"p\x1b\\");
+        tracker.clear();
+
+        // CAN cancels tracking
+        assert!(!tracker.push(0x1b));
+        assert!(!tracker.push(b'['));
+        assert!(!tracker.push(0x18));
+        assert!(!tracker.is_tracking());
+        assert!(tracker.bytes().is_empty());
+
+        // 8-bit ST completes OSC
+        assert!(!tracker.push(0x9d));
+        assert!(!tracker.push(b'0'));
+        assert!(tracker.push(0x9c));
+        assert_eq!(tracker.bytes(), &[0x9d, b'0', 0x9c]);
     }
 }
