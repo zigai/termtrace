@@ -3,7 +3,10 @@
 use std::{collections::HashMap, path::Path, time::Duration};
 
 use serde::Serialize;
-use termtrace_evidence::{artifact::write_secure, event_log::EventLog};
+use termtrace_evidence::{
+    artifact::{finish_writer, secure_writer},
+    event_log::EventLog,
+};
 use termtrace_model::execution::event::{Event, OperationStatus};
 use termtrace_model::value::ByteString;
 use uuid::Uuid;
@@ -37,9 +40,9 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
     let session = session_directory.as_ref();
     let output = output.as_ref();
     let log = EventLog::read(session.join("events.jsonl"))?;
-    let mut encoded: Vec<u8> = Vec::new();
+    let mut writer = secure_writer(output)?;
     write_line(
-        &mut encoded,
+        &mut writer,
         &CastHeader {
             version: 2,
             width: log.header.cols,
@@ -58,10 +61,10 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
         let seconds = Duration::from_nanos(record.monotonic_ns).as_secs_f64();
         match &record.event {
             Event::Output { data } => write_cast_event(
-                &mut encoded,
+                &mut writer,
                 seconds,
                 "o",
-                &String::from_utf8_lossy(data.as_bytes()),
+                String::from_utf8_lossy(data.as_bytes()).as_ref(),
                 output,
             )?,
             Event::InputIntent {
@@ -76,10 +79,10 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
             } => {
                 if let Some(data) = inputs.remove(operation_id) {
                     write_cast_event(
-                        &mut encoded,
+                        &mut writer,
                         seconds,
                         "i",
-                        &String::from_utf8_lossy(data.as_bytes()),
+                        String::from_utf8_lossy(data.as_bytes()).as_ref(),
                         output,
                     )?;
                 }
@@ -98,13 +101,7 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
                 ..
             } => {
                 if let Some((cols, rows)) = resizes.remove(operation_id) {
-                    write_cast_event(
-                        &mut encoded,
-                        seconds,
-                        "r",
-                        &format!("{cols}x{rows}"),
-                        output,
-                    )?;
+                    write_cast_event(&mut writer, seconds, "r", &format!("{cols}x{rows}"), output)?;
                 }
             }
             Event::InputResult { operation_id, .. } => {
@@ -116,23 +113,28 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
             _ => {}
         }
     }
-    write_secure(output, &encoded)?;
+    finish_writer(writer, output)?;
     return Ok(());
 }
 
 fn write_cast_event(
-    output: &mut Vec<u8>,
+    writer: &mut impl std::io::Write,
     seconds: f64,
     code: &str,
     data: &str,
     path: &Path,
 ) -> Result<()> {
-    return write_line(output, &(seconds, code, data), path);
+    return write_line(writer, &(seconds, code, data), path);
 }
 
-fn write_line(output: &mut Vec<u8>, value: &impl Serialize, path: &Path) -> Result<()> {
-    serde_json::to_writer(&mut *output, value)
+fn write_line(writer: &mut impl std::io::Write, value: &impl Serialize, path: &Path) -> Result<()> {
+    serde_json::to_writer(&mut *writer, value)
         .map_err(|source| return Error::json(path, source))?;
-    output.push(b'\n');
+    writer
+        .write_all(b"\n")
+        .map_err(|source| Error::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        })?;
     return Ok(());
 }

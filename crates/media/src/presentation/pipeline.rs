@@ -248,14 +248,13 @@ pub(super) fn select_preview_frames(
             .map(|frame| return vec![frame])
             .ok_or_else(|| return plan_error("preview selection contains no frames"));
     }
-    let mut selected = Vec::with_capacity(count);
-    for index in 0..count {
-        let candidate_index =
-            index.saturating_mul(candidates.len().saturating_sub(1)) / count.saturating_sub(1);
-        if let Some(frame) = candidates.get(candidate_index) {
-            selected.push(*frame);
-        }
-    }
+    let mut selected = (0..count)
+        .filter_map(|index| {
+            let candidate_index =
+                index.saturating_mul(candidates.len().saturating_sub(1)) / count.saturating_sub(1);
+            return candidates.get(candidate_index).copied();
+        })
+        .collect::<Vec<_>>();
     selected.dedup();
     return Ok(selected);
 }

@@ -6,14 +6,14 @@ use std::{
 use termtrace_model::{terminal::replay::SourceRange, value::geometry::TerminalGeometryReport};
 
 use super::{
-    ffmpeg::{append_change_visualization, cursor_mask_ranges},
+    ffmpeg::{append_change_visualization, cursor_mask_ranges, probe_delivery_video},
     mapping::{semantic_change_states_at, write_presentation_map},
     pipeline::select_preview_frames,
     planning::{
         ceil_ratio, frame_ceil, frame_floor, hash_file, missing_native_capture_error,
         ranges_overlap, validate_transform_geometry,
     },
-    validation::{validate_edit_plan, validate_edit_selector},
+    validation::{validate_ass_resource, validate_edit_plan, validate_edit_selector},
     *,
 };
 
@@ -279,16 +279,16 @@ fn exports_multi_clip_h264_presentation_atomically() {
             .expect("read generated annotations")
             .contains("frame 7 source 11")
     );
-    assert!(
-        fs_err::read_to_string(outcome.directory.join("filter.txt"))
-            .expect("read filter graph")
-            .contains("tblend=all_mode=difference")
-    );
-    assert!(
-        fs_err::read_to_string(outcome.directory.join("filter.txt"))
-            .expect("read transforms")
-            .contains("drawbox=x=2:y=26:w=60:h=30")
-    );
+    let probed = probe_delivery_video(&outcome.video).expect("probe delivery video");
+    assert_eq!(probed["streams"][0]["width"].as_u64(), Some(64));
+    assert_eq!(probed["streams"][0]["height"].as_u64(), Some(64));
+    let manifest_bytes =
+        fs_err::read(outcome.directory.join("manifest.json")).expect("read manifest");
+    let manifest: PresentationManifest =
+        serde_json::from_slice(&manifest_bytes).expect("parse manifest");
+    assert_eq!(manifest.plan.output_frame_count, plan.output_frame_count);
+    assert!(!manifest.output_video_hash.is_empty());
+    assert!(!manifest.members.is_empty());
     assert!(outcome.directory.join("branding.txt").is_file());
     let staged_regular = outcome.directory.join("fonts/JetBrainsMono-Regular.ttf");
     assert_eq!(
@@ -463,11 +463,16 @@ fn facade_render_configuration_survives_normalization_inputs() {
         validate_transform_geometry(&edit, 800, 600, false).expect("resize should be exact"),
         (1_920, 1_080)
     );
-    let encoded = serde_json::to_value(&edit).expect("serialize facade edit plan");
-    assert_eq!(encoded["render_config"]["preset"], "lossless");
-    assert_eq!(encoded["render_config"]["renderer"], "semantic");
-    assert_eq!(encoded["delivery"]["crf"], 0);
-    assert_eq!(encoded["delivery"]["pixel_format"], "rgb24");
+    assert_eq!(
+        edit.render_config.as_ref().map(|c| c.preset.as_str()),
+        Some("lossless")
+    );
+    assert_eq!(
+        edit.render_config.as_ref().map(|c| c.renderer.as_str()),
+        Some("semantic")
+    );
+    assert_eq!(edit.delivery.crf, 0);
+    assert_eq!(edit.delivery.pixel_format, "rgb24");
 }
 
 #[test]
@@ -545,4 +550,20 @@ fn preview_selection_is_bounded_deterministic_and_change_aware() {
     )
     .expect("select changes");
     assert_eq!(selected, vec![3, 4, 9]);
+}
+
+#[test]
+fn validate_ass_resource_accepts_valid_file_and_rejects_invalid() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let valid_ass = temporary.path().join("valid.ass");
+    fs_err::write(
+        &valid_ass,
+        "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Hello world\n",
+    )
+    .expect("write valid ASS");
+    assert!(validate_ass_resource(&valid_ass).is_ok());
+
+    let invalid_ass = temporary.path().join("invalid.ass");
+    fs_err::write(&invalid_ass, "plain text without sections").expect("write invalid ASS");
+    assert!(validate_ass_resource(&invalid_ass).is_err());
 }

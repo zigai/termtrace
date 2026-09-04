@@ -74,13 +74,6 @@ pub struct CaptureOutcome {
     pub screenshot: PathBuf,
 }
 
-/// Geometry and configuration measured from Ghostty at a target viewport.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FittedGeometry {
-    /// Live XTWINOPS geometry report.
-    pub report: TerminalGeometryReport,
-}
-
 /// One viewport and measured grid considered by the exact-grid solver.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -190,11 +183,6 @@ pub struct NativeFrameSample {
     pub blake3: String,
     /// Whether this sample equals its immediate predecessor.
     pub same_as_previous: bool,
-}
-
-/// Resolve the deterministic visual artifact directory for a source range.
-pub fn visual_directory_name(source_range: Option<SourceRange>) -> String {
-    return visual_directory_name_for(source_range, StateSelection::All);
 }
 
 /// Resolve a deterministic visual directory for a range and index mode.

@@ -445,18 +445,23 @@ fn semantic_ffmpeg_arguments(source: &SemanticVideoSourcePlan, output: &Path) ->
 }
 
 fn write_frame_spans(path: &Path, spans: &[SemanticFrameSpan]) -> Result<()> {
-    let mut bytes = Vec::new();
+    let mut writer = termtrace_evidence::artifact::secure_writer(path)?;
     for span in spans {
-        serde_json::to_writer(&mut bytes, span).map_err(|source_error| {
+        serde_json::to_writer(&mut writer, span).map_err(|source_error| {
             return Error::InvalidJson {
                 path: path.to_path_buf(),
                 json_path: "$".to_owned(),
                 source: source_error,
             };
         })?;
-        bytes.push(b'\n');
+        writer
+            .write_all(b"\n")
+            .map_err(|source| Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            })?;
     }
-    write_secure(path, &bytes)?;
+    termtrace_evidence::artifact::finish_writer(writer, path)?;
     return Ok(());
 }
 

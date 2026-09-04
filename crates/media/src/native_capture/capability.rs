@@ -7,9 +7,23 @@ use termtrace_model::protocol::capability::{
 /// Probe native screenshot and video dependencies in stable report order.
 #[must_use]
 pub fn native_capabilities() -> [Capability; 2] {
+    return native_capabilities_with(available, ffmpeg_has_encoder);
+}
+
+fn native_capabilities_with(
+    available_fn: impl Fn(&str) -> bool,
+    has_encoder_fn: impl Fn(&str) -> bool,
+) -> [Capability; 2] {
+    let missing = |programs: &[&str]| -> Vec<String> {
+        programs
+            .iter()
+            .filter(|program| !available_fn(program))
+            .map(|program| (*program).to_owned())
+            .collect()
+    };
     let screenshot_missing = missing(&["ghostty", "Xvfb", "dbus-run-session", "import", "ffprobe"]);
     let video_missing = missing(&["ghostty", "Xvfb", "dbus-run-session", "ffmpeg", "ffprobe"]);
-    let encoder = video_missing.is_empty() && ffmpeg_has_encoder("libx264rgb");
+    let encoder = video_missing.is_empty() && has_encoder_fn("libx264rgb");
     return [
         capability(
             NATIVE_SCREENSHOT_CAPABILITY,
@@ -63,13 +77,6 @@ fn capability(
     };
 }
 
-fn missing(programs: &[&str]) -> Vec<String> {
-    return programs
-        .iter()
-        .filter(|program| return !available(program))
-        .map(|program| return (*program).to_owned())
-        .collect();
-}
 fn available(program: &str) -> bool {
     return Command::new("sh")
         .args([
@@ -104,21 +111,9 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn native_video_does_not_require_screenshot_only_import() {
-        let screenshot = capability(
-            NATIVE_SCREENSHOT_CAPABILITY,
-            "native_screenshot_tools_ready",
-            "native_host_tools_missing",
-            &["import".to_owned()],
-            true,
-        );
-        let video = capability(
-            NATIVE_VIDEO_CAPABILITY,
-            "native_video_tools_ready",
-            "native_video_dependency_missing",
-            &[],
-            true,
-        );
+        let [screenshot, video] = native_capabilities_with(|prog| prog != "import", |_| true);
         assert_eq!(screenshot.status, CapabilityStatus::Blocked);
+        assert!(screenshot.detail.contains("import"));
         assert_eq!(video.status, CapabilityStatus::Ready);
     }
 }

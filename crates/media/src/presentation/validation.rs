@@ -1,5 +1,6 @@
 use std::{
     path::{Path, PathBuf},
+    process::Command,
     str,
 };
 
@@ -317,15 +318,55 @@ pub(super) fn validate_ass_resource(path: &Path) -> Result<()> {
     let content = str::from_utf8(&bytes).map_err(|error| {
         return plan_error(format!("ASS subtitle resource must be UTF-8: {error}"));
     })?;
-    if !content.contains("[Script Info]")
-        || !content.contains("[Events]")
-        || !content
-            .lines()
-            .any(|line| return line.starts_with("Dialogue:"))
-    {
-        return Err(plan_error(
-            "ASS subtitle resource requires Script Info, Events, and Dialogue sections",
-        ));
+    let escaped = path
+        .to_str()
+        .map(|value| {
+            value
+                .replace('\\', "\\\\")
+                .replace(':', "\\:")
+                .replace('\'', "\\'")
+        })
+        .ok_or_else(|| return plan_error("ASS subtitle resource path is not valid UTF-8"))?;
+    let filter = format!("ass='{escaped}'");
+    let ffmpeg_run = Command::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-nostdin",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=64x64:rate=24:duration=0.04",
+            "-vf",
+            &filter,
+            "-f",
+            "null",
+            "-",
+        ])
+        .output();
+
+    match ffmpeg_run {
+        Ok(output) if !output.status.success() => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(plan_error(format!(
+                "ASS subtitle resource failed FFmpeg validation: {}",
+                stderr.trim()
+            )));
+        }
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            if !content.contains("[Script Info]")
+                || !content.contains("[Events]")
+                || !content
+                    .lines()
+                    .any(|line| return line.starts_with("Dialogue:"))
+            {
+                return Err(plan_error(
+                    "ASS subtitle resource requires Script Info, Events, and Dialogue sections",
+                ));
+            }
+        }
     }
     return Ok(());
 }

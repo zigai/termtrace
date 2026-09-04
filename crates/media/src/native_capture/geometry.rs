@@ -6,9 +6,7 @@ use termtrace_evidence::{
     session::read_manifest,
 };
 use termtrace_model::{
-    artifact::visual::{
-        FittedGeometry, GHOSTTY_EFFECTIVE_CONFIG_NAME, GeometryProbeAttempt, GeometrySolveReport,
-    },
+    artifact::visual::{GHOSTTY_EFFECTIVE_CONFIG_NAME, GeometryProbeAttempt, GeometrySolveReport},
     execution::session::{
         CaptureTarget, GHOSTTY_REPLAY_PROFILE_NAME, GeometrySource, GhosttyVisualOverrides,
         SessionGeometry,
@@ -77,7 +75,7 @@ pub fn native_capture_target(
 pub fn probe_ghostty_geometry(
     target: CaptureTarget,
     profile: &ResolvedGhosttyProfile,
-) -> Result<FittedGeometry> {
+) -> Result<TerminalGeometryReport> {
     if target.width < 320 || target.height < 200 {
         return Err(Error::InvalidReplay {
             reason: "fitted geometry requires a viewport of at least 320x200 pixels".to_owned(),
@@ -114,7 +112,7 @@ pub fn solve_ghostty_geometry(
     profile: &ResolvedGhosttyProfile,
 ) -> Result<GeometrySolveReport> {
     return solve_geometry_with(required_cols, required_rows, initial, |target| {
-        return probe_ghostty_geometry(target, profile).map(|fit| return fit.report);
+        return probe_ghostty_geometry(target, profile);
     });
 }
 
@@ -225,7 +223,7 @@ fn probe_staged(
     target: CaptureTarget,
     profile: &ResolvedGhosttyProfile,
     staging: &Path,
-) -> Result<FittedGeometry> {
+) -> Result<TerminalGeometryReport> {
     write_secure(
         &staging.join(GHOSTTY_EFFECTIVE_CONFIG_NAME),
         &profile.effective_config,
@@ -248,7 +246,7 @@ fn probe_staged(
     wait_for_success(&mut ghostty, Duration::from_secs(5), staging)?;
     xvfb.terminate();
     validate_report(report)?;
-    return Ok(FittedGeometry { report });
+    return Ok(report);
 }
 
 fn validate_report(report: TerminalGeometryReport) -> Result<()> {

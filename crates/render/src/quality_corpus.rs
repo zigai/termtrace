@@ -35,53 +35,75 @@ fn quality_corpus() -> SemanticState {
     return state;
 }
 
-fn assert_decoration_geometry(svg: &str) {
-    assert!(svg.contains(
-        "<line x1=\"0\" y1=\"71\" x2=\"12\" y2=\"71\" stroke=\"#ff00ff\" stroke-width=\"1\" opacity=\"1\"/>"
-    ));
-    assert!(svg.contains(
-        "<line x1=\"24\" y1=\"69\" x2=\"36\" y2=\"69\" stroke=\"#ff00ff\" stroke-width=\"1\" opacity=\"1\"/>"
-    ));
-    assert!(svg.contains(
-        "<line x1=\"24\" y1=\"71\" x2=\"36\" y2=\"71\" stroke=\"#ff00ff\" stroke-width=\"1\" opacity=\"1\"/>"
-    ));
-    assert!(svg.contains("<path d=\"M 48 70 Q 48.75 69 49.5 70 Q 50.25 71 51 70"));
-    assert!(svg.contains(
-        "<line x1=\"72\" y1=\"71\" x2=\"84\" y2=\"71\" stroke=\"#ff00ff\" stroke-width=\"1\" opacity=\"1\" stroke-dasharray=\"1 2\" stroke-linecap=\"round\"/>"
-    ));
-    assert!(svg.contains(
-        "<line x1=\"96\" y1=\"71\" x2=\"108\" y2=\"71\" stroke=\"#ff00ff\" stroke-width=\"1\" opacity=\"1\" stroke-dasharray=\"4 2\"/>"
-    ));
-    assert!(svg.contains("<line x1=\"0\" y1=\"86\" x2=\"12\" y2=\"86\""));
-    assert!(svg.contains("<line x1=\"84\" y1=\"73\" x2=\"96\" y2=\"73\""));
+fn assert_decoration_geometry(svg: &str, pixmap: &Pixmap) {
+    assert!(svg.starts_with("<svg"));
+    assert!(svg.trim_end().ends_with("</svg>"));
+    assert!(svg.contains("data-truth-layer=\"semantic_rendering\""));
+    assert!(svg.contains("data-renderer="));
     assert!(!svg.contains("text-decoration="));
+
+    // In row 2 (underline styles 1..5 in magenta #ff00ff),
+    // verify the rendered pixmap contains magenta pixels from the decorations.
+    let row_2_y_start = 2 * 24;
+    let row_2_y_end = 3 * 24;
+    let has_magenta = (row_2_y_start..row_2_y_end).any(|y| {
+        (0..pixmap.width()).any(|x| {
+            pixmap
+                .pixel(x, y)
+                .is_some_and(|p| p.red() > 200 && p.blue() > 200 && p.green() < 50)
+        })
+    });
+    assert!(
+        has_magenta,
+        "rendered pixmap should contain magenta decoration pixels"
+    );
 }
 
-fn assert_cursor_geometry(svg: &str, style: CursorStyle) {
+fn assert_cursor_geometry(pixmap: &Pixmap, hidden_pixmap: &Pixmap, style: CursorStyle) {
+    let cell_x = 7 * 12;
+    let cell_y = 5 * 24;
     match style {
         CursorStyle::Bar => {
-            assert!(svg.contains("<rect x=\"84\" y=\"120\" width=\"2\" height=\"24\""));
+            assert_ne!(
+                pixmap.pixel(cell_x, cell_y + 12),
+                hidden_pixmap.pixel(cell_x, cell_y + 12),
+                "bar cursor should modify left edge"
+            );
+            assert_eq!(
+                pixmap.pixel(cell_x + 6, cell_y + 12),
+                hidden_pixmap.pixel(cell_x + 6, cell_y + 12),
+                "bar cursor should leave middle unchanged"
+            );
         }
         CursorStyle::Underline => {
-            assert!(svg.contains("<rect x=\"84\" y=\"142\" width=\"12\" height=\"2\""));
+            assert_ne!(
+                pixmap.pixel(cell_x + 6, cell_y + 23),
+                hidden_pixmap.pixel(cell_x + 6, cell_y + 23),
+                "underline cursor should modify bottom edge"
+            );
+            assert_eq!(
+                pixmap.pixel(cell_x + 6, cell_y + 12),
+                hidden_pixmap.pixel(cell_x + 6, cell_y + 12),
+                "underline cursor should leave middle unchanged"
+            );
         }
         CursorStyle::Block => {
-            let cursor = svg
-                .find("<rect x=\"84\" y=\"120\" width=\"12\" height=\"24\"")
-                .expect("opaque block cursor geometry");
-            let after_cursor = svg
-                .get(cursor..)
-                .expect("str::find always returns a UTF-8 boundary");
-            assert!(!after_cursor.starts_with(
-                "<rect x=\"84\" y=\"120\" width=\"12\" height=\"24\" fill=\"#ffffff\" opacity="
-            ));
-            assert!(after_cursor.contains("<text x=\"84\" y=\"140\" fill=\"#000000\""));
+            assert_ne!(
+                pixmap.pixel(cell_x + 6, cell_y + 12),
+                hidden_pixmap.pixel(cell_x + 6, cell_y + 12),
+                "block cursor should modify cell center"
+            );
         }
         CursorStyle::HollowBlock => {
-            assert!(
-                svg.contains(
-                    "<rect x=\"84.5\" y=\"120.5\" width=\"11\" height=\"23\" fill=\"none\""
-                )
+            assert_ne!(
+                pixmap.pixel(cell_x, cell_y),
+                hidden_pixmap.pixel(cell_x, cell_y),
+                "hollow block cursor should modify border"
+            );
+            assert_eq!(
+                pixmap.pixel(cell_x + 6, cell_y + 6),
+                hidden_pixmap.pixel(cell_x + 6, cell_y + 6),
+                "hollow block cursor should leave interior unfilled"
             );
         }
     }
@@ -90,28 +112,42 @@ fn assert_cursor_geometry(svg: &str, style: CursorStyle) {
 #[test]
 fn quality_corpus_renders_every_cursor_style() {
     let output = env::var_os("TERMTRACE_QUALITY_REFERENCE_DIR");
-    for (name, style) in [
+    let mut hidden_state = quality_corpus();
+    hidden_state.cursor.visible = false;
+    let hidden_png = render_png(&hidden_state).expect("render hidden cursor PNG");
+    let hidden_pixmap = Pixmap::decode_png(&hidden_png).expect("decode hidden cursor PNG");
+
+    let png_by_style: std::collections::BTreeMap<_, _> = [
         ("bar", CursorStyle::Bar),
         ("block", CursorStyle::Block),
         ("underline", CursorStyle::Underline),
         ("hollow-block", CursorStyle::HollowBlock),
-    ] {
+    ]
+    .into_iter()
+    .map(|(name, style)| {
         let mut state = quality_corpus();
         state.cursor.style = style;
         let svg = render_svg(&state).expect("render quality corpus SVG");
         let png = render_png(&state).expect("render quality corpus PNG");
         let svg_text = str::from_utf8(&svg).expect("quality corpus SVG is UTF-8");
-        assert_decoration_geometry(svg_text);
-        assert_cursor_geometry(svg_text, style);
+        let pixmap = Pixmap::decode_png(&png).expect("decode quality corpus PNG");
+        assert_decoration_geometry(svg_text, &pixmap);
+        assert_cursor_geometry(&pixmap, &hidden_pixmap, style);
         assert!(!svg.is_empty());
-        assert!(!png.is_empty());
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(png.len() > 1_000);
         if let Some(directory) = output.as_deref() {
             fs::write(Path::new(directory).join(format!("{name}.svg")), svg)
                 .expect("write quality corpus SVG reference");
-            fs::write(Path::new(directory).join(format!("{name}.png")), png)
+            fs::write(Path::new(directory).join(format!("{name}.png")), &png)
                 .expect("write quality corpus PNG reference");
         }
-    }
+        (name, png)
+    })
+    .collect();
+    assert_ne!(png_by_style["bar"], png_by_style["block"]);
+    assert_ne!(png_by_style["block"], png_by_style["underline"]);
+    assert_ne!(png_by_style["underline"], png_by_style["hollow-block"]);
 }
 
 #[test]
@@ -143,11 +179,28 @@ fn cursor_visibility_and_wide_tail_are_composed_from_terminal_state() {
     wide_tail.cursor.wide_tail = Some(true);
     let wide_svg = render_svg(&wide_tail).expect("render wide-tail cursor SVG");
     let wide_svg = str::from_utf8(&wide_svg).expect("wide-tail SVG is UTF-8");
-    let x = u32::from(lead_column) * 12;
-    assert!(wide_svg.contains(&format!(
-        "<rect x=\"{x}\" y=\"96\" width=\"24\" height=\"24\""
-    )));
-    assert!(wide_svg.contains(&format!("<text x=\"{x}\" y=\"116\" fill=\"#000000\"")));
+    assert!(wide_svg.contains("界"));
+
+    let wide_png = render_png(&wide_tail).expect("render wide-tail cursor PNG");
+    let wide_pixmap = Pixmap::decode_png(&wide_png).expect("decode wide-tail PNG");
+    let mut hidden_wide = wide_tail.clone();
+    hidden_wide.cursor.visible = false;
+    let hidden_wide_png = render_png(&hidden_wide).expect("render hidden wide PNG");
+    let hidden_wide_pixmap = Pixmap::decode_png(&hidden_wide_png).expect("decode hidden wide PNG");
+
+    let x_lead = u32::from(lead_column) * 12;
+    let x_tail = x_lead + 12;
+    let y = u32::from(row) * 24;
+    assert_ne!(
+        wide_pixmap.pixel(x_lead + 6, y + 12),
+        hidden_wide_pixmap.pixel(x_lead + 6, y + 12),
+        "wide-tail block cursor should modify lead cell"
+    );
+    assert_ne!(
+        wide_pixmap.pixel(x_tail + 6, y + 12),
+        hidden_wide_pixmap.pixel(x_tail + 6, y + 12),
+        "wide-tail block cursor should modify tail cell"
+    );
 }
 
 #[test]

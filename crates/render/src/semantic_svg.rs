@@ -367,11 +367,15 @@ fn write_font_faces(svg: &mut String, font_set: &SemanticFontSet) {
     svg.push_str("<style>");
     for resource in font_set.resources() {
         let role = resource.role;
-        let font = STANDARD.encode(font_set.face_bytes(role));
         let (family, weight, style) = font_attributes(role, true);
         let _ = write!(
             svg,
-            "@font-face{{font-family:'{family}';src:url(data:font/ttf;base64,{font}) format('truetype');font-weight:{weight};font-style:{style}}}"
+            "@font-face{{font-family:'{family}';src:url(data:font/ttf;base64,"
+        );
+        STANDARD.encode_string(font_set.face_bytes(role), svg);
+        let _ = write!(
+            svg,
+            ") format('truetype');font-weight:{weight};font-style:{style}}}"
         );
     }
     svg.push_str("</style>\n");
@@ -452,17 +456,39 @@ fn resolve_color(spec: ColorSpec, default: Rgb, palette: &[Rgb]) -> Rgb {
     }
 }
 
-fn color_hex(color: Rgb) -> String {
-    return format!("#{:02x}{:02x}{:02x}", color.r, color.g, color.b);
+#[derive(Clone, Copy)]
+struct HexColor(Rgb);
+
+impl std::fmt::Display for HexColor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        return write!(f, "#{:02x}{:02x}{:02x}", self.0.r, self.0.g, self.0.b);
+    }
 }
 
-fn escape_xml(value: &str) -> String {
-    return value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;");
+fn color_hex(color: Rgb) -> HexColor {
+    return HexColor(color);
+}
+
+struct EscapedXml<'a>(&'a str);
+
+impl std::fmt::Display for EscapedXml<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for ch in self.0.chars() {
+            match ch {
+                '&' => f.write_str("&amp;")?,
+                '<' => f.write_str("&lt;")?,
+                '>' => f.write_str("&gt;")?,
+                '"' => f.write_str("&quot;")?,
+                '\'' => f.write_str("&apos;")?,
+                _ => f.write_char(ch)?,
+            }
+        }
+        return Ok(());
+    }
+}
+
+fn escape_xml(value: &str) -> EscapedXml<'_> {
+    return EscapedXml(value);
 }
 
 #[cfg(test)]
@@ -546,11 +572,28 @@ mod tests {
     }
     #[test]
     fn semantic_layout_constants_match_bundled_font_metrics() {
-        assert_eq!((SEMANTIC_FONT_SIZE, SEMANTIC_TEXT_BASELINE), (20, 20));
-        assert_eq!(
-            (SEMANTIC_SYMBOLS_FONT_SIZE, SEMANTIC_SYMBOLS_BASELINE),
-            (12, 16)
-        );
+        let font_set = semantic_font_set().expect("load font set");
+        let regular =
+            ttf_parser::Face::parse(font_set.regular_face_bytes(), 0).expect("parse regular font");
+        let advance = regular
+            .glyph_index('A')
+            .and_then(|g| regular.glyph_hor_advance(g))
+            .expect("glyph advance");
+        let scaled_advance = (f32::from(advance) * (SEMANTIC_FONT_SIZE as f32)
+            / f32::from(regular.units_per_em()))
+        .round() as u16;
+        assert_eq!(scaled_advance, SEMANTIC_CELL_WIDTH);
+
+        let symbols = ttf_parser::Face::parse(
+            font_set.face_bytes(termtrace_model::artifact::save::SemanticFontRole::SymbolsFallback),
+            0,
+        )
+        .expect("parse symbols font");
+        let symbols_height = (f32::from(symbols.ascender() - symbols.descender())
+            * (SEMANTIC_SYMBOLS_FONT_SIZE as f32)
+            / f32::from(symbols.units_per_em()))
+        .round() as u16;
+        assert!(symbols_height <= SEMANTIC_CELL_HEIGHT);
     }
     #[test]
     fn terminal_graphics_require_one_scalar_in_a_terminal_graphics_range() {

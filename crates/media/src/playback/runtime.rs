@@ -1,8 +1,6 @@
 use std::{
     collections::HashMap,
-    fs::OpenOptions,
-    io::{self, Write as _},
-    os::unix::fs::OpenOptionsExt as _,
+    io,
     path::{Path, PathBuf},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -348,26 +346,7 @@ fn write_create_new_json(path: &Path, value: &impl serde::Serialize) -> Result<(
     return write_create_new(path, &encoded);
 }
 fn write_create_new(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|source| {
-            return Error::Filesystem {
-                path: path.to_path_buf(),
-                source,
-            };
-        })?;
-    return file
-        .write_all(bytes)
-        .and_then(|()| return file.sync_data())
-        .map_err(|source| {
-            return Error::Filesystem {
-                path: path.to_path_buf(),
-                source,
-            };
-        });
+    termtrace_evidence::artifact::write_secure(path, bytes).map_err(Error::from)
 }
 fn output_error(source: io::Error) -> Error {
     return Error::Filesystem {
