@@ -15,6 +15,8 @@ pub use secure_fs::{
     commit_directory, create_private_directory, finish_writer, secure_file, secure_writer,
     sync_directory, write_secure,
 };
+#[cfg(test)]
+pub(crate) use verification::ArtifactMemberEnvelope;
 pub use verification::{
     collect_artifact_members, hash_regular_file, verify_artifact_members, verify_session_artifacts,
 };

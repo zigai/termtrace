@@ -26,7 +26,7 @@ use crate::{
 
 use super::{
     io::{manifest_hash, read_completion, read_manifest},
-    validation::{validate_completed_log, validate_completion_format, validate_manifest},
+    validation::{validate_completion_format, validate_completion_with_loaded, validate_manifest},
 };
 
 /// Verify a session at the requested integrity level without a signer trust policy.
@@ -125,7 +125,13 @@ pub fn verify_session_with_trust(
         report.valid = true;
         return report;
     }
-    if let Err(error) = validate_completed_log(session_directory, &log) {
+    if let Err(error) = validate_completion_with_loaded(
+        session_directory,
+        &log,
+        &manifest,
+        &manifest_bytes,
+        &completion,
+    ) {
         let code = content_finding_code(&error);
         finding(&mut report, code, error.to_string());
         return report;

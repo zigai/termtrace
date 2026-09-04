@@ -58,12 +58,12 @@ fn session_artifact_verification_binds_manifest_source_event_hash() {
     create_private_directory(&artifact).expect("artifact directory");
     write_secure(&artifact.join("final.txt"), b"state").expect("artifact member");
     let members = collect_artifact_members(&artifact).expect("collect members");
-    let manifest_bytes = serde_json::to_vec(&serde_json::json!({
-        "members": members,
-        "source_event_hash": "wrong-source",
-        "source_range": null
-    }))
-    .expect("manifest JSON");
+    let manifest = ArtifactMemberEnvelope {
+        members,
+        source_event_hash: Some("wrong-source".to_owned()),
+        source_range: None,
+    };
+    let manifest_bytes = serde_json::to_vec(&manifest).expect("manifest JSON");
     write_secure(&artifact.join("manifest.json"), &manifest_bytes).expect("artifact manifest");
     append_artifact_root(
         &session,
@@ -78,7 +78,7 @@ fn session_artifact_verification_binds_manifest_source_event_hash() {
 
     let error = verify_session_artifacts(&session, "session-manifest", Some("canonical-source"))
         .expect_err("manifest source event hash must bind its catalog");
-    assert!(error.to_string().contains("source event hash"));
+    assert!(matches!(error, Error::InvalidEvidence { .. }));
 }
 
 #[test]

@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     fs::{File, OpenOptions},
     io::{BufRead as _, BufReader, BufWriter, Write as _},
-    os::unix::fs::{FileTypeExt as _, OpenOptionsExt as _},
+    os::unix::fs::OpenOptionsExt as _,
     path::{Path, PathBuf},
 };
 
@@ -263,14 +263,7 @@ pub fn read_mutation_journal(path: &Path) -> Result<Vec<MutationJournalRecord>> 
     let metadata =
         fs_err::symlink_metadata(path).map_err(|source| return Error::filesystem(path, source))?;
     let file_type = metadata.file_type();
-    if file_type.is_dir()
-        || file_type.is_symlink()
-        || file_type.is_block_device()
-        || file_type.is_char_device()
-        || file_type.is_fifo()
-        || file_type.is_socket()
-        || metadata.len() > MAX_MUTATION_JOURNAL_BYTES
-    {
+    if !file_type.is_file() || metadata.len() > MAX_MUTATION_JOURNAL_BYTES {
         return Err(Error::invalid(
             "mutation journal is not a bounded regular file",
         ));

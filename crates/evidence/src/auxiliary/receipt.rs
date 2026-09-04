@@ -3,7 +3,7 @@ use std::{
     ffi::{OsStr, OsString},
     fs::{OpenOptions, Permissions},
     io::{ErrorKind, Write as _},
-    os::unix::fs::{FileTypeExt as _, OpenOptionsExt as _, PermissionsExt as _},
+    os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{SystemTime, UNIX_EPOCH},
@@ -144,7 +144,7 @@ fn sign_ssh_receipt(
     receipt_path: &Path,
     payload: EvidenceReceiptPayload,
     key: &Path,
-) -> Result<EvidenceReceipt> {
+) -> Result<()> {
     validate_payload(&payload)?;
     if receipt_path.exists() {
         return Err(Error::DestinationExists {
@@ -214,7 +214,7 @@ fn sign_ssh_receipt(
     })?;
     write_temporary(receipt_path, &bytes)?;
     sync_parent(receipt_path)?;
-    return Ok(receipt);
+    return Ok(());
 }
 
 /// Read and validate a bounded evidence receipt.
@@ -227,14 +227,7 @@ pub fn read_receipt(receipt_path: &Path) -> Result<EvidenceReceipt> {
     let metadata = fs_err::symlink_metadata(receipt_path)
         .map_err(|source| return Error::filesystem(receipt_path, source))?;
     let file_type = metadata.file_type();
-    if file_type.is_dir()
-        || file_type.is_symlink()
-        || file_type.is_block_device()
-        || file_type.is_char_device()
-        || file_type.is_fifo()
-        || file_type.is_socket()
-        || metadata.len() > MAX_RECEIPT_BYTES
-    {
+    if !file_type.is_file() || metadata.len() > MAX_RECEIPT_BYTES {
         return Err(Error::invalid("receipt is not a bounded regular file"));
     }
     let bytes = fs_err::read(receipt_path)
@@ -270,7 +263,14 @@ pub fn verify_ssh_receipt(
         ));
     }
     let signed_bytes = signed_payload_bytes(&receipt.payload)?;
-    let temporary_directory = VerificationDirectory::create()?;
+    let temporary_directory = tempfile::Builder::new()
+        .prefix("termtrace-receipt-")
+        .permissions(Permissions::from_mode(0o700))
+        .tempdir()
+        .map_err(|source| Error::Filesystem {
+            path: env::temp_dir(),
+            source,
+        })?;
     let signature_path = temporary_directory.path().join("receipt.sig");
     write_temporary(&signature_path, receipt.signature.value.as_bytes())?;
     let cryptographic_valid = run_ssh_verification(
@@ -375,32 +375,6 @@ fn run_ssh_verification(
         return Err(command_error("write verifier payload", error.to_string()));
     }
     return Ok(status.success());
-}
-
-struct VerificationDirectory {
-    path: PathBuf,
-}
-
-impl VerificationDirectory {
-    fn create() -> Result<Self> {
-        let path = env::temp_dir().join(format!("termtrace-receipt-{}", Uuid::now_v7()));
-        fs_err::create_dir(&path).map_err(|source| return Error::filesystem(&path, source))?;
-        if let Err(source) = fs_err::set_permissions(&path, Permissions::from_mode(0o700)) {
-            let _ = fs_err::remove_dir(&path);
-            return Err(Error::filesystem(path, source));
-        }
-        return Ok(Self { path });
-    }
-
-    fn path(&self) -> &Path {
-        return &self.path;
-    }
-}
-
-impl Drop for VerificationDirectory {
-    fn drop(&mut self) {
-        let _ = fs_err::remove_dir_all(&self.path);
-    }
 }
 
 fn write_temporary(path: &Path, bytes: &[u8]) -> Result<()> {

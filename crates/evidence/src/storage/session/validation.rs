@@ -75,13 +75,29 @@ pub fn validate_completion_candidate(
     })?;
     let manifest = read_manifest(session_directory)?;
     validate_manifest(&manifest)?;
-    if canonical_manifest_bytes(&manifest)? != manifest_bytes {
+    validate_completion_format(completion)?;
+    return validate_completion_with_loaded(
+        session_directory,
+        log,
+        &manifest,
+        &manifest_bytes,
+        completion,
+    );
+}
+
+pub(super) fn validate_completion_with_loaded(
+    session_directory: &Path,
+    log: &EventLog,
+    manifest: &SessionManifest,
+    manifest_bytes: &[u8],
+    completion: &SessionCompletion,
+) -> Result<()> {
+    if canonical_manifest_bytes(manifest)? != manifest_bytes {
         return Err(invalid(
             "session manifest bytes are not in the canonical serialization",
         ));
     }
-    validate_replay_profile_file(session_directory, &manifest)?;
-    validate_completion_format(completion)?;
+    validate_replay_profile_file(session_directory, manifest)?;
     let final_event_hash = log.events.last().map(|record| return record.hash.as_str());
     let event_count = u64::try_from(log.events.len()).unwrap_or(u64::MAX);
     let actual_manifest_hash = manifest_hash(&manifest_bytes);

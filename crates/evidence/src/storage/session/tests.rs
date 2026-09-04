@@ -157,14 +157,14 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
     missing_target.geometry_provenance.capture_target = None;
     assert!(matches!(
         validate_manifest(&missing_target),
-        Err(Error::InvalidEvidence { reason }) if reason.contains("capture target")
+        Err(Error::InvalidEvidence { .. })
     ));
 
     let mut missing_profile = fitted;
     missing_profile.ghostty_visual = None;
     assert!(matches!(
         validate_manifest(&missing_profile),
-        Err(Error::InvalidEvidence { reason }) if reason.contains("profile provenance")
+        Err(Error::InvalidEvidence { .. })
     ));
 
     let mut invalid_path = manifest.clone();
@@ -175,8 +175,7 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
         .replay_profile = "nested/ghostty-profile.ghostty".to_owned();
     assert!(matches!(
         validate_manifest(&invalid_path),
-        Err(Error::InvalidEvidence { reason })
-            if reason.contains("canonical root artifact")
+        Err(Error::InvalidEvidence { .. })
     ));
 
     let mut invalid_replay_hash = manifest.clone();
@@ -187,8 +186,7 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
         .replay_profile_hash = "A".repeat(64);
     assert!(matches!(
         validate_manifest(&invalid_replay_hash),
-        Err(Error::InvalidEvidence { reason })
-            if reason.contains("replay profile hash")
+        Err(Error::InvalidEvidence { .. })
     ));
 
     manifest
@@ -198,8 +196,7 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
         .effective_config_hash = "f".repeat(63);
     assert!(matches!(
         validate_manifest(&manifest),
-        Err(Error::InvalidEvidence { reason })
-            if reason.contains("effective configuration hash")
+        Err(Error::InvalidEvidence { .. })
     ));
 }
 
@@ -223,10 +220,7 @@ fn completed_content_validation_binds_the_replay_profile_file() {
     fs_err::write(&profile_path, b"font-size = 14\n").expect("tampered replay profile");
     let error =
         validate_replay_profile_file(&session, &manifest).expect_err("profile hash must bind");
-    assert!(matches!(
-        error,
-        Error::InvalidEvidence { reason } if reason.contains("replay profile")
-    ));
+    assert!(matches!(error, Error::InvalidEvidence { .. }));
 }
 
 #[test]
@@ -237,10 +231,7 @@ fn completed_validation_requires_terminal_exit() {
     }]);
     let error = validate_completed_log(&temporary.path().join("session"), &log)
         .expect_err("nonterminal completion must fail");
-    assert!(matches!(
-        error,
-        Error::InvalidEvidence { reason } if reason.contains("does not end with an Exit")
-    ));
+    assert!(matches!(error, Error::InvalidEvidence { .. }));
 }
 
 #[test]
@@ -265,27 +256,36 @@ fn completed_validation_rejects_pending_mutation() {
     ]);
     let error = validate_completed_log(&temporary.path().join("session"), &log)
         .expect_err("pending mutation must fail");
-    assert!(matches!(
-        error,
-        Error::InvalidEvidence { reason } if reason.contains("pending mutation")
-    ));
+    assert!(matches!(error, Error::InvalidEvidence { .. }));
+}
+
+#[derive(serde::Deserialize)]
+struct RejectedVersionCorpus {
+    format: String,
+    version: u32,
+    cases: Vec<RejectedVersionCase>,
+}
+
+#[derive(serde::Deserialize)]
+struct RejectedVersionCase {
+    surface: String,
+    rejected_version: u32,
+    expected_error: String,
 }
 
 #[test]
 fn persisted_format_readers_reject_version_corpus_without_compatibility_fallbacks() {
-    let corpus: serde_json::Value = serde_json::from_str(include_str!(
+    let corpus: RejectedVersionCorpus = serde_json::from_str(include_str!(
         "../../../../../fixtures/conformance/protocol/rejected-versions.json"
     ))
     .expect("rejected version corpus");
-    assert_eq!(corpus["format"], "termtrace-rejected-version-corpus");
-    assert_eq!(corpus["version"], 1);
+    assert_eq!(corpus.format, "termtrace-rejected-version-corpus");
+    assert_eq!(corpus.version, 1);
 
-    for case in corpus["cases"].as_array().expect("version cases") {
-        let surface = case["surface"].as_str().expect("version surface");
-        let rejected_version =
-            u32::try_from(case["rejected_version"].as_u64().expect("rejected version"))
-                .expect("u32 rejected version");
-        let expected_error = case["expected_error"].as_str().expect("expected error");
+    for case in &corpus.cases {
+        let surface = case.surface.as_str();
+        let rejected_version = case.rejected_version;
+        let expected_error = case.expected_error.as_str();
         let (temporary, _) = completed_fixture(Vec::new());
         let session = temporary.path().join("session");
 

@@ -3,9 +3,10 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     fs::File,
-    io::{BufReader, Read as _},
-    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
-    os::unix::fs::{MetadataExt as _, PermissionsExt as _},
+    os::unix::{
+        ffi::{OsStrExt as _, OsStringExt as _},
+        fs::PermissionsExt as _,
+    },
     path::{Path, PathBuf},
 };
 
@@ -193,7 +194,7 @@ fn resolve_executable(
 
 fn canonical_executable(path: PathBuf) -> Option<PathBuf> {
     let metadata = path.metadata().ok()?;
-    if metadata.mode() & 0o170_000 != 0o100_000 || metadata.permissions().mode() & 0o111 == 0 {
+    if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
         return None;
     }
     return path.canonicalize().ok();
@@ -224,24 +225,16 @@ fn discover_invoked_file(
     } else {
         working_directory.join(path)
     };
-    if candidate.metadata().ok()?.mode() & 0o170_000 != 0o100_000 {
+    if !candidate.metadata().ok()?.is_file() {
         return None;
     }
     return Some((argument.clone(), candidate.canonicalize().ok()?));
 }
 
 fn hash_file(path: &Path) -> Option<String> {
-    let file = File::open(path).ok()?;
-    let mut reader = BufReader::new(file);
+    let mut file = File::open(path).ok()?;
     let mut hasher = blake3::Hasher::new();
-    let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
-    loop {
-        let count = reader.read(&mut buffer).ok()?;
-        if count == 0 {
-            break;
-        }
-        hasher.update(buffer.get(..count)?);
-    }
+    hasher.update_reader(&mut file).ok()?;
     return Some(hasher.finalize().to_hex().to_string());
 }
 

@@ -16,9 +16,9 @@ tar_archive = { package = "tar", version = "0.4.46" }
 zstd = "0.13.3"
 uuid = { version = "1.18.1", features = ["serde", "v7"] }
 termtrace-model = { path = "../model" }
+tempfile = "3.23.0"
 
 [dev-dependencies]
-tempfile = "3.23.0"
 proptest = "1.11.0"
 
 [lints]

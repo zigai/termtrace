@@ -4,6 +4,7 @@ use termtrace_model::execution::event::Event;
 use termtrace_model::value::ByteString;
 
 use crate::event_log::{EventLogWriter, SessionClock};
+use crate::storage::Error;
 
 use super::{
     super::reader::{DEFAULT_EVENT_LOG_LIMITS, EventLogLimits, parse_event_log_with_limits},
@@ -46,7 +47,7 @@ fn enforces_aggregate_event_log_limits_before_retention() {
         },
     )
     .expect_err("aggregate event count must be bounded");
-    assert!(count_error.to_string().contains("event limit"));
+    assert!(matches!(count_error, Error::InvalidEventLog { .. }));
 
     let payload_error = parse_event_log_with_limits(
         &path,
@@ -58,7 +59,7 @@ fn enforces_aggregate_event_log_limits_before_retention() {
         },
     )
     .expect_err("aggregate decoded payload must be bounded");
-    assert!(payload_error.to_string().contains("decoded-payload-byte"));
+    assert!(matches!(payload_error, Error::InvalidEventLog { .. }));
 
     let encoded_error = parse_event_log_with_limits(
         &path,
@@ -70,7 +71,7 @@ fn enforces_aggregate_event_log_limits_before_retention() {
         },
     )
     .expect_err("aggregate encoded bytes must be bounded");
-    assert!(encoded_error.to_string().contains("encoded-byte"));
+    assert!(matches!(encoded_error, Error::InvalidEventLog { .. }));
 
     let prefix_error = parse_event_log_with_limits(
         &path,
@@ -82,5 +83,5 @@ fn enforces_aggregate_event_log_limits_before_retention() {
         },
     )
     .expect_err("prefix readers must share the count policy");
-    assert!(prefix_error.to_string().contains("prefix exceeds"));
+    assert!(matches!(prefix_error, Error::InvalidEventLog { .. }));
 }

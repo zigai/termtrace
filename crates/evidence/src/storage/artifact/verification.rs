@@ -1,7 +1,6 @@
 use std::{
     collections::BTreeSet,
     fs::{self, File},
-    io::Read as _,
     path::{Component, Path, PathBuf},
     thread,
 };
@@ -10,7 +9,7 @@ use nix::{
     fcntl::OFlag,
     sys::stat::{Mode, SFlag, fstat},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use termtrace_model::artifact::metadata::{
     ArtifactMember, ArtifactSensitivity, ArtifactSourceRange,
 };
@@ -22,11 +21,11 @@ use super::{
     secure_fs::{nix_filesystem, open_file_at, open_parent_directory, safe_file_name},
 };
 
-#[derive(Deserialize)]
-struct ArtifactMemberEnvelope {
-    members: Vec<ArtifactMember>,
-    source_event_hash: Option<String>,
-    source_range: Option<ArtifactSourceRange>,
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct ArtifactMemberEnvelope {
+    pub(crate) members: Vec<ArtifactMember>,
+    pub(crate) source_event_hash: Option<String>,
+    pub(crate) source_range: Option<ArtifactSourceRange>,
 }
 
 /// Inventory all regular payload files below an artifact directory.
@@ -281,28 +280,15 @@ pub(super) fn normalized_relative_path(path: &Path) -> Result<String> {
 ///
 /// Returns an error when the path is not a readable regular file.
 pub fn hash_regular_file(path: &Path) -> Result<(u64, String)> {
-    let (mut file, _) = open_regular_file_nofollow(path)?;
+    let (mut file, size) = open_regular_file_nofollow(path)?;
     let mut hasher = blake3::Hasher::new();
-    let mut byte_length = 0_u64;
-    let mut buffer = [0_u8; 16 * 1024];
-    loop {
-        let read = file.read(&mut buffer).map_err(|source| {
-            return Error::Filesystem {
-                path: path.to_path_buf(),
-                source,
-            };
+    hasher
+        .update_reader(&mut file)
+        .map_err(|source| Error::Filesystem {
+            path: path.to_path_buf(),
+            source,
         })?;
-        if read == 0 {
-            break;
-        }
-        byte_length = byte_length
-            .checked_add(u64::try_from(read).unwrap_or(u64::MAX))
-            .ok_or_else(|| return invalid_artifact("artifact member byte length overflow"))?;
-        hasher.update(buffer.get(..read).ok_or_else(|| {
-            return invalid_artifact("artifact hashing buffer bounds are invalid");
-        })?);
-    }
-    return Ok((byte_length, hasher.finalize().to_hex().to_string()));
+    return Ok((size, hasher.finalize().to_hex().to_string()));
 }
 
 fn open_regular_file_nofollow(path: &Path) -> Result<(File, u64)> {
