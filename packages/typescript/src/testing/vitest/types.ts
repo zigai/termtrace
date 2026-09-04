@@ -106,8 +106,6 @@ export type TerminalTestApi = TestAPI<TerminalTestFixtures>;
 export type TerminalLaunchOptions = Omit<LaunchOptions, "evidenceRoot">;
 
 export type FailureArtifactOptions = {
-    readonly snapshotProfile?: SnapshotProfile;
-    readonly snapshotOptions?: SnapshotOptions;
     readonly bundleProfile?: "screen" | "debug" | "forensic";
     readonly maxScreenshotBytes?: number;
     readonly maxBundleBytes?: number;

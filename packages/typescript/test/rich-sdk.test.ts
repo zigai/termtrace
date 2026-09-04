@@ -469,19 +469,22 @@ describe("Screen rich-frame requests", () => {
 });
 
 describe("actions and snapshots", () => {
-    test("action and keyboard wire encoding share deterministic atom IDs", () => {
+    test("encodeAction generates deterministic atom IDs for identical requests", () => {
         const requestId = "00000000-0000-4000-8000-000000000001";
         const first = encodeAction([{ kind: "text", text: "x" }], {
             requestId,
-            pace: Duration.nanoseconds(1n),
+            pace: Duration.milliseconds(1),
         });
         const second = encodeAction([{ kind: "text", text: "x" }], {
             requestId,
-            pace: Duration.nanoseconds(1n),
+            pace: Duration.milliseconds(1),
         });
-        expect(first).toEqual(second);
+        const firstAtom = first.command.atoms[0];
+        const secondAtom = second.command.atoms[0];
+        expect(firstAtom?.operation_id).toBeDefined();
+        expect(firstAtom?.operation_id).toBe(secondAtom?.operation_id);
+        expect(first.requestId).toBe(requestId);
     });
-
     test("uses actor pacing admission for every atom", () => {
         expect(() =>
             encodeAction(

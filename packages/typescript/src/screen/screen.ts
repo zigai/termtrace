@@ -1,8 +1,8 @@
 import { Duration } from "../session/actions.js";
 import type { IdleWaitOptions, WaitOptions } from "../session/session.js";
 import { InvalidDurationError, StableCaptureIncompleteError } from "../errors.js";
-import { Locator, locatorByText, locatorFor } from "./locator.js";
-import type { LocatorSpec, StyleFilter, TextQuery } from "./queries.js";
+import { Locator } from "./locator.js";
+import { textQuery, type LocatorSpec, type StyleFilter, type TextQuery } from "./queries.js";
 import {
     encodeFrameRequest,
     parseScreenFrame,
@@ -107,17 +107,16 @@ export class Screen {
     }
 
     locator(spec: LocatorSpec): Locator {
-        return locatorFor((request, options) => this.frame(request, options), spec);
+        return new Locator((request, options) => this.frame(request, options), spec);
     }
 
     getByText(
         query: TextQuery,
         options: { readonly exact?: boolean; readonly crossSoftWrap?: boolean } = {},
     ): Locator {
-        return locatorByText(
+        return new Locator(
             (request, captureOptions) => this.frame(request, captureOptions),
-            query,
-            options,
+            textQuery(query, options),
         );
     }
 

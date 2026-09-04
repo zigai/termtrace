@@ -13,11 +13,9 @@ import {
     regionQuery,
     rowQuery,
     styleQuery,
-    textQuery,
     type LocatorSpec,
     type ScreenMatch,
     type StyleFilter,
-    type TextQuery,
 } from "./queries.js";
 import type { FrameRequest, Region, ScreenFrame } from "./frame.js";
 
@@ -170,17 +168,6 @@ export class Locator {
         const frame = await this.capture(frameRequest(this.spec));
         return Object.freeze({ frame, matches: evaluateQuery(frame, this.spec) });
     }
-}
-
-export function locatorByText(
-    capture: FrameCapture,
-    query: TextQuery,
-    options: { readonly exact?: boolean; readonly crossSoftWrap?: boolean } = {},
-): Locator {
-    return new Locator(capture, textQuery(query, options));
-}
-export function locatorFor(capture: FrameCapture, spec: LocatorSpec): Locator {
-    return new Locator(capture, spec);
 }
 
 function frameRequest(spec: LocatorSpec): FrameRequest {

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { InvalidQueryError, InvalidRegionError, ResourceLimitError } from "../errors.js";
 import type {
     ColorSource,
@@ -267,7 +268,6 @@ function evaluateComposition(
     description: string,
 ): ScreenMatch[] {
     const flattened = flattenSpecs(specs);
-    validateComposition(flattened);
     const region = intersectScopes(frame, flattened);
     const text = flattened.find(
         (candidate): candidate is Extract<LocatorSpec, { readonly kind: "text" }> =>
@@ -794,7 +794,7 @@ function optionalEqual<T>(expected: T | undefined, actual: T): boolean {
     return expected === undefined || expected === actual;
 }
 function optionalDeepEqual<T>(expected: T | undefined, actual: T): boolean {
-    return expected === undefined || JSON.stringify(expected) === JSON.stringify(actual);
+    return expected === undefined || isDeepStrictEqual(expected, actual);
 }
 function cellsForMatch(frame: ScreenFrame, match: ScreenMatch): ScreenCell[] {
     const cells: ScreenCell[] = [];

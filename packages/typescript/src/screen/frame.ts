@@ -213,7 +213,7 @@ export function parseScreenFrame(input: unknown): ScreenFrame {
         frame.frame_hash,
         frame.presented,
         frame.capture_quality,
-        parseSource(frame.source),
+        Object.freeze({ ...frame.source }),
         geometry,
         requestedRegion,
         returnedRegion,
@@ -392,10 +392,6 @@ function parseColors(value: WireScreenFrame["colors"]): ColorState {
         cursor: value.cursor === undefined || value.cursor === null ? null : rgb(value.cursor),
         palette: Object.freeze(value.palette.map(rgb)),
     });
-}
-
-function parseSource(value: WireScreenFrame["source"]): ScreenFrameSource {
-    return Object.freeze({ ...value });
 }
 
 function parseWireRegion(

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { Duration } from "../session/actions.js";
 import type { Session } from "../session/session.js";
 import { NoMatchError, MultipleMatchesError } from "../errors.js";
@@ -172,7 +173,7 @@ export async function assertTerminalSnapshot(
     expected: TerminalSnapshot,
 ): Promise<void> {
     const actual = await stableTerminalSnapshot(session);
-    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    if (!isDeepStrictEqual(actual, expected)) {
         throw new AssertionMismatchError(
             `terminal snapshot differs\nexpected: ${bounded(JSON.stringify(expected))}\nactual: ${bounded(JSON.stringify(actual))}`,
         );

@@ -1,8 +1,0 @@
-{
-  "name": "termtrace-root-consumer-fixture",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "@termtrace/test": "file:../../.."
-  }
-}

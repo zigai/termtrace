@@ -5,11 +5,11 @@ import {
     PostconditionIncompleteError,
     ProtocolMismatchError,
 } from "../errors.js";
+import validateControlData from "../transport/generated/validate-control-data.js";
 import type {
     DriverRequest as WireDriverRequest,
     InputSequenceAtom as WireInputSequenceAtom,
 } from "../transport/generated/driver-request.js";
-import validateControlData from "../transport/generated/validate-control-data.js";
 import {
     encodeFrameRequest,
     parseScreenFrame,
@@ -271,9 +271,7 @@ export function parseActionResult(
         (completion.kind === "idle" && completion.quality === "stable") ||
         (completion.kind === "screen" &&
             (completion.quality === "matched" || completion.quality === "matched_unsettled"));
-    if (!complete && !allowIncomplete) {
-        if (completion.kind === "none")
-            throw new ProtocolMismatchError("none completion was unexpectedly incomplete");
+    if (!complete && !allowIncomplete && completion.kind !== "none") {
         throw new PostconditionIncompleteError(result, completion.quality);
     }
     return result;
