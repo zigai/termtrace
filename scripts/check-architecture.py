@@ -113,14 +113,6 @@ def internal_edges(metadata: Metadata) -> tuple[set[str], set[tuple[str, str]]]:
     return workspace_packages, edges
 
 
-def expected_edges() -> set[tuple[str, str]]:
-    return {
-        (consumer, dependency)
-        for consumer, dependencies in EXPECTED_EDGES.items()
-        for dependency in dependencies
-    }
-
-
 def print_items(title: str, items: set[str] | set[tuple[str, str]]) -> None:
     if not items:
         return
@@ -141,7 +133,11 @@ def main() -> int:
 
     packages, actual = internal_edges(metadata)
     expected_packages = set(EXPECTED_EDGES)
-    expected = expected_edges()
+    expected = {
+        (consumer, dependency)
+        for consumer, dependencies in EXPECTED_EDGES.items()
+        for dependency in dependencies
+    }
     missing_packages = expected_packages - packages
     unexpected_packages = packages - expected_packages
     missing_edges = expected - actual
