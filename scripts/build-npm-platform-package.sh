@@ -17,7 +17,7 @@ case "$os/$arch" in
         ;;
 esac
 
-version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
+version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
 staging="packages/npm-staging/cli-$os-$arch"
 
 cleanup() {

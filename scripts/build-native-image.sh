@@ -13,7 +13,7 @@ if [[ ! "$base" =~ @sha256:[0-9a-f]{64}$ ]]; then
     exit 2
 fi
 
-version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
+version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
 revision=$(git rev-parse HEAD)
 docker build \
     --file packaging/native/Containerfile \
