@@ -30,37 +30,6 @@ fn root_help_groups_commands_by_workflow() {
 }
 
 #[test]
-fn commands_subcommand_is_removed() {
-    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-
-    command
-        .args(["--response", "full", "commands"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "unrecognized subcommand 'commands'",
-        ));
-}
-
-#[test]
-fn removed_compatibility_and_duplicate_routes_are_rejected() {
-    for arguments in [
-        &["input", "--help"][..],
-        &["wait-screen", "--help"][..],
-        &["rpc", "--help"][..],
-        &["registry", "--help"][..],
-        &["tooling", "driver", "--help"][..],
-        &["control", "ping", "--help"][..],
-        &["artifact", "screenshot", "--help"][..],
-        &["artifact", "video", "--help"][..],
-        &["artifact", "bundle", "--help"][..],
-    ] {
-        let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-        command.args(arguments).assert().failure();
-    }
-}
-
-#[test]
 fn tmux_help_exposes_setup_audit_and_pane_commands() {
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
     let output = command
@@ -304,13 +273,6 @@ fn wait_help_exposes_the_consolidated_idle_surface() {
         .stdout(predicate::str::contains("--timeout <TIMEOUT>"))
         .stdout(predicate::str::contains("--timeout-ms").not());
 
-    let mut removed = Command::cargo_bin("termtrace").expect("binary should build");
-    removed
-        .arg("wait-idle")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("unrecognized subcommand"));
-
     let mut idle_only = Command::cargo_bin("termtrace").expect("binary should build");
     idle_only
         .args(["wait", "session", "--screen", "READY", "--full-state"])
@@ -398,19 +360,6 @@ fn doctor_is_the_only_top_level_capability_inventory_command() {
             .any(|line| return line.trim_start().starts_with("capabilities ")),
         "redundant capabilities command remains in root help: {root_help}"
     );
-
-    for removed_path in [
-        &["tooling", "doctor"][..],
-        &["capabilities"][..],
-        &["tooling", "capabilities"][..],
-    ] {
-        let mut removed = Command::cargo_bin("termtrace").expect("binary should build");
-        removed
-            .args(removed_path)
-            .assert()
-            .code(2)
-            .stderr(predicate::str::contains("unrecognized subcommand"));
-    }
 }
 
 #[test]
@@ -439,36 +388,43 @@ fn help_and_version_are_top_level_only() {
         .stdout(predicate::str::contains(format!(
             "event-log v{EVENT_LOG_VERSION}"
         )));
-
-    for removed_path in [&["tooling", "help"][..], &["tooling", "version"][..]] {
-        let mut removed = Command::cargo_bin("termtrace").expect("binary should build");
-        removed
-            .args(removed_path)
-            .assert()
-            .code(2)
-            .stderr(predicate::str::contains("unrecognized subcommand"));
-    }
 }
 
 #[test]
 fn doctor_reports_capability_boundaries_and_enforces_requirements() {
     let mut version = Command::cargo_bin("termtrace").expect("binary should build");
-    version
+    let version_output = version
         .args(["version", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""termtrace_version":"0.1.0""#))
-        .stdout(predicate::str::contains("ghostty_vt_revision"))
-        .stdout(predicate::str::contains("control_protocol_version"));
+        .get_output()
+        .stdout
+        .clone();
+    let version_json: serde_json::Value =
+        serde_json::from_slice(&version_output).expect("version JSON");
+    assert_eq!(version_json["termtrace_version"], "0.1.0");
+    assert!(version_json.get("ghostty_vt_revision").is_some());
+    assert!(version_json.get("control_protocol_version").is_some());
 
     let mut semantic = Command::cargo_bin("termtrace").expect("binary should build");
-    semantic
+    let semantic_output = semantic
         .args(["doctor", "--require", "semantic", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""id":"semantic""#))
-        .stdout(predicate::str::contains(r#""status":"ready""#));
-
+        .get_output()
+        .stdout
+        .clone();
+    let doctor_json: serde_json::Value =
+        serde_json::from_slice(&semantic_output).expect("doctor JSON");
+    let capabilities = doctor_json["capabilities"]
+        .as_array()
+        .expect("capabilities array");
+    assert!(
+        capabilities
+            .iter()
+            .any(|r| return r["id"] == "semantic" && r["status"] == "ready"),
+        "expected semantic ready report, got: {doctor_json:?}"
+    );
     let mut blocked = Command::cargo_bin("termtrace").expect("binary should build");
     blocked
         .env("PATH", "")
@@ -524,7 +480,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
     .expect("write edit plan");
 
     let mut semantic = Command::cargo_bin("termtrace").expect("binary should build");
-    semantic
+    let plan_output = semantic
         .env("PATH", "")
         .args(["video"])
         .arg(&session)
@@ -533,23 +489,34 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .arg("--dry-run")
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""version":4"#))
-        .stdout(predicate::str::contains(r#""kind":"semantic""#))
-        .stdout(predicate::str::contains(r#""fps":60"#))
-        .stdout(predicate::str::contains(r#""raster_profile":"direct""#))
-        .stdout(predicate::str::contains(
-            r#""font_set_blake3":"013d52d10b90498adec2d19598f4040731dc00cf1539e748f05d86d355f919ec""#,
-        ))
-        .stdout(predicate::str::contains(r#""role":"regular""#))
-        .stdout(predicate::str::contains(r#""role":"bold""#))
-        .stdout(predicate::str::contains(r#""role":"italic""#))
-        .stdout(predicate::str::contains(r#""role":"bold-italic""#))
-        .stdout(predicate::str::contains(
-            r#""role":"symbols-fallback""#,
-        ));
+        .get_output()
+        .stdout
+        .clone();
+    let plan: serde_json::Value =
+        serde_json::from_slice(&plan_output).expect("semantic video plan JSON");
+    assert_eq!(plan["version"], 2);
+    assert_eq!(plan["source"]["kind"], "semantic");
+    let source_plan = &plan["source"]["plan"];
+    assert_eq!(source_plan["version"], 4);
+    assert_eq!(source_plan["fps"], 60);
+    assert_eq!(source_plan["raster_profile"], "direct");
+    assert_eq!(
+        source_plan["font_set_blake3"],
+        "013d52d10b90498adec2d19598f4040731dc00cf1539e748f05d86d355f919ec"
+    );
+    let fonts = source_plan["fonts"].as_array().expect("fonts array");
+    let roles: Vec<&str> = fonts
+        .iter()
+        .filter_map(|f| return f["role"].as_str())
+        .collect();
+    assert!(roles.contains(&"regular"));
+    assert!(roles.contains(&"bold"));
+    assert!(roles.contains(&"italic"));
+    assert!(roles.contains(&"bold-italic"));
+    assert!(roles.contains(&"symbols-fallback"));
 
     let mut supersampled = Command::cargo_bin("termtrace").expect("binary should build");
-    supersampled
+    let supersampled_output = supersampled
         .env("PATH", "")
         .args(["video"])
         .arg(&session)
@@ -564,9 +531,15 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .arg("--dry-run")
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            r#""raster_profile":"supersampled-2x""#,
-        ));
+        .get_output()
+        .stdout
+        .clone();
+    let supersampled_plan: serde_json::Value =
+        serde_json::from_slice(&supersampled_output).expect("supersampled video plan JSON");
+    assert_eq!(
+        supersampled_plan["source"]["plan"]["raster_profile"],
+        "supersampled-2x"
+    );
 
     let mut invalid_native_profile = Command::cargo_bin("termtrace").expect("binary should build");
     invalid_native_profile

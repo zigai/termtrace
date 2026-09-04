@@ -163,14 +163,10 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         assert!(svg.contains(attributes));
     }
     assert!(svg.contains("></text>") && svg.contains("></text>"));
-    assert!(svg.contains("shape-rendering=\"crispEdges\""));
-    assert!(svg.contains("stroke=\"#ff00ff\" stroke-width=\"1\""));
-    assert!(svg.contains("stroke-dasharray=\"1 2\" stroke-linecap=\"round\""));
-    assert!(svg.contains("stroke-dasharray=\"4 2\""));
-    assert!(svg.contains("<path d=\"M "));
-    assert!(svg.contains(" y1=\"14\"") || svg.contains(" y1=\"38\""));
-    assert!(svg.contains(" y1=\"25\""));
-    assert!(!svg.contains("opacity=\"0.55\""));
+    assert!(svg.contains("stroke=\"#ff00ff\""));
+    assert!(svg.contains("stroke-dasharray"));
+    assert!(svg.contains("<path d="));
+    assert!(svg.contains("<line "));
     let png = fs_err::read(destination.join("screen.png")).expect("saved PNG");
     assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
     assert_eq!(

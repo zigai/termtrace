@@ -151,7 +151,20 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
     let retry = session
         .act(&atoms, options)
         .expect_err("cached oversized action retry must retain its failure");
-    assert_eq!(retry.to_string(), error.to_string());
+    let Error::ActionTerminatingFrame {
+        request_id: retry_request_id,
+        retry_safety: retry_safety_retry,
+        source: ScreenFrameError::ResourceLimit {
+            limit: retry_limit, ..
+        },
+        ..
+    } = &retry
+    else {
+        panic!("unexpected retry action error: {retry:?}");
+    };
+    assert_eq!(retry_request_id, request_id);
+    assert_eq!(retry_safety_retry, retry_safety);
+    assert_eq!(retry_limit, limit);
     wait_for_output(session.path(), b"COUNT:1:once", Duration::from_secs(5))
         .expect("first action input reached the fixture");
     let frame = session

@@ -566,16 +566,33 @@ fn playback_does_not_echo_terminal_query_responses() {
     let mut child = pty.slave.spawn_command(command).expect("spawn playback");
     drop(pty.slave);
     let mut reader = pty.master.try_clone_reader().expect("clone PTY reader");
+    let (query_tx, query_rx) = std::sync::mpsc::channel();
     let reader_thread = thread::spawn(move || {
         let mut output = Vec::new();
-        let _ = reader.read_to_end(&mut output);
-        return output;
+        let mut buffer = [0_u8; 128];
+        let mut observed_query = false;
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(n) => {
+                    output.extend_from_slice(&buffer[..n]);
+                    if !observed_query && output.windows(query.len()).any(|w| w == query) {
+                        let _ = query_tx.send(());
+                        observed_query = true;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        output
     });
     let mut writer = pty.master.take_writer().expect("take PTY writer");
     writer
         .write_all(b"\x1b[4;432;720t\x1b[6;18;9t\x1b[8;24;80t")
         .expect("write geometry responses");
-    thread::sleep(Duration::from_millis(400));
+    query_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("wait for query to be emitted on PTY");
     writer
         .write_all(b"HOST-RESPONSE\n")
         .expect("write simulated host response");

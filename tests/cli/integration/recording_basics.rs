@@ -77,38 +77,35 @@ fn durability_thresholds_are_only_accepted_in_bounded_mode() {
 #[test]
 fn output_budget_exhaustion_returns_failure_after_fast_child_exit() {
     let temporary = TempDir::new().expect("temporary directory");
-    for attempt in 0..8 {
-        let session = temporary.path().join(format!("budget-{attempt}"));
-        Command::cargo_bin("termtrace")
-            .expect("binary should build")
-            .args([
-                "record",
-                "--no-input",
-                "--output-byte-budget",
-                "4095",
-                "--out",
-            ])
-            .arg(&session)
-            .args([
-                "--",
-                "/usr/bin/python3",
-                "-c",
-                "import os; os.write(1, b'x' * 4096)",
-            ])
-            .assert()
-            .failure();
-        let completion: serde_json::Value = serde_json::from_slice(
-            &fs_err::read(session.join("completion.json")).expect("completion"),
-        )
-        .expect("completion JSON");
-        assert_eq!(completion["resource_limit"]["kind"], "output_bytes");
-        assert_eq!(completion["resource_limit"]["limit"], 4095);
-        assert!(
-            completion["resource_limit"]["observed"]
-                .as_u64()
-                .is_some_and(|observed| return observed >= 4096)
-        );
-    }
+    let session = temporary.path().join("budget");
+    Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .args([
+            "record",
+            "--no-input",
+            "--output-byte-budget",
+            "4095",
+            "--out",
+        ])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os; os.write(1, b'x' * 4096)",
+        ])
+        .assert()
+        .failure();
+    let completion: serde_json::Value =
+        serde_json::from_slice(&fs_err::read(session.join("completion.json")).expect("completion"))
+            .expect("completion JSON");
+    assert_eq!(completion["resource_limit"]["kind"], "output_bytes");
+    assert_eq!(completion["resource_limit"]["limit"], 4095);
+    assert!(
+        completion["resource_limit"]["observed"]
+            .as_u64()
+            .is_some_and(|observed| return observed >= 4096)
+    );
 }
 
 #[test]

@@ -159,26 +159,46 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
         .args(["--type", "output", "--metadata-only"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""event_type":"output""#))
-        .stdout(predicate::str::contains(r#""metadata_only":true"#))
-        .stdout(predicate::str::contains(r#""field":"data""#))
-        .stdout(predicate::str::contains(r#""byte_count":12"#))
-        .stdout(predicate::str::contains(r#""event":null"#))
-        .stdout(predicate::str::contains("secret-bytes").not())
         .get_output()
         .stdout
         .clone();
-    assert_eq!(output.split(|byte| return *byte == b'\n').count(), 2);
+    assert!(
+        !output
+            .windows(b"secret-bytes".len())
+            .any(|w| return w == b"secret-bytes")
+    );
+    let mut lines = output
+        .split(|byte| return *byte == b'\n')
+        .filter(|line| return !line.is_empty());
+    let line = lines.next().expect("metadata event JSON line");
+    let record: serde_json::Value = serde_json::from_slice(line).expect("metadata event JSON");
+    assert_eq!(record["event_type"], "output");
+    assert_eq!(record["metadata_only"], true);
+    assert!(record["event"].is_null());
+    let payload = &record["byte_payloads"][0];
+    assert_eq!(payload["field"], "data");
+    assert_eq!(payload["byte_count"], 12);
+    assert!(lines.next().is_none());
 
     let mut exact = Command::cargo_bin("termtrace").expect("binary should build");
-    exact
+    let exact_output = exact
         .args(["analyze", "events"])
         .arg(&session)
         .args(["--type", "output"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""metadata_only":false"#))
-        .stdout(predicate::str::contains(r#""type":"output""#));
+        .get_output()
+        .stdout
+        .clone();
+    let exact_line = exact_output
+        .split(|byte| return *byte == b'\n')
+        .find(|line| return !line.is_empty())
+        .expect("exact event JSON line");
+    let exact_record: serde_json::Value =
+        serde_json::from_slice(exact_line).expect("exact event JSON");
+    assert_eq!(exact_record["metadata_only"], false);
+    assert_eq!(exact_record["event_type"], "output");
+    assert_eq!(exact_record["event"]["type"], "output");
 }
 
 #[test]
