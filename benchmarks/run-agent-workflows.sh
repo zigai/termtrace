@@ -51,22 +51,39 @@ measure() {
     local id=$1
     shift
     local stdout=$work/$id.stdout
+    local invocations=$work/$id.calls
+    : >"$invocations"
+
+    local wrapper_dir=$work/harness/bin
+    mkdir -p "$wrapper_dir"
+    local wrapper=$wrapper_dir/termtrace
+    cat >"$wrapper" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$invocations"
+exec "$binary" "\$@"
+EOF
+    chmod +x "$wrapper"
+
+    local cmd=("$@")
+    if [[ "${cmd[0]}" == "$binary" ]]; then
+        cmd[0]="$wrapper"
+    fi
+
     local started ended maximum maximum_commands bytes command_count
     started=$(date +%s%N)
-    "$@" >"$stdout"
+    PATH="$wrapper_dir:$PATH" TERMTRACE_BINARY="$wrapper" "${cmd[@]}" >"$stdout"
     ended=$(date +%s%N)
     bytes=$(wc -c <"$stdout")
+    command_count=$(wc -l <"$invocations")
     maximum=$(jq -r --arg id "$id" '.workflows[] | select(.id == $id) | .maximum_stdout_bytes' "$contract")
     maximum_commands=$(jq -r --arg id "$id" '.workflows[] | select(.id == $id) | .maximum_commands' "$contract")
-    command_count=1
-    jq -cn \
-        --arg id "$id" \
-        --argjson stdout_bytes "$bytes" \
-        --argjson elapsed_ns "$((ended - started))" \
-        --argjson maximum_stdout_bytes "$maximum" \
-        --argjson command_count "$command_count" \
-        --argjson maximum_commands "$maximum_commands" \
-        '{workflow:$id,stdout_bytes:$stdout_bytes,elapsed_ns:$elapsed_ns,maximum_stdout_bytes:$maximum_stdout_bytes,command_count:$command_count,maximum_commands:$maximum_commands,passed:($stdout_bytes <= $maximum_stdout_bytes and $command_count <= $maximum_commands)}' |
+    python3 "$root/benchmarks/models.py" emit-agent-workflow-result \
+        --workflow "$id" \
+        --stdout-bytes "$bytes" \
+        --elapsed-ns "$((ended - started))" \
+        --max-stdout-bytes "$maximum" \
+        --command-count "$command_count" \
+        --max-commands "$maximum_commands" |
         tee -a "$output"
     ((bytes <= maximum && command_count <= maximum_commands))
 }

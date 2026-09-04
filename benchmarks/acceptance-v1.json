@@ -71,8 +71,7 @@
       "kind": "generated_large",
       "event_count": 1000000,
       "output_bytes": 1073741824,
-      "generator": "cargo run --release --bin termtrace-fixture -- large --events 1000000 --output-bytes 1073741824",
-      "notes": "The generator is a required roadmap deliverable and this fixture is unavailable until it exists."
+      "generator": "cargo run --release --bin termtrace-fixture -- large --events 1000000 --output-bytes 1073741824"
     }
   ],
   "gates": [

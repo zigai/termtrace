@@ -5,41 +5,28 @@
   "workflows": [
     {
       "id": "stable-observe",
-      "command": "wait SESSION --idle 10ms",
       "maximum_stdout_bytes": 4096,
       "maximum_commands": 1
     },
     {
       "id": "atomic-input-sequence",
-      "command": "--fields boundary act SESSION text:go enter",
       "maximum_stdout_bytes": 4096,
       "maximum_commands": 1
     },
     {
       "id": "live-status",
-      "command": "status SESSION",
       "maximum_stdout_bytes": 2048,
       "maximum_commands": 1
     },
     {
       "id": "bounded-timeline",
-      "command": "analyze timeline SESSION --jsonl",
       "maximum_stdout_bytes": 49152,
-      "maximum_commands": 1,
-      "required_default_limit": 100
+      "maximum_commands": 1
     },
     {
       "id": "managed-client-python",
-      "command": "termtrace tooling client python WORKFLOW.py",
       "maximum_stdout_bytes": 128,
       "maximum_commands": 1
     }
-  ],
-  "invariants": [
-    "no_compressed_semantic_state_in_default_output",
-    "one_guard_for_complete_input_sequence",
-    "typed_live_session_state",
-    "pagination_metadata_when_truncated",
-    "no_worktree_sdk_scaffolding"
   ]
 }

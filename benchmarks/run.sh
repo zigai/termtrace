@@ -95,21 +95,12 @@ write_run_manifest() {
     local started_unix_ns=$2
     local revision
     revision=$(git -C "$root" rev-parse HEAD 2>/dev/null || printf 'unknown')
-    jq -n \
-        --arg command "$command" \
-        --arg revision "$revision" \
-        --arg binary "$binary" \
-        --arg started_unix_ns "$started_unix_ns" \
-        --arg host "$(hostname)" \
-        '{
-          format: "termtrace-benchmark-run",
-          version: 1,
-          command: $command,
-          termtrace_commit: $revision,
-          binary: $binary,
-          host: $host,
-          started_unix_ns: ($started_unix_ns | tonumber)
-        }' >"$run_dir/run.json"
+    python3 "$root/benchmarks/models.py" emit-run-manifest \
+        --command "$command" \
+        --revision "$revision" \
+        --binary "$binary" \
+        --started-unix-ns "$started_unix_ns" \
+        --host "$(hostname)" >"$run_dir/run.json"
 }
 
 run_one() {

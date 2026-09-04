@@ -57,21 +57,14 @@ for mode in strict bounded throughput; do
         wait "$recorder_pid"
         elapsed_ns="$(($(date +%s%N) - started_ns))"
 
-        jq -cn \
-            --arg mode "$mode" \
-            --argjson iteration "$iteration" \
-            --argjson payload_bytes "$payload_bytes" \
-            --argjson elapsed_ns "$elapsed_ns" \
-            --argjson maximum_rss_kib "$maximum_rss_kib" \
-            --slurpfile completion "$session/completion.json" \
-            '{
-        mode: $mode,
-        iteration: $iteration,
-        payload_bytes: $payload_bytes,
-        elapsed_ns: $elapsed_ns,
-        maximum_rss_bytes: ($maximum_rss_kib * 1024),
-        durability: $completion[0].durability
-      }' >>"$output"
+        python3 "$root/benchmarks/models.py" emit-durability-result \
+            --mode "$mode" \
+            --iteration "$iteration" \
+            --payload-bytes "$payload_bytes" \
+            --elapsed-ns "$elapsed_ns" \
+            --max-rss-kib "$maximum_rss_kib" \
+            --completion-file "$session/completion.json" \
+            >>"$output"
 
         rm -rf "$session"
     done

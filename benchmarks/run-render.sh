@@ -51,11 +51,7 @@ edit="$work/edit.json"
     ' >/dev/null
 
 end_ns=$(jq -s -r '.[-1].monotonic_ns' "$session/events.jsonl")
-jq -n --argjson end_ns "$end_ns" '{
-    version: 1,
-    clips: [{from: {monotonicNs: 0}, to: {monotonicNs: $end_ns}, caption: null}],
-    change_visualization: null
-}' >"$edit"
+python3 "$root/benchmarks/models.py" emit-render-edit --end-ns "$end_ns" >"$edit"
 
 measure() {
     local operation=$1
@@ -91,12 +87,11 @@ measure() {
     ended_ns=$(date +%s%N)
     elapsed_ns=$((ended_ns - started_ns))
     if [[ "$record_result" == true ]]; then
-        jq -cn \
-            --arg operation "$operation" \
-            --argjson iteration "$iteration" \
-            --argjson elapsed_ns "$elapsed_ns" \
-            --arg artifact_hash "$artifact_hash" \
-            '{operation:$operation,iteration:$iteration,elapsed_ns:$elapsed_ns,artifact_hash:$artifact_hash}' \
+        python3 "$root/benchmarks/models.py" emit-render-result \
+            --operation "$operation" \
+            --iteration "$iteration" \
+            --elapsed-ns "$elapsed_ns" \
+            --artifact-hash "$artifact_hash" \
             >>"$output"
     fi
 }
