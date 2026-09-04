@@ -43,14 +43,10 @@ use termtrace_media::{
         CaptureOptions, CaptureOutcome, capture as capture_native, validated_visual_manifests,
     },
     playback::{PlaybackOptions, playback},
-    presentation::{export as export_presentation, preview as preview_presentation},
     save::{save, verify_saved_artifact},
 };
 use termtrace_model::{
     artifact::bundle::{BundleManifest, BundleProfile, BundleVerificationPolicy},
-    artifact::presentation::{
-        PresentationOutcome, PresentationPlan, PresentationPreviewOutcome, PreviewOptions,
-    },
     artifact::save::{SaveFormat, SaveOutcome},
     execution::environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},
     execution::event::{EventProjection, InputKind},

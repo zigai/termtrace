@@ -32,9 +32,10 @@ pub enum InputAtom {
 }
 
 /// Typed public postcondition using exact Rust durations.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum ActionCondition {
     /// Return immediately after complete input application.
+    #[default]
     None,
     /// Require one unchanged presented state.
     Idle {
@@ -53,7 +54,7 @@ pub enum ActionCondition {
 }
 
 /// Public options for one actor-ordered input action.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ActionOptions {
     /// Caller-supplied request identity, or `None` to allocate a fresh UUID.
     pub request_id: Option<Uuid>,
@@ -71,21 +72,6 @@ pub struct ActionOptions {
     pub projection: ScreenProjectionRequest,
     /// Whether to return an incomplete postcondition result instead of an error.
     pub allow_incomplete: bool,
-}
-
-impl Default for ActionOptions {
-    fn default() -> Self {
-        return Self {
-            request_id: None,
-            if_state: None,
-            caller_intent: None,
-            pace: Duration::ZERO,
-            verbose_atom_outcomes: false,
-            postcondition: ActionCondition::None,
-            projection: ScreenProjectionRequest::default(),
-            allow_incomplete: false,
-        };
-    }
 }
 
 /// Typed public action completion without a protocol envelope.

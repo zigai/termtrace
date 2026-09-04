@@ -17,7 +17,8 @@ pub enum EvidencePolicy {
 }
 
 /// Classification recorded when an owned test is finalized.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TestOutcome {
     /// The body returned successfully.
     Passed,

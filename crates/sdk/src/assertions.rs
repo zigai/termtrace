@@ -230,20 +230,23 @@ fn span_row_from_cells(row: &ScreenCellRow) -> ScreenSpanRow {
 }
 
 fn cell_row_from_spans(row: &ScreenSpanRow) -> ScreenCellRow {
-    let mut cells: Vec<ScreenCell> = Vec::new();
-    for span in &row.spans {
-        for (offset, cell) in span.cells.iter().enumerate() {
-            cells.push(ScreenCell {
-                row: row.row,
-                column: span
-                    .start_column
-                    .saturating_add(u16::try_from(offset).unwrap_or(u16::MAX)),
-                grapheme: cell.grapheme.clone(),
-                wide_kind: cell.wide_kind,
-                appearance: span.appearance.clone(),
+    let cells = row
+        .spans
+        .iter()
+        .flat_map(|span| {
+            return span.cells.iter().enumerate().map(move |(offset, cell)| {
+                return ScreenCell {
+                    row: row.row,
+                    column: span
+                        .start_column
+                        .saturating_add(u16::try_from(offset).unwrap_or(u16::MAX)),
+                    grapheme: cell.grapheme.clone(),
+                    wide_kind: cell.wide_kind,
+                    appearance: span.appearance.clone(),
+                };
             });
-        }
-    }
+        })
+        .collect();
     return ScreenCellRow {
         row: row.row,
         soft_wrapped: row.soft_wrapped,

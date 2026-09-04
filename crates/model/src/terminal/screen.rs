@@ -256,18 +256,6 @@ pub enum ScreenFrameData {
     },
 }
 
-impl ScreenFrameData {
-    /// Number of returned rows.
-    #[must_use]
-    pub fn row_count(&self) -> usize {
-        match self {
-            Self::Text { rows } => return rows.len(),
-
-            Self::Spans { rows } => return rows.len(),
-            Self::Cells { rows } => return rows.len(),
-        }
-    }
-}
 /// Allocation-free row facts supplied while visiting projected cells.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ScreenRowMetadata<'row> {

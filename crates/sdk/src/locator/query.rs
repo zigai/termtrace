@@ -500,23 +500,15 @@ impl QueryResult {
 
     /// Require exactly one match.
     pub fn single(&self) -> Result<&ScreenMatch, QueryError> {
-        if self.matches.is_empty() {
-            return Err(QueryError::NoMatch {
+        match self.all() {
+            [] => Err(QueryError::NoMatch {
                 query: self.spec.description(),
                 state_hash: self.frame.state_hash.clone(),
                 frame_hash: self.frame.frame_hash.clone(),
-            });
+            }),
+            [only] => Ok(only),
+            _ => Err(multiple_matches(&self.spec, &self.frame, &self.matches)),
         }
-        if self.matches.len() != 1 {
-            return Err(multiple_matches(&self.spec, &self.frame, &self.matches));
-        }
-        return self.matches.first().ok_or_else(|| {
-            return QueryError::NoMatch {
-                query: self.spec.description(),
-                state_hash: self.frame.state_hash.clone(),
-                frame_hash: self.frame.frame_hash.clone(),
-            };
-        });
     }
 
     /// Explicitly select the first match, rejecting absence but not ambiguity.

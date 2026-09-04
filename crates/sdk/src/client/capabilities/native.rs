@@ -19,23 +19,4 @@ impl Native<'_> {
         options.session_directory = self.session.path.clone();
         return playback(&options).map_err(Error::from);
     }
-
-    /// Export an already normalized presentation plan.
-    pub fn export(
-        &self,
-        plan: &PresentationPlan,
-        destination: impl AsRef<Path>,
-    ) -> Result<PresentationOutcome> {
-        return export_presentation(plan, destination).map_err(Error::from);
-    }
-
-    /// Render an atomic presentation preview.
-    pub fn preview(
-        &self,
-        plan: &PresentationPlan,
-        destination: impl AsRef<Path>,
-        options: PreviewOptions,
-    ) -> Result<PresentationPreviewOutcome> {
-        return preview_presentation(plan, destination, options).map_err(Error::from);
-    }
 }

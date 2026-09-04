@@ -34,9 +34,8 @@ pub mod evidence {
 pub mod inspection {
     pub use crate::client::{Events, Semantic};
     pub use crate::protocol::wait_for_screen;
-    pub use termtrace_engine::inspection::{
-        inspect_session, inspect_state_text, wait_for_completion, wait_for_output,
-    };
+    pub use termtrace_engine::inspection::{inspect_session, wait_for_completion, wait_for_output};
+    pub use termtrace_engine::observation::state_text;
     pub use termtrace_model::terminal::inspection::{ScreenWaitOutcome, WaitOutcome};
 }
 

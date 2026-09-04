@@ -125,7 +125,14 @@ pub fn wait_for_screen(
         },
     ) {
         Ok(result) => result,
-        Err(error) if completion_transition_error(&error) => {
+        Err(error)
+            if matches!(
+                &error,
+                Error::ControlUnavailable { .. }
+                    | Error::ControlTimeout { .. }
+                    | Error::ControlTransport { .. }
+            ) =>
+        {
             let remaining = timeout.saturating_sub(started_at.elapsed());
             if let Err(completion_error) = wait_for_completion(session_directory, remaining) {
                 if session_directory.join("completion.json").is_file() {
@@ -160,15 +167,6 @@ pub fn wait_for_screen(
         quality,
         frame,
     });
-}
-
-fn completion_transition_error(error: &Error) -> bool {
-    return matches!(
-        error,
-        Error::ControlUnavailable { .. }
-            | Error::ControlTimeout { .. }
-            | Error::ControlTransport { .. }
-    );
 }
 
 fn completed_screen_wait(

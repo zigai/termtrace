@@ -34,7 +34,7 @@ struct TestEvidenceManifest {
     version: u32,
     session_id: Uuid,
     canonical_session: String,
-    outcome: String,
+    outcome: TestOutcome,
     artifacts: Vec<String>,
 }
 
@@ -59,7 +59,7 @@ pub(super) fn write_evidence_manifest(
         version: 1,
         session_id,
         canonical_session: relative_session,
-        outcome: format!("{:?}", report.outcome).to_lowercase(),
+        outcome: report.outcome,
         artifacts,
     };
     let path = attempt_directory.join("termtrace-test-evidence.json");

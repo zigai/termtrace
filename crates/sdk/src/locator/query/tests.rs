@@ -1,7 +1,5 @@
 use super::*;
-use termtrace_model::{
-    terminal::observation::CaptureQuality, terminal::screen::SpanCell, terminal::state::CellStyle,
-};
+use termtrace_model::{terminal::observation::CaptureQuality, terminal::screen::SpanCell};
 
 fn fixture_frame() -> ScreenFrame {
     let value: serde_json::Value = serde_json::from_str(include_str!(
@@ -170,54 +168,22 @@ fn diagnostics_truncate_only_at_unicode_boundaries() {
 
 #[test]
 fn grapheme_boundaries_retain_terminal_columns_for_combining_and_wide_cells() {
-    let appearance = ScreenAppearance {
-        style: CellStyle {
-            foreground: ColorSpec::None,
-            background: ColorSpec::None,
-            underline_color: ColorSpec::None,
-            bold: false,
-            italic: false,
-            faint: false,
-            blink: false,
-            inverse: false,
-            invisible: false,
-            strikethrough: false,
-            overline: false,
-            underline: 0,
-        },
-
-        resolved_foreground: None,
-        resolved_background: None,
-        selected: false,
-    };
-    let row = LogicalRow {
-        row: 3,
-        soft_wrapped: false,
-        wrap_continuation: false,
-        cells: vec![
-            LogicalCell {
-                row: 3,
-                column: 4,
-                end_column: 5,
-                grapheme: "e\u{301}".to_owned(),
-                wide_kind: WideKind::Narrow,
-                appearance: appearance.clone(),
-            },
-            LogicalCell {
-                row: 3,
-                column: 5,
-                end_column: 7,
-                grapheme: "界".to_owned(),
-                wide_kind: WideKind::Wide,
-                appearance,
-            },
-        ],
-    };
-    let (text, boundaries) = selected_text(&row, &[0, 1]);
-    assert_eq!(text, "e\u{301}界");
-    assert_eq!(boundaries, vec![(0, 3, 0), (3, 6, 1)]);
-    assert_eq!(row.cells.last().map(|cell| return cell.column), Some(5));
-    assert_eq!(row.cells.last().map(|cell| return cell.end_column), Some(7));
+    let frame = fixture_frame();
+    let query_match = frame
+        .query(LocatorSpec::text("e\u{301}界").expect("text query"))
+        .expect("query execution")
+        .single()
+        .expect("single match")
+        .clone();
+    assert_eq!(query_match.text.as_ref(), "e\u{301}界");
+    assert_eq!(
+        query_match.ranges.as_ref(),
+        &[MatchRange {
+            row: 1,
+            start_column: 0,
+            end_column: 3,
+        }]
+    );
 }
 #[test]
 fn composed_regions_intersect_and_partial_graphemes_are_rejected() {
@@ -276,120 +242,109 @@ struct ExpectedMatch {
     ranges: Vec<[u16; 3]>,
 }
 
-fn conformance_spec(value: &serde_json::Value) -> Result<LocatorSpec, QueryError> {
-    let kind = value
-        .get("kind")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            return QueryError::InvalidQuery {
-                reason: "fixture query kind is missing".to_owned(),
-            };
-        })?;
-    match kind {
-        "text" => {
-            let text = value
-                .get("value")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            let exact = value
-                .get("exact")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false);
-            let cross_soft_wraps = value
-                .get("cross_soft_wraps")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false);
-            let spec = if exact {
-                LocatorSpec::exact(text)?
-            } else {
-                LocatorSpec::text(text)?
-            };
-            return Ok(spec.across_soft_wraps(cross_soft_wraps));
-        }
-        "regex" => {
-            let pattern = value
-                .get("pattern")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            return LocatorSpec::native_regex(pattern);
-        }
-        "style" => {
-            let bold = value.get("bold").and_then(serde_json::Value::as_bool);
-            let resolved_background = value
-                .get("resolved_background")
-                .and_then(serde_json::Value::as_str)
-                .map(|color| {
-                    return match color {
-                        "#3b1e1c" => Some(Rgb {
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ConformanceQuery {
+    Text {
+        #[serde(default)]
+        value: String,
+        #[serde(default)]
+        exact: bool,
+        #[serde(default)]
+        cross_soft_wraps: bool,
+    },
+    Regex {
+        #[serde(default)]
+        pattern: String,
+    },
+    Style {
+        #[serde(default)]
+        bold: Option<bool>,
+        #[serde(default)]
+        resolved_background: Option<String>,
+    },
+    Row {
+        row: u16,
+    },
+    Region {
+        top: u16,
+        left: u16,
+        width: u16,
+        height: u16,
+    },
+    All {
+        specs: Vec<ConformanceQuery>,
+    },
+}
+
+impl TryFrom<ConformanceQuery> for LocatorSpec {
+    type Error = QueryError;
+
+    fn try_from(query: ConformanceQuery) -> Result<Self, Self::Error> {
+        match query {
+            ConformanceQuery::Text {
+                value,
+                exact,
+                cross_soft_wraps,
+            } => {
+                let spec = if exact {
+                    LocatorSpec::exact(value)?
+                } else {
+                    LocatorSpec::text(value)?
+                };
+                Ok(spec.across_soft_wraps(cross_soft_wraps))
+            }
+            ConformanceQuery::Regex { pattern } => LocatorSpec::native_regex(pattern),
+            ConformanceQuery::Style {
+                bold,
+                resolved_background,
+            } => {
+                let bg = resolved_background.and_then(|color| {
+                    if color == "#3b1e1c" {
+                        Some(Rgb {
                             r: 59,
                             g: 30,
                             b: 28,
-                        }),
-                        _ => None,
-                    };
+                        })
+                    } else {
+                        None
+                    }
                 });
-            return Ok(LocatorSpec::default().with_style(StyleFilter {
-                bold,
-                resolved_background,
-                ..StyleFilter::default()
-            }));
-        }
-        "row" => {
-            let row = value
-                .get("row")
-                .and_then(serde_json::Value::as_u64)
-                .and_then(|row| return u16::try_from(row).ok())
-                .ok_or_else(|| {
-                    return QueryError::InvalidQuery {
-                        reason: "fixture row is invalid".to_owned(),
-                    };
-                })?;
-            return Ok(LocatorSpec::default().in_row(row));
-        }
-        "region" => {
-            let coordinate = |name: &str| {
-                return value
-                    .get(name)
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|coordinate| return u16::try_from(coordinate).ok())
-                    .ok_or_else(|| {
-                        return QueryError::InvalidQuery {
-                            reason: format!("fixture region {name} is invalid"),
-                        };
-                    });
-            };
-            let top = coordinate("top")?;
-            let left = coordinate("left")?;
-            let width = coordinate("width")?;
-            let height = coordinate("height")?;
-            return LocatorSpec::default().in_region(ScreenRegion {
+                Ok(LocatorSpec::default().with_style(StyleFilter {
+                    bold,
+                    resolved_background: bg.map(Some),
+                    ..StyleFilter::default()
+                }))
+            }
+            ConformanceQuery::Row { row } => Ok(LocatorSpec::default().in_row(row)),
+            ConformanceQuery::Region {
+                top,
+                left,
+                width,
+                height,
+            } => LocatorSpec::default().in_region(ScreenRegion {
                 top,
                 left,
                 right: left.saturating_add(width),
                 bottom: top.saturating_add(height),
-            });
-        }
-        "all" => {
-            let specs = value
-                .get("specs")
-                .and_then(serde_json::Value::as_array)
-                .ok_or_else(|| {
-                    return QueryError::InvalidQuery {
-                        reason: "fixture composition is invalid".to_owned(),
-                    };
-                })?;
-            let mut combined = LocatorSpec::default();
-            for spec in specs {
-                combined = combined.and(conformance_spec(spec)?)?;
+            }),
+            ConformanceQuery::All { specs } => {
+                let mut combined = LocatorSpec::default();
+                for spec in specs {
+                    combined = combined.and(LocatorSpec::try_from(spec)?)?;
+                }
+                Ok(combined)
             }
-            return Ok(combined);
-        }
-        _ => {
-            return Err(QueryError::InvalidQuery {
-                reason: "fixture query kind is unknown".to_owned(),
-            });
         }
     }
+}
+
+fn conformance_spec(value: &serde_json::Value) -> Result<LocatorSpec, QueryError> {
+    let query: ConformanceQuery =
+        serde_json::from_value(value.clone()).map_err(|e| QueryError::InvalidQuery {
+            reason: e.to_string(),
+        })?;
+    LocatorSpec::try_from(query)
 }
 
 #[test]
