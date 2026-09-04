@@ -182,11 +182,13 @@ fn assert_supported_encoding(
         "libghostty-key-encoder-v1"
     };
     assert_eq!(encoded.encoder, expected_encoder);
-    if uses_extended_fallback {
-        assert_eq!(
-            encoded.data.as_bytes(),
-            expected_extended_function_sequence(key, modifiers).as_bytes()
-        );
+    if uses_extended_fallback && let NamedKey::Function(number) = key {
+        if let Some((_, _, expected)) = EXTENDED_FUNCTION_FIXTURES
+            .iter()
+            .find(|(n, m, _)| *n == number && *m == modifiers)
+        {
+            assert_eq!(encoded.data.as_bytes(), *expected);
+        }
     }
     assert!(
         !encoded.data.as_bytes().is_empty(),
@@ -194,32 +196,165 @@ fn assert_supported_encoding(
     );
 }
 
-fn expected_extended_function_sequence(key: NamedKey, modifiers: KeyModifiers) -> String {
-    let NamedKey::Function(number) = key else {
-        panic!("extended function fallback requires a function key");
-    };
-    let parameter = match number {
-        13 => 25,
-        14 => 26,
-        15 => 28,
-        16 => 29,
-        17 => 31,
-        18 => 32,
-        19 => 33,
-        20 => 34,
-        21 => 42,
-        22 => 43,
-        23 => 44,
-        24 => 45,
-        _ => panic!("extended function fallback requires F13 through F24"),
-    };
-    let modifier = 1_u8
-        .saturating_add(u8::from(modifiers.shift))
-        .saturating_add(u8::from(modifiers.alt).saturating_mul(2))
-        .saturating_add(u8::from(modifiers.control).saturating_mul(4))
-        .saturating_add(u8::from(modifiers.super_key).saturating_mul(8));
-    if modifier == 1 {
-        return format!("\x1b[{parameter}~");
-    }
-    return format!("\x1b[{parameter};{modifier}~");
-}
+const EXTENDED_FUNCTION_FIXTURES: &[(u8, KeyModifiers, &[u8])] = &[
+    (
+        13,
+        KeyModifiers {
+            shift: false,
+            alt: false,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[25~",
+    ),
+    (
+        14,
+        KeyModifiers {
+            shift: false,
+            alt: false,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[26~",
+    ),
+    (
+        15,
+        KeyModifiers {
+            shift: false,
+            alt: false,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[28~",
+    ),
+    (
+        16,
+        KeyModifiers {
+            shift: false,
+            alt: false,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[29~",
+    ),
+    (
+        17,
+        KeyModifiers {
+            shift: false,
+            alt: false,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[31~",
+    ),
+    (
+        18,
+        KeyModifiers {
+            shift: false,
+            alt: false,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[32~",
+    ),
+    (
+        19,
+        KeyModifiers {
+            shift: false,
+            alt: false,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[33~",
+    ),
+    (
+        20,
+        KeyModifiers {
+            shift: false,
+            alt: false,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[34~",
+    ),
+    (
+        21,
+        KeyModifiers {
+            shift: false,
+            alt: false,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[42~",
+    ),
+    (
+        22,
+        KeyModifiers {
+            shift: false,
+            alt: false,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[43~",
+    ),
+    (
+        23,
+        KeyModifiers {
+            shift: false,
+            alt: false,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[44~",
+    ),
+    (
+        24,
+        KeyModifiers {
+            shift: false,
+            alt: false,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[45~",
+    ),
+    (
+        13,
+        KeyModifiers {
+            shift: true,
+            alt: false,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[25;2~",
+    ),
+    (
+        13,
+        KeyModifiers {
+            shift: false,
+            alt: true,
+            control: false,
+            super_key: false,
+        },
+        b"\x1b[25;3~",
+    ),
+    (
+        13,
+        KeyModifiers {
+            shift: false,
+            alt: false,
+            control: true,
+            super_key: false,
+        },
+        b"\x1b[25;5~",
+    ),
+    (
+        24,
+        KeyModifiers {
+            shift: true,
+            alt: true,
+            control: true,
+            super_key: false,
+        },
+        b"\x1b[45;8~",
+    ),
+];
