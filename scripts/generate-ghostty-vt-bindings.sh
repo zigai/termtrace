@@ -6,7 +6,7 @@ readonly ghostty_revision=55a3e33ab26a23d75b274b23c7f76d837db00578
 readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ghostty="$root/vendor/ghostty"
 readonly header="$ghostty/include/ghostty/vt.h"
-readonly output="$root/src/ghostty_vt/bindings.rs"
+readonly output="$root/crates/terminal/src/ghostty_vt/bindings.rs"
 temporary_output=""
 
 cleanup() {
@@ -29,7 +29,7 @@ fi
 
 if ! command -v bindgen >/dev/null 2>&1; then
     echo "bindgen is required only to upgrade bindings" >&2
-    echo "install it with: cargo +1.97.1 install bindgen-cli --version $bindgen_version --locked" >&2
+    echo "install it with: cargo install bindgen-cli --version $bindgen_version --locked" >&2
     exit 2
 fi
 
