@@ -45,12 +45,6 @@ pub enum Error {
         /// Unexpected stable filename.
         filename: &'static str,
     },
-    /// A caller requested a filename absent from the complete registry.
-    #[error("schema is not registered: {filename}")]
-    UnknownSchema {
-        /// Requested filename.
-        filename: String,
-    },
     /// Schemars produced a value that cannot be emitted as a schema object.
     #[error("generated schema root for {filename} is not an object")]
     GeneratedRootNotObject {
@@ -77,108 +71,6 @@ pub enum Error {
     },
 }
 
-/// Crate that owns the serialized contract represented by a schema.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ContractOwner {
-    /// Shared data contract owned by `termtrace-model`.
-    Model,
-    /// Root CLI and repository-operated contracts.
-    Root,
-}
-
-/// Stable family used to inventory and select related schemas.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SchemaCategory {
-    /// Canonical event-log values.
-    EventLog,
-    /// Runtime capability reports.
-    Capability,
-    /// Session save and screenshot publication values.
-    Save,
-    /// Scenario language and report values.
-    Scenario,
-    /// Evidence export plans and manifests.
-    EvidenceExport,
-    /// Live control protocol values.
-    ControlProtocol,
-    /// SDK driver wire protocol values.
-    DriverProtocol,
-    /// Child environment contracts.
-    Environment,
-    /// Recording session lifecycle values.
-    Session,
-    /// Evidence identity and integrity values.
-    Evidence,
-    /// Execution provenance values.
-    Provenance,
-    /// Named-session registry values.
-    Registry,
-    /// Semantic replay values.
-    Replay,
-    /// Read-only review values.
-    Review,
-    /// Native visual evidence values.
-    Visual,
-    /// Inspection and observation values.
-    Observation,
-    /// Rich terminal projection values.
-    Screen,
-    /// Timeline and semantic diff values.
-    Analysis,
-    /// Native playback values.
-    Playback,
-    /// Edited presentation values.
-    Presentation,
-    /// Semantic-video source values.
-    SemanticVideo,
-    /// Aggregate tmux values.
-    Tmux,
-    /// Acceptance benchmark configuration.
-    AcceptanceBenchmark,
-    /// Compact CLI response protocol.
-    CliResponse,
-}
-
-/// Meaning of a contract version attached to a registry entry.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum VersionKind {
-    /// Version of an on-disk or exported data format.
-    Format,
-    /// Version of a schema envelope.
-    Schema,
-    /// Version of a request/response protocol.
-    Protocol,
-}
-
-/// Version metadata for a schema when its owning contract defines one.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ContractVersion {
-    /// What the numeric version governs.
-    pub kind: VersionKind,
-    /// Stable format identifier, when the contract defines one.
-    pub format: Option<&'static str>,
-    /// Current owning-contract version.
-    pub value: u32,
-}
-
-impl ContractVersion {
-    const fn new(kind: VersionKind, format: Option<&'static str>, value: u32) -> Self {
-        return Self {
-            kind,
-            format,
-            value,
-        };
-    }
-}
-/// Origin of one public schema definition.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SchemaSource {
-    /// Generated from an owning Rust type.
-    RustType,
-    /// Handwritten contract with bytes embedded into the catalog.
-    Manual,
-}
-
 /// One schema generated from its owning Rust contract.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GeneratedSchema {
@@ -196,16 +88,6 @@ pub type SchemaGenerator = fn(&'static str) -> Result<GeneratedSchema>;
 pub struct SchemaEntry {
     /// Stable repository filename.
     pub filename: &'static str,
-    /// Crate or repository layer that owns the serialized contract.
-    pub owner: ContractOwner,
-    /// Contract family.
-    pub category: SchemaCategory,
-    /// Format, schema, or protocol version where one is defined.
-    pub version: Option<ContractVersion>,
-    /// Rust type that generates the schema, or `None` for a handwritten contract.
-    pub rust_type: Option<&'static str>,
-    /// Whether the schema is generated from a Rust type or maintained manually.
-    pub source: SchemaSource,
     /// Generator for the canonical checked-in bytes.
     pub generator: SchemaGenerator,
 }
@@ -226,577 +108,236 @@ macro_rules! schema_generator {
     };
 }
 
-macro_rules! schema_rust_type {
-    (manual $generator:path) => {
-        None
-    };
-    ($contract:path) => {
-        Some(stringify!($contract))
-    };
-}
-
-macro_rules! schema_source {
-    (manual $generator:path) => {
-        SchemaSource::Manual
-    };
-    ($contract:path) => {
-        SchemaSource::RustType
-    };
-}
-
 macro_rules! registry {
-    ($(($filename:literal, $owner:ident, $category:ident, $version:expr, $($generator:tt)+)),+ $(,)?) => {
+    ($(($filename:literal, $($generator:tt)+)),+ $(,)?) => {
         /// Complete, ordered public schema registry.
         pub static SCHEMA_REGISTRY: &[SchemaEntry] = &[
             $(SchemaEntry {
                 filename: $filename,
-                owner: ContractOwner::$owner,
-                category: SchemaCategory::$category,
-                version: $version,
-                rust_type: schema_rust_type!($($generator)+),
-                source: schema_source!($($generator)+),
                 generator: schema_generator!($($generator)+),
             }),+
         ];
     };
 }
 
-const fn format_version(format: &'static str, value: u32) -> Option<ContractVersion> {
-    return Some(ContractVersion::new(
-        VersionKind::Format,
-        Some(format),
-        value,
-    ));
-}
-
-const fn unnamed_format_version(value: u32) -> Option<ContractVersion> {
-    return Some(ContractVersion::new(VersionKind::Format, None, value));
-}
-const fn schema_version(format: Option<&'static str>, value: u32) -> Option<ContractVersion> {
-    return Some(ContractVersion::new(VersionKind::Schema, format, value));
-}
-
-const fn protocol_version(value: u32) -> Option<ContractVersion> {
-    return Some(ContractVersion::new(VersionKind::Protocol, None, value));
-}
-fn generate_embedded_schema(
-    filename: &'static str,
-    json: &'static [u8],
-) -> Result<GeneratedSchema> {
+fn generate_acceptance_benchmark_schema(filename: &'static str) -> Result<GeneratedSchema> {
     return Ok(GeneratedSchema {
         filename,
-        json: json.to_vec(),
+        json: include_bytes!("../../../schemas/acceptance-benchmark.schema.json").to_vec(),
     });
 }
 
-fn generate_acceptance_benchmark_schema(filename: &'static str) -> Result<GeneratedSchema> {
-    return generate_embedded_schema(
-        filename,
-        include_bytes!("../../../schemas/acceptance-benchmark.schema.json"),
-    );
-}
-
 registry!(
-    (
-        "event-log-header.schema.json",
-        Model,
-        EventLog,
-        format_version(event::EVENT_LOG_FORMAT, event::EVENT_LOG_VERSION),
+    ("event-log-header.schema.json",
         event::EventLogHeader
     ),
-    (
-        "event-record.schema.json",
-        Model,
-        EventLog,
-        format_version(event::EVENT_LOG_FORMAT, event::EVENT_LOG_VERSION),
+    ("event-record.schema.json",
         event::EventRecord
     ),
-    (
-        "event-projection.schema.json",
-        Model,
-        EventLog,
-        format_version(event::EVENT_LOG_FORMAT, event::EVENT_LOG_VERSION),
+    ("event-projection.schema.json",
         event::EventProjection
     ),
-    (
-        "capability-report.schema.json",
-        Model,
-        Capability,
-        None,
+    ("capability-report.schema.json",
         capability::CapabilityReport
     ),
-    (
-        "save-manifest.schema.json",
-        Model,
-        Save,
-        None,
+    ("save-manifest.schema.json",
         save::SaveManifest
     ),
-    (
-        "screenshot-batch-manifest.schema.json",
-        Model,
-        Save,
-        None,
+    ("screenshot-batch-manifest.schema.json",
         save::ScreenshotBatchManifest
     ),
-    (
-        "scenario.schema.json",
-        Model,
-        Scenario,
-        schema_version(None, scenario::SCENARIO_VERSION),
+    ("scenario.schema.json",
         scenario::Scenario
     ),
-    (
-        "scenario-report.schema.json",
-        Model,
-        Scenario,
-        schema_version(None, scenario::SCENARIO_VERSION),
+    ("scenario-report.schema.json",
         scenario::ScenarioReport
     ),
-    (
-        "scenario-frame-snapshot.schema.json",
-        Model,
-        Scenario,
-        schema_version(None, scenario::SCENARIO_VERSION),
+    ("scenario-frame-snapshot.schema.json",
         scenario::ScenarioFrameSnapshot
     ),
-    (
-        "scenario-suite-report.schema.json",
-        Model,
-        Scenario,
-        schema_version(None, scenario::SCENARIO_VERSION),
+    ("scenario-suite-report.schema.json",
         scenario::ScenarioSuiteReport
     ),
-    (
-        "evidence-export-plan.schema.json",
-        Model,
-        EvidenceExport,
-        format_version(model_bundle::BUNDLE_FORMAT, model_bundle::BUNDLE_VERSION),
+    ("evidence-export-plan.schema.json",
         model_bundle::BundlePlan
     ),
-    (
-        "evidence-export-manifest.schema.json",
-        Model,
-        EvidenceExport,
-        format_version(model_bundle::BUNDLE_FORMAT, model_bundle::BUNDLE_VERSION),
+    ("evidence-export-manifest.schema.json",
         model_bundle::BundleManifest
     ),
-    (
-        "control-request.schema.json",
-        Model,
-        ControlProtocol,
-        protocol_version(control::CONTROL_PROTOCOL_VERSION),
+    ("control-request.schema.json",
         control::ControlRequest
     ),
-    (
-        "control-response.schema.json",
-        Model,
-        ControlProtocol,
-        protocol_version(control::CONTROL_PROTOCOL_VERSION),
+    ("control-response.schema.json",
         control::ControlResponse
     ),
-    (
-        "driver-request.schema.json",
-        Model,
-        DriverProtocol,
-        protocol_version(driver::DRIVER_PROTOCOL_VERSION),
+    ("driver-request.schema.json",
         driver::DriverRequest
     ),
-    (
-        "driver-response.schema.json",
-        Model,
-        DriverProtocol,
-        protocol_version(driver::DRIVER_PROTOCOL_VERSION),
+    ("driver-response.schema.json",
         driver::DriverResponse
     ),
-    (
-        "environment-spec.schema.json",
-        Model,
-        Environment,
-        None,
+    ("environment-spec.schema.json",
         environment::EnvironmentSpec
     ),
-    (
-        "session.schema.json",
-        Model,
-        Session,
-        schema_version(
-            Some(session::SESSION_MANIFEST_FORMAT),
-            session::SESSION_MANIFEST_VERSION
-        ),
+    ("session.schema.json",
         session::SessionManifest
     ),
-    (
-        "completion.schema.json",
-        Model,
-        Session,
-        schema_version(
-            Some(session::SESSION_COMPLETION_FORMAT),
-            session::SESSION_COMPLETION_VERSION
-        ),
+    ("completion.schema.json",
         session::SessionCompletion
     ),
-    (
-        "verification-report.schema.json",
-        Model,
-        Session,
-        schema_version(
-            Some(session::VERIFICATION_REPORT_FORMAT),
-            session::VERIFICATION_REPORT_VERSION
-        ),
+    ("verification-report.schema.json",
         session::VerificationReport
     ),
-    (
-        "artifact-root-record.schema.json",
-        Model,
-        Evidence,
-        None,
+    ("artifact-root-record.schema.json",
         artifact::ArtifactRootRecord
     ),
-    (
-        "mutation-journal-record.schema.json",
-        Model,
-        Evidence,
-        schema_version(
-            Some(request_journal::MUTATION_JOURNAL_FORMAT),
-            request_journal::MUTATION_JOURNAL_VERSION
-        ),
+    ("mutation-journal-record.schema.json",
         request_journal::MutationJournalRecord
     ),
-    (
-        "provenance-policy.schema.json",
-        Model,
-        Provenance,
-        None,
+    ("provenance-policy.schema.json",
         provenance::ProvenancePolicy
     ),
-    (
-        "environment-provenance.schema.json",
-        Model,
-        Provenance,
-        None,
+    ("environment-provenance.schema.json",
         provenance::EnvironmentProvenance
     ),
-    (
-        "execution-provenance.schema.json",
-        Model,
-        Provenance,
-        None,
+    ("execution-provenance.schema.json",
         provenance::ExecutionProvenance
     ),
-    (
-        "evidence-receipt.schema.json",
-        Model,
-        Evidence,
-        schema_version(
-            Some(receipt::EVIDENCE_RECEIPT_FORMAT),
-            receipt::EVIDENCE_RECEIPT_VERSION
-        ),
+    ("evidence-receipt.schema.json",
         receipt::EvidenceReceipt
     ),
-    (
-        "registry-entry.schema.json",
-        Model,
-        Registry,
-        schema_version(
-            Some(model_registry::REGISTRY_ENTRY_FORMAT),
-            model_registry::REGISTRY_ENTRY_VERSION
-        ),
+    ("registry-entry.schema.json",
         model_registry::RegistryEntry
     ),
-    (
-        "registry-list-entry.schema.json",
-        Model,
-        Registry,
-        schema_version(
-            Some(model_registry::REGISTRY_ENTRY_FORMAT),
-            model_registry::REGISTRY_ENTRY_VERSION
-        ),
+    ("registry-list-entry.schema.json",
         model_registry::RegistryListEntry
     ),
-    (
-        "state-record.schema.json",
-        Model,
-        Replay,
-        unnamed_format_version(replay::STATE_FORMAT_VERSION),
+    ("state-record.schema.json",
         replay::StateRecord
     ),
-    (
-        "state-index-entry.schema.json",
-        Model,
-        Replay,
-        unnamed_format_version(replay::STATE_FORMAT_VERSION),
+    ("state-index-entry.schema.json",
         replay::StateIndexEntry
     ),
-    (
-        "state-inspection.schema.json",
-        Model,
-        Replay,
-        unnamed_format_version(replay::STATE_FORMAT_VERSION),
+    ("state-inspection.schema.json",
         replay::StateInspection
     ),
-    (
-        "replay-manifest.schema.json",
-        Model,
-        Replay,
-        unnamed_format_version(replay::STATE_FORMAT_VERSION),
+    ("replay-manifest.schema.json",
         replay::ReplayManifest
     ),
-    (
-        "semantic-replay-checkpoint.schema.json",
-        Model,
-        Replay,
-        unnamed_format_version(replay::STATE_FORMAT_VERSION),
+    ("semantic-replay-checkpoint.schema.json",
         replay::SemanticReplayCheckpoint
     ),
-    (
-        "review-summary.schema.json",
-        Model,
-        Review,
-        None,
+    ("review-summary.schema.json",
         reviewer::ReviewSummary
     ),
-    (
-        "reviewer-capabilities.schema.json",
-        Model,
-        Review,
-        None,
+    ("reviewer-capabilities.schema.json",
         reviewer::ReviewerCapabilities
     ),
-    (
-        "review-search-result.schema.json",
-        Model,
-        Review,
-        None,
+    ("review-search-result.schema.json",
         reviewer::ReviewSearchResult
     ),
-    (
-        "review-export-manifest.schema.json",
-        Model,
-        Review,
-        None,
+    ("review-export-manifest.schema.json",
         reviewer::ReviewExportManifest
     ),
-    (
-        "visual-manifest.schema.json",
-        Model,
-        Visual,
-        schema_version(None, visual::VISUAL_MANIFEST_VERSION),
+    ("visual-manifest.schema.json",
         visual::VisualManifest
     ),
-    (
-        "geometry-solve-report.schema.json",
-        Model,
-        Visual,
-        None,
+    ("geometry-solve-report.schema.json",
         visual::GeometrySolveReport
     ),
-    (
-        "video-map-entry.schema.json",
-        Model,
-        Visual,
-        None,
+    ("video-map-entry.schema.json",
         visual::VideoMapEntry
     ),
-    (
-        "recovery-report.schema.json",
-        Model,
-        EventLog,
-        None,
+    ("recovery-report.schema.json",
         event_log::RecoveryReport
     ),
-    (
-        "wait-outcome.schema.json",
-        Model,
-        Observation,
-        None,
+    ("wait-outcome.schema.json",
         inspection::WaitOutcome
     ),
-    (
-        "screen-wait-outcome.schema.json",
-        Model,
-        Observation,
-        None,
+    ("screen-wait-outcome.schema.json",
         inspection::ScreenWaitOutcome
     ),
-    (
-        "observation.schema.json",
-        Model,
-        Observation,
-        None,
+    ("observation.schema.json",
         observation::Observation
     ),
-    (
-        "frame-envelope.schema.json",
-        Model,
-        Observation,
-        None,
+    ("frame-envelope.schema.json",
         observation::FrameEnvelope
     ),
-    (
-        "screen-frame.schema.json",
-        Model,
-        Screen,
-        schema_version(None, screen::SCREEN_FRAME_VERSION),
+    ("screen-frame.schema.json",
         screen::ScreenFrame
     ),
-    (
-        "screen-projection-request.schema.json",
-        Model,
-        Screen,
-        schema_version(None, screen::SCREEN_FRAME_VERSION),
+    ("screen-projection-request.schema.json",
         screen::ScreenProjectionRequest
     ),
-    (
-        "replay-checkpoint.schema.json",
-        Model,
-        Observation,
-        None,
+    ("replay-checkpoint.schema.json",
         observation::ReplayCheckpoint
     ),
-    (
-        "output-projection-report.schema.json",
-        Model,
-        Observation,
-        None,
+    ("output-projection-report.schema.json",
         output_projection::OutputProjectionReport
     ),
-    (
-        "timeline-entry.schema.json",
-        Model,
-        Analysis,
-        None,
+    ("timeline-entry.schema.json",
         timeline::TimelineEntry
     ),
-    (
-        "semantic-diff.schema.json",
-        Model,
-        Analysis,
-        None,
+    ("semantic-diff.schema.json",
         diff::SemanticDiff
     ),
-    ("vt-token.schema.json", Model, EventLog, None, vt::VtToken),
-    (
-        "explain-report.schema.json",
-        Model,
-        Analysis,
-        None,
+    ("vt-token.schema.json",
+        vt::VtToken
+    ),
+    ("explain-report.schema.json",
         analysis::ExplainReport
     ),
-    (
-        "diagnose-report.schema.json",
-        Model,
-        Analysis,
-        None,
+    ("diagnose-report.schema.json",
         analysis::DiagnoseReport
     ),
-    (
-        "playback-timing.schema.json",
-        Model,
-        Playback,
-        None,
+    ("playback-timing.schema.json",
         playback::PlaybackTiming
     ),
-    (
-        "playback-failure.schema.json",
-        Model,
-        Playback,
-        None,
+    ("playback-failure.schema.json",
         playback::PlaybackFailure
     ),
-    (
-        "edit-plan.schema.json",
-        Model,
-        Presentation,
-        schema_version(None, presentation::EDIT_PLAN_VERSION),
+    ("edit-plan.schema.json",
         presentation::EditPlan
     ),
-    (
-        "presentation-plan.schema.json",
-        Model,
-        Presentation,
-        unnamed_format_version(presentation::PRESENTATION_FORMAT_VERSION),
+    ("presentation-plan.schema.json",
         presentation::PresentationPlan
     ),
-    (
-        "presentation-manifest.schema.json",
-        Model,
-        Presentation,
-        unnamed_format_version(presentation::PRESENTATION_FORMAT_VERSION),
+    ("presentation-manifest.schema.json",
         presentation::PresentationManifest
     ),
-    (
-        "presentation-map-entry.schema.json",
-        Model,
-        Presentation,
-        unnamed_format_version(presentation::PRESENTATION_FORMAT_VERSION),
+    ("presentation-map-entry.schema.json",
         presentation::PresentationMapEntry
     ),
-    (
-        "presentation-preview-manifest.schema.json",
-        Model,
-        Presentation,
-        unnamed_format_version(presentation::PRESENTATION_FORMAT_VERSION),
+    ("presentation-preview-manifest.schema.json",
         presentation::PresentationPreviewManifest
     ),
-    (
-        "marker-record.schema.json",
-        Model,
-        Presentation,
-        unnamed_format_version(presentation::PRESENTATION_FORMAT_VERSION),
+    ("marker-record.schema.json",
         presentation::MarkerRecord
     ),
-    (
-        "semantic-video-source-plan.schema.json",
-        Model,
-        SemanticVideo,
-        unnamed_format_version(semantic_video::SEMANTIC_VIDEO_VERSION),
+    ("semantic-video-source-plan.schema.json",
         semantic_video::SemanticVideoSourcePlan
     ),
-    (
-        "semantic-frame-span.schema.json",
-        Model,
-        SemanticVideo,
-        unnamed_format_version(semantic_video::SEMANTIC_VIDEO_VERSION),
+    ("semantic-frame-span.schema.json",
         semantic_video::SemanticFrameSpan
     ),
-    (
-        "semantic-video-source-manifest.schema.json",
-        Model,
-        SemanticVideo,
-        unnamed_format_version(semantic_video::SEMANTIC_VIDEO_VERSION),
+    ("semantic-video-source-manifest.schema.json",
         semantic_video::SemanticVideoSourceManifest
     ),
-    (
-        "tmux-recording-manifest.schema.json",
-        Model,
-        Tmux,
-        format_version(tmux::TMUX_RECORDING_FORMAT, tmux::TMUX_RECORDING_VERSION),
+    ("tmux-recording-manifest.schema.json",
         tmux::TmuxRecordingManifest
     ),
-    (
-        "tmux-bundle-manifest.schema.json",
-        Model,
-        Tmux,
-        format_version(tmux::TMUX_BUNDLE_FORMAT, tmux::TMUX_BUNDLE_VERSION),
+    ("tmux-bundle-manifest.schema.json",
         tmux::TmuxBundleManifest
     ),
-    (
-        "acceptance-benchmark.schema.json",
-        Root,
-        AcceptanceBenchmark,
-        format_version("termtrace-acceptance-benchmark", 1),
+    ("acceptance-benchmark.schema.json",
         manual generate_acceptance_benchmark_schema
     ),
-    (
-        "cli-response.schema.json",
-        Model,
-        CliResponse,
-        protocol_version(cli_response::CLI_RESPONSE_VERSION),
+    ("cli-response.schema.json",
         cli_response::CliResponseEnvelope
     ),
 );
-/// Stable filenames that constitute the complete public generated-schema inventory.
+
+/// Complete, ordered list of public schema filenames.
 pub static PUBLIC_SCHEMA_FILENAMES: &[&str] = &[
     "event-log-header.schema.json",
     "event-record.schema.json",
@@ -906,20 +447,6 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
         .copied()
         .map(SchemaEntry::generate)
         .collect();
-}
-
-/// Generate one public schema by its stable filename.
-pub fn generate_named(filename: &str) -> Result<GeneratedSchema> {
-    let entry = catalog()?
-        .iter()
-        .find(|entry| return entry.filename == filename)
-        .copied();
-    let Some(entry) = entry else {
-        return Err(Error::UnknownSchema {
-            filename: filename.to_owned(),
-        });
-    };
-    return entry.generate();
 }
 
 /// Write all generated schemas to a directory in stable registry order.

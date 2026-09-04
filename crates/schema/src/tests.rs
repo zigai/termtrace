@@ -52,26 +52,15 @@ fn checked_in_schemas_match_catalog() {
 }
 
 #[test]
-fn handwritten_schema_has_explicit_catalog_owner() {
-    let entry = catalog()
-        .expect("schema catalog")
-        .iter()
-        .find(|entry| return entry.filename == "acceptance-benchmark.schema.json")
-        .expect("handwritten schema catalog entry");
-    assert_eq!(entry.owner, ContractOwner::Root);
-    assert_eq!(entry.source, SchemaSource::Manual);
-    assert_eq!(entry.rust_type, None);
-
-    let cli = catalog()
-        .expect("schema catalog")
-        .iter()
-        .find(|entry| return entry.filename == "cli-response.schema.json")
-        .expect("CLI response schema catalog entry");
-    assert_eq!(cli.owner, ContractOwner::Model);
-    assert_eq!(cli.source, SchemaSource::RustType);
-    assert_eq!(cli.rust_type, Some("cli_response::CliResponseEnvelope"));
+fn acceptance_benchmark_instance_matches_schema() {
+    let schema_bytes = include_bytes!("../../../schemas/acceptance-benchmark.schema.json");
+    let schema: serde_json::Value = serde_json::from_slice(schema_bytes).expect("schema json");
+    let validator = jsonschema::validator_for(&schema).expect("schema validator");
+    let instance: serde_json::Value =
+        serde_json::from_slice(include_bytes!("../../../benchmarks/acceptance-v1.json"))
+            .expect("acceptance benchmark json");
+    assert!(validator.is_valid(&instance));
 }
-
 #[test]
 fn shared_driver_response_fixtures_match_the_rust_contract() {
     let schema = serde_json::to_value(schema_for!(DriverResponse)).expect("driver schema");
