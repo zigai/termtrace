@@ -197,14 +197,7 @@ verify_checksum() {
     fi
 
     if command -v shasum >/dev/null 2>&1; then
-        local expected actual
-
-        expected=$(awk '{print $1}' "${work}/${checksum}")
-        actual=$(shasum -a 256 "${work}/${archive}" | awk '{print $1}')
-        if [[ "$actual" != "$expected" ]]; then
-            echo "SHA-256 checksum mismatch" >&2
-            exit 1
-        fi
+        (cd "$work" && shasum -a 256 --check "$checksum")
         return
     fi
 
