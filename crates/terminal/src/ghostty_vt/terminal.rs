@@ -192,6 +192,10 @@ impl VtInputLimiter {
     }
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "output_len is bounded by TERMINAL_WRITE_CHUNK_BYTES"
+)]
 fn push_output(
     byte: u8,
     output: &mut [u8; TERMINAL_WRITE_CHUNK_BYTES],
@@ -201,10 +205,8 @@ fn push_output(
     if *output_len == output.len() {
         flush_output(output, output_len, emit);
     }
-    if let Some(slot) = output.get_mut(*output_len) {
-        *slot = byte;
-        *output_len += 1;
-    }
+    output[*output_len] = byte;
+    *output_len += 1;
 }
 
 fn flush_output(

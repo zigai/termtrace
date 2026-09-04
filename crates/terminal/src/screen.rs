@@ -46,11 +46,10 @@ pub fn semantic_state_hash(state: &SemanticState) -> Result<String, ScreenFrameE
         active_style: &state.active_style,
         metadata: &state.metadata,
     };
-    let encoded =
-        serde_json::to_vec(&metadata).map_err(|_| return ScreenFrameError::Serialization)?;
     let mut hash = blake3::Hasher::new();
     hash.update(SEMANTIC_STATE_HASH_DOMAIN);
-    hash.update(&encoded);
+    serde_json::to_writer(&mut hash, &metadata)
+        .map_err(|_| return ScreenFrameError::Serialization)?;
     for row in &state.grid {
         let normalized = StateHashRow {
             row: row.row,
@@ -58,9 +57,10 @@ pub fn semantic_state_hash(state: &SemanticState) -> Result<String, ScreenFrameE
             wrap_continuation: row.wrap_continuation,
             cells: &row.cells,
         };
-        let encoded =
-            serde_json::to_vec(&normalized).map_err(|_| return ScreenFrameError::Serialization)?;
-        hash.update(blake3::hash(&encoded).as_bytes());
+        let mut row_hash = blake3::Hasher::new();
+        serde_json::to_writer(&mut row_hash, &normalized)
+            .map_err(|_| return ScreenFrameError::Serialization)?;
+        hash.update(row_hash.finalize().as_bytes());
     }
     return Ok(hash.finalize().to_hex().to_string());
 }
@@ -109,17 +109,7 @@ pub fn validate_screen_region(
             InvalidRegionReason::OutOfBounds,
         ));
     }
-    let cell_count = u32::from(region.width())
-        .checked_mul(u32::from(region.height()))
-        .ok_or_else(|| {
-            return ScreenFrameError::ResourceLimit {
-                limit: ScreenFrameLimitKind::CellCount,
-                requested: u64::MAX,
-                maximum: u64::from(MAX_SCREEN_FRAME_CELLS),
-                detail: request.detail,
-                region,
-            };
-        })?;
+    let cell_count = u32::from(region.width()) * u32::from(region.height());
     if cell_count > MAX_SCREEN_FRAME_CELLS {
         return Err(ScreenFrameError::ResourceLimit {
             limit: ScreenFrameLimitKind::CellCount,
@@ -329,18 +319,21 @@ fn project_data(
     }
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "validated by validate_screen_region"
+)]
 fn selected_rows(state: &SemanticState, region: ScreenRegion) -> impl Iterator<Item = &RowState> {
-    let rows = state
-        .grid
-        .get(usize::from(region.top)..usize::from(region.bottom))
-        .unwrap_or_default();
+    let rows = &state.grid[usize::from(region.top)..usize::from(region.bottom)];
     return rows.iter();
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "validated by validate_screen_region"
+)]
 fn selected_cells(cells: &[CellState], region: ScreenRegion) -> &[CellState] {
-    return cells
-        .get(usize::from(region.left)..usize::from(region.right))
-        .unwrap_or_default();
+    return &cells[usize::from(region.left)..usize::from(region.right)];
 }
 
 fn screen_cell(row: u16, cell: &CellState) -> ScreenCell {
