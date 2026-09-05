@@ -16,12 +16,40 @@ pub(super) fn write_presentation_map(
     semantic_spans: &[SemanticFrameSpan],
 ) -> Result<()> {
     let mut writer = secure_writer(path)?;
+    let mut span_cursor = 0usize;
+    let mut mask_cursor = 0usize;
     for (clip_index, clip) in plan.clips.iter().enumerate() {
         for output_frame in clip.output_start_frame..clip.output_end_frame {
             let (source_frame, operation) = mapped_source_frame(clip, output_frame);
-            let semantic_state = semantic_spans.iter().find(|span| {
+            while semantic_spans
+                .get(span_cursor)
+                .is_some_and(|span| return span.end_frame <= source_frame)
+            {
+                span_cursor += 1;
+            }
+            if semantic_spans
+                .get(span_cursor)
+                .is_some_and(|span| return span.start_frame > source_frame)
+            {
+                span_cursor =
+                    semantic_spans.partition_point(|span| return span.end_frame <= source_frame);
+            }
+            let semantic_state = semantic_spans.get(span_cursor).filter(|span| {
                 return span.start_frame <= source_frame && source_frame < span.end_frame;
             });
+
+            while plan
+                .cursor_masks
+                .get(mask_cursor)
+                .is_some_and(|mask| return mask.output_frame < output_frame)
+            {
+                mask_cursor += 1;
+            }
+            let cursor_mask = plan
+                .cursor_masks
+                .get(mask_cursor)
+                .filter(|mask| return mask.output_frame == output_frame);
+
             let entry = PresentationMapEntry {
                 output_frame,
                 clip_index,
@@ -41,16 +69,12 @@ pub(super) fn write_presentation_map(
                     })
                     .map(|annotation| return annotation.annotation_index)
                     .collect(),
-                transforms: frame_transform_names(plan, output_frame),
+                transforms: frame_transform_names(plan, output_frame, cursor_mask.is_some()),
                 change_state_ids: semantic_change_states_at(plan, output_frame),
                 encoded_pixel_change: plan.change_visualization.as_ref().is_some_and(|change| {
                     return change.source == ChangeSource::EncodedPixels && output_frame > 0;
                 }),
-                cursor_mask_state_id: plan
-                    .cursor_masks
-                    .iter()
-                    .find(|mask| return mask.output_frame == output_frame)
-                    .map(|mask| return mask.state_id),
+                cursor_mask_state_id: cursor_mask.map(|mask| return mask.state_id),
             };
             serde_json::to_writer(&mut writer, &entry).map_err(|source| {
                 return Error::InvalidJson {
@@ -135,16 +159,16 @@ fn transform_name(transform: &PixelTransform) -> String {
     .to_owned();
 }
 
-fn frame_transform_names(plan: &PresentationPlan, output_frame: u64) -> Vec<String> {
+fn frame_transform_names(
+    plan: &PresentationPlan,
+    output_frame: u64,
+    has_cursor_mask: bool,
+) -> Vec<String> {
     let mut names = plan
         .transforms
         .iter()
         .filter(|transform| {
-            return !matches!(transform, PixelTransform::CursorMask)
-                || plan
-                    .cursor_masks
-                    .iter()
-                    .any(|mask| return mask.output_frame == output_frame);
+            return !matches!(transform, PixelTransform::CursorMask) || has_cursor_mask;
         })
         .map(transform_name)
         .collect::<Vec<_>>();
