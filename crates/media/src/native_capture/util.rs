@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io::Read as _,
     os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
@@ -33,8 +34,9 @@ pub(super) fn external_error(program: &str, error: impl ToString) -> Error {
     };
 }
 pub(super) fn status_error_with_logs(program: &str, status: ExitStatus, staging: &Path) -> Error {
-    let stderr =
-        fs::read_to_string(staging.join(format!("{program}.stderr.log"))).unwrap_or_default();
+    let mut stderr = String::new();
+    let _ = fs::File::open(staging.join(format!("{program}.stderr.log")))
+        .and_then(|file| return file.take(2048).read_to_string(&mut stderr));
     return Error::ExternalCommand {
         operation: program.to_owned(),
         reason: format!("exited with {status}: {}", stderr.trim()),

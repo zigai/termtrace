@@ -1,8 +1,13 @@
 use std::{
-    fs::File,
-    io::{self, BufRead as _, BufReader},
+    fs::{File, OpenOptions},
+    io::{self, BufRead as _, BufReader, Read as _},
+    mem::size_of,
+    os::unix::fs::OpenOptionsExt as _,
     path::Path,
+    sync::atomic::{AtomicBool, Ordering},
 };
+
+use nix::libc::{O_NOFOLLOW, O_NONBLOCK};
 
 use termtrace_engine::analysis::diagnostics::ValidatedVisualManifest;
 use termtrace_evidence::{event_log::EventLog, session::read_manifest};
@@ -172,6 +177,224 @@ pub fn validated_visual_manifests(
         validated.push(visual);
     }
     return Ok(validated);
+}
+
+/// Load only native correlations for one exact state with bounded retained data.
+///
+/// Canonical completion is authenticated by the shared observation verifier.
+/// Candidate manifests and video-map lines have explicit allocation bounds, and
+/// map scans check cancellation without retaining unrelated semantic states.
+pub fn validated_visual_manifests_for_state(
+    session: &Path,
+    state_id: u64,
+    cancelled: &AtomicBool,
+) -> Result<Vec<ValidatedVisualManifest>> {
+    use termtrace_engine::observation::{
+        StatePoint, semantic_state_with_hash_for_session_cancellable,
+    };
+    use termtrace_evidence::{event_log::EventLogCursor, session::read_completion};
+
+    semantic_state_with_hash_for_session_cancellable(
+        session,
+        &StatePoint::LatestPresented,
+        false,
+        cancelled,
+    )?;
+    let session_manifest = read_manifest(session)?;
+    let completion = read_completion(session)?;
+    let canonical = EventLogCursor::open(session.join(&session_manifest.event_log))?;
+    let expected_profile_hash = session_manifest
+        .ghostty_visual
+        .as_ref()
+        .map(|profile| return profile.effective_config_hash.as_str());
+    let directory = fs_err::read_dir(session).map_err(|source| {
+        return Error::Filesystem {
+            path: session.to_path_buf(),
+            source,
+        };
+    })?;
+    let mut validated = Vec::new();
+    let mut retained_bytes = 0_usize;
+    for entry in directory {
+        check_review_cancelled(cancelled)?;
+        let entry = entry.map_err(|source| {
+            return Error::Filesystem {
+                path: session.to_path_buf(),
+                source,
+            };
+        })?;
+        if !entry
+            .file_type()
+            .map_err(|source| {
+                return Error::Filesystem {
+                    path: entry.path(),
+                    source,
+                };
+            })?
+            .is_dir()
+        {
+            continue;
+        }
+        let manifest_path = entry.path().join("manifest.json");
+        let mut file = match open_review_file(&manifest_path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(source) => {
+                return Err(Error::Filesystem {
+                    path: manifest_path,
+                    source,
+                });
+            }
+        };
+        let mut bytes = Vec::new();
+        file.by_ref()
+            .take(1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|source| {
+                return Error::Filesystem {
+                    path: manifest_path.clone(),
+                    source,
+                };
+            })?;
+        if bytes.len() > 1024 * 1024 {
+            return Err(invalid("reviewer native manifest exceeds 1 MiB limit"));
+        }
+        let Ok(manifest) = serde_json::from_slice::<VisualManifest>(&bytes) else {
+            continue;
+        };
+        if manifest.session_id != session_manifest.session_id
+            || manifest.source_event_hash.as_deref() != Some(completion.final_event_hash.as_str())
+            || validate_visual_manifest_binding(
+                &manifest,
+                expected_profile_hash,
+                &canonical.header().colors.source,
+            )
+            .is_err()
+        {
+            continue;
+        }
+        let map_path = entry.path().join("video-map.jsonl");
+        let mut video_map = Vec::new();
+        match open_review_file(&map_path) {
+            Ok(file) => {
+                let member = manifest
+                    .members
+                    .iter()
+                    .find(|member| return member.path == "video-map.jsonl")
+                    .ok_or_else(|| {
+                        return invalid("native video map is absent from its manifest");
+                    })?;
+                let mut reader = BufReader::new(file);
+                let mut hash = blake3::Hasher::new();
+                let mut total_bytes = 0_u64;
+                let mut line = Vec::new();
+                loop {
+                    check_review_cancelled(cancelled)?;
+                    line.clear();
+                    let count = reader
+                        .by_ref()
+                        .take(64 * 1024 + 1)
+                        .read_until(b'\n', &mut line)
+                        .map_err(|source| {
+                            return Error::Filesystem {
+                                path: map_path.clone(),
+                                source,
+                            };
+                        })?;
+                    if count == 0 {
+                        break;
+                    }
+                    if count > 64 * 1024 {
+                        return Err(invalid("native video-map line exceeds 64 KiB limit"));
+                    }
+                    hash.update(&line);
+                    total_bytes =
+                        total_bytes.saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
+                    let mapped: VideoMapEntry = serde_json::from_slice(&line).map_err(|error| {
+                        return invalid(format!("invalid native video-map entry: {error}"));
+                    })?;
+                    if mapped.state_id == state_id {
+                        if video_map.len() >= 4096 {
+                            return Err(invalid(
+                                "selected state exceeds 4096 native frame correlations",
+                            ));
+                        }
+                        video_map.push(mapped);
+                    }
+                }
+                if total_bytes != member.byte_length
+                    || hash.finalize().to_hex().as_str() != member.blake3
+                {
+                    return Err(invalid(
+                        "native video-map content does not match its manifest",
+                    ));
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(Error::Filesystem {
+                    path: map_path,
+                    source,
+                });
+            }
+        }
+        if manifest.selected_state_id != Some(state_id) && video_map.is_empty() {
+            continue;
+        }
+        retained_bytes = retained_bytes
+            .saturating_add(bytes.len())
+            .saturating_add(video_map.len().saturating_mul(size_of::<VideoMapEntry>()));
+        if validated.len() >= 256 || retained_bytes > 8 * 1024 * 1024 {
+            return Err(invalid(
+                "selected native evidence exceeds reviewer retention budget",
+            ));
+        }
+        let relative = manifest_path
+            .strip_prefix(session)
+            .unwrap_or(&manifest_path)
+            .to_path_buf();
+        let visual =
+            ValidatedVisualManifest::new(relative.clone(), manifest, video_map, |_| return Ok(()))
+                .map_err(Error::from)?;
+        validated.push((relative, visual));
+    }
+    check_review_cancelled(cancelled)?;
+    semantic_state_with_hash_for_session_cancellable(
+        session,
+        &StatePoint::LatestPresented,
+        false,
+        cancelled,
+    )?;
+    if read_completion(session)?.final_event_hash != completion.final_event_hash {
+        return Err(invalid(
+            "canonical source changed during native reviewer query",
+        ));
+    }
+    validated.sort_unstable_by(|(left, _), (right, _)| return left.cmp(right));
+    return Ok(validated
+        .into_iter()
+        .map(|(_, visual)| return visual)
+        .collect());
+}
+
+fn check_review_cancelled(cancelled: &AtomicBool) -> Result<()> {
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(invalid("native reviewer query cancelled"));
+    }
+    return Ok(());
+}
+
+fn open_review_file(path: &Path) -> io::Result<File> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NOFOLLOW | O_NONBLOCK)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other(
+            "review evidence member must be a regular file",
+        ));
+    }
+    return Ok(file);
 }
 
 fn invalid(reason: impl Into<String>) -> Error {

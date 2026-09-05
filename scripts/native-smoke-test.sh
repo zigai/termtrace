@@ -3,6 +3,7 @@ set -Eeuo pipefail
 umask 077
 
 readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+binary="${TERMTRACE_BINARY:-$root/target/debug/termtrace}"
 readonly SMOKE_RANGE_FROM_NS=11000000000
 readonly SMOKE_RANGE_TO_NS=12350000000
 readonly SMOKE_RANGE_SUFFIX="range-${SMOKE_RANGE_FROM_NS}-${SMOKE_RANGE_TO_NS}"
@@ -334,16 +335,16 @@ check_session_integrity() {
     local finding
     {
         printf '\n$ %q --response full integrity verify --level content --json %q\n' \
-            "$root/target/debug/termtrace" "$output"
+            "$binary" "$output"
     } >>"$log"
     if [[ "$verbose" == true ]]; then
-        if report="$("$root/target/debug/termtrace" --response full integrity verify \
+        if report="$("$binary" --response full integrity verify \
             --level content --json "$output" 2> >(tee -a "$log" >&2))"; then
             status=0
         else
             status=$?
         fi
-    elif report="$("$root/target/debug/termtrace" --response full integrity verify \
+    elif report="$("$binary" --response full integrity verify \
         --level content --json "$output" 2>>"$log")"; then
         status=0
     else
@@ -820,11 +821,11 @@ if [[ "$validation_only" == true ]]; then
     printf '  Recording: %s\n\n' "$output"
     step "Checking validation tools"
     require_commands jq awk grep cmp ffprobe
-    if [[ ! -x "$root/target/debug/termtrace" ]]; then
+    if [[ ! -x "$binary" ]]; then
         failed_check="termtrace_binary"
-        failed_expected="an executable target/debug/termtrace; run cargo build first"
+        failed_expected="an executable Termtrace binary; set TERMTRACE_BINARY or run cargo build"
         failed_observed="binary is missing or not executable"
-        failed_file="$root/target/debug/termtrace"
+        failed_file="$binary"
         exit 2
     fi
     step "Validating retained manifests, media, range boundaries, and provenance"
@@ -848,17 +849,21 @@ require_commands "${required_commands[@]}"
 
 cd "$root"
 
-step "Building Termtrace"
-run cargo build
+if [[ -z "${TERMTRACE_BINARY:-}" ]]; then
+    step "Building Termtrace"
+    run cargo build
+else
+    [[ -x "$binary" ]] || die "TERMTRACE_BINARY is not executable: $binary"
+fi
 
 step "Checking native capture capabilities"
-run target/debug/termtrace --response full doctor --json \
+run "$binary" --response full doctor --json \
     --require native-screenshot,native-video
 
 printf 'font-size = 11\nwindow-padding-x = 2\nbackground = #220000\n' >"$profile"
 
 step "Recording the timed fixture (about 13 seconds)"
-run target/debug/termtrace --response full record --no-input --geometry fit \
+run "$binary" --response full record --no-input --geometry fit \
     --viewport "$SMOKE_VIEWPORT" --ghostty-config "$profile" --font-size "$SMOKE_FONT_SIZE" \
     --padding-x 6 --padding-y 4 --foreground '#e6e6e6' \
     --background '#101010' --out "$output" -- /bin/sh -c \
@@ -866,22 +871,22 @@ run target/debug/termtrace --response full record --no-input --geometry fit \
 rm -f "$profile"
 
 step "Indexing the complete recording"
-run target/debug/termtrace --response full analyze index --session "$output"
+run "$binary" --response full analyze index --session "$output"
 
 step "Capturing full video and a strict screenshot"
-run target/debug/termtrace --response full artifact capture --session "$output" --fps 24
-run target/debug/termtrace --response full screenshot "$output" \
+run "$binary" --response full artifact capture --session "$output" --fps 24
+run "$binary" --response full screenshot "$output" \
     --renderer native --at 12.2s --viewport "$SMOKE_VIEWPORT" --strict \
     --out "$output/native-single"
 
 readonly capture_range_visual="$output/visual-$SMOKE_RANGE_SUFFIX"
 
 step "Capturing the selected 11.0s–12.35s range"
-run target/debug/termtrace --response full analyze index --session "$output" \
+run "$binary" --response full analyze index --session "$output" \
     --from "${SMOKE_RANGE_FROM_NS}ns" --to "${SMOKE_RANGE_TO_NS}ns"
 range_capture_started="$(python3 -c 'import time; print(time.monotonic_ns())')"
 readonly range_capture_started
-run target/debug/termtrace --response full artifact capture --session "$output" --fps 24 \
+run "$binary" --response full artifact capture --session "$output" --fps 24 \
     --from "${SMOKE_RANGE_FROM_NS}ns" --to "${SMOKE_RANGE_TO_NS}ns"
 range_capture_finished="$(python3 -c 'import time; print(time.monotonic_ns())')"
 readonly range_capture_finished

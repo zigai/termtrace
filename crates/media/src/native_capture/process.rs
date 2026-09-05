@@ -1,13 +1,19 @@
 use std::{
     fs::{self, OpenOptions},
-    io::{ErrorKind, Write as _},
+    io::{ErrorKind, Read, Write as _},
     os::unix::fs::OpenOptionsExt as _,
+    os::unix::process::CommandExt as _,
     path::{Path, PathBuf},
-    process::{self, Child, Command, ExitStatus, Stdio},
+    process::{self, Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio},
     thread,
     time::{Duration, Instant},
 };
 
+use nix::{
+    fcntl::{FcntlArg, OFlag, fcntl},
+    sys::signal::{Signal, killpg},
+    unistd::Pid,
+};
 use serde::de::DeserializeOwned;
 use termtrace_evidence::artifact::secure_file;
 use termtrace_model::{
@@ -23,10 +29,82 @@ use super::{
 pub(super) struct ManagedChild {
     name: &'static str,
     child: Option<Child>,
+    group: Option<Pid>,
+    output: Option<ProbeOutput>,
 }
 pub(super) struct DisplayLease {
     pub(super) number: u16,
     lock_path: PathBuf,
+}
+
+struct ProbeOutput {
+    stdout: ChildStdout,
+    stderr: ChildStderr,
+    stdout_bytes: Vec<u8>,
+    stderr_bytes: Vec<u8>,
+    log: Option<fs::File>,
+}
+
+impl ProbeOutput {
+    fn drain(&mut self, name: &str) -> Result<()> {
+        drain_pipe(&mut self.stdout, &mut self.stdout_bytes, 1_048_576, name)?;
+        drain_pipe(&mut self.stderr, &mut self.stderr_bytes, 65_536, name)?;
+        return Ok(());
+    }
+}
+
+fn drain_pipe(pipe: &mut impl Read, bytes: &mut Vec<u8>, limit: usize, name: &str) -> Result<()> {
+    let mut buffer = [0_u8; 8192];
+    loop {
+        match pipe.read(&mut buffer) {
+            Ok(0) => return Ok(()),
+            Ok(count) => {
+                if count > limit.saturating_sub(bytes.len()) {
+                    return Err(external_error(
+                        name,
+                        format!("probe output exceeded {limit} bytes"),
+                    ));
+                }
+                let chunk = buffer.get(..count).ok_or_else(|| {
+                    return external_error(name, "pipe returned an invalid byte count");
+                })?;
+                bytes.extend_from_slice(chunk);
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(()),
+            Err(error) if error.kind() == ErrorKind::Interrupted => {}
+            Err(error) => return Err(external_error(name, error)),
+        }
+    }
+}
+
+/// Run a dependency probe with owned descendants, bounded output and an explicit deadline.
+pub(crate) fn probe_output(
+    name: &'static str,
+    command: &mut Command,
+    timeout: Duration,
+) -> Result<Vec<u8>> {
+    command.stdin(Stdio::null());
+    let mut process = ManagedChild::spawn_group(name, command)?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = process.try_wait()? {
+            if !status.success() {
+                return Err(process.failure(status));
+            }
+            let output = process
+                .output
+                .take()
+                .ok_or_else(|| return external_error(name, "probe output pipes are unavailable"))?;
+            return Ok(output.stdout_bytes);
+        }
+        if Instant::now() >= deadline {
+            return Err(external_error(
+                name,
+                "timed out while waiting for probe exit",
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 pub(super) fn ghostty_overrides() -> Vec<String> {
@@ -51,26 +129,27 @@ pub(super) fn spawn_xvfb(
     height: u16,
     staging: &Path,
 ) -> Result<ManagedChild> {
-    let path = staging.join("xvfb.log");
-    let log = secure_file(&path)?;
-    let clone = log
-        .try_clone()
-        .map_err(|source| return Error::Filesystem { path, source })?;
-    let child = Command::new("Xvfb")
-        .arg(format!(":{}", lease.number))
-        .args([
-            "-screen",
-            "0",
-            &format!("{width}x{height}x24"),
-            "-nolisten",
-            "tcp",
-            "-noreset",
-        ])
-        .stdout(Stdio::from(clone))
-        .stderr(Stdio::from(log))
-        .spawn()
-        .map_err(|error| return external_error("Xvfb", error))?;
-    return Ok(ManagedChild::new("Xvfb", child));
+    let log = secure_file(&staging.join("xvfb.log"))?;
+    let mut process = ManagedChild::spawn_group(
+        "Xvfb",
+        Command::new("Xvfb")
+            .arg(format!(":{}", lease.number))
+            .args([
+                "-screen",
+                "0",
+                &format!("{width}x{height}x24"),
+                "-nolisten",
+                "tcp",
+                "-noreset",
+                "-extension",
+                "GLX",
+            ])
+            .stdin(Stdio::null()),
+    )?;
+    if let Some(output) = process.output.as_mut() {
+        output.log = Some(log);
+    }
+    return Ok(process);
 }
 
 pub(super) fn spawn_geometry_probe(
@@ -237,10 +316,61 @@ impl ManagedChild {
         return Self {
             name,
             child: Some(child),
+            group: None,
+            output: None,
         };
     }
+    pub(super) fn spawn_group(name: &'static str, command: &mut Command) -> Result<Self> {
+        let mut child = command
+            .process_group(0)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| return external_error(name, error))?;
+        let group = match i32::try_from(child.id()) {
+            Ok(pid) => Pid::from_raw(pid),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(external_error(name, error));
+            }
+        };
+        let mut managed = Self {
+            name,
+            child: Some(child),
+            group: Some(group),
+            output: None,
+        };
+        let child = managed
+            .child
+            .as_mut()
+            .ok_or_else(|| return external_error(name, "managed child is unavailable"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| return external_error(name, "probe stdout pipe is unavailable"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| return external_error(name, "probe stderr pipe is unavailable"))?;
+        fcntl(&stdout, FcntlArg::F_SETFL(OFlag::O_NONBLOCK))
+            .map_err(|error| return external_error(name, error))?;
+        fcntl(&stderr, FcntlArg::F_SETFL(OFlag::O_NONBLOCK))
+            .map_err(|error| return external_error(name, error))?;
+        managed.output = Some(ProbeOutput {
+            stdout,
+            stderr,
+            stdout_bytes: Vec::new(),
+            stderr_bytes: Vec::new(),
+            log: None,
+        });
+        return Ok(managed);
+    }
     fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
-        return self
+        if let Some(output) = self.output.as_mut() {
+            output.drain(self.name)?;
+        }
+        let status = self
             .child
             .as_mut()
             .ok_or_else(|| {
@@ -250,12 +380,58 @@ impl ManagedChild {
                 };
             })?
             .try_wait()
-            .map_err(|error| return external_error(self.name, error));
+            .map_err(|error| return external_error(self.name, error))?;
+        if status.is_some()
+            && let Some(output) = self.output.as_mut()
+        {
+            output.drain(self.name)?;
+        }
+        return Ok(status);
+    }
+    fn failure(&self, status: ExitStatus) -> Error {
+        let detail = self.output.as_ref().map_or_else(String::new, |output| {
+            return String::from_utf8_lossy(&output.stderr_bytes)
+                .chars()
+                .take(2048)
+                .collect();
+        });
+        return external_error(
+            self.name,
+            format!("exited with {status}: {}", detail.trim()),
+        );
+    }
+
+    pub(super) fn check_running(&mut self) -> Result<()> {
+        if let Some(status) = self.try_wait()? {
+            return Err(self.failure(status));
+        }
+        return Ok(());
     }
     pub(super) fn terminate(&mut self) {
+        if let Some(group) = self.group.take() {
+            let _ = killpg(group, Signal::SIGTERM);
+            let deadline = Instant::now() + Duration::from_millis(250);
+            while Instant::now() < deadline {
+                if killpg(group, None).is_err() {
+                    break;
+                }
+                if let Some(child) = self.child.as_mut() {
+                    let _ = child.try_wait();
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            let _ = killpg(group, Signal::SIGKILL);
+        }
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
+        }
+        if let Some(output) = self.output.as_mut() {
+            let _ = output.drain(self.name);
+            if let Some(mut log) = output.log.take() {
+                let _ = log.write_all(&output.stdout_bytes);
+                let _ = log.write_all(&output.stderr_bytes);
+            }
         }
     }
 }
@@ -348,7 +524,7 @@ fn wait_until(
             return Ok(());
         }
         if let Some(status) = process.try_wait()? {
-            return Err(status_error(process.name, status));
+            return Err(process.failure(status));
         }
         if Instant::now() >= deadline {
             return Err(Error::ExternalCommand {
@@ -367,7 +543,7 @@ pub(super) fn wait_for_success(
     let deadline = Instant::now() + timeout;
     loop {
         if let Some(status) = process.try_wait()? {
-            process.child.take();
+            process.terminate();
             return if status.success() {
                 Ok(())
             } else {

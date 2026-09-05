@@ -1,17 +1,18 @@
 //! Bounded capability probes owned by the media layer.
 
 use std::{
-    env,
-    ffi::OsStr,
-    path::PathBuf,
-    process::{Command, Stdio},
-    result::Result as StdResult,
+    env, ffi::OsStr, os::unix::fs::PermissionsExt as _, path::PathBuf, process::Command,
+    result::Result as StdResult, time::Duration,
 };
 
 use termtrace_model::protocol::capability::{
     Capability, CapabilityStatus, PRESENTATION_CAPABILITY, SEMANTIC_VIDEO_CAPABILITY,
 };
 use termtrace_terminal::GhosttyVt;
+
+use crate::native_capture::process::probe_output;
+
+const DEPENDENCY_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Probe semantic-video and presentation dependencies in stable report order.
 #[must_use]
@@ -57,8 +58,8 @@ pub fn semantic_video_capability() -> Capability {
 #[must_use]
 pub fn presentation_capability() -> Capability {
     let missing = missing(&["ffmpeg", "ffprobe"]);
-    let encoder = ffmpeg_has_entry("-encoders", "libx264");
-    let ass_filter = ffmpeg_has_entry("-filters", "ass");
+    let encoder = missing.is_empty() && ffmpeg_has_entry("-encoders", "libx264");
+    let ass_filter = encoder && ffmpeg_has_entry("-filters", "ass");
     if missing.is_empty() && encoder && ass_filter {
         return ready(
             PRESENTATION_CAPABILITY,
@@ -117,30 +118,40 @@ fn executable(command: impl AsRef<OsStr>) -> Option<PathBuf> {
     let path = env::var_os("PATH")?;
     return env::split_paths(&path)
         .map(|directory| return directory.join(command))
-        .find(|candidate| return candidate.is_file());
+        .find(|candidate| {
+            return candidate.metadata().is_ok_and(|metadata| {
+                return metadata.is_file() && metadata.permissions().mode() & 0o111 != 0;
+            });
+        });
 }
 
 fn ffmpeg_has_entry(argument: &str, entry: &str) -> bool {
     let Some(ffmpeg) = executable("ffmpeg") else {
         return false;
     };
-    return Command::new(ffmpeg)
-        .args(["-hide_banner", argument])
-        .stdin(Stdio::null())
-        .output()
-        .ok()
-        .is_some_and(|output| {
-            return output.status.success()
-                && String::from_utf8_lossy(&output.stdout)
-                    .split_whitespace()
-                    .any(|value| return value == entry);
-        });
+    return probe_output(
+        "ffmpeg",
+        Command::new(ffmpeg).args(["-hide_banner", argument]),
+        DEPENDENCY_PROBE_TIMEOUT,
+    )
+    .is_ok_and(|output| {
+        return String::from_utf8_lossy(&output)
+            .split_whitespace()
+            .any(|value| return value == entry);
+    });
 }
 
 pub(crate) fn probe_semantic_video_encode() -> StdResult<(), String> {
     let ffmpeg = executable("ffmpeg").ok_or_else(|| return "FFmpeg is unavailable".to_owned())?;
-    let output = Command::new(ffmpeg)
-        .args([
+    probe_output(
+        "ffprobe",
+        Command::new("ffprobe").arg("-version"),
+        DEPENDENCY_PROBE_TIMEOUT,
+    )
+    .map_err(|error| return error.to_string())?;
+    return probe_output(
+        "ffmpeg",
+        Command::new(ffmpeg).args([
             "-hide_banner",
             "-loglevel",
             "error",
@@ -162,18 +173,11 @@ pub(crate) fn probe_semantic_video_encode() -> StdResult<(), String> {
             "-f",
             "null",
             "-",
-        ])
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| format!("could not execute FFmpeg: {error}"))?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let detail: String = String::from_utf8_lossy(&output.stderr)
-        .chars()
-        .take(1_024)
-        .collect();
-    return Err(format!("FFmpeg semantic-video encode failed: {detail}"));
+        ]),
+        DEPENDENCY_PROBE_TIMEOUT,
+    )
+    .map(|_| return)
+    .map_err(|error| return error.to_string());
 }
 
 fn availability(value: bool) -> &'static str {

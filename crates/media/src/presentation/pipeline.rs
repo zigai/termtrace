@@ -361,11 +361,13 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
     let ffmpeg_arguments = vec![
         "-hide_banner".to_owned(),
         "-nostdin".to_owned(),
+        "-threads".to_owned(),
+        "1".to_owned(),
         "-y".to_owned(),
         "-i".to_owned(),
         source_video.display().to_string(),
-        "-/filter_complex".to_owned(),
-        "filter.txt".to_owned(),
+        "-filter_complex".to_owned(),
+        filter.trim().to_owned(),
         "-map".to_owned(),
         "[outv]".to_owned(),
         "-an".to_owned(),
@@ -375,6 +377,8 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
         plan.output_frame_count.to_string(),
         "-c:v".to_owned(),
         encoder.to_owned(),
+        "-threads".to_owned(),
+        "1".to_owned(),
         "-preset".to_owned(),
         plan.delivery.encoder_preset.clone(),
         "-crf".to_owned(),
@@ -400,8 +404,9 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
     write_secure(&staging.join("ffmpeg.log"), &process.stderr)?;
     if !process.status.success() {
         return Err(plan_error(format!(
-            "FFmpeg presentation export failed with {}",
-            process.status
+            "FFmpeg presentation export failed with {}: {}",
+            process.status,
+            String::from_utf8_lossy(&process.stderr)
         )));
     }
     let (output_probe, ffmpeg_version) =

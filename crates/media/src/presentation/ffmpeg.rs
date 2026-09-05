@@ -69,9 +69,11 @@ pub(super) fn render_low_resolution_preview(
 ) -> Result<()> {
     let filter = format!("scale=w='min(iw,{width})':h=-2:flags=lanczos");
     let process = Command::new("ffmpeg")
-        .args(["-hide_banner", "-nostdin", "-y", "-i"])
+        .args(["-hide_banner", "-nostdin", "-y", "-threads", "1", "-i"])
         .arg(source)
         .args([
+            "-threads",
+            "1",
             "-vf",
             &filter,
             "-an",

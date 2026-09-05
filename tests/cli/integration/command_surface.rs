@@ -685,7 +685,15 @@ fn retained_native_video_exports_without_native_capture_tools() {
     let session = temporary.path().join("retained-native-session");
     Command::cargo_bin("termtrace")
         .expect("binary should build")
-        .args(["record", "--no-input", "--out"])
+        .args([
+            "record",
+            "--no-input",
+            "--geometry",
+            "fit",
+            "--viewport",
+            "640x400",
+            "--out",
+        ])
         .arg(&session)
         .args(["--", "/bin/sh", "-c", "printf RETAINED_NATIVE; sleep 0.25"])
         .assert()

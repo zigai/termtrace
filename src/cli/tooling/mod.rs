@@ -24,11 +24,15 @@ use termtrace_engine::{
 };
 use termtrace_evidence::{artifact::write_secure, receipt::receipt_signing_capability};
 use termtrace_media::{
-    capability::derived_media_capabilities, native_capture::native_capabilities,
+    capability::{derived_media_capabilities, presentation_capability, semantic_video_capability},
+    native_capture::native_capabilities,
 };
 use termtrace_model::{
     execution::event::EVENT_LOG_VERSION,
-    protocol::capability::{CapabilityReport, CapabilityStatus},
+    protocol::capability::{
+        CapabilityReport, CapabilityStatus, NATIVE_SCREENSHOT_CAPABILITY, NATIVE_VIDEO_CAPABILITY,
+        PRESENTATION_CAPABILITY, RECEIPT_SIGNING_CAPABILITY, SEMANTIC_VIDEO_CAPABILITY,
+    },
     protocol::control::CONTROL_PROTOCOL_VERSION,
     terminal::replay::{GHOSTTY_REVISION, STATE_FORMAT_VERSION},
     value::ByteString,
@@ -48,17 +52,44 @@ use crate::cli::{
 #[must_use]
 pub(super) fn probe_capabilities() -> CapabilityReport {
     let mut external = derived_media_capabilities().to_vec();
-    external.extend(native_capabilities());
+    external.extend(native_capabilities(true, true));
     external.push(receipt_signing_capability());
     return probe_engine_capabilities(external);
 }
 
+fn require_selected_capability(id: &str) -> termtrace_engine::Result<()> {
+    let capability = match id {
+        SEMANTIC_VIDEO_CAPABILITY => Some(semantic_video_capability()),
+        PRESENTATION_CAPABILITY => Some(presentation_capability()),
+        RECEIPT_SIGNING_CAPABILITY => Some(receipt_signing_capability()),
+        NATIVE_SCREENSHOT_CAPABILITY | NATIVE_VIDEO_CAPABILITY => native_capabilities(
+            id == NATIVE_SCREENSHOT_CAPABILITY,
+            id == NATIVE_VIDEO_CAPABILITY,
+        )
+        .next(),
+        _ => None,
+    };
+    let Some(capability) = capability else {
+        return require_engine_capability(&probe_engine_capabilities([]), id);
+    };
+    if capability.status == CapabilityStatus::Ready {
+        return Ok(());
+    }
+    return Err(EngineError::CapabilityBlocked {
+        id: capability.id,
+        code: capability.code,
+        detail: capability.detail,
+        remediation: capability
+            .remediation
+            .unwrap_or_else(|| return "no automatic remediation is available".to_owned()),
+    });
+}
+
 pub(super) fn require_capability(id: &str) -> termtrace_sdk::Result<()> {
-    return require_engine_capability(&probe_capabilities(), id)
-        .map_err(termtrace_sdk::Error::from);
+    return require_selected_capability(id).map_err(termtrace_sdk::Error::from);
 }
 pub(super) fn require_cli_capability(id: &str) -> Result<()> {
-    match require_engine_capability(&probe_capabilities(), id) {
+    match require_selected_capability(id) {
         Ok(()) => return Ok(()),
         Err(EngineError::CapabilityBlocked {
             id,

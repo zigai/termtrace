@@ -48,6 +48,8 @@ pub(super) fn spawn_video_ffmpeg(
             &fps,
             "-c:v",
             "libx264rgb",
+            "-threads",
+            "1",
             "-crf",
             "0",
             "-preset",
@@ -171,7 +173,17 @@ pub(super) fn probe_video(
     height: u16,
 ) -> Result<serde_json::Value> {
     let probe = ffprobe(path, &["-count_packets", "-show_streams", "-show_format"])?;
-    let stream = first_stream(&probe)?;
+    validate_video_probe(&probe, fps, width, height)?;
+    return Ok(probe);
+}
+
+pub(super) fn validate_video_probe(
+    probe: &serde_json::Value,
+    fps: u16,
+    width: u16,
+    height: u16,
+) -> Result<()> {
+    let stream = first_stream(probe)?;
     let rate = format!("{fps}/1");
     let packets = stream
         .get("nb_read_packets")
@@ -190,11 +202,20 @@ pub(super) fn probe_video(
             reason: format!("video probe does not match {width}x{height} at {rate} with packets"),
         });
     }
-    return Ok(probe);
+    return Ok(());
 }
 pub(super) fn probe_screenshot(path: &Path, width: u16, height: u16) -> Result<serde_json::Value> {
     let probe = ffprobe(path, &["-show_streams"])?;
-    let stream = first_stream(&probe)?;
+    validate_screenshot_probe(&probe, width, height)?;
+    return Ok(probe);
+}
+
+pub(super) fn validate_screenshot_probe(
+    probe: &serde_json::Value,
+    width: u16,
+    height: u16,
+) -> Result<()> {
+    let stream = first_stream(probe)?;
     if stream.get("width").and_then(serde_json::Value::as_u64) != Some(u64::from(width))
         || stream.get("height").and_then(serde_json::Value::as_u64) != Some(u64::from(height))
         || stream.get("codec_name").and_then(serde_json::Value::as_str) != Some("png")
@@ -203,7 +224,7 @@ pub(super) fn probe_screenshot(path: &Path, width: u16, height: u16) -> Result<s
             reason: "screenshot dimensions or codec do not match".to_owned(),
         });
     }
-    return Ok(probe);
+    return Ok(());
 }
 fn ffprobe(path: &Path, args: &[&str]) -> Result<serde_json::Value> {
     let output = Command::new("ffprobe")

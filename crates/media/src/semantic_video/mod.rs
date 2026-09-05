@@ -426,6 +426,8 @@ fn semantic_ffmpeg_arguments(source: &SemanticVideoSourcePlan, output: &Path) ->
         source.frame_count.to_string(),
         "-vf".to_owned(),
         "format=rgb24".to_owned(),
+        "-threads".to_owned(),
+        "1".to_owned(),
         "-c:v".to_owned(),
         "libx264rgb".to_owned(),
         "-crf".to_owned(),

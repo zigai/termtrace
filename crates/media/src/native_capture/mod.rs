@@ -5,7 +5,7 @@ mod capture;
 mod geometry;
 mod index;
 mod media;
-mod process;
+pub(crate) mod process;
 mod profile;
 mod util;
 mod validation;
@@ -23,4 +23,6 @@ pub use termtrace_model::artifact::visual::{
     VISUAL_MANIFEST_VERSION, VideoMapEntry, VisualManifest, visual_directory_name_for,
 };
 pub(crate) use validation::validate_visual_manifest_binding;
-pub use validation::{validate_visual_manifest, validated_visual_manifests};
+pub use validation::{
+    validate_visual_manifest, validated_visual_manifests, validated_visual_manifests_for_state,
+};
