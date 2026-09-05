@@ -154,8 +154,8 @@ pub fn project_screen_frame(
         data,
         frame_hash: String::new(),
     };
-    frame.frame_hash = screen_frame_hash(&frame)?;
-    let serialized_bytes = count_json_bytes(&frame)?;
+    let (frame_hash, serialized_bytes) = screen_frame_hash_and_bytes(&frame)?;
+    frame.frame_hash = frame_hash;
     if serialized_bytes > MAX_SCREEN_FRAME_JSON_BYTES {
         return Err(ScreenFrameError::ResourceLimit {
             limit: ScreenFrameLimitKind::SerializedBytes,
@@ -256,13 +256,18 @@ fn validate_projection_clone_bytes(
 }
 
 fn json_string_content_bytes(value: &str) -> Result<u64, ScreenFrameError> {
-    let mut writer = CountingWriter(0);
-    serde_json::to_writer(&mut writer, value)
-        .map_err(|_| return ScreenFrameError::Serialization)?;
-    return writer
-        .0
-        .checked_sub(2)
-        .ok_or(ScreenFrameError::Serialization);
+    let mut count = 0u64;
+    for byte in value.bytes() {
+        let len = match byte {
+            b'"' | b'\\' | b'\n' | b'\r' | b'\t' | 0x08 | 0x0C => 2,
+            0x00..=0x1F => 6,
+            _ => 1,
+        };
+        count = count
+            .checked_add(len)
+            .ok_or(ScreenFrameError::Serialization)?;
+    }
+    return Ok(count);
 }
 fn project_data(
     state: &SemanticState,
@@ -446,7 +451,8 @@ impl Write for CountingHashWriter {
 }
 
 /// Compute the canonical projection identity, excluding the identity field itself.
-pub fn screen_frame_hash(frame: &ScreenFrame) -> Result<String, ScreenFrameError> {
+/// Compute canonical projection identity and total serialized frame byte length in one pass.
+pub fn screen_frame_hash_and_bytes(frame: &ScreenFrame) -> Result<(String, u64), ScreenFrameError> {
     let input = ScreenFrameHashInput {
         version: frame.version,
         state_hash: &frame.state_hash,
@@ -468,30 +474,14 @@ pub fn screen_frame_hash(frame: &ScreenFrame) -> Result<String, ScreenFrameError
     writer.hasher.update(SCREEN_FRAME_HASH_DOMAIN);
     serde_json::to_writer(&mut writer, &input)
         .map_err(|_| return ScreenFrameError::Serialization)?;
-    return Ok(writer.hasher.finalize().to_hex().to_string());
+    let hash = writer.hasher.finalize().to_hex().to_string();
+    let total_bytes = writer.count.saturating_add(80);
+    return Ok((hash, total_bytes));
 }
 
-struct CountingWriter(u64);
-
-impl Write for CountingWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0 = self
-            .0
-            .checked_add(u64::try_from(buf.len()).unwrap_or(u64::MAX))
-            .ok_or_else(|| return io::Error::other("screen frame byte count overflow"))?;
-        return Ok(buf.len());
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        return Ok(());
-    }
-}
-
-fn count_json_bytes(frame: &ScreenFrame) -> Result<u64, ScreenFrameError> {
-    let mut writer = CountingWriter(0);
-    serde_json::to_writer(&mut writer, frame)
-        .map_err(|_| return ScreenFrameError::Serialization)?;
-    return Ok(writer.0);
+/// Compute the canonical projection identity, excluding the identity field itself.
+pub fn screen_frame_hash(frame: &ScreenFrame) -> Result<String, ScreenFrameError> {
+    return screen_frame_hash_and_bytes(frame).map(|(hash, _)| return hash);
 }
 
 /// Pure deterministic text snapshot normalization.
