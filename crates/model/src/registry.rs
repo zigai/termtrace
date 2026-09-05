@@ -194,6 +194,9 @@ pub struct GarbageCollectionReport {
     pub removed_sessions: u64,
     /// Detached supervisor log files removed with deleted sessions.
     pub removed_supervisor_files: u64,
+    /// Stale alias registry bindings removed during collection.
+    #[serde(default)]
+    pub removed_stale_aliases: u64,
     /// Bytes reclaimed from canonical managed session directories.
     pub reclaimed_bytes: u64,
 }

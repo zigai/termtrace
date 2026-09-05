@@ -1,5 +1,9 @@
 use super::*;
-
+use termtrace_model::{
+    protocol::control::CONTROL_PROTOCOL_VERSION,
+    registry::{RegistryEntry, REGISTRY_ENTRY_FORMAT, REGISTRY_ENTRY_VERSION},
+    value::ByteString,
+};
 #[test]
 fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomplete_evidence() {
     let temporary = TempDir::new().expect("temporary directory");
@@ -170,4 +174,78 @@ fn corrupt_registry_entries_do_not_poison_listing_or_unsafe_garbage_collection()
         eligible.is_dir(),
         "GC removed ambiguously protected evidence"
     );
+}
+
+#[test]
+fn stale_aliases_with_exited_recorder_are_reaped_by_garbage_collection() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let sessions = state.join("sessions");
+    let registry = state.join("registry");
+    fs_err::create_dir_all(&sessions).expect("managed session directory");
+    fs_err::create_dir_all(&registry).expect("managed registry directory");
+    fs_err::set_permissions(&state, Permissions::from_mode(0o700)).expect("private state root");
+    fs_err::set_permissions(&sessions, Permissions::from_mode(0o700))
+        .expect("private managed session directory");
+    fs_err::set_permissions(&registry, Permissions::from_mode(0o700))
+        .expect("private registry directory");
+
+    let session = sessions.join("stale.termtrace");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf STALE"])
+        .assert()
+        .success();
+
+    let completion_file = session.join("completion.json");
+    if completion_file.exists() {
+        fs_err::remove_file(&completion_file).expect("remove completion");
+    }
+
+    let manifest = read_manifest(&session).expect("manifest");
+    let alias_file = registry.join("stale-alias.json");
+    let entry = RegistryEntry {
+        format: REGISTRY_ENTRY_FORMAT.to_owned(),
+        version: REGISTRY_ENTRY_VERSION,
+        alias: "stale-alias".to_owned(),
+        canonical_session: ByteString::from(
+            session
+                .canonicalize()
+                .unwrap_or_else(|_| return session.clone())
+                .as_os_str()
+                .as_bytes(),
+        ),
+        session_id: manifest.session_id,
+        recorder_pid: Some(9_999_999),
+        recorder_process_start_ticks: Some(12345),
+        control_protocol_version: CONTROL_PROTOCOL_VERSION,
+        registered_unix_ns: 1_700_000_000_000_000_000_u128,
+    };
+    fs_err::write(
+        &alias_file,
+        serde_json::to_vec_pretty(&entry).expect("entry JSON"),
+    )
+    .expect("write entry");
+    fs_err::set_permissions(&alias_file, Permissions::from_mode(0o600))
+        .expect("private alias record");
+    let mut apply = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = apply
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "session",
+            "gc",
+            "--older-than-days",
+            "0",
+            "--keep-latest",
+            "0",
+            "--apply",
+        ])
+        .assert()
+        .success();
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.get_output().stdout).expect("GC report");
+    assert_eq!(report["removed_stale_aliases"], 1);
+    assert!(!alias_file.exists(), "stale alias file was not removed");
 }

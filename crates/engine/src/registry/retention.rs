@@ -1,4 +1,5 @@
 use super::*;
+use std::cmp::Reverse;
 
 impl SessionRegistry {
     /// Allocate collision-free paths for a detached session and supervisor logs.
@@ -47,6 +48,10 @@ impl SessionRegistry {
         // Serialize alias changes with the protection scan and apply phase.
         let _lock = self.lock()?;
         let sessions = self.state_root.join("sessions");
+        let retention = Duration::from_secs(older_than_days.saturating_mul(86_400));
+        let cutoff = SystemTime::now()
+            .checked_sub(retention)
+            .unwrap_or(SystemTime::UNIX_EPOCH);
         let mut report = GarbageCollectionReport {
             state_root: self.state_root.clone(),
             changes_applied: apply,
@@ -58,14 +63,17 @@ impl SessionRegistry {
             candidates: Vec::new(),
             removed_sessions: 0,
             removed_supervisor_files: 0,
+            removed_stale_aliases: 0,
             reclaimed_bytes: 0,
         };
         if !sessions.exists() {
             return Ok(report);
         }
         validate_owner_directory(&sessions)?;
-        let (registered, corrupt_entries) = self.protected_session_paths()?;
+        let (registered, corrupt_entries, removed_stale_aliases) =
+            self.reap_and_resolve_protected_paths(cutoff, older_than_days, apply)?;
         report.skipped_corrupt_registry_entries = corrupt_entries;
+        report.removed_stale_aliases = removed_stale_aliases;
         if corrupt_entries != 0 {
             return Ok(report);
         }
@@ -130,7 +138,7 @@ impl SessionRegistry {
                 })?;
             completed_sessions.push((session, completion.session_id, completed_at));
         }
-        completed_sessions.sort_by_key(|entry| std::cmp::Reverse(entry.2));
+        completed_sessions.sort_by_key(|entry| return Reverse(entry.2));
         let retention = Duration::from_secs(older_than_days.saturating_mul(86_400));
         let cutoff = SystemTime::now()
             .checked_sub(retention)
@@ -185,9 +193,19 @@ impl SessionRegistry {
         return Ok(report);
     }
 
-    fn protected_session_paths(&self) -> Result<(HashSet<PathBuf>, u64)> {
+    fn reap_and_resolve_protected_paths(
+        &self,
+        cutoff: SystemTime,
+        older_than_days: u64,
+        apply: bool,
+    ) -> Result<(HashSet<PathBuf>, u64, u64)> {
         let mut paths = HashSet::new();
         let mut corrupt_entries = 0_u64;
+        let mut removed_stale_aliases = 0_u64;
+        let now_unix_ns = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
         for item in fs::read_dir(&self.directory).map_err(|source| {
             return Error::Filesystem {
                 path: self.directory.clone(),
@@ -204,17 +222,76 @@ impl SessionRegistry {
             if path.extension() != Some(OsStr::new("json")) {
                 continue;
             }
-            let session = match read_registry_record_nofollow(&path) {
-                Ok(RegistryRecord::Entry(entry)) => entry.session_path(),
-                Ok(RegistryRecord::Reservation(reservation)) => reservation.session_path(),
+            let record = match read_registry_record_nofollow(&path) {
+                Ok(record) => record,
                 Err(_) => {
                     corrupt_entries = corrupt_entries.saturating_add(1);
                     continue;
                 }
             };
-            paths.insert(session);
+            match record {
+                RegistryRecord::Reservation(reservation) => {
+                    if reservation.lease_expires_unix_ns < now_unix_ns {
+                        if apply {
+                            let _ = fs::remove_file(&path);
+                        }
+                        removed_stale_aliases = removed_stale_aliases.saturating_add(1);
+                    } else {
+                        paths.insert(reservation.session_path());
+                    }
+                }
+                RegistryRecord::Entry(entry) => {
+                    let session = entry.session_path();
+                    let responsive_identity = recorder_identity(&session);
+                    let is_live = if let Some(identity) =
+                        entry.recorder_pid.zip(entry.recorder_process_start_ticks)
+                    {
+                        responsive_identity == Some(identity)
+                    } else {
+                        responsive_identity.is_some()
+                    };
+
+                    let completion_exists = session.join("completion.json").is_file();
+                    let mut should_reap = false;
+
+                    if !completion_exists {
+                        if !is_live {
+                            should_reap = true;
+                        } else if older_than_days > 0 {
+                            let last_activity = fs::symlink_metadata(session.join("events.jsonl"))
+                                .and_then(|m| return m.modified())
+                                .or_else(|_| {
+                                    return fs::symlink_metadata(session.join("requests.jsonl"))
+                                        .and_then(|m| return m.modified());
+                                })
+                                .unwrap_or(SystemTime::UNIX_EPOCH);
+                            if last_activity < cutoff {
+                                should_reap = true;
+                            }
+                        }
+                    }
+
+                    if should_reap {
+                        if apply {
+                            if let Some(pid) = entry.recorder_pid {
+                                crate::recording::terminate_process_group(Some(pid));
+                            }
+                            let _ = fs::remove_file(&path);
+                        }
+                        removed_stale_aliases = removed_stale_aliases.saturating_add(1);
+                    } else {
+                        if let Ok(canonical) = session.canonicalize() {
+                            paths.insert(canonical);
+                        }
+                        paths.insert(session);
+                    }
+                }
+            }
         }
-        return Ok((paths, corrupt_entries));
+        if apply && removed_stale_aliases > 0 {
+            sync_directory(&self.directory)?;
+        }
+        return Ok((paths, corrupt_entries, removed_stale_aliases));
     }
 }
 
