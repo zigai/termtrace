@@ -2955,7 +2955,7 @@ export interface ResourceLimitOutcome {
   /**
    * Stable limit kind.
    */
-  kind: "output_bytes";
+  kind: "output_bytes" | "max_duration" | "idle_timeout";
   /**
    * Configured trigger threshold.
    */

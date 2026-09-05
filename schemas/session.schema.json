@@ -629,6 +629,24 @@
       "additionalProperties": false,
       "description": "Canonical runtime resource limits for one recording.",
       "properties": {
+        "idle_timeout_ms": {
+          "description": "Maximum idle duration in milliseconds without input, output, or control activity.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_duration_ms": {
+          "description": "Maximum session duration in milliseconds before termination is triggered.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "output_bytes": {
           "description": "Soft output budget that triggers termination after all observed bytes are retained.",
           "format": "uint64",

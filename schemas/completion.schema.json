@@ -99,6 +99,16 @@
           "const": "output_bytes",
           "description": "Observed PTY output byte count.",
           "type": "string"
+        },
+        {
+          "const": "max_duration",
+          "description": "Wall-clock session duration limit.",
+          "type": "string"
+        },
+        {
+          "const": "idle_timeout",
+          "description": "Inactivity idle timeout.",
+          "type": "string"
         }
       ]
     },

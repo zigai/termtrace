@@ -241,6 +241,20 @@ pub(super) fn restarted_record_options(
                     .output_byte_budget
                     .or(manifest.resource_limits.output_bytes)
             },
+            max_duration_ms: if overrides.clear_max_duration {
+                None
+            } else {
+                overrides
+                    .max_duration_ms
+                    .or(manifest.resource_limits.max_duration_ms)
+            },
+            idle_timeout_ms: if overrides.clear_idle_timeout {
+                None
+            } else {
+                overrides
+                    .idle_timeout_ms
+                    .or(manifest.resource_limits.idle_timeout_ms)
+            },
         },
     };
     apply_restart_overrides(&mut options, overrides)?;
@@ -303,6 +317,14 @@ pub(super) fn restart_overrides_from_args(arguments: &RestartArgs) -> Result<Res
         provenance_environment: arguments.provenance_environment.clone(),
         output_byte_budget: arguments.output_byte_budget,
         clear_output_byte_budget: arguments.clear_output_byte_budget,
+        max_duration_ms: arguments
+            .max_duration
+            .map(|d| return u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+        clear_max_duration: arguments.clear_max_duration,
+        idle_timeout_ms: arguments
+            .idle_timeout
+            .map(|d| return u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+        clear_idle_timeout: arguments.clear_idle_timeout,
         allow_environment_change: arguments.allow_environment_change,
         command: (!arguments.command.is_empty()).then(|| {
             return arguments

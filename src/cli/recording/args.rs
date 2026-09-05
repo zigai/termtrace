@@ -147,7 +147,20 @@ pub(in crate::cli) struct RestartArgs {
     /// Remove the predecessor's output budget.
     #[arg(long)]
     pub(in crate::cli) clear_output_byte_budget: bool,
-    /// Override the executable and arguments; options must precede the executable.
+
+    /// Override the maximum wall-clock session duration.
+    #[arg(long, value_parser = parse_wait_deadline_duration, conflicts_with = "clear_max_duration")]
+    pub(in crate::cli) max_duration: Option<Duration>,
+    /// Remove the predecessor's maximum session duration limit.
+    #[arg(long)]
+    pub(in crate::cli) clear_max_duration: bool,
+
+    /// Override the maximum idle duration without activity.
+    #[arg(long, value_parser = parse_wait_deadline_duration, conflicts_with = "clear_idle_timeout")]
+    pub(in crate::cli) idle_timeout: Option<Duration>,
+    /// Remove the predecessor's idle timeout.
+    #[arg(long)]
+    pub(in crate::cli) clear_idle_timeout: bool,
     #[arg(num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
     pub(in crate::cli) command: Vec<OsString>,
 }
@@ -168,6 +181,10 @@ pub(in crate::cli) struct RestartOverrides {
     pub(in crate::cli) provenance_environment: Vec<(String, ProvenanceCapture)>,
     pub(in crate::cli) output_byte_budget: Option<u64>,
     pub(in crate::cli) clear_output_byte_budget: bool,
+    pub(in crate::cli) max_duration_ms: Option<u64>,
+    pub(in crate::cli) clear_max_duration: bool,
+    pub(in crate::cli) idle_timeout_ms: Option<u64>,
+    pub(in crate::cli) clear_idle_timeout: bool,
     pub(in crate::cli) allow_environment_change: bool,
     pub(in crate::cli) command: Option<Vec<ByteString>>,
 }
@@ -275,6 +292,13 @@ pub(in crate::cli) struct RecordingArgs {
     #[arg(long)]
     pub(in crate::cli) output_byte_budget: Option<u64>,
 
+    /// Maximum session duration before termination is triggered (e.g. 1h, 30m).
+    #[arg(long, value_parser = parse_wait_deadline_duration)]
+    pub(in crate::cli) max_duration: Option<Duration>,
+
+    /// Maximum idle duration without activity before termination is triggered (e.g. 15m, 60s).
+    #[arg(long, value_parser = parse_wait_deadline_duration)]
+    pub(in crate::cli) idle_timeout: Option<Duration>,
     /// Canonical output persistence policy.
     #[arg(long, value_enum, default_value_t = DurabilityModeArg::Bounded)]
     pub(in crate::cli) durability: DurabilityModeArg,

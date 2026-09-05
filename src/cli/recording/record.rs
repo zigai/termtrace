@@ -168,6 +168,12 @@ pub(in crate::cli) fn run_record(
             provenance_policy,
             resource_limits: ResourceLimits {
                 output_bytes: arguments.output_byte_budget,
+                max_duration_ms: arguments
+                    .max_duration
+                    .map(|d| return u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+                idle_timeout_ms: arguments
+                    .idle_timeout
+                    .map(|d| return u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
             },
         },
     )?;

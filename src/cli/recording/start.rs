@@ -426,6 +426,21 @@ pub(super) fn detached_record_arguments(
             OsStr::new(&value.to_string()),
         );
     }
+    if let Some(value) = recording.max_duration {
+        push_record_option(
+            &mut arguments,
+            "--max-duration",
+            OsStr::new(&format!("{}ms", value.as_millis())),
+        );
+    }
+    let idle_timeout = recording.idle_timeout.unwrap_or(Duration::from_secs(15 * 60));
+    if !idle_timeout.is_zero() {
+        push_record_option(
+            &mut arguments,
+            "--idle-timeout",
+            OsStr::new(&format!("{}ms", idle_timeout.as_millis())),
+        );
+    }
     push_record_option(
         &mut arguments,
         "--durability",

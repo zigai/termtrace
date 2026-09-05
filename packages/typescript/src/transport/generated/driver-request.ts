@@ -1293,6 +1293,14 @@ export interface EnvironmentSpec {
  */
 export interface ResourceLimits {
   /**
+   * Maximum idle duration in milliseconds without input, output, or control activity.
+   */
+  idle_timeout_ms?: number | null;
+  /**
+   * Maximum session duration in milliseconds before termination is triggered.
+   */
+  max_duration_ms?: number | null;
+  /**
    * Soft output budget that triggers termination after all observed bytes are retained.
    */
   output_bytes?: number | null;

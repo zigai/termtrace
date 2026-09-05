@@ -100,7 +100,7 @@ pub(super) fn validate_completion_with_loaded(
     validate_replay_profile_file(session_directory, manifest)?;
     let final_event_hash = log.events.last().map(|record| return record.hash.as_str());
     let event_count = u64::try_from(log.events.len()).unwrap_or(u64::MAX);
-    let actual_manifest_hash = manifest_hash(&manifest_bytes);
+    let actual_manifest_hash = manifest_hash(manifest_bytes);
     let header_bytes = serde_json::to_vec(&log.header).map_err(|source| {
         return Error::InvalidJson {
             path: session_directory.join("events.jsonl"),
@@ -205,13 +205,83 @@ pub(super) fn validate_completion_with_loaded(
             completion.output_bytes
         )));
     }
-    match (&manifest.resource_limits.output_bytes, &completion.resource_limit) {
-        (Some(limit), Some(outcome)) if outcome.kind == ResourceLimitKind::OutputBytes && outcome.limit == *limit && outcome.observed > *limit && outcome.observed <= output_bytes => {
-            if !log.events.iter().any(|record| matches!(&record.event, Event::HostError { code, .. } if code == "output_budget_exceeded")) { return Err(invalid("resource-limit completion has no canonical output-budget trigger")); }
+    if let Some(limit) = manifest.resource_limits.output_bytes
+        && output_bytes > limit
+        && completion.resource_limit.is_none()
+    {
+        return Err(invalid(
+            "output bytes exceeded manifest limit without completion outcome",
+        ));
+    }
+    if let Some(outcome) = &completion.resource_limit {
+        match outcome.kind {
+            ResourceLimitKind::OutputBytes => {
+                if let Some(limit) = manifest.resource_limits.output_bytes {
+                    if outcome.limit == limit
+                        && outcome.observed > limit
+                        && outcome.observed <= output_bytes
+                    {
+                        if !log.events.iter().any(|record| {
+                            return matches!(&record.event, Event::HostError { code, .. } if code == "output_budget_exceeded");
+                        }) {
+                            return Err(invalid(
+                                "resource-limit completion has no canonical output-budget trigger",
+                            ));
+                        }
+                    } else {
+                        return Err(invalid(
+                            "completion resource-limit outcome does not match manifest policy and canonical output",
+                        ));
+                    }
+                } else {
+                    return Err(invalid(
+                        "completion resource-limit outcome does not match manifest policy",
+                    ));
+                }
+            }
+            ResourceLimitKind::MaxDuration => {
+                if let Some(limit) = manifest.resource_limits.max_duration_ms {
+                    if outcome.limit == limit && outcome.observed >= limit {
+                        if !log.events.iter().any(|record| {
+                            return matches!(&record.event, Event::HostError { code, .. } if code == "max_duration_exceeded");
+                        }) {
+                            return Err(invalid(
+                                "resource-limit completion has no canonical max-duration trigger",
+                            ));
+                        }
+                    } else {
+                        return Err(invalid(
+                            "completion resource-limit outcome does not match manifest policy and duration",
+                        ));
+                    }
+                } else {
+                    return Err(invalid(
+                        "completion resource-limit outcome does not match manifest policy",
+                    ));
+                }
+            }
+            ResourceLimitKind::IdleTimeout => {
+                if let Some(limit) = manifest.resource_limits.idle_timeout_ms {
+                    if outcome.limit == limit && outcome.observed >= limit {
+                        if !log.events.iter().any(|record| {
+                            return matches!(&record.event, Event::HostError { code, .. } if code == "idle_timeout_exceeded");
+                        }) {
+                            return Err(invalid(
+                                "resource-limit completion has no canonical idle-timeout trigger",
+                            ));
+                        }
+                    } else {
+                        return Err(invalid(
+                            "completion resource-limit outcome does not match manifest policy and idle duration",
+                        ));
+                    }
+                } else {
+                    return Err(invalid(
+                        "completion resource-limit outcome does not match manifest policy",
+                    ));
+                }
+            }
         }
-        (Some(limit), None) if output_bytes <= *limit => {}
-        (None, None) => {}
-        _ => return Err(invalid("completion resource-limit outcome does not match manifest policy and canonical output")),
     }
     return Ok(());
 }

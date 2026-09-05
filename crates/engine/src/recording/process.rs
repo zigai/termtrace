@@ -470,7 +470,7 @@ fn sync_parent_directory(path: &Path) -> Result<()> {
     });
 }
 
-pub(super) fn terminate_process_group(pid: Option<u32>) {
+pub(crate) fn terminate_process_group(pid: Option<u32>) {
     let Some(pid) = pid.and_then(|value| return i32::try_from(value).ok()) else {
         return;
     };

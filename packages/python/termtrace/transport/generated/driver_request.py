@@ -394,6 +394,22 @@ class ProcessSignal(StrEnum):
 
 
 class ResourceLimits(Struct, forbid_unknown_fields=True):
+    idle_timeout_ms: (
+        Annotated[
+            int,
+            Meta(description='Maximum idle duration in milliseconds without input, output, or control activity.', ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    max_duration_ms: (
+        Annotated[
+            int,
+            Meta(description='Maximum session duration in milliseconds before termination is triggered.', ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
     output_bytes: (
         Annotated[
             int,
@@ -613,9 +629,7 @@ class DriverMethod2(Struct, forbid_unknown_fields=True, tag_field='method', tag=
             ResourceLimits, Meta(description='Non-truncating runtime resource limits.')
         ]
         | UnsetType
-    ) = (
-        field(default_factory=lambda: convert({'output_bytes': None},  type=ResourceLimits))
-    )
+    ) = field(default_factory=dict)
     working_directory: (
         Annotated[str, Meta(description='Optional child working directory.')]
         | None

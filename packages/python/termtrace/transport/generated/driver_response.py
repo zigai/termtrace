@@ -603,6 +603,8 @@ class OutputPage(Struct, forbid_unknown_fields=True):
 
 class ResourceLimitKind(StrEnum):
     output_bytes = 'output_bytes'
+    max_duration = 'max_duration'
+    idle_timeout = 'idle_timeout'
 
 
 class ResourceLimitOutcome(Struct, forbid_unknown_fields=True):

@@ -22,3 +22,4 @@ pub use support::{
     inherited_geometry, parse_environment_spec, read_environment_spec, resolve_ghostty_profile,
     resolved_terminal_colors, restore_ghostty_profile,
 };
+pub(crate) use process::terminate_process_group;

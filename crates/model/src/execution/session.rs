@@ -38,7 +38,14 @@ pub const VERIFICATION_REPORT_VERSION: u32 = 4;
 #[serde(deny_unknown_fields)]
 pub struct ResourceLimits {
     /// Soft output budget that triggers termination after all observed bytes are retained.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_bytes: Option<u64>,
+    /// Maximum session duration in milliseconds before termination is triggered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_duration_ms: Option<u64>,
+    /// Maximum idle duration in milliseconds without input, output, or control activity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_timeout_ms: Option<u64>,
 }
 
 /// Canonical resource-limit kinds with implemented completion semantics.
@@ -47,6 +54,10 @@ pub struct ResourceLimits {
 pub enum ResourceLimitKind {
     /// Observed PTY output byte count.
     OutputBytes,
+    /// Wall-clock session duration limit.
+    MaxDuration,
+    /// Inactivity idle timeout.
+    IdleTimeout,
 }
 
 /// Resource-limit trigger retained in immutable completion evidence.

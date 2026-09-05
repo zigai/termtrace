@@ -342,6 +342,74 @@ fn output_budget_retains_observed_bytes_and_records_termination() {
 }
 
 #[test]
+fn max_duration_limit_terminates_session() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("max-duration");
+    let mut options = isolated_options(
+        session.clone(),
+        vec![
+            OsString::from("/bin/sh"),
+            OsString::from("-c"),
+            OsString::from("sleep 30"),
+        ],
+    );
+    options.resource_limits.max_duration_ms = Some(100);
+
+    let mut mirrored_output: Vec<u8> = Vec::new();
+    let outcome = record_to(&options, &mut mirrored_output).expect("duration-limited recording");
+    assert!(outcome.resource_limit.is_some());
+    let completion: SessionCompletion =
+        serde_json::from_slice(&fs_err::read(session.join("completion.json")).expect("completion"))
+            .expect("completion JSON");
+    let limit = completion.resource_limit.expect("resource outcome");
+    assert_eq!(limit.kind, ResourceLimitKind::MaxDuration);
+    assert_eq!(limit.limit, 100);
+    assert!(limit.observed >= 100);
+    let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+    assert!(log.events.iter().any(|record| {
+        return matches!(
+            &record.event,
+            Event::HostError { code, .. } if code == "max_duration_exceeded"
+        );
+    }));
+    validate_completed_log(&session, &log).expect("valid completed duration evidence");
+}
+
+#[test]
+fn idle_timeout_limit_terminates_session() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("idle-timeout");
+    let mut options = isolated_options(
+        session.clone(),
+        vec![
+            OsString::from("/bin/sh"),
+            OsString::from("-c"),
+            OsString::from("sleep 30"),
+        ],
+    );
+    options.resource_limits.idle_timeout_ms = Some(100);
+
+    let mut mirrored_output: Vec<u8> = Vec::new();
+    let outcome = record_to(&options, &mut mirrored_output).expect("idle-timeout recording");
+    assert!(outcome.resource_limit.is_some());
+    let completion: SessionCompletion =
+        serde_json::from_slice(&fs_err::read(session.join("completion.json")).expect("completion"))
+            .expect("completion JSON");
+    let limit = completion.resource_limit.expect("resource outcome");
+    assert_eq!(limit.kind, ResourceLimitKind::IdleTimeout);
+    assert_eq!(limit.limit, 100);
+    assert!(limit.observed >= 100);
+    let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+    assert!(log.events.iter().any(|record| {
+        return matches!(
+            &record.event,
+            Event::HostError { code, .. } if code == "idle_timeout_exceeded"
+        );
+    }));
+    validate_completed_log(&session, &log).expect("valid completed idle evidence");
+}
+
+#[test]
 fn completed_output_burst_refreshes_the_pty_drain_deadline() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("completed-burst");
