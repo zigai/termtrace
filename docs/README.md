@@ -8,7 +8,7 @@ Termtrace records terminal execution as verifiable events and derives semantic o
 2. [Record and complete a session](recording.md).
 3. [Inspect or control the terminal](agent-workflows.md).
 
-For a working example, run the [end-to-end demo](../demos/README.md).
+For a working example, run the [end-to-end demo](../examples/README.md).
 
 ## Guides
 

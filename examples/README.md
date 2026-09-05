@@ -1,20 +1,23 @@
-# Termtrace demo
+# Termtrace examples
 
 The demo exercises Termtrace through its public CLI and retains owner-only evidence under an ignored output directory. Generated sessions, raw terminal bytes, screenshots, and videos may contain sensitive data; do not publish them without inspection.
 
 ## Run it
 
 ```bash
-demos/run-all.sh
+examples/demo.sh
 ```
 
 Pass a different destination to keep output elsewhere:
 
 ```bash
-demos/run-all.sh /tmp/my-termtrace-demo
+examples/demo.sh /tmp/my-termtrace-demo
 ```
 
 The demo refuses to replace existing output. Its artifacts are written beneath `<destination>/showcase`.
+
+The script builds the release binary and requires Cargo, Python 3, jq, FFmpeg
+with FFprobe and libx264, Ghostty, Xvfb, and `dbus-run-session`.
 
 ## What it demonstrates
 

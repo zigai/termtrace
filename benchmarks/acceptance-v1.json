@@ -63,7 +63,7 @@
     {
       "id": "fullscreen-query-heavy",
       "kind": "fullscreen_query_heavy",
-      "command": ["python3", "demos/apps/terminal_showcase.py", "semantic"],
+      "command": ["python3", "examples/apps/terminal_showcase.py", "semantic"],
       "completion_marker": "SEMANTIC_DEMO_COMPLETE"
     },
     {
