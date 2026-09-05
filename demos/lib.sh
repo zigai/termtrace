@@ -31,7 +31,8 @@ wait_for_control() {
     local stderr_log=$2
     local attempt
     for attempt in $(seq 1 200); do
-        if [[ -S $session/control.sock ]] && "$TERMTRACE_BIN" status "$session" >/dev/null 2>&1; then
+        if "$TERMTRACE_BIN" --response agent status "$session" 2>/dev/null |
+            jq -e '.session_state == "live"' >/dev/null; then
             return 0
         fi
         if [[ -n ${RECORDER_PID:-} ]] && ! kill -0 "$RECORDER_PID" 2>/dev/null; then
@@ -41,14 +42,14 @@ wait_for_control() {
         fi
         sleep 0.05
     done
-    printf 'timed out waiting for control socket: %s\n' "$session/control.sock" >&2
+    printf 'timed out waiting for recorder readiness: %s\n' "$session" >&2
     tail -n 40 "$stderr_log" >&2 || true
     return 1
 }
 
 stop_recorder_on_error() {
     local session=${1:-}
-    if [[ -n $session && -S $session/control.sock ]]; then
+    if [[ -n $session ]]; then
         "$TERMTRACE_BIN" stop "$session" >/dev/null 2>&1 || true
     fi
     if [[ -n ${RECORDER_PID:-} ]] && kill -0 "$RECORDER_PID" 2>/dev/null; then
