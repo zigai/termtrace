@@ -19,7 +19,6 @@ use termtrace_model::{
     },
     terminal::diff::{RowChange, ValueChange},
     terminal::observation::StatePoint,
-    terminal::replay::StateSelector,
     terminal::state::{ModeState, SemanticState, TerminalMode},
 };
 use termtrace_terminal::frame_event_records;
@@ -28,8 +27,8 @@ use uuid::Uuid;
 use crate::{
     Error, Result,
     analysis::diagnostics::diagnose,
-    diff::diff_states_with_semantic_states,
-    replay::{inspect, replay},
+    diff::diff_inspections_with_semantic_states,
+    replay::{StateInspection, visit_states},
 };
 
 const MAX_ACTION_WARNINGS: usize = 16;
@@ -60,33 +59,42 @@ pub fn analyze_last_action(
         ));
     }
     let action = last_input_action(session, log)?;
-    let final_inspection = inspect(log, StateSelector::Final)?;
-    let (difference, before, after) = diff_states_with_semantic_states(
-        log,
-        StatePoint::EventSeq {
-            event_seq: action.request_event_start_seq,
-        },
-        StatePoint::StateId {
-            state_id: final_inspection.record.state_id,
-        },
-    )?;
+    let from_point = StatePoint::EventSeq {
+        event_seq: action.request_event_start_seq,
+    };
+    let mut before_inspection: Option<StateInspection> = None;
+    let mut after_inspection: Option<StateInspection> = None;
+    let mut presentation_eligible_states = 0_u64;
+
+    visit_states(log, |record, state| {
+        if record
+            .event_seq
+            .is_none_or(|event| return event <= action.request_event_start_seq)
+        {
+            before_inspection = Some(StateInspection {
+                record: record.clone(),
+                state: state.clone(),
+            });
+        } else if record.presented {
+            presentation_eligible_states = presentation_eligible_states.saturating_add(1);
+        }
+        after_inspection = Some(StateInspection {
+            record: record.clone(),
+            state: state.clone(),
+        });
+        return Ok(());
+    })?;
+
+    let from_inspection = before_inspection
+        .ok_or_else(|| return task_error("no state matches action start sequence"))?;
+    let to_inspection =
+        after_inspection.ok_or_else(|| return task_error("no state matches final sequence"))?;
+    let to_point = StatePoint::StateId {
+        state_id: to_inspection.record.state_id,
+    };
+    let (difference, before, after) =
+        diff_inspections_with_semantic_states(from_point, to_point, from_inspection, to_inspection);
     let output_generated = output_summary(log, action.intent_event_seq);
-    let replayed = replay(log)?;
-    let action_states = replayed
-        .states
-        .iter()
-        .filter(|state| {
-            return state.state_id > difference.from.state_id
-                && state.state_id <= difference.to.state_id;
-        })
-        .collect::<Vec<_>>();
-    let presentation_eligible_states = u64::try_from(
-        action_states
-            .iter()
-            .filter(|state| return state.presented)
-            .count(),
-    )
-    .unwrap_or(u64::MAX);
     let diagnostic_report = diagnose(log, DiagnosticCheck::all(), broad_change_percent, &[])?;
     let action_token_ids = frame_event_records(&log.events)?
         .into_iter()

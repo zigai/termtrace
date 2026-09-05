@@ -41,6 +41,21 @@ pub fn diff_states_with_semantic_states(
     let from_inspection = inspections
         .pop()
         .ok_or_else(|| return diff_error("missing earlier diff endpoint"))?;
+    return Ok(diff_inspections_with_semantic_states(
+        from,
+        to,
+        from_inspection,
+        to_inspection,
+    ));
+}
+
+/// Diff two already-replayed state inspections directly without re-reading or replaying the log.
+pub fn diff_inspections_with_semantic_states(
+    from: StatePoint,
+    to: StatePoint,
+    from_inspection: StateInspection,
+    to_inspection: StateInspection,
+) -> (SemanticDiff, SemanticState, SemanticState) {
     let rows = changed_rows(&from_inspection.state, &to_inspection.state);
     let geometry = changed(
         (from_inspection.state.cols, from_inspection.state.rows),
@@ -91,7 +106,7 @@ pub fn diff_states_with_semantic_states(
         presented,
         rows,
     };
-    return Ok((difference, from_inspection.state, to_inspection.state));
+    return (difference, from_inspection.state, to_inspection.state);
 }
 
 /// Resolve one shared state point against a canonical event log.
