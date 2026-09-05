@@ -1,4 +1,27 @@
 use super::*;
+use nix::time::{ClockId, clock_gettime};
+use termtrace_model::protocol::control::ClockSample;
+
+fn system_monotonic_ns() -> Result<u64> {
+    let time = clock_gettime(ClockId::CLOCK_MONOTONIC)
+        .map_err(|error| return terminal_error("sample monotonic clock", error.to_string()))?;
+    return u64::try_from(i128::from(time.tv_sec()) * 1_000_000_000 + i128::from(time.tv_nsec()))
+        .map_err(|error| return terminal_error("represent monotonic clock", error.to_string()));
+}
+
+fn sample_clock(event_log: &EventLogWriter) -> Result<ClockSample> {
+    let before = system_monotonic_ns()?;
+    let session_monotonic_ns = event_log.elapsed_ns();
+    let after = system_monotonic_ns()?;
+    let width = after
+        .checked_sub(before)
+        .ok_or_else(|| return terminal_error("sample monotonic clock", "clock moved backwards"))?;
+    return Ok(ClockSample {
+        session_monotonic_ns,
+        system_monotonic_ns: before + width / 2,
+        uncertainty_ns: width.div_ceil(2),
+    });
+}
 
 pub(super) enum AdmittedPostcondition {
     None,
@@ -197,9 +220,23 @@ impl SessionActor<'_> {
             ControlCommand::Ping => Ok(ControlData::Acknowledged {
                 boundaries: actor_boundaries(&self.event_log),
             }),
-            ControlCommand::Status => Ok(ControlData::Status {
-                pid: self.spawned.pid,
-                boundaries: actor_boundaries(&self.event_log),
+            ControlCommand::EventCursor { next_event_seq } => {
+                let (device, inode, header_hash) = self.event_log.source_identity();
+                let (start, durable) = self.event_log.follow_cursors(*next_event_seq);
+                Ok(ControlData::EventCursor {
+                    device,
+                    inode,
+                    header_hash,
+                    start,
+                    durable,
+                })
+            }
+            ControlCommand::Status => sample_clock(&self.event_log).map(|clock_sample| {
+                return ControlData::Status {
+                    pid: self.spawned.pid,
+                    boundaries: actor_boundaries(&self.event_log),
+                    clock_sample,
+                };
             }),
             ControlCommand::Snapshot => {
                 let encoded = match serde_json::to_vec(&self.live.presented) {

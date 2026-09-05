@@ -326,13 +326,13 @@ pub(super) fn directory_bytes_nofollow(directory: &Path) -> Result<u64> {
         }
         if file_type.is_dir() {
             total = total.saturating_add(directory_bytes_nofollow(&path)?);
-        } else if !file_type.is_file() {
+        } else if metadata.is_file() {
+            total = total.saturating_add(metadata.len());
+        } else {
             return Err(registry_error(
                 "measure managed session",
                 "managed session contains a non-file member",
             ));
-        } else {
-            total = total.saturating_add(metadata.len());
         }
     }
     return Ok(total);

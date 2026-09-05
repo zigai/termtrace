@@ -15,6 +15,7 @@ use crate::Error;
 mod delta;
 mod engine;
 mod index;
+pub(crate) mod trust;
 
 use delta::state_delta;
 #[cfg(test)]
@@ -24,11 +25,11 @@ use engine::{
 };
 pub use engine::{
     RenderedStateFormats, StateInspectionWithFormats, format_state, inspect, inspect_many,
-    inspect_with_formats, replay, semantic_state_hash, visit_states,
+    inspect_with_formats, replay, semantic_state_hash, visit_session_states_while, visit_states,
 };
 pub(crate) use engine::{
-    ReplaySeed, inspect_latest_presented_fast, visit_states_range, visit_states_range_while,
-    visit_states_seeded_while,
+    ReplaySeed, inspect_latest_presented_stream, inspect_session_stream, visit_states_range,
+    visit_states_range_while, visit_states_seeded_while,
 };
 use engine::{replay_for_index, validate_replay_seed};
 #[cfg(test)]

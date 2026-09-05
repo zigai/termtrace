@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs::{File, OpenOptions},
     io::{BufRead as _, BufReader, BufWriter, Write as _},
     os::unix::fs::OpenOptionsExt as _,
@@ -8,7 +8,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use termtrace_model::{
-    execution::event::{Event, EventLogHeader, EventRecord},
+    execution::event::Event,
     execution::request_journal::MutationJournalRecord,
     protocol::control::{
         ControlCommand, ControlData, ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES,
@@ -17,7 +17,7 @@ use termtrace_model::{
 };
 use uuid::Uuid;
 
-use crate::storage::{Error, Result};
+use crate::storage::{Error, Result, event_log::EventLogCursor};
 
 pub use termtrace_model::execution::request_journal::{
     MUTATION_JOURNAL_FORMAT, MUTATION_JOURNAL_NAME, MUTATION_JOURNAL_VERSION,
@@ -262,8 +262,7 @@ pub fn read_mutation_journal(path: &Path) -> Result<Vec<MutationJournalRecord>> 
     }
     let metadata =
         fs_err::symlink_metadata(path).map_err(|source| return Error::filesystem(path, source))?;
-    let file_type = metadata.file_type();
-    if !file_type.is_file() || metadata.len() > MAX_MUTATION_JOURNAL_BYTES {
+    if !metadata.is_file() || metadata.len() > MAX_MUTATION_JOURNAL_BYTES {
         return Err(Error::invalid(
             "mutation journal is not a bounded regular file",
         ));
@@ -293,14 +292,14 @@ pub fn read_mutation_journal(path: &Path) -> Result<Vec<MutationJournalRecord>> 
 /// # Errors
 ///
 /// Returns an error when journal records or their event boundaries are inconsistent.
-pub fn validate_mutation_journal(
-    session: &Path,
-    header: &EventLogHeader,
-    events: &[EventRecord],
-) -> Result<u64> {
+pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
     let path = session.join(MUTATION_JOURNAL_NAME);
     let records = read_mutation_journal(&path)?;
-    let header_bytes = serde_json::to_vec(header).map_err(|source| {
+    if records.is_empty() {
+        return Ok(0);
+    }
+    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let header_bytes = serde_json::to_vec(cursor.header()).map_err(|source| {
         return Error::InvalidJson {
             path: path.clone(),
             json_path: "$".to_owned(),
@@ -308,6 +307,24 @@ pub fn validate_mutation_journal(
         };
     })?;
     let header_hash = blake3::hash(&header_bytes).to_hex().to_string();
+    let boundaries: HashSet<u64> = records
+        .iter()
+        .map(|record| return record.event_end_seq)
+        .collect();
+    let mut hashes = HashMap::new();
+    hashes.insert(0, header_hash);
+    let mut operations = Vec::new();
+    let mut event_count = 0;
+    while let Some(event) = cursor.next_record()? {
+        event_count = event.seq + 1;
+        if let Some(operation_id) = event_operation_id(&event.event) {
+            operations.push((event.seq, operation_id));
+        }
+        if boundaries.contains(&event_count) {
+            hashes.insert(event_count, event.hash);
+        }
+    }
+    let _pending = cursor.finish()?;
     let mut request_ids: HashSet<Uuid> = HashSet::new();
     for record in &records {
         if !request_ids.insert(record.request_id) {
@@ -315,35 +332,28 @@ pub fn validate_mutation_journal(
                 "mutation journal repeats a request identifier",
             ));
         }
-        let event_count = u64::try_from(events.len()).unwrap_or(u64::MAX);
         if record.event_end_seq > event_count {
             return Err(Error::invalid(
                 "mutation journal event range exceeds the canonical log",
             ));
         }
-        let expected_hash = if record.event_end_seq == 0 {
-            header_hash.as_str()
-        } else {
-            let index = usize::try_from(record.event_end_seq - 1)
-                .map_err(|_| return Error::invalid("journal boundary is not addressable"))?;
-            events
-                .get(index)
-                .map(|event| return event.hash.as_str())
-                .ok_or_else(|| return Error::invalid("journal event boundary is missing"))?
-        };
-        if record.event_hash != expected_hash {
+        let expected_hash = hashes
+            .get(&record.event_end_seq)
+            .ok_or_else(|| return Error::invalid("journal event boundary is missing"))?;
+        if record.event_hash != *expected_hash {
             return Err(Error::invalid(
                 "mutation journal event hash does not match the canonical boundary",
             ));
         }
         if record.event_end_seq > record.event_start_seq {
             let mut actual_operation_ids: Vec<Uuid> = Vec::new();
-            for operation_id in events
+            let start = operations.partition_point(|(seq, _)| return *seq < record.event_start_seq);
+            for operation_id in operations
+                .get(start..)
+                .unwrap_or_default()
                 .iter()
-                .filter(|event| {
-                    return event.seq >= record.event_start_seq && event.seq < record.event_end_seq;
-                })
-                .filter_map(|event| return event_operation_id(&event.event))
+                .take_while(|(seq, _)| return *seq < record.event_end_seq)
+                .map(|(_, operation_id)| return *operation_id)
             {
                 if actual_operation_ids.last() != Some(&operation_id) {
                     actual_operation_ids.push(operation_id);
@@ -384,6 +394,7 @@ fn response_boundaries(response: &ControlResponse) -> Option<&ActorBoundaries> {
             | ControlData::Status { boundaries, .. }
             | ControlData::Marked { boundaries, .. } => Some(boundaries),
             ControlData::ScreenFrame { .. }
+            | ControlData::EventCursor { .. }
             | ControlData::StableSnapshot { .. }
             | ControlData::ScreenWait { .. } => None,
         },

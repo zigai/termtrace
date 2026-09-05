@@ -19,6 +19,7 @@ impl Evidence<'_> {
             point,
             &[SaveFormat::Png],
             false,
+            None,
         )?;
         verify_saved_artifact(&outcome.directory, &outcome.manifest)?;
         return Ok(outcome);
@@ -31,7 +32,7 @@ impl Evidence<'_> {
         profile: BundleProfile,
     ) -> Result<BundleManifest> {
         let destination = destination.as_ref();
-        let manifest = create_bundle(&self.session.path, destination, profile)?;
+        let manifest = create_bundle(&self.session.path, destination, profile, None)?;
         let policy = BundleVerificationPolicy::new(&self.session.path, profile);
         let verified = verify_bundle(destination, &policy)?;
         if verified != manifest {

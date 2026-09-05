@@ -1,6 +1,6 @@
 //! Deterministic PNG and opaque RGBA rasterization.
 
-use std::sync::Arc;
+use std::{io::Write, sync::Arc};
 
 use resvg::tiny_skia::{Color, FilterQuality, Pixmap, PixmapPaint, Transform};
 use resvg::usvg::{Options, Tree};
@@ -38,11 +38,42 @@ pub fn render_png_with_profile(
     state: &SemanticState,
     profile: SemanticRasterProfile,
 ) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    write_png(state, profile, &mut bytes)?;
+    return Ok(bytes);
+}
+
+/// Encode a semantic screenshot directly into a fallible streaming destination.
+///
+/// # Errors
+///
+/// Returns rendering, encoding, or destination write errors without materializing the PNG.
+pub fn write_png(
+    state: &SemanticState,
+    profile: SemanticRasterProfile,
+    writer: impl Write,
+) -> Result<()> {
     validate_geometry(state.cols, state.rows, "semantic state")?;
     let svg = render_svg_scene(state, state.cols, state.rows, false)?;
-    return rasterize_svg_pixmap(&svg, profile, Some(state.colors.background))?
-        .encode_png()
-        .map_err(|error| return render_error(format!("encode semantic PNG: {error}")));
+    let pixmap = rasterize_svg_pixmap(&svg, profile, Some(state.colors.background))?;
+    let mut encoder = png::Encoder::new(writer, pixmap.width(), pixmap.height());
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut png = encoder
+        .write_header()
+        .map_err(|error| return render_error(format!("encode semantic PNG: {error}")))?;
+    let mut stream = png
+        .stream_writer()
+        .map_err(|error| return render_error(format!("encode semantic PNG: {error}")))?;
+    stream
+        .write_all(pixmap.data())
+        .map_err(|error| return render_error(format!("write semantic PNG: {error}")))?;
+    stream
+        .finish()
+        .map_err(|error| return render_error(format!("finish semantic PNG: {error}")))?;
+    return png
+        .finish()
+        .map_err(|error| return render_error(format!("finish semantic PNG: {error}")));
 }
 
 /// Render one semantic state onto a fixed top-left-anchored video canvas.

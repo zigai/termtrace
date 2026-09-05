@@ -634,6 +634,7 @@ pub(super) fn run_save(response: &mut ResponseWriter, arguments: SaveArgs) -> Re
         point,
         &formats,
         arguments.include_hidden,
+        None,
     )
     .into_diagnostic()?;
     return write_json_line(
@@ -800,6 +801,7 @@ pub(super) fn run_screenshot(
         point,
         &[format],
         arguments.include_hidden,
+        None,
     )
     .into_diagnostic()?;
     let image_path = outcome.directory.join(filename);
@@ -858,7 +860,7 @@ pub(super) fn run_bundle(response: &mut ResponseWriter, arguments: BundleArgs) -
             .parent()
             .ok_or_else(|| return miette::miette!("bundle archive path has no parent"))?;
         let staging = parent.join(format!(".bundle-source-{}.tmp", uuid::Uuid::now_v7()));
-        let manifest = create_bundle(&session, &staging, profile).into_diagnostic()?;
+        let manifest = create_bundle(&session, &staging, profile, None).into_diagnostic()?;
         let policy = BundleVerificationPolicy::new(&session, profile);
         let result = create_bundle_archive(&staging, &arguments.out, &policy);
         let _cleanup = fs_err::remove_dir_all(&staging);
@@ -874,7 +876,7 @@ pub(super) fn run_bundle(response: &mut ResponseWriter, arguments: BundleArgs) -
             }),
         );
     }
-    let manifest = create_bundle(&session, &arguments.out, profile).into_diagnostic()?;
+    let manifest = create_bundle(&session, &arguments.out, profile, None).into_diagnostic()?;
     return write_json_line(
         response,
         &serde_json::json!({

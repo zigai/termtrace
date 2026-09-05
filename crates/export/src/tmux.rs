@@ -79,6 +79,7 @@ pub fn create(
             &source.session,
             &staging.join(&directory),
             BundleProfile::Forensic,
+            None,
         )?;
         tracks.push(TmuxBundleTrack {
             role: source.role.to_owned(),

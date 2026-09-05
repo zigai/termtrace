@@ -93,7 +93,7 @@ pub enum Error {
         source: IoError,
     },
     /// Control transport failed with possibly uncertain delivery.
-    #[error("live control transport failed during `{phase}` for session `{session}`")]
+    #[error("live control transport failed during `{phase}` for session `{session}`: {source}")]
     ControlTransport {
         /// Canonical session directory.
         session: PathBuf,

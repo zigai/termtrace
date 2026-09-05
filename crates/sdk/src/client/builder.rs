@@ -1,5 +1,6 @@
 use super::control::client_error;
 use super::*;
+use termtrace_evidence::session::validate_completed_session;
 
 /// Fresh-session launch configuration.
 #[derive(Clone, Debug)]
@@ -188,6 +189,10 @@ impl SessionBuilder {
                 };
             })?;
             if let Some(status) = status {
+                if path.join("completion.json").is_file() {
+                    validate_completed_session(&path)?;
+                    break;
+                }
                 return Err(client_error(format!(
                     "recorder exited before readiness with {status}"
                 )));

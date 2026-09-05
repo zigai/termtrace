@@ -14,9 +14,9 @@ use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::recording::{EffectiveEnvironment, control_socket_name};
 use termtrace_evidence::{
     artifact::write_secure,
-    event_log::{DurabilityPolicy, EventLog, EventLogWriter, SessionClock},
+    event_log::{DurabilityPolicy, EventLogWriter, SessionClock},
     provenance::{RecorderBuildIdentity, collect_execution_provenance},
-    session::{canonical_manifest_bytes, manifest_hash, validate_completed_log},
+    session::{canonical_manifest_bytes, manifest_hash, validate_completed_session},
 };
 use termtrace_model::{
     execution::environment::EnvironmentSpec,
@@ -85,6 +85,16 @@ fn generate(arguments: LargeArgs) -> Result<()> {
     if arguments.output_bytes < arguments.events - 1 {
         return Err(miette::miette!(
             "--output-bytes must provide at least one byte per output event"
+        ));
+    }
+    if arguments.events > 2_000_000 || arguments.output_bytes > 2 * 1024 * 1024 * 1024 {
+        return Err(miette::miette!(
+            "fixture exceeds the streaming event or payload budget"
+        ));
+    }
+    if arguments.output_bytes.div_ceil(arguments.events - 1) > 32 * 1024 * 1024 {
+        return Err(miette::miette!(
+            "fixture output chunks must not exceed 32 MiB; increase --events"
         ));
     }
     if arguments.cols == 0 || arguments.rows == 0 {
@@ -203,8 +213,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         &serde_json::to_vec(&completion).into_diagnostic()?,
     )
     .into_diagnostic()?;
-    let log = EventLog::read(arguments.out.join("events.jsonl")).into_diagnostic()?;
-    validate_completed_log(&arguments.out, &log).into_diagnostic()?;
+    validate_completed_session(&arguments.out).into_diagnostic()?;
     println!(
         "{} events, {} output bytes: {}",
         completion.event_count,
@@ -264,8 +273,7 @@ mod tests {
             rows: 24,
         })
         .expect("generate fixture");
-        let log = EventLog::read(session.join("events.jsonl")).expect("read fixture");
-        let completion = validate_completed_log(&session, &log).expect("validate fixture");
+        let completion = validate_completed_session(&session).expect("validate fixture");
         assert_eq!(completion.event_count, 128);
         assert_eq!(completion.output_bytes, 65_536);
         assert_eq!(completion.terminal_event_seq, 127);

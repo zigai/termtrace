@@ -1,8 +1,9 @@
 use std::{
     fs::OpenOptions,
     io::{BufReader, ErrorKind, Read as _},
-    os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
+    os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
+    sync::atomic::AtomicBool,
     time::SystemTime,
 };
 
@@ -20,7 +21,10 @@ use termtrace_model::{
 };
 
 use super::observation_error;
-use crate::replay::{EndpointInspection, semantic_state_hash};
+use crate::replay::{
+    EndpointInspection, semantic_state_hash,
+    trust::{self, SourceIdentity},
+};
 use crate::{Error, Result};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -38,7 +42,7 @@ const MAX_REPLAY_CACHE_ENTRIES: u64 = 32;
 const MAX_REPLAY_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_REPLAY_CHECKPOINT_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_REPLAY_CHECKPOINT_DECOMPRESSED_BYTES: u64 = 128 * 1024 * 1024;
-const MAX_CANONICAL_EVENT_LOG_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_CANONICAL_EVENT_LOG_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 pub(super) fn load_checkpoint(
     session: &Path,
@@ -70,8 +74,7 @@ pub(super) fn load_checkpoint(
                 source,
             };
         })?;
-        let file_type = metadata.file_type();
-        if !file_type.is_file() || metadata.permissions().mode() & 0o077 != 0 {
+        if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 {
             return Err(observation_error(
                 "replay checkpoint must be a regular owner-only file",
             ));
@@ -101,21 +104,13 @@ pub(super) fn load_checkpoint(
                 "replay checkpoint exceeds its decompressed size limit",
             ));
         }
-        let checkpoint: ReplayCheckpoint = serde_json::from_slice(&bytes).map_err(|source| {
-            return Error::InvalidJson {
-                path: path.clone(),
-                json_path: "$".to_owned(),
-                source,
-            };
-        })?;
+        let checkpoint: ReplayCheckpoint = trust::decode(session, &bytes)?;
         let completion_bytes = fs_err::read(session.join("completion.json")).map_err(|source| {
             return Error::Filesystem {
                 path: session.join("completion.json"),
                 source,
             };
         })?;
-        let event_path = session.join("events.jsonl");
-        let (event_log_byte_count, event_log_blake3) = hash_file(&event_path)?;
         let state_bytes = serde_json::to_vec(&checkpoint.state).map_err(|source| {
             return Error::InvalidJson {
                 path: PathBuf::from("<checkpoint-state>"),
@@ -131,8 +126,6 @@ pub(super) fn load_checkpoint(
             || checkpoint.state_point != *point
             || checkpoint.final_event_hash != completion.final_event_hash
             || checkpoint.completion_blake3 != blake3::hash(&completion_bytes).to_hex().to_string()
-            || checkpoint.event_log_byte_count != event_log_byte_count
-            || checkpoint.event_log_blake3 != event_log_blake3
             || checkpoint.state_blake3 != state_blake3
             || checkpoint.state_hash != semantic_hash
         {
@@ -171,6 +164,8 @@ pub(super) fn publish_checkpoint(
     point: &StatePoint,
     completion: &SessionCompletion,
     inspection: &StateInspection,
+    source: &SourceIdentity,
+    cancelled: Option<&AtomicBool>,
 ) -> Result<()> {
     let state = CachedSemanticState {
         state_id: Some(inspection.record.state_id),
@@ -181,7 +176,7 @@ pub(super) fn publish_checkpoint(
         presented: inspection.record.presented,
         state: inspection.state.clone(),
     };
-    return publish_cached_checkpoint(session, point, completion, &state);
+    return publish_cached_checkpoint(session, point, completion, &state, source, cancelled);
 }
 
 pub(crate) fn publish_endpoint_checkpoint(
@@ -189,6 +184,8 @@ pub(crate) fn publish_endpoint_checkpoint(
     point: &StatePoint,
     completion: &SessionCompletion,
     inspection: &EndpointInspection,
+    source: &SourceIdentity,
+    cancelled: Option<&AtomicBool>,
 ) -> Result<()> {
     let state = CachedSemanticState {
         state_id: None,
@@ -199,7 +196,7 @@ pub(crate) fn publish_endpoint_checkpoint(
         presented: inspection.presented,
         state: inspection.state.clone(),
     };
-    return publish_cached_checkpoint(session, point, completion, &state);
+    return publish_cached_checkpoint(session, point, completion, &state, source, cancelled);
 }
 
 fn publish_cached_checkpoint(
@@ -207,7 +204,10 @@ fn publish_cached_checkpoint(
     point: &StatePoint,
     completion: &SessionCompletion,
     state: &CachedSemanticState,
+    source: &SourceIdentity,
+    cancelled: Option<&AtomicBool>,
 ) -> Result<()> {
+    source.check(session)?;
     let path = checkpoint_path(session, point, completion)?;
     if path.exists() {
         return Ok(());
@@ -223,7 +223,8 @@ fn publish_cached_checkpoint(
             source,
         };
     })?;
-    let (event_log_byte_count, event_log_blake3) = hash_file(&session.join("events.jsonl"))?;
+    let (event_log_byte_count, event_log_blake3) =
+        hash_file(&session.join("events.jsonl"), cancelled)?;
     let state_bytes = serde_json::to_vec(&state.state).map_err(|source| {
         return Error::InvalidJson {
             path: PathBuf::from("<checkpoint-state>"),
@@ -249,13 +250,8 @@ fn publish_cached_checkpoint(
         state: state.state.clone(),
         state_blake3: blake3::hash(&state_bytes).to_hex().to_string(),
     };
-    let bytes = serde_json::to_vec(&checkpoint).map_err(|source| {
-        return Error::InvalidJson {
-            path: path.clone(),
-            json_path: "$".to_owned(),
-            source,
-        };
-    })?;
+    source.check(session)?;
+    let bytes = trust::encode(session, source, checkpoint)?;
     let compressed = encode_all(bytes.as_slice(), 3).map_err(|error| {
         return observation_error(format!("could not compress replay checkpoint: {error}"));
     })?;
@@ -263,6 +259,7 @@ fn publish_cached_checkpoint(
         tracing::warn!(path = %path.display(), "skipped oversized disposable replay checkpoint");
         return Ok(());
     }
+    source.check(session)?;
     write_secure(&path, &compressed)?;
     enforce_replay_cache_limits(session, Some(&path))?;
     return Ok(sync_directory(directory)?);
@@ -414,8 +411,7 @@ fn replay_cache_entries(directory: &Path) -> Result<Vec<ReplayCacheEntry>> {
                 source,
             };
         })?;
-        let file_type = metadata.file_type();
-        if !file_type.is_file() {
+        if !metadata.is_file() {
             return Err(observation_error(
                 "replay checkpoint cache contains a non-regular member",
             ));
@@ -476,7 +472,7 @@ fn ensure_private_cache_directory(path: &Path) -> Result<()> {
     }
 }
 
-fn hash_file(path: &Path) -> Result<(u64, String)> {
+fn hash_file(path: &Path, cancelled: Option<&AtomicBool>) -> Result<(u64, String)> {
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(O_NOFOLLOW)
@@ -493,19 +489,54 @@ fn hash_file(path: &Path) -> Result<(u64, String)> {
             source,
         };
     })?;
-    let file_type = metadata.file_type();
-    if !file_type.is_file() || metadata.len() > MAX_CANONICAL_EVENT_LOG_BYTES {
+    if !metadata.is_file() || metadata.len() > MAX_CANONICAL_EVENT_LOG_BYTES {
         return Err(observation_error(
             "canonical event log must be a bounded regular file",
         ));
     }
     let mut reader = BufReader::new(file);
     let mut hasher = blake3::Hasher::new();
-    hasher.update_reader(&mut reader).map_err(|source| {
+    let mut buffer = [0_u8; 16384];
+    let mut bytes = 0_u64;
+    loop {
+        trust::check_cancelled(cancelled)?;
+        let count = reader.read(&mut buffer).map_err(|source| {
+            return Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            };
+        })?;
+        if count == 0 {
+            break;
+        }
+        bytes = bytes.saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
+        if bytes > MAX_CANONICAL_EVENT_LOG_BYTES {
+            return Err(observation_error(
+                "canonical event log grew beyond the streaming byte budget",
+            ));
+        }
+        hasher.update(
+            buffer
+                .get(..count)
+                .ok_or_else(|| return observation_error("invalid hash read length"))?,
+        );
+    }
+    let after = reader.get_ref().metadata().map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),
             source,
         };
     })?;
+    if metadata.len() != bytes
+        || metadata.len() != after.len()
+        || metadata.mtime() != after.mtime()
+        || metadata.mtime_nsec() != after.mtime_nsec()
+        || metadata.ctime() != after.ctime()
+        || metadata.ctime_nsec() != after.ctime_nsec()
+    {
+        return Err(observation_error(
+            "canonical event log changed while hashing",
+        ));
+    }
     return Ok((metadata.len(), hasher.finalize().to_hex().to_string()));
 }

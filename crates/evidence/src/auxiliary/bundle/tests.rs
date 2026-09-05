@@ -8,6 +8,58 @@ use super::*;
 use super::{tar::extract_archive, verify::read_bounded_regular_file};
 
 #[test]
+fn generation_budget_is_shared_by_members_and_manifest() {
+    use std::io::Write as _;
+
+    let temporary = TempDir::new().expect("temporary directory");
+    let destination = temporary.path().join("bounded");
+    let identity = BundleIdentity {
+        profile: BundleProfile::Screen,
+        session_id: Uuid::nil(),
+        canonical_session: ByteString::from(b"/trusted/session".as_slice()),
+        source_final_event_hash: "a".repeat(64),
+        includes_canonical_evidence: false,
+    };
+    let metadata = BundleMemberMetadata {
+        media_type: "text/plain".to_owned(),
+        schema_type: None,
+        sensitivity: ArtifactSensitivity::SensitiveTerminalData,
+        relationship: "selected_screen".to_owned(),
+    };
+    let mut draft = BundleDraft::create(&destination, identity, Some(5)).expect("draft");
+    draft
+        .add_member_bytes("first.txt", metadata.clone(), b"abc")
+        .expect("first member");
+    let staging = draft.staging_path().to_path_buf();
+    {
+        let mut writer = draft
+            .start_member("second.txt", metadata)
+            .expect("second member");
+        assert!(writer.write_all(b"def").is_err());
+        writer.write_all(b"de").expect("remaining shared budget");
+        writer.finish().expect("finished second member");
+    }
+    assert_eq!(
+        fs_err::metadata(staging.join("first.txt"))
+            .expect("first metadata")
+            .len(),
+        3
+    );
+    assert_eq!(
+        fs_err::metadata(staging.join("second.txt"))
+            .expect("second metadata")
+            .len(),
+        2
+    );
+    assert!(
+        draft.commit().is_err(),
+        "manifest must consume the same generation budget"
+    );
+    assert!(!destination.exists());
+    assert!(!staging.exists());
+}
+
+#[test]
 fn direct_and_archived_manifests_share_the_byte_limit() {
     let temporary = TempDir::new().expect("temporary directory");
     let direct = temporary.path().join("manifest.json");

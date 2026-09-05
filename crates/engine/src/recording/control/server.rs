@@ -145,7 +145,9 @@ fn control_server_loop(
                         };
                         scope.spawn(move || {
                             let _permit = permit;
-                            let _result = handle_control_connection(stream, sender, cancel);
+                            if let Err(error) = handle_control_connection(stream, sender, cancel) {
+                                tracing::warn!(%error, "control connection failed");
+                            }
                         });
                     }
                     Err(error) if error.kind() == ErrorKind::WouldBlock => break,
@@ -191,6 +193,10 @@ fn handle_control_connection(
     .take(MAX_CONTROL_MESSAGE_BYTES + 1)
     .read_until(b'\n', &mut encoded)
     .map_err(|error| return terminal_error("read control request", error.to_string()))?;
+    // Reachability checks connect and close without submitting a request.
+    if encoded.is_empty() {
+        return Ok(());
+    }
     validate_frame(&encoded)?;
     let request: ControlRequest = serde_json::from_slice(&encoded).map_err(|source| {
         return Error::InvalidJson {

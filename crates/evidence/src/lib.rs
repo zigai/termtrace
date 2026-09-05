@@ -12,9 +12,9 @@ pub use storage::{Error, Result};
 /// Derived-artifact storage and verification.
 pub mod artifact {
     pub use crate::storage::artifact::{
-        ARTIFACT_ROOT_LOG, append_artifact_root, collect_artifact_members, commit_directory,
-        create_private_directory, finish_writer, hash_regular_file, read_artifact_roots,
-        secure_file, secure_writer, sync_directory, verify_artifact_members,
+        ARTIFACT_ROOT_LOG, BudgetWriter, append_artifact_root, collect_artifact_members,
+        commit_directory, create_private_directory, finish_writer, hash_regular_file,
+        read_artifact_roots, secure_file, secure_writer, sync_directory, verify_artifact_members,
         verify_session_artifacts, write_secure,
     };
 }
@@ -23,8 +23,8 @@ pub mod artifact {
 pub mod event_log {
     pub use crate::storage::event_log::{
         CanonicalBoundary, DurabilityMode, DurabilityPolicy, DurabilityRecord, EventLog,
-        EventLogCursor, EventLogWriter, OperationKind, PendingOperation, PendingOperationReport,
-        RecoveryIssue, RecoveryReport, SessionClock,
+        EventLogCursor, EventLogSummary, EventLogWriter, OperationKind, PendingOperation,
+        PendingOperationReport, RecoveryIssue, RecoveryReport, SessionClock,
     };
 }
 
@@ -32,8 +32,8 @@ pub mod event_log {
 pub mod session {
     pub use crate::storage::session::{
         canonical_manifest_bytes, manifest_hash, read_completion, read_manifest,
-        validate_completed_log, validate_completion_candidate, verify_session,
-        verify_session_with_trust,
+        validate_completed_log, validate_completed_session, validate_completion_candidate,
+        validate_completion_summary_candidate, verify_session, verify_session_with_trust,
     };
 }
 

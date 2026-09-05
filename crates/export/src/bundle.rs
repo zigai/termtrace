@@ -85,6 +85,7 @@ pub fn create(
     session: &Path,
     destination: &Path,
     profile: BundleProfile,
+    max_bytes: Option<u64>,
 ) -> Result<BundleManifest> {
     let trusted = TrustedSource::resolve(session)?;
     if destination.starts_with(&trusted.canonical) {
@@ -93,7 +94,7 @@ pub fn create(
         ));
     }
     let identity = trusted.identity(profile);
-    let mut draft = BundleDraft::create(destination, identity)?;
+    let mut draft = BundleDraft::create(destination, identity, max_bytes)?;
     let observation = observe_session(&trusted.canonical, StatePoint::LatestPresented)?;
     draft.add_member_bytes(
         "screen.txt",
@@ -618,10 +619,13 @@ fn add_json_member(
     metadata: BundleMemberMetadata,
     value: &impl Serialize,
 ) -> Result<()> {
-    let mut bytes =
-        serde_json::to_vec_pretty(value).map_err(|source| return Error::json(path, source))?;
-    bytes.push(b'\n');
-    draft.add_member_bytes(path, metadata, &bytes)?;
+    let mut writer = draft.start_member(path, metadata)?;
+    serde_json::to_writer_pretty(&mut writer, value)
+        .map_err(|source| return Error::json(path, source))?;
+    writer
+        .write_all(b"\n")
+        .map_err(|source| return Error::filesystem(path, source))?;
+    writer.finish()?;
     return Ok(());
 }
 

@@ -9,7 +9,7 @@ use termtrace_sdk::{Error, Result};
 use termtrace_model::protocol::driver::{DRIVER_MAX_REQUEST_BYTES, DriverRequest};
 
 pub(super) enum DriverFrame {
-    Request(DriverRequest),
+    Request(Box<DriverRequest>),
     Invalid { line: usize, column: usize },
     TooLarge,
     Unterminated,
@@ -45,7 +45,7 @@ pub(super) fn read_frame(input: &mut impl BufRead) -> Result<Option<DriverFrame>
         return Ok(Some(DriverFrame::Unterminated));
     }
     return Ok(Some(match parsed {
-        Ok(request) => DriverFrame::Request(request),
+        Ok(request) => DriverFrame::Request(Box::new(request)),
         Err(error) => DriverFrame::Invalid {
             line: error.line(),
             column: error.column(),

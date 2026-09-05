@@ -15,6 +15,19 @@ use super::secure_fs::{
 use super::*;
 
 #[test]
+fn generation_budget_rejects_before_writing_excess_bytes() {
+    let mut bytes = Vec::new();
+    {
+        let mut writer = BudgetWriter::new(&mut bytes, 5);
+        writer.write_all(b"abc").expect("first bounded write");
+        assert!(writer.write_all(b"def").is_err());
+        writer.write_all(b"de").expect("exact remaining allowance");
+        assert!(writer.write_all(b"f").is_err());
+    }
+    assert_eq!(bytes, b"abcde");
+}
+
+#[test]
 fn member_verification_rejects_extra_and_changed_payloads() {
     let temporary = TempDir::new().expect("temporary directory");
     let artifact = temporary.path().join("artifact");

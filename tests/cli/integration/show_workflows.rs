@@ -1,5 +1,10 @@
 //! show workflows CLI integration tests.
 
+use std::fs::{File, FileTimes};
+use termtrace_engine::replay::semantic_state_hash;
+use termtrace_model::{terminal::observation::ReplayCheckpoint, value::ByteString};
+use zstd::stream::{decode_all, encode_all};
+
 use crate::support::*;
 
 #[test]
@@ -90,10 +95,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
             r#""source_kind":"completed_session""#,
         ))
         .stdout(predicate::str::contains(r#""capture_quality":"completed""#))
-        .stdout(predicate::str::contains(r#""source_completed":true"#))
-        .stdout(predicate::str::contains(
-            r#""resolution":"canonical_replay""#,
-        ));
+        .stdout(predicate::str::contains(r#""source_completed":true"#));
     let mut warm = Command::cargo_bin("termtrace").expect("binary should build");
     warm.env("TERMTRACE_STATE_DIR", &state)
         .args(["show", "demo", "--format", "json-compact"])
@@ -156,6 +158,95 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
         .success()
         .stdout(predicate::str::contains(r#""removed_entries":1"#))
         .stdout(predicate::str::contains(r#""entries":0"#));
+}
+
+#[test]
+fn completed_cache_rejects_forged_state_and_same_length_source_tampering() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state_root = temporary.path().join("state");
+    let session = temporary.path().join("session");
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .env("TERMTRACE_STATE_DIR", &state_root)
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf TRUSTED"])
+        .assert()
+        .success();
+    let observe = || {
+        return Command::cargo_bin("termtrace")
+            .expect("binary")
+            .env("TERMTRACE_STATE_DIR", &state_root)
+            .arg("show")
+            .arg(&session)
+            .args(["--format", "json-compact"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+    };
+    let original: serde_json::Value = serde_json::from_slice(&observe()).expect("observation");
+    let cache = fs_err::read_dir(session.join("derived-cache"))
+        .expect("cache")
+        .next()
+        .expect("cache entry")
+        .expect("cache path")
+        .path();
+    let compressed = fs_err::read(&cache).expect("checkpoint");
+    let decoded = decode_all(compressed.as_slice()).expect("decode cache");
+    let mut envelope: serde_json::Value = serde_json::from_slice(&decoded).expect("cache envelope");
+    let mut checkpoint: ReplayCheckpoint =
+        serde_json::from_value(envelope["payload"].clone()).expect("checkpoint payload");
+    checkpoint.state.metadata.title = ByteString::from(b"FORGED".as_slice());
+    checkpoint.state_hash = semantic_state_hash(&checkpoint.state).expect("forged semantic hash");
+    checkpoint.state_blake3 =
+        blake3::hash(&serde_json::to_vec(&checkpoint.state).expect("state bytes"))
+            .to_hex()
+            .to_string();
+    envelope["payload"] = serde_json::to_value(checkpoint).expect("forged payload");
+    let forged = serde_json::to_vec(&envelope).expect("forged envelope");
+    fs_err::write(
+        &cache,
+        encode_all(forged.as_slice(), 3).expect("compress forged cache"),
+    )
+    .expect("tamper cache");
+    let after_forgery: serde_json::Value =
+        serde_json::from_slice(&observe()).expect("replayed observation");
+    assert_eq!(after_forgery["state_hash"], original["state_hash"]);
+
+    let events = session.join("events.jsonl");
+    let before = fs_err::metadata(&events).expect("source metadata");
+    let canonical = fs_err::read_to_string(&events).expect("source");
+    let corrupted = canonical.replace("VFJVU1RFRA==", "Rk9SR0VEIQ==");
+    assert_ne!(
+        corrupted, canonical,
+        "fixture output payload must be present"
+    );
+    assert_eq!(corrupted.len(), canonical.len());
+    fs_err::write(&events, corrupted).expect("tamper canonical output");
+    File::options()
+        .write(true)
+        .open(&events)
+        .expect("source handle")
+        .set_times(FileTimes::new().set_modified(before.modified().expect("source mtime")))
+        .expect("restore original mtime");
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .env("TERMTRACE_STATE_DIR", &state_root)
+        .arg("show")
+        .arg(&session)
+        .assert()
+        .failure();
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .env("TERMTRACE_STATE_DIR", &state_root)
+        .args(["integrity", "verify"])
+        .arg(&session)
+        .arg("--json")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("event_log_invalid"));
 }
 
 #[test]

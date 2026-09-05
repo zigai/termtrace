@@ -239,8 +239,7 @@ fn sign_ssh_receipt(
 pub fn read_receipt(receipt_path: &Path) -> Result<EvidenceReceipt> {
     let metadata = fs_err::symlink_metadata(receipt_path)
         .map_err(|source| return Error::filesystem(receipt_path, source))?;
-    let file_type = metadata.file_type();
-    if !file_type.is_file() || metadata.len() > MAX_RECEIPT_BYTES {
+    if !metadata.is_file() || metadata.len() > MAX_RECEIPT_BYTES {
         return Err(Error::invalid("receipt is not a bounded regular file"));
     }
     let bytes = fs_err::read(receipt_path)

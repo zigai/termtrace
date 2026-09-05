@@ -14,7 +14,7 @@ use termtrace_terminal::{
     GhosttyVt, PresentationAction, PresentationTracker, PresentationTransition, QueryTracker,
 };
 
-use super::{input::apply_input, model::TerminalGeometry};
+use super::{control::MutationHistory, input::apply_input, model::TerminalGeometry};
 use crate::{Error, Result};
 
 pub(super) struct LiveTerminal {
@@ -30,12 +30,19 @@ pub(super) fn process_semantic_output(
     live: &mut LiveTerminal,
     writer: &mut dyn Write,
     event_log: &mut EventLogWriter,
+    mutation_history: &mut MutationHistory,
     data: &[u8],
 ) -> Result<()> {
     for byte in data {
         match live.presentation_tracker.push(*byte) {
             PresentationAction::Immediate => {
-                process_semantic_bytes(live, writer, event_log, slice::from_ref(byte))?;
+                process_semantic_bytes(
+                    live,
+                    writer,
+                    event_log,
+                    mutation_history,
+                    slice::from_ref(byte),
+                )?;
             }
             PresentationAction::Buffered => {}
             PresentationAction::Sequence { bytes, command } => {
@@ -44,7 +51,7 @@ pub(super) fn process_semantic_output(
                 } else {
                     None
                 };
-                process_semantic_bytes(live, writer, event_log, &bytes)?;
+                process_semantic_bytes(live, writer, event_log, mutation_history, &bytes)?;
                 if command.is_some() {
                     let after_command = live.semantic.snapshot()?;
                     match live
@@ -72,6 +79,7 @@ pub(super) fn process_semantic_bytes(
     live: &mut LiveTerminal,
     writer: &mut dyn Write,
     event_log: &mut EventLogWriter,
+    _mutation_history: &mut MutationHistory,
     data: &[u8],
 ) -> Result<()> {
     for byte in data {
@@ -84,6 +92,7 @@ pub(super) fn process_semantic_bytes(
         {
             let query = ByteString::from(live.query_tracker.bytes());
             for response in take(&mut live.pending_query_responses) {
+                let operation_id = Uuid::now_v7();
                 event_log.append(Event::QueryResponse {
                     query: query.clone(),
                     response: ByteString::from(response.as_slice()),
@@ -92,7 +101,7 @@ pub(super) fn process_semantic_bytes(
                 apply_input(
                     writer,
                     event_log,
-                    Uuid::now_v7(),
+                    operation_id,
                     InputSource::Host,
                     InputKind::Raw,
                     InputDescriptor::Raw,

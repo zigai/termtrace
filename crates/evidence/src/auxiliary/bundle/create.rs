@@ -13,6 +13,7 @@ use termtrace_model::{artifact::bundle::BundleManifest, artifact::metadata::Arti
 use uuid::Uuid;
 
 use crate::{
+    artifact::BudgetWriter,
     auxiliary::bundle::{
         BUNDLE_MANIFEST_NAME, BundleIdentity, BundleMemberMetadata, MAX_BUNDLE_MANIFEST_BYTES,
         MAX_BUNDLE_MEMBERS, create_private_directory, create_private_parents, secure_file,
@@ -29,6 +30,7 @@ pub struct BundleDraft {
     members: Vec<ArtifactMember>,
     paths: BTreeSet<String>,
     committed: bool,
+    remaining_bytes: u64,
 }
 
 impl BundleDraft {
@@ -37,7 +39,11 @@ impl BundleDraft {
     /// # Errors
     ///
     /// Returns an error when the destination exists or staging cannot be created.
-    pub fn create(destination: impl Into<PathBuf>, identity: BundleIdentity) -> Result<Self> {
+    pub fn create(
+        destination: impl Into<PathBuf>,
+        identity: BundleIdentity,
+        max_bytes: Option<u64>,
+    ) -> Result<Self> {
         let destination = destination.into();
         let parent = destination
             .parent()
@@ -66,6 +72,7 @@ impl BundleDraft {
             members: Vec::new(),
             paths: BTreeSet::new(),
             committed: false,
+            remaining_bytes: max_bytes.unwrap_or(u64::MAX),
         });
     }
 
@@ -166,21 +173,25 @@ impl BundleDraft {
             .sort_by(|left, right| return left.path.cmp(&right.path));
         let manifest = self.identity.manifest(self.members.clone());
         let manifest_path = self.staging.join(BUNDLE_MANIFEST_NAME);
-        let mut bytes = serde_json::to_vec_pretty(&manifest).map_err(|source| {
-            return Error::InvalidJson {
-                path: manifest_path.clone(),
-                json_path: "$".to_owned(),
-                source,
-            };
-        })?;
-        bytes.push(b'\n');
-        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_BUNDLE_MANIFEST_BYTES {
-            return Err(Error::invalid("bundle manifest exceeds its byte limit"));
-        }
         let mut manifest_file = secure_file(&manifest_path)?;
+        {
+            let mut writer = BudgetWriter::new(
+                &mut manifest_file,
+                self.remaining_bytes.min(MAX_BUNDLE_MANIFEST_BYTES),
+            );
+            serde_json::to_writer_pretty(&mut writer, &manifest).map_err(|source| {
+                return Error::InvalidJson {
+                    path: manifest_path.clone(),
+                    json_path: "$".to_owned(),
+                    source,
+                };
+            })?;
+            writer
+                .write_all(b"\n")
+                .map_err(|source| return Error::filesystem(&manifest_path, source))?;
+        }
         manifest_file
-            .write_all(&bytes)
-            .and_then(|()| return manifest_file.sync_all())
+            .sync_all()
             .map_err(|source| return Error::filesystem(&manifest_path, source))?;
         sync_directory(&self.staging)?;
         let parent = self
@@ -274,11 +285,15 @@ impl BundleMemberWriter<'_> {
 
 impl Write for BundleMemberWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if u64::try_from(buf.len()).unwrap_or(u64::MAX) > self.draft.remaining_bytes {
+            return Err(io::Error::other("bundle exceeds its byte budget"));
+        }
         let writer = self
             .writer
             .as_mut()
             .ok_or_else(|| return io::Error::other("bundle member writer is already finished"))?;
         let count = writer.write(buf)?;
+        self.draft.remaining_bytes -= u64::try_from(count).unwrap_or(u64::MAX);
         let written = buf.get(..count).ok_or_else(|| {
             return io::Error::other("bundle member writer returned an invalid count");
         })?;
@@ -305,6 +320,7 @@ impl Drop for BundleMemberWriter<'_> {
             return;
         }
         self.writer.take();
+        self.draft.remaining_bytes = self.draft.remaining_bytes.saturating_add(self.byte_length);
         let _ = fs_err::remove_file(&self.destination);
         self.draft.paths.remove(&self.path);
     }

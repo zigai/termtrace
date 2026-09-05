@@ -1,15 +1,19 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     fmt::Write as _,
+    iter::from_fn,
+    path::Path,
     slice,
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
 use uuid::Uuid;
 
-use termtrace_evidence::event_log::EventLog;
+use termtrace_evidence::event_log::{EventLog, EventLogCursor};
 use termtrace_model::{
-    execution::event::{Event, EventRecord, OperationStatus},
+    execution::event::{Event, EventLogHeader, EventRecord, OperationStatus},
     terminal::replay::{
         CollectedReplay, DERIVED_DIRECTORY, ReplayArtifacts, SourceRange, StateInspection,
         StateRecord, StateSelector,
@@ -262,19 +266,59 @@ pub fn inspect_many(log: &EventLog, selectors: &[StateSelector]) -> Result<Vec<S
         .collect();
 }
 
+#[cfg(test)]
 pub(crate) fn inspect_latest_presented_fast(log: &EventLog) -> Result<EndpointInspection> {
     return inspect_latest_presented_fast_with_limits(log, DEFAULT_REPLAY_LIMITS);
 }
 
+#[cfg(test)]
 pub(super) fn inspect_latest_presented_fast_with_limits(
     log: &EventLog,
     limits: ReplayLimits,
 ) -> Result<EndpointInspection> {
+    return inspect_latest_presented_records(
+        &log.header,
+        log.events
+            .iter()
+            .map(|record| return Ok(Cow::Borrowed(record))),
+        limits,
+        None,
+    );
+}
+
+pub(crate) fn inspect_latest_presented_stream(
+    path: &Path,
+    cancelled: Option<&AtomicBool>,
+) -> Result<EndpointInspection> {
+    let mut cursor = EventLogCursor::open(path)?;
+    let header = cursor.header().clone();
+    let records = from_fn(|| return cursor.next_record().transpose())
+        .map(|record| return record.map(Cow::Owned).map_err(Error::from));
+    let endpoint = inspect_latest_presented_records(
+        &header,
+        records,
+        ReplayLimits {
+            output_bytes: 1024 * 1024 * 1024,
+            elapsed: Duration::from_secs(3600),
+            ..DEFAULT_REPLAY_LIMITS
+        },
+        cancelled,
+    )?;
+    let _pending = cursor.finish()?;
+    return Ok(endpoint);
+}
+
+fn inspect_latest_presented_records<'record>(
+    header: &EventLogHeader,
+    records: impl Iterator<Item = Result<Cow<'record, EventRecord>>>,
+    limits: ReplayLimits,
+    cancelled: Option<&AtomicBool>,
+) -> Result<EndpointInspection> {
     use termtrace_terminal::{PresentationAction, PresentationTracker};
 
-    let mut budget = ReplayBudget::new(log.header.cols, log.header.rows, limits)?;
-    let mut engine = GhosttyVt::new(log.header.cols, log.header.rows, 100_000)?;
-    engine.apply_terminal_colors(&log.header.colors)?;
+    let mut budget = ReplayBudget::new(header.cols, header.rows, limits)?;
+    let mut engine = GhosttyVt::new(header.cols, header.rows, 100_000)?;
+    engine.apply_terminal_colors(&header.colors)?;
     budget.charge_capture()?;
     let mut presented = engine.snapshot()?;
     let mut synchronized_output = presented.modes.synchronized_output;
@@ -287,15 +331,29 @@ pub(super) fn inspect_latest_presented_fast_with_limits(
     let mut last_applied_source = (None, None, None);
     let mut last_buffered_source = (None, None, None);
 
-    for record in &log.events {
+    for record in records {
+        let record = record?;
+        super::trust::check_cancelled(cancelled)?;
         match &record.event {
             Event::Output { data } => {
                 budget.charge_output(data.as_bytes().len())?;
+                let mut immediate_start = None;
                 for (offset, byte) in data.as_bytes().iter().enumerate() {
-                    match tracker.push(*byte) {
+                    if offset % 4096 == 0 {
+                        super::trust::check_cancelled(cancelled)?;
+                    }
+                    let action = tracker.push(*byte);
+                    if !matches!(action, PresentationAction::Immediate)
+                        && let Some(start) = immediate_start.take()
+                    {
+                        engine.write(data.as_bytes().get(start..offset).ok_or_else(|| {
+                            return invalid_replay("invalid immediate output span");
+                        })?);
+                        drop(engine.take_responses());
+                    }
+                    match action {
                         PresentationAction::Immediate => {
-                            engine.write(slice::from_ref(byte));
-                            drop(engine.take_responses());
+                            immediate_start.get_or_insert(offset);
                             unsnapshotted_changes = true;
                             last_applied_source = (
                                 Some(record.seq),
@@ -350,6 +408,12 @@ pub(super) fn inspect_latest_presented_fast_with_limits(
                             }
                         }
                     }
+                }
+                if let Some(start) = immediate_start {
+                    engine.write(data.as_bytes().get(start..).ok_or_else(|| {
+                        return invalid_replay("invalid immediate output span");
+                    })?);
+                    drop(engine.take_responses());
                 }
             }
             Event::ResizeIntent {
@@ -542,6 +606,37 @@ fn state_selector_matches(selector: &StateSelector, record: &StateRecord) -> boo
     };
 }
 
+pub(crate) fn inspect_session_stream(
+    session: &Path,
+    selector: StateSelector,
+    cancelled: Option<&AtomicBool>,
+) -> Result<StateInspection> {
+    let never_cancelled = AtomicBool::new(false);
+    let mut selected = None;
+    visit_session_states_while(
+        session,
+        cancelled.unwrap_or(&never_cancelled),
+        |record, state| {
+            if state_selector_matches(&selector, record) {
+                selected = Some(StateInspection {
+                    record: record.clone(),
+                    state: state.clone(),
+                });
+            }
+            return Ok(match &selector {
+                StateSelector::StateId(id) => record.state_id < *id,
+                StateSelector::EventSeq(seq) => {
+                    record.event_seq.is_none_or(|event| return event <= *seq)
+                }
+                StateSelector::MonotonicNs(time) => record.monotonic_ns <= *time,
+                _ => true,
+            });
+        },
+    )?;
+    super::trust::check_cancelled(cancelled)?;
+    return selected.ok_or_else(|| return invalid_replay("no semantic state matches the selector"));
+}
+
 pub(super) fn replay_with(
     log: &EventLog,
     source_range: Option<SourceRange>,
@@ -648,12 +743,82 @@ fn replay_with_limits_and_formats_control(
     limits: ReplayLimits,
     include_final_formats: bool,
     seed: Option<ReplaySeed>,
+    state_sink: impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<bool>,
+) -> Result<ReplayArtifacts> {
+    let builder = match seed.as_ref() {
+        Some(seed) => ReplayBuilder::from_seed(log, limits, seed)?,
+        None => ReplayBuilder::new(&log.header, limits)?,
+    };
+    return replay_records(
+        builder,
+        log.events
+            .iter()
+            .map(|record| return Ok(Cow::Borrowed(record))),
+        source_range,
+        include_final_formats,
+        seed,
+        None,
+        state_sink,
+    );
+}
+
+/// Visit exact byte-granular canonical states without retaining the log or state history.
+///
+/// The caller must establish completed-source integrity before using partial results.
+/// Returning `false` stops immediately; this supports bounded pages and cancellation.
+///
+/// # Errors
+///
+/// Rejects invalid visited records, concurrent source changes, and replay resource exhaustion.
+pub fn visit_session_states_while(
+    session: &Path,
+    cancelled: &AtomicBool,
+    mut visitor: impl FnMut(&StateRecord, &SemanticState) -> Result<bool>,
+) -> Result<()> {
+    let source = super::trust::SourceIdentity::capture(session)?;
+    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let builder = ReplayBuilder::new(
+        cursor.header(),
+        ReplayLimits {
+            output_bytes: 1024 * 1024 * 1024,
+            capture_attempts: 1024 * 1024 * 1024 + 1_000_001,
+            state_count: 1024 * 1024 * 1024 + 1_000_001,
+            cell_work: 1024 * 1024 * 1024 * 1_000_000,
+            elapsed: Duration::from_secs(3600),
+        },
+    )?;
+    let mut exhausted = false;
+    let records = from_fn(|| {
+        let next = cursor.next_record().transpose();
+        exhausted = next.is_none();
+        return next;
+    })
+    .map(|record| return record.map(Cow::Owned).map_err(Error::from));
+    replay_records(
+        builder,
+        records,
+        None,
+        false,
+        None,
+        Some(cancelled),
+        |record, state, _| return visitor(&record, state),
+    )?;
+    if exhausted {
+        let _pending = cursor.finish()?;
+    }
+    source.check(session)?;
+    return Ok(());
+}
+
+fn replay_records<'record>(
+    mut builder: ReplayBuilder,
+    records: impl Iterator<Item = Result<Cow<'record, EventRecord>>>,
+    source_range: Option<SourceRange>,
+    include_final_formats: bool,
+    seed: Option<ReplaySeed>,
+    cancelled: Option<&AtomicBool>,
     mut state_sink: impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<bool>,
 ) -> Result<ReplayArtifacts> {
-    let mut builder = match seed.as_ref() {
-        Some(seed) => ReplayBuilder::from_seed(log, limits, seed)?,
-        None => ReplayBuilder::new(log, limits)?,
-    };
     let mut resize_intents = HashMap::new();
     let mut continue_replay = true;
     if source_range.is_none() {
@@ -676,11 +841,12 @@ fn replay_with_limits_and_formats_control(
             "replay checkpoint is later than the requested source range",
         ));
     }
-    'events: for record in &log.events {
-        if !continue_replay {
+    'events: for record in records {
+        let record = record?;
+        if !continue_replay || cancelled.is_some_and(|flag| return flag.load(Ordering::Relaxed)) {
             break;
         }
-        let seed_byte_start = source_byte_start(record, seed_record, &mut resize_intents)?;
+        let seed_byte_start = source_byte_start(&record, seed_record, &mut resize_intents)?;
         let Some(seed_byte_start) = seed_byte_start else {
             continue;
         };
@@ -710,6 +876,11 @@ fn replay_with_limits_and_formats_control(
                 builder.budget.charge_output(bytes.len())?;
                 for (relative_offset, byte) in bytes.iter().enumerate() {
                     if relative_offset % 4_096 == 0 {
+                        if cancelled.is_some_and(|flag| {
+                            return flag.load(Ordering::Relaxed);
+                        }) {
+                            break 'events;
+                        }
                         builder.budget.check_elapsed()?;
                     }
                     let offset = seed_byte_start
@@ -966,16 +1137,16 @@ fn track_resize_control(record: &EventRecord, resize_intents: &mut HashMap<Uuid,
 }
 
 impl ReplayBuilder {
-    fn new(log: &EventLog, limits: ReplayLimits) -> Result<Self> {
-        let mut engine = GhosttyVt::new(log.header.cols, log.header.rows, 100_000)?;
-        engine.apply_terminal_colors(&log.header.colors)?;
+    fn new(header: &EventLogHeader, limits: ReplayLimits) -> Result<Self> {
+        let mut engine = GhosttyVt::new(header.cols, header.rows, 100_000)?;
+        engine.apply_terminal_colors(&header.colors)?;
         return Ok(Self {
             engine,
             previous: None,
             previous_hash: None,
             state_count: 0,
             row_hashes: Vec::new(),
-            budget: ReplayBudget::new(log.header.cols, log.header.rows, limits)?,
+            budget: ReplayBudget::new(header.cols, header.rows, limits)?,
         });
     }
 

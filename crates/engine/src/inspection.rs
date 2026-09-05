@@ -10,7 +10,7 @@ use crate::replay::inspect;
 use crate::{Error, Result};
 use termtrace_evidence::{
     event_log::{EventLog, EventLogCursor},
-    session::validate_completed_log,
+    session::{validate_completed_log, validate_completed_session},
 };
 pub use termtrace_model::terminal::inspection::WaitOutcome;
 use termtrace_model::{
@@ -90,8 +90,7 @@ pub fn wait_for_completion(
     let deadline = Instant::now() + timeout;
     loop {
         if completion_path.is_file() {
-            let log = EventLog::read(session.join("events.jsonl"))?;
-            return Ok(validate_completed_log(session, &log)?);
+            return Ok(validate_completed_session(session)?);
         }
         if Instant::now() >= deadline {
             return Err(wait_error("timed out before session completion"));

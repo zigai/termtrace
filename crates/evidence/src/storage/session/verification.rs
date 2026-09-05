@@ -17,7 +17,7 @@ use crate::{
     storage::{
         CompletionIntegrityKind, Error,
         artifact::{ARTIFACT_ROOT_LOG, read_artifact_roots, verify_session_artifacts},
-        event_log::EventLog,
+        event_log::EventLogSummary,
     },
 };
 
@@ -91,14 +91,17 @@ pub fn verify_session_with_trust(
         finding(&mut report, "session_format_unsupported", error.to_string());
         return report;
     }
-    let log = match EventLog::read(session_directory.join(&manifest.event_log)) {
+    let log = match EventLogSummary::read(session_directory.join(&manifest.event_log)) {
         Ok(log) => log,
         Err(error) => {
             finding(&mut report, "event_log_invalid", error.to_string());
             return report;
         }
     };
-    report.final_event_hash = log.events.last().map(|record| return record.hash.clone());
+    report.final_event_hash = log
+        .terminal
+        .as_ref()
+        .map(|record| return record.hash.clone());
     let completion = match read_completion(session_directory) {
         Ok(completion) => completion,
         Err(error) => {
@@ -145,7 +148,7 @@ pub fn verify_session_with_trust(
         }
     }
     if session_directory.join(MUTATION_JOURNAL_NAME).exists() {
-        match validate_mutation_journal(session_directory, &log.header, &log.events) {
+        match validate_mutation_journal(session_directory) {
             Ok(count) => {
                 report.mutation_journal_status = MutationJournalStatus::Verified;
                 report.mutation_journal_records_verified = count;

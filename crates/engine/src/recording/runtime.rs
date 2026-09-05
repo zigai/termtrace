@@ -9,6 +9,7 @@ use std::{
 };
 
 use portable_pty::ExitStatus;
+use signal_hook::iterator::Signals;
 use uuid::Uuid;
 
 use termtrace_model::{
@@ -52,6 +53,7 @@ pub(super) fn consume_runtime(
     forward_stdin: bool,
     initial_geometry: TerminalGeometry,
     control_socket: &str,
+    host_signals: Signals,
 ) -> Result<RuntimeOutcome> {
     let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
     let reader = replace(&mut actor.spawned.reader, Box::new(io::empty()));
@@ -62,6 +64,7 @@ pub(super) fn consume_runtime(
         forward_stdin,
         initial_geometry,
         control_socket,
+        host_signals,
     )?;
     drop(sender);
 
@@ -290,10 +293,12 @@ impl SessionActor<'_> {
             code: code.to_owned(),
             message,
         })?;
+        let operation_id = Uuid::now_v7();
+        self.mutation_history.reserve_operation(operation_id)?;
         apply_signal(
             self.spawned.pid,
             &mut self.event_log,
-            Uuid::now_v7(),
+            operation_id,
             ProcessSignal::Terminate,
             true,
         )?;
@@ -333,6 +338,7 @@ impl SessionActor<'_> {
                     &mut self.live,
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
+                    &mut self.mutation_history,
                     &data,
                 )?;
                 let latest = self.live.semantic.snapshot()?;
@@ -350,6 +356,7 @@ impl SessionActor<'_> {
                         &mut self.live,
                         self.spawned.writer.as_mut(),
                         &mut self.event_log,
+                        &mut self.mutation_history,
                         &pending,
                     )?;
                     let latest = self.live.semantic.snapshot()?;
@@ -367,10 +374,12 @@ impl SessionActor<'_> {
                 return Err(terminal_error("read PTY output", reason));
             }
             RuntimeMessage::Input(data) => {
+                let operation_id = Uuid::now_v7();
+                self.mutation_history.reserve_operation(operation_id)?;
                 apply_input(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
-                    Uuid::now_v7(),
+                    operation_id,
                     InputSource::Human,
                     InputKind::Raw,
                     InputDescriptor::Raw,
@@ -384,10 +393,12 @@ impl SessionActor<'_> {
                 return Err(terminal_error("read standard input", reason));
             }
             RuntimeMessage::Resize(geometry) => {
+                let operation_id = Uuid::now_v7();
+                self.mutation_history.reserve_operation(operation_id)?;
                 apply_resize(
                     self.spawned.master.as_mut(),
                     &mut self.event_log,
-                    Uuid::now_v7(),
+                    operation_id,
                     geometry,
                 )?;
                 resize_semantic(&mut self.live.semantic, geometry)?;
@@ -407,10 +418,12 @@ impl SessionActor<'_> {
                         "recorder received {signal:?}; forwarding it to the child process group"
                     ),
                 })?;
+                let operation_id = Uuid::now_v7();
+                self.mutation_history.reserve_operation(operation_id)?;
                 apply_signal(
                     self.spawned.pid,
                     &mut self.event_log,
-                    Uuid::now_v7(),
+                    operation_id,
                     signal,
                     true,
                 )?;

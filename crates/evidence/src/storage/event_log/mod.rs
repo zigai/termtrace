@@ -12,5 +12,5 @@ pub use termtrace_model::execution::event_log::{
     CanonicalBoundary, DurabilityMode, DurabilityPolicy, DurabilityRecord, OperationKind,
     PendingOperation, PendingOperationReport, RecoveryIssue, RecoveryReport,
 };
-pub use types::{EventLog, SessionClock};
+pub use types::{EventLog, EventLogSummary, SessionClock};
 pub use writer::EventLogWriter;

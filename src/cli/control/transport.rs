@@ -1,4 +1,5 @@
 use super::*;
+use termtrace_model::protocol::control::{ActorBoundaries, ClockSample};
 
 pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Value> {
     let value = match data {
@@ -83,10 +84,15 @@ pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Val
             "result_event_seq": result_event_seq,
             "boundary": compact_boundaries(boundaries),
         }),
-        ControlData::Status { pid, boundaries } => serde_json::json!({
+        ControlData::Status {
+            pid,
+            boundaries,
+            clock_sample,
+        } => serde_json::json!({
             "kind": "status",
             "pid": pid,
             "boundary": compact_boundaries(boundaries),
+            "clock_sample": clock_sample,
         }),
         ControlData::Snapshot {
             viewport_text,
@@ -113,6 +119,7 @@ pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Val
             "boundary": compact_boundaries(boundaries),
         }),
         ControlData::ActionApplied { .. }
+        | ControlData::EventCursor { .. }
         | ControlData::ScreenFrame { .. }
         | ControlData::StableSnapshot { .. }
         | ControlData::ScreenWait { .. } => serde_json::to_value(data).into_diagnostic()?,
@@ -216,13 +223,20 @@ pub(in crate::cli) fn run_status(
         return write_session_lifecycle(response, &resolved, "status", ExitCode::SUCCESS);
     }
     let data = request(resolved.path, ControlCommand::Status).into_diagnostic()?;
-    if let ControlData::Status { pid, boundaries } = data {
+    if let ControlData::Status {
+        pid,
+        boundaries,
+        clock_sample,
+    } = data
+    {
         let status = LiveStatusResponse {
             kind: "status",
             session: &session_label,
             lifecycle: "live",
             pid,
             boundary: compact_boundaries(&boundaries),
+            boundaries: boundaries.clone(),
+            clock_sample,
         };
         return write_json_line(response, &status);
     }
@@ -238,6 +252,8 @@ struct LiveStatusResponse<'session> {
     lifecycle: &'static str,
     pid: Option<u32>,
     boundary: serde_json::Value,
+    boundaries: ActorBoundaries,
+    clock_sample: ClockSample,
 }
 
 pub(in crate::cli) fn run_stop(

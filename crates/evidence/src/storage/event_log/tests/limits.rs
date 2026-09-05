@@ -3,7 +3,7 @@ use tempfile::TempDir;
 use termtrace_model::execution::event::Event;
 use termtrace_model::value::ByteString;
 
-use crate::event_log::{EventLogWriter, SessionClock};
+use crate::event_log::{EventLogSummary, EventLogWriter, SessionClock};
 use crate::storage::Error;
 
 use super::{
@@ -60,6 +60,23 @@ fn enforces_aggregate_event_log_limits_before_retention() {
     )
     .expect_err("aggregate decoded payload must be bounded");
     assert!(matches!(payload_error, Error::InvalidEventLog { .. }));
+    let summary =
+        EventLogSummary::read(&path).expect("streaming validation is not a retention allocation");
+    assert_eq!(summary.output_bytes, 6);
+    assert_eq!(summary.event_count, 2);
+
+    let mut checks = 0;
+    let cancelled = EventLogSummary::read_with_check(&path, || {
+        checks += 1;
+        if checks == 2 {
+            return Err(Error::InvalidEvidence {
+                reason: "cancelled".to_owned(),
+            });
+        }
+        return Ok(());
+    })
+    .expect_err("streaming validation must observe cancellation between records");
+    assert!(matches!(cancelled, Error::InvalidEvidence { .. }));
 
     let encoded_error = parse_event_log_with_limits(
         &path,
@@ -84,4 +101,12 @@ fn enforces_aggregate_event_log_limits_before_retention() {
     )
     .expect_err("prefix readers must share the count policy");
     assert!(matches!(prefix_error, Error::InvalidEventLog { .. }));
+
+    let mut truncated = fs_err::read(&path).expect("canonical bytes");
+    truncated.pop();
+    fs_err::write(&path, truncated).expect("unterminated terminal line");
+    assert!(matches!(
+        EventLogSummary::read(&path),
+        Err(Error::InvalidEventLog { .. })
+    ));
 }

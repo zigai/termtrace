@@ -2,6 +2,8 @@
 
 use crate::support::*;
 use std::ffi::OsStr;
+use termtrace_model::protocol::control::{InputSequenceAtom, derive_input_operation_id};
+use uuid::Uuid;
 
 #[test]
 fn named_key_is_encoded_from_live_application_cursor_mode() {
@@ -898,4 +900,176 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         .wait_with_output()
         .expect("snapshot fixture completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
+}
+
+#[test]
+fn adjacent_request_atom_identities_close_with_valid_canonical_evidence() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("adjacent-input-identities");
+    let child = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,tty; tty.setraw(0); os.write(1,b'READY'); data=b''\nwhile not data.endswith(b'!'): data+=os.read(0,64)\nos.write(1,b'GOT:'+data.hex().encode())",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn adjacent identity fixture");
+    wait_for_control(&session);
+    wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("fixture ready");
+    for (request_id, bytes) in [
+        ("00000000-0000-4000-8000-000000000001", b"AB"),
+        ("00000000-0000-4000-8000-000000000002", b"CD"),
+    ] {
+        let request_id = Uuid::parse_str(request_id).expect("request UUID");
+        let mut request = ControlRequest::new(ControlCommand::InputSequence {
+            atoms: bytes
+                .iter()
+                .enumerate()
+                .map(|(index, byte)| {
+                    return InputSequenceAtom::Bytes {
+                        operation_id: derive_input_operation_id(request_id, index),
+                        data: ByteString::new(vec![*byte]),
+                        input_kind: InputKind::Text,
+                        caller_intent: None,
+                    };
+                })
+                .collect(),
+            pace_ns: 0,
+            include_atom_outcomes: true,
+        });
+        request.request_id = request_id;
+        let response = send_request_response(&session, &request).expect("sequence response");
+        assert!(matches!(&response.result, ControlResult::Ok { .. }));
+        assert_eq!(
+            send_request_response(&session, &request).expect("exact sequence retry"),
+            response,
+        );
+    }
+    send_request(
+        &session,
+        &ControlRequest::new(ControlCommand::Input {
+            data: ByteString::new(b"!".to_vec()),
+            input_kind: InputKind::Text,
+            caller_intent: None,
+        }),
+    )
+    .expect("finish fixture input");
+    let output = child.wait_with_output().expect("fixture completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+    let log = EventLog::read(session.join("events.jsonl")).expect("unique operation evidence");
+    validate_completed_log(&session, &log).expect("closed canonical evidence validates");
+    assert!(canonical_output_bytes(&log).windows(14).any(|bytes| {
+        return bytes == b"GOT:4142434421";
+    }));
+}
+
+#[test]
+fn raw_operation_collisions_reject_atomically_across_mutation_kinds() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("reserved-input-identities");
+    let child = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,tty; tty.setraw(0); os.write(1,b'READY'); data=b''\nwhile not data.endswith(b'!'): data+=os.read(0,64)\nos.write(1,b'GOT:'+data.hex().encode())",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn reserved identity fixture");
+    wait_for_control(&session);
+    wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("fixture ready");
+    let used = Uuid::now_v7();
+    let fresh = Uuid::now_v7();
+    let atom = |operation_id, byte| {
+        return InputSequenceAtom::Bytes {
+            operation_id,
+            data: ByteString::new(vec![byte]),
+            input_kind: InputKind::Text,
+            caller_intent: None,
+        };
+    };
+    let first = ControlRequest::new(ControlCommand::InputSequence {
+        atoms: vec![atom(used, b'A')],
+        pace_ns: 0,
+        include_atom_outcomes: true,
+    });
+    let first_response = send_request_response(&session, &first).expect("first sequence");
+    assert!(matches!(&first_response.result, ControlResult::Ok { .. }));
+    let marker = ControlRequest::new(ControlCommand::Mark {
+        label: "reserved-marker".to_owned(),
+    });
+    send_request(&session, &marker).expect("reserve non-input mutation identity");
+    let mut scalar = ControlRequest::new(ControlCommand::Input {
+        data: ByteString::new(b"BAD".to_vec()),
+        input_kind: InputKind::Text,
+        caller_intent: None,
+    });
+    scalar.request_id = used;
+    for request in [
+        ControlRequest::new(ControlCommand::InputSequence {
+            atoms: vec![atom(fresh, b'X'), atom(used, b'Y')],
+            pace_ns: 0,
+            include_atom_outcomes: false,
+        }),
+        scalar,
+        ControlRequest::new(ControlCommand::InputSequence {
+            atoms: vec![atom(marker.request_id, b'Z')],
+            pace_ns: 0,
+            include_atom_outcomes: false,
+        }),
+    ] {
+        let rejected = send_request_response(&session, &request).expect("collision response");
+        assert!(matches!(
+            &rejected.result,
+            ControlResult::Error { code, .. } if code == "operation_id_collision"
+        ));
+        assert_eq!(
+            send_request_response(&session, &request).expect("exact rejection retry"),
+            rejected,
+        );
+    }
+    assert_eq!(
+        send_request_response(&session, &first).expect("exact accepted retry"),
+        first_response,
+    );
+    send_request(
+        &session,
+        &ControlRequest::new(ControlCommand::InputSequence {
+            atoms: vec![atom(fresh, b'B'), atom(Uuid::now_v7(), b'!')],
+            pace_ns: 0,
+            include_atom_outcomes: false,
+        }),
+    )
+    .expect("rejected batch did not reserve fresh prefix");
+    let output = child.wait_with_output().expect("fixture completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+    let log = EventLog::read(session.join("events.jsonl")).expect("unique operation evidence");
+    validate_completed_log(&session, &log).expect("closed canonical evidence validates");
+    assert!(canonical_output_bytes(&log).windows(10).any(|bytes| {
+        return bytes == b"GOT:414221";
+    }));
+    let input: Vec<u8> = log
+        .events
+        .iter()
+        .filter_map(|record| match &record.event {
+            Event::InputIntent {
+                data,
+                source: InputSource::Agent,
+                ..
+            } => return Some(data.as_bytes()),
+            _ => return None,
+        })
+        .flatten()
+        .copied()
+        .collect();
+    assert_eq!(input, b"AB!");
 }

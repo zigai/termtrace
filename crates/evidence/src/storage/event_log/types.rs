@@ -4,7 +4,7 @@ use std::{
 };
 
 use termtrace_model::{
-    execution::event::{EventLogHeader, EventRecord},
+    execution::event::{Event, EventLogHeader, EventRecord},
     execution::event_log::PendingOperation,
 };
 
@@ -56,4 +56,53 @@ pub struct EventLog {
     pub pending_operations: Vec<PendingOperation>,
     /// Source file when the log was read from storage.
     pub source_path: Option<PathBuf>,
+}
+
+/// Bounded content-validation result; output payloads are not retained.
+#[derive(Clone, Debug)]
+pub struct EventLogSummary {
+    /// Immutable header carrying the session identity, initial geometry, and manifest hash.
+    pub header: EventLogHeader,
+    /// Number of canonical event records, excluding the header.
+    pub event_count: u64,
+    /// Total decoded payload bytes in canonical [`Event::Output`] records.
+    pub output_bytes: u64,
+    /// Final canonical record, or `None` when there are no events.
+    /// This is not necessarily an [`Event::Exit`]; completion validation checks its kind.
+    pub terminal: Option<EventRecord>,
+    /// Mutation intents without a matching result at the end of the log.
+    pub pending_operations: Vec<PendingOperation>,
+    /// Presence of canonical [`Event::HostError`] resource-limit triggers in the log.
+    /// Entries correspond to `output_budget_exceeded`, `max_duration_exceeded`, and
+    /// `idle_timeout_exceeded`, in that order.
+    pub resource_triggers: [bool; 3],
+}
+
+impl From<&EventLog> for EventLogSummary {
+    fn from(log: &EventLog) -> Self {
+        let mut summary = Self {
+            header: log.header.clone(),
+            event_count: u64::try_from(log.events.len()).unwrap_or(u64::MAX),
+            output_bytes: 0,
+            terminal: log.events.last().cloned(),
+            pending_operations: log.pending_operations.clone(),
+            resource_triggers: [false; 3],
+        };
+        for record in &log.events {
+            match &record.event {
+                Event::Output { data } => {
+                    summary.output_bytes +=
+                        u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX);
+                }
+                Event::HostError { code, .. } => match code.as_str() {
+                    "output_budget_exceeded" => summary.resource_triggers[0] = true,
+                    "max_duration_exceeded" => summary.resource_triggers[1] = true,
+                    "idle_timeout_exceeded" => summary.resource_triggers[2] = true,
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        return summary;
+    }
 }

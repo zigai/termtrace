@@ -624,6 +624,7 @@ impl SessionActor<'_> {
             }
             ControlCommand::Ping
             | ControlCommand::Status
+            | ControlCommand::EventCursor { .. }
             | ControlCommand::Snapshot
             | ControlCommand::ScreenFrame { .. }
             | ControlCommand::WaitScreen { .. }

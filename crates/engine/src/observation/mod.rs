@@ -24,5 +24,5 @@ pub use session::{
     observation_from_live_snapshot, observe_completed_with_formats, observe_session,
     observe_session_with_options, observe_validated_prefix, resolved_screen_state_for_session,
     semantic_state_for_session, semantic_state_from_live_snapshot,
-    semantic_state_with_hash_for_session,
+    semantic_state_with_hash_for_session, semantic_state_with_hash_for_session_cancellable,
 };

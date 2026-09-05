@@ -132,9 +132,15 @@ fn spawn_resize(
     return Ok(Some(ResizeWorker { handle, thread }));
 }
 
-fn spawn_host_signals(sender: mpsc::SyncSender<RuntimeMessage>) -> Result<SignalWorker> {
-    let mut signals = Signals::new([SIGHUP, SIGINT, SIGTERM])
-        .map_err(|error| return terminal_error("listen for recorder signals", error.to_string()))?;
+pub(super) fn register_host_signals() -> Result<Signals> {
+    return Signals::new([SIGHUP, SIGINT, SIGTERM])
+        .map_err(|error| return terminal_error("listen for recorder signals", error.to_string()));
+}
+
+fn spawn_host_signals(
+    mut signals: Signals,
+    sender: mpsc::SyncSender<RuntimeMessage>,
+) -> Result<SignalWorker> {
     let handle = signals.handle();
     let thread = thread::Builder::new()
         .name("termtrace-signal-listener".to_owned())
@@ -358,8 +364,9 @@ impl RuntimeWorkers {
         forward_stdin: bool,
         initial_geometry: TerminalGeometry,
         control_socket: &str,
+        host_signals: Signals,
     ) -> Result<(Self, mpsc::Receiver<RuntimeMessage>)> {
-        let signals = spawn_host_signals(sender.clone())?;
+        let signals = spawn_host_signals(host_signals, sender.clone())?;
         let control = match spawn_control_server(control_socket, sender.clone()) {
             Ok(worker) => worker,
             Err(error) => {
@@ -541,6 +548,7 @@ mod tests {
                     pixel_height: 432,
                 },
                 &format!("termtrace-worker-test-{}", uuid::Uuid::now_v7()),
+                register_host_signals().expect("register host signals"),
             )
             .expect("start real runtime workers");
             reading
@@ -592,6 +600,7 @@ mod tests {
                 pixel_height: 432,
             },
             &"x".repeat(256),
+            register_host_signals().expect("register host signals"),
         );
         assert!(started.is_err());
         completed

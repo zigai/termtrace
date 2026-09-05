@@ -4,7 +4,7 @@ use proptest::{collection, prelude::*};
 use uuid::Uuid;
 use zstd::stream::decode_all;
 
-use super::engine::inspect_latest_presented_fast_with_limits;
+use super::engine::{inspect_latest_presented_fast, inspect_latest_presented_fast_with_limits};
 use super::*;
 use termtrace_evidence::{artifact::create_private_directory, event_log::EventLog};
 use termtrace_model::{

@@ -10,6 +10,7 @@ termtrace-terminal = { path = "../terminal" }
 base64 = "0.22.1"
 blake3 = "1.8.2"
 resvg = { version = "0.45.1", default-features = false, features = ["text"] }
+png = "0.17.16"
 ttf-parser = "0.25.1"
 zstd = "0.13.3"
 

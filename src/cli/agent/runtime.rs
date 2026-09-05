@@ -31,7 +31,7 @@ pub(in crate::cli) fn serve(mut input: impl BufRead, output: impl Write) -> Resu
     let mut driver = Driver::default();
     while let Some(frame) = read_frame(&mut input)? {
         let encoded = match frame {
-            DriverFrame::Request(request) => driver.handle_request(request),
+            DriverFrame::Request(request) => driver.handle_request(*request),
             DriverFrame::Invalid { line, column } => encode_driver_response(&driver_error(
                 Uuid::nil(),
                 "invalid_request",

@@ -16,10 +16,10 @@ use uuid::Uuid;
 
 use termtrace_evidence::{
     artifact::write_secure,
-    event_log::{CanonicalBoundary, EventLog, EventLogWriter, SessionClock},
+    event_log::{CanonicalBoundary, EventLogSummary, EventLogWriter, SessionClock},
     provenance::{RecorderBuildIdentity, collect_execution_provenance},
     request_journal::{MUTATION_JOURNAL_NAME, MutationJournal},
-    session::{canonical_manifest_bytes, manifest_hash, validate_completion_candidate},
+    session::{canonical_manifest_bytes, manifest_hash, validate_completion_summary_candidate},
 };
 use termtrace_model::{
     execution::event::{Event, EventLogHeader, LifecycleKind, TerminalColors},
@@ -44,13 +44,17 @@ use super::{
     model::{RecordOptions, RecordOutcome, TerminalGeometry},
     presentation::{LiveTerminal, geometry_cell_size},
     process::{
-        create_session_directory, invalid_geometry, resolve_working_directory, spawn_command,
-        terminate_process_group,
+        create_session_directory, invalid_geometry, register_host_signals,
+        resolve_working_directory, spawn_command, terminate_process_group,
     },
     raw_terminal::RawTerminalGuard,
     support::{finish_with_cleanup, terminal_error},
 };
-use crate::{Error, Result, observation::publish_endpoint_checkpoint, replay::EndpointInspection};
+use crate::{
+    Error, Result,
+    observation::publish_endpoint_checkpoint,
+    replay::{EndpointInspection, trust::SourceIdentity},
+};
 
 const MUTATION_CACHE_CAPACITY: usize = 256;
 const SESSION_FAILURE_FORMAT: &str = "termtrace-session-failure";
@@ -119,6 +123,9 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     if let Some(profile) = &options.ghostty_profile {
         profile.validate()?;
     }
+    // Install handlers before the child exists so cancellation during startup
+    // is buffered until the actor can audit it and reap the owned process group.
+    let host_signals = register_host_signals()?;
     create_session_directory(&options.output_directory)?;
     if let Some(profile) = &options.ghostty_profile {
         write_secure(
@@ -249,6 +256,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         options.forward_stdin,
         TerminalGeometry::from(pty_size),
         &control_socket,
+        host_signals,
     ) {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -315,7 +323,9 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         resource_limit: runtime.resource_limit.clone(),
         failure: None,
     };
+    let source = SourceIdentity::capture_candidate(&options.output_directory)?;
     publish_session_completion(options, &completion)?;
+    let source = source.completed(&options.output_directory)?;
     match semantic_state_hash(&runtime.final_presented) {
         Ok(final_state_hash) => {
             let endpoint = EndpointInspection {
@@ -331,6 +341,8 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
                 &StatePoint::LatestPresented,
                 &completion,
                 &endpoint,
+                &source,
+                None,
             ) {
                 tracing::warn!(%error, "could not publish completion endpoint checkpoint");
             }
@@ -416,8 +428,8 @@ fn publish_session_completion(
     completion: &SessionCompletion,
 ) -> Result<()> {
     let validation_result = (|| {
-        let log = EventLog::read(options.output_directory.join("events.jsonl"))?;
-        return validate_completion_candidate(&options.output_directory, &log, completion);
+        let log = EventLogSummary::read(options.output_directory.join("events.jsonl"))?;
+        return validate_completion_summary_candidate(&options.output_directory, &log, completion);
     })();
     if let Err(error) = validation_result {
         let error = Error::from(error);

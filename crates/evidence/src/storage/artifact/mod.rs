@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::{
+    io::{self, Write},
+    path::PathBuf,
+};
 
 use crate::storage::Error;
 
@@ -33,4 +36,40 @@ fn json_error(path: PathBuf, source: serde_json::Error) -> Error {
         json_path: "$".to_owned(),
         source,
     };
+}
+
+/// Streaming output that refuses a write before it exceeds its byte allowance.
+pub struct BudgetWriter<W> {
+    inner: W,
+    remaining: u64,
+}
+
+impl<W> BudgetWriter<W> {
+    /// Wrap an output with a strict byte allowance.
+    pub const fn new(inner: W, maximum: u64) -> Self {
+        return Self {
+            inner,
+            remaining: maximum,
+        };
+    }
+
+    /// Bytes still available to subsequent output.
+    pub const fn remaining(&self) -> u64 {
+        return self.remaining;
+    }
+}
+
+impl<W: Write> Write for BudgetWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if u64::try_from(buf.len()).unwrap_or(u64::MAX) > self.remaining {
+            return Err(io::Error::other("artifact exceeds its byte budget"));
+        }
+        let count = self.inner.write(buf)?;
+        self.remaining -= u64::try_from(count).unwrap_or(u64::MAX);
+        return Ok(count);
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        return self.inner.flush();
+    }
 }

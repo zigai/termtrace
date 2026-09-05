@@ -21,6 +21,86 @@ use super::{
 };
 
 #[test]
+fn live_suffix_crosses_pending_operation_without_claiming_full_verification() {
+    use std::io::{Seek as _, SeekFrom};
+
+    let temporary = TempDir::new().expect("temporary directory");
+    let path = temporary.path().join("session/events.jsonl");
+    secure_directory(path.parent().expect("parent"));
+    let clock = SessionClock::now().expect("clock");
+    let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("writer");
+    let operation_id = Uuid::now_v7();
+    writer
+        .append_at(
+            10,
+            Event::InputIntent {
+                operation_id,
+                source: InputSource::Agent,
+                input_kind: InputKind::Keys,
+                descriptor: InputDescriptor::Raw,
+                data: ByteString::from(&b"x"[..]),
+                terminal_modes_hash: None,
+                semantic_input: None,
+                caller_intent: None,
+            },
+        )
+        .expect("pending intent");
+    let (start, _) = writer.follow_cursors(writer.next_seq());
+    let start = start.expect("retained position");
+    writer
+        .append_at(
+            11,
+            Event::InputResult {
+                operation_id,
+                status: OperationStatus::Applied,
+                bytes_written: 1,
+                error_code: None,
+            },
+        )
+        .expect("input result");
+    let (_, durable) = writer.follow_cursors(start.next_event_seq);
+    let (device, inode, header_hash) = writer.source_identity();
+    assert!(
+        EventLog::read(&path)
+            .expect("full verification")
+            .pending_operations
+            .is_empty()
+    );
+    // The old intent is outside the requested suffix. Corrupting it makes any
+    // hidden prefix scan fail, while the actor-anchored result remains authentic.
+    let (header_position, _) = writer.follow_cursors(0);
+    let mut source = OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .expect("open old prefix");
+    source
+        .seek(SeekFrom::Start(
+            header_position.expect("header cursor").file_offset,
+        ))
+        .expect("seek old intent");
+    source.write_all(b"!").expect("corrupt old intent");
+    source.sync_all().expect("sync corruption");
+    let mut cursor = EventLogCursor::open(&path).expect("open");
+    cursor
+        .resume_live_suffix(&start, device, inode, &header_hash)
+        .expect("actor seed");
+    let record = cursor.next_record().expect("read suffix").expect("result");
+    assert!(matches!(record.event, Event::InputResult { .. }));
+    cursor
+        .validate_live_boundary(&durable)
+        .expect("actor endpoint");
+    assert!(cursor.next_record().expect("eof").is_none());
+    assert!(matches!(
+        cursor.finish(),
+        Err(Error::InvalidEventLog { .. })
+    ));
+    assert!(
+        EventLog::read(&path).is_err(),
+        "suffix success must not imply full-log validity"
+    );
+}
+
+#[test]
 fn rejects_header_without_terminal_colors() {
     let temporary = TempDir::new().expect("temporary directory");
     let path = temporary.path().join("session/events.jsonl");

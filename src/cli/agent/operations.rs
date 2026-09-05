@@ -418,26 +418,39 @@ impl Driver {
                     destination,
                     renderer,
                     viewport,
+                    max_bytes,
                 } => {
                     let path = self.session_path(handle)?;
                     match renderer {
-                        DriverScreenshotRenderer::Semantic => {
-                            save(path, destination, point.clone(), &[SaveFormat::Png], false)
-                                .and_then(|outcome| {
-                                    verify_saved_artifact(&outcome.directory, &outcome.manifest)?;
-                                    return Ok(DriverData::Artifact {
-                                        artifact_type: "semantic_screenshot".to_owned(),
-                                        directory: outcome.directory.clone(),
-                                        primary: outcome.directory.join("screen.png"),
-                                        manifest: outcome.directory.join("save-manifest.json"),
-                                        truth_layer: "semantic_rendering".to_owned(),
-                                    });
-                                })
-                                .map_err(|error| {
-                                    return driver_failure_from_error(error, Some(path.clone()));
-                                })
-                        }
+                        DriverScreenshotRenderer::Semantic => save(
+                            path,
+                            destination,
+                            point.clone(),
+                            &[SaveFormat::Png],
+                            false,
+                            *max_bytes,
+                        )
+                        .and_then(|outcome| {
+                            verify_saved_artifact(&outcome.directory, &outcome.manifest)?;
+                            return Ok(DriverData::Artifact {
+                                artifact_type: "semantic_screenshot".to_owned(),
+                                directory: outcome.directory.clone(),
+                                primary: outcome.directory.join("screen.png"),
+                                manifest: outcome.directory.join("save-manifest.json"),
+                                truth_layer: "semantic_rendering".to_owned(),
+                            });
+                        })
+                        .map_err(|error| {
+                            return driver_failure_from_error(error, Some(path.clone()));
+                        }),
                         DriverScreenshotRenderer::Native => {
+                            if max_bytes.is_some() {
+                                return Err(driver_failure(
+                                    "unsupported_artifact_budget",
+                                    "generation byte budgets are supported for semantic screenshots only",
+                                    Some(path.clone()),
+                                ));
+                            }
                             let log = completed_driver_log(path)?;
                             let inspection = inspect_point(&log, point).map_err(|error| {
                                 return driver_failure_from_error(error, Some(path.clone()));
@@ -519,11 +532,14 @@ impl Driver {
                     handle,
                     destination,
                     profile,
+                    max_bytes,
                 } => {
                     let path = self.session_path(handle)?;
-                    let manifest = create_bundle(path, destination, *profile).map_err(|error| {
-                        return driver_failure_from_error(error, Some(path.clone()));
-                    })?;
+                    let manifest = create_bundle(path, destination, *profile, *max_bytes).map_err(
+                        |error| {
+                            return driver_failure_from_error(error, Some(path.clone()));
+                        },
+                    )?;
                     let policy = BundleVerificationPolicy::new(path, *profile);
                     let verified = verify_bundle(destination, &policy).map_err(|error| {
                         return driver_failure_from_error(error, Some(path.clone()));
@@ -640,6 +656,7 @@ impl Driver {
             return driver_failure_from_error(error, Some(evidence_root.to_path_buf()));
         })?;
         let session_id = session.session_id();
+        let completed = session.path().join("completion.json").is_file();
         let (canonical_session, recorder) = session.into_detached_parts();
         let handle = Uuid::now_v7();
         self.sessions.insert(
@@ -653,7 +670,7 @@ impl Driver {
             handle,
             session_id,
             canonical_session,
-            completed: false,
+            completed,
         });
     }
 
@@ -817,6 +834,7 @@ pub(super) fn control_command_mutates(command: &ControlCommand) -> bool {
         command,
         ControlCommand::Ping
             | ControlCommand::Status
+            | ControlCommand::EventCursor { .. }
             | ControlCommand::ScreenFrame { .. }
             | ControlCommand::Snapshot
             | ControlCommand::WaitScreen { .. }

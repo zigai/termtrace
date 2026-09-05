@@ -2,14 +2,18 @@ use std::{
     io::Read as _,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
+    sync::atomic::AtomicBool,
 };
 
 use uuid::Uuid;
 use zstd::stream::read::Decoder;
 
 use termtrace_evidence::{
-    event_log::{CanonicalBoundary, EventLog},
-    session::{read_completion, read_manifest, validate_completed_log},
+    event_log::{CanonicalBoundary, EventLog, EventLogCursor, EventLogSummary},
+    session::{
+        read_completion, read_manifest, validate_completed_log,
+        validate_completion_summary_candidate,
+    },
 };
 use termtrace_model::{
     execution::event::Event,
@@ -31,8 +35,9 @@ use super::{
     publish_checkpoint, publish_endpoint_checkpoint,
 };
 use crate::replay::{
-    EndpointInspection, RenderedStateFormats, inspect, inspect_latest_presented_fast,
-    inspect_with_formats,
+    EndpointInspection, RenderedStateFormats, inspect, inspect_latest_presented_stream,
+    inspect_session_stream, inspect_with_formats,
+    trust::{SourceIdentity, check_cancelled},
 };
 use crate::{Error, Result};
 
@@ -267,7 +272,7 @@ fn observe_completed(
     include_hidden: bool,
 ) -> Result<Observation> {
     let completion = read_completion(session)?;
-    let (state, resolution) = resolve_completed_state(session, &point, &completion)?;
+    let (state, resolution) = resolve_completed_state(session, &point, &completion, None)?;
     return completed_observation_from_cached(
         session,
         session_id,
@@ -298,7 +303,7 @@ pub fn resolved_screen_state_for_session(
     })?;
     let manifest = read_manifest(&canonical)?;
     let completion = read_completion(&canonical)?;
-    let (state, resolution) = resolve_completed_state(&canonical, &point, &completion)?;
+    let (state, resolution) = resolve_completed_state(&canonical, &point, &completion, None)?;
     if !state.presented && !include_hidden {
         return Err(observation_error(
             "selected semantic state is hidden; pass explicit hidden-state permission",
@@ -327,10 +332,12 @@ fn resolve_completed_state(
     session: &Path,
     point: &StatePoint,
     completion: &SessionCompletion,
+    cancelled: Option<&AtomicBool>,
 ) -> Result<(CachedSemanticState, ObservationResolution)> {
-    let log = EventLog::read(session.join("events.jsonl"))?;
-    validate_completed_log(session, &log)?;
+    check_cancelled(cancelled)?;
+    let source = SourceIdentity::capture(session)?;
     if let Some(state) = load_checkpoint(session, point, completion)? {
+        source.check(session)?;
         return Ok((state, ObservationResolution::ValidatedCheckpoint));
     }
     if matches!(point, StatePoint::StateHash { .. })
@@ -340,18 +347,31 @@ fn resolve_completed_state(
             StatePoint::StateHash { state_hash } if state.state_hash == *state_hash
         )
     {
+        source.check(session)?;
         return Ok((state, ObservationResolution::ValidatedCheckpoint));
     }
+    let summary = EventLogSummary::read_with_check(session.join("events.jsonl"), || {
+        return check_cancelled(cancelled).map_err(|error| {
+            return termtrace_evidence::Error::InvalidEvidence {
+                reason: error.to_string(),
+            };
+        });
+    })?;
+    validate_completion_summary_candidate(session, &summary, completion)?;
+    source.check(session)?;
     if matches!(
         point,
         StatePoint::LatestPresented | StatePoint::StateHash { .. }
     ) {
-        let endpoint = inspect_latest_presented_fast(&log)?;
+        let endpoint = inspect_latest_presented_stream(&session.join("events.jsonl"), cancelled)?;
+        source.check(session)?;
         if let Err(error) = publish_endpoint_checkpoint(
             session,
             &StatePoint::LatestPresented,
             completion,
             &endpoint,
+            &source,
+            cancelled,
         ) {
             tracing::warn!(%error, "could not publish endpoint replay checkpoint");
         }
@@ -367,9 +387,12 @@ fn resolve_completed_state(
             ));
         }
     }
-    let selector = state_selector(&log, point)?;
-    let inspection = inspect(&log, selector)?;
-    if let Err(error) = publish_checkpoint(session, point, completion, &inspection) {
+    let selector = streamed_state_selector(session, point, cancelled)?;
+    let inspection = inspect_session_stream(session, selector, cancelled)?;
+    source.check(session)?;
+    if let Err(error) =
+        publish_checkpoint(session, point, completion, &inspection, &source, cancelled)
+    {
         tracing::warn!(%error, "could not publish disposable replay checkpoint");
     }
     return Ok((
@@ -439,6 +462,37 @@ fn completed_observation_from_cached(
     });
 }
 
+fn streamed_state_selector(
+    session: &Path,
+    point: &StatePoint,
+    cancelled: Option<&AtomicBool>,
+) -> Result<StateSelector> {
+    let StatePoint::Marker { label } = point else {
+        return Ok(match point {
+            StatePoint::LatestPresented => StateSelector::LatestPresented,
+            StatePoint::StateId { state_id } => StateSelector::StateId(*state_id),
+            StatePoint::StateHash { state_hash } => StateSelector::StateHash(state_hash.clone()),
+            StatePoint::EventSeq { event_seq } => StateSelector::EventSeq(*event_seq),
+            StatePoint::MonotonicNs { monotonic_ns } => StateSelector::MonotonicNs(*monotonic_ns),
+            StatePoint::Marker { .. } => return Err(observation_error("invalid marker selector")),
+        });
+    };
+    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut found = None;
+    while let Some(record) = cursor.next_record()? {
+        check_cancelled(cancelled)?;
+        if matches!(&record.event, Event::Marker { label: value, .. } if value == label)
+            && found.replace(record.seq).is_some()
+        {
+            return Err(observation_error("marker label is ambiguous"));
+        }
+    }
+    let _pending = cursor.finish()?;
+    return found
+        .map(StateSelector::EventSeq)
+        .ok_or_else(|| return observation_error("marker does not exist"));
+}
+
 fn state_selector(log: &EventLog, point: &StatePoint) -> Result<StateSelector> {
     let selector = match point {
         StatePoint::LatestPresented => StateSelector::LatestPresented,
@@ -489,6 +543,34 @@ pub fn semantic_state_with_hash_for_session(
     point: &StatePoint,
     include_hidden: bool,
 ) -> Result<(SemanticState, String)> {
+    return semantic_state_with_hash_for_session_inner(session, point, include_hidden, None);
+}
+
+/// Resolve semantic evidence with cooperative cancellation during validation and replay.
+///
+/// # Errors
+///
+/// Returns source/selection errors or cancellation without publishing partial cache entries.
+pub fn semantic_state_with_hash_for_session_cancellable(
+    session: &Path,
+    point: &StatePoint,
+    include_hidden: bool,
+    cancelled: &AtomicBool,
+) -> Result<(SemanticState, String)> {
+    return semantic_state_with_hash_for_session_inner(
+        session,
+        point,
+        include_hidden,
+        Some(cancelled),
+    );
+}
+
+fn semantic_state_with_hash_for_session_inner(
+    session: &Path,
+    point: &StatePoint,
+    include_hidden: bool,
+    cancelled: Option<&AtomicBool>,
+) -> Result<(SemanticState, String)> {
     let canonical = session.canonicalize().map_err(|source| {
         return Error::Filesystem {
             path: session.to_path_buf(),
@@ -501,7 +583,7 @@ pub fn semantic_state_with_hash_for_session(
         ));
     }
     let completion = read_completion(&canonical)?;
-    let (state, _) = resolve_completed_state(&canonical, point, &completion)?;
+    let (state, _) = resolve_completed_state(&canonical, point, &completion, cancelled)?;
     if !state.presented && !include_hidden {
         return Err(observation_error(
             "selected semantic state is hidden; pass explicit hidden-state permission",

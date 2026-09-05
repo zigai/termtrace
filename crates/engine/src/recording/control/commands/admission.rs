@@ -11,6 +11,7 @@ impl SessionActor<'_> {
                 request.command,
                 ControlCommand::Ping
                     | ControlCommand::Status
+                    | ControlCommand::EventCursor { .. }
                     | ControlCommand::Snapshot
                     | ControlCommand::ScreenFrame { .. }
                     | ControlCommand::WaitScreen { .. }
@@ -25,6 +26,39 @@ impl SessionActor<'_> {
             let _ = response_sender.send(response);
             return Ok(());
         }
+        let read_only = matches!(
+            request.command,
+            ControlCommand::Ping
+                | ControlCommand::Status
+                | ControlCommand::EventCursor { .. }
+                | ControlCommand::Snapshot
+                | ControlCommand::ScreenFrame { .. }
+                | ControlCommand::WaitScreen { .. }
+                | ControlCommand::CaptureStable { .. }
+        );
+        let command_hash = if read_only {
+            None
+        } else {
+            let (hash, prior) = self.mutation_history.lookup(
+                request.request_id,
+                &request.command,
+                request.expected_presented_state_hash.as_deref(),
+            )?;
+            if let Some(response) = prior {
+                let _ = response_sender.send(response);
+                return Ok(());
+            }
+            if self.mutation_history.is_full() {
+                let response = control_error_response(
+                    request.request_id,
+                    "mutation_limit_reached",
+                    "session mutation operation limit has been reached",
+                );
+                let _ = response_sender.send(response);
+                return Ok(());
+            }
+            Some(hash)
+        };
         if self
             .pending_input_sequence
             .as_ref()
@@ -152,14 +186,6 @@ impl SessionActor<'_> {
             });
             return Ok(());
         }
-        let read_only = matches!(
-            request.command,
-            ControlCommand::Ping
-                | ControlCommand::Status
-                | ControlCommand::Snapshot
-                | ControlCommand::ScreenFrame { .. }
-                | ControlCommand::CaptureStable { .. }
-        );
         if self.pending_input_sequence.is_some() && !read_only {
             let response = control_error_response(
                 request.request_id,
@@ -169,29 +195,6 @@ impl SessionActor<'_> {
             let _ = response_sender.send(response);
             return Ok(());
         }
-        let command_hash = if read_only {
-            None
-        } else {
-            let (hash, prior) = self.mutation_history.lookup(
-                request.request_id,
-                &request.command,
-                request.expected_presented_state_hash.as_deref(),
-            )?;
-            if let Some(response) = prior {
-                let _ = response_sender.send(response);
-                return Ok(());
-            }
-            if self.mutation_history.is_full() {
-                let response = control_error_response(
-                    request.request_id,
-                    "mutation_limit_reached",
-                    "session mutation operation limit has been reached",
-                );
-                let _ = response_sender.send(response);
-                return Ok(());
-            }
-            Some(hash)
-        };
 
         let event_start_seq = self.event_log.next_seq();
         let current_state_hash = presented_state_hash(&self.live)?;
@@ -244,6 +247,8 @@ impl SessionActor<'_> {
                         pace_ns,
                         include_atom_outcomes,
                     )?;
+                    self.mutation_history
+                        .reserve_command(request.request_id, &request.command)?;
                     return Ok((execution, action));
                 });
                 match execution {
@@ -309,8 +314,14 @@ impl SessionActor<'_> {
                     "presented state changed; current state hash is {current_state_hash}"
                 ),
             })
-        } else {
+        } else if read_only {
             self.execute_control_command(request.request_id, &request.command)
+        } else {
+            self.mutation_history
+                .reserve_command(request.request_id, &request.command)
+                .and_then(|()| {
+                    return self.execute_control_command(request.request_id, &request.command);
+                })
         };
         let response = match (&outcome, stale) {
             (Err(Error::ControlRejected { code, message }), true) => ControlResponse {

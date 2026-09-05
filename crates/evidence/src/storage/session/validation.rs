@@ -12,8 +12,10 @@ use termtrace_model::{
 };
 
 use crate::storage::{
-    CompletionIntegrityError, CompletionIntegrityKind, Error, Result, artifact::hash_regular_file,
-    event_log::EventLog, is_lowercase_blake3,
+    CompletionIntegrityError, CompletionIntegrityKind, Error, Result,
+    artifact::hash_regular_file,
+    event_log::{EventLog, EventLogSummary},
+    is_lowercase_blake3,
 };
 
 use super::io::{canonical_manifest_bytes, manifest_hash, read_completion, read_manifest};
@@ -69,6 +71,40 @@ pub fn validate_completion_candidate(
     log: &EventLog,
     completion: &SessionCompletion,
 ) -> Result<()> {
+    return validate_completion_summary_candidate(
+        session_directory,
+        &EventLogSummary::from(log),
+        completion,
+    );
+}
+
+/// Stream and validate a completed canonical session without retaining its output.
+///
+/// # Errors
+///
+/// Returns an error for any malformed source or inconsistent completion.
+pub fn validate_completed_session(session_directory: &Path) -> Result<SessionCompletion> {
+    if !session_directory.join("completion.json").is_file() {
+        return Err(Error::SessionIncomplete {
+            session: session_directory.to_path_buf(),
+        });
+    }
+    let completion = read_completion(session_directory)?;
+    let summary = EventLogSummary::read(session_directory.join("events.jsonl"))?;
+    validate_completion_summary_candidate(session_directory, &summary, &completion)?;
+    return Ok(completion);
+}
+
+/// Validate a completion candidate against a streamed, fully validated log summary.
+///
+/// # Errors
+///
+/// Returns an error when any canonical identity, count, hash, or format contract differs.
+pub fn validate_completion_summary_candidate(
+    session_directory: &Path,
+    log: &EventLogSummary,
+    completion: &SessionCompletion,
+) -> Result<()> {
     let manifest_path = session_directory.join("session.json");
     let manifest_bytes = fs::read(&manifest_path).map_err(|source| {
         return Error::Filesystem {
@@ -91,7 +127,7 @@ pub fn validate_completion_candidate(
 
 pub(super) fn validate_completion_with_loaded(
     session_directory: &Path,
-    log: &EventLog,
+    log: &EventLogSummary,
     manifest: &SessionManifest,
     manifest_bytes: &[u8],
     completion: &SessionCompletion,
@@ -103,8 +139,11 @@ pub(super) fn validate_completion_with_loaded(
         .into());
     }
     validate_replay_profile_file(session_directory, manifest)?;
-    let final_event_hash = log.events.last().map(|record| return record.hash.as_str());
-    let event_count = u64::try_from(log.events.len()).unwrap_or(u64::MAX);
+    let final_event_hash = log
+        .terminal
+        .as_ref()
+        .map(|record| return record.hash.as_str());
+    let event_count = log.event_count;
     let actual_manifest_hash = manifest_hash(manifest_bytes);
     let header_bytes = serde_json::to_vec(&log.header).map_err(|source| {
         return Error::InvalidJson {
@@ -171,7 +210,7 @@ pub(super) fn validate_completion_with_loaded(
             ),
         ));
     }
-    let Some(terminal) = log.events.last() else {
+    let Some(terminal) = log.terminal.as_ref() else {
         return Err(CompletionIntegrityError::new(
             CompletionIntegrityKind::TerminalExitMissing,
             "completed event log has no terminal Exit event",
@@ -216,18 +255,7 @@ pub(super) fn validate_completion_with_loaded(
             "completed event log contains pending mutation intents",
         ));
     }
-    let output_bytes = log.events.iter().try_fold(0_u64, |total, record| {
-        let bytes = match &record.event {
-            Event::Output { data } => u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX),
-            _ => 0,
-        };
-        return total.checked_add(bytes).ok_or_else(|| {
-            return CompletionIntegrityError::new(
-                CompletionIntegrityKind::OutputCount,
-                "canonical output byte count overflow",
-            );
-        });
-    })?;
+    let output_bytes = log.output_bytes;
     if completion.output_bytes != output_bytes {
         return Err(CompletionIntegrityError::new(
             CompletionIntegrityKind::OutputCount,
@@ -247,22 +275,23 @@ pub(super) fn validate_completion_with_loaded(
         .into());
     }
     if let Some(outcome) = &completion.resource_limit {
-        let (configured_limit, trigger_code, policy_label, trigger_label) = match outcome.kind {
+        let [output_trigger, duration_trigger, idle_trigger] = log.resource_triggers;
+        let (configured_limit, triggered, policy_label, trigger_label) = match outcome.kind {
             ResourceLimitKind::OutputBytes => (
                 manifest.resource_limits.output_bytes,
-                "output_budget_exceeded",
+                output_trigger,
                 "canonical output",
                 "output-budget",
             ),
             ResourceLimitKind::MaxDuration => (
                 manifest.resource_limits.max_duration_ms,
-                "max_duration_exceeded",
+                duration_trigger,
                 "duration",
                 "max-duration",
             ),
             ResourceLimitKind::IdleTimeout => (
                 manifest.resource_limits.idle_timeout_ms,
-                "idle_timeout_exceeded",
+                idle_trigger,
                 "idle duration",
                 "idle-timeout",
             ),
@@ -286,9 +315,7 @@ pub(super) fn validate_completion_with_loaded(
                 "completion resource-limit outcome does not match manifest policy and {policy_label}"
             )).into());
         }
-        if !log.events.iter().any(|record| {
-            return matches!(&record.event, Event::HostError { code, .. } if code == trigger_code);
-        }) {
+        if !triggered {
             return Err(Error::invalid(format!(
                 "resource-limit completion has no canonical {trigger_label} trigger"
             ))

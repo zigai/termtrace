@@ -173,7 +173,7 @@ pub(crate) fn open_regular_nofollow(path: &Path) -> Result<(File, u64)> {
     let metadata = file
         .metadata()
         .map_err(|source| return Error::filesystem(path, source))?;
-    if !metadata.file_type().is_file() {
+    if !metadata.is_file() {
         return Err(Error::invalid(format!(
             "bundle member `{}` is not a regular file",
             path.display()
@@ -231,7 +231,10 @@ pub(crate) fn collect_regular_files(
             collect_regular_files(root, &entry.path(), files)?;
             continue;
         }
-        if !file_type.is_file() {
+        let entry_metadata = entry
+            .metadata()
+            .map_err(|source| return Error::filesystem(entry.path(), source))?;
+        if !entry_metadata.is_file() {
             return Err(Error::invalid("bundle contains a symlink or special file"));
         }
         files.push(

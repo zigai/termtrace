@@ -133,7 +133,9 @@ pub fn wait_for_screen(
                     | Error::ControlTransport { .. }
             ) =>
         {
-            let remaining = timeout.saturating_sub(started_at.elapsed());
+            let remaining = timeout
+                .saturating_sub(started_at.elapsed())
+                .max(Duration::from_secs(5));
             if let Err(completion_error) = wait_for_completion(session_directory, remaining) {
                 if session_directory.join("completion.json").is_file() {
                     return Err(completion_error.into());

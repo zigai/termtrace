@@ -2,6 +2,7 @@ use crate::cli::output::ResponseWriter;
 
 use std::{
     borrow::Cow,
+    io::{BufRead as _, BufReader, BufWriter, Seek as _, SeekFrom, Write as _},
     path::Path,
     process::ExitCode,
     thread,
@@ -11,10 +12,12 @@ use std::{
 use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::timeline::resolve_source_selection;
 use termtrace_evidence::{
-    artifact::write_secure, event_log::EventLog, session::validate_completed_log,
+    artifact::write_secure,
+    event_log::{EventLog, EventLogCursor},
+    session::{validate_completed_log, validate_completed_session},
 };
 use termtrace_model::{
-    execution::event::{Event, EventProjection, event_type},
+    execution::event::{Event, EventProjection, EventRecord, event_type},
     protocol::control::{ControlCommand, ControlData},
     protocol::output_projection::{OutputProjectionQuality, OutputProjectionReport},
 };
@@ -340,18 +343,27 @@ fn follow_events(
     event_types: &[String],
     metadata_only: bool,
 ) -> Result<ExitCode> {
+    let mut cursor = EventLogCursor::open(session.join("events.jsonl")).into_diagnostic()?;
+    let mut initialized = false;
     let mut control_failure_since = None;
+    let mut staged = tempfile::tempfile().into_diagnostic()?;
+    let mut line = Vec::new();
     loop {
         let completion_exists = session.join("completion.json").is_file();
-        let log = if completion_exists {
-            let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
-            validate_completed_log(session, &log).into_diagnostic()?;
-            log
+        let (available, live_boundary, completed_hash) = if completion_exists {
+            // A seeded suffix is not full-log operation verification. Validate the completed
+            // source once, streaming, before allowing its final suffix to become observable.
+            let completion = validate_completed_session(session).into_diagnostic()?;
+            (
+                completion.event_count,
+                None,
+                Some(completion.final_event_hash),
+            )
         } else {
-            let response = match request(session, ControlCommand::Status) {
-                Ok(response) => {
+            let data = match request(session, ControlCommand::EventCursor { next_event_seq }) {
+                Ok(data) => {
                     control_failure_since = None;
-                    response
+                    data
                 }
                 Err(_) if session.join("completion.json").is_file() => continue,
                 Err(error) => {
@@ -363,36 +375,84 @@ fn follow_events(
                     continue;
                 }
             };
-            let ControlData::Status { boundaries, .. } = response else {
+            let ControlData::EventCursor {
+                device,
+                inode,
+                header_hash,
+                start,
+                durable,
+            } = data
+            else {
                 return Err(miette::miette!(
-                    "live status returned an unexpected response"
+                    "live cursor returned an unexpected response"
                 ));
             };
-            EventLog::read_prefix(
-                session.join("events.jsonl"),
-                boundaries.durable.next_event_seq,
-            )
-            .into_diagnostic()?
+            cursor
+                .validate_live_source(device, inode, &header_hash)
+                .into_diagnostic()?;
+            if !initialized {
+                if let Some(start) = start {
+                    cursor
+                        .resume_live_suffix(&start, device, inode, &header_hash)
+                        .into_diagnostic()?;
+                }
+                // An absent retained start requires explicit historical streaming from
+                // the header, never a cursor reconstructed from untrusted source bytes.
+                initialized = true;
+            }
+            (durable.next_event_seq, Some(durable), None)
         };
-        let available = u64::try_from(log.events.len()).unwrap_or(u64::MAX);
         if next_event_seq > available {
             return Err(miette::miette!(
                 "event resume cursor {next_event_seq} exceeds durable event count {available}"
             ));
         }
         let emit_end = end_event_seq.unwrap_or(available).min(available);
-        for record in &log.events {
-            let kind = event_type(&record.event);
-            if record.seq < next_event_seq
-                || record.seq >= emit_end
-                || (!event_types.is_empty()
-                    && !event_types.iter().any(|value| return value == kind))
-            {
-                continue;
+        // Stage on an anonymous file, not in memory: nothing from a self-hashed suffix
+        // is published until its endpoint matches the independent actor/completion.
+        staged.set_len(0).into_diagnostic()?;
+        staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
+        {
+            let mut staged_writer = BufWriter::new(&mut staged);
+            while cursor.next_event_seq() < available {
+                let record = cursor.next_record().into_diagnostic()?.ok_or_else(|| {
+                    return miette::miette!("durable event prefix is incomplete");
+                })?;
+                let kind = event_type(&record.event);
+                if record.seq < next_event_seq
+                    || record.seq >= emit_end
+                    || (!event_types.is_empty()
+                        && !event_types.iter().any(|value| return value == kind))
+                {
+                    continue;
+                }
+                serde_json::to_writer(&mut staged_writer, &record).into_diagnostic()?;
+                staged_writer.write_all(b"\n").into_diagnostic()?;
             }
+            staged_writer.flush().into_diagnostic()?;
+        }
+        if let Some(boundary) = live_boundary {
+            cursor.validate_live_boundary(&boundary).into_diagnostic()?;
+        } else if let Some(hash) = completed_hash {
+            cursor
+                .validate_boundary(available, &hash)
+                .into_diagnostic()?;
+        }
+        staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
+        let mut staged_reader = BufReader::new(&mut staged);
+        loop {
+            line.clear();
+            if staged_reader
+                .read_until(b'\n', &mut line)
+                .into_diagnostic()?
+                == 0
+            {
+                break;
+            }
+            let record: EventRecord = serde_json::from_slice(&line).into_diagnostic()?;
             if !write_follow_json_line(
                 response,
-                &EventProjection::from_record(record, metadata_only),
+                &EventProjection::from_record(&record, metadata_only),
             )? {
                 return Ok(ExitCode::SUCCESS);
             }
