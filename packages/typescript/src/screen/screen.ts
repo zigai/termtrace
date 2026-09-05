@@ -246,6 +246,7 @@ export class Screen {
         destination: string,
         point: StatePoint = { selector: "latest_presented" },
         requestTimeoutMs?: number,
+        maxBytes?: number,
     ): Promise<Artifact> {
         return this.session.request(
             {
@@ -254,6 +255,7 @@ export class Screen {
                 destination,
                 renderer: "semantic",
                 viewport: null,
+                max_bytes: maxBytes ?? null,
             },
             "artifact",
             requestTimeoutMs === undefined ? {} : { timeoutMs: requestTimeoutMs },

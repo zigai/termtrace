@@ -441,6 +441,7 @@ class AsyncScreen:
                 "destination": str(destination),
                 "renderer": "semantic",
                 "viewport": None,
+                "max_bytes": None,
             },
             DriverArtifactData,
         )

@@ -374,7 +374,11 @@ fn rust_test_helper_resumes_original_panic_after_finalization() {
 #[cfg(unix)]
 #[test]
 fn rust_test_helper_does_not_claim_deleted_evidence_after_discard_failure() {
+    use nix::unistd::geteuid;
     use std::os::unix::fs::PermissionsExt as _;
+    if geteuid().is_root() {
+        return;
+    }
 
     let temporary = TempDir::new().expect("temporary directory");
     let terminal = Terminal::new(env!("CARGO_BIN_EXE_termtrace"), temporary.path());

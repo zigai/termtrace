@@ -71,7 +71,7 @@ def encode_input_sequence(
         raise InvalidDurationError("pace must not exceed 60 seconds")
     if pace.nanoseconds * len(atoms) > Duration.seconds(60).nanoseconds:
         raise InvalidDurationError("total input sequence pacing must not exceed 60 seconds")
-    command = request_wire.ControlCommand8(
+    command = request_wire.ControlInputSequenceCommand(
         atoms=wire_atoms,
         pace_ns=pace.nanoseconds,
         include_atom_outcomes=verbose,
@@ -101,7 +101,9 @@ def _encode_wire_atoms(
     namespace = uuid.UUID(request_id) if request_id is not None else uuid.uuid4()
     encoded: list[request_wire.InputSequenceAtom] = []
     for index, atom in enumerate(atoms):
-        operation_id = str(uuid.UUID(int=namespace.int ^ (index + 1)))
+        operation_id = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"termtrace/input-atom/v1/{namespace}/{index}")
+        )
         intent = atom.caller_intent if atom.caller_intent is not None else caller_intent
         if isinstance(atom, TextAtom):
             if not atom.text:

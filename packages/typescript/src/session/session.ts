@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
 
 import type { DriverRequestOptions } from "../transport/driver-client.js";
 import {
@@ -24,6 +25,7 @@ import {
 import { Screen } from "../screen/screen.js";
 import type { StatePoint } from "../screen/frame.js";
 import {
+    TermtraceProtocolError,
     TermtraceOperationError,
     type Artifact,
     type BundleResult,
@@ -71,6 +73,8 @@ export type WaitOptions = {
     readonly signal?: AbortSignal;
 };
 export type SessionDriver = {
+    readonly closedSuccessfully?: boolean;
+    readonly isClosed?: boolean;
     request<Kind extends DriverDataKind>(
         method: DriverMethod,
         expectedKind: Kind,
@@ -111,6 +115,7 @@ export class Session implements AsyncDisposable {
     readonly #evidencePolicy: "always" | "on-failure" | "manual";
     #closed = false;
     #completed = false;
+    #discardAfterClose = false;
 
     constructor(
         driver: SessionDriver,
@@ -160,7 +165,7 @@ export class Session implements AsyncDisposable {
         } catch (cause: unknown) {
             if (!(cause instanceof TermtraceOperationError)) throw cause;
             const failure = cause.failure;
-            if (failure.code === "stale_state") {
+            if (failure.code === "stale_observation") {
                 throw new StaleStateError(
                     options.ifState ?? "",
                     failure.details?.current_presented_state_hash ?? "",
@@ -291,37 +296,79 @@ export class Session implements AsyncDisposable {
         if (this.#owned && this.#evidencePolicy !== "manual") {
             await this.#ensureCompleted();
         }
-        await this.#driver.request({ method: "detach", handle: this.#handle }, "detached");
+        if (!this.#driver.isClosed) {
+            try {
+                await this.#driver.request({ method: "detach", handle: this.#handle }, "detached");
+            } catch (cause: unknown) {
+                if (
+                    !(cause instanceof TermtraceProtocolError) ||
+                    cause.message !== "driver is closed"
+                ) {
+                    throw cause;
+                }
+            }
+        }
         this.#closed = true;
     }
 
-    /** Complete owned work and apply the explicit success-sensitive retention policy. */
-    async finish(passed: boolean): Promise<void> {
+    /** Complete and verify owned work; discard is deferred until the owning client closes. */
+    async finish(passed: boolean, requestTimeoutMs = 10_000): Promise<void> {
         if (this.#closed) return;
         if (!this.#owned)
             throw new TypeError("finish is valid only for sessions launched by this client");
-        await this.#ensureCompleted();
-        if (passed && this.#evidencePolicy === "on-failure") {
-            await this.#driver.request(
-                { method: "discard_completed", handle: this.#handle },
-                "discarded",
-            );
-            this.#closed = true;
-            return;
+        await this.#ensureCompleted(requestTimeoutMs);
+        const verification = await this.evidence.verify("content", requestTimeoutMs);
+        if (!verification.valid) {
+            throw new Error("canonical evidence failed content verification");
         }
-        await this.#driver.request({ method: "detach", handle: this.#handle }, "detached");
+        if (!this.#driver.isClosed) {
+            try {
+                await this.#driver.request({ method: "detach", handle: this.#handle }, "detached", {
+                    timeoutMs: requestTimeoutMs,
+                });
+            } catch (cause: unknown) {
+                if (
+                    !(cause instanceof TermtraceProtocolError) ||
+                    cause.message !== "driver is closed"
+                ) {
+                    throw cause;
+                }
+            }
+        }
         this.#closed = true;
+        this.#discardAfterClose = passed && this.#evidencePolicy === "on-failure";
     }
 
-    async #ensureCompleted(): Promise<void> {
+    /** Cancel a pending success-only discard when a later lifecycle stage fails. */
+    retain(): void {
+        this.#discardAfterClose = false;
+    }
+
+    /** Apply a verified finish decision only after the owning driver has closed successfully. */
+    async discardAfterDriverClose(): Promise<void> {
+        if (!this.#discardAfterClose) return;
+        if (this.#driver.closedSuccessfully !== true) {
+            throw new Error(
+                "canonical evidence cannot be discarded before successful driver close",
+            );
+        }
+        await rm(this.canonicalSession, { recursive: true });
+        this.#discardAfterClose = false;
+    }
+
+    async #ensureCompleted(requestTimeoutMs = 10_000): Promise<void> {
         if (this.#completed) return;
         try {
-            await this.stop();
+            await this.stop({ requestTimeoutMs });
         } catch (cause: unknown) {
-            // A naturally completed process has no live actor; completion below is authoritative.
-            if (!(cause instanceof Error)) throw cause;
+            // A completed actor has no endpoint; completion below verifies that case.
+            if (
+                !(cause instanceof TermtraceOperationError) ||
+                cause.failure.code !== "control_unavailable"
+            )
+                throw cause;
         }
-        await this.complete(10_000);
+        await this.complete(requestTimeoutMs, requestTimeoutMs);
     }
     async [Symbol.asyncDispose](): Promise<void> {
         await this.close();
@@ -591,6 +638,7 @@ export class Native {
                 destination,
                 renderer: "native",
                 viewport: options.viewport ?? null,
+                max_bytes: null,
             },
             "artifact",
         );
@@ -629,9 +677,10 @@ export class Evidence {
         destination: string,
         profile: "screen" | "debug" | "forensic" = "screen",
         requestTimeoutMs?: number,
+        maxBytes?: number,
     ): Promise<BundleResult> {
         return this.session.request(
-            { method: "bundle", destination, profile },
+            { method: "bundle", destination, profile, max_bytes: maxBytes ?? null },
             "bundle",
             requestTimeoutMs === undefined ? {} : { timeoutMs: requestTimeoutMs },
         );

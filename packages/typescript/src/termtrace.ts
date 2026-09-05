@@ -5,6 +5,7 @@ import { Session } from "./session/session.js";
 export type TermtraceOptions = {
     readonly binaryPath?: string;
     readonly evidenceRoot?: string;
+    readonly signal?: AbortSignal;
 };
 
 export type LaunchOptions = {
@@ -15,6 +16,7 @@ export type LaunchOptions = {
     readonly evidence?: "always" | "on-failure" | "manual";
     readonly environment?: EnvironmentOptions;
     readonly outputByteBudget?: number;
+    readonly signal?: AbortSignal;
 };
 
 export type EnvironmentOptions = {
@@ -29,6 +31,8 @@ export type EnvironmentOptions = {
 export class Termtrace implements AsyncDisposable {
     readonly #driver: DriverClient;
     readonly #evidenceRoot: string | undefined;
+    readonly #sessions = new Set<Session>();
+    #closing: Promise<void> | undefined;
 
     private constructor(driver: DriverClient, evidenceRoot: string | undefined) {
         this.#driver = driver;
@@ -36,14 +40,25 @@ export class Termtrace implements AsyncDisposable {
     }
 
     static async create(options: TermtraceOptions = {}): Promise<Termtrace> {
+        options.signal?.throwIfAborted();
         const driver = new DriverClient(
             options.binaryPath ?? process.env.TERMTRACE_BINARY ?? "termtrace",
         );
-        await driver.request({ method: "hello" }, "hello");
+        try {
+            const requestOptions =
+                options.signal === undefined
+                    ? { timeoutMs: 10_000 }
+                    : { timeoutMs: 10_000, signal: options.signal };
+            await driver.request({ method: "hello" }, "hello", requestOptions);
+        } catch (cause: unknown) {
+            await driver.close();
+            throw cause;
+        }
         return new Termtrace(driver, options.evidenceRoot);
     }
 
     async launch(options: LaunchOptions): Promise<Session> {
+        options.signal?.throwIfAborted();
         const evidenceRoot = options.evidenceRoot ?? this.#evidenceRoot;
         if (evidenceRoot === undefined) {
             throw new TypeError("launch requires evidenceRoot on Termtrace or this call");
@@ -64,8 +79,11 @@ export class Termtrace implements AsyncDisposable {
                 },
             },
             "attached",
+            options.signal === undefined ? {} : { signal: options.signal },
         );
-        return new Session(this.#driver, data, true, options.evidence ?? "always");
+        const session = new Session(this.#driver, data, true, options.evidence ?? "always");
+        this.#sessions.add(session);
+        return session;
     }
 
     async attach(session: string): Promise<Session> {
@@ -73,10 +91,38 @@ export class Termtrace implements AsyncDisposable {
         return new Session(this.#driver, data, false, "manual");
     }
 
-    async close(): Promise<void> {
-        await this.#driver.close();
+    close(options: { readonly requestTimeoutMs?: number } = {}): Promise<void> {
+        this.#closing ??= this.#closeOwned(options.requestTimeoutMs ?? 10_000);
+        return this.#closing;
     }
 
+    async #closeOwned(requestTimeoutMs: number): Promise<void> {
+        const failures: unknown[] = [];
+        for (const session of this.#sessions) {
+            try {
+                await session.finish(false, requestTimeoutMs);
+            } catch (cause: unknown) {
+                failures.push(cause);
+            }
+        }
+        if (failures.length > 0) {
+            await this.#driver.terminate(
+                new AggregateError(failures, "Termtrace finalization failed"),
+            );
+        }
+        try {
+            await this.#driver.close();
+        } catch (cause: unknown) {
+            failures.push(cause);
+        }
+        if (failures.length > 0) {
+            throw new AggregateError(failures, "Termtrace client cleanup failed");
+        }
+        for (const session of this.#sessions) {
+            await session.discardAfterDriverClose();
+        }
+        this.#sessions.clear();
+    }
     async [Symbol.asyncDispose](): Promise<void> {
         await this.close();
     }

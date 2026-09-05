@@ -450,6 +450,7 @@ class Screen:
                 "destination": str(destination),
                 "renderer": "semantic",
                 "viewport": None,
+                "max_bytes": None,
             },
             DriverArtifactData,
             request_timeout=request_timeout,

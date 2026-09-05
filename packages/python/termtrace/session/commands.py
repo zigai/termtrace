@@ -21,7 +21,7 @@ from termtrace.transport.protocol import JsonObject, JsonValue, wire_json_object
 
 def keyboard_press_command(key: str) -> JsonObject:
     return wire_json_object(
-        request_wire.ControlCommand10(
+        request_wire.ControlKeyCommand(
             key=key,
             modifiers=request_wire.KeyModifiers(
                 shift=False, control=False, alt=False, super_key=False
@@ -45,7 +45,7 @@ def keyboard_type_command(
 
 def keyboard_paste_command(data: str | bytes | memoryview) -> JsonObject:
     raw = data.encode() if isinstance(data, str) else bytes(data)
-    return wire_json_object(request_wire.ControlCommand11(data=base64.b64encode(raw).decode()))
+    return wire_json_object(request_wire.ControlPasteCommand(data=base64.b64encode(raw).decode()))
 
 
 def keyboard_sequence_command(
@@ -216,6 +216,7 @@ def native_screenshot_request(
         "destination": str(destination),
         "renderer": "native",
         "viewport": target,
+        "max_bytes": None,
     }
 
 
@@ -233,4 +234,5 @@ def evidence_bundle_request(
         "method": "bundle",
         "destination": str(destination),
         "profile": profile,
+        "max_bytes": None,
     }

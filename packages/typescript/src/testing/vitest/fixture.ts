@@ -32,8 +32,8 @@ export function createTerminalTest(options: CreateTerminalTestOptions): Terminal
                 const evidencePolicy = launch.evidence ?? "on-failure";
                 const client = await Termtrace.create(
                     options.termtrace.binaryPath === undefined
-                        ? { evidenceRoot }
-                        : { binaryPath: options.termtrace.binaryPath, evidenceRoot },
+                        ? { evidenceRoot, signal }
+                        : { binaryPath: options.termtrace.binaryPath, evidenceRoot, signal },
                 );
                 let session: Session;
                 try {
@@ -42,6 +42,7 @@ export function createTerminalTest(options: CreateTerminalTestOptions): Terminal
                         ...launch,
                         evidenceRoot,
                         evidence: evidencePolicy,
+                        signal,
                     });
                 } catch (cause: unknown) {
                     await closeAfterSetupFailure(client, cause);

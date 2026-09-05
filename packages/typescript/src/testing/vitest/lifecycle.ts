@@ -1,15 +1,16 @@
 import { lstat, mkdir, rm } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
+import { TermtraceOperationError } from "../../transport/protocol.js";
 import type { Session } from "../../session/session.js";
 import type { Termtrace } from "../../termtrace.js";
 import type { FailureArtifactOptions, MutableArtifacts } from "./types.js";
 import { boundedPathPart } from "./artifact-path.js";
 
 const DEFAULT_SCREENSHOT_BYTES = 4 * 1024 * 1024;
-const FINISH_HOOK_OVERHEAD_MS = 5_000;
+const FINISH_HOOK_OVERHEAD_MS = 11_000;
 const MAX_TIMER_MS = 2_147_483_647;
-const FAILURE_CLEANUP_OPERATION_COUNT = 5;
+const FAILURE_CLEANUP_OPERATION_COUNT = 9;
 const DEFAULT_BUNDLE_BYTES = 32 * 1024 * 1024;
 
 export function finishHookTimeout(operationTimeoutMs: number): number {
@@ -45,7 +46,7 @@ export async function finishTerminalTest(input: {
         secondaryFailures,
         input.operationTimeoutMs,
     );
-    if (input.bodyFailed) {
+    if (input.bodyFailed || secondaryFailures.length > 0) {
         secondaryFailures.push(
             ...(await captureFailureArtifacts(
                 input.session,
@@ -58,13 +59,20 @@ export async function finishTerminalTest(input: {
     }
     if (completionSucceeded) {
         try {
-            await input.session.finish(!input.bodyFailed);
+            await input.session.finish(
+                !input.bodyFailed && secondaryFailures.length === 0,
+                input.operationTimeoutMs,
+            );
+            input.artifacts.verificationValid = true;
         } catch (cause: unknown) {
             secondaryFailures.push(cause);
         }
     }
+    if (input.bodyFailed || secondaryFailures.length > 0) {
+        input.session.retain();
+    }
     try {
-        await input.client.close();
+        await input.client.close({ requestTimeoutMs: input.operationTimeoutMs });
     } catch (cause: unknown) {
         secondaryFailures.push(cause);
     }
@@ -103,7 +111,7 @@ export async function finishTerminalTest(input: {
         return;
     }
     if (secondaryFailures.length > 0) {
-        throw lifecycleError("Termtrace test cleanup failed", secondaryFailures);
+        throw lifecycleError("Termtrace test cleanup failed", secondaryFailures, input.artifacts);
     }
 }
 
@@ -125,6 +133,15 @@ async function completeSession(
             timeoutMs: operationTimeoutMs,
             requestTimeoutMs: operationTimeoutMs,
         });
+        if (
+            stopFailed &&
+            !(
+                stopFailure instanceof TermtraceOperationError &&
+                stopFailure.failure.code === "control_unavailable"
+            )
+        ) {
+            failures.push(stopFailure);
+        }
         return true;
     } catch (cause: unknown) {
         if (stopFailed) failures.push(stopFailure);
@@ -156,6 +173,7 @@ async function captureFailureArtifacts(
             destination,
             { selector: "latest_presented" },
             operationTimeoutMs,
+            options?.maxScreenshotBytes ?? DEFAULT_SCREENSHOT_BYTES,
         );
         const primary = resolve(screenshot.primary);
         const relativePrimary = relative(resolve(destination), primary);
@@ -189,6 +207,7 @@ async function captureFailureArtifacts(
             destination,
             options?.bundleProfile ?? "debug",
             operationTimeoutMs,
+            options?.maxBundleBytes ?? DEFAULT_BUNDLE_BYTES,
         );
         const bytes = bundle.manifest.members.reduce(
             (total, member) => total + member.byte_length,

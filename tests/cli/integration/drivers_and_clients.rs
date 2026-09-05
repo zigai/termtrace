@@ -66,7 +66,7 @@ fn python_sync_and_async_clients_parse_driver_completion_contract() {
     let binary = env!("CARGO_BIN_EXE_termtrace");
     let sync_code = r#"import json, sys
 from pathlib import Path
-from termtrace import EnvironmentOptions, Terminal, assert_frame_text, assert_terminal_snapshot
+from termtrace import ActionOptions, EnvironmentOptions, StaleStateError, Terminal, TextAtom, assert_frame_text, assert_terminal_snapshot
 with Terminal(binary_path=sys.argv[1]) as terminal:
     Path(sys.argv[3]).mkdir(parents=True, exist_ok=True)
     session = terminal.attach(sys.argv[2])
@@ -101,6 +101,19 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
     assert "PY_LAUNCH" in launched.screen.text()
     assert launched.screen.frame().viewport_text.startswith("PY_LAUNCH")
     assert launched.output.wait_for_text("PY_LAUNCH").event_seq >= 0
+    before = launched.screen.frame()
+    boundary = launched.control({"command": "status"}).boundaries.observed
+    try:
+        launched.act([TextAtom("MUST_NOT_BE_SENT")], ActionOptions(if_state="0" * 64))
+    except StaleStateError as error:
+        assert error.expected_state_hash == "0" * 64
+        assert error.current_state_hash == before.state_hash
+        assert error.retry_safety == "safe_new_request"
+        assert error.uncertain is False
+    else:
+        raise AssertionError("stale action was accepted")
+    assert launched.control({"command": "status"}).boundaries.observed == boundary
+    assert "MUST_NOT_BE_SENT" not in launched.screen.text()
     launched.stop()
     assert str(launched.evidence.complete().session_id) == launched.session_id
     launched.close()
@@ -132,7 +145,7 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
 
     let async_code = r#"import asyncio, json, sys
 from pathlib import Path
-from termtrace import AsyncTerminal, EnvironmentOptions
+from termtrace import ActionOptions, AsyncTerminal, EnvironmentOptions, StaleStateError, TextAtom
 async def main():
     Path(sys.argv[3]).mkdir(parents=True, exist_ok=True)
     terminal = await AsyncTerminal.create(binary_path=sys.argv[1])
@@ -165,6 +178,19 @@ async def main():
         assert "ASYNC_LAUNCH" in await launched.screen.text()
         assert (await launched.screen.frame()).viewport_text.startswith("ASYNC_LAUNCH")
         assert (await launched.output.wait_for_text("ASYNC_LAUNCH")).event_seq >= 0
+        before = await launched.screen.frame()
+        boundary = (await launched.control({"command": "status"})).boundaries.observed
+        try:
+            await launched.act([TextAtom("MUST_NOT_BE_SENT")], ActionOptions(if_state="0" * 64))
+        except StaleStateError as error:
+            assert error.expected_state_hash == "0" * 64
+            assert error.current_state_hash == before.state_hash
+            assert error.retry_safety == "safe_new_request"
+            assert error.uncertain is False
+        else:
+            raise AssertionError("stale action was accepted")
+        assert (await launched.control({"command": "status"})).boundaries.observed == boundary
+        assert "MUST_NOT_BE_SENT" not in await launched.screen.text()
         await launched.stop()
         assert str((await launched.evidence.complete()).session_id) == launched.session_id
         await launched.close()
@@ -202,7 +228,7 @@ fn typescript_client_attaches_and_reads_completion_contract() {
         .success();
     let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/typescript/src/index.ts");
     let code = r#"const { existsSync, mkdirSync } = await import("node:fs")
-const { Termtrace, assertScreenText, stableTerminalSnapshot } = await import(process.argv[1])
+const { Termtrace, StaleStateError, assertScreenText, stableTerminalSnapshot } = await import(process.argv[1])
 mkdirSync(process.argv[4], { recursive: true })
 await using terminal = await Termtrace.create({ binaryPath: process.argv[2] })
 await using attached = await terminal.attach(process.argv[3])
@@ -243,29 +269,48 @@ if ((await Bun.file(`${launched.canonicalSession}/session.json`).json()).resourc
 if (!await launched.screen.text().then((text) => text.includes("TS_LAUNCH"))) throw new Error("missing screen text")
 if (!String((await launched.screen.frame()).viewport_text).includes("TS_LAUNCH")) throw new Error("missing frame")
 if ((await launched.output.waitForText("TS_LAUNCH")).event_seq < 0) throw new Error("missing output wait")
+const before = await launched.screen.frame()
+const boundary = (await launched.control({ command: "status" })).boundaries.observed
+try {
+  await launched.act([{ kind: "text", text: "MUST_NOT_BE_SENT" }], { ifState: "0".repeat(64) })
+  throw new Error("stale action was accepted")
+} catch (cause) {
+  if (!(cause instanceof StaleStateError)) throw cause
+  if (cause.expectedStateHash !== "0".repeat(64) || cause.currentStateHash !== before.stateHash || !cause.retrySafe) throw new Error("stale error lost state/retry details")
+}
+if (JSON.stringify((await launched.control({ command: "status" })).boundaries.observed) !== JSON.stringify(boundary)) throw new Error("stale action mutated canonical evidence")
+if ((await launched.screen.text()).includes("MUST_NOT_BE_SENT")) throw new Error("stale input reached application")
 await launched.stop()
 if ((await launched.evidence.complete()).session_id !== launched.sessionId) throw new Error("missing launched completion")
 const disposable = await terminal.launch({ command: ["/bin/sh", "-c", "printf TS_DISPOSABLE; sleep 30"], evidenceRoot: process.argv[4], evidence: "on-failure" })
 const disposablePath = disposable.canonicalSession
 await disposable.screen.waitForText("TS_DISPOSABLE")
 await disposable.finish(true)
-if (existsSync(disposablePath)) throw new Error("successful disposable evidence remained")
+if (!existsSync(disposablePath)) throw new Error("evidence was discarded before driver close")
 const retained = await terminal.launch({ command: ["/bin/sh", "-c", "printf TS_RETAINED; sleep 30"], evidenceRoot: process.argv[4], evidence: "on-failure" })
 const retainedPath = retained.canonicalSession
 await retained.screen.waitForText("TS_RETAINED")
 await retained.finish(false)
 if (!existsSync(`${retainedPath}/completion.json`)) throw new Error("failed-run evidence was not retained")
+await terminal.close()
+if (existsSync(disposablePath)) throw new Error("successful disposable evidence remained after driver close")
+if (!existsSync(`${retainedPath}/completion.json`)) throw new Error("driver close discarded failed evidence")
 "#;
-    let status = StdCommand::new("bun")
+    let output = StdCommand::new("bun")
         .arg("-e")
         .arg(code)
         .arg(package)
         .arg(env!("CARGO_BIN_EXE_termtrace"))
         .arg(&session)
         .arg(temporary.path().join("typescript-evidence"))
-        .status()
+        .output()
         .expect("run TypeScript client");
-    assert!(status.success());
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

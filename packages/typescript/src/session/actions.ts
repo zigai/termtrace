@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
     InvalidAtomError,
     InvalidDurationError,
@@ -167,22 +167,22 @@ export function normalizeInputAtoms(
 ): ReadonlyArray<WireInputSequenceAtom> {
     if (atoms.length < 1 || atoms.length > 4096)
         throw new InvalidAtomError("input must contain 1 through 4096 atoms");
-    const match = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-)([0-9a-f]{12})$/iu.exec(
-        requestId,
-    );
-    const prefix = match?.[1];
-    const tail = match?.[2];
-    if (prefix === undefined || tail === undefined)
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(requestId))
         throw new InvalidAtomError("requestId must be a UUID");
-    const suffix = BigInt(`0x${tail}`);
+    const canonicalRequestId = requestId.toLowerCase();
+    const namespace = Buffer.from("6ba7b8119dad11d180b400c04fd430c8", "hex");
     return Object.freeze(
-        atoms.map((atom, index) =>
-            encodeAtom(
-                atom,
-                `${prefix}${(suffix ^ BigInt(index + 1)).toString(16).padStart(12, "0")}`,
-                callerIntent,
-            ),
-        ),
+        atoms.map((atom, index) => {
+            const hash = createHash("sha1")
+                .update(namespace)
+                .update(`termtrace/input-atom/v1/${canonicalRequestId}/${index}`, "utf8")
+                .digest();
+            hash.writeUInt8((hash.readUInt8(6) & 0x0f) | 0x50, 6);
+            hash.writeUInt8((hash.readUInt8(8) & 0x3f) | 0x80, 8);
+            const hex = hash.subarray(0, 16).toString("hex");
+            const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+            return encodeAtom(atom, id, callerIntent);
+        }),
     );
 }
 

@@ -147,6 +147,13 @@ export class ScreenFrame {
     get viewport_text(): string {
         return this.viewportText;
     }
+    get state_hash(): string {
+        return this.stateHash;
+    }
+
+    get frame_hash(): string {
+        return this.frameHash;
+    }
 
     query(spec: LocatorSpec): ReadonlyArray<ScreenMatch> {
         return evaluateQuery(this, spec);

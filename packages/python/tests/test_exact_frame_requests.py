@@ -132,7 +132,7 @@ class _SyncSession:
                     "frame": _wire_frame("stable"),
                     "semantic_state_zstd": "",
                 },
-                type=response_wire.ControlData10,
+                type=response_wire.ControlStableSnapshotData,
                 strict=True,
             )
         return msgspec.convert(
@@ -140,7 +140,7 @@ class _SyncSession:
                 "kind": "screen_frame",
                 "frame": _wire_frame("captured"),
             },
-            type=response_wire.ControlData9,
+            type=response_wire.ControlScreenFrameData,
             strict=True,
         )
 
@@ -179,7 +179,7 @@ class _AsyncSession:
                     "frame": _wire_frame("stable"),
                     "semantic_state_zstd": "",
                 },
-                type=response_wire.ControlData10,
+                type=response_wire.ControlStableSnapshotData,
                 strict=True,
             )
         return msgspec.convert(
@@ -187,7 +187,7 @@ class _AsyncSession:
                 "kind": "screen_frame",
                 "frame": _wire_frame("captured"),
             },
-            type=response_wire.ControlData9,
+            type=response_wire.ControlScreenFrameData,
             strict=True,
         )
 

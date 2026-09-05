@@ -99,7 +99,7 @@ describe("parseDriverResponse", () => {
             _tag: "Failure",
             failure: {
                 _tag: "DriverFailure",
-                code: "stale_state",
+                code: "stale_observation",
                 message: "state changed",
                 retrySafety: "safe_new_request",
                 uncertain: false,
@@ -344,10 +344,6 @@ describe("Keyboard.sequence", () => {
         expect(captured?.atoms).toMatchObject([
             { caller_intent: "submit text" },
             { caller_intent: "submit key" },
-        ]);
-        expect(captured?.atoms).toMatchObject([
-            { operation_id: "00000000-0000-0000-0000-000000000021" },
-            { operation_id: "00000000-0000-0000-0000-000000000022" },
         ]);
         const first = captured;
         await keyboard.sequence(

@@ -96,7 +96,7 @@ test("terminates a driver when a correlated request exceeds its deadline", async
         await client.close();
         rmSync(directory, { recursive: true, force: true });
     }
-});
+}, 10_000);
 
 test("aborting an in-flight request reaps the driver tree and rejects all FIFO work", async () => {
     const directory = mkdtempSync(join(tmpdir(), "termtrace-driver-abort-"));
@@ -147,4 +147,4 @@ test("aborting an in-flight request reaps the driver tree and rejects all FIFO w
         await client.close();
         rmSync(directory, { recursive: true, force: true });
     }
-});
+}, 10_000);

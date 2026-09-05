@@ -1,11 +1,13 @@
 import asyncio
 import re
 import time
+import uuid
 from dataclasses import replace
 from typing import cast
 
 import pytest
 
+from termtrace.atoms import TextAtom, encode_atoms
 from termtrace.duration import Duration
 from termtrace.errors import (
     InvalidDurationError,
@@ -39,6 +41,24 @@ from termtrace.screen.queries import StyleFilter, evaluate, region, style, text
 from termtrace.screen.snapshot import normalize_frame
 from termtrace.session.async_ import AsyncScreen, AsyncSession
 from termtrace.session.sync import Screen, Session
+
+
+def test_atom_identities_separate_adjacent_requests_and_canonicalize_uuid() -> None:
+    atoms = [TextAtom("a"), TextAtom("b")]
+    request_id = "abcdef00-0000-4000-8000-000000000001"
+    first = encode_atoms(atoms, request_id=request_id)
+    retry = encode_atoms(atoms, request_id=request_id.upper())
+    second = encode_atoms(atoms, request_id="abcdef00-0000-4000-8000-000000000002")
+    assert retry == first
+    ids: list[uuid.UUID] = []
+    for atom in [*first, *second]:
+        assert isinstance(atom, dict)
+        operation_id = atom["operation_id"]
+        assert isinstance(operation_id, str)
+        ids.append(uuid.UUID(operation_id))
+    assert len(set(ids)) == 4
+    assert all(operation_id.version == 5 for operation_id in ids)
+    assert ids[0] == uuid.uuid5(uuid.NAMESPACE_URL, f"termtrace/input-atom/v1/{request_id}/0")
 
 
 def _appearance(*, bold: bool = False) -> Appearance:

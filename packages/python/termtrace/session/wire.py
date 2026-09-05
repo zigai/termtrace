@@ -53,7 +53,7 @@ def normalize_action(
     value: response_wire.ControlData | Mapping[str, object],
     request_id: str,
 ) -> ActionResult:
-    wire_value = parse_wire(value, response_wire.ControlData4, "action response")
+    wire_value = parse_wire(value, response_wire.ControlActionAppliedData, "action response")
     input_value = wire_value.input
     if input_value.sequence_id != request_id:
         raise ProtocolMismatchError("action request ID does not match its canonical sequence ID")
@@ -88,7 +88,7 @@ def normalize_action(
 def normalize_stable_capture(
     value: response_wire.ControlData | Mapping[str, object],
 ) -> StableCapture:
-    wire_value = parse_wire(value, response_wire.ControlData10, "stable capture")
+    wire_value = parse_wire(value, response_wire.ControlStableSnapshotData, "stable capture")
     return StableCapture(
         quality=wire_value.quality.value,
         first_observed_at=Duration(wire_value.first_observed_monotonic_ns),
@@ -101,7 +101,7 @@ def normalize_stable_capture(
 def normalize_screen_wait(
     value: response_wire.ControlData | Mapping[str, object],
 ) -> ScreenWaitResult:
-    wire_value = parse_wire(value, response_wire.ControlData11, "screen wait")
+    wire_value = parse_wire(value, response_wire.ControlScreenWaitData, "screen wait")
     first_match = optional_wire(wire_value.first_match_monotonic_ns)
     return ScreenWaitResult(
         matched=wire_value.matched,

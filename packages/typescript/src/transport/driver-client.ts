@@ -18,7 +18,9 @@ import {
     type JsonValue,
 } from "./protocol.js";
 
-const PROCESS_TREE_TERMINATION_GRACE_MS = 1_000;
+const PROCESS_TREE_TERMINATION_GRACE_MS = 5_000;
+const DRIVER_CLOSE_TIMEOUT_MS = 5_000;
+const MAX_PENDING_REQUESTS = 256;
 
 export type DriverRequestOptions = {
     readonly requestId?: string;
@@ -41,11 +43,19 @@ export class DriverClient {
     readonly #pending: Array<PendingRequest> = [];
     #closed = false;
     #terminating = false;
+    readonly #exited: Promise<void>;
+    #termination: Promise<void> | undefined;
+    #closePromise: Promise<void> | undefined;
+    #closedSuccessfully = false;
 
     constructor(binaryPath: string) {
         this.#process = spawn(binaryPath, ["agent"], {
             stdio: ["pipe", "pipe", "pipe"],
             detached: process.platform !== "win32",
+        });
+        this.#exited = new Promise<void>((resolve) => {
+            this.#process.once("exit", () => resolve());
+            this.#process.once("error", () => resolve());
         });
         this.#process.stderr.resume();
         this.#lines = createInterface({ input: this.#process.stdout, crlfDelay: Infinity });
@@ -67,6 +77,18 @@ export class DriverClient {
         });
     }
 
+    get closedSuccessfully(): boolean {
+        return this.#closedSuccessfully;
+    }
+    get isClosed(): boolean {
+        return this.#closed;
+    }
+
+    /** Stop and reap all work owned by this driver after unsuccessful finalization. */
+    terminate(cause: unknown): Promise<void> {
+        return this.#terminateWithFailure(cause);
+    }
+
     request<Kind extends DriverDataKind>(
         method: DriverMethod,
         expectedKind: Kind,
@@ -74,6 +96,9 @@ export class DriverClient {
     ): Promise<DriverDataOf<Kind>> {
         if (this.#closed) {
             return Promise.reject(new TermtraceProtocolError("driver is closed"));
+        }
+        if (this.#pending.length >= MAX_PENDING_REQUESTS) {
+            return Promise.reject(new TermtraceProtocolError("driver request queue is full"));
         }
         if (
             options.timeoutMs !== undefined &&
@@ -101,18 +126,27 @@ export class DriverClient {
                     reject(cause);
                 }
             };
+            const cancel = (cause: unknown): void => {
+                if (method.method === "launch" || method.method === "hello") {
+                    void this.#terminateWithFailure(cause);
+                    return;
+                }
+                const pending = this.#pending.find((request) => request.requestId === requestId);
+                if (pending !== undefined) this.#clearPendingGuards(pending);
+                reject(cause);
+            };
             const timer =
                 timeoutMs === undefined
                     ? undefined
                     : setTimeout(() => {
-                          void this.#terminateWithFailure(new RequestTimeoutError(timeoutMs));
+                          cancel(new RequestTimeoutError(timeoutMs));
                       }, timeoutMs);
             timer?.unref();
             const abortSubscription =
                 signal === undefined
                     ? undefined
                     : addAbortListener(signal, () => {
-                          void this.#terminateWithFailure(signal.reason);
+                          cancel(signal.reason);
                       });
             this.#pending.push({
                 requestId,
@@ -125,38 +159,71 @@ export class DriverClient {
         });
     }
 
-    async close(): Promise<void> {
+    close(): Promise<void> {
+        this.#closePromise ??= this.#closeProcess();
+        return this.#closePromise;
+    }
+
+    async #closeProcess(): Promise<void> {
         if (this.#closed) {
+            await this.#termination;
+            await this.#exited;
             return;
         }
         this.#closed = true;
         this.#process.stdin.end();
-        if (this.#process.exitCode !== null) {
-            return;
+        let timer: NodeJS.Timeout | undefined;
+        const timedOut = await Promise.race([
+            this.#exited.then(() => false),
+            new Promise<boolean>((resolve) => {
+                timer = setTimeout(() => resolve(true), DRIVER_CLOSE_TIMEOUT_MS);
+            }),
+        ]);
+        clearTimeout(timer);
+        if (timedOut) {
+            const cause = new RequestTimeoutError(DRIVER_CLOSE_TIMEOUT_MS);
+            await this.#terminateWithFailure(cause);
+            throw cause;
         }
-        await new Promise<void>((resolve) => this.#process.once("exit", () => resolve()));
+        if (this.#process.exitCode !== 0) {
+            throw new TermtraceProtocolError("driver failed during close");
+        }
+        this.#closedSuccessfully = true;
     }
 
-    async #terminateWithFailure(cause: unknown): Promise<void> {
-        if (this.#closed) {
-            return;
-        }
+    #terminateWithFailure(cause: unknown): Promise<void> {
+        if (this.#termination !== undefined) return this.#termination;
         this.#closed = true;
         this.#terminating = true;
         this.#lines.close();
-        const exited =
-            this.#process.exitCode === null
-                ? new Promise<void>((resolve) => this.#process.once("exit", () => resolve()))
-                : Promise.resolve();
+        this.#termination = this.#terminateProcessTree(cause);
+        return this.#termination;
+    }
+
+    async #terminateProcessTree(cause: unknown): Promise<void> {
         this.#signalProcessTree("SIGTERM");
-        await new Promise<void>((resolve) =>
-            setTimeout(resolve, PROCESS_TREE_TERMINATION_GRACE_MS),
-        );
+        const deadline = Date.now() + PROCESS_TREE_TERMINATION_GRACE_MS;
+        while (this.#processTreeExists() && Date.now() < deadline) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 25));
+        }
         if (process.platform !== "win32" || this.#process.exitCode === null) {
             this.#signalProcessTree("SIGKILL");
         }
-        await exited;
+        await this.#exited;
         this.#rejectAll(cause);
+    }
+
+    #processTreeExists(): boolean {
+        const pid = this.#process.pid;
+        if (process.platform !== "win32" && pid !== undefined) {
+            try {
+                process.kill(-pid, 0);
+                return true;
+            } catch {
+                return false;
+            }
+        }
+        return this.#process.exitCode === null && this.#process.signalCode === null;
     }
 
     #signalProcessTree(signal: NodeJS.Signals): void {

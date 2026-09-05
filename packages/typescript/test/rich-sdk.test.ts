@@ -536,21 +536,26 @@ describe("Screen rich-frame requests", () => {
 });
 
 describe("actions and snapshots", () => {
-    test("encodeAction generates deterministic atom IDs for identical requests", () => {
-        const requestId = "00000000-0000-4000-8000-000000000001";
-        const first = encodeAction([{ kind: "text", text: "x" }], {
-            requestId,
-            pace: Duration.milliseconds(1),
+    test("atom identities separate adjacent requests and canonicalize UUID spelling", () => {
+        const atoms = [
+            { kind: "text", text: "a" },
+            { kind: "text", text: "b" },
+        ] as const;
+        const requestId = "abcdef00-0000-4000-8000-000000000001";
+        const first = encodeAction(atoms, { requestId });
+        const retry = encodeAction(atoms, { requestId: requestId.toUpperCase() });
+        const second = encodeAction(atoms, {
+            requestId: "abcdef00-0000-4000-8000-000000000002",
         });
-        const second = encodeAction([{ kind: "text", text: "x" }], {
-            requestId,
-            pace: Duration.milliseconds(1),
-        });
-        const firstAtom = first.command.atoms[0];
-        const secondAtom = second.command.atoms[0];
-        expect(firstAtom?.operation_id).toBeDefined();
-        expect(firstAtom?.operation_id).toBe(secondAtom?.operation_id);
-        expect(first.requestId).toBe(requestId);
+        expect(retry.command.atoms).toEqual(first.command.atoms);
+        const ids = [...first.command.atoms, ...second.command.atoms].map(
+            (atom) => atom.operation_id,
+        );
+        expect(new Set(ids).size).toBe(4);
+        for (const id of ids)
+            expect(id).toMatch(
+                /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+            );
     });
     test("uses actor pacing admission for every atom", () => {
         expect(() =>
