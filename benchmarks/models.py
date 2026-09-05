@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, dataclass, field
 import json
+import hashlib
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any
 
@@ -14,8 +16,11 @@ from typing import Any
 @dataclass(frozen=True, slots=True)
 class BenchmarkRunManifest:
     command: str
-    termtrace_commit: str
+    source_checkout_commit: str
     binary: str
+    binary_sha256: str
+    build_revision: str
+    build_profile: str
     host: str
     started_unix_ns: int
     format: str = "termtrace-benchmark-run"
@@ -128,10 +133,23 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.subcommand == "emit-run-manifest":
+        binary = Path(args.binary).resolve()
+        version = json.loads(subprocess.check_output(
+            [str(binary), "--response", "full", "version", "--json"], timeout=30
+        ))
+        if isinstance(version, list) and len(version) == 1:
+            version = version[0]
+        if not isinstance(version, dict) or not isinstance(version.get("build_revision"), str):
+            raise ValueError("binary did not report its build revision")
+        with binary.open("rb") as stream:
+            binary_hash = hashlib.file_digest(stream, "sha256").hexdigest()
         manifest = BenchmarkRunManifest(
             command=args.command,
-            termtrace_commit=args.revision,
-            binary=args.binary,
+            source_checkout_commit=args.revision,
+            binary=str(binary),
+            binary_sha256=binary_hash,
+            build_revision=version["build_revision"],
+            build_profile="unverified-existing-artifact",
             host=args.host,
             started_unix_ns=args.started_unix_ns,
         )

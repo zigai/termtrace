@@ -10,16 +10,16 @@
   },
   "environment": {
     "kind": "host",
-    "identifier": "termtrace-linux-amd-7900x-2026-07",
+    "identifier": "termtrace-linux-amd-7900x-2026-09",
     "operating_system": "EndeavourOS 2025.03.19",
-    "kernel": "Linux 6.18.38-2-lts",
+    "kernel": "Linux 6.18.49-2-lts",
     "architecture": "x86_64",
     "cpu": "AMD Ryzen 9 7900X 12-Core Processor",
     "logical_cpus": 24,
-    "memory_bytes": 66480795648,
-    "rust_toolchain": "1.91.1 (ed61e7d7e242494fb7057f2657300d9e77bb4fcb)",
+    "memory_bytes": 66480734208,
+    "rust_toolchain": "1.97.1 (8bab26f4f68e0e26f0bb7960be334d5b520ea452)",
     "ghostty_native": "1.3.1-arch2",
-    "ffmpeg": "8.1.2",
+    "ffmpeg": "n9.0.1",
     "jq": "1.8.2",
     "notes": "Absolute latency gates apply only to this host identity until a reviewed manifest diff pins a replacement host or OCI digest."
   },
@@ -63,8 +63,8 @@
     {
       "id": "fullscreen-query-heavy",
       "kind": "fullscreen_query_heavy",
-      "command": ["python3", "examples/apps/terminal_showcase.py", "semantic"],
-      "completion_marker": "SEMANTIC_DEMO_COMPLETE"
+      "command": ["python3", "benchmarks/workload.py", "--control", "CONTROL_FIFO"],
+      "completion_marker": "READY"
     },
     {
       "id": "million-event-1gib",
@@ -78,7 +78,7 @@
     {
       "id": "cli-command-count-parity",
       "kind": "ergonomics",
-      "workflows": ["start", "act", "send", "wait", "show", "control resize", "restart", "stop", "screenshot", "test", "video"],
+      "workflows": ["start", "act", "send", "wait", "screen", "control resize", "restart", "stop", "screenshot", "test", "video"],
       "maximum_commands_per_workflow": 1,
       "maximum_required_identifiers_per_workflow": 1
     },
@@ -94,7 +94,7 @@
     {
       "id": "warm-live-show-p95",
       "kind": "latency",
-      "operation": "show --format text",
+      "operation": "screen --screen text",
       "fixture": "fullscreen-query-heavy",
       "cache_policy": "warm",
       "percentile": 95,
@@ -103,7 +103,7 @@
     {
       "id": "presented-wait-notification-p95",
       "kind": "latency_delta",
-      "operation": "wait --scope screen",
+      "operation": "wait --screen READY",
       "fixture": "fullscreen-query-heavy",
       "percentile": 95,
       "maximum_delta_ms": 50,
@@ -140,13 +140,13 @@
       "id": "large-live-independence",
       "kind": "complexity",
       "fixture": "million-event-1gib",
-      "operations": ["show", "wait", "analyze events --follow"],
+      "operations": ["screen", "wait", "analyze events --follow"],
       "requirement": "latency and resident memory are independent of total canonical log length"
     },
     {
       "id": "large-completed-show-p95",
       "kind": "latency",
-      "operation": "show --format text",
+      "operation": "screen --screen text",
       "fixture": "million-event-1gib",
       "cache_policy": "warm",
       "percentile": 95,

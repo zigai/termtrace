@@ -12,10 +12,11 @@ Usage: benchmarks/run.sh COMMAND
 
 Commands:
   check       Validate committed benchmark contracts and required tools
+  acceptance  Execute every acceptance gate, invariant, and artifact validator
   agent       Run compact agent-facing workflow checks
   durability  Compare strict, bounded, and throughput durability modes
   render      Measure semantic video export and preview rendering
-  all         Run check, agent, durability, and render benchmarks
+  all         Run the complete acceptance contract, then supplemental benchmarks
 
 Environment:
   TERMTRACE_BINARY  Existing release binary; otherwise build one
@@ -66,9 +67,7 @@ ensure_binary() {
         binary=$TERMTRACE_BINARY
     else
         binary="$root/target/release/termtrace"
-        if [[ ! -x "$binary" ]]; then
-            cargo build --release --all-features --manifest-path "$root/Cargo.toml"
-        fi
+        cargo build --release --all-features --manifest-path "$root/Cargo.toml"
     fi
     if [[ ! -x "$binary" ]]; then
         printf 'Termtrace binary is not executable: %s\n' "$binary" >&2
@@ -135,6 +134,10 @@ run_one() {
 }
 
 require_tools
+if [[ "${1:-acceptance}" == acceptance ]]; then
+    shift || true
+    exec uv run --project "$root/packages/python" python "$root/benchmarks/acceptance.py" "$@"
+fi
 command=${1:-}
 case "$command" in
     check)
@@ -147,6 +150,7 @@ case "$command" in
         run_one "$command"
         ;;
     all)
+        uv run --project "$root/packages/python" python "$root/benchmarks/acceptance.py"
         validate_contracts
         ensure_binary
         create_run_dir
