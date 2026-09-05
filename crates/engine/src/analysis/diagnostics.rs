@@ -20,6 +20,7 @@ use termtrace_model::{
     terminal::vt::VtToken,
 };
 use termtrace_terminal::frame_event_records;
+use uuid::Uuid;
 
 use crate::{
     Error, Result,
@@ -74,17 +75,48 @@ pub fn native_correlations(
     evidence: &[ValidatedVisualManifest],
 ) -> BTreeMap<u64, Vec<NativeCorrelation>> {
     let mut correlations = BTreeMap::<u64, Vec<NativeCorrelation>>::new();
+    visit_native_correlations(log.header.session_id, None, evidence, |correlation| {
+        correlations
+            .entry(correlation.state_id)
+            .or_default()
+            .push(correlation);
+    });
+    return correlations;
+}
+
+/// Resolve only one selected semantic state's native correlations.
+#[must_use]
+pub fn native_correlations_for_state(
+    session_id: Uuid,
+    state_id: u64,
+    evidence: &[ValidatedVisualManifest],
+) -> Vec<NativeCorrelation> {
+    let mut correlations = Vec::new();
+    visit_native_correlations(session_id, Some(state_id), evidence, |correlation| {
+        correlations.push(correlation);
+    });
+    return correlations;
+}
+
+fn visit_native_correlations(
+    session_id: Uuid,
+    selected: Option<u64>,
+    evidence: &[ValidatedVisualManifest],
+    mut visit: impl FnMut(NativeCorrelation),
+) {
     for evidence in evidence {
-        if evidence.manifest.session_id != log.header.session_id {
+        if evidence.manifest.session_id != session_id {
             continue;
         }
-        if let Some(state_id) = evidence.manifest.selected_state_id {
+        if let Some(state_id) = evidence.manifest.selected_state_id
+            && selected.is_none_or(|selected| return selected == state_id)
+        {
             let level = if evidence.manifest.presentation_evidence == "presentation_proven" {
                 NativeEvidenceLevel::FrameObserved
             } else {
                 NativeEvidenceLevel::PostEndpointStableCapture
             };
-            correlations.entry(state_id).or_default().push(NativeCorrelation {
+            visit(NativeCorrelation {
                 level,
                 manifest: evidence.manifest_path.clone(),
                 state_id,
@@ -97,11 +129,10 @@ pub fn native_correlations(
             });
         }
         for mapped in &evidence.video_map {
-            if let Some(frame) = mapped.frame {
-                correlations
-                    .entry(mapped.state_id)
-                    .or_default()
-                    .push(NativeCorrelation {
+            if selected.is_none_or(|selected| return selected == mapped.state_id)
+                && let Some(frame) = mapped.frame
+            {
+                visit(NativeCorrelation {
                     level: NativeEvidenceLevel::ScheduledForFrame,
                     manifest: evidence.manifest_path.clone(),
                     state_id: mapped.state_id,
@@ -113,7 +144,6 @@ pub fn native_correlations(
             }
         }
     }
-    return correlations;
 }
 
 /// Run the selected deterministic checks over canonical and validated visual evidence.

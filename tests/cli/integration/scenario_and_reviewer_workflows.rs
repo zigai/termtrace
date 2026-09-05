@@ -625,3 +625,206 @@ printf '\n__TERMTRACE_REVIEWER_ROLLBACK__=%s reviewer_status=%s\n' "$restored" "
         "reviewer terminal setup unexpectedly succeeded"
     );
 }
+
+#[test]
+fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
+    use std::sync::atomic::AtomicBool;
+    use termtrace_engine::{
+        analysis::reviewer::{REVIEW_PAGE_STATES, ReviewQuery, load_review_page},
+        observation::state_text,
+        replay::inspect,
+    };
+    use termtrace_model::terminal::replay::StateSelector;
+
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("paged-reviewer");
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf '\\033[?2026habc\\033[?2026l'; printf '%0120dTARGET' 0",
+        ])
+        .assert()
+        .success();
+    let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+    let states = replay(&log)
+        .expect("bounded fixture reference replay")
+        .states;
+    let hidden = states
+        .iter()
+        .find(|state| return !state.presented)
+        .expect("fixture contains synchronized hidden semantic boundaries");
+    let cancelled = AtomicBool::new(false);
+    let page = load_review_page(&session, &ReviewQuery::State(hidden.state_id), &cancelled)
+        .expect("exact hidden page")
+        .expect("selected page");
+    assert!(page.entries.len() <= REVIEW_PAGE_STATES);
+    let selected = page
+        .entries
+        .iter()
+        .find(|entry| return entry.state_id == page.selected)
+        .expect("selected hidden state retained");
+    assert_eq!(selected.state_hash, hidden.state_hash);
+    assert_eq!(selected.event_seq, hidden.event_seq);
+    assert_eq!(selected.event_byte_offset, hidden.event_byte_offset);
+    assert!(!selected.presented);
+    for (left, right) in page.entries.iter().zip(page.entries.iter().skip(1)) {
+        assert_eq!(
+            left.state_id + 1,
+            right.state_id,
+            "pages cannot sample away hidden states"
+        );
+    }
+    let next_presented = states
+        .iter()
+        .find(|state| return state.state_id > hidden.state_id && state.presented)
+        .expect("next presented state");
+    let next = load_review_page(
+        &session,
+        &ReviewQuery::Move {
+            from: hidden.state_id,
+            forward: true,
+            presented_only: true,
+        },
+        &cancelled,
+    )
+    .expect("presented navigation")
+    .expect("next page");
+    assert_eq!(next.selected, next_presented.state_id);
+    let found = load_review_page(
+        &session,
+        &ReviewQuery::Search {
+            from: None,
+            forward: true,
+            query: "TARGET".to_owned(),
+        },
+        &cancelled,
+    )
+    .expect("paged semantic search")
+    .expect("matching page");
+    let inspection =
+        inspect(&log, StateSelector::StateId(found.selected)).expect("reference matched state");
+    assert!(state_text(&inspection.state).contains("TARGET"));
+    assert!(load_review_page(&session, &ReviewQuery::Final, &AtomicBool::new(true)).is_err());
+    let path = session.join("events.jsonl");
+    let mut changed = fs_err::read(&path).expect("canonical bytes");
+    changed.extend_from_slice(b"tampered\n");
+    fs_err::write(&path, changed).expect("tamper warmed source");
+    assert!(load_review_page(&session, &ReviewQuery::State(0), &cancelled).is_err());
+}
+
+#[test]
+fn reviewer_cancels_large_background_loading_and_restores_the_terminal() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("cancel-reviewer-load");
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os; os.write(1,b'x'*1048576)",
+        ])
+        .assert()
+        .success();
+    let _quit = reviewer_pty_output(&session, None);
+    let _signal = reviewer_pty_output(&session, Some("TERM"));
+}
+
+#[test]
+fn reviewer_pages_resolve_marker_and_input_source_boundaries() {
+    use std::sync::atomic::AtomicBool;
+    use termtrace_engine::analysis::reviewer::{ReviewQuery, load_review_page};
+
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("reviewer-source-jumps");
+    let child = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf READY; IFS= read -r line; printf 'DONE:%s' \"$line\"",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("record source jump fixture");
+    wait_for_control(&session);
+    wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("fixture ready");
+    send_request(
+        &session,
+        &ControlRequest::new(ControlCommand::Mark {
+            label: "checkpoint".to_owned(),
+        }),
+    )
+    .expect("canonical marker");
+    send_request(
+        &session,
+        &ControlRequest::new(ControlCommand::Input {
+            data: ByteString::new(b"accepted\n".to_vec()),
+            input_kind: InputKind::Text,
+            caller_intent: None,
+        }),
+    )
+    .expect("canonical input");
+    let output = child.wait_with_output().expect("fixture completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+    let log = EventLog::read(session.join("events.jsonl")).expect("closed evidence");
+    let states = replay(&log).expect("bounded reference states").states;
+    let cancelled = AtomicBool::new(false);
+    for (query, marker) in [
+        (ReviewQuery::Marker("checkpoint".to_owned()), true),
+        (
+            ReviewQuery::Event {
+                from_ns: 0,
+                forward: true,
+                marker: true,
+            },
+            true,
+        ),
+        (
+            ReviewQuery::Event {
+                from_ns: u64::MAX,
+                forward: false,
+                marker: false,
+            },
+            false,
+        ),
+    ] {
+        let time = log
+            .events
+            .iter()
+            .find_map(|record| {
+                let selected = if marker {
+                    matches!(record.event, Event::Marker { .. })
+                } else {
+                    matches!(
+                        record.event,
+                        Event::InputIntent {
+                            source: InputSource::Agent,
+                            ..
+                        }
+                    )
+                };
+                return selected.then_some(record.monotonic_ns);
+            })
+            .expect("canonical source event");
+        let expected = states
+            .iter()
+            .find(|state| return state.monotonic_ns >= time)
+            .or_else(|| return states.last())
+            .expect("state at source boundary");
+        let page = load_review_page(&session, &query, &cancelled)
+            .expect("source boundary page")
+            .expect("selected boundary");
+        assert_eq!(page.selected, expected.state_id);
+    }
+}

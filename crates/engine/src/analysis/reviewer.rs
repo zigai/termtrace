@@ -29,6 +29,11 @@ use crate::{
     replay::{inspect, visit_states},
 };
 
+mod pager;
+pub use pager::{
+    REVIEW_PAGE_STATES, ReviewEntry, ReviewPage, ReviewQuery, ReviewViewport, load_review_page,
+};
+
 /// Load and summarize a validated completed session without changing it.
 pub fn summarize(
     session: impl AsRef<Path>,
