@@ -564,10 +564,7 @@ fn multiple_matches(
 }
 
 fn bounded_text(text: &str) -> (String, bool) {
-    let mut end = text.len().min(MAX_DIAGNOSTIC_CHARS);
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = text.floor_char_boundary(MAX_DIAGNOSTIC_CHARS);
     return (
         text.get(..end).unwrap_or_default().to_owned(),
         end != text.len(),
@@ -575,7 +572,6 @@ fn bounded_text(text: &str) -> (String, bool) {
 }
 
 // The evaluator is implemented below the public model so its scratch representation never leaks.
-#[derive(Clone)]
 struct LogicalCell {
     row: u16,
     column: u16,
@@ -585,7 +581,6 @@ struct LogicalCell {
     appearance: ScreenAppearance,
 }
 
-#[derive(Clone)]
 struct LogicalRow {
     row: u16,
     soft_wrapped: bool,
@@ -701,7 +696,7 @@ pub(super) fn query_frame(
         });
     }
     let rows = logical_rows(&frame)?;
-    let mut matches = evaluate_rows(&frame, &rows, &spec)?;
+    let mut matches = evaluate_rows(&frame, rows, &spec)?;
     matches.sort_by_key(|screen_match| {
         return screen_match.ranges.first().copied().unwrap_or(MatchRange {
             row: u16::MAX,
@@ -718,7 +713,7 @@ pub(super) fn query_frame(
 
 fn evaluate_rows(
     frame: &Arc<ScreenFrame>,
-    rows: &[LogicalRow],
+    rows: Vec<LogicalRow>,
     spec: &LocatorSpec,
 ) -> Result<Vec<ScreenMatch>, QueryError> {
     let mut output: Vec<ScreenMatch> = Vec::new();
@@ -726,7 +721,7 @@ fn evaluate_rows(
     let grouped_rows = if spec.cross_soft_wraps && spec.matcher.is_some() {
         soft_wrap_groups(rows)
     } else {
-        rows.to_vec()
+        rows
     };
     for row in &grouped_rows {
         let selected: Vec<usize> = row
@@ -766,20 +761,18 @@ fn evaluate_rows(
     return Ok(output);
 }
 
-fn soft_wrap_groups(rows: &[LogicalRow]) -> Vec<LogicalRow> {
+fn soft_wrap_groups(rows: Vec<LogicalRow>) -> Vec<LogicalRow> {
     let mut groups: Vec<LogicalRow> = Vec::new();
-    for row in rows {
-        let continues = groups
-            .last()
-            .is_some_and(|previous| return previous.soft_wrapped && row.wrap_continuation);
-        if continues {
-            if let Some(previous) = groups.last_mut() {
-                previous.cells.extend(row.cells.iter().cloned());
-                previous.soft_wrapped = row.soft_wrapped;
-            }
+    for mut row in rows {
+        if let Some(previous) = groups.last_mut()
+            && previous.soft_wrapped
+            && row.wrap_continuation
+        {
+            previous.cells.append(&mut row.cells);
+            previous.soft_wrapped = row.soft_wrapped;
             continue;
         }
-        groups.push(row.clone());
+        groups.push(row);
     }
     return groups;
 }

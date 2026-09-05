@@ -1,6 +1,6 @@
 //! Runner-neutral expectation classification and deterministic frame snapshots.
 
-use std::{error::Error as StdError, fmt, sync::Arc};
+use std::{error::Error as StdError, fmt};
 
 use serde_json::Value;
 
@@ -316,7 +316,7 @@ pub fn assert_screen_text(frame: &ScreenFrame, expected: &str) -> Result<(), Exp
         "screen_text",
         &format!("screen contains {expected:?}"),
         &format!("screen text {text:?}"),
-        &Arc::new(frame.clone()),
+        frame,
     ));
 }
 
@@ -385,7 +385,7 @@ pub fn assert_cursor(
         "cursor",
         &format!("{expected:?}"),
         &format!("{:?}", frame.cursor),
-        &Arc::new(frame.clone()),
+        frame,
     ));
 }
 
@@ -415,7 +415,7 @@ pub fn assert_no_wrapped_rows(frame: &ScreenFrame) -> Result<(), ExpectationMism
         "no_wrapped_rows",
         "no native wrapped rows",
         &format!("wrapped rows {wrapped:?}"),
-        &Arc::new(frame.clone()),
+        frame,
     ));
 }
 
@@ -501,7 +501,7 @@ pub fn assert_neutral_region(
         "neutral_region",
         &format!("{expected_cells} neutral terminal cells"),
         &format!("checked {checked}; non-neutral {non_neutral}"),
-        &Arc::new(frame.clone()),
+        frame,
     )));
 }
 
@@ -517,7 +517,7 @@ pub fn assert_no_presented_transient(frame: &ScreenFrame) -> Result<(), Expectat
             "presented={} synchronized_output={}",
             frame.presented, frame.modes.synchronized_output
         ),
-        &Arc::new(frame.clone()),
+        frame,
     ));
 }
 
@@ -525,7 +525,7 @@ fn mismatch(
     assertion: &'static str,
     expected: &str,
     actual: &str,
-    frame: &Arc<ScreenFrame>,
+    frame: &ScreenFrame,
 ) -> ExpectationMismatch {
     let (expected, expected_truncated) = bounded(expected);
     let (actual, actual_truncated) = bounded(actual);
@@ -590,10 +590,7 @@ fn frame_excerpt(frame: &ScreenFrame) -> String {
 }
 
 fn bounded(text: &str) -> (String, bool) {
-    let mut end = text.len().min(MAX_ASSERTION_CHARS);
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = text.floor_char_boundary(MAX_ASSERTION_CHARS);
     return (
         text.get(..end).unwrap_or_default().to_owned(),
         end != text.len(),

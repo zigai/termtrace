@@ -1,12 +1,10 @@
 use std::{
     collections::HashMap,
     fmt::Write as _,
-    path::PathBuf,
     slice,
     time::{Duration, Instant},
 };
 
-use serde::Serialize;
 use uuid::Uuid;
 
 use termtrace_evidence::event_log::EventLog;
@@ -16,17 +14,15 @@ use termtrace_model::{
         CollectedReplay, DERIVED_DIRECTORY, ReplayArtifacts, SourceRange, StateInspection,
         StateRecord, StateSelector,
     },
-    terminal::state::{
-        CellState, CellStyle, ColorSpec, ColorState, CursorState, DirtyState, ModeState, RowState,
-        SemanticState, TerminalMetadata,
-    },
+    terminal::state::{CellStyle, ColorSpec, DirtyState, SemanticState},
 };
-use termtrace_terminal::{Format, GhosttyVt, supported_geometry_cell_count};
+use termtrace_terminal::{
+    Format, GhosttyVt, hash_semantic_row, semantic_state_hash_from_row_hashes,
+    supported_geometry_cell_count,
+};
 
-use super::{
-    EndpointInspection, invalid_replay, json_error, load_nearest_replay_seed, state_delta,
-};
-use crate::Result;
+use super::{EndpointInspection, invalid_replay, load_nearest_replay_seed, state_delta};
+use crate::{Error, Result};
 
 #[cfg(test)]
 use std::cell::Cell;
@@ -110,37 +106,6 @@ struct ReplayBudget {
     current_cells: u64,
 }
 
-#[derive(Serialize)]
-struct StateHashMetadata<'state> {
-    cols: u16,
-    rows: u16,
-    cursor: &'state CursorState,
-    modes: &'state ModeState,
-    colors: &'state ColorState,
-    active_style: &'state CellStyle,
-    metadata: &'state TerminalMetadata,
-}
-#[derive(Serialize)]
-struct StateHashRow<'state> {
-    row: u16,
-    soft_wrapped: bool,
-    wrap_continuation: bool,
-    cells: &'state [CellState],
-}
-
-fn hash_semantic_row(row: &RowState) -> Result<blake3::Hash> {
-    let normalized = StateHashRow {
-        row: row.row,
-        soft_wrapped: row.soft_wrapped,
-        wrap_continuation: row.wrap_continuation,
-        cells: &row.cells,
-    };
-    let mut hasher = blake3::Hasher::new();
-    serde_json::to_writer(&mut hasher, &normalized)
-        .map_err(|source| return json_error(PathBuf::from("<semantic-row>"), source))?;
-    return Ok(hasher.finalize());
-}
-
 /// Hash a normalized semantic state with the replay state-hash contract.
 ///
 /// Transient Ghostty dirtiness is excluded; terminal content, modes, metadata,
@@ -150,23 +115,7 @@ fn hash_semantic_row(row: &RowState) -> Result<blake3::Hash> {
 ///
 /// Returns an error when semantic metadata or grid rows cannot be serialized.
 pub fn semantic_state_hash(state: &SemanticState) -> Result<String> {
-    let metadata = StateHashMetadata {
-        cols: state.cols,
-        rows: state.rows,
-        cursor: &state.cursor,
-        modes: &state.modes,
-        colors: &state.colors,
-        active_style: &state.active_style,
-        metadata: &state.metadata,
-    };
-    let mut hash = blake3::Hasher::new();
-    hash.update(b"termtrace-semantic-state-v2\0");
-    serde_json::to_writer(&mut hash, &metadata)
-        .map_err(|source| return json_error(PathBuf::from("<semantic-metadata>"), source))?;
-    for row in &state.grid {
-        hash.update(hash_semantic_row(row)?.as_bytes());
-    }
-    return Ok(hash.finalize().to_hex().to_string());
+    return termtrace_terminal::semantic_state_hash(state).map_err(Error::ScreenFrame);
 }
 
 /// Replay a validated event log and collect every distinct state.
@@ -1136,10 +1085,9 @@ impl ReplayBuilder {
             if restored.metadata != state.metadata {
                 mismatches.push("metadata");
             }
-            return Err(invalid_replay(format!(
-                "replay checkpoint VT seed does not reconstruct semantic fields: {}",
-                mismatches.join(", ")
-            )));
+            return Err(Error::CheckpointReconstruction {
+                mismatched_fields: mismatches,
+            });
         }
         let state_count = record
             .state_id
@@ -1248,26 +1196,11 @@ impl ReplayBuilder {
                     .row_hashes
                     .get_mut(usize::from(row.row))
                     .ok_or_else(|| return invalid_replay("semantic row is outside the viewport"))?;
-                *slot = hash_semantic_row(row)?;
+                *slot = hash_semantic_row(row).map_err(Error::ScreenFrame)?;
             }
         }
-        let metadata = StateHashMetadata {
-            cols: state.cols,
-            rows: state.rows,
-            cursor: &state.cursor,
-            modes: &state.modes,
-            colors: &state.colors,
-            active_style: &state.active_style,
-            metadata: &state.metadata,
-        };
-        let mut hash = blake3::Hasher::new();
-        hash.update(b"termtrace-semantic-state-v2\0");
-        serde_json::to_writer(&mut hash, &metadata)
-            .map_err(|source| return json_error(PathBuf::from("<semantic-metadata>"), source))?;
-        for row_hash in &self.row_hashes {
-            hash.update(row_hash.as_bytes());
-        }
-        return Ok(hash.finalize().to_hex().to_string());
+        return semantic_state_hash_from_row_hashes(state, &self.row_hashes)
+            .map_err(Error::ScreenFrame);
     }
 }
 

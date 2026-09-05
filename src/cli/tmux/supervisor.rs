@@ -25,12 +25,10 @@ use super::{
         coverage_from_options, refresh_configured_aggregate_manifest, run_tmux_recording_status,
     },
     args::{TmuxCoverageMode, TmuxGuardArgs, TmuxStatusArgs},
-    client::{
-        TmuxClient, option_text, query_number, query_text, same_executable, valid_tmux_identifier,
-    },
+    client::{TmuxClient, option_text, query_number, same_executable, valid_tmux_identifier},
     scope::{
         TmuxScopeMode, TmuxScopePolicy, mark_pane_scope_decision, pane_matches_scope,
-        pane_scope_decision, scope_from_options,
+        pane_scope_decision, parse_scope_identifier, scope_from_options,
     },
     setup::{setup_from_options, tmux_wrapper_command},
 };
@@ -366,34 +364,26 @@ pub(super) fn tmux_status_report(client: &TmuxClient) -> Result<TmuxStatusReport
     let default_command_matches = expected_wrapper.as_ref().is_some_and(|wrapper| {
         return client.option("default-command").ok().as_deref() == Some(wrapper.as_bytes());
     });
-    let pane_output = client.output(["list-panes", "-a", "-F", "#{pane_id}"])?;
-    let pane_ids = pane_output
-        .split(|byte| return *byte == b'\n')
-        .filter(|line| return !line.is_empty())
-        .map(|line| return str::from_utf8(line).map(str::to_owned).into_diagnostic())
-        .collect::<Result<BTreeSet<_>>>()?;
-    let mut panes = Vec::with_capacity(pane_ids.len());
-    for pane_id in pane_ids {
-        let session_id = query_text(client, &pane_id, "#{session_id}")?;
-        let window_id = query_text(client, &pane_id, "#{window_id}")?;
-        let pane_pid = query_number::<u32>(client, &pane_id, "#{pane_pid}").ok();
-        let current_command = client.pane_format(&pane_id, "#{pane_current_command}")?;
-        let recording_session = client.pane_option(&pane_id, OPTION_PANE_SESSION)?;
-        let selected = match (&scope, pane_pid) {
-            (Some(policy), Some(pid)) => pane_scope_decision(client, &pane_id, pid, policy)?,
-            _ => false,
+    let pane_rows = pane_process_rows(client)?;
+    let mut panes = Vec::with_capacity(pane_rows.len());
+    for pane in pane_rows {
+        // Commands and recording paths can contain tabs or newlines, so keep
+        // these arbitrary-byte fields out of the framed identity rows.
+        let current_command = client.pane_format(&pane.pane_id, "#{pane_current_command}")?;
+        let recording_session = client.pane_option(&pane.pane_id, OPTION_PANE_SESSION)?;
+        let selected = match &scope {
+            Some(policy) => pane_row_is_selected(client, &pane, policy)?,
+            None => false,
         };
         let recorded = match &expected {
-            Some(executable) => {
-                pane_process_is_wrapper(client, &pane_id, executable)?.unwrap_or(false)
-            }
+            Some(executable) => process_id_has_role(pane.pid, executable, b"run")?.unwrap_or(false),
             None => false,
         };
         panes.push(TmuxPaneStatus {
-            pane_id,
-            session_id,
-            window_id,
-            pane_pid,
+            pane_id: pane.pane_id,
+            session_id: pane.session_id,
+            window_id: pane.window_id,
+            pane_pid: Some(pane.pid),
             current_command: ByteString::from(current_command.as_slice()),
             selected,
             recorded,
@@ -493,12 +483,7 @@ pub(super) fn pane_process_rows(client: &TmuxClient) -> Result<Vec<PaneProcessRo
             continue;
         }
         let mut fields = line.splitn(7, |byte| return *byte == b'\t');
-        let pane_id = fields
-            .next()
-            .and_then(|value| return str::from_utf8(value).ok())
-            .filter(|value| return valid_tmux_identifier(value, b'%'))
-            .ok_or_else(|| return miette::miette!("tmux returned an invalid pane row"))?
-            .to_owned();
+        let pane_id = parse_scope_identifier(fields.next(), b'%', "pane")?;
         let pid = fields
             .next()
             .and_then(|value| return str::from_utf8(value).ok())
@@ -516,18 +501,8 @@ pub(super) fn pane_process_rows(client: &TmuxClient) -> Result<Vec<PaneProcessRo
             .next()
             .and_then(|value| return str::from_utf8(value).ok())
             .and_then(|value| return value.parse::<u32>().ok());
-        let session_id = fields
-            .next()
-            .and_then(|value| return str::from_utf8(value).ok())
-            .filter(|value| return valid_tmux_identifier(value, b'$'))
-            .ok_or_else(|| return miette::miette!("tmux returned an invalid session ID"))?
-            .to_owned();
-        let window_id = fields
-            .next()
-            .and_then(|value| return str::from_utf8(value).ok())
-            .filter(|value| return valid_tmux_identifier(value, b'@'))
-            .ok_or_else(|| return miette::miette!("tmux returned an invalid window ID"))?
-            .to_owned();
+        let session_id = parse_scope_identifier(fields.next(), b'$', "session")?;
+        let window_id = parse_scope_identifier(fields.next(), b'@', "window")?;
         panes.insert(
             pane_id.clone(),
             PaneProcessRow {

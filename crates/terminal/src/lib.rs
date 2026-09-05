@@ -18,7 +18,8 @@ pub use error::{Error, Result};
 pub use ghostty_vt::{Format, GhosttyVt, encode_focus, supported_geometry_cell_count};
 pub use output_projection::ControlStripper;
 pub use screen::{
-    project_screen_frame, screen_frame_hash, semantic_state_hash, validate_screen_region,
+    hash_semantic_row, project_screen_frame, screen_frame_hash, semantic_state_hash,
+    semantic_state_hash_from_row_hashes, semantic_viewport_text, validate_screen_region,
 };
 pub use tracking::{PresentationAction, PresentationTracker, PresentationTransition, QueryTracker};
 pub use vt_framer::{VtFramer, frame_event_records};

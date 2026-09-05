@@ -232,6 +232,9 @@ fn completed_validation_requires_terminal_exit() {
     let error = validate_completed_log(&temporary.path().join("session"), &log)
         .expect_err("nonterminal completion must fail");
     assert!(matches!(error, Error::InvalidEvidence { .. }));
+    let report = verify_session(temporary.path().join("session"), VerificationLevel::Content);
+    assert!(!report.valid);
+    assert_eq!(report.findings[0].code, "terminal_exit_missing");
 }
 
 #[test]
@@ -257,6 +260,9 @@ fn completed_validation_rejects_pending_mutation() {
     let error = validate_completed_log(&temporary.path().join("session"), &log)
         .expect_err("pending mutation must fail");
     assert!(matches!(error, Error::InvalidEvidence { .. }));
+    let report = verify_session(temporary.path().join("session"), VerificationLevel::Content);
+    assert!(!report.valid);
+    assert_eq!(report.findings[0].code, "pending_mutation_intents");
 }
 
 #[derive(serde::Deserialize)]

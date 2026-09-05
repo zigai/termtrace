@@ -143,8 +143,6 @@ pub(in crate::cli) fn run_diff(
     )?;
     let (difference, before_state, after_state) =
         diff_states_with_semantic_states(&log, from, to).into_diagnostic()?;
-    let image_states = matches!(arguments.format, DiffFormat::Svg | DiffFormat::Png)
-        .then_some((before_state, after_state));
     let changed = difference.changed;
     let _output_status = match arguments.format {
         DiffFormat::Text => write_stdout(response, diff_text(&difference)?)?,
@@ -156,24 +154,14 @@ pub(in crate::cli) fn run_diff(
             ),
         )?,
         DiffFormat::JsonCompact => write_json_line(response, &difference)?,
-        DiffFormat::Svg => {
-            let (before, after) = image_states
-                .as_ref()
-                .ok_or_else(|| return miette::miette!("missing visual diff states"))?;
-            write_stdout(
-                response,
-                render_diff_svg(before, after, &difference).into_diagnostic()?,
-            )?
-        }
-        DiffFormat::Png => {
-            let (before, after) = image_states
-                .as_ref()
-                .ok_or_else(|| return miette::miette!("missing visual diff states"))?;
-            write_stdout(
-                response,
-                render_diff_png(before, after, &difference).into_diagnostic()?,
-            )?
-        }
+        DiffFormat::Svg => write_stdout(
+            response,
+            render_diff_svg(&before_state, &after_state, &difference).into_diagnostic()?,
+        )?,
+        DiffFormat::Png => write_stdout(
+            response,
+            render_diff_png(&before_state, &after_state, &difference).into_diagnostic()?,
+        )?,
     };
     if arguments.expect_no_change && changed {
         return Ok(ExitCode::FAILURE);

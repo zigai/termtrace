@@ -3,8 +3,7 @@
 use std::{
     ffi::OsString,
     fs::OpenOptions,
-    io::{BufRead as _, BufReader, Error as IoError, ErrorKind, Read as _, Write as _},
-    net::Shutdown,
+    io::{Error as IoError, Write as _},
     os::unix::fs::OpenOptionsExt as _,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -19,7 +18,7 @@ use nix::{
 };
 use uuid::Uuid;
 
-use termtrace_engine::observation::project_screen_frame;
+use termtrace_engine::observation::{project_screen_frame, resolved_screen_state_for_session};
 use termtrace_engine::{
     analysis::diagnostics::{diagnose, explain},
     diff::diff_states,
@@ -52,10 +51,9 @@ use termtrace_model::{
     execution::event::{EventProjection, InputKind},
     execution::session::{SessionCompletion, VerificationLevel, VerificationReport},
     protocol::control::{
-        ActionPostcondition, ActionPostconditionResult, CONTROL_PROTOCOL_VERSION, ControlCommand,
-        ControlData, ControlErrorDetails, ControlRequest, ControlResponse, ControlResult,
-        InputSequenceAtom, MAX_CONTROL_MESSAGE_BYTES, PointerOperation, ScreenPredicate,
-        StableCaptureQuality,
+        ActionPostcondition, ActionPostconditionResult, ControlCommand, ControlData,
+        ControlErrorDetails, ControlRequest, ControlResult, InputSequenceAtom, PointerOperation,
+        ScreenPredicate, StableCaptureQuality, derive_input_operation_id,
     },
     terminal::analysis::{DiagnoseReport, DiagnosticCheck, ExplainReport},
     terminal::diff::SemanticDiff,
@@ -63,7 +61,7 @@ use termtrace_model::{
     terminal::observation::{CaptureQuality, Observation, StatePoint},
     terminal::screen::{
         FrameDetail, InvalidRegionReason, ScreenFrame, ScreenFrameError, ScreenFrameLimitKind,
-        ScreenFrameSource, ScreenProjectionRequest, ScreenRegion,
+        ScreenProjectionRequest, ScreenRegion,
     },
     terminal::state::{KeyModifiers, MouseButton, NamedKey},
     terminal::timeline::TimelineEntry,
@@ -75,8 +73,8 @@ use crate::{
     actions::{ActionCompletion, ActionCondition, ActionOptions, ActionResult, InputAtom},
     error::RetrySafety,
     protocol::{
-        connect_session_control, control_endpoint_is_reachable, send_request,
-        send_request_response, validate_frame, wait_for_screen,
+        ExchangeTiming, control_endpoint_is_reachable, exchange, send_request,
+        send_request_response, wait_for_screen,
     },
     screen::StableCaptureOptions,
 };

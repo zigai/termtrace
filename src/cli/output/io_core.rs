@@ -31,10 +31,7 @@ pub(super) fn capture_json(
 }
 
 pub(super) fn capture_raw(response: &mut ResponseWriter, output: &[u8]) {
-    capture_raw_into(&mut response.state, output);
-}
-
-pub(super) fn capture_raw_into(state: &mut ResponseState, output: &[u8]) {
+    let state = &mut response.state;
     if let Some(page) = raw_pagination_projection(output) {
         state.values.push(page);
     }

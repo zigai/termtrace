@@ -34,10 +34,10 @@ use termtrace_media::native_capture::{
     CaptureKind, CaptureOptions, capture, native_capture_target,
 };
 use termtrace_media::presentation::{
-    EDIT_PLAN_VERSION, EditClip, EditPlan, EditSelector, PixelTransform, PresentationDelivery,
-    PresentationSource, PresentationSourceRequest, PreviewOptions, RationalSpeed,
-    VideoRenderConfig, export as export_presentation, plan_with_source as plan_presentation,
-    preview as preview_presentation, read_edit_plan,
+    EDIT_PLAN_VERSION, EditPlan, PixelTransform, PresentationDelivery, PresentationSource,
+    PresentationSourceRequest, PreviewOptions, VideoIdlePolicy, VideoRenderConfig,
+    export as export_presentation, plan_with_source as plan_presentation,
+    preview as preview_presentation, read_edit_plan, video_clip_ranges, video_clips,
 };
 use termtrace_media::save::{save, save_screenshot_batch};
 use termtrace_model::{
@@ -279,7 +279,14 @@ pub(super) fn run_video_facade(
                 "video range must contain positive recorded time"
             ));
         }
-        let ranges = video_clip_ranges(&log, selected, arguments.trim_idle);
+        let ranges = video_clip_ranges(
+            &log,
+            selected,
+            arguments.trim_idle.then_some(VideoIdlePolicy {
+                threshold_ns: VIDEO_IDLE_THRESHOLD_NS,
+                context_ns: VIDEO_IDLE_CONTEXT_NS,
+            }),
+        );
         let provisional =
             facade_edit_plan(&arguments, &ranges, provisional_fps, hold_start, hold_end)?;
         let first_plan = plan_presentation(&session, &provisional, source).into_diagnostic()?;
@@ -390,7 +397,7 @@ fn facade_edit_plan(
 ) -> Result<EditPlan> {
     let hold_start_ms = duration_millis(hold_start, "--hold-start")?;
     let hold_end_ms = duration_millis(hold_end, "--hold-end")?;
-    let clips = facade_video_clips(ranges, fps, hold_start_ms, hold_end_ms)?;
+    let clips = video_clips(ranges, fps, hold_start_ms, hold_end_ms).into_diagnostic()?;
     let mut transforms: Vec<PixelTransform> = Vec::new();
     if arguments.cursor_style == VideoCursorStyleArg::Hidden {
         transforms.push(PixelTransform::CursorMask);
@@ -523,109 +530,6 @@ fn duration_millis(duration: Duration, flag: &str) -> Result<u64> {
         .map_err(|_error| return miette::miette!("{flag} is too large"));
 }
 
-fn facade_video_clips(
-    ranges: &[SourceRange],
-    fps: u16,
-    hold_start_ms: u64,
-    hold_end_ms: u64,
-) -> Result<Vec<EditClip>> {
-    let Some((&first, rest)) = ranges.split_first() else {
-        return Err(miette::miette!("video range contains no source activity"));
-    };
-    let mut clips = Vec::with_capacity(ranges.len() + 1);
-    if hold_start_ms > 0 {
-        let frame_ns = 1_000_000_000_u64.div_ceil(u64::from(fps));
-        let split = first
-            .start_monotonic_ns
-            .saturating_add(frame_ns)
-            .min(first.end_monotonic_ns);
-        clips.push(edit_clip(
-            SourceRange {
-                start_monotonic_ns: first.start_monotonic_ns,
-                end_monotonic_ns: split,
-            },
-            hold_start_ms,
-        ));
-        if split < first.end_monotonic_ns {
-            clips.push(edit_clip(
-                SourceRange {
-                    start_monotonic_ns: split,
-                    end_monotonic_ns: first.end_monotonic_ns,
-                },
-                0,
-            ));
-        }
-    } else {
-        clips.push(edit_clip(first, 0));
-    }
-    for &range in rest {
-        clips.push(edit_clip(range, 0));
-    }
-    if let Some(last) = clips.last_mut() {
-        last.hold_ms = last.hold_ms.saturating_add(hold_end_ms);
-    }
-    return Ok(clips);
-}
-
-fn edit_clip(range: SourceRange, hold_ms: u64) -> EditClip {
-    return EditClip {
-        from: EditSelector {
-            monotonic_ns: Some(range.start_monotonic_ns),
-            ..EditSelector::default()
-        },
-        to: EditSelector {
-            monotonic_ns: Some(range.end_monotonic_ns),
-            ..EditSelector::default()
-        },
-        speed: RationalSpeed::default(),
-        hold_ms,
-        caption: None,
-    };
-}
-
-fn video_clip_ranges(log: &EventLog, selected: SourceRange, trim_idle: bool) -> Vec<SourceRange> {
-    if !trim_idle {
-        return vec![selected];
-    }
-    let mut activity = log
-        .events
-        .iter()
-        .filter(|record| {
-            return selected.contains(record.monotonic_ns)
-                && matches!(&record.event, Event::Output { .. });
-        })
-        .map(|record| return record.monotonic_ns);
-    let Some(first) = activity.next() else {
-        return vec![selected];
-    };
-    let mut ranges: Vec<SourceRange> = Vec::new();
-    let mut start = first
-        .saturating_sub(VIDEO_IDLE_CONTEXT_NS)
-        .max(selected.start_monotonic_ns);
-    let mut previous = first;
-    for timestamp in activity {
-        if timestamp.saturating_sub(previous) > VIDEO_IDLE_THRESHOLD_NS {
-            ranges.push(SourceRange {
-                start_monotonic_ns: start,
-                end_monotonic_ns: previous
-                    .saturating_add(VIDEO_IDLE_CONTEXT_NS)
-                    .min(selected.end_monotonic_ns),
-            });
-            start = timestamp
-                .saturating_sub(VIDEO_IDLE_CONTEXT_NS)
-                .max(selected.start_monotonic_ns);
-        }
-        previous = timestamp;
-    }
-    ranges.push(SourceRange {
-        start_monotonic_ns: start,
-        end_monotonic_ns: previous
-            .saturating_add(VIDEO_IDLE_CONTEXT_NS)
-            .min(selected.end_monotonic_ns),
-    });
-    return ranges;
-}
-
 fn video_sidecar_path(output: &Path) -> PathBuf {
     let mut sidecar = output.as_os_str().to_os_string();
     sidecar.push(".termtrace");
@@ -675,24 +579,28 @@ pub(super) fn run_capture(
             ));
         }
     };
+    let helper = env::current_exe().into_diagnostic()?;
     let (target, geometry_solver) =
-        native_capture_target(&arguments.session, viewport).into_diagnostic()?;
-    let outcome = capture(&CaptureOptions {
-        session_directory: arguments.session,
-        width: target.width,
-        height: target.height,
-        fps: arguments.fps,
-        start_monotonic_ns,
-        end_monotonic_ns,
-        state_selection: if arguments.presented_only {
-            StateSelection::Presented
-        } else {
-            StateSelection::All
+        native_capture_target(&helper, &arguments.session, viewport).into_diagnostic()?;
+    let outcome = capture(
+        &helper,
+        &CaptureOptions {
+            session_directory: arguments.session,
+            width: target.width,
+            height: target.height,
+            fps: arguments.fps,
+            start_monotonic_ns,
+            end_monotonic_ns,
+            state_selection: if arguments.presented_only {
+                StateSelection::Presented
+            } else {
+                StateSelection::All
+            },
+            geometry_solver,
+            kind: CaptureKind::Video,
+            destination: None,
         },
-        geometry_solver,
-        kind: CaptureKind::Video,
-        destination: None,
-    })
+    )
     .into_diagnostic()?;
     return write_json_line(
         response,
@@ -810,25 +718,29 @@ pub(super) fn run_screenshot(
             return miette::miette!("the initial blank state has no native replay endpoint");
         })?;
         require_cli_capability(NATIVE_SCREENSHOT_CAPABILITY)?;
+        let helper = env::current_exe().into_diagnostic()?;
         let (target, geometry_solver) =
-            native_capture_target(&session, arguments.viewport).into_diagnostic()?;
-        let outcome = capture(&CaptureOptions {
-            session_directory: session,
-            width: target.width,
-            height: target.height,
-            fps: 24,
-            start_monotonic_ns: None,
-            end_monotonic_ns: None,
-            state_selection: StateSelection::Presented,
-            geometry_solver,
-            kind: CaptureKind::Screenshot {
-                state_id: inspection.record.state_id,
-                state_hash: inspection.record.state_hash,
-                event_seq,
-                event_byte_offset: inspection.record.event_byte_offset,
+            native_capture_target(&helper, &session, arguments.viewport).into_diagnostic()?;
+        let outcome = capture(
+            &helper,
+            &CaptureOptions {
+                session_directory: session,
+                width: target.width,
+                height: target.height,
+                fps: 24,
+                start_monotonic_ns: None,
+                end_monotonic_ns: None,
+                state_selection: StateSelection::Presented,
+                geometry_solver,
+                kind: CaptureKind::Screenshot {
+                    state_id: inspection.record.state_id,
+                    state_hash: inspection.record.state_hash,
+                    event_seq,
+                    event_byte_offset: inspection.record.event_byte_offset,
+                },
+                destination: Some(arguments.out),
             },
-            destination: Some(arguments.out),
-        })
+        )
         .into_diagnostic()?;
         return write_json_line(
             response,
@@ -1010,21 +922,6 @@ pub(super) fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn native_video_editing_requires_presentation_without_capture_tooling() {
-        assert_eq!(
-            video_render_capability_ids(PresentationSourceRequest::Native),
-            (None, PRESENTATION_CAPABILITY)
-        );
-        assert_eq!(
-            video_render_capability_ids(PresentationSourceRequest::Semantic {
-                fps: 24,
-                raster_profile: SemanticRasterProfile::Direct,
-            }),
-            (Some(SEMANTIC_VIDEO_CAPABILITY), PRESENTATION_CAPABILITY)
-        );
-    }
 
     #[test]
     fn semantic_raster_profiles_follow_source_and_preset_precedence() {

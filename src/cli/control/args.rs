@@ -57,6 +57,8 @@ pub(in crate::cli) enum ControlSubcommand {
             "state_unchanged"
         ])
 ))]
+// Require the group so another predicate's conflict cannot waive the idle requirement.
+#[command(group(ArgGroup::new("idle_selection").args(["idle"])))]
 #[command(override_usage = "termtrace wait [OPTIONS] <SESSION>")]
 pub(in crate::cli) struct WaitArgs {
     /// Live session name or canonical path.
@@ -121,13 +123,13 @@ pub(in crate::cli) struct WaitArgs {
     #[arg(long, value_parser = parse_wait_deadline_duration, default_value = "30s")]
     pub(in crate::cli) timeout: Duration,
     /// Return typed completed/output-closed/deadline snapshots instead of rejecting them.
-    #[arg(long, requires = "idle")]
+    #[arg(long, requires = "idle_selection")]
     pub(in crate::cli) allow_incomplete: bool,
     /// Require the stable interval to complete while the recorder is still live.
-    #[arg(long, requires = "idle", conflicts_with = "allow_incomplete")]
+    #[arg(long, requires = "idle_selection", conflicts_with = "allow_incomplete")]
     pub(in crate::cli) require_live_stability: bool,
     /// Include the compressed complete semantic state in the response.
-    #[arg(long, requires = "idle")]
+    #[arg(long, requires = "idle_selection")]
     pub(in crate::cli) full_state: bool,
 }
 

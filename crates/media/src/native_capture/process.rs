@@ -1,5 +1,4 @@
 use std::{
-    env::current_exe,
     fs::{self, OpenOptions},
     io::{ErrorKind, Write as _},
     os::unix::fs::OpenOptionsExt as _,
@@ -75,6 +74,7 @@ pub(super) fn spawn_xvfb(
 }
 
 pub(super) fn spawn_geometry_probe(
+    helper: &Path,
     staging: &Path,
     display: &str,
     report: &Path,
@@ -82,12 +82,6 @@ pub(super) fn spawn_geometry_probe(
     profile: &Path,
     stem: &str,
 ) -> Result<ManagedChild> {
-    let executable = current_exe().map_err(|source| {
-        return Error::Filesystem {
-            path: PathBuf::from("<current-executable>"),
-            source,
-        };
-    })?;
     let stdout = secure_file(&staging.join(format!("{stem}.stdout.log")))?;
     let stderr = secure_file(&staging.join(format!("{stem}.stderr.log")))?;
     let child = Command::new("dbus-run-session")
@@ -95,7 +89,7 @@ pub(super) fn spawn_geometry_probe(
         .arg("ghostty")
         .args(overrides)
         .arg("-e")
-        .arg(executable)
+        .arg(helper)
         .arg("geometry-probe")
         .arg("--out")
         .arg(report)
@@ -116,6 +110,7 @@ pub(super) fn spawn_geometry_probe(
     reason = "the arguments mirror the explicit playback subprocess protocol"
 )]
 pub(super) fn spawn_ghostty(
+    helper: &Path,
     options: &CaptureOptions,
     staging: &Path,
     display: &str,
@@ -126,12 +121,6 @@ pub(super) fn spawn_ghostty(
     overrides: &[String],
     profile: Option<&Path>,
 ) -> Result<ManagedChild> {
-    let executable = current_exe().map_err(|source| {
-        return Error::Filesystem {
-            path: PathBuf::from("<current-executable>"),
-            source,
-        };
-    })?;
     let stdout = secure_file(&staging.join("ghostty.stdout.log"))?;
     let stderr = secure_file(&staging.join("ghostty.stderr.log"))?;
     let mut command = Command::new("dbus-run-session");
@@ -140,7 +129,7 @@ pub(super) fn spawn_ghostty(
         .arg("ghostty")
         .args(overrides)
         .arg("-e")
-        .arg(executable)
+        .arg(helper)
         .arg("playback")
         .arg("--session")
         .arg(&options.session_directory)

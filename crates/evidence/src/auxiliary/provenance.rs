@@ -3,10 +3,7 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     fs::File,
-    os::unix::{
-        ffi::{OsStrExt as _, OsStringExt as _},
-        fs::PermissionsExt as _,
-    },
+    os::unix::{ffi::OsStrExt as _, fs::PermissionsExt as _},
     path::{Path, PathBuf},
 };
 
@@ -206,8 +203,8 @@ fn discover_invoked_file(
     working_directory: &Path,
 ) -> Option<(OsString, PathBuf)> {
     let resolved = executable.resolved.as_ref()?;
-    let resolved_path = OsString::from_vec(resolved.as_bytes().to_vec());
-    let name = Path::new(&resolved_path).file_name()?.to_string_lossy();
+    let resolved_path = Path::new(OsStr::from_bytes(resolved.as_bytes()));
+    let name = resolved_path.file_name()?.to_string_lossy();
     let interpreter = matches!(
         name.as_ref(),
         "sh" | "bash" | "dash" | "zsh" | "node" | "ruby" | "perl"

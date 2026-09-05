@@ -1,17 +1,23 @@
 use std::{
+    io,
     path::{Path, PathBuf},
     process::Command,
 };
 
-use termtrace_model::{terminal::replay::SourceRange, value::geometry::TerminalGeometryReport};
+use termtrace_engine::recording::{RecordOptions, record_with_output};
+use termtrace_evidence::event_log::EventLog;
+use termtrace_model::{
+    artifact::save::SemanticRasterProfile, terminal::replay::SourceRange,
+    value::geometry::TerminalGeometryReport,
+};
 
 use super::{
     ffmpeg::{append_change_visualization, cursor_mask_ranges, probe_delivery_video},
     mapping::{semantic_change_states_at, write_presentation_map},
     pipeline::select_preview_frames,
     planning::{
-        ceil_ratio, frame_ceil, frame_floor, hash_file, missing_native_capture_error,
-        ranges_overlap, validate_transform_geometry,
+        frame_ceil, frame_floor, hash_file, missing_native_capture_error, ranges_overlap,
+        validate_transform_geometry,
     },
     validation::{validate_ass_resource, validate_edit_plan, validate_edit_selector},
     *,
@@ -34,8 +40,6 @@ fn missing_native_capture_guides_capture_or_semantic_fallback() {
 fn rational_retiming_and_hold_round_up_to_frames() {
     assert_eq!(frame_floor(1_500_000_000, 24), 36);
     assert_eq!(frame_ceil(1_500_000_001, 24), 37);
-    assert_eq!(ceil_ratio(25, 4), 7);
-    assert_eq!(ceil_ratio(801 * 24, 1000), 20);
 }
 
 #[test]
@@ -279,7 +283,7 @@ fn exports_multi_clip_h264_presentation_atomically() {
             .expect("read generated annotations")
             .contains("frame 7 source 11")
     );
-    let probed = probe_delivery_video(&outcome.video).expect("probe delivery video");
+    let probed = probe_delivery_video(&outcome.directory).expect("probe delivery video");
     assert_eq!(probed["streams"][0]["width"].as_u64(), Some(64));
     assert_eq!(probed["streams"][0]["height"].as_u64(), Some(64));
     let manifest_bytes =
@@ -341,7 +345,7 @@ fn semantic_change_filters_retain_state_provenance_and_hold() {
             text_width: 80,
             text_height: 40,
         },
-        output_frame_count: 5,
+        output_frame_count: 6,
         change_visualization: Some(ChangeVisualization {
             source: ChangeSource::SemanticCells,
             mode: ChangeMode::Outline,
@@ -367,9 +371,52 @@ fn semantic_change_filters_retain_state_provenance_and_hold() {
     let mut filters = Vec::new();
     let output =
         append_change_visualization(&mut filters, &plan, "input").expect("build semantic overlay");
-    assert_eq!(output, "change0");
-    assert!(filters[0].contains("between(n,2,4)"));
-    assert_eq!(semantic_change_states_at(&plan, 4), vec![7]);
+    for frame in 0..6 {
+        assert_eq!(
+            semantic_change_states_at(&plan, frame),
+            if (2..=4).contains(&frame) {
+                vec![7]
+            } else {
+                Vec::new()
+            }
+        );
+    }
+    let rendered = Command::new("ffmpeg")
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=black:s=80x40:r=24",
+        ])
+        .args([
+            "-filter_complex",
+            &filters.join(";").replace("[input]", "[0:v]"),
+        ])
+        .args(["-map", &format!("[{output}]"), "-frames:v", "6"])
+        .args(["-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"])
+        .output()
+        .expect("render semantic overlay with FFmpeg");
+    assert!(
+        rendered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rendered.stderr)
+    );
+    let frames = rendered
+        .stdout
+        .chunks_exact(80 * 40 * 3)
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 6);
+    for (index, frame) in frames.iter().enumerate() {
+        let outline = &frame[(8 * 3)..(9 * 3)];
+        assert_eq!(
+            outline.iter().any(|component| return *component != 0),
+            (2..=4).contains(&index),
+            "overlay pixels at frame {index}"
+        );
+        assert_eq!(&frame[..3], &[0, 0, 0], "outside overlay at frame {index}");
+    }
 }
 
 #[test]
@@ -416,7 +463,35 @@ fn transform_geometry_is_ordered_bounded_and_even() {
 }
 
 #[test]
-fn facade_render_configuration_survives_normalization_inputs() {
+fn facade_render_configuration_survives_normalization() {
+    let temporary = tempfile::TempDir::new().expect("temporary session");
+    let session = temporary.path().join("session");
+    let options = RecordOptions {
+        output_directory: session.clone(),
+        creation_alias: None,
+        lineage: None,
+        import_provenance: None,
+        tmux_pane: None,
+        command: vec!["/bin/printf".into(), "normalization".into()],
+        working_directory: None,
+        cols: 80,
+        rows: 24,
+        cell_width_px: 8,
+        cell_height_px: 16,
+        geometry_provenance: Default::default(),
+        ghostty_profile: None,
+        term: "xterm-256color".to_owned(),
+        environment: Default::default(),
+        colors: Default::default(),
+        forward_stdin: false,
+        continue_after_output_mirror_closes: false,
+        durability_policy: Default::default(),
+        provenance_policy: Default::default(),
+        resource_limits: Default::default(),
+    };
+    record_with_output(&options, &mut io::sink()).expect("record completed evidence");
+    let log = EventLog::read(session.join("events.jsonl")).expect("read completed evidence");
+    let end = log.events.last().expect("terminal event").monotonic_ns;
     let edit = EditPlan {
         version: EDIT_PLAN_VERSION,
         clips: vec![EditClip {
@@ -425,7 +500,7 @@ fn facade_render_configuration_survives_normalization_inputs() {
                 ..EditSelector::default()
             },
             to: EditSelector {
-                monotonic_ns: Some(1_000_000_000),
+                monotonic_ns: Some(end),
                 ..EditSelector::default()
             },
             speed: RationalSpeed::default(),
@@ -463,20 +538,22 @@ fn facade_render_configuration_survives_normalization_inputs() {
         validate_transform_geometry(&edit, 800, 600, false).expect("resize should be exact"),
         (1_920, 1_080)
     );
+    let normalized = plan_with_source(
+        &session,
+        &edit,
+        PresentationSourceRequest::Semantic {
+            fps: 60,
+            raster_profile: SemanticRasterProfile::Direct,
+        },
+    )
+    .expect("normalize completed semantic evidence");
+    assert_eq!(normalized.render_config, edit.render_config);
     assert_eq!(
-        edit.render_config
-            .as_ref()
-            .map(|c| return c.preset.as_str()),
-        Some("lossless")
+        (normalized.output_width, normalized.output_height),
+        (1_920, 1_080)
     );
-    assert_eq!(
-        edit.render_config
-            .as_ref()
-            .map(|c| return c.renderer.as_str()),
-        Some("semantic")
-    );
-    assert_eq!(edit.delivery.crf, 0);
-    assert_eq!(edit.delivery.pixel_format, "rgb24");
+    assert_eq!(normalized.delivery.crf, 0);
+    assert_eq!(normalized.delivery.pixel_format, "rgb24");
 }
 
 #[test]
@@ -554,6 +631,50 @@ fn preview_selection_is_bounded_deterministic_and_change_aware() {
     )
     .expect("select changes");
     assert_eq!(selected, vec![3, 4, 9]);
+    let dense = PresentationPlan {
+        output_frame_count: u64::MAX,
+        ..PresentationPlan::default()
+    };
+    let options = PreviewOptions {
+        max_frames: 3,
+        ..PreviewOptions::default()
+    };
+    assert_eq!(
+        select_preview_frames(&dense, options).expect("sample huge frame range"),
+        vec![0, (u64::MAX - 1) / 2, u64::MAX - 1]
+    );
+    let encoded = PresentationPlan {
+        change_visualization: Some(ChangeVisualization {
+            source: ChangeSource::EncodedPixels,
+            mode: ChangeMode::Outline,
+            hold_frames: 1,
+            pixel_threshold: None,
+        }),
+        ..dense
+    };
+    assert_eq!(
+        select_preview_frames(
+            &encoded,
+            PreviewOptions {
+                change_only: true,
+                ..options
+            }
+        )
+        .expect("sample encoded changes"),
+        vec![1, 1 + (u64::MAX - 2) / 2, u64::MAX - 1]
+    );
+    assert_eq!(
+        select_preview_frames(
+            &encoded,
+            PreviewOptions {
+                max_frames: 1,
+                change_only: true,
+                ..options
+            }
+        )
+        .expect("sample single encoded change"),
+        vec![1]
+    );
 }
 
 #[test]

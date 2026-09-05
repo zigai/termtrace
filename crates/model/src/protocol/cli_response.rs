@@ -100,7 +100,7 @@ impl JsonSchema for CliResponseEnvelope {
         return Cow::Borrowed("CliResponseEnvelope");
     }
 
-    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         return json_schema!({
             "title": "Termtrace CLI response",
             "description": "Version 1 compact response emitted by --response agent.",
@@ -111,9 +111,9 @@ impl JsonSchema for CliResponseEnvelope {
                 "ok": { "type": "boolean" },
                 "type": { "type": "string", "minLength": 1 },
                 "code": { "type": "string", "minLength": 1 },
-                "applied": { "enum": ["none", "all", "partial", "unknown"] },
-                "retry": { "enum": ["not_needed", "safe_new_request", "same_request_id_only", "inspect_before_retry", "unsafe"] },
-                "session_state": { "enum": ["live", "ended", "completed", "pending", "unknown"] },
+                "applied": generator.subschema_for::<Applied>(),
+                "retry": generator.subschema_for::<Retry>(),
+                "session_state": generator.subschema_for::<SessionState>(),
                 "request_id": { "type": ["string", "integer"] },
                 "message": { "type": "string" },
                 "truncated": { "type": "boolean" },

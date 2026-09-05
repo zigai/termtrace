@@ -1,6 +1,9 @@
 use std::{env::temp_dir, fs, path::Path, time::Duration};
 
-use termtrace_engine::analysis::profile::ResolvedGhosttyProfile;
+use termtrace_engine::{
+    analysis::profile::ResolvedGhosttyProfile,
+    recording::{resolve_ghostty_profile, restore_ghostty_profile},
+};
 use termtrace_evidence::{
     artifact::{create_private_directory, write_secure},
     session::read_manifest,
@@ -20,14 +23,16 @@ use super::{
         DisplayLease, ghostty_overrides, spawn_geometry_probe, spawn_xvfb, wait_for_json,
         wait_for_success, wait_for_x_socket,
     },
-    profile::{materialize_profile, resolve_ghostty_profile, restore_ghostty_profile},
+    profile::materialize_profile,
 };
 
 /// Resolve the native capture viewport requested by a session or explicit caller override.
 ///
 /// An explicit viewport is returned unchanged. Otherwise the recorded Ghostty profile is restored
 /// and the viewport is solved to reproduce the session's canonical terminal grid.
+/// `helper` is the Termtrace executable providing the geometry-probe subprocess protocol.
 pub fn native_capture_target(
+    helper: &Path,
     session: &Path,
     viewport: Option<CaptureTarget>,
 ) -> Result<(CaptureTarget, Option<GeometrySolveReport>)> {
@@ -60,6 +65,7 @@ pub fn native_capture_target(
         resolve_ghostty_profile(None, GhosttyVisualOverrides::default())?
     };
     let report = solve_ghostty_geometry(
+        helper,
         manifest.geometry.cols,
         manifest.geometry.rows,
         initial,
@@ -72,7 +78,9 @@ pub fn native_capture_target(
 ///
 /// The probe runs in an isolated display. Failed probes retain their staging directory in
 /// [`Error::CaptureFailed`] for diagnosis.
+/// `helper` is the Termtrace executable providing the geometry-probe subprocess protocol.
 pub fn probe_ghostty_geometry(
+    helper: &Path,
     target: CaptureTarget,
     profile: &ResolvedGhosttyProfile,
 ) -> Result<TerminalGeometryReport> {
@@ -83,7 +91,7 @@ pub fn probe_ghostty_geometry(
     }
     let staging = temp_dir().join(format!("termtrace-geometry-{}", uuid::Uuid::now_v7()));
     create_private_directory(&staging)?;
-    match probe_staged(target, profile, &staging) {
+    match probe_staged(helper, target, profile, &staging) {
         Ok(fitted) => {
             fs::remove_dir_all(&staging).map_err(|source| {
                 return Error::Filesystem {
@@ -105,14 +113,16 @@ pub fn probe_ghostty_geometry(
 /// Find a Ghostty viewport that exactly reproduces the required terminal cell grid.
 ///
 /// The returned report records every measured viewport and the selected exact fit.
+/// `helper` is the Termtrace executable providing the geometry-probe subprocess protocol.
 pub fn solve_ghostty_geometry(
+    helper: &Path,
     required_cols: u16,
     required_rows: u16,
     initial: CaptureTarget,
     profile: &ResolvedGhosttyProfile,
 ) -> Result<GeometrySolveReport> {
     return solve_geometry_with(required_cols, required_rows, initial, |target| {
-        return probe_ghostty_geometry(target, profile);
+        return probe_ghostty_geometry(helper, target, profile);
     });
 }
 
@@ -220,6 +230,7 @@ pub(super) fn validate_capture_geometry(
 }
 
 fn probe_staged(
+    helper: &Path,
     target: CaptureTarget,
     profile: &ResolvedGhosttyProfile,
     staging: &Path,
@@ -235,6 +246,7 @@ fn probe_staged(
     wait_for_x_socket(&lease, &mut xvfb, Duration::from_secs(5))?;
     let report_path = staging.join("geometry.json");
     let mut ghostty = spawn_geometry_probe(
+        helper,
         staging,
         &display,
         &report_path,

@@ -159,6 +159,16 @@ pub struct StateIndexEntry {
     pub control_rank: Option<u64>,
 }
 
+/// Seek position for a canonical event's first control-index entry.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControlSourceIndexEntry {
+    /// Canonical event sequence.
+    pub event_seq: u64,
+    /// Byte offset of the corresponding control-index entry.
+    pub control_index_offset: u64,
+}
+
 /// Periodic full-state replay seed addressable from the compact state index.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

@@ -2,15 +2,15 @@
 
 use std::fmt::Write;
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
 use termtrace_model::terminal::diff::SemanticDiff;
 use termtrace_model::terminal::state::SemanticState;
 
 use crate::error::Result;
-use crate::font::{SEMANTIC_TEXT_FONT_FAMILY, semantic_font_set};
+use crate::font::{SEMANTIC_RASTER_TEXT_FONT_FAMILY, SEMANTIC_TEXT_FONT_FAMILY, semantic_font_set};
 use crate::raster::{rasterize_svg, validate_geometry};
-use crate::semantic_svg::{SEMANTIC_CELL_HEIGHT, SEMANTIC_CELL_WIDTH, render_svg};
+use crate::semantic_svg::{
+    SEMANTIC_CELL_HEIGHT, SEMANTIC_CELL_WIDTH, write_font_faces, write_scene_content,
+};
 
 /// Stable semantic diff SVG renderer identity.
 pub const SEMANTIC_DIFF_SVG_RENDERER: &str = "termtrace-semantic-diff-svg-v4";
@@ -25,6 +25,15 @@ pub fn render_diff_svg(
     after: &SemanticState,
     difference: &SemanticDiff,
 ) -> Result<Vec<u8>> {
+    return render_diff_scene(before, after, difference, true);
+}
+
+fn render_diff_scene(
+    before: &SemanticState,
+    after: &SemanticState,
+    difference: &SemanticDiff,
+    embed_font: bool,
+) -> Result<Vec<u8>> {
     const CELL_WIDTH: u32 = SEMANTIC_CELL_WIDTH as u32;
     const CELL_HEIGHT: u32 = SEMANTIC_CELL_HEIGHT as u32;
     const HEADER: u32 = 30;
@@ -35,23 +44,32 @@ pub fn render_diff_svg(
         .saturating_add(HEADER);
     let width = before_width.saturating_add(after_width);
     let mut svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" data-truth-layer=\"semantic_rendering\" data-renderer=\"{SEMANTIC_DIFF_SVG_RENDERER}\">\n<style>@font-face{{font-family:'{SEMANTIC_TEXT_FONT_FAMILY}';src:url(data:font/ttf;base64,"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" data-truth-layer=\"semantic_rendering\" data-renderer=\"{SEMANTIC_DIFF_SVG_RENDERER}\">\n"
     );
-    STANDARD.encode_string(semantic_font_set()?.regular_face_bytes(), &mut svg);
+    let font_set = semantic_font_set()?;
+    let label_font = if embed_font {
+        write_font_faces(&mut svg, font_set);
+        SEMANTIC_TEXT_FONT_FAMILY
+    } else {
+        SEMANTIC_RASTER_TEXT_FONT_FAMILY
+    };
     let after_label_x = before_width.saturating_add(4);
     let _ = write!(
         svg,
-        ") format('truetype');font-weight:normal;font-style:normal}}text{{font-family:'{SEMANTIC_TEXT_FONT_FAMILY}'}}</style>\n<rect width=\"100%\" height=\"100%\" fill=\"#202020\"/>\n<text x=\"4\" y=\"20\" fill=\"white\" font-size=\"14\">before</text>\n<text x=\"{after_label_x}\" y=\"20\" fill=\"white\" font-size=\"14\">after</text>\n<image x=\"0\" y=\"{HEADER}\" width=\"{before_width}\" href=\"data:image/svg+xml;base64,"
+        "<rect width=\"100%\" height=\"100%\" fill=\"#202020\"/>\n<text x=\"4\" y=\"20\" fill=\"white\" font-family=\"{label_font}\" font-size=\"14\">before</text>\n<text x=\"{after_label_x}\" y=\"20\" fill=\"white\" font-family=\"{label_font}\" font-size=\"14\">after</text>\n"
     );
-    let before_rendered = render_svg(before)?;
-    STANDARD.encode_string(&before_rendered, &mut svg);
-    let _ = write!(
-        svg,
-        "\"/>\n<image x=\"{before_width}\" y=\"{HEADER}\" width=\"{after_width}\" href=\"data:image/svg+xml;base64,"
-    );
-    let after_rendered = render_svg(after)?;
-    STANDARD.encode_string(&after_rendered, &mut svg);
-    svg.push_str("\"/>\n");
+    for (state, x, viewport_width) in [
+        (before, 0, before_width),
+        (after, before_width, after_width),
+    ] {
+        let viewport_height = u32::from(state.rows).saturating_mul(CELL_HEIGHT);
+        let _ = writeln!(
+            svg,
+            "<svg x=\"{x}\" y=\"{HEADER}\" width=\"{viewport_width}\" height=\"{viewport_height}\" viewBox=\"0 0 {viewport_width} {viewport_height}\" overflow=\"hidden\">"
+        );
+        write_scene_content(&mut svg, state, font_set, embed_font);
+        svg.push_str("</svg>\n");
+    }
     for row in &difference.rows {
         for cell in &row.cells {
             let x = before_width.saturating_add(u32::from(cell.column).saturating_mul(CELL_WIDTH));
@@ -79,5 +97,5 @@ pub fn render_diff_png(
 ) -> Result<Vec<u8>> {
     validate_geometry(before.cols, before.rows, "before semantic state")?;
     validate_geometry(after.cols, after.rows, "after semantic state")?;
-    return rasterize_svg(&render_diff_svg(before, after, difference)?);
+    return rasterize_svg(&render_diff_scene(before, after, difference, false)?);
 }

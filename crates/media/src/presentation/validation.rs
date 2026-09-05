@@ -315,20 +315,12 @@ pub(super) fn validate_ass_resource(path: &Path) -> Result<()> {
             source,
         };
     })?;
-    let content = str::from_utf8(&bytes).map_err(|error| {
+    str::from_utf8(&bytes).map_err(|error| {
         return plan_error(format!("ASS subtitle resource must be UTF-8: {error}"));
     })?;
-    let escaped = path
-        .to_str()
-        .map(|value| {
-            return value
-                .replace('\\', "\\\\")
-                .replace(':', "\\:")
-                .replace('\'', "\\'");
-        })
-        .ok_or_else(|| return plan_error("ASS subtitle resource path is not valid UTF-8"))?;
+    let escaped = super::filter_path_value(path)?;
     let filter = format!("ass='{escaped}'");
-    let ffmpeg_run = Command::new("ffmpeg")
+    let output = Command::new("ffmpeg")
         .args([
             "-hide_banner",
             "-nostdin",
@@ -344,29 +336,19 @@ pub(super) fn validate_ass_resource(path: &Path) -> Result<()> {
             "null",
             "-",
         ])
-        .output();
-
-    match ffmpeg_run {
-        Ok(output) if !output.status.success() => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(plan_error(format!(
-                "ASS subtitle resource failed FFmpeg validation: {}",
-                stderr.trim()
-            )));
-        }
-        Ok(_) => return Ok(()),
-        Err(_) => {
-            if !content.contains("[Script Info]")
-                || !content.contains("[Events]")
-                || !content
-                    .lines()
-                    .any(|line| return line.starts_with("Dialogue:"))
-            {
-                return Err(plan_error(
-                    "ASS subtitle resource requires Script Info, Events, and Dialogue sections",
-                ));
-            }
-        }
+        .output()
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: PathBuf::from("ffmpeg"),
+                source,
+            };
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(plan_error(format!(
+            "ASS subtitle resource failed FFmpeg validation: {}",
+            stderr.trim()
+        )));
     }
     return Ok(());
 }

@@ -33,18 +33,6 @@ pub enum Error {
         /// Duplicated repository filename.
         filename: &'static str,
     },
-    /// The stable public inventory names a contract absent from the registry.
-    #[error("public schema inventory is missing registry entry: {filename}")]
-    MissingRegistryEntry {
-        /// Expected stable filename.
-        filename: &'static str,
-    },
-    /// The registry contains a contract absent from the stable public inventory.
-    #[error("schema registry contains an unrecognized entry: {filename}")]
-    UnexpectedRegistryEntry {
-        /// Unexpected stable filename.
-        filename: &'static str,
-    },
     /// Schemars produced a value that cannot be emitted as a schema object.
     #[error("generated schema root for {filename} is not an object")]
     GeneratedRootNotObject {
@@ -117,6 +105,9 @@ macro_rules! registry {
                 generator: schema_generator!($($generator)+),
             }),+
         ];
+
+        /// Complete, ordered list of public schema filenames.
+        pub static PUBLIC_SCHEMA_FILENAMES: &[&str] = &[$($filename),+];
     };
 }
 
@@ -337,86 +328,13 @@ registry!(
     ),
 );
 
-/// Complete, ordered list of public schema filenames.
-pub static PUBLIC_SCHEMA_FILENAMES: &[&str] = &[
-    "event-log-header.schema.json",
-    "event-record.schema.json",
-    "event-projection.schema.json",
-    "capability-report.schema.json",
-    "save-manifest.schema.json",
-    "screenshot-batch-manifest.schema.json",
-    "scenario.schema.json",
-    "scenario-report.schema.json",
-    "scenario-frame-snapshot.schema.json",
-    "scenario-suite-report.schema.json",
-    "evidence-export-plan.schema.json",
-    "evidence-export-manifest.schema.json",
-    "control-request.schema.json",
-    "control-response.schema.json",
-    "driver-request.schema.json",
-    "driver-response.schema.json",
-    "environment-spec.schema.json",
-    "session.schema.json",
-    "completion.schema.json",
-    "verification-report.schema.json",
-    "artifact-root-record.schema.json",
-    "mutation-journal-record.schema.json",
-    "provenance-policy.schema.json",
-    "environment-provenance.schema.json",
-    "execution-provenance.schema.json",
-    "evidence-receipt.schema.json",
-    "registry-entry.schema.json",
-    "registry-list-entry.schema.json",
-    "state-record.schema.json",
-    "state-index-entry.schema.json",
-    "state-inspection.schema.json",
-    "replay-manifest.schema.json",
-    "semantic-replay-checkpoint.schema.json",
-    "review-summary.schema.json",
-    "reviewer-capabilities.schema.json",
-    "review-search-result.schema.json",
-    "review-export-manifest.schema.json",
-    "visual-manifest.schema.json",
-    "geometry-solve-report.schema.json",
-    "video-map-entry.schema.json",
-    "recovery-report.schema.json",
-    "wait-outcome.schema.json",
-    "screen-wait-outcome.schema.json",
-    "observation.schema.json",
-    "frame-envelope.schema.json",
-    "screen-frame.schema.json",
-    "screen-projection-request.schema.json",
-    "replay-checkpoint.schema.json",
-    "output-projection-report.schema.json",
-    "timeline-entry.schema.json",
-    "semantic-diff.schema.json",
-    "vt-token.schema.json",
-    "explain-report.schema.json",
-    "diagnose-report.schema.json",
-    "playback-timing.schema.json",
-    "playback-failure.schema.json",
-    "edit-plan.schema.json",
-    "presentation-plan.schema.json",
-    "presentation-manifest.schema.json",
-    "presentation-map-entry.schema.json",
-    "presentation-preview-manifest.schema.json",
-    "marker-record.schema.json",
-    "semantic-video-source-plan.schema.json",
-    "semantic-frame-span.schema.json",
-    "semantic-video-source-manifest.schema.json",
-    "tmux-recording-manifest.schema.json",
-    "tmux-bundle-manifest.schema.json",
-    "acceptance-benchmark.schema.json",
-    "cli-response.schema.json",
-];
-
 /// Return the complete ordered catalog after checking registry invariants.
 pub fn catalog() -> Result<&'static [SchemaEntry]> {
     validate_registry()?;
     return Ok(SCHEMA_REGISTRY);
 }
 
-/// Validate uniqueness and filename stability for the complete registry.
+/// Validate filename uniqueness for the complete registry.
 pub fn validate_registry() -> Result<()> {
     let mut filenames: BTreeSet<&'static str> = BTreeSet::new();
     for entry in SCHEMA_REGISTRY {
@@ -424,17 +342,6 @@ pub fn validate_registry() -> Result<()> {
             return Err(Error::DuplicateFilename {
                 filename: entry.filename,
             });
-        }
-    }
-    for &filename in PUBLIC_SCHEMA_FILENAMES {
-        if !filenames.contains(filename) {
-            return Err(Error::MissingRegistryEntry { filename });
-        }
-    }
-    let expected: BTreeSet<&'static str> = PUBLIC_SCHEMA_FILENAMES.iter().copied().collect();
-    for filename in filenames {
-        if !expected.contains(filename) {
-            return Err(Error::UnexpectedRegistryEntry { filename });
         }
     }
     return Ok(());

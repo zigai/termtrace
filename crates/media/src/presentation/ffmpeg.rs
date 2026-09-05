@@ -16,8 +16,7 @@ use termtrace_render::semantic_font_set;
 use crate::{Error, Result};
 
 use super::{
-    mapping::mapped_source_frame, plan_error, planning::ceil_ratio,
-    validation::validate_ass_resource,
+    filter_path_value, mapping::mapped_source_frame, plan_error, validation::validate_ass_resource,
 };
 
 pub(super) fn render_contact_sheet(
@@ -656,7 +655,7 @@ fn ass_color(rgb: &str, opacity: u8) -> Result<String> {
 fn ass_time(frame: u64, fps: u16, end: bool) -> String {
     let numerator = frame.saturating_mul(100);
     let centiseconds = if end {
-        ceil_ratio(numerator, u64::from(fps))
+        numerator.div_ceil(u64::from(fps))
     } else {
         numerator / u64::from(fps)
     };
@@ -804,14 +803,4 @@ pub(super) fn write_source_frame_hashes(source_video: &Path, staging: &Path) -> 
         return Err(plan_error("FFmpeg source-frame hash output was empty"));
     }
     return Ok(());
-}
-
-pub(super) fn filter_path_value(path: &Path) -> Result<String> {
-    let value = path
-        .to_str()
-        .ok_or_else(|| return plan_error("FFmpeg filter resource path is not UTF-8"))?;
-    return Ok(value
-        .replace('\\', "\\\\")
-        .replace(':', "\\:")
-        .replace('\'', "\\'"));
 }

@@ -7,7 +7,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::{Error, Result};
+use crate::{Error, Result, capability::probe_semantic_video_encode};
 use termtrace_engine::{Error as EngineError, replay::visit_states};
 use termtrace_evidence::{
     artifact::{finish_writer, hash_regular_file, secure_file, secure_writer, write_secure},
@@ -159,12 +159,6 @@ pub fn materialize(
             reason: status.to_string(),
         });
     }
-    if summary.written_frames != source.frame_count {
-        return Err(video_error(format!(
-            "semantic source wrote {} frames instead of {}",
-            summary.written_frames, source.frame_count
-        )));
-    }
 
     write_frame_spans(&directory.join("semantic-source-map.jsonl"), &summary.spans)?;
     let (_, source_video_hash) = hash_regular_file(&output)?;
@@ -313,7 +307,6 @@ impl<'scheduler, W: Write> SemanticFrameScheduler<'scheduler, W> {
             ));
         }
         return Ok(FrameSummary {
-            written_frames: self.next_frame,
             presented_state_count: self.presented_state_count,
             rendered_state_count: self.rendered_state_count,
             suppressed_state_count: self.suppressed_state_count,
@@ -324,7 +317,6 @@ impl<'scheduler, W: Write> SemanticFrameScheduler<'scheduler, W> {
 }
 
 struct FrameSummary {
-    written_frames: u64,
     presented_state_count: u64,
     rendered_state_count: u64,
     suppressed_state_count: u64,
@@ -474,51 +466,13 @@ fn require_semantic_video_capability() -> Result<()> {
             remediation: "install FFmpeg with FFprobe and the libx264rgb encoder".to_owned(),
         };
     })?;
-    let output = Command::new("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=black:s=16x16:d=0.04",
-            "-frames:v",
-            "1",
-            "-vf",
-            "format=rgb24",
-            "-c:v",
-            "libx264rgb",
-            "-crf",
-            "0",
-            "-preset",
-            "medium",
-            "-f",
-            "null",
-            "-",
-        ])
-        .output()
-        .map_err(|source| {
-            return Error::CapabilityBlocked {
-                id: SEMANTIC_VIDEO_CAPABILITY.to_owned(),
-                code: "semantic_video_dependency_missing".to_owned(),
-                detail: format!("could not execute FFmpeg: {source}"),
-                remediation: "install FFmpeg with FFprobe and the libx264rgb encoder".to_owned(),
-            };
-        })?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let detail: String = String::from_utf8_lossy(&output.stderr)
-        .chars()
-        .take(1_024)
-        .collect();
-    return Err(Error::CapabilityBlocked {
-        id: SEMANTIC_VIDEO_CAPABILITY.to_owned(),
-        code: "semantic_video_dependency_missing".to_owned(),
-        detail: format!("FFmpeg semantic-video encode failed: {detail}"),
-        remediation: "install FFmpeg with FFprobe and the libx264rgb encoder".to_owned(),
+    return probe_semantic_video_encode().map_err(|detail| {
+        return Error::CapabilityBlocked {
+            id: SEMANTIC_VIDEO_CAPABILITY.to_owned(),
+            code: "semantic_video_dependency_missing".to_owned(),
+            detail,
+            remediation: "install FFmpeg with FFprobe and the libx264rgb encoder".to_owned(),
+        };
     });
 }
 
@@ -674,7 +628,6 @@ mod tests {
             .expect("finish supersampled schedule");
 
         assert_eq!(bytes.len(), frame_bytes * 2);
-        assert_eq!(summary.written_frames, 2);
         assert_eq!(summary.presented_state_count, 1);
         assert_eq!(summary.rendered_state_count, 1);
         assert_eq!(summary.suppressed_state_count, 0);

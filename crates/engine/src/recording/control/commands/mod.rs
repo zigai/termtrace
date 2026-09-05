@@ -31,18 +31,18 @@ use termtrace_model::{
     value::ByteString,
 };
 use termtrace_terminal::{
-    encode_focus, project_screen_frame, semantic_state_hash, supported_geometry_cell_count,
-    validate_screen_region,
+    encode_focus, project_screen_frame, semantic_state_hash, semantic_viewport_text,
+    supported_geometry_cell_count, validate_screen_region,
 };
 
 use super::super::{
     actor::SessionActor,
     input::{
-        InputSequenceExecution, apply_input, apply_resize, encode_paste, interpolate_cell,
-        mouse_button_name, semantic_key_input, semantic_key_name,
+        InputSequenceExecution, apply_input, apply_resize, interpolate_cell, mode_hash,
+        mouse_button_name, prepare_bytes, prepare_key, prepare_paste,
     },
     model::TerminalGeometry,
-    presentation::{LiveTerminal, find_text_regions, resize_semantic, semantic_viewport_text},
+    presentation::{LiveTerminal, find_text_regions, resize_semantic},
     runtime::HOST_SIGNAL_GRACE_PERIOD,
     support::{
         actor_boundaries, control_error_response, control_rejected, finish_with_cleanup,
@@ -50,8 +50,8 @@ use super::super::{
     },
 };
 use super::screen::{
-    MAX_SCREEN_WAITERS, ScreenWaiter, evaluate_screen_predicate, presented_state_hash,
-    valid_blake3_hash, validate_screen_predicate,
+    CompiledScreenPredicate, MAX_SCREEN_WAITERS, ScreenWaiter, compile_screen_predicate,
+    evaluate_screen_predicate, presented_state_hash, valid_blake3_hash,
 };
 use crate::{Error, Result};
 
@@ -63,8 +63,9 @@ mod response;
 
 pub(in crate::recording) use action::PendingInputSequence;
 pub(in crate::recording) use mutations::apply_signal;
-use observation::{evaluate_action_postcondition, validate_action_postcondition};
-use response::{control_error_code, screen_frame_error_response};
-pub(in crate::recording::control) use response::{
-    screen_frame_error_code, screen_frame_failure_details,
+use observation::{
+    AdmittedAction, AdmittedPostcondition, compile_action_postcondition,
+    evaluate_action_postcondition,
 };
+use response::control_error_code;
+pub(in crate::recording::control) use response::screen_frame_error_response;

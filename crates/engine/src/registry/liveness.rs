@@ -2,10 +2,6 @@ use super::*;
 
 /// Return the live recorder PID/start pair observed through socket credentials.
 pub fn recorder_identity(session: &Path) -> Option<(u32, u64)> {
-    return recorder_process_identity(session);
-}
-
-pub(super) fn recorder_process_identity(session: &Path) -> Option<(u32, u64)> {
     let manifest = read_manifest(session).ok()?;
     let address = SocketAddr::from_abstract_name(manifest.control_socket.as_bytes()).ok()?;
     let stream = UnixStream::connect_addr(&address).ok()?;

@@ -55,9 +55,10 @@ pub(super) fn consume_runtime(
 ) -> Result<RuntimeOutcome> {
     let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
     let reader = replace(&mut actor.spawned.reader, Box::new(io::empty()));
-    let workers = RuntimeWorkers::start(
+    let (workers, receiver) = RuntimeWorkers::start(
         reader,
         &sender,
+        receiver,
         forward_stdin,
         initial_geometry,
         control_socket,
@@ -116,90 +117,7 @@ pub(super) fn consume_runtime(
             actor.event_log.flush_due()?;
             actor.evaluate_screen_waiters(child_exited, actor.progress.output_closed)?;
 
-            if actor.progress.resource_limit.is_none()
-                && let Some(limit) = actor.resource_limits.output_bytes
-                && actor.progress.output_bytes > limit
-            {
-                let outcome = ResourceLimitOutcome {
-                    kind: ResourceLimitKind::OutputBytes,
-                    limit,
-                    observed: actor.progress.output_bytes,
-                };
-                actor.event_log.append(Event::HostError {
-                    code: "output_budget_exceeded".to_owned(),
-                    message: format!(
-                        "output budget of {limit} bytes was exceeded at {} observed bytes; every observed byte was retained",
-                        actor.progress.output_bytes
-                    ),
-                })?;
-                apply_signal(
-                    actor.spawned.pid,
-                    &mut actor.event_log,
-                    Uuid::now_v7(),
-                    ProcessSignal::Terminate,
-                    true,
-                )?;
-                actor.progress.resource_limit = Some(outcome);
-                actor.resource_kill_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
-            }
-
-            if actor.progress.resource_limit.is_none()
-                && let Some(limit_ms) = actor.resource_limits.max_duration_ms
-            {
-                let elapsed_ms =
-                    u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
-                if elapsed_ms >= limit_ms {
-                    let outcome = ResourceLimitOutcome {
-                        kind: ResourceLimitKind::MaxDuration,
-                        limit: limit_ms,
-                        observed: elapsed_ms,
-                    };
-                    actor.event_log.append(Event::HostError {
-                        code: "max_duration_exceeded".to_owned(),
-                        message: format!(
-                            "session duration limit of {limit_ms}ms was exceeded at {elapsed_ms}ms; terminating process group"
-                        ),
-                    })?;
-                    apply_signal(
-                        actor.spawned.pid,
-                        &mut actor.event_log,
-                        Uuid::now_v7(),
-                        ProcessSignal::Terminate,
-                        true,
-                    )?;
-                    actor.progress.resource_limit = Some(outcome);
-                    actor.resource_kill_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
-                }
-            }
-
-            if actor.progress.resource_limit.is_none()
-                && let Some(limit_ms) = actor.resource_limits.idle_timeout_ms
-            {
-                let idle_ms =
-                    u64::try_from(last_activity_at.elapsed().as_millis()).unwrap_or(u64::MAX);
-                if idle_ms >= limit_ms {
-                    let outcome = ResourceLimitOutcome {
-                        kind: ResourceLimitKind::IdleTimeout,
-                        limit: limit_ms,
-                        observed: idle_ms,
-                    };
-                    actor.event_log.append(Event::HostError {
-                        code: "idle_timeout_exceeded".to_owned(),
-                        message: format!(
-                            "idle timeout of {limit_ms}ms without activity was exceeded at {idle_ms}ms; terminating process group"
-                        ),
-                    })?;
-                    apply_signal(
-                        actor.spawned.pid,
-                        &mut actor.event_log,
-                        Uuid::now_v7(),
-                        ProcessSignal::Terminate,
-                        true,
-                    )?;
-                    actor.progress.resource_limit = Some(outcome);
-                    actor.resource_kill_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
-                }
-            }
+            actor.enforce_resource_limits(started_at, last_activity_at)?;
 
             if received_output && actor.exit_status.is_some() && !actor.progress.output_closed {
                 actor.drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
@@ -210,7 +128,12 @@ pub(super) fn consume_runtime(
                     .is_some_and(|deadline| return Instant::now() >= deadline)
                 && !actor.process_group_killed
             {
-                let (code, message) = match actor.progress.resource_limit.as_ref().map(|o| return o.kind) {
+                let (code, message) = match actor
+                    .progress
+                    .resource_limit
+                    .as_ref()
+                    .map(|o| return o.kind)
+                {
                     Some(ResourceLimitKind::MaxDuration) => (
                         "max_duration_force_kill",
                         "child did not exit after duration-limit termination; process group was killed",
@@ -288,7 +211,7 @@ pub(super) fn consume_runtime(
         terminate_process_group(actor.spawned.pid);
         let _ = actor.spawned.child.kill();
     }
-    let status = workers.finish(result)?;
+    let status = workers.finish(receiver, result)?;
 
     return Ok(RuntimeOutcome {
         status,
@@ -299,6 +222,86 @@ pub(super) fn consume_runtime(
 }
 
 impl SessionActor<'_> {
+    fn enforce_resource_limits(
+        &mut self,
+        started_at: Instant,
+        last_activity_at: Instant,
+    ) -> Result<()> {
+        if self.progress.resource_limit.is_some() {
+            return Ok(());
+        }
+        let detected = (|| {
+            if let Some(limit) = self.resource_limits.output_bytes
+                && self.progress.output_bytes > limit
+            {
+                return Some((
+                    ResourceLimitOutcome {
+                        kind: ResourceLimitKind::OutputBytes,
+                        limit,
+                        observed: self.progress.output_bytes,
+                    },
+                    "output_budget_exceeded",
+                    format!(
+                        "output budget of {limit} bytes was exceeded at {} observed bytes; every observed byte was retained",
+                        self.progress.output_bytes
+                    ),
+                ));
+            }
+            if let Some(limit_ms) = self.resource_limits.max_duration_ms {
+                let elapsed_ms =
+                    u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+                if elapsed_ms >= limit_ms {
+                    return Some((
+                        ResourceLimitOutcome {
+                            kind: ResourceLimitKind::MaxDuration,
+                            limit: limit_ms,
+                            observed: elapsed_ms,
+                        },
+                        "max_duration_exceeded",
+                        format!(
+                            "session duration limit of {limit_ms}ms was exceeded at {elapsed_ms}ms; terminating process group"
+                        ),
+                    ));
+                }
+            }
+            if let Some(limit_ms) = self.resource_limits.idle_timeout_ms {
+                let idle_ms =
+                    u64::try_from(last_activity_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+                if idle_ms >= limit_ms {
+                    return Some((
+                        ResourceLimitOutcome {
+                            kind: ResourceLimitKind::IdleTimeout,
+                            limit: limit_ms,
+                            observed: idle_ms,
+                        },
+                        "idle_timeout_exceeded",
+                        format!(
+                            "idle timeout of {limit_ms}ms without activity was exceeded at {idle_ms}ms; terminating process group"
+                        ),
+                    ));
+                }
+            }
+            return None;
+        })();
+        let Some((outcome, code, message)) = detected else {
+            return Ok(());
+        };
+        self.event_log.append(Event::HostError {
+            code: code.to_owned(),
+            message,
+        })?;
+        apply_signal(
+            self.spawned.pid,
+            &mut self.event_log,
+            Uuid::now_v7(),
+            ProcessSignal::Terminate,
+            true,
+        )?;
+        self.progress.resource_limit = Some(outcome);
+        self.resource_kill_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
+        return Ok(());
+    }
+
     fn process_runtime_message(&mut self, message: RuntimeMessage) -> Result<()> {
         match message {
             RuntimeMessage::Output(data) => {

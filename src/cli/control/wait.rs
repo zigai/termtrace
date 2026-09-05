@@ -4,13 +4,6 @@ pub(in crate::cli) fn run_wait(
     response: &mut ResponseWriter,
     arguments: WaitArgs,
 ) -> Result<ExitCode> {
-    if arguments.idle.is_none()
-        && (arguments.allow_incomplete || arguments.require_live_stability || arguments.full_state)
-    {
-        return Err(miette::miette!(
-            "--allow-incomplete, --require-live-stability, and --full-state require --idle"
-        ));
-    }
     let timeout = arguments.timeout;
     if let Some(stable_for) = arguments.idle {
         return run_idle_wait(response, arguments, stable_for);

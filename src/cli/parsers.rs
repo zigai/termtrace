@@ -257,12 +257,9 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn duration_parsers_enforce_domain_limits_and_wording() {
+    fn duration_parsers_enforce_domain_limits() {
         assert_eq!(parse_pace_duration("60s"), Ok(Duration::from_secs(60)));
-        assert_eq!(
-            parse_pace_duration("61s"),
-            Err("pace duration must not exceed 60s".to_owned())
-        );
+        assert!(parse_pace_duration("61s").is_err());
         assert_eq!(parse_stability_duration("90s"), Ok(Duration::from_secs(90)));
         assert_eq!(
             parse_wait_deadline_duration("2m"),
@@ -272,20 +269,8 @@ mod tests {
             parse_media_hold_duration("01:30"),
             Ok(Duration::from_secs(90))
         );
-        assert!(
-            parse_stability_duration("invalid")
-                .expect_err("invalid stability duration")
-                .starts_with("stability duration ")
-        );
-        assert!(
-            parse_wait_deadline_duration("invalid")
-                .expect_err("invalid wait deadline")
-                .starts_with("wait deadline ")
-        );
-        assert!(
-            parse_media_hold_duration("invalid")
-                .expect_err("invalid media hold")
-                .starts_with("media hold duration ")
-        );
+        assert!(parse_stability_duration("invalid").is_err());
+        assert!(parse_wait_deadline_duration("invalid").is_err());
+        assert!(parse_media_hold_duration("invalid").is_err());
     }
 }

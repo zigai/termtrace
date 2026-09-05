@@ -15,7 +15,7 @@ use nix::{
 };
 use termtrace_model::value::geometry::TerminalGeometryReport;
 
-use crate::{Error, Result};
+use crate::{Error, Result, error::finish_with_cleanup};
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -109,7 +109,7 @@ impl TerminalInputDrain {
                 return terminal_error("join playback input drain", "thread panicked");
             })?;
         });
-        return super::runtime::finish_with_cleanup(cancel, joined);
+        return finish_with_cleanup(cancel, joined);
     }
 }
 

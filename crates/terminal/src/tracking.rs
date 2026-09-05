@@ -36,7 +36,7 @@ enum PresentationParseState {
     Ground,
     Escape,
     Csi(CsiModeParser),
-    CsiPassthrough(CsiModeParser),
+    CsiPassthrough,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -122,21 +122,18 @@ impl PresentationTracker {
                 }
                 parser.push(byte);
                 if self.pending.len() > MAX_TRACKED_SEQUENCE_BYTES {
-                    let parser = *parser;
-                    self.state = PresentationParseState::CsiPassthrough(parser);
+                    self.state = PresentationParseState::CsiPassthrough;
                     return self.take_sequence(None);
                 }
                 return PresentationAction::Buffered;
             }
-            PresentationParseState::CsiPassthrough(parser) => {
+            PresentationParseState::CsiPassthrough => {
                 if (0x40..=0x7e).contains(&byte) || matches!(byte, 0x18 | 0x1a) {
                     self.state = PresentationParseState::Ground;
                 } else if byte == 0x1b {
                     self.pending.push(byte);
                     self.state = PresentationParseState::Escape;
                     return PresentationAction::Buffered;
-                } else {
-                    parser.push(byte);
                 }
                 return PresentationAction::Immediate;
             }

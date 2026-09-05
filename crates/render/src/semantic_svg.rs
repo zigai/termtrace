@@ -57,22 +57,31 @@ pub(super) fn render_svg_scene(
     if embed_font {
         write_font_faces(&mut svg, font_set);
     }
+    write_scene_content(&mut svg, state, font_set, embed_font);
+    svg.push_str("</svg>\n");
+    return Ok(svg.into_bytes());
+}
+
+pub(super) fn write_scene_content(
+    svg: &mut String,
+    state: &SemanticState,
+    font_set: &SemanticFontSet,
+    embed_font: bool,
+) {
     let _ = writeln!(
         svg,
         "<rect width=\"100%\" height=\"100%\" fill=\"{}\"/>",
-        color_hex(state.colors.background)
+        HexColor(state.colors.background)
     );
     for row in &state.grid {
         for cell in &row.cells {
             let Some(resolved) = resolve_cell(state, font_set, row.row, cell, embed_font) else {
                 continue;
             };
-            write_cell(&mut svg, state.colors.background, &resolved);
+            write_cell(svg, state.colors.background, &resolved);
         }
     }
-    write_cursor(&mut svg, state, font_set, embed_font);
-    svg.push_str("</svg>\n");
-    return Ok(svg.into_bytes());
+    write_cursor(svg, state, font_set, embed_font);
 }
 
 struct ResolvedCell<'cell> {
@@ -156,7 +165,7 @@ fn write_cell(svg: &mut String, canvas_background: Rgb, resolved: &ResolvedCell<
             resolved.y,
             resolved.span,
             SEMANTIC_CELL_HEIGHT,
-            color_hex(resolved.background)
+            HexColor(resolved.background)
         );
     }
     if resolved.cell.style.invisible {
@@ -169,13 +178,13 @@ fn write_cell(svg: &mut String, canvas_background: Rgb, resolved: &ResolvedCell<
 }
 
 fn write_glyph(svg: &mut String, resolved: &ResolvedCell<'_>, color: Rgb) {
-    let escaped = escape_xml(&resolved.cell.grapheme);
+    let escaped = EscapedXml(&resolved.cell.grapheme);
     let text_y = resolved.y.saturating_add(u32::from(resolved.baseline));
     let _ = writeln!(
         svg,
         "<text x=\"{}\" y=\"{text_y}\" fill=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" opacity=\"{}\"{} xml:space=\"preserve\">{escaped}</text>",
         resolved.x,
-        color_hex(color),
+        HexColor(color),
         resolved.font_family,
         resolved.font_size,
         resolved.weight,
@@ -230,7 +239,7 @@ fn write_decoration_line(
         svg,
         "<line x1=\"{}\" y1=\"{y}\" x2=\"{x_end}\" y2=\"{y}\" stroke=\"{}\" stroke-width=\"1\" opacity=\"{}\"{attributes}/>",
         resolved.x,
-        color_hex(color),
+        HexColor(color),
         resolved.opacity
     );
 }
@@ -252,7 +261,7 @@ fn write_curly_underline(svg: &mut String, resolved: &ResolvedCell<'_>) {
     let _ = writeln!(
         svg,
         "<path d=\"{path}\" fill=\"none\" stroke=\"{}\" stroke-width=\"1\" opacity=\"{}\"/>",
-        color_hex(resolved.underline_color),
+        HexColor(resolved.underline_color),
         resolved.opacity
     );
 }
@@ -304,7 +313,7 @@ fn write_cursor(
                 resolved.x,
                 resolved.y,
                 SEMANTIC_CELL_HEIGHT,
-                color_hex(cursor_color)
+                HexColor(cursor_color)
             );
         }
         CursorStyle::Underline => {
@@ -316,7 +325,7 @@ fn write_cursor(
                 "<rect x=\"{}\" y=\"{cursor_y}\" width=\"{}\" height=\"2\" fill=\"{}\"/>",
                 resolved.x,
                 SEMANTIC_CELL_WIDTH,
-                color_hex(cursor_color)
+                HexColor(cursor_color)
             );
         }
         CursorStyle::Block => {
@@ -331,7 +340,7 @@ fn write_cursor(
                 resolved.x,
                 resolved.y,
                 SEMANTIC_CELL_HEIGHT,
-                color_hex(cursor_color)
+                HexColor(cursor_color)
             );
             if !cell.grapheme.is_empty() && !cell.style.invisible {
                 write_glyph(svg, &resolved, resolved.background);
@@ -345,7 +354,7 @@ fn write_cursor(
             let _ = writeln!(
                 svg,
                 "<rect x=\"{x}\" y=\"{y}\" width=\"{width}\" height=\"{height}\" fill=\"none\" stroke=\"{}\" stroke-width=\"1\"/>",
-                color_hex(cursor_color)
+                HexColor(cursor_color)
             );
         }
     }
@@ -363,7 +372,7 @@ fn is_terminal_graphic(grapheme: &str) -> bool {
         || ('\u{2580}'..='\u{259f}').contains(&character);
 }
 
-fn write_font_faces(svg: &mut String, font_set: &SemanticFontSet) {
+pub(super) fn write_font_faces(svg: &mut String, font_set: &SemanticFontSet) {
     svg.push_str("<style>");
     for resource in font_set.resources() {
         let role = resource.role;
@@ -465,10 +474,6 @@ impl Display for HexColor {
     }
 }
 
-fn color_hex(color: Rgb) -> HexColor {
-    return HexColor(color);
-}
-
 struct EscapedXml<'text>(&'text str);
 
 impl Display for EscapedXml<'_> {
@@ -485,10 +490,6 @@ impl Display for EscapedXml<'_> {
         }
         return Ok(());
     }
-}
-
-fn escape_xml(value: &str) -> EscapedXml<'_> {
-    return EscapedXml(value);
 }
 
 #[cfg(test)]

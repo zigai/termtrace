@@ -14,8 +14,7 @@ use uuid::Uuid;
 use crate::storage::{Error, Result};
 
 use super::{
-    ARTIFACT_ROOT_FORMAT, ARTIFACT_ROOT_LOCK, ARTIFACT_ROOT_LOG, ARTIFACT_ROOT_VERSION,
-    invalid_artifact, json_error,
+    ARTIFACT_ROOT_FORMAT, ARTIFACT_ROOT_LOCK, ARTIFACT_ROOT_LOG, ARTIFACT_ROOT_VERSION, json_error,
     secure_fs::{
         open_directory_path, open_file_at, open_parent_directory, safe_file_name, sync_fd,
         validate_private_directory_fd, validate_private_regular_file_fd,
@@ -55,7 +54,7 @@ pub fn append_artifact_root(
 ) -> Result<ArtifactRootRecord> {
     let directory_name = artifact_directory
         .strip_prefix(session)
-        .map_err(|_| return invalid_artifact("artifact directory is outside its source session"))?;
+        .map_err(|_| return Error::invalid("artifact directory is outside its source session"))?;
     let directory_name = normalized_relative_path(directory_name)?;
     let session_fd = open_directory_path(session, false)?;
     validate_private_directory_fd(&session_fd, session)?;
@@ -92,7 +91,7 @@ pub fn append_artifact_root(
         .iter()
         .any(|record| return record.artifact_directory == directory_name)
     {
-        return Err(invalid_artifact(
+        return Err(Error::invalid(
             "artifact directory already has a catalog root",
         ));
     }
@@ -194,7 +193,7 @@ fn read_artifact_roots_from(file: &mut File, path: &Path) -> Result<Vec<Artifact
             || record.seq != seq
             || record.prev_hash != previous_hash
         {
-            return Err(invalid_artifact(
+            return Err(Error::invalid(
                 "artifact-root catalog format, sequence, or prior hash is invalid",
             ));
         }
@@ -212,7 +211,7 @@ fn read_artifact_roots_from(file: &mut File, path: &Path) -> Result<Vec<Artifact
             source_range: record.source_range,
         };
         if record.hash != hash_artifact_root(&body, path)? {
-            return Err(invalid_artifact(
+            return Err(Error::invalid(
                 "artifact-root catalog record hash does not match",
             ));
         }

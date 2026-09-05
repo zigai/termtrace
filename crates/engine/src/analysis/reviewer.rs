@@ -10,7 +10,9 @@ use std::{
 };
 
 use termtrace_evidence::{
-    artifact::write_secure, event_log::EventLog, session::validate_completed_log,
+    artifact::{commit_directory, write_secure},
+    event_log::EventLog,
+    session::validate_completed_log,
 };
 use termtrace_model::{
     execution::event::Event,
@@ -27,81 +29,52 @@ use crate::{
     replay::{inspect, visit_states},
 };
 
-struct ReviewSource {
-    session: PathBuf,
-    log: EventLog,
-    records: Vec<StateRecord>,
-    native_correlation_count: u64,
-}
-
-impl ReviewSource {
-    fn open(
-        session: impl AsRef<Path>,
-        visual_evidence: &[ValidatedVisualManifest],
-    ) -> Result<Self> {
-        let session = session.as_ref().to_path_buf();
-        let log = EventLog::read(session.join("events.jsonl"))?;
-        validate_completed_log(&session, &log)?;
-        let mut records: Vec<StateRecord> = Vec::new();
-        visit_states(&log, |record, _| {
-            records.push(record.clone());
-            return Ok(());
-        })?;
-        if records.is_empty() {
-            return Err(review_error(
-                "completed session contains no semantic states",
-            ));
-        }
-        let native_correlation_count = u64::try_from(
-            native_correlations(&log, visual_evidence)
-                .values()
-                .map(Vec::len)
-                .sum::<usize>(),
-        )
-        .unwrap_or(u64::MAX);
-        return Ok(Self {
-            session,
-            log,
-            records,
-            native_correlation_count,
-        });
-    }
-
-    fn summary(&self) -> ReviewSummary {
-        return ReviewSummary {
-            canonical_session: self.session.clone(),
-            state_count: u64::try_from(self.records.len()).unwrap_or(u64::MAX),
-            presented_state_count: u64::try_from(
-                self.records
-                    .iter()
-                    .filter(|record| return record.presented)
-                    .count(),
-            )
-            .unwrap_or(u64::MAX),
-            marker_count: u64::try_from(
-                self.log
-                    .events
-                    .iter()
-                    .filter(|record| matches!(record.event, Event::Marker { .. }))
-                    .count(),
-            )
-            .unwrap_or(u64::MAX),
-            native_correlation_count: self.native_correlation_count,
-            final_state_hash: self.records.last().map_or_else(String::new, |record| {
-                return record.state_hash.clone();
-            }),
-            rendering_policy: "semantic_cells_only_no_raw_replay".to_owned(),
-        };
-    }
-}
-
 /// Load and summarize a validated completed session without changing it.
 pub fn summarize(
     session: impl AsRef<Path>,
     visual_evidence: &[ValidatedVisualManifest],
 ) -> Result<ReviewSummary> {
-    let source = ReviewSource::open(session, visual_evidence)?;
-    return Ok(source.summary());
+    let session = session.as_ref().to_path_buf();
+    let log = EventLog::read(session.join("events.jsonl"))?;
+    validate_completed_log(&session, &log)?;
+    let mut state_count = 0_u64;
+    let mut presented_state_count = 0_u64;
+    let mut final_state_hash = String::new();
+    visit_states(&log, |record, _| {
+        state_count = state_count.saturating_add(1);
+        if record.presented {
+            presented_state_count = presented_state_count.saturating_add(1);
+        }
+        final_state_hash.clone_from(&record.state_hash);
+        return Ok(());
+    })?;
+    if state_count == 0 {
+        return Err(review_error(
+            "completed session contains no semantic states",
+        ));
+    }
+    let native_correlation_count = u64::try_from(
+        native_correlations(&log, visual_evidence)
+            .values()
+            .map(Vec::len)
+            .sum::<usize>(),
+    )
+    .unwrap_or(u64::MAX);
+    return Ok(ReviewSummary {
+        canonical_session: session,
+        state_count,
+        presented_state_count,
+        marker_count: u64::try_from(
+            log.events
+                .iter()
+                .filter(|record| matches!(record.event, Event::Marker { .. }))
+                .count(),
+        )
+        .unwrap_or(u64::MAX),
+        native_correlation_count,
+        final_state_hash,
+        rendering_policy: "semantic_cells_only_no_raw_replay".to_owned(),
+    });
 }
 
 /// Search every semantic viewport in a validated completed session.
@@ -211,8 +184,10 @@ fn export_into(
     })?;
     manifest_json.push(b'\n');
     write_secure(&temporary.join("manifest.json"), &manifest_json)?;
-    fs::rename(temporary, destination)
-        .map_err(|source_error| return filesystem_error(destination, source_error))?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| return review_error("review export destination has no parent"))?;
+    commit_directory(parent, temporary, destination)?;
     return Ok(manifest);
 }
 

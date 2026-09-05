@@ -66,9 +66,9 @@ impl<'engine> Snapshot<'engine> {
         let modes = self.mode_state()?;
         let active_style = self.active_style()?;
         let metadata = self.terminal_metadata()?;
-        let previous = self.last_snapshot.as_ref().cloned();
+        let previous = self.last_snapshot.as_ref();
         if dirty == DirtyState::Clean
-            && previous.as_ref().is_some_and(|state| {
+            && previous.is_some_and(|state| {
                 return state.cols == cols
                     && state.rows == rows
                     && state.cursor == cursor
@@ -80,14 +80,14 @@ impl<'engine> Snapshot<'engine> {
             return Ok(None);
         }
         let colors = if dirty == DirtyState::Clean {
-            previous
-                .as_ref()
-                .map(|state| return state.colors.clone())
-                .unwrap_or(self.color_state()?)
+            match previous {
+                Some(state) => state.colors.clone(),
+                None => self.color_state()?,
+            }
         } else {
             self.color_state()?
         };
-        let grid = self.grid(cols, rows, dirty, previous.as_ref())?;
+        let grid = self.grid(cols, rows, dirty, previous)?;
         let dirty_rows = grid
             .iter()
             .filter_map(|row| return row.dirty.then_some(row.row))
@@ -105,10 +105,7 @@ impl<'engine> Snapshot<'engine> {
             metadata,
             grid,
         };
-        if previous
-            .as_ref()
-            .is_some_and(|previous| return semantic_content_eq(previous, &state))
-        {
+        if previous.is_some_and(|previous| return semantic_content_eq(previous, &state)) {
             return Ok(None);
         }
         *self.last_snapshot = Some(state.clone());

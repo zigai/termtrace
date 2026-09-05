@@ -1,6 +1,7 @@
 //! Presented-screen predicates, stable captures, and asynchronous waiters.
 
 use std::{
+    collections::BTreeMap,
     result::Result as StdResult,
     sync::mpsc,
     time::{Duration, Instant},
@@ -11,29 +12,29 @@ use zstd::stream::encode_all;
 
 use termtrace_model::{
     protocol::control::{
-        CONTROL_PROTOCOL_VERSION, ControlData, ControlErrorDetails, ControlResponse, ControlResult,
-        ScreenMode, ScreenPredicate, ScreenWaitQuality, StableCaptureQuality, StateHashComparison,
+        CONTROL_PROTOCOL_VERSION, ControlData, ControlResponse, ControlResult, ScreenMode,
+        ScreenPredicate, ScreenWaitQuality, StableCaptureQuality, StateHashComparison,
     },
     terminal::observation::CaptureQuality,
     terminal::screen::{ScreenFrameSource, ScreenProjectionRequest, ScreenRegion},
     terminal::state::SemanticState,
     value::ByteString,
 };
-use termtrace_terminal::{project_screen_frame, semantic_state_hash};
+use termtrace_terminal::{project_screen_frame, semantic_state_hash, semantic_viewport_text};
 
 use super::super::{
     actor::SessionActor,
-    presentation::{LiveTerminal, semantic_viewport_text},
+    presentation::LiveTerminal,
     support::{actor_boundaries, control_error_response, terminal_error},
 };
-use super::commands::{screen_frame_error_code, screen_frame_failure_details};
+use super::commands::screen_frame_error_response;
 use crate::Result;
 
 pub(super) const MAX_SCREEN_WAITERS: usize = 128;
 
 pub(in crate::recording) struct ScreenWaiter {
     pub(super) request_id: Uuid,
-    pub(super) predicate: Option<ScreenPredicate>,
+    pub(super) predicate: Option<CompiledScreenPredicate>,
     pub(super) stable_for: Duration,
     pub(super) deadline: Instant,
     pub(super) projection: ScreenProjectionRequest,
@@ -126,21 +127,13 @@ impl SessionActor<'_> {
             ) {
                 Ok(frame) => frame,
                 Err(error) => {
-                    let response = ControlResponse {
-                        version: CONTROL_PROTOCOL_VERSION,
-                        request_id: waiter.request_id,
-                        result: ControlResult::Error {
-                            code: screen_frame_error_code(&error).to_owned(),
-                            message: error.to_string(),
-                            details: Some(ControlErrorDetails {
-                                current_presented_state_hash: state_hash.clone(),
-                                boundaries,
-                                scope: "screen_wait_terminating_frame".to_owned(),
-                                input_sequence: None,
-                                screen_frame: Some(screen_frame_failure_details(&error)),
-                            }),
-                        },
-                    };
+                    let response = screen_frame_error_response(
+                        waiter.request_id,
+                        &error,
+                        state_hash.clone(),
+                        &self.event_log,
+                        "screen_wait_terminating_frame",
+                    );
                     let _ = waiter.response.send(response);
                     continue;
                 }
@@ -158,7 +151,7 @@ impl SessionActor<'_> {
                     ScreenWaitQuality::Deadline
                 };
                 ControlData::ScreenWait {
-                    predicate,
+                    predicate: predicate.predicate,
                     matched,
                     first_match_monotonic_ns: waiter
                         .matching_state
@@ -218,12 +211,21 @@ impl SessionActor<'_> {
     }
 }
 
-/// Validate a bounded screen predicate before evaluation.
-pub fn validate_screen_predicate(predicate: &ScreenPredicate) -> StdResult<(), String> {
+/// An admitted predicate with bounded regular expressions compiled once.
+pub struct CompiledScreenPredicate {
+    predicate: ScreenPredicate,
+    regexes: BTreeMap<String, regex::Regex>,
+}
+
+/// Validate a bounded screen predicate and retain its compiled expressions.
+pub fn compile_screen_predicate(
+    predicate: &ScreenPredicate,
+) -> StdResult<CompiledScreenPredicate, String> {
     fn visit(
         predicate: &ScreenPredicate,
         depth: usize,
         nodes: &mut usize,
+        regexes: &mut BTreeMap<String, regex::Regex>,
     ) -> StdResult<(), String> {
         *nodes = nodes.saturating_add(1);
         if depth > 4 || *nodes > 32 {
@@ -243,10 +245,13 @@ pub fn validate_screen_predicate(predicate: &ScreenPredicate) -> StdResult<(), S
                 if pattern.is_empty() || pattern.len() > 1024 {
                     return Err("screen regular expression must contain 1-1024 bytes".to_owned());
                 }
-                regex::RegexBuilder::new(pattern)
-                    .size_limit(1024 * 1024)
-                    .build()
-                    .map_err(|error| return format!("invalid bounded screen regex: {error}"))?;
+                if !regexes.contains_key(pattern) {
+                    let regex = regex::RegexBuilder::new(pattern)
+                        .size_limit(1024 * 1024)
+                        .build()
+                        .map_err(|error| return format!("invalid bounded screen regex: {error}"))?;
+                    regexes.insert(pattern.clone(), regex);
+                }
             }
             ScreenPredicate::RegionContains { region, text }
             | ScreenPredicate::RegionAbsent { region, text } => {
@@ -277,7 +282,7 @@ pub fn validate_screen_predicate(predicate: &ScreenPredicate) -> StdResult<(), S
                     return Err("predicate composition must contain 1-16 children".to_owned());
                 }
                 for child in predicates {
-                    visit(child, depth + 1, nodes)?;
+                    visit(child, depth + 1, nodes, regexes)?;
                 }
             }
             ScreenPredicate::Mode { .. } => {}
@@ -286,13 +291,34 @@ pub fn validate_screen_predicate(predicate: &ScreenPredicate) -> StdResult<(), S
     }
 
     let mut nodes = 0;
-    return visit(predicate, 1, &mut nodes);
+    let mut regexes = BTreeMap::new();
+    visit(predicate, 1, &mut nodes, &mut regexes)?;
+    return Ok(CompiledScreenPredicate {
+        predicate: predicate.clone(),
+        regexes,
+    });
 }
 
 /// Evaluate a validated predicate against one reconstructed semantic state.
 #[must_use]
 pub fn evaluate_screen_predicate(
+    predicate: &CompiledScreenPredicate,
+    state: &SemanticState,
+    viewport_text: &str,
+    state_hash: &str,
+) -> bool {
+    return evaluate(
+        &predicate.predicate,
+        &predicate.regexes,
+        state,
+        viewport_text,
+        state_hash,
+    );
+}
+
+fn evaluate(
     predicate: &ScreenPredicate,
+    regexes: &BTreeMap<String, regex::Regex>,
     state: &SemanticState,
     viewport_text: &str,
     state_hash: &str,
@@ -300,12 +326,12 @@ pub fn evaluate_screen_predicate(
     return match predicate {
         ScreenPredicate::Contains { text } => viewport_text.contains(text),
         ScreenPredicate::Absent { text } => !viewport_text.contains(text),
-        ScreenPredicate::MatchesRegex { pattern } => {
-            regex::Regex::new(pattern).is_ok_and(|regex| return regex.is_match(viewport_text))
-        }
-        ScreenPredicate::ExcludesRegex { pattern } => {
-            regex::Regex::new(pattern).is_ok_and(|regex| return !regex.is_match(viewport_text))
-        }
+        ScreenPredicate::MatchesRegex { pattern } => regexes
+            .get(pattern)
+            .is_some_and(|regex| return regex.is_match(viewport_text)),
+        ScreenPredicate::ExcludesRegex { pattern } => regexes
+            .get(pattern)
+            .is_some_and(|regex| return !regex.is_match(viewport_text)),
         ScreenPredicate::RowContains { row, text } => {
             screen_row_text(state, *row).is_some_and(|value| return value.contains(text))
         }
@@ -335,10 +361,10 @@ pub fn evaluate_screen_predicate(
             StateHashComparison::Changed => state_hash != hash,
         },
         ScreenPredicate::All { predicates } => predicates.iter().all(|child| {
-            return evaluate_screen_predicate(child, state, viewport_text, state_hash);
+            return evaluate(child, regexes, state, viewport_text, state_hash);
         }),
         ScreenPredicate::Any { predicates } => predicates.iter().any(|child| {
-            return evaluate_screen_predicate(child, state, viewport_text, state_hash);
+            return evaluate(child, regexes, state, viewport_text, state_hash);
         }),
     };
 }

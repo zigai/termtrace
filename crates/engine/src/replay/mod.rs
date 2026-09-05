@@ -10,7 +10,7 @@ pub use termtrace_model::terminal::replay::{
 };
 use termtrace_model::{execution::event::Event, terminal::state::SemanticState};
 
-use crate::{Error, Result};
+use crate::Error;
 
 mod delta;
 mod engine;
@@ -63,42 +63,6 @@ fn invalid_replay(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
     };
-}
-
-fn resolve_source_range(
-    start: Option<u64>,
-    end: Option<u64>,
-    final_monotonic_ns: u64,
-) -> Result<Option<SourceRange>> {
-    if start.is_none() && end.is_none() {
-        return Ok(None);
-    }
-    let source_end = final_monotonic_ns.checked_add(1).ok_or_else(|| {
-        return invalid_replay(
-            "source timeline ends at u64::MAX and cannot form an exclusive bound",
-        );
-    })?;
-    let start = start.unwrap_or(0);
-    let end = end.unwrap_or(source_end);
-    if start >= end {
-        return Err(invalid_replay(format!(
-            "source range must be non-empty with FROM < TO, got {start}..{end}"
-        )));
-    }
-    if start > final_monotonic_ns {
-        return Err(invalid_replay(format!(
-            "source range starts at {start} ns after the final event at {final_monotonic_ns} ns"
-        )));
-    }
-    if end > source_end {
-        return Err(invalid_replay(format!(
-            "source range ends at {end} ns after the exclusive source endpoint {source_end} ns"
-        )));
-    }
-    return Ok(Some(SourceRange {
-        start_monotonic_ns: start,
-        end_monotonic_ns: end,
-    }));
 }
 
 pub(crate) fn timeline_event(event: &Event) -> bool {

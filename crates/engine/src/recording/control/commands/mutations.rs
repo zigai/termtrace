@@ -16,37 +16,18 @@ impl SessionActor<'_> {
                 caller_intent,
             } => {
                 validate_control_input(data.as_bytes(), caller_intent.as_deref())?;
-                let modes = self.live.semantic.snapshot()?.modes;
-                let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
-                    return terminal_error("serialize input modes", error.to_string());
-                })?;
-                let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
-                let semantic_input = match input_kind {
-                    InputKind::Text => "text",
-                    InputKind::Raw => "raw",
-                    InputKind::Keys => "keys",
-                    InputKind::Paste => "paste",
-                    InputKind::Focus => "focus",
-                    InputKind::Pointer => "pointer",
-                };
+                let input = prepare_bytes(data.as_bytes(), *input_kind, &mut self.live.semantic)?;
                 let applied = apply_input(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
                     request_id,
                     InputSource::Agent,
-                    *input_kind,
-                    match input_kind {
-                        InputKind::Text => InputDescriptor::Text,
-                        InputKind::Raw
-                        | InputKind::Keys
-                        | InputKind::Paste
-                        | InputKind::Focus
-                        | InputKind::Pointer => InputDescriptor::Raw,
-                    },
-                    Some(terminal_modes_hash),
-                    Some(semantic_input.to_owned()),
+                    input.input_kind,
+                    input.descriptor,
+                    Some(input.terminal_modes_hash),
+                    input.semantic_input,
                     caller_intent.clone(),
-                    data.as_bytes(),
+                    &input.data,
                 )?;
                 return Ok(ControlData::InputApplied {
                     operation_id: request_id,
@@ -65,42 +46,23 @@ impl SessionActor<'_> {
                 ));
             }
             ControlCommand::Key { key, modifiers } => {
-                let modes = self.live.semantic.snapshot()?.modes;
-                let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
-                    return terminal_error("serialize keyboard modes", error.to_string());
-                })?;
-                let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
-                let encoded = self.live.semantic.encode_key(*key, *modifiers)?;
-                if encoded.data.as_bytes().is_empty() {
-                    return Err(control_rejected(
-                        "key_has_no_output",
-                        "the requested key press produced no terminal bytes",
-                    ));
-                }
+                let input = prepare_key(*key, *modifiers, &mut self.live.semantic, Error::from)?;
                 let applied = apply_input(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
                     request_id,
                     InputSource::Agent,
-                    InputKind::Keys,
-                    InputDescriptor::Key {
-                        key: semantic_key_name(*key),
-                        shift: modifiers.shift,
-                        control: modifiers.control,
-                        alt: modifiers.alt,
-                        super_key: modifiers.super_key,
-                        encoder: encoded.encoder,
-                        terminal_modes_hash: terminal_modes_hash.clone(),
-                    },
-                    Some(terminal_modes_hash),
-                    Some(semantic_key_input(*key, *modifiers)),
+                    input.input_kind,
+                    input.descriptor,
+                    Some(input.terminal_modes_hash),
+                    input.semantic_input,
                     None,
-                    encoded.data.as_bytes(),
+                    &input.data,
                 )?;
                 return Ok(ControlData::InputApplied {
                     operation_id: request_id,
                     input_kind: InputKind::Keys,
-                    data: encoded.data,
+                    data: ByteString::new(input.data.into_owned()),
                     bytes_written: applied.bytes_written,
                     intent_event_seq: applied.intent_event_seq,
                     result_event_seq: applied.result_event_seq,
@@ -109,31 +71,23 @@ impl SessionActor<'_> {
             }
             ControlCommand::Paste { data } => {
                 validate_control_input(data.as_bytes(), Some("paste"))?;
-                let modes = self.live.semantic.snapshot()?.modes;
-                let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
-                    return terminal_error("serialize paste modes", error.to_string());
-                })?;
-                let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
-                let encoded = encode_paste(data.as_bytes(), modes.bracketed_paste)?;
+                let input = prepare_paste(data.as_bytes(), &mut self.live.semantic)?;
                 let applied = apply_input(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
                     request_id,
                     InputSource::Agent,
-                    InputKind::Paste,
-                    InputDescriptor::Paste {
-                        bracketed: modes.bracketed_paste,
-                        terminal_modes_hash: terminal_modes_hash.clone(),
-                    },
-                    Some(terminal_modes_hash),
-                    Some("paste".to_owned()),
+                    input.input_kind,
+                    input.descriptor,
+                    Some(input.terminal_modes_hash),
+                    input.semantic_input,
                     None,
-                    &encoded,
+                    &input.data,
                 )?;
                 return Ok(ControlData::InputApplied {
                     operation_id: request_id,
                     input_kind: InputKind::Paste,
-                    data: ByteString::new(encoded),
+                    data: ByteString::new(input.data.into_owned()),
                     bytes_written: applied.bytes_written,
                     intent_event_seq: applied.intent_event_seq,
                     result_event_seq: applied.result_event_seq,
@@ -142,10 +96,7 @@ impl SessionActor<'_> {
             }
             ControlCommand::Focus { focused, strict } => {
                 let modes = self.live.semantic.snapshot()?.modes;
-                let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
-                    return terminal_error("serialize focus modes", error.to_string());
-                })?;
-                let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
+                let terminal_modes_hash = mode_hash(&modes, "serialize focus modes")?;
                 let reporting_enabled = modes
                     .values
                     .iter()
@@ -211,10 +162,7 @@ impl SessionActor<'_> {
                     ));
                 }
                 let modes = self.live.semantic.snapshot()?.modes;
-                let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
-                    return terminal_error("serialize pointer modes", error.to_string());
-                })?;
-                let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
+                let terminal_modes_hash = mode_hash(&modes, "serialize pointer modes")?;
                 let reporting_enabled = modes.values.iter().any(|mode| {
                     return !mode.ansi
                         && matches!(mode.number, 9 | 1000 | 1002 | 1003)
@@ -508,10 +456,8 @@ impl SessionActor<'_> {
                 let target_column = region
                     .start_column
                     .saturating_add(region.end_column.saturating_sub(region.start_column + 1) / 2);
-                let mode_bytes = serde_json::to_vec(&semantic_state.modes).map_err(|error| {
-                    return terminal_error("serialize activation modes", error.to_string());
-                })?;
-                let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
+                let terminal_modes_hash =
+                    mode_hash(&semantic_state.modes, "serialize activation modes")?;
                 let reporting_enabled = semantic_state.modes.values.iter().any(|mode| {
                     return !mode.ansi
                         && matches!(mode.number, 9 | 1000 | 1002 | 1003)

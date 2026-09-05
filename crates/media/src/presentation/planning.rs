@@ -19,7 +19,7 @@ use termtrace_model::{
         ChangeVisualization, CursorMaskFrame, EditClip, EditPlan, EditSelector, MarkerRecord,
         NormalizedAnnotation, NormalizedChangeFrame, NormalizedClip, NormalizedSubtitle,
         PRESENTATION_FORMAT_VERSION, PixelTransform, PresentationPlan, PresentationSource,
-        PresentationSourceRequest,
+        PresentationSourceRequest, RationalSpeed,
     },
     artifact::visual::{VisualManifest, visual_directory_name_for},
     execution::{event::Event, session::SessionManifest},
@@ -35,11 +35,133 @@ use crate::{
 };
 
 use super::{
-    NANOS_PER_SECOND,
-    mapping::mapped_source_frame,
-    plan_error,
-    validation::{validate_edit_plan, validate_edit_selector},
+    NANOS_PER_SECOND, mapping::mapped_source_frame, plan_error, validation::validate_edit_plan,
 };
+
+/// Idle gaps omitted from video clips, with activity context retained on either side.
+#[derive(Clone, Copy, Debug)]
+pub struct VideoIdlePolicy {
+    /// Minimum gap between output events that starts a new clip.
+    pub threshold_ns: u64,
+    /// Source time retained before and after output activity.
+    pub context_ns: u64,
+}
+
+/// Select output-active ranges, or retain the entire selection when no policy is supplied.
+pub fn video_clip_ranges(
+    log: &EventLog,
+    selected: SourceRange,
+    idle: Option<VideoIdlePolicy>,
+) -> Vec<SourceRange> {
+    let Some(idle) = idle else {
+        return vec![selected];
+    };
+    let mut activity = log
+        .events
+        .iter()
+        .filter(|record| {
+            return selected.contains(record.monotonic_ns)
+                && matches!(&record.event, Event::Output { .. });
+        })
+        .map(|record| return record.monotonic_ns);
+    let Some(first) = activity.next() else {
+        return vec![selected];
+    };
+    let mut ranges = Vec::new();
+    let mut start = first
+        .saturating_sub(idle.context_ns)
+        .max(selected.start_monotonic_ns);
+    let mut previous = first;
+    for timestamp in activity {
+        if timestamp.saturating_sub(previous) > idle.threshold_ns {
+            ranges.push(SourceRange {
+                start_monotonic_ns: start,
+                end_monotonic_ns: previous
+                    .saturating_add(idle.context_ns)
+                    .min(selected.end_monotonic_ns),
+            });
+            start = timestamp
+                .saturating_sub(idle.context_ns)
+                .max(selected.start_monotonic_ns);
+        }
+        previous = timestamp;
+    }
+    ranges.push(SourceRange {
+        start_monotonic_ns: start,
+        end_monotonic_ns: previous
+            .saturating_add(idle.context_ns)
+            .min(selected.end_monotonic_ns),
+    });
+    return ranges;
+}
+
+/// Build video edits, applying start hold to the first source frame and end hold to the last clip.
+///
+/// # Errors
+///
+/// Returns an error if the frame rate is zero or no source ranges were selected.
+pub fn video_clips(
+    ranges: &[SourceRange],
+    fps: u16,
+    hold_start_ms: u64,
+    hold_end_ms: u64,
+) -> Result<Vec<EditClip>> {
+    if fps == 0 {
+        return Err(plan_error("video frame rate must be nonzero"));
+    }
+    let Some((&first, rest)) = ranges.split_first() else {
+        return Err(plan_error("video range contains no source activity"));
+    };
+    let mut clips = Vec::with_capacity(ranges.len() + 1);
+    if hold_start_ms > 0 {
+        let frame_ns = NANOS_PER_SECOND.div_ceil(u64::from(fps));
+        let split = first
+            .start_monotonic_ns
+            .saturating_add(frame_ns)
+            .min(first.end_monotonic_ns);
+        clips.push(edit_clip(
+            SourceRange {
+                start_monotonic_ns: first.start_monotonic_ns,
+                end_monotonic_ns: split,
+            },
+            hold_start_ms,
+        ));
+        if split < first.end_monotonic_ns {
+            clips.push(edit_clip(
+                SourceRange {
+                    start_monotonic_ns: split,
+                    end_monotonic_ns: first.end_monotonic_ns,
+                },
+                0,
+            ));
+        }
+    } else {
+        clips.push(edit_clip(first, 0));
+    }
+    for &range in rest {
+        clips.push(edit_clip(range, 0));
+    }
+    if let Some(last) = clips.last_mut() {
+        last.hold_ms = last.hold_ms.saturating_add(hold_end_ms);
+    }
+    return Ok(clips);
+}
+
+fn edit_clip(range: SourceRange, hold_ms: u64) -> EditClip {
+    return EditClip {
+        from: EditSelector {
+            monotonic_ns: Some(range.start_monotonic_ns),
+            ..EditSelector::default()
+        },
+        to: EditSelector {
+            monotonic_ns: Some(range.end_monotonic_ns),
+            ..EditSelector::default()
+        },
+        speed: RationalSpeed::default(),
+        hold_ms,
+        caption: None,
+    };
+}
 
 /// List every canonical marker without claiming native presentation.
 pub fn markers(session: impl AsRef<Path>, fps: u16) -> Result<Vec<MarkerRecord>> {
@@ -425,11 +547,10 @@ fn normalize_clips(
             },
         );
         let source_frames = source_end_frame.saturating_sub(source_start_frame);
-        let retimed_frame_count = ceil_ratio(
-            source_frames.saturating_mul(u64::from(clip.speed.denominator)),
-            u64::from(clip.speed.numerator),
-        );
-        let hold_frame_count = ceil_ratio(clip.hold_ms.saturating_mul(u64::from(fps)), 1000);
+        let retimed_frame_count = source_frames
+            .saturating_mul(u64::from(clip.speed.denominator))
+            .div_ceil(u64::from(clip.speed.numerator));
+        let hold_frame_count = clip.hold_ms.saturating_mul(u64::from(fps)).div_ceil(1000);
         let output_end_frame = output_start_frame
             .saturating_add(retimed_frame_count)
             .saturating_add(hold_frame_count);
@@ -877,7 +998,6 @@ fn resolve_edit_selector(
     capture_start_ns: u64,
     fps: u16,
 ) -> Result<u64> {
-    validate_edit_selector(selector)?;
     if let Some(monotonic_ns) = selector.monotonic_ns {
         return Ok(monotonic_ns);
     }
@@ -926,14 +1046,9 @@ pub(super) fn frame_floor(monotonic_ns: u64, fps: u16) -> u64 {
 }
 
 pub(super) fn frame_ceil(monotonic_ns: u64, fps: u16) -> u64 {
-    return ceil_ratio(
-        monotonic_ns.saturating_mul(u64::from(fps)),
-        NANOS_PER_SECOND,
-    );
-}
-
-pub(super) fn ceil_ratio(numerator: u64, denominator: u64) -> u64 {
-    return numerator.saturating_add(denominator - 1) / denominator;
+    return monotonic_ns
+        .saturating_mul(u64::from(fps))
+        .div_ceil(NANOS_PER_SECOND);
 }
 
 pub(super) fn hash_file(path: &Path) -> Result<String> {

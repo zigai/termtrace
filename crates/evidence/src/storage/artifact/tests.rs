@@ -1,5 +1,5 @@
 use std::{
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fs::File,
     io::Write as _,
     os::unix::fs::{PermissionsExt as _, symlink},
@@ -191,18 +191,11 @@ fn secure_write_is_never_partially_published_at_injected_failure_boundaries() {
         fs_err::read(&destination).expect("fully renamed payload"),
         payload
     );
-    assert!(
-        fs_err::read_dir(&directory)
-            .expect("atomic write directory")
-            .all(|entry| {
-                return !entry
-                    .expect("atomic write entry")
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(".termtrace-write-");
-            }),
-        "injected failures must not leave staging files"
-    );
+    let entries: Vec<_> = fs_err::read_dir(&directory)
+        .expect("atomic write directory")
+        .map(|entry| return entry.expect("atomic write entry").file_name())
+        .collect();
+    assert_eq!(entries, [OsString::from("after-rename.json")]);
 }
 
 #[test]

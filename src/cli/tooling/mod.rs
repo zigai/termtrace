@@ -169,38 +169,44 @@ pub(super) fn run_client(response: &mut ResponseWriter, arguments: ClientArgs) -
 }
 
 fn run_python_client(assets: &Path, arguments: ClientRunArgs) -> Result<ExitCode> {
-    let (script, _temporary) = prepare_client_script(&arguments.script, "py")?;
-    let binary = env::current_exe().into_diagnostic()?;
-    if executable_on_path("uv") {
-        let status = ProcessCommand::new("uv")
-            .args(["run", "--quiet", "--isolated", "--no-project", "--with"])
-            .arg(assets.join("python"))
-            .args(["python"])
+    let (script, temporary) = prepare_client_script(&arguments.script, "py")?;
+    let result = (|| {
+        let binary = env::current_exe().into_diagnostic()?;
+        if executable_on_path("uv") {
+            let status = ProcessCommand::new("uv")
+                .args(["run", "--quiet", "--isolated", "--no-project", "--with"])
+                .arg(assets.join("python"))
+                .args(["python"])
+                .arg(&script)
+                .args(&arguments.arguments)
+                .env("TERMTRACE_BINARY", &binary)
+                .status()
+                .into_diagnostic()?;
+            return process_exit_code(status);
+        }
+        let python_root = assets.join("python");
+        let python_path = match env::var_os("PYTHONPATH") {
+            Some(existing) => env::join_paths([python_root.as_os_str(), existing.as_os_str()])
+                .map_err(|error| return miette::miette!("invalid PYTHONPATH: {error}"))?,
+            None => python_root.into_os_string(),
+        };
+        let status = ProcessCommand::new("python3")
             .arg(&script)
             .args(&arguments.arguments)
-            .env("TERMTRACE_BINARY", &binary)
+            .env("PYTHONPATH", python_path)
+            .env("TERMTRACE_BINARY", binary)
             .status()
-            .into_diagnostic()?;
+            .map_err(|error| {
+                return miette::miette!(
+                    "Python client execution requires `uv` or Python 3 with `msgspec`: {error}"
+                );
+            })?;
         return process_exit_code(status);
+    })();
+    if let Some(temporary) = temporary {
+        temporary.close().into_diagnostic()?;
     }
-    let python_root = assets.join("python");
-    let python_path = match env::var_os("PYTHONPATH") {
-        Some(existing) => env::join_paths([python_root.as_os_str(), existing.as_os_str()])
-            .map_err(|error| return miette::miette!("invalid PYTHONPATH: {error}"))?,
-        None => python_root.into_os_string(),
-    };
-    let status = ProcessCommand::new("python3")
-        .arg(&script)
-        .args(&arguments.arguments)
-        .env("PYTHONPATH", python_path)
-        .env("TERMTRACE_BINARY", binary)
-        .status()
-        .map_err(|error| {
-            return miette::miette!(
-                "Python client execution requires `uv` or Python 3 with `msgspec`: {error}"
-            );
-        })?;
-    return process_exit_code(status);
+    return result;
 }
 
 fn run_typescript_client(assets: &Path, arguments: ClientRunArgs) -> Result<ExitCode> {
@@ -210,95 +216,83 @@ fn run_typescript_client(assets: &Path, arguments: ClientRunArgs) -> Result<Exit
         ));
     }
     let temporary = create_client_temp_directory()?;
-    let package = temporary.path.join("node_modules/@termtrace/test");
-    fs_err::create_dir_all(&package).into_diagnostic()?;
-    fs_err::set_permissions(&package, Permissions::from_mode(0o700)).into_diagnostic()?;
-    write_secure(
-        &package.join("package.json"),
-        br#"{"type":"module","exports":"./index.js"}"#,
-    )
-    .into_diagnostic()?;
-    let package_entry = assets
-        .join("typescript/lib/index.js")
-        .canonicalize()
+    let result = (|| {
+        let package = temporary.path().join("node_modules/@termtrace/test");
+        fs_err::create_dir_all(&package).into_diagnostic()?;
+        fs_err::set_permissions(&package, Permissions::from_mode(0o700)).into_diagnostic()?;
+        write_secure(
+            &package.join("package.json"),
+            br#"{"type":"module","exports":"./index.js"}"#,
+        )
         .into_diagnostic()?;
-    let package_entry = package_entry.to_str().ok_or_else(|| {
-        return miette::miette!("TypeScript client assets path is not valid UTF-8");
-    })?;
-    let package_entry = serde_json::to_string(package_entry).into_diagnostic()?;
-    write_secure(
-        &package.join("index.js"),
-        format!("export * from {package_entry};\n").as_bytes(),
-    )
-    .into_diagnostic()?;
-    let script = if arguments.script.as_os_str() == OsStr::new("-") {
-        let source = temporary.path.join("source");
-        fs_err::create_dir(&source).into_diagnostic()?;
-        fs_err::set_permissions(&source, Permissions::from_mode(0o700)).into_diagnostic()?;
-        let path = source.join("client.ts");
-        write_secure(&path, &read_client_stdin()?).into_diagnostic()?;
-        path
-    } else {
-        arguments.script.canonicalize().into_diagnostic()?
-    };
-    let node_modules = temporary.path.join("node_modules");
-    let mut node_paths: Vec<PathBuf> = vec![node_modules];
-    if let Some(existing) = env::var_os("NODE_PATH") {
-        node_paths.extend(env::split_paths(&existing));
-    }
-    let node_path = env::join_paths(node_paths).into_diagnostic()?;
-    let binary = env::current_exe().into_diagnostic()?;
-    let status = ProcessCommand::new("bun")
-        .arg("--no-install")
-        .arg(&script)
-        .args(&arguments.arguments)
-        .env("NODE_PATH", node_path)
-        .env("TERMTRACE_BINARY", binary)
-        .status()
+        let package_entry = assets
+            .join("typescript/lib/index.js")
+            .canonicalize()
+            .into_diagnostic()?;
+        let package_entry = package_entry.to_str().ok_or_else(|| {
+            return miette::miette!("TypeScript client assets path is not valid UTF-8");
+        })?;
+        let package_entry = serde_json::to_string(package_entry).into_diagnostic()?;
+        write_secure(
+            &package.join("index.js"),
+            format!("export * from {package_entry};\n").as_bytes(),
+        )
         .into_diagnostic()?;
-    return process_exit_code(status);
-}
-
-struct ClientTempDirectory {
-    path: PathBuf,
-}
-
-impl Drop for ClientTempDirectory {
-    fn drop(&mut self) {
-        if let Err(error) = fs_err::remove_dir_all(&self.path) {
-            tracing::warn!(path = %self.path.display(), %error, "could not remove client runtime directory");
+        let script = if arguments.script.as_os_str() == OsStr::new("-") {
+            let source = temporary.path().join("source");
+            fs_err::create_dir(&source).into_diagnostic()?;
+            fs_err::set_permissions(&source, Permissions::from_mode(0o700)).into_diagnostic()?;
+            let path = source.join("client.ts");
+            write_secure(&path, &read_client_stdin()?).into_diagnostic()?;
+            path
+        } else {
+            arguments.script.canonicalize().into_diagnostic()?
+        };
+        let node_modules = temporary.path().join("node_modules");
+        let mut node_paths: Vec<PathBuf> = vec![node_modules];
+        if let Some(existing) = env::var_os("NODE_PATH") {
+            node_paths.extend(env::split_paths(&existing));
         }
-    }
+        let node_path = env::join_paths(node_paths).into_diagnostic()?;
+        let binary = env::current_exe().into_diagnostic()?;
+        let status = ProcessCommand::new("bun")
+            .arg("--no-install")
+            .arg(&script)
+            .args(&arguments.arguments)
+            .env("NODE_PATH", node_path)
+            .env("TERMTRACE_BINARY", binary)
+            .status()
+            .into_diagnostic()?;
+        return process_exit_code(status);
+    })();
+    temporary.close().into_diagnostic()?;
+    return result;
 }
 
-fn create_client_temp_directory() -> Result<ClientTempDirectory> {
-    for _ in 0..32 {
-        let path = env::temp_dir().join(format!("termtrace-client-{}", uuid::Uuid::now_v7()));
-        match fs_err::create_dir(&path) {
-            Ok(()) => {
-                fs_err::set_permissions(&path, Permissions::from_mode(0o700)).into_diagnostic()?;
-                return Ok(ClientTempDirectory { path });
-            }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error).into_diagnostic(),
-        }
-    }
-    return Err(miette::miette!(
-        "could not allocate a private temporary client runtime directory"
-    ));
+fn create_client_temp_directory() -> Result<tempfile::TempDir> {
+    return tempfile::Builder::new()
+        .prefix("termtrace-client-")
+        .permissions(Permissions::from_mode(0o700))
+        .tempdir()
+        .into_diagnostic();
 }
 
 fn prepare_client_script(
     script: &Path,
     extension: &str,
-) -> Result<(PathBuf, Option<ClientTempDirectory>)> {
+) -> Result<(PathBuf, Option<tempfile::TempDir>)> {
     if script.as_os_str() != OsStr::new("-") {
         return Ok((script.canonicalize().into_diagnostic()?, None));
     }
     let temporary = create_client_temp_directory()?;
-    let path = temporary.path.join(format!("client.{extension}"));
-    let bytes = read_client_stdin()?;
-    write_secure(&path, &bytes).into_diagnostic()?;
+    let path = temporary.path().join(format!("client.{extension}"));
+    let result = read_client_stdin().and_then(|bytes| {
+        return write_secure(&path, &bytes).into_diagnostic();
+    });
+    if let Err(error) = result {
+        temporary.close().into_diagnostic()?;
+        return Err(error);
+    }
     return Ok((path, Some(temporary)));
 }
 

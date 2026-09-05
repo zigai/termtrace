@@ -137,7 +137,7 @@ fn ffmpeg_has_entry(argument: &str, entry: &str) -> bool {
         });
 }
 
-fn probe_semantic_video_encode() -> StdResult<(), String> {
+pub(crate) fn probe_semantic_video_encode() -> StdResult<(), String> {
     let ffmpeg = executable("ffmpeg").ok_or_else(|| return "FFmpeg is unavailable".to_owned())?;
     let output = Command::new(ffmpeg)
         .args([

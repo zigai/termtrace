@@ -21,7 +21,10 @@ use termtrace_model::{
 };
 use termtrace_terminal::frame_event_records;
 
-use crate::{Error, Result, replay::replay};
+use crate::{
+    Error, Result,
+    replay::{replay, visit_states},
+};
 
 fn analysis_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
@@ -122,40 +125,61 @@ pub fn native_correlations(
 /// Returns an error when replay or terminal-event framing fails.
 pub fn diagnose(
     log: &EventLog,
-    mut checks: Vec<DiagnosticCheck>,
+    checks: Vec<DiagnosticCheck>,
     broad_change_percent: u8,
     visual_evidence: &[ValidatedVisualManifest],
 ) -> Result<DiagnoseReport> {
+    let mut states = Vec::new();
+    visit_states(log, |record, _| {
+        states.push(record.clone());
+        return Ok(());
+    })?;
+    let tokens = frame_event_records(&log.events)?;
+    return Ok(diagnose_states(
+        log,
+        checks,
+        broad_change_percent,
+        visual_evidence,
+        &states,
+        &tokens,
+    ));
+}
+
+pub(super) fn diagnose_states(
+    log: &EventLog,
+    mut checks: Vec<DiagnosticCheck>,
+    broad_change_percent: u8,
+    visual_evidence: &[ValidatedVisualManifest],
+    states: &[StateRecord],
+    tokens: &[VtToken],
+) -> DiagnoseReport {
     checks.sort_unstable();
     checks.dedup();
     if checks.is_empty() {
         checks = DiagnosticCheck::all();
     }
-    let replayed = replay(log)?;
-    let states = replayed.states;
-    let tokens = frame_event_records(&log.events)?;
     let mut detected = Vec::new();
     if checks.contains(&DiagnosticCheck::FullRedraw) {
         detect_full_redraw(
-            &tokens,
-            &states,
+            tokens,
+            states,
             log.header.cols,
             log.header.rows,
             broad_change_percent,
             &mut detected,
         );
-        detect_redundant_full_redraw(&states, &mut detected);
+        detect_redundant_full_redraw(states, &mut detected);
     }
     if checks.contains(&DiagnosticCheck::Transient) {
-        detect_transients(&states, &mut detected);
+        detect_transients(states, &mut detected);
     }
     if checks.contains(&DiagnosticCheck::Dirty) {
-        detect_dirty_discrepancies(&states, &mut detected);
+        detect_dirty_discrepancies(states, &mut detected);
     }
     if checks.contains(&DiagnosticCheck::Cursor) {
-        detect_cursor_jumps(&states, &mut detected);
+        detect_cursor_jumps(states, &mut detected);
     }
-    detect_churn(&checks, &states, &mut detected);
+    detect_churn(&checks, states, &mut detected);
     if checks.contains(&DiagnosticCheck::QueryLoop) {
         detect_query_loops(log, &mut detected);
     }
@@ -186,7 +210,7 @@ pub fn diagnose(
             .cmp(&right.state_ids.first())
             .then_with(|| return left.code.cmp(&right.code));
     });
-    return Ok(DiagnoseReport {
+    return DiagnoseReport {
         format: "termtrace-diagnose".to_owned(),
         version: 1,
         session_id: log.header.session_id,
@@ -199,7 +223,7 @@ pub fn diagnose(
         broad_change_fraction: format!("{broad_change_percent}/100"),
         findings: detected,
         output_page: None,
-    });
+    };
 }
 
 /// Explain exact VT frames and semantic transitions around one state point.

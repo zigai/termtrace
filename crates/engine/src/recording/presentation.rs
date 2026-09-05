@@ -167,23 +167,3 @@ pub(super) fn find_text_regions(state: &SemanticState, needle: &str) -> Vec<Text
     }
     return regions;
 }
-
-pub(super) fn semantic_viewport_text(state: &SemanticState) -> String {
-    let mut output = String::new();
-    for (index, row) in state.grid.iter().enumerate() {
-        for cell in &row.cells {
-            if cell.grapheme.is_empty() {
-                output.push(' ');
-            } else {
-                output.push_str(&cell.grapheme);
-            }
-        }
-        while output.ends_with(' ') {
-            output.pop();
-        }
-        if index + 1 < state.grid.len() {
-            output.push('\n');
-        }
-    }
-    return output;
-}

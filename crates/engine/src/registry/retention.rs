@@ -1,4 +1,5 @@
 use super::*;
+use crate::recording::terminate_process_group;
 use std::cmp::Reverse;
 
 impl SessionRegistry {
@@ -243,13 +244,13 @@ impl SessionRegistry {
                 RegistryRecord::Entry(entry) => {
                     let session = entry.session_path();
                     let responsive_identity = recorder_identity(&session);
-                    let is_live = if let Some(identity) =
-                        entry.recorder_pid.zip(entry.recorder_process_start_ticks)
-                    {
-                        responsive_identity == Some(identity)
-                    } else {
-                        responsive_identity.is_some()
-                    };
+                    let is_live = entry
+                        .recorder_pid
+                        .zip(entry.recorder_process_start_ticks)
+                        .map_or_else(
+                            || return responsive_identity.is_some(),
+                            |identity| return responsive_identity == Some(identity),
+                        );
 
                     let completion_exists = session.join("completion.json").is_file();
                     let mut should_reap = false;
@@ -274,7 +275,7 @@ impl SessionRegistry {
                     if should_reap {
                         if apply {
                             if let Some(pid) = entry.recorder_pid {
-                                crate::recording::terminate_process_group(Some(pid));
+                                terminate_process_group(Some(pid));
                             }
                             let _ = fs::remove_file(&path);
                         }

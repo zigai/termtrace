@@ -8,10 +8,7 @@ pub(super) fn append_bounded_text(output: &mut String, value: &str) -> bool {
         output.push_str(value);
         return false;
     }
-    let mut end = remaining;
-    while end > 0 && !value.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = value.floor_char_boundary(remaining);
     output.push_str(value.get(..end).unwrap_or_default());
     return true;
 }
@@ -373,14 +370,22 @@ pub(super) fn compact_task_value(
     fields: &[ResponseField],
     command_type: &str,
 ) -> Option<serde_json::Value> {
-    let compacted = compact_value_with_paths(value.clone(), fields, command_type == "test")?;
     if !matches!(
         command_type,
         "start" | "send" | "act" | "wait" | "status" | "stop"
     ) {
-        return Some(compacted);
+        return compact_value_with_paths(value, fields, command_type == "test");
     }
     let source = value.as_object()?;
+    let copy_compacted = |target: &mut serde_json::Map<String, serde_json::Value>,
+                          source_key: &str,
+                          target_key: &str| {
+        if let Some(value) = source.get(source_key).cloned().and_then(|value| {
+            return compact_value_with_paths(value, fields, false);
+        }) {
+            target.insert(target_key.to_owned(), value);
+        }
+    };
     let mut projected = serde_json::Map::new();
     match command_type {
         "start" => {
@@ -410,47 +415,42 @@ pub(super) fn compact_task_value(
             copy_value(source, &mut projected, "bytes_written", "bytes");
             copy_value(source, &mut projected, "input_kind", "input");
             copy_value(source, &mut projected, "reason", "reason");
-            if let Some(compacted) = compacted.as_object() {
-                copy_value(compacted, &mut projected, "atoms", "outcomes");
-            }
+            copy_compacted(&mut projected, "atoms", "outcomes");
         }
         "act" => {
-            if let Some(compacted) = compacted.as_object() {
-                if let Some(input) = compacted
-                    .get("input")
-                    .and_then(serde_json::Value::as_object)
-                {
-                    let mut summary = serde_json::Map::new();
-                    for key in ["applied", "atoms", "bytes"] {
-                        copy_value(input, &mut summary, key, key);
+            if let Some(input) = source.get("input").and_then(serde_json::Value::as_object) {
+                let mut summary = serde_json::Map::new();
+                for key in ["applied", "atoms", "bytes"] {
+                    if let Some(value) = input.get(key).cloned().and_then(|value| {
+                        return compact_value_with_paths(value, fields, false);
+                    }) {
+                        summary.insert(key.to_owned(), value);
                     }
-                    projected.insert("input".to_owned(), serde_json::Value::Object(summary));
                 }
-                if let Some(observation) = source
-                    .get("observation")
-                    .and_then(serde_json::Value::as_object)
-                {
-                    let mut summary = serde_json::Map::new();
-                    copy_value(observation, &mut summary, "state", "state");
-                    copy_value(observation, &mut summary, "state_hash", "state");
-                    copy_value(observation, &mut summary, "quality", "quality");
-                    copy_value(observation, &mut summary, "capture_quality", "quality");
-                    copy_value(observation, &mut summary, "scope", "scope");
-                    copy_value(observation, &mut summary, "screen", "screen");
-                    if let Some((screen, truncated)) = bounded_screen_frame_text(observation) {
-                        summary.insert("screen".to_owned(), serde_json::Value::String(screen));
-                        if truncated {
-                            summary.insert(
-                                "screen_truncated".to_owned(),
-                                serde_json::Value::Bool(true),
-                            );
-                        }
+                projected.insert("input".to_owned(), serde_json::Value::Object(summary));
+            }
+            if let Some(observation) = source
+                .get("observation")
+                .and_then(serde_json::Value::as_object)
+            {
+                let mut summary = serde_json::Map::new();
+                copy_value(observation, &mut summary, "state", "state");
+                copy_value(observation, &mut summary, "state_hash", "state");
+                copy_value(observation, &mut summary, "quality", "quality");
+                copy_value(observation, &mut summary, "capture_quality", "quality");
+                copy_value(observation, &mut summary, "scope", "scope");
+                copy_value(observation, &mut summary, "screen", "screen");
+                if let Some((screen, truncated)) = bounded_screen_frame_text(observation) {
+                    summary.insert("screen".to_owned(), serde_json::Value::String(screen));
+                    if truncated {
+                        summary
+                            .insert("screen_truncated".to_owned(), serde_json::Value::Bool(true));
                     }
-                    projected.insert("observation".to_owned(), serde_json::Value::Object(summary));
                 }
-                if compacted.get("ended").and_then(serde_json::Value::as_bool) == Some(true) {
-                    projected.insert("ended".to_owned(), serde_json::Value::Bool(true));
-                }
+                projected.insert("observation".to_owned(), serde_json::Value::Object(summary));
+            }
+            if source.get("ended").and_then(serde_json::Value::as_bool) == Some(true) {
+                projected.insert("ended".to_owned(), serde_json::Value::Bool(true));
             }
             if source
                 .get("postcondition")
@@ -538,37 +538,28 @@ pub(super) fn compact_task_value(
         }
         _ => return None,
     }
-    if selected(fields, ResponseField::Boundary)
-        && let Some(compacted) = compacted.as_object()
-    {
+    if selected(fields, ResponseField::Boundary) {
         for key in ["boundary", "boundaries", "durability"] {
-            copy_value(compacted, &mut projected, key, key);
+            copy_compacted(&mut projected, key, key);
         }
     }
-    if let Some(compacted) = compacted.as_object() {
-        if selected(fields, ResponseField::Cursor) {
-            copy_value(compacted, &mut projected, "cursor", "cursor");
-        }
-        if selected(fields, ResponseField::Modes) {
-            copy_value(compacted, &mut projected, "modes", "modes");
-            copy_value(
-                compacted,
-                &mut projected,
-                "terminal_modes",
-                "terminal_modes",
-            );
-        }
-        if selected(fields, ResponseField::Timing) {
-            for key in [
-                "first_observed_monotonic_ns",
-                "observed_monotonic_ns",
-                "stable_for_ns",
-                "pace_ns",
-                "timing",
-                "timestamps",
-            ] {
-                copy_value(compacted, &mut projected, key, key);
-            }
+    if selected(fields, ResponseField::Cursor) {
+        copy_compacted(&mut projected, "cursor", "cursor");
+    }
+    if selected(fields, ResponseField::Modes) {
+        copy_compacted(&mut projected, "modes", "modes");
+        copy_compacted(&mut projected, "terminal_modes", "terminal_modes");
+    }
+    if selected(fields, ResponseField::Timing) {
+        for key in [
+            "first_observed_monotonic_ns",
+            "observed_monotonic_ns",
+            "stable_for_ns",
+            "pace_ns",
+            "timing",
+            "timestamps",
+        ] {
+            copy_compacted(&mut projected, key, key);
         }
     }
     return Some(serde_json::Value::Object(projected));

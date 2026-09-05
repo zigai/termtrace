@@ -354,18 +354,23 @@ impl RuntimeWorkers {
     pub(super) fn start(
         reader: Box<dyn Read + Send>,
         sender: &mpsc::SyncSender<RuntimeMessage>,
+        receiver: mpsc::Receiver<RuntimeMessage>,
         forward_stdin: bool,
         initial_geometry: TerminalGeometry,
         control_socket: &str,
-    ) -> Result<Self> {
+    ) -> Result<(Self, mpsc::Receiver<RuntimeMessage>)> {
         let signals = spawn_host_signals(sender.clone())?;
         let control = match spawn_control_server(control_socket, sender.clone()) {
             Ok(worker) => worker,
-            Err(error) => return finish_with_cleanup(Err(error), signals.stop()),
+            Err(error) => {
+                drop(receiver);
+                return finish_with_cleanup(Err(error), signals.stop());
+            }
         };
         let resize = match spawn_resize(sender.clone(), initial_geometry) {
             Ok(worker) => worker,
             Err(error) => {
+                drop(receiver);
                 let cleanup = finish_with_cleanup(signals.stop(), control.stop());
                 return finish_with_cleanup(Err(error), cleanup);
             }
@@ -376,6 +381,7 @@ impl RuntimeWorkers {
         {
             Ok(worker) => worker,
             Err(error) => {
+                drop(receiver);
                 let cleanup =
                     finish_with_cleanup(resize.map_or(Ok(()), ResizeWorker::stop), control.stop());
                 let cleanup = finish_with_cleanup(cleanup, signals.stop());
@@ -385,6 +391,7 @@ impl RuntimeWorkers {
         let reader = match spawn_reader(reader, sender.clone()) {
             Ok(worker) => worker,
             Err(error) => {
+                drop(receiver);
                 let cleanup = finish_with_cleanup(
                     input.map_or(Ok(()), InputWorker::stop),
                     resize.map_or(Ok(()), ResizeWorker::stop),
@@ -394,13 +401,16 @@ impl RuntimeWorkers {
                 return finish_with_cleanup(Err(error), cleanup);
             }
         };
-        return Ok(Self {
-            reader,
-            input,
-            resize,
-            signals,
-            control,
-        });
+        return Ok((
+            Self {
+                reader,
+                input,
+                resize,
+                signals,
+                control,
+            },
+            receiver,
+        ));
     }
 
     pub(super) fn begin_control_shutdown(&self) -> Result<()> {
@@ -411,7 +421,12 @@ impl RuntimeWorkers {
         return self.control.shutdown_finished();
     }
 
-    pub(super) fn finish<T>(self, primary: Result<T>) -> Result<T> {
+    pub(super) fn finish<T>(
+        self,
+        receiver: mpsc::Receiver<RuntimeMessage>,
+        primary: Result<T>,
+    ) -> Result<T> {
+        drop(receiver);
         let control_stop = self.control.stop();
         let input_stop = self.input.map_or(Ok(()), InputWorker::stop);
         let resize_stop = self.resize.map_or(Ok(()), ResizeWorker::stop);
@@ -488,4 +503,100 @@ pub(super) fn invalid_geometry(options: &RecordOptions) -> Error {
         cell_width_px: options.cell_width_px,
         cell_height_px: options.cell_height_px,
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    struct NotifyingReader(mpsc::SyncSender<()>);
+
+    impl Read for NotifyingReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.0.send(()).map_err(io::Error::other)?;
+            buf[0] = b'x';
+            return Ok(1);
+        }
+    }
+
+    #[test]
+    fn runtime_workers_error_closes_full_inbox_before_joining_reader() {
+        let (completed_sender, completed) = mpsc::sync_channel(1);
+        let thread = thread::spawn(move || {
+            let (sender, receiver) = mpsc::sync_channel(1);
+            sender
+                .send(RuntimeMessage::Output(vec![b'a']))
+                .expect("fill inbox");
+            let (reading_sender, reading) = mpsc::sync_channel(1);
+            let (workers, receiver) = RuntimeWorkers::start(
+                Box::new(NotifyingReader(reading_sender)),
+                &sender,
+                receiver,
+                false,
+                TerminalGeometry {
+                    cols: 80,
+                    rows: 24,
+                    pixel_width: 720,
+                    pixel_height: 432,
+                },
+                &format!("termtrace-worker-test-{}", uuid::Uuid::now_v7()),
+            )
+            .expect("start real runtime workers");
+            reading
+                .recv_timeout(Duration::from_secs(5))
+                .expect("reader reached full inbox");
+            let result: Result<()> = workers.finish(
+                receiver,
+                Err(terminal_error("test actor failure", "stop consuming")),
+            );
+            assert!(matches!(
+                result,
+                Err(Error::TerminalOperation {
+                    operation: "test actor failure",
+                    ..
+                })
+            ));
+            assert!(sender.send(RuntimeMessage::OutputClosed).is_err());
+            completed_sender.send(()).expect("report completed cleanup");
+        });
+        completed
+            .recv_timeout(Duration::from_secs(10))
+            .expect("runtime cleanup must release the blocked reader");
+        thread.join().expect("runtime cleanup thread");
+    }
+
+    #[test]
+    fn runtime_workers_partial_startup_failure_disconnects_full_inbox() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        sender
+            .send(RuntimeMessage::Output(vec![b'a']))
+            .expect("fill inbox");
+        let (completed_sender, completed) = mpsc::sync_channel(1);
+        let blocked_sender = sender.clone();
+        let producer = thread::spawn(move || {
+            assert!(blocked_sender.send(RuntimeMessage::OutputClosed).is_err());
+            completed_sender
+                .send(())
+                .expect("report disconnected producer");
+        });
+        let started = RuntimeWorkers::start(
+            Box::new(io::empty()),
+            &sender,
+            receiver,
+            false,
+            TerminalGeometry {
+                cols: 80,
+                rows: 24,
+                pixel_width: 720,
+                pixel_height: 432,
+            },
+            &"x".repeat(256),
+        );
+        assert!(started.is_err());
+        completed
+            .recv_timeout(Duration::from_secs(5))
+            .expect("partial startup must release the blocked producer");
+        producer.join().expect("producer thread");
+    }
 }

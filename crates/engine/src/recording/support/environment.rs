@@ -8,6 +8,7 @@ use std::{
 use nix::{libc, unistd::geteuid};
 use termtrace_model::execution::environment::EnvironmentSpec;
 
+use super::terminal_error;
 use crate::{Error, Result};
 
 const MAX_SPEC_BYTES: u64 = 4 * 1024 * 1024;
@@ -87,15 +88,8 @@ pub fn parse_environment_spec(bytes: &[u8], source_path: &Path) -> Result<Enviro
         };
     })?;
     spec.validate()
-        .map_err(|error| return validation_error(error.to_string()))?;
+        .map_err(|error| return terminal_error("validate environment", error.to_string()))?;
     return Ok(spec);
-}
-
-fn validation_error(reason: impl Into<String>) -> Error {
-    return Error::TerminalOperation {
-        operation: "validate environment",
-        reason: reason.into(),
-    };
 }
 
 fn environment_error(reason: impl Into<String>) -> Error {

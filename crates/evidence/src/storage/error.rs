@@ -2,6 +2,45 @@ use std::{error::Error as StdError, fmt, io, path::PathBuf, result::Result as St
 
 use termtrace_model::error::ModelValidationError;
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum CompletionIntegrityKind {
+    CanonicalContent,
+    SessionManifestHash,
+    EventHeaderHash,
+    TerminalExitMissing,
+    PendingMutationIntents,
+    EventCount,
+    OutputCount,
+    FinalEventHash,
+    ExitOutcome,
+    DurabilityRecord,
+}
+
+// Classification stays private; public validation retains its existing Error contract.
+#[derive(Debug)]
+pub(crate) struct CompletionIntegrityError {
+    pub(crate) kind: CompletionIntegrityKind,
+    pub(crate) error: Error,
+}
+
+impl CompletionIntegrityError {
+    pub(crate) fn new(kind: CompletionIntegrityKind, reason: impl Into<String>) -> Self {
+        return Self {
+            kind,
+            error: Error::invalid(reason),
+        };
+    }
+}
+
+impl From<Error> for CompletionIntegrityError {
+    fn from(error: Error) -> Self {
+        return Self {
+            kind: CompletionIntegrityKind::CanonicalContent,
+            error,
+        };
+    }
+}
+
 /// Failure while storing, reading, or verifying evidence.
 #[derive(Debug)]
 pub enum Error {

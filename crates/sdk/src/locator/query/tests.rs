@@ -162,8 +162,7 @@ fn diagnostics_truncate_only_at_unicode_boundaries() {
     let input = "界".repeat(MAX_DIAGNOSTIC_CHARS);
     let (bounded, truncated) = bounded_text(&input);
     assert!(truncated);
-    assert!(bounded.len() <= MAX_DIAGNOSTIC_CHARS);
-    assert!(bounded.is_char_boundary(bounded.len()));
+    assert_eq!(bounded, "界".repeat(MAX_DIAGNOSTIC_CHARS / "界".len()));
 }
 
 #[test]

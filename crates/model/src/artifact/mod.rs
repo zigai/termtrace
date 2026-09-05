@@ -1,5 +1,6 @@
 //! Derived artifact metadata, publication, playback, and presentation contracts.
 
+pub mod bug_report;
 pub mod bundle;
 pub mod metadata;
 pub mod playback;

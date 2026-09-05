@@ -301,22 +301,19 @@ pub(in crate::cli) fn run_events(
         }
         records.push(record);
     }
-    let next_sequences = records
-        .iter()
-        .map(|record| return record.seq)
-        .collect::<Vec<_>>();
-    let projections = records
-        .into_iter()
-        .map(|record| return EventProjection::from_record(record, arguments.metadata_only))
-        .collect::<Vec<_>>();
-    let (projections, page, partial) = paginate(projections, &arguments.page);
-    for projection in projections {
+    let next_event_seq = (!arguments.page.all)
+        .then(|| {
+            return records
+                .get(arguments.page.offset.saturating_add(arguments.page.limit))
+                .map(|record| return record.seq);
+        })
+        .flatten();
+    let (records, page, partial) = paginate(records, &arguments.page);
+    for record in records {
+        let projection = EventProjection::from_record(record, arguments.metadata_only);
         write_json_line(response, &projection)?;
     }
     if partial {
-        let next_event_seq = page
-            .next_offset
-            .and_then(|offset| return next_sequences.get(offset).copied());
         let mut page = serde_json::to_value(page).into_diagnostic()?;
         if let Some(object) = page.as_object_mut() {
             object.insert(

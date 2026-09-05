@@ -77,7 +77,7 @@ pub(super) fn validate_postcondition_durations(postcondition: &ActionCondition) 
                     reason: "idle stability must be greater than zero".to_owned(),
                 });
             }
-            if timeout_ns == 0 || stable_for_ns > timeout_ns {
+            if stable_for_ns > timeout_ns {
                 return Err(Error::InvalidDuration {
                     field: "timeout",
                     reason: "timeout must be nonzero and at least stable_for".to_owned(),
@@ -129,7 +129,7 @@ pub(super) fn validate_stable_options(options: StableCaptureOptions) -> Result<(
             reason: "stable_for must be greater than zero".to_owned(),
         });
     }
-    if timeout_ns == 0 || stable_for_ns > timeout_ns || timeout_ns > 3_600_000_000_000 {
+    if stable_for_ns > timeout_ns || timeout_ns > 3_600_000_000_000 {
         return Err(Error::InvalidDuration {
             field: "timeout",
             reason: "timeout must satisfy stable_for <= timeout <= one hour".to_owned(),
@@ -146,154 +146,6 @@ pub(super) fn validate_stable_options(options: StableCaptureOptions) -> Result<(
         }));
     }
     return Ok(());
-}
-
-pub(super) fn send_request_response_with_timeout(
-    session_directory: &Path,
-    request: &ControlRequest,
-    timeout: Duration,
-) -> Result<ControlResponse> {
-    let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
-        return Error::InvalidDuration {
-            field: "request_timeout",
-            reason: "request timeout exceeds the monotonic clock range".to_owned(),
-        };
-    })?;
-    let socket = PathBuf::from("<abstract-control-socket>");
-    let mut request_frame = serde_json::to_vec(request).map_err(|source| {
-        return Error::InvalidJson {
-            path: socket.clone(),
-            json_path: "$".to_owned(),
-            source,
-        };
-    })?;
-    if u64::try_from(request_frame.len().saturating_add(1)).unwrap_or(u64::MAX)
-        > MAX_CONTROL_MESSAGE_BYTES
-    {
-        return Err(Error::InvalidControlProtocol {
-            reason: "request must be no larger than 1 MiB".to_owned(),
-        });
-    }
-    request_frame.push(b'\n');
-
-    let mut stream = connect_session_control(session_directory)?;
-    let write_timeout =
-        remaining_control_timeout(deadline, session_directory, "write request", false)?;
-    stream
-        .set_read_timeout(Some(write_timeout))
-        .and_then(|()| return stream.set_write_timeout(Some(write_timeout)))
-        .map_err(|source| {
-            return client_control_transport_error(
-                session_directory,
-                "configure deadlines",
-                write_timeout,
-                false,
-                source,
-            );
-        })?;
-    stream.write_all(&request_frame).map_err(|source| {
-        return client_control_transport_error(
-            session_directory,
-            "write request",
-            write_timeout,
-            true,
-            source,
-        );
-    })?;
-    stream.shutdown(Shutdown::Write).map_err(|source| {
-        return client_control_transport_error(
-            session_directory,
-            "finish request",
-            write_timeout,
-            true,
-            source,
-        );
-    })?;
-
-    let read_timeout =
-        remaining_control_timeout(deadline, session_directory, "read response", true)?;
-    stream
-        .set_read_timeout(Some(read_timeout))
-        .map_err(|source| {
-            return client_control_transport_error(
-                session_directory,
-                "configure response deadline",
-                read_timeout,
-                true,
-                source,
-            );
-        })?;
-    let mut encoded: Vec<u8> = Vec::new();
-    BufReader::new(stream)
-        .take(MAX_CONTROL_MESSAGE_BYTES + 1)
-        .read_until(b'\n', &mut encoded)
-        .map_err(|source| {
-            return client_control_transport_error(
-                session_directory,
-                "read response",
-                read_timeout,
-                true,
-                source,
-            );
-        })?;
-    validate_frame(&encoded)?;
-    let response: ControlResponse = serde_json::from_slice(&encoded).map_err(|source| {
-        return Error::InvalidJson {
-            path: socket,
-            json_path: "$".to_owned(),
-            source,
-        };
-    })?;
-    if response.version != CONTROL_PROTOCOL_VERSION || response.request_id != request.request_id {
-        return Err(Error::InvalidControlProtocol {
-            reason: "response version or request identifier does not match".to_owned(),
-        });
-    }
-    return Ok(response);
-}
-
-pub(super) fn remaining_control_timeout(
-    deadline: Instant,
-    session: &Path,
-    phase: &'static str,
-    request_dispatched: bool,
-) -> Result<Duration> {
-    return deadline
-        .checked_duration_since(Instant::now())
-        .filter(|remaining| return !remaining.is_zero())
-        .ok_or_else(|| {
-            return Error::ControlTimeout {
-                session: session.to_path_buf(),
-                phase,
-                timeout_ms: 0,
-                request_dispatched,
-                source: IoError::new(ErrorKind::TimedOut, "control deadline elapsed"),
-            };
-        });
-}
-
-pub(super) fn client_control_transport_error(
-    session: &Path,
-    phase: &'static str,
-    timeout: Duration,
-    request_dispatched: bool,
-    source: IoError,
-) -> Error {
-    if matches!(source.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) {
-        return Error::ControlTimeout {
-            session: session.to_path_buf(),
-            phase,
-            timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
-            request_dispatched,
-            source,
-        };
-    }
-    return Error::ControlTransport {
-        session: session.to_path_buf(),
-        phase,
-        request_dispatched,
-        source,
-    };
 }
 
 pub(super) fn exact_duration_ns(field: &'static str, duration: Duration) -> Result<u64> {
@@ -335,11 +187,6 @@ pub(super) fn action_atom(
             caller_intent,
         },
     };
-}
-
-pub(super) fn action_operation_id(request_id: Uuid, index: usize) -> Uuid {
-    let atom_number = u128::try_from(index).unwrap_or(u128::MAX).saturating_add(1);
-    return Uuid::from_u128(request_id.as_u128() ^ atom_number);
 }
 
 pub(super) fn public_control_error(

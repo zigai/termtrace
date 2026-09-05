@@ -21,7 +21,7 @@ use termtrace_model::{
         ActionPostcondition, ActionPostconditionResult, ControlCommand, ControlData,
         ControlErrorDetails, ControlRequest, ControlResult, InputSequenceAtom,
         InputSequenceAtomOutcome, PointerOperation, ScreenPostconditionQuality, ScreenPredicate,
-        ScreenWaitQuality, StableCaptureQuality, StateHashComparison,
+        ScreenWaitQuality, StableCaptureQuality, StateHashComparison, derive_input_operation_id,
     },
     registry::RegistryLifecycle,
     terminal::observation::{ActorBoundaries, CaptureQuality, StatePoint},

@@ -133,8 +133,6 @@ mod sink;
 
 use envelope::*;
 use human::*;
-#[cfg(test)]
-use io_core::capture_raw_into;
 use io_core::{capture_json, capture_raw, direct_stderr, direct_stdout, report_message};
 use pagination::{pagination_projection, raw_pagination_projection};
 use projection::*;

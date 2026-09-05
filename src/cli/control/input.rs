@@ -34,7 +34,7 @@ pub(in crate::cli) fn run_send(
     }
     let request_id = uuid::Uuid::now_v7();
     let atom = InputSequenceAtom::Bytes {
-        operation_id: sequence_operation_id(request_id, 0),
+        operation_id: derive_input_operation_id(request_id, 0),
         data: ByteString::new(data),
         input_kind,
         caller_intent: None,
@@ -150,11 +150,6 @@ pub(super) fn input_sequence_atom_for_cli(
         input_kind,
         caller_intent,
     });
-}
-
-pub(super) fn sequence_operation_id(sequence_id: uuid::Uuid, index: usize) -> uuid::Uuid {
-    let atom_number = u128::try_from(index).unwrap_or(u128::MAX).saturating_add(1);
-    return uuid::Uuid::from_u128(sequence_id.as_u128() ^ atom_number);
 }
 
 pub(super) fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifiers)>> {

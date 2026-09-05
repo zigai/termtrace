@@ -1,5 +1,10 @@
 use std::collections::BTreeMap;
 
+use serde::{
+    Deserialize as _,
+    de::value::{self, StrDeserializer},
+};
+
 use super::*;
 
 pub(super) fn typed_envelope(response: CliResponseEnvelope) -> serde_json::Value {
@@ -22,35 +27,18 @@ pub(super) fn response_encoding_failure(message: String) -> serde_json::Value {
 }
 
 pub(super) fn applied_from_str(value: &str) -> Result<Applied, String> {
-    return match value {
-        "none" => Ok(Applied::None),
-        "all" => Ok(Applied::All),
-        "partial" => Ok(Applied::Partial),
-        "unknown" => Ok(Applied::Unknown),
-        _ => Err(format!("unknown applied value `{value}`")),
-    };
+    return Applied::deserialize(StrDeserializer::<value::Error>::new(value))
+        .map_err(|error| return format!("invalid applied value `{value}`: {error}"));
 }
 
 pub(super) fn retry_from_str(value: &str) -> Result<Retry, String> {
-    return match value {
-        "not_needed" => Ok(Retry::NotNeeded),
-        "safe_new_request" => Ok(Retry::SafeNewRequest),
-        "same_request_id_only" => Ok(Retry::SameRequestIdOnly),
-        "inspect_before_retry" => Ok(Retry::InspectBeforeRetry),
-        "unsafe" => Ok(Retry::Unsafe),
-        _ => Err(format!("unknown retry value `{value}`")),
-    };
+    return Retry::deserialize(StrDeserializer::<value::Error>::new(value))
+        .map_err(|error| return format!("invalid retry value `{value}`: {error}"));
 }
 
 pub(super) fn session_state_from_str(value: &str) -> Result<SessionState, String> {
-    return match value {
-        "live" => Ok(SessionState::Live),
-        "ended" => Ok(SessionState::Ended),
-        "completed" => Ok(SessionState::Completed),
-        "pending" => Ok(SessionState::Pending),
-        "unknown" => Ok(SessionState::Unknown),
-        _ => Err(format!("unknown session state value `{value}`")),
-    };
+    return SessionState::deserialize(StrDeserializer::<value::Error>::new(value))
+        .map_err(|error| return format!("invalid session state value `{value}`: {error}"));
 }
 pub(super) fn response_string_value(
     value: Option<&serde_json::Value>,

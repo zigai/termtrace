@@ -87,6 +87,14 @@ fn round_trip_preserves_binary_events_and_integrity_chain() {
     let recording = EventLog::read(&path).expect("read valid recording");
     assert_eq!(recording.events.len(), 3);
     assert!(recording.pending_operations.is_empty());
+    let encoded = fs_err::read_to_string(&path).expect("event log bytes");
+    for (line, record) in encoded.lines().skip(1).zip(&recording.events) {
+        assert_eq!(
+            line,
+            serde_json::to_string(record).expect("canonical event record JSON"),
+            "writer must preserve the canonical record wire encoding"
+        );
+    }
     assert_eq!(recording.events[0].seq, 0);
     assert_eq!(recording.events[1].seq, 1);
     assert!(matches!(

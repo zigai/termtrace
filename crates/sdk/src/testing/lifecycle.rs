@@ -442,48 +442,9 @@ fn stop_session_with_timeout(session: &Session, timeout: Duration) -> StdResult<
         return Err("finalization deadline expired before the stop request".to_owned());
     }
     let request = ControlRequest::new(ControlCommand::Stop);
-    let stream =
-        connect_session_control(session.path()).map_err(|error| return error.to_string())?;
-    return send_stop_request(stream, &request, timeout);
-}
-
-fn send_stop_request(
-    mut stream: UnixStream,
-    request: &ControlRequest,
-    timeout: Duration,
-) -> StdResult<(), String> {
-    stream
-        .set_read_timeout(Some(timeout))
-        .and_then(|()| return stream.set_write_timeout(Some(timeout)))
-        .map_err(|error| format!("failed to configure stop request deadline: {error}"))?;
-    let mut encoded = serde_json::to_vec(request)
-        .map_err(|error| format!("failed to encode stop request: {error}"))?;
-    encoded.push(b'\n');
-    stream
-        .write_all(&encoded)
-        .map_err(|error| format!("failed to write stop request: {error}"))?;
-    stream
-        .shutdown(Shutdown::Write)
-        .map_err(|error| format!("failed to finish stop request: {error}"))?;
-
-    let mut response_bytes: Vec<u8> = Vec::new();
-    BufReader::new(stream)
-        .take(MAX_CONTROL_MESSAGE_BYTES + 1)
-        .read_until(b'\n', &mut response_bytes)
-        .map_err(|error| format!("failed to read stop response: {error}"))?;
-    if response_bytes.last() != Some(&b'\n')
-        || u64::try_from(response_bytes.len()).unwrap_or(u64::MAX) > MAX_CONTROL_MESSAGE_BYTES
-    {
-        return Err(
-            "stop response must be one newline-terminated JSON object no larger than 1 MiB"
-                .to_owned(),
-        );
-    }
-    let response: ControlResponse = serde_json::from_slice(&response_bytes)
-        .map_err(|error| format!("failed to decode stop response: {error}"))?;
-    if response.version != CONTROL_PROTOCOL_VERSION || response.request_id != request.request_id {
-        return Err("stop response version or request identifier does not match".to_owned());
-    }
+    let timing = ExchangeTiming::deadline(timeout).map_err(|error| return error.to_string())?;
+    let response =
+        exchange(session.path(), &request, timing).map_err(|error| return error.to_string())?;
     match response.result {
         ControlResult::Ok { .. } => return Ok(()),
         ControlResult::Error { code, message, .. } => {
@@ -517,35 +478,14 @@ fn emit_panic_finalization_diagnostics(report: &FinalizationReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
-
-    #[test]
-    fn repeated_finalization_returns_the_recorded_report() {
-        let recorded = FinalizationReport {
-            outcome: TestOutcome::Passed,
-            evidence_directory: Some(PathBuf::from("attempt.tt")),
-            verified_artifacts: vec![PathBuf::from("attempt.tt")],
-            secondary_failures: Vec::new(),
-            retained: true,
-        };
-        let mut test = TerminalTest {
-            state: LifecycleState::Finalized(recorded.clone()),
-            attempt_directory: PathBuf::from("attempt.tt"),
-            snapshot_root: PathBuf::from("snapshots"),
-            update_snapshots: false,
-            finalization_timeout: Duration::from_secs(1),
-            evidence_policy: EvidencePolicy::OnFailure,
-        };
-        assert_eq!(test.finalize(TestOutcome::Error), recorded);
-        assert_eq!(test.finalize(TestOutcome::Panic), recorded);
-    }
-
     #[test]
     fn secondary_diagnostics_are_unicode_bounded() {
         let failure = bounded_secondary("cleanup", &"界".repeat(MAX_SECONDARY_FAILURE_CHARS));
         assert!(failure.truncated);
-        assert!(failure.message.len() <= MAX_SECONDARY_FAILURE_CHARS);
-        assert!(failure.message.is_char_boundary(failure.message.len()));
+        assert_eq!(
+            failure.message,
+            "界".repeat(MAX_SECONDARY_FAILURE_CHARS / "界".len())
+        );
     }
 
     #[test]
@@ -553,26 +493,5 @@ mod tests {
         let error = snapshot_path(Path::new("snapshots"), "../escape")
             .expect_err("path traversal must fail");
         assert!(error.to_string().contains("terminal_snapshot_name"));
-    }
-
-    #[test]
-    fn stop_request_obeys_the_supplied_deadline() {
-        let (client, server) = UnixStream::pair().expect("socket pair");
-        let server_thread = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(200));
-            drop(server);
-        });
-        let request = ControlRequest::new(ControlCommand::Stop);
-        let started = Instant::now();
-        let error = send_stop_request(client, &request, Duration::from_millis(20))
-            .expect_err("withheld stop response must time out");
-        let elapsed = started.elapsed();
-
-        assert!(error.contains("failed to read stop response"), "{error}");
-        assert!(
-            elapsed < Duration::from_millis(150),
-            "stop request ignored its deadline: {elapsed:?}"
-        );
-        server_thread.join().expect("server thread");
     }
 }

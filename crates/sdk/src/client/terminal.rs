@@ -53,6 +53,6 @@ impl Terminal {
                 source,
             };
         })?;
-        return Session::open(path, None);
+        return Session::open(path, self.binary.clone(), None);
     }
 }

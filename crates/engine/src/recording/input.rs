@@ -1,6 +1,7 @@
 //! Terminal input encoding, validation, and ordered event application.
 
 use std::{
+    borrow::Cow,
     collections::HashSet,
     io::{Error as IoError, ErrorKind, Write},
     mem::take,
@@ -13,18 +14,15 @@ use uuid::Uuid;
 use termtrace_evidence::event_log::EventLogWriter;
 use termtrace_model::{
     execution::event::{Event, InputDescriptor, InputKind, InputSource, OperationStatus},
-    protocol::control::{ControlData, InputSequenceAtom, InputSequenceAtomOutcome},
-    terminal::state::{KeyModifiers, MouseButton, NamedKey},
+    protocol::control::{ActionInputResult, InputSequenceAtom, InputSequenceAtomOutcome},
+    terminal::state::{KeyModifiers, ModeState, MouseButton, NamedKey},
     value::ByteString,
 };
 use termtrace_terminal::GhosttyVt;
 
 use super::{
     model::TerminalGeometry,
-    support::{
-        actor_boundaries, control_rejected, finish_with_cleanup, terminal_error,
-        validate_control_input,
-    },
+    support::{control_rejected, finish_with_cleanup, terminal_error, validate_control_input},
 };
 use crate::{Error, Result};
 
@@ -34,14 +32,12 @@ pub(super) struct InputApplication {
     pub(super) result_event_seq: u64,
 }
 
-struct PreparedSequenceAtom {
-    operation_id: Uuid,
-    input_kind: InputKind,
-    descriptor: InputDescriptor,
-    semantic_input: Option<String>,
-    terminal_modes_hash: String,
-    caller_intent: Option<String>,
-    data: Vec<u8>,
+pub(super) struct PreparedInput<'data> {
+    pub(super) input_kind: InputKind,
+    pub(super) descriptor: InputDescriptor,
+    pub(super) semantic_input: Option<String>,
+    pub(super) terminal_modes_hash: String,
+    pub(super) data: Cow<'data, [u8]>,
 }
 pub(super) fn semantic_key_name(key: NamedKey) -> String {
     return match key {
@@ -235,7 +231,7 @@ impl InputSequenceExecution {
         writer: &mut dyn Write,
         event_log: &mut EventLogWriter,
         semantic: &mut GhosttyVt,
-    ) -> Result<Option<ControlData>> {
+    ) -> Result<Option<ActionInputResult>> {
         let source_atom = self.atoms.get(self.next_atom_index).ok_or_else(|| {
             return terminal_error(
                 "advance input sequence",
@@ -266,13 +262,17 @@ impl InputSequenceExecution {
         let applied = match apply_input(
             writer,
             event_log,
-            atom.operation_id,
+            input_sequence_operation_id(source_atom),
             InputSource::Agent,
             atom.input_kind,
             atom.descriptor,
             Some(atom.terminal_modes_hash),
             atom.semantic_input,
-            atom.caller_intent,
+            match source_atom {
+                InputSequenceAtom::Bytes { caller_intent, .. }
+                | InputSequenceAtom::Key { caller_intent, .. }
+                | InputSequenceAtom::Paste { caller_intent, .. } => caller_intent.clone(),
+            },
             &atom.data,
         ) {
             Ok(applied) => applied,
@@ -305,7 +305,7 @@ impl InputSequenceExecution {
             .saturating_add(applied.bytes_written);
         if self.include_atom_outcomes {
             self.outcomes.push(InputSequenceAtomOutcome {
-                operation_id: atom.operation_id,
+                operation_id: input_sequence_operation_id(source_atom),
                 input_kind: atom.input_kind,
                 bytes_written: applied.bytes_written,
                 intent_event_seq: applied.intent_event_seq,
@@ -317,7 +317,7 @@ impl InputSequenceExecution {
             self.next_deadline = Instant::now() + Duration::from_nanos(self.pace_ns);
             return Ok(None);
         }
-        return Ok(Some(ControlData::InputSequenceApplied {
+        return Ok(Some(ActionInputResult {
             sequence_id: self.sequence_id,
             atom_count: u32::try_from(self.atoms.len()).unwrap_or(u32::MAX),
             bytes_written: self.total_bytes_written,
@@ -329,7 +329,6 @@ impl InputSequenceExecution {
                 .unwrap_or_else(|| return event_log.next_seq()),
             pace_ns: self.pace_ns,
             atoms: take(&mut self.outcomes),
-            boundaries: actor_boundaries(event_log),
         }));
     }
 }
@@ -382,110 +381,110 @@ fn validate_input_sequence(atoms: &[InputSequenceAtom], pace_ns: u64) -> Result<
     return Ok(());
 }
 
-fn prepare_input_sequence_atom(
-    atom: &InputSequenceAtom,
+fn prepare_input_sequence_atom<'data>(
+    atom: &'data InputSequenceAtom,
     semantic: &mut GhosttyVt,
-) -> Result<PreparedSequenceAtom> {
+) -> Result<PreparedInput<'data>> {
     return match atom {
         InputSequenceAtom::Bytes {
-            operation_id,
-            data,
-            input_kind,
-            caller_intent,
-        } => Ok(PreparedSequenceAtom {
-            operation_id: *operation_id,
-            input_kind: *input_kind,
-            descriptor: match input_kind {
-                InputKind::Text => InputDescriptor::Text,
-                InputKind::Raw
-                | InputKind::Keys
-                | InputKind::Paste
-                | InputKind::Focus
-                | InputKind::Pointer => InputDescriptor::Raw,
-            },
-            terminal_modes_hash: mode_hash(semantic)?,
-            semantic_input: Some(
-                match input_kind {
-                    InputKind::Text => "text",
-                    InputKind::Raw => "raw",
-                    InputKind::Keys => "keys",
-                    InputKind::Paste => "paste",
-                    InputKind::Focus => "focus",
-                    InputKind::Pointer => "pointer",
-                }
-                .to_owned(),
-            ),
-            caller_intent: caller_intent.clone(),
-            data: data.as_bytes().to_vec(),
-        }),
-        InputSequenceAtom::Key {
-            operation_id,
-            key,
-            modifiers,
-            caller_intent,
-        } => {
-            let modes = semantic.snapshot()?.modes;
-            let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
-                return terminal_error("serialize keyboard modes", error.to_string());
-            })?;
-            let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
-            let encoded = semantic.encode_key(*key, *modifiers).map_err(|error| {
+            data, input_kind, ..
+        } => prepare_bytes(data.as_bytes(), *input_kind, semantic),
+        InputSequenceAtom::Key { key, modifiers, .. } => {
+            prepare_key(*key, *modifiers, semantic, |error| {
                 return control_rejected("key_encoding_failed", &error.to_string());
-            })?;
-            if encoded.data.as_bytes().is_empty() {
-                return Err(control_rejected(
-                    "key_has_no_output",
-                    "the requested key press produced no terminal bytes",
-                ));
-            }
-            Ok(PreparedSequenceAtom {
-                operation_id: *operation_id,
-                input_kind: InputKind::Keys,
-                descriptor: InputDescriptor::Key {
-                    key: semantic_key_name(*key),
-                    shift: modifiers.shift,
-                    control: modifiers.control,
-                    alt: modifiers.alt,
-                    super_key: modifiers.super_key,
-                    encoder: encoded.encoder,
-                    terminal_modes_hash: terminal_modes_hash.clone(),
-                },
-                terminal_modes_hash,
-                semantic_input: Some(semantic_key_input(*key, *modifiers)),
-                caller_intent: caller_intent.clone(),
-                data: encoded.data.as_bytes().to_vec(),
             })
         }
-        InputSequenceAtom::Paste {
-            operation_id,
-            data,
-            caller_intent,
-        } => {
-            let modes = semantic.snapshot()?.modes;
-            let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
-                return terminal_error("serialize paste modes", error.to_string());
-            })?;
-            let terminal_modes_hash = blake3::hash(&mode_bytes).to_hex().to_string();
-            Ok(PreparedSequenceAtom {
-                operation_id: *operation_id,
-                input_kind: InputKind::Paste,
-                descriptor: InputDescriptor::Paste {
-                    bracketed: modes.bracketed_paste,
-                    terminal_modes_hash: terminal_modes_hash.clone(),
-                },
-                terminal_modes_hash,
-                semantic_input: Some("paste".to_owned()),
-                caller_intent: caller_intent.clone(),
-                data: encode_paste(data.as_bytes(), modes.bracketed_paste)?,
-            })
-        }
+        InputSequenceAtom::Paste { data, .. } => prepare_paste(data.as_bytes(), semantic),
     };
 }
 
-fn mode_hash(semantic: &mut GhosttyVt) -> Result<String> {
+pub(super) fn prepare_bytes<'data>(
+    data: &'data [u8],
+    input_kind: InputKind,
+    semantic: &mut GhosttyVt,
+) -> Result<PreparedInput<'data>> {
     let modes = semantic.snapshot()?.modes;
-    let mode_bytes = serde_json::to_vec(&modes).map_err(|error| {
-        return terminal_error("serialize input modes", error.to_string());
+    return Ok(PreparedInput {
+        input_kind,
+        descriptor: match input_kind {
+            InputKind::Text => InputDescriptor::Text,
+            InputKind::Raw
+            | InputKind::Keys
+            | InputKind::Paste
+            | InputKind::Focus
+            | InputKind::Pointer => InputDescriptor::Raw,
+        },
+        terminal_modes_hash: mode_hash(&modes, "serialize input modes")?,
+        semantic_input: Some(
+            match input_kind {
+                InputKind::Text => "text",
+                InputKind::Raw => "raw",
+                InputKind::Keys => "keys",
+                InputKind::Paste => "paste",
+                InputKind::Focus => "focus",
+                InputKind::Pointer => "pointer",
+            }
+            .to_owned(),
+        ),
+        data: Cow::Borrowed(data),
+    });
+}
+
+pub(super) fn prepare_key(
+    key: NamedKey,
+    modifiers: KeyModifiers,
+    semantic: &mut GhosttyVt,
+    encoding_error: fn(termtrace_terminal::Error) -> Error,
+) -> Result<PreparedInput<'static>> {
+    let modes = semantic.snapshot()?.modes;
+    let terminal_modes_hash = mode_hash(&modes, "serialize keyboard modes")?;
+    let encoded = semantic
+        .encode_key(key, modifiers)
+        .map_err(encoding_error)?;
+    if encoded.data.as_bytes().is_empty() {
+        return Err(control_rejected(
+            "key_has_no_output",
+            "the requested key press produced no terminal bytes",
+        ));
+    }
+    return Ok(PreparedInput {
+        input_kind: InputKind::Keys,
+        descriptor: InputDescriptor::Key {
+            key: semantic_key_name(key),
+            shift: modifiers.shift,
+            control: modifiers.control,
+            alt: modifiers.alt,
+            super_key: modifiers.super_key,
+            encoder: encoded.encoder,
+            terminal_modes_hash: terminal_modes_hash.clone(),
+        },
+        terminal_modes_hash,
+        semantic_input: Some(semantic_key_input(key, modifiers)),
+        data: Cow::Owned(encoded.data.into_bytes()),
+    });
+}
+
+pub(super) fn prepare_paste(
+    data: &[u8],
+    semantic: &mut GhosttyVt,
+) -> Result<PreparedInput<'static>> {
+    let modes = semantic.snapshot()?.modes;
+    let terminal_modes_hash = mode_hash(&modes, "serialize paste modes")?;
+    return Ok(PreparedInput {
+        input_kind: InputKind::Paste,
+        descriptor: InputDescriptor::Paste {
+            bracketed: modes.bracketed_paste,
+            terminal_modes_hash: terminal_modes_hash.clone(),
+        },
+        terminal_modes_hash,
+        semantic_input: Some("paste".to_owned()),
+        data: Cow::Owned(encode_paste(data, modes.bracketed_paste)?),
+    });
+}
+
+pub(super) fn mode_hash(modes: &ModeState, operation: &'static str) -> Result<String> {
+    let mode_bytes = serde_json::to_vec(modes).map_err(|error| {
+        return terminal_error(operation, error.to_string());
     })?;
     return Ok(blake3::hash(&mode_bytes).to_hex().to_string());
 }

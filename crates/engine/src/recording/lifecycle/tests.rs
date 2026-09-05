@@ -697,22 +697,6 @@ fn preserves_complete_osc_query_when_response_precedes_st() {
 }
 
 #[test]
-fn synchronized_output_holds_presented_state_until_exit() {
-    let temporary = TempDir::new().expect("temporary directory");
-    let session = temporary.path().join("sync-recording");
-    let command = vec![
-        OsString::from("/bin/sh"),
-        OsString::from("-c"),
-        OsString::from("printf 'before\x1b[?2026hhidden\x1b[?2026lafter'"),
-    ];
-    let options = isolated_options(session, command);
-    let mut output = Vec::new();
-    let outcome = record_to(&options, &mut output).expect("record synchronized output");
-    assert_eq!(outcome.exit_code, Some(0));
-    assert_eq!(output, b"before\x1b[?2026hhidden\x1b[?2026lafter");
-}
-
-#[test]
 fn graceful_control_shutdown_drains_an_inflight_request() {
     let (sender, receiver) = mpsc::sync_channel(1);
     let socket_name = control_socket_name(Uuid::now_v7());

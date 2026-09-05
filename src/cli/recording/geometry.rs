@@ -1,4 +1,5 @@
 use super::*;
+use std::env::current_exe;
 
 pub(in crate::cli) fn run_geometry_probe(arguments: GeometryProbeArgs) -> Result<ExitCode> {
     let stdin = io::stdin();
@@ -170,7 +171,8 @@ pub(super) fn resolve_record_geometry(
             let profile = ghostty_profile.ok_or_else(|| {
                 return miette::miette!("fitted geometry requires a resolved Ghostty profile");
             })?;
-            let report = probe_ghostty_geometry(target, profile).into_diagnostic()?;
+            let helper = current_exe().into_diagnostic()?;
+            let report = probe_ghostty_geometry(&helper, target, profile).into_diagnostic()?;
             let geometry = SessionGeometry {
                 cols: report.cols,
                 rows: report.rows,

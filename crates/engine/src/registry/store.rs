@@ -1,6 +1,5 @@
 use directories::BaseDirs;
 
-use super::liveness::recorder_process_identity;
 use super::*;
 
 impl SessionRegistry {
@@ -277,7 +276,7 @@ impl SessionRegistry {
             .duration_since(UNIX_EPOCH)
             .map_err(|_| return Error::ClockBeforeEpoch)?
             .as_nanos();
-        let process_identity = recorder_process_identity(&canonical);
+        let process_identity = recorder_identity(&canonical);
         return Ok(RegistryEntry {
             format: REGISTRY_ENTRY_FORMAT.to_owned(),
             version: REGISTRY_ENTRY_VERSION,
@@ -406,7 +405,7 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
             }
         }
     }
-    let responsive_identity = recorder_process_identity(&canonical);
+    let responsive_identity = recorder_identity(&canonical);
     if let Some(identity) = entry.recorder_pid.zip(entry.recorder_process_start_ticks) {
         if responsive_identity == Some(identity) {
             row.lifecycle = RegistryLifecycle::Live;

@@ -2,7 +2,10 @@ use std::{ffi::OsString, path::PathBuf};
 
 use clap::{Args, Subcommand, ValueEnum};
 
-use crate::cli::parsers::parse_video_fps;
+use crate::cli::{
+    artifacts::args::{VideoPresetArg, VideoSourceArg},
+    parsers::parse_video_fps,
+};
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct TmuxArgs {
@@ -220,19 +223,6 @@ pub(in crate::cli) struct TmuxStopArgs {
     pub(in crate::cli) timeout_ms: u64,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub(in crate::cli) enum TmuxVideoPreset {
-    Docs,
-    Social,
-    Lossless,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub(in crate::cli) enum TmuxVideoRenderer {
-    Semantic,
-    Native,
-}
-
 #[derive(Debug, Args)]
 pub(in crate::cli) struct TmuxVideoArgs {
     /// Aggregate tmux recording name.
@@ -246,15 +236,15 @@ pub(in crate::cli) struct TmuxVideoArgs {
     #[arg(long)]
     pub(in crate::cli) output_root: Option<PathBuf>,
 
-    #[arg(long, value_enum, default_value_t = TmuxVideoPreset::Docs)]
-    pub(in crate::cli) preset: TmuxVideoPreset,
+    #[arg(long, value_enum, default_value_t = VideoPresetArg::Docs)]
+    pub(in crate::cli) preset: VideoPresetArg,
 
     /// Optional exact video frame rate; presets choose their own default when omitted.
     #[arg(long, value_parser = parse_video_fps)]
     pub(in crate::cli) fps: Option<u16>,
 
-    #[arg(long, value_enum, default_value_t = TmuxVideoRenderer::Semantic)]
-    pub(in crate::cli) renderer: TmuxVideoRenderer,
+    #[arg(long, value_enum, default_value_t = VideoSourceArg::Semantic)]
+    pub(in crate::cli) renderer: VideoSourceArg,
 }
 
 #[derive(Debug, Args)]

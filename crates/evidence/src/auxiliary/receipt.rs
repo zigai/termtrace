@@ -10,10 +10,11 @@ use std::{
 };
 
 use termtrace_model::{
+    artifact::metadata::ArtifactRootRecord,
     execution::receipt::{
         EvidenceReceipt, EvidenceReceiptPayload, EvidenceSignature, ReceiptVerification,
     },
-    execution::session::VerificationLevel,
+    execution::session::{SessionCompletion, VerificationLevel},
     protocol::capability::{Capability, CapabilityStatus, RECEIPT_SIGNING_CAPABILITY},
     value::ByteString,
 };
@@ -78,18 +79,13 @@ pub fn create_ssh_receipt(session: &Path, key: &Path, signer_key_id: &str) -> Re
             "signer key ID must be non-empty and single-line",
         ));
     }
-    let payload = build_payload(session, signer_key_id, None, None)?;
+    let payload = build_payload(session, signer_key_id)?;
     let path = session.join(EVIDENCE_RECEIPT_NAME);
     sign_ssh_receipt(&path, payload, key)?;
     return Ok(path);
 }
 
-fn build_payload(
-    session: &Path,
-    signer_key_id: &str,
-    checkpoint_count: Option<u64>,
-    created_unix_ns: Option<u128>,
-) -> Result<EvidenceReceiptPayload> {
+fn build_payload(session: &Path, signer_key_id: &str) -> Result<EvidenceReceiptPayload> {
     let manifest = read_manifest(session)?;
     let completion = read_completion(session)?;
     let completion_path = session.join("completion.json");
@@ -97,7 +93,31 @@ fn build_payload(
         .map_err(|source| return Error::filesystem(completion_path.clone(), source))?;
     let roots = read_artifact_roots(&session.join(ARTIFACT_ROOT_LOG))?;
     let available_count = u64::try_from(roots.len()).unwrap_or(u64::MAX);
-    let artifact_root_count = checkpoint_count.unwrap_or(available_count);
+    let created_unix_ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| return Error::ClockBeforeEpoch)?
+        .as_nanos();
+    return receipt_payload(
+        manifest.session_id,
+        &completion,
+        &completion_bytes,
+        &roots,
+        available_count,
+        signer_key_id,
+        created_unix_ns,
+    );
+}
+
+pub(crate) fn receipt_payload(
+    session_id: Uuid,
+    completion: &SessionCompletion,
+    completion_bytes: &[u8],
+    roots: &[ArtifactRootRecord],
+    artifact_root_count: u64,
+    signer_key_id: &str,
+    created_unix_ns: u128,
+) -> Result<EvidenceReceiptPayload> {
+    let available_count = u64::try_from(roots.len()).unwrap_or(u64::MAX);
     if artifact_root_count > available_count {
         return Err(Error::invalid(
             "artifact checkpoint exceeds the current root catalog",
@@ -116,21 +136,14 @@ fn build_payload(
                 .clone(),
         )
     };
-    let created_unix_ns = match created_unix_ns {
-        Some(value) => value,
-        None => SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| return Error::ClockBeforeEpoch)?
-            .as_nanos(),
-    };
     return Ok(EvidenceReceiptPayload {
         domain: EVIDENCE_RECEIPT_FORMAT.to_owned(),
         version: EVIDENCE_RECEIPT_VERSION,
-        session_id: manifest.session_id,
-        session_manifest_hash: completion.session_manifest_hash,
-        final_event_hash: completion.final_event_hash,
+        session_id,
+        session_manifest_hash: completion.session_manifest_hash.clone(),
+        final_event_hash: completion.final_event_hash.clone(),
         event_count: completion.event_count,
-        completion_hash: blake3::hash(&completion_bytes).to_hex().to_string(),
+        completion_hash: blake3::hash(completion_bytes).to_hex().to_string(),
         artifact_root_count,
         artifact_root_hash,
         signer_key_id: signer_key_id.to_owned(),

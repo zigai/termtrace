@@ -1,4 +1,4 @@
-use super::input::{input_sequence_atom_for_cli, sequence_operation_id};
+use super::input::input_sequence_atom_for_cli;
 use super::*;
 
 pub(in crate::cli) fn run_act(
@@ -13,7 +13,7 @@ pub(in crate::cli) fn run_act(
     let mut atoms: Vec<InputSequenceAtom> = Vec::new();
     for atom in &arguments.atoms {
         if arguments.pace.is_zero() || !atom.starts_with("text:") {
-            let operation_id = sequence_operation_id(request_id, atoms.len());
+            let operation_id = derive_input_operation_id(request_id, atoms.len());
             atoms.push(input_sequence_atom_for_cli(
                 atom,
                 operation_id,
@@ -24,7 +24,7 @@ pub(in crate::cli) fn run_act(
         let text = atom.strip_prefix("text:").unwrap_or_default();
         for scalar in text.chars() {
             atoms.push(InputSequenceAtom::Bytes {
-                operation_id: sequence_operation_id(request_id, atoms.len()),
+                operation_id: derive_input_operation_id(request_id, atoms.len()),
                 data: ByteString::new(scalar.to_string().into_bytes()),
                 input_kind: InputKind::Text,
                 caller_intent: arguments.intent.clone(),

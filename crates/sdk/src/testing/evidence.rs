@@ -114,10 +114,7 @@ fn relative_evidence_path(root: &Path, path: &Path) -> Result<String> {
         .ok_or_else(|| return testing_error("test artifact path is not valid UTF-8"));
 }
 pub(super) fn bounded_secondary(phase: &'static str, message: &str) -> SecondaryFailure {
-    let mut end = message.len().min(MAX_SECONDARY_FAILURE_CHARS);
-    while !message.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = message.floor_char_boundary(MAX_SECONDARY_FAILURE_CHARS);
     return SecondaryFailure {
         phase,
         message: message.get(..end).unwrap_or_default().to_owned(),

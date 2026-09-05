@@ -45,11 +45,16 @@ impl SessionActor<'_> {
             projection,
         } = &request.command
         {
-            if validate_screen_predicate(predicate).is_err()
-                || *timeout_ns == 0
-                || *timeout_ns > 3_600_000_000_000
-                || *stable_for_ns > *timeout_ns
-            {
+            let predicate = compile_screen_predicate(predicate).and_then(|predicate| {
+                if *timeout_ns == 0
+                    || *timeout_ns > 3_600_000_000_000
+                    || *stable_for_ns > *timeout_ns
+                {
+                    return Err("invalid screen wait duration".to_owned());
+                }
+                return Ok(predicate);
+            });
+            let Ok(predicate) = predicate else {
                 let response = control_error_response(
                     request.request_id,
                     "invalid_screen_wait",
@@ -57,7 +62,7 @@ impl SessionActor<'_> {
                 );
                 let _ = response_sender.send(response);
                 return Ok(());
-            }
+            };
             if let Err(error) = validate_screen_region(
                 projection,
                 self.live.presented.cols,
@@ -84,7 +89,7 @@ impl SessionActor<'_> {
             }
             self.screen_waiters.push(ScreenWaiter {
                 request_id: request.request_id,
-                predicate: Some(predicate.clone()),
+                predicate: Some(predicate),
                 stable_for: Duration::from_nanos(*stable_for_ns),
                 deadline: Instant::now() + Duration::from_nanos(*timeout_ns),
                 matching_state: None,
@@ -201,7 +206,7 @@ impl SessionActor<'_> {
                     atoms,
                     pace_ns,
                     include_atom_outcomes,
-                } => Some((atoms, *pace_ns, *include_atom_outcomes, None, None)),
+                } => Some((atoms, *pace_ns, *include_atom_outcomes, None)),
                 ControlCommand::Act {
                     atoms,
                     pace_ns,
@@ -212,39 +217,37 @@ impl SessionActor<'_> {
                     atoms,
                     *pace_ns,
                     *include_atom_outcomes,
-                    Some(postcondition.clone()),
-                    Some(*projection),
+                    Some((postcondition, projection)),
                 )),
                 _ => None,
             };
-            if let Some((atoms, pace_ns, include_atom_outcomes, postcondition, projection)) =
-                sequence
-            {
-                let validated_postcondition = postcondition
-                    .as_ref()
-                    .map(validate_action_postcondition)
-                    .transpose()
-                    .and_then(|_| {
-                        if let Some(projection) = &projection {
-                            validate_screen_region(
-                                projection,
-                                self.live.presented.cols,
-                                self.live.presented.rows,
-                            )
-                            .map_err(Error::ScreenFrame)?;
-                        }
-                        return Ok(());
-                    });
-                let execution = validated_postcondition.and_then(|_| {
-                    return InputSequenceExecution::new(
+            if let Some((atoms, pace_ns, include_atom_outcomes, action)) = sequence {
+                let admitted_action = action
+                    .map(|(postcondition, projection)| {
+                        let postcondition = compile_action_postcondition(postcondition)?;
+                        validate_screen_region(
+                            projection,
+                            self.live.presented.cols,
+                            self.live.presented.rows,
+                        )
+                        .map_err(Error::ScreenFrame)?;
+                        return Ok(AdmittedAction {
+                            postcondition,
+                            projection: *projection,
+                        });
+                    })
+                    .transpose();
+                let execution = admitted_action.and_then(|action| {
+                    let execution = InputSequenceExecution::new(
                         request.request_id,
                         atoms,
                         pace_ns,
                         include_atom_outcomes,
-                    );
+                    )?;
+                    return Ok((execution, action));
                 });
                 match execution {
-                    Ok(execution) => {
+                    Ok((execution, action)) => {
                         self.pending_input_sequence = Some(PendingInputSequence {
                             request,
                             response_sender,
@@ -255,12 +258,7 @@ impl SessionActor<'_> {
                                 );
                             })?,
                             event_start_seq,
-                            execution,
-                            postcondition,
-                            input: None,
-                            postcondition_started_at: None,
-                            matching_state: None,
-                            projection,
+                            phase: action::InputSequencePhase::Applying { execution, action },
                         });
                         return Ok(());
                     }
@@ -335,21 +333,13 @@ impl SessionActor<'_> {
                 request_id: request.request_id,
                 result: ControlResult::Ok { data: data.clone() },
             },
-            (Err(Error::ScreenFrame(error)), _) => ControlResponse {
-                version: CONTROL_PROTOCOL_VERSION,
-                request_id: request.request_id,
-                result: ControlResult::Error {
-                    code: screen_frame_error_code(error).to_owned(),
-                    message: error.to_string(),
-                    details: Some(ControlErrorDetails {
-                        current_presented_state_hash: current_state_hash,
-                        boundaries: actor_boundaries(&self.event_log),
-                        scope: "screen_frame_projection".to_owned(),
-                        input_sequence: None,
-                        screen_frame: Some(screen_frame_failure_details(error)),
-                    }),
-                },
-            },
+            (Err(Error::ScreenFrame(error)), _) => screen_frame_error_response(
+                request.request_id,
+                error,
+                current_state_hash,
+                &self.event_log,
+                "screen_frame_projection",
+            ),
             (Err(error), _) => control_error_response(
                 request.request_id,
                 control_error_code(error),

@@ -30,7 +30,7 @@ pub(in crate::cli) fn serve(mut input: impl BufRead, output: impl Write) -> Resu
     let mut output = BufWriter::new(output);
     let mut driver = Driver::default();
     while let Some(frame) = read_frame(&mut input)? {
-        let (_response, encoded) = match frame {
+        let encoded = match frame {
             DriverFrame::Request(request) => driver.handle_request(request),
             DriverFrame::Invalid { line, column } => encode_driver_response(&driver_error(
                 Uuid::nil(),
@@ -67,7 +67,7 @@ pub(in crate::cli) fn serve(mut input: impl BufRead, output: impl Write) -> Resu
     return Ok(());
 }
 
-fn encode_driver_response(response: &DriverResponse) -> Result<(DriverResponse, Vec<u8>)> {
+fn encode_driver_response(response: &DriverResponse) -> Result<Vec<u8>> {
     let bytes = serde_json::to_vec(response).map_err(|source| {
         return Error::InvalidJson {
             path: PathBuf::from("<driver-stdout>"),
@@ -75,7 +75,7 @@ fn encode_driver_response(response: &DriverResponse) -> Result<(DriverResponse, 
             source,
         };
     })?;
-    return Ok((response.clone(), bytes));
+    return Ok(bytes);
 }
 
 #[derive(Debug)]
@@ -104,7 +104,7 @@ pub(super) struct CachedDriverResponse {
 }
 
 impl Driver {
-    fn handle_request(&mut self, request: DriverRequest) -> (DriverResponse, Vec<u8>) {
+    fn handle_request(&mut self, request: DriverRequest) -> Vec<u8> {
         let method_hash = match serde_json::to_vec(&request.method) {
             Ok(bytes) => blake3::hash(&bytes).to_hex().to_string(),
             Err(_) => {
@@ -115,13 +115,13 @@ impl Driver {
                     None,
                 );
                 let bytes = serde_json::to_vec(&err).unwrap_or_default();
-                return (err, bytes);
+                return bytes;
             }
         };
         if let Some(cached) = self.cached.get(&request.request_id) {
             if cached.method_hash == method_hash {
                 let bytes = serde_json::to_vec(&cached.response).unwrap_or_default();
-                return (cached.response.clone(), bytes);
+                return bytes;
             }
             let err = driver_error(
                 request.request_id,
@@ -130,7 +130,7 @@ impl Driver {
                 None,
             );
             let bytes = serde_json::to_vec(&err).unwrap_or_default();
-            return (err, bytes);
+            return bytes;
         }
         let response = if request.version != DRIVER_PROTOCOL_VERSION {
             driver_error(
@@ -144,14 +144,9 @@ impl Driver {
         };
         let (response, encoded) = bounded_response_with_bytes(response);
         if driver_response_is_cacheable(&response) {
-            self.cache(
-                request.request_id,
-                method_hash,
-                response.clone(),
-                encoded.len(),
-            );
+            self.cache(request.request_id, method_hash, response, encoded.len());
         }
-        return (response, encoded);
+        return encoded;
     }
 
     pub(super) fn cache(

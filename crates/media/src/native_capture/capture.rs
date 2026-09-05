@@ -23,6 +23,8 @@ use termtrace_model::{
     terminal::replay::{SourceRange, StateIndexEntry},
 };
 
+use crate::error::finish_with_cleanup;
+
 use super::{
     Error, Result,
     geometry::validate_capture_geometry,
@@ -36,15 +38,13 @@ use super::{
         wait_for_playback_handshake, wait_for_success, wait_for_x_socket,
     },
     profile::materialize_profile,
-    util::{
-        command_output, command_output_in_profile, finish_with_cleanup, outcome,
-        secure_permissions, unix_now_ns,
-    },
+    util::{command_output, command_output_in_profile, outcome, secure_permissions, unix_now_ns},
     validate_visual_manifest,
 };
 
 /// Capture a completed session in a private display and atomically publish its visual artifacts.
 ///
+/// `helper` is the Termtrace executable providing the playback subprocess protocol.
 /// The selected capture kind, source range, profile, geometry, and output location are taken
 /// from `options`. Existing destinations are never replaced.
 ///
@@ -52,7 +52,7 @@ use super::{
 ///
 /// Returns an error when the session or options are invalid, a required tool is unavailable,
 /// native playback or capture fails, or the resulting artifacts cannot be verified and published.
-pub fn capture(options: &CaptureOptions) -> Result<CaptureOutcome> {
+pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome> {
     validate_options(options)?;
     if !options.session_directory.join("completion.json").is_file() {
         return Err(Error::SessionIncomplete {
@@ -100,7 +100,7 @@ pub fn capture(options: &CaptureOptions) -> Result<CaptureOutcome> {
     require_native_tools(&options.kind)?;
     let staging = parent.join(format!(".visual.{}.tmp", uuid::Uuid::now_v7()));
     create_private_directory(&staging)?;
-    if let Err(error) = capture_staged(options, &log, &states, range, &staging) {
+    if let Err(error) = capture_staged(helper, options, &log, &states, range, &staging) {
         return Err(preserve_failed(parent, &staging, error));
     }
     if let Err(error) = commit_directory(parent, &staging, &destination)
@@ -213,6 +213,7 @@ fn selected_states(
 }
 
 fn capture_staged(
+    helper: &Path,
     options: &CaptureOptions,
     log: &EventLog,
     states: &[StateIndexEntry],
@@ -303,6 +304,7 @@ fn capture_staged(
     let ready_file = staging.join("playback-ready");
     let overrides = ghostty_overrides();
     let mut ghostty = spawn_ghostty(
+        helper,
         options,
         staging,
         &display,

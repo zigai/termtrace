@@ -437,7 +437,9 @@ pub(super) fn detached_record_arguments(
             OsStr::new(&format!("{}ms", value.as_millis())),
         );
     }
-    let idle_timeout = recording.idle_timeout.unwrap_or(Duration::from_secs(15 * 60));
+    let idle_timeout = recording
+        .idle_timeout
+        .unwrap_or(Duration::from_secs(15 * 60));
     if !idle_timeout.is_zero() {
         push_record_option(
             &mut arguments,

@@ -7,8 +7,10 @@ use std::{
 };
 
 use blake3::Hash;
+use serde::Serialize;
+use serde_json::value::{RawValue, to_raw_value};
 use termtrace_model::{
-    execution::event::{Event, EventBody, EventLogHeader},
+    execution::event::{Event, EventLogHeader},
     execution::event_log::{CanonicalBoundary, DurabilityMode, DurabilityPolicy, DurabilityRecord},
 };
 
@@ -21,6 +23,24 @@ use super::{
         validate_parent_directory,
     },
 };
+
+// Field order is the canonical model EventBody hash preimage.
+#[derive(Serialize)]
+struct EncodedEventBody<'event> {
+    seq: u64,
+    monotonic_ns: u64,
+    event: &'event RawValue,
+}
+
+// Reuses the same encoded payload in model EventRecord field order.
+#[derive(Serialize)]
+struct EncodedEventRecord<'event> {
+    seq: u64,
+    monotonic_ns: u64,
+    prev_hash: &'event str,
+    hash: &'event str,
+    event: &'event RawValue,
+}
 
 /// Append-only writer for a hash-chained canonical event log.
 #[derive(Debug)]
@@ -248,10 +268,17 @@ impl EventLogWriter {
         let next_seq = seq.checked_add(1).ok_or_else(|| {
             return invalid_log(&self.path, seq.saturating_add(2), "event sequence overflow");
         })?;
-        let body = EventBody {
+        let payload = to_raw_value(&event).map_err(|source| {
+            return Error::InvalidJson {
+                path: self.path.clone(),
+                json_path: "$".to_owned(),
+                source,
+            };
+        })?;
+        let body = EncodedEventBody {
             seq,
             monotonic_ns,
-            event: &event,
+            event: &payload,
         };
         let body_bytes = serde_json::to_vec(&body).map_err(|source| {
             return Error::InvalidJson {
@@ -275,40 +302,22 @@ impl EventLogWriter {
                     "output byte count overflow",
                 );
             })?;
-        let search_limit = body_bytes.len().min(64);
-        let search_slice = body_bytes
-            .get(..search_limit)
-            .unwrap_or(body_bytes.as_slice());
-        let event_offset = search_slice
-            .windows(8)
-            .position(|window| return window == b"\"event\":")
-            .ok_or_else(|| {
-                return Error::InvalidJson {
-                    path: self.path.clone(),
-                    json_path: "$".to_owned(),
-                    source: serde_json::Error::io(io::Error::other("event key not found in body")),
-                };
-            })?;
-        let (prefix, suffix) = body_bytes.split_at_checked(event_offset).ok_or_else(|| {
-            return Error::InvalidJson {
-                path: self.path.clone(),
-                json_path: "$".to_owned(),
-                source: serde_json::Error::io(io::Error::other("invalid event slice offset")),
-            };
-        })?;
-        let write_result = self
-            .writer
-            .write_all(prefix)
-            .and_then(|()| return self.writer.write_all(b"\"prev_hash\":\""))
-            .and_then(|()| {
-                return self
-                    .writer
-                    .write_all(self.previous_hash.to_hex().as_bytes());
+        let previous_hash_text = self.previous_hash.to_hex();
+        let hash_text = hash.to_hex();
+        let record = EncodedEventRecord {
+            seq,
+            monotonic_ns,
+            prev_hash: previous_hash_text.as_str(),
+            hash: hash_text.as_str(),
+            event: &payload,
+        };
+        let write_result = serde_json::to_writer(&mut self.writer, &record)
+            .map_err(|source| {
+                return io::Error::new(
+                    source.io_error_kind().unwrap_or(io::ErrorKind::Other),
+                    source,
+                );
             })
-            .and_then(|()| return self.writer.write_all(b"\",\"hash\":\""))
-            .and_then(|()| return self.writer.write_all(hash.to_hex().as_bytes()))
-            .and_then(|()| return self.writer.write_all(b"\","))
-            .and_then(|()| return self.writer.write_all(suffix))
             .and_then(|()| return self.writer.write_all(b"\n"));
         let write_result = if durable {
             write_result

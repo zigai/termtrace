@@ -18,7 +18,7 @@ use super::{
         actor_failure_retry, control_command_mutates, driver_error, driver_failure_from_error,
         driver_failure_with_retry, driver_response_is_cacheable,
     },
-    runtime::{DRIVER_RESPONSE_CACHE_BYTES, Driver, bounded_response, serialized_size},
+    runtime::{DRIVER_RESPONSE_CACHE_BYTES, bounded_response, serialized_size},
     serve,
 };
 use termtrace_model::protocol::driver::{
@@ -190,30 +190,79 @@ fn oversized_response_is_replaced_with_a_bounded_error() {
 
 #[test]
 fn response_cache_is_evicted_by_total_encoded_bytes() {
-    let mut driver = Driver::default();
-    let first = Uuid::now_v7();
-    let second = Uuid::now_v7();
-    let response = driver_error(first, "failure", "bounded", None);
-
-    driver.cache(
-        first,
-        "first".to_owned(),
-        response.clone(),
-        DRIVER_RESPONSE_CACHE_BYTES / 2 + 1,
-    );
-    driver.cache(
-        second,
-        "second".to_owned(),
-        DriverResponse {
-            request_id: second,
-            ..response
-        },
-        DRIVER_RESPONSE_CACHE_BYTES / 2 + 1,
-    );
-
-    assert!(!driver.cached.contains_key(&first));
-    assert!(driver.cached.contains_key(&second));
-    assert_eq!(driver.cached_bytes, DRIVER_RESPONSE_CACHE_BYTES / 2 + 1);
+    let requests = (1..=6)
+        .map(|id| {
+            return DriverRequest {
+                version: DRIVER_PROTOCOL_VERSION,
+                request_id: Uuid::from_u128(id),
+                method: DriverMethod::Launch {
+                    evidence_root: PathBuf::from(format!("/{}", "x".repeat(3 * 1024 * 1024))),
+                    command: Vec::new(),
+                    cols: 80,
+                    rows: 24,
+                    working_directory: None,
+                    environment: EnvironmentSpec::default(),
+                    resource_limits: ResourceLimits::default(),
+                },
+            };
+        })
+        .collect::<Vec<_>>();
+    let mut input = Vec::new();
+    for request in &requests {
+        serde_json::to_writer(&mut input, request).expect("request JSON");
+        input.push(b'\n');
+    }
+    // The second response remains cached after the first has been evicted.
+    serde_json::to_writer(&mut input, &requests[1]).expect("retry JSON");
+    input.push(b'\n');
+    for id in [2, 1] {
+        serde_json::to_writer(
+            &mut input,
+            &DriverRequest {
+                version: DRIVER_PROTOCOL_VERSION,
+                request_id: Uuid::from_u128(id),
+                method: DriverMethod::Hello,
+            },
+        )
+        .expect("changed method JSON");
+        input.push(b'\n');
+    }
+    let mut output = Vec::new();
+    serve(Cursor::new(input), &mut output).expect("serve cache pressure and retries");
+    let lines = output
+        .split(|byte| return *byte == b'\n')
+        .filter(|line| return !line.is_empty())
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 9);
+    let response_bytes = lines
+        .iter()
+        .take(6)
+        .map(|line| return line.len())
+        .sum::<usize>();
+    assert!(response_bytes > DRIVER_RESPONSE_CACHE_BYTES);
+    assert!(response_bytes - lines[0].len() <= DRIVER_RESPONSE_CACHE_BYTES);
+    for line in lines.iter().take(6) {
+        let response: DriverResponse = serde_json::from_slice(line).expect("launch response");
+        assert!(matches!(
+            response.result,
+            DriverResult::Error { code, .. } if code == "invalid_launch"
+        ));
+    }
+    assert_eq!(lines[1], lines[6]);
+    let collision: DriverResponse = serde_json::from_slice(lines[7]).expect("collision response");
+    assert_eq!(collision.request_id, Uuid::from_u128(2));
+    assert!(matches!(
+        collision.result,
+        DriverResult::Error { code, .. } if code == "request_id_collision"
+    ));
+    let evicted: DriverResponse = serde_json::from_slice(lines[8]).expect("evicted response");
+    assert_eq!(evicted.request_id, Uuid::from_u128(1));
+    assert!(matches!(
+        evicted.result,
+        DriverResult::Ok {
+            data: DriverData::Hello { .. }
+        }
+    ));
 }
 
 #[test]

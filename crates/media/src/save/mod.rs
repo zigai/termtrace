@@ -7,9 +7,6 @@ use std::{
     io::{self, Read as _},
     os::unix::{ffi::OsStrExt as _, fs::FileTypeExt as _},
     path::{Component, Path, PathBuf},
-    process,
-    sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use termtrace_engine::{
@@ -43,8 +40,6 @@ use termtrace_render::{
     SEMANTIC_SYMBOLS_FONT_SIZE, SEMANTIC_TEXT_BASELINE, render_png, render_svg, semantic_font_set,
 };
 use termtrace_terminal::Format;
-
-static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Re-read and verify one saved semantic artifact against its trusted creation result.
 ///
@@ -565,15 +560,10 @@ fn staging_path(destination: &Path, kind: &str) -> Result<PathBuf> {
     let name = destination
         .file_name()
         .ok_or_else(|| return save_error(format!("{kind} path has no basename")))?;
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| return Error::ClockBeforeEpoch)?
-        .as_nanos();
-    let sequence = STAGING_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     return Ok(parent.join(format!(
-        ".{}.{}.{timestamp}.{sequence}.tmp",
+        ".{}.{}.tmp",
         name.to_string_lossy(),
-        process::id()
+        uuid::Uuid::now_v7()
     )));
 }
 

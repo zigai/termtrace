@@ -1,19 +1,20 @@
 use super::control::{
-    action_atom, action_operation_id, client_error, exact_duration_ns, public_control_error,
-    validate_action_options, wire_postcondition,
+    action_atom, client_error, exact_duration_ns, public_control_error, validate_action_options,
+    wire_postcondition,
 };
 use super::*;
 
 /// High-level live/completed session handle.
 pub struct Session {
     pub(super) path: PathBuf,
+    pub(super) helper: PathBuf,
     pub(super) session_id: Uuid,
     pub(super) recorder: Option<Child>,
     pub(super) recorded_process_group: Option<u32>,
 }
 
 impl Session {
-    pub(super) fn open(path: PathBuf, recorder: Option<Child>) -> Result<Self> {
+    pub(super) fn open(path: PathBuf, helper: PathBuf, recorder: Option<Child>) -> Result<Self> {
         let manifest = read_manifest(&path)?;
         let recorded_process_group = if recorder.is_some() {
             match send_request(&path, &ControlRequest::new(ControlCommand::Status)) {
@@ -25,6 +26,7 @@ impl Session {
         };
         return Ok(Self {
             path,
+            helper,
             session_id: manifest.session_id,
             recorder,
             recorded_process_group,
@@ -105,7 +107,7 @@ impl Session {
             .map(|(index, atom)| {
                 return action_atom(
                     atom,
-                    action_operation_id(request_id, index),
+                    derive_input_operation_id(request_id, index),
                     options.caller_intent.clone(),
                 );
             })
@@ -299,6 +301,7 @@ mod tests {
         let process_path = PathBuf::from(format!("/proc/{}", child.id()));
         let session = Session {
             path: PathBuf::from("/unused"),
+            helper: PathBuf::from("/unused-termtrace"),
             session_id: Uuid::now_v7(),
             recorder: Some(child),
             recorded_process_group: None,

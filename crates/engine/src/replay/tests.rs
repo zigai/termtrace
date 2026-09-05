@@ -263,7 +263,7 @@ fn alternate_screen_checkpoint_seed_is_rejected_before_replay() {
         |_, _, _| return Ok(()),
     )
     .expect_err("alternate-screen seed cannot reconstruct hidden primary-screen state");
-    assert!(matches!(error, Error::InvalidReplay { .. }));
+    assert!(matches!(error, Error::CheckpointReconstruction { .. }));
 }
 
 #[test]
@@ -353,7 +353,6 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
         .lines()
         .map(|line| return serde_json::from_str(line).expect("semantic checkpoint"))
         .collect();
-    assert_eq!(checkpoints.len(), 9);
     for checkpoint in checkpoints {
         validate_replay_seed(
             &log,

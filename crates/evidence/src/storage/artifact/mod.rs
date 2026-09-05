@@ -34,9 +34,3 @@ fn json_error(path: PathBuf, source: serde_json::Error) -> Error {
         source,
     };
 }
-
-fn invalid_artifact(reason: impl Into<String>) -> Error {
-    return Error::InvalidEvidence {
-        reason: reason.into(),
-    };
-}

@@ -12,7 +12,7 @@ use crate::{
         MAX_BUNDLE_MANIFEST_BYTES, MAX_BUNDLE_MEMBERS, collect_regular_files, hash_regular_file,
         open_regular_nofollow, validate_relative_path,
     },
-    storage::{Error, Result},
+    storage::{Error, Result, is_lowercase_blake3},
 };
 
 /// Verify a bundle directory and return its validated manifest.
@@ -51,9 +51,8 @@ pub fn verify(directory: &Path, expected: Option<&BundleIdentity>) -> Result<Bun
 fn verify_members(directory: &Path, expected: &[ArtifactMember]) -> Result<()> {
     let mut by_path: BTreeMap<&str, &ArtifactMember> = BTreeMap::new();
     for member in expected {
-        let normalized = validate_relative_path(Path::new(&member.path))?;
-        if normalized != member.path
-            || member.media_type.is_empty()
+        validate_relative_path(Path::new(&member.path))?;
+        if member.media_type.is_empty()
             || member.relationship.is_empty()
             || !is_lowercase_blake3(&member.blake3)
         {
@@ -120,11 +119,4 @@ pub(crate) fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> Resu
         )));
     }
     return Ok(bytes);
-}
-
-fn is_lowercase_blake3(value: &str) -> bool {
-    return value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| return byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
 }

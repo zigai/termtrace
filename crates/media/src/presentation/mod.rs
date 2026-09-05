@@ -10,7 +10,9 @@ mod validation;
 mod tests;
 
 pub use pipeline::{export, preview};
-pub use planning::{markers, plan, plan_with_source};
+pub use planning::{
+    VideoIdlePolicy, markers, plan, plan_with_source, video_clip_ranges, video_clips,
+};
 pub use termtrace_model::artifact::presentation::{
     AnnotationAnchor, AnnotationPosition, AnnotationScope, AnnotationStyle, CaptionLayout,
     ChangeMode, ChangeRegion, ChangeSource, ChangeVisualization, CursorMaskFrame,
@@ -23,7 +25,9 @@ pub use termtrace_model::artifact::presentation::{
 };
 pub use validation::read_edit_plan;
 
-use crate::Error;
+use std::path::Path;
+
+use crate::{Error, Result};
 
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
@@ -31,4 +35,13 @@ fn plan_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
     };
+}
+fn filter_path_value(path: &Path) -> Result<String> {
+    let value = path
+        .to_str()
+        .ok_or_else(|| return plan_error("FFmpeg filter resource path is not UTF-8"))?;
+    return Ok(value
+        .replace('\\', "\\\\")
+        .replace(':', "\\:")
+        .replace('\'', "\\'"));
 }

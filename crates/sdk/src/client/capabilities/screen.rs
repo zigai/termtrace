@@ -1,6 +1,5 @@
 use super::super::control::{
-    client_error, exact_duration_ns, public_control_error, send_request_response_with_timeout,
-    validate_stable_options,
+    client_error, exact_duration_ns, public_control_error, validate_stable_options,
 };
 use super::super::*;
 
@@ -32,27 +31,16 @@ impl Screen<'_> {
     /// Return one bounded rich latest-presented frame from a live or completed session.
     pub fn frame(&self, projection: ScreenProjectionRequest) -> Result<ScreenFrame> {
         if self.session.path.join("completion.json").is_file() {
-            let point = StatePoint::LatestPresented;
-            let observation =
-                observe_session_with_options(&self.session.path, point.clone(), false)?;
-            let state = semantic_state_for_session(&self.session.path, &point, false)?;
-            let source = ScreenFrameSource::Resolved {
-                source_kind: observation.source_kind,
-                session_id: observation.session_id,
-                source_completed: observation.source_completed,
-                state_point: observation.state_point,
-                state_id: observation.state_id,
-                event_seq: observation.event_seq,
-                monotonic_ns: observation.monotonic_ns,
-                boundary: observation.boundary,
-                integrity: observation.integrity,
-                resolution: observation.resolution,
-            };
+            let (state, source, presented) = resolved_screen_state_for_session(
+                &self.session.path,
+                StatePoint::LatestPresented,
+                false,
+            )?;
             return project_screen_frame(
                 &state,
                 &projection,
                 source,
-                observation.presented,
+                presented,
                 CaptureQuality::Completed,
             )
             .map_err(Error::ScreenFrame);
@@ -119,8 +107,11 @@ impl Screen<'_> {
             projection: options.projection,
         });
         request.request_id = Uuid::now_v7();
-        let response =
-            send_request_response_with_timeout(&self.session.path, &request, options.timeout)?;
+        let response = exchange(
+            &self.session.path,
+            &request,
+            ExchangeTiming::deadline(options.timeout)?,
+        )?;
         let data = match response.result {
             ControlResult::Ok { data } => data,
             ControlResult::Error {

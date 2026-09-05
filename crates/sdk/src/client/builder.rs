@@ -202,6 +202,6 @@ impl SessionBuilder {
             }
             thread::sleep(Duration::from_millis(10));
         }
-        return Session::open(path, Some(child));
+        return Session::open(path, self.terminal.binary, Some(child));
     }
 }

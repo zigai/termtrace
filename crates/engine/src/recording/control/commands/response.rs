@@ -12,7 +12,7 @@ pub(in crate::recording::control) fn screen_frame_error_code(
     };
 }
 
-pub(super) fn screen_frame_error_response(
+pub(in crate::recording::control) fn screen_frame_error_response(
     request_id: Uuid,
     error: &ScreenFrameError,
     current_state_hash: String,

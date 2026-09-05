@@ -17,7 +17,7 @@ use termtrace_model::artifact::metadata::{
 use crate::storage::{Error, Result};
 
 use super::{
-    ARTIFACT_ROOT_LOG, invalid_artifact, json_error, read_artifact_roots,
+    ARTIFACT_ROOT_LOG, json_error, read_artifact_roots,
     secure_fs::{nix_filesystem, open_file_at, open_parent_directory, safe_file_name},
 };
 
@@ -36,22 +36,8 @@ pub(crate) struct ArtifactMemberEnvelope {
 ///
 /// Returns an error for unsafe entries, unreadable files, or paths that cannot be normalized.
 pub fn collect_artifact_members(directory: &Path) -> Result<Vec<ArtifactMember>> {
-    return collect_artifact_members_bounded(directory, usize::MAX);
-}
-
-fn collect_artifact_members_bounded(
-    directory: &Path,
-    maximum_tree_entries: usize,
-) -> Result<Vec<ArtifactMember>> {
     let mut paths: Vec<PathBuf> = Vec::new();
-    let mut tree_entries = 0_usize;
-    collect_member_paths(
-        directory,
-        directory,
-        &mut paths,
-        &mut tree_entries,
-        maximum_tree_entries,
-    )?;
+    collect_member_paths(directory, directory, &mut paths)?;
     paths.sort();
     let mut payloads: Vec<(PathBuf, String)> = Vec::with_capacity(paths.len());
     for relative in paths {
@@ -70,7 +56,7 @@ fn collect_artifact_members_bounded(
                     let mut members: Vec<(usize, ArtifactMember)> = Vec::new();
                     for index in (worker..payloads.len()).step_by(worker_count) {
                         let (path, normalized) = payloads.get(index).ok_or_else(|| {
-                            return invalid_artifact("artifact hashing index is outside payloads");
+                            return Error::invalid("artifact hashing index is outside payloads");
                         })?;
                         let (byte_length, hash) = hash_regular_file(path)?;
                         members.push((
@@ -95,7 +81,7 @@ fn collect_artifact_members_bounded(
             indexed.append(
                 &mut handle
                     .join()
-                    .map_err(|_| return invalid_artifact("artifact hashing worker panicked"))??,
+                    .map_err(|_| return Error::invalid("artifact hashing worker panicked"))??,
             );
         }
         return Ok(indexed);
@@ -126,12 +112,12 @@ pub fn verify_artifact_members(directory: &Path, expected: &[ArtifactMember]) ->
         .map(|member| return member.path.as_str())
         .collect();
     if expected_paths.len() != expected.len() {
-        return Err(invalid_artifact(
+        return Err(Error::invalid(
             "artifact manifest contains duplicate member paths",
         ));
     }
     if actual != expected {
-        return Err(invalid_artifact(
+        return Err(Error::invalid(
             "artifact payload members do not match their whole-file manifest",
         ));
     }
@@ -155,17 +141,12 @@ pub fn verify_session_artifacts(
         if record.session_manifest_hash != session_manifest_hash
             || record.source_event_hash.as_deref() != source_event_hash
         {
-            return Err(invalid_artifact(
+            return Err(Error::invalid(
                 "artifact-root catalog entry does not bind the canonical source roots",
             ));
         }
         let relative = Path::new(&record.artifact_directory);
-        let normalized = normalized_relative_path(relative)?;
-        if normalized != record.artifact_directory {
-            return Err(invalid_artifact(
-                "artifact-root directory path is not normalized",
-            ));
-        }
+        normalized_relative_path(relative)?;
         let directory = session.join(relative);
         let manifest_path = directory.join("manifest.json");
         let manifest_bytes = fs::read(&manifest_path).map_err(|source| {
@@ -175,19 +156,19 @@ pub fn verify_session_artifacts(
             };
         })?;
         if blake3::hash(&manifest_bytes).to_hex().as_str() != record.manifest_hash {
-            return Err(invalid_artifact(
+            return Err(Error::invalid(
                 "artifact manifest hash does not match its catalog root",
             ));
         }
         let manifest: ArtifactMemberEnvelope = serde_json::from_slice(&manifest_bytes)
             .map_err(|source| return json_error(manifest_path, source))?;
         if manifest.source_range != record.source_range {
-            return Err(invalid_artifact(
+            return Err(Error::invalid(
                 "artifact catalog source range does not match its manifest",
             ));
         }
         if manifest.source_event_hash != record.source_event_hash {
-            return Err(invalid_artifact(
+            return Err(Error::invalid(
                 "artifact catalog source event hash does not match its manifest",
             ));
         }
@@ -196,13 +177,7 @@ pub fn verify_session_artifacts(
     return Ok(u64::try_from(records.len()).unwrap_or(u64::MAX));
 }
 
-fn collect_member_paths(
-    root: &Path,
-    directory: &Path,
-    paths: &mut Vec<PathBuf>,
-    tree_entries: &mut usize,
-    maximum_tree_entries: usize,
-) -> Result<()> {
+fn collect_member_paths(root: &Path, directory: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
     let mut entries: Vec<fs::DirEntry> = Vec::new();
     for entry in fs::read_dir(directory).map_err(|source| {
         return Error::Filesystem {
@@ -216,12 +191,6 @@ fn collect_member_paths(
                 source,
             };
         })?;
-        *tree_entries = tree_entries.saturating_add(1);
-        if *tree_entries > maximum_tree_entries {
-            return Err(invalid_artifact(format!(
-                "artifact tree exceeds {maximum_tree_entries} entry limit"
-            )));
-        }
         entries.push(entry);
     }
     entries.sort_by_key(fs::DirEntry::file_name);
@@ -234,18 +203,18 @@ fn collect_member_paths(
             };
         })?;
         if metadata.file_type().is_symlink() {
-            return Err(invalid_artifact("artifact payload contains a symlink"));
+            return Err(Error::invalid("artifact payload contains a symlink"));
         }
         if metadata.is_dir() {
-            collect_member_paths(root, &path, paths, tree_entries, maximum_tree_entries)?;
+            collect_member_paths(root, &path, paths)?;
         } else if metadata.is_file() {
             paths.push(
                 path.strip_prefix(root)
-                    .map_err(|_| return invalid_artifact("artifact member escaped its root"))?
+                    .map_err(|_| return Error::invalid("artifact member escaped its root"))?
                     .to_path_buf(),
             );
         } else {
-            return Err(invalid_artifact(
+            return Err(Error::invalid(
                 "artifact payload contains a device or special file",
             ));
         }
@@ -259,13 +228,13 @@ pub(super) fn normalized_relative_path(path: &Path) -> Result<String> {
             .components()
             .any(|component| return !matches!(component, Component::Normal(_)))
     {
-        return Err(invalid_artifact("artifact member path is not normalized"));
+        return Err(Error::invalid("artifact member path is not normalized"));
     }
     let normalized = path
         .to_str()
-        .ok_or_else(|| return invalid_artifact("artifact member path is not valid UTF-8"))?;
+        .ok_or_else(|| return Error::invalid("artifact member path is not valid UTF-8"))?;
     if normalized.contains('\\') {
-        return Err(invalid_artifact(
+        return Err(Error::invalid(
             "artifact member path uses a non-portable separator",
         ));
     }
@@ -303,10 +272,10 @@ fn open_regular_file_nofollow(path: &Path) -> Result<(File, u64)> {
     )?;
     let stat = fstat(&fd).map_err(|error| return nix_filesystem(path, error))?;
     if !SFlag::from_bits_truncate(stat.st_mode).contains(SFlag::S_IFREG) || stat.st_size < 0 {
-        return Err(invalid_artifact("artifact member is not a regular file"));
+        return Err(Error::invalid("artifact member is not a regular file"));
     }
     let size = u64::try_from(stat.st_size)
-        .map_err(|_| return invalid_artifact("artifact member size is invalid"))?;
+        .map_err(|_| return Error::invalid("artifact member size is invalid"))?;
     return Ok((File::from(fd), size));
 }
 

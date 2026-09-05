@@ -156,10 +156,7 @@ fn snapshot_mismatch(
 }
 
 pub(super) fn bounded_text(value: &str) -> String {
-    let mut end = value.len().min(MAX_SECONDARY_FAILURE_CHARS);
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = value.floor_char_boundary(MAX_SECONDARY_FAILURE_CHARS);
     return value.get(..end).unwrap_or_default().to_owned();
 }
 

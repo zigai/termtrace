@@ -18,24 +18,7 @@ pub(super) fn frame_from_state(state: &SemanticState) -> ObservationFrame {
 
 /// Render a semantic terminal grid as trimmed, newline-separated viewport text.
 pub fn state_text(state: &SemanticState) -> String {
-    let mut output = String::new();
-    for (index, row) in state.grid.iter().enumerate() {
-        let start = output.len();
-        for cell in &row.cells {
-            if cell.grapheme.is_empty() {
-                output.push(' ');
-            } else {
-                output.push_str(&cell.grapheme);
-            }
-        }
-        while output.len() > start && output.ends_with(' ') {
-            output.pop();
-        }
-        if index + 1 < state.grid.len() {
-            output.push('\n');
-        }
-    }
-    return output;
+    return termtrace_terminal::semantic_viewport_text(state);
 }
 
 pub(super) fn frame_hash(frame: &ObservationFrame) -> Result<String> {

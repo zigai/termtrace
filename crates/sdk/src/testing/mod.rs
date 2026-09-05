@@ -5,10 +5,9 @@ use std::{
     ffi::OsString,
     fmt,
     fs::{File, OpenOptions},
-    io::{self, BufRead as _, BufReader, Read as _, Write as _},
+    io::{self, Read as _, Write as _},
     mem::replace,
-    net::Shutdown,
-    os::unix::{fs::OpenOptionsExt as _, net::UnixStream},
+    os::unix::fs::OpenOptionsExt as _,
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     path::{Path, PathBuf},
     result::Result as StdResult,
@@ -24,10 +23,7 @@ use termtrace_evidence::artifact::{create_private_directory, sync_directory, wri
 use termtrace_model::{
     artifact::bundle::BundleProfile,
     execution::session::VerificationLevel,
-    protocol::control::{
-        CONTROL_PROTOCOL_VERSION, ControlCommand, ControlRequest, ControlResponse, ControlResult,
-        MAX_CONTROL_MESSAGE_BYTES,
-    },
+    protocol::control::{ControlCommand, ControlRequest, ControlResult},
     terminal::observation::StatePoint,
     terminal::screen::{ScreenFrame, ScreenSnapshotOptions},
     terminal::state::CursorState,
@@ -41,7 +37,7 @@ use crate::{
     },
     client::{Screen, Session, Terminal},
     locator::{Locator, LocatorSpec},
-    protocol::connect_session_control,
+    protocol::{ExchangeTiming, exchange},
 };
 
 const MAX_SECONDARY_FAILURE_CHARS: usize = 512;

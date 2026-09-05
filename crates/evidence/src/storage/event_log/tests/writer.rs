@@ -21,7 +21,17 @@ fn distinguishes_observed_and_durable_boundaries() {
     let path = temporary.path().join("session/events.jsonl");
     secure_directory(path.parent().expect("parent"));
     let clock = SessionClock::now().expect("valid clock");
-    let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("create log");
+    let mut writer = EventLogWriter::create_with_policy(
+        &path,
+        &header(&clock),
+        clock,
+        DurabilityPolicy {
+            mode: DurabilityMode::Throughput,
+            maximum_interval_ms: None,
+            maximum_uncommitted_bytes: None,
+        },
+    )
+    .expect("create log");
     assert_eq!(writer.observed_boundary(), writer.durable_boundary());
 
     writer

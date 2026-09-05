@@ -1,10 +1,7 @@
 use std::{fs, path::Path};
 
 use termtrace_model::{
-    execution::receipt::{
-        EVIDENCE_RECEIPT_FORMAT, EVIDENCE_RECEIPT_NAME, EVIDENCE_RECEIPT_VERSION,
-        EvidenceReceiptPayload,
-    },
+    execution::receipt::{EVIDENCE_RECEIPT_NAME, EvidenceReceiptPayload},
     execution::request_journal::MUTATION_JOURNAL_NAME,
     execution::session::{
         MutationJournalStatus, SessionCompletion, VERIFICATION_REPORT_FORMAT,
@@ -14,11 +11,11 @@ use termtrace_model::{
 
 use crate::{
     auxiliary::{
-        receipt::{read_receipt, verify_ssh_receipt},
+        receipt::{read_receipt, receipt_payload, verify_ssh_receipt},
         request_journal::validate_mutation_journal,
     },
     storage::{
-        Error,
+        CompletionIntegrityKind, Error,
         artifact::{ARTIFACT_ROOT_LOG, read_artifact_roots, verify_session_artifacts},
         event_log::EventLog,
     },
@@ -132,8 +129,8 @@ pub fn verify_session_with_trust(
         &manifest_bytes,
         &completion,
     ) {
-        let code = content_finding_code(&error);
-        finding(&mut report, code, error.to_string());
+        let code = content_finding_code(error.kind);
+        finding(&mut report, code, error.error.to_string());
         return report;
     }
     match verify_session_artifacts(
@@ -239,32 +236,6 @@ fn expected_receipt_payload(
         };
     })?;
     let roots = read_artifact_roots(&session.join(ARTIFACT_ROOT_LOG))?;
-    let count = receipt.payload.artifact_root_count;
-    if count > u64::try_from(roots.len()).unwrap_or(u64::MAX) {
-        return Err(Error::InvalidEvidence {
-            reason: "artifact checkpoint exceeds the current root catalog".to_owned(),
-        });
-    }
-    let artifact_root_hash = if count == 0 {
-        None
-    } else {
-        let index = usize::try_from(count - 1).map_err(|_| {
-            return Error::InvalidEvidence {
-                reason: "artifact checkpoint is not addressable".to_owned(),
-            };
-        })?;
-        Some(
-            roots
-                .get(index)
-                .ok_or_else(|| {
-                    return Error::InvalidEvidence {
-                        reason: "artifact checkpoint record is missing".to_owned(),
-                    };
-                })?
-                .hash
-                .clone(),
-        )
-    };
     let completion_path = session.join("completion.json");
     let completion_bytes = fs::read(&completion_path).map_err(|source| {
         return Error::Filesystem {
@@ -272,21 +243,15 @@ fn expected_receipt_payload(
             source,
         };
     })?;
-    return Ok(EvidenceReceiptPayload {
-        domain: EVIDENCE_RECEIPT_FORMAT.to_owned(),
-        version: EVIDENCE_RECEIPT_VERSION,
-        session_id: completion.session_id,
-        session_manifest_hash: completion.session_manifest_hash.clone(),
-        final_event_hash: completion.final_event_hash.clone(),
-        event_count: completion.event_count,
-        completion_hash: blake3::hash(&completion_bytes).to_hex().to_string(),
-        artifact_root_count: count,
-        artifact_root_hash,
-        signer_key_id: receipt.payload.signer_key_id,
-        created_unix_ns: receipt.payload.created_unix_ns,
-        creation_time_source: "signing_host_system_clock".to_owned(),
-        canonicalization: "domain-prefix-plus-serde-json-struct-v1".to_owned(),
-    });
+    return receipt_payload(
+        completion.session_id,
+        completion,
+        &completion_bytes,
+        &roots,
+        receipt.payload.artifact_root_count,
+        &receipt.payload.signer_key_id,
+        receipt.payload.created_unix_ns,
+    );
 }
 
 fn finding(report: &mut VerificationReport, code: &str, message: impl Into<String>) {
@@ -295,29 +260,17 @@ fn finding(report: &mut VerificationReport, code: &str, message: impl Into<Strin
         message: message.into(),
     });
 }
-fn content_finding_code(error: &Error) -> &'static str {
-    let Error::InvalidEvidence { reason } = error else {
-        return "canonical_content_invalid";
+fn content_finding_code(kind: CompletionIntegrityKind) -> &'static str {
+    return match kind {
+        CompletionIntegrityKind::CanonicalContent => "canonical_content_invalid",
+        CompletionIntegrityKind::SessionManifestHash => "session_manifest_hash_mismatch",
+        CompletionIntegrityKind::EventHeaderHash => "event_header_hash_mismatch",
+        CompletionIntegrityKind::TerminalExitMissing => "terminal_exit_missing",
+        CompletionIntegrityKind::PendingMutationIntents => "pending_mutation_intents",
+        CompletionIntegrityKind::EventCount => "event_count_mismatch",
+        CompletionIntegrityKind::OutputCount => "output_count_mismatch",
+        CompletionIntegrityKind::FinalEventHash => "final_event_hash_mismatch",
+        CompletionIntegrityKind::ExitOutcome => "exit_outcome_mismatch",
+        CompletionIntegrityKind::DurabilityRecord => "durability_record_invalid",
     };
-    if reason.contains("session manifest hash") {
-        return "session_manifest_hash_mismatch";
-    } else if reason.contains("event header hash") {
-        return "event_header_hash_mismatch";
-    } else if reason.contains("does not end with an Exit") || reason.contains("no terminal Exit") {
-        return "terminal_exit_missing";
-    } else if reason.contains("pending mutation") {
-        return "pending_mutation_intents";
-    } else if reason.contains("event count") {
-        return "event_count_mismatch";
-    } else if reason.contains("output byte count") {
-        return "output_count_mismatch";
-    } else if reason.contains("final hash") {
-        return "final_event_hash_mismatch";
-    } else if reason.contains("exit outcome") {
-        return "exit_outcome_mismatch";
-    } else if reason.contains("durability") || reason.contains("synchronization") {
-        return "durability_record_invalid";
-    } else {
-        return "canonical_content_invalid";
-    }
 }

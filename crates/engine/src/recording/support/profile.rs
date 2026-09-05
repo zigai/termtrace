@@ -16,8 +16,8 @@ use uuid::Uuid;
 use crate::{
     Error, Result,
     analysis::profile::{
-        ResolvedGhosttyProfile, builtin_terminal_colors, resolve_profile, restore_profile,
-        terminal_colors_from_config,
+        ResolvedGhosttyProfile, builtin_terminal_colors, escape_config_string, resolve_profile,
+        restore_profile, terminal_colors_from_config,
     },
 };
 
@@ -139,10 +139,6 @@ fn checked_config_output(output: Output, operation: &'static str) -> Result<Vec<
         )));
     }
     return Ok(output.stdout);
-}
-
-fn escape_config_string(value: &str) -> String {
-    return value.replace('\\', "\\\\").replace('"', "\\\"");
 }
 
 fn profile_error(reason: impl Into<String>) -> Error {

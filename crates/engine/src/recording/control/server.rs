@@ -49,6 +49,17 @@ struct ConnectionPermit<'counter> {
     active: &'counter AtomicUsize,
 }
 
+impl<'counter> ConnectionPermit<'counter> {
+    fn acquire(active: &'counter AtomicUsize, capacity: usize) -> Option<Self> {
+        return active
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                return (count < capacity).then_some(count + 1);
+            })
+            .ok()
+            .map(|_| return Self { active });
+    }
+}
+
 impl Drop for ConnectionPermit<'_> {
     fn drop(&mut self) {
         self.active.fetch_sub(1, Ordering::Relaxed);
@@ -127,16 +138,13 @@ fn control_server_loop(
             loop {
                 match listener.accept() {
                     Ok((stream, _)) => {
-                        let permit =
-                            active.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
-                                return (count < MAX_CONTROL_CONNECTIONS).then_some(count + 1);
-                            });
-                        if permit.is_err() {
+                        let Some(permit) =
+                            ConnectionPermit::acquire(&active, MAX_CONTROL_CONNECTIONS)
+                        else {
                             continue;
-                        }
-                        let active = &active;
+                        };
                         scope.spawn(move || {
-                            let _permit = ConnectionPermit { active };
+                            let _permit = permit;
                             let _result = handle_control_connection(stream, sender, cancel);
                         });
                     }
@@ -436,13 +444,7 @@ impl ControlWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use loom::{
-        sync::{
-            Arc as LoomArc,
-            atomic::{AtomicUsize as LoomAtomicUsize, Ordering as LoomOrdering},
-        },
-        thread as loom_thread,
-    };
+    use std::sync::Barrier;
     use termtrace_evidence::event_log::CanonicalBoundary;
     use termtrace_model::{
         terminal::observation::ActorBoundaries, terminal::observation::CaptureQuality,
@@ -521,29 +523,23 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "run explicitly with the bounded concurrency-model workflow"]
-    fn connection_limiter_model_never_oversubscribes_or_leaks() {
-        loom::model(|| {
-            let active = LoomArc::new(LoomAtomicUsize::new(0));
-            let mut threads = Vec::new();
-            for _ in 0..2 {
-                let active = LoomArc::clone(&active);
-                threads.push(loom_thread::spawn(move || {
-                    let acquired = active
-                        .fetch_update(LoomOrdering::Relaxed, LoomOrdering::Relaxed, |count| {
-                            return (count < 1).then_some(count + 1);
-                        })
-                        .is_ok();
-                    if acquired {
-                        assert!(active.load(LoomOrdering::Relaxed) <= 1);
-                        active.fetch_sub(1, LoomOrdering::Relaxed);
-                    }
-                }));
-            }
-            for thread in threads {
-                thread.join().expect("modeled control connection");
-            }
-            assert_eq!(active.load(LoomOrdering::Relaxed), 0);
+    fn connection_limiter_never_oversubscribes_or_leaks() {
+        let active = AtomicUsize::new(0);
+        let barrier = Barrier::new(2);
+        thread::scope(|scope| {
+            let permit = ConnectionPermit::acquire(&active, 1).expect("first connection");
+            scope.spawn(|| {
+                assert!(ConnectionPermit::acquire(&active, 1).is_none());
+                barrier.wait();
+                barrier.wait();
+                let _permit = ConnectionPermit::acquire(&active, 1).expect("released capacity");
+                assert!(ConnectionPermit::acquire(&active, 1).is_none());
+            });
+            barrier.wait();
+            drop(permit);
+            barrier.wait();
         });
+        let _permit = ConnectionPermit::acquire(&active, 1).expect("worker released capacity");
+        assert!(ConnectionPermit::acquire(&active, 1).is_none());
     }
 }

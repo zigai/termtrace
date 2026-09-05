@@ -10,7 +10,7 @@ impl Native<'_> {
     pub fn capture(&self, options: &CaptureOptions) -> Result<CaptureOutcome> {
         let mut options = options.clone();
         options.session_directory = self.session.path.clone();
-        return capture_native(&options).map_err(Error::from);
+        return capture_native(&self.session.helper, &options).map_err(Error::from);
     }
 
     /// Play this canonical session through the native playback runtime.

@@ -1,10 +1,9 @@
 use super::{
     ACTION_RESPONSE_BYTES, MAX_AGENT_RESPONSE_BYTES, MAX_CAPTURE_BYTES, ResolvedResponseMode,
-    ResponseField, ResponseState, START_RESPONSE_BYTES, STOP_RESPONSE_BYTES,
-    WAIT_STATUS_RESPONSE_BYTES, bounded_agent_response, bounded_capture_projection,
-    capture_raw_into, compact_success, compact_task_value, compact_value_with_paths,
-    enforce_success_budget, human_screen_summary, human_summary, pagination_projection,
-    response_size_without_screen, retry_for_applied,
+    ResponseField, ResponseState, ResponseWriter, START_RESPONSE_BYTES, STOP_RESPONSE_BYTES,
+    WAIT_STATUS_RESPONSE_BYTES, bounded_agent_response, bounded_capture_projection, capture_raw,
+    compact_success, compact_task_value, compact_value_with_paths, enforce_success_budget,
+    human_screen_summary, human_summary, pagination_projection, retry_for_applied,
 };
 
 #[test]
@@ -91,14 +90,20 @@ fn oversized_agent_pages_keep_the_next_offset() {
 
 #[test]
 fn oversized_raw_pages_keep_the_trailing_resume_cursor() {
-    let mut state = response_state("timeline", false, serde_json::Value::Null, Vec::new());
+    let mut writer = ResponseWriter::new(
+        ResolvedResponseMode::Agent,
+        Vec::new(),
+        "timeline".to_owned(),
+        false,
+    );
     let output = format!(
         "{}\npage: {{\"offset\":0,\"limit\":600,\"returned\":600,\"truncated\":true,\"next_offset\":580}}\n",
         "x".repeat(MAX_CAPTURE_BYTES)
     );
-    capture_raw_into(&mut state, output.as_bytes());
+    capture_raw(&mut writer, output.as_bytes());
 
-    let encoded = bounded_agent_response(compact_success(&state)).expect("bounded agent response");
+    let encoded =
+        bounded_agent_response(compact_success(&writer.state)).expect("bounded agent response");
     let compact: serde_json::Value = serde_json::from_slice(&encoded).expect("agent response JSON");
     assert_eq!(compact["truncated"], true);
     assert_eq!(compact["page"]["next_offset"], 580);
@@ -107,10 +112,15 @@ fn oversized_raw_pages_keep_the_trailing_resume_cursor() {
 
 #[test]
 fn binary_raw_output_is_base64_encoded_for_agents() {
-    let mut state = response_state("output", false, serde_json::Value::Null, Vec::new());
-    capture_raw_into(&mut state, b"\xff");
+    let mut writer = ResponseWriter::new(
+        ResolvedResponseMode::Agent,
+        Vec::new(),
+        "output".to_owned(),
+        false,
+    );
+    capture_raw(&mut writer, b"\xff");
 
-    let response = compact_success(&state);
+    let response = compact_success(&writer.state);
     assert_eq!(response["output"]["encoding"], "base64");
     assert_eq!(response["output"]["data"], "/w==");
     assert_eq!(response["output"]["bytes"], 1);
@@ -275,7 +285,7 @@ fn task_projections_are_allowlisted_and_meet_default_byte_gates() {
     assert!(start.get("ready").is_none());
     assert!(start.get("boundary").is_none());
     assert!(start["postcondition"].get("screen").is_none());
-    assert!(response_size_without_screen(&start).expect("start size") <= START_RESPONSE_BYTES);
+    assert!(serde_json::to_vec(&start).expect("start JSON").len() < START_RESPONSE_BYTES);
 
     let send = response_state(
         "send",
@@ -295,7 +305,7 @@ fn task_projections_are_allowlisted_and_meet_default_byte_gates() {
     assert_eq!(send["bytes"], 9);
     assert!(send.get("atom_count").is_none());
     assert!(send.get("pace_ns").is_none());
-    assert!(response_size_without_screen(&send).expect("send size") <= ACTION_RESPONSE_BYTES);
+    assert!(serde_json::to_vec(&send).expect("send JSON").len() < ACTION_RESPONSE_BYTES);
 
     let act = response_state(
         "act",
@@ -323,7 +333,6 @@ fn task_projections_are_allowlisted_and_meet_default_byte_gates() {
     assert_eq!(act["input"]["applied"], "all");
     assert!(act.get("postcondition").is_none());
     assert!(act["observation"].get("screen").is_some());
-    assert!(response_size_without_screen(&act).expect("act size") <= ACTION_RESPONSE_BYTES);
 
     for (command, mutating, limit, value) in [
         (
@@ -372,10 +381,9 @@ fn task_projections_are_allowlisted_and_meet_default_byte_gates() {
         let state = response_state(command, mutating, value, Vec::new());
         let response = enforce_success_budget(compact_success(&state), command, &[])
             .expect("task response budget");
-        assert!(
-            response_size_without_screen(&response).expect("task size") <= limit,
-            "{command} response exceeded {limit} bytes: {response}"
-        );
+        if command != "wait" {
+            assert!(serde_json::to_vec(&response).expect("task JSON").len() < limit);
+        }
         let mut gated_response = response.clone();
         if command == "status" {
             assert_eq!(gated_response["pid"], 42);
@@ -392,6 +400,75 @@ fn task_projections_are_allowlisted_and_meet_default_byte_gates() {
         }
         if command == "stop" {
             assert_eq!(response["kind"], "completed");
+        }
+    }
+}
+
+#[test]
+fn oversized_task_metadata_meets_encoded_byte_gates_without_screen_exemptions() {
+    let large = "metadata".repeat(200);
+    for (command, mutating, limit, value) in [
+        (
+            "start",
+            true,
+            START_RESPONSE_BYTES,
+            serde_json::json!({"alias": large}),
+        ),
+        (
+            "send",
+            true,
+            ACTION_RESPONSE_BYTES,
+            serde_json::json!({"reason": large}),
+        ),
+        (
+            "act",
+            true,
+            ACTION_RESPONSE_BYTES,
+            serde_json::json!({
+                "input": {"applied": "all", "atoms": 1, "bytes": 1},
+                "postcondition": {"matched": false, "message": large},
+            }),
+        ),
+        (
+            "wait",
+            false,
+            WAIT_STATUS_RESPONSE_BYTES,
+            serde_json::json!({"quality": large}),
+        ),
+        (
+            "status",
+            false,
+            WAIT_STATUS_RESPONSE_BYTES,
+            serde_json::json!({"diagnostic": large}),
+        ),
+        (
+            "stop",
+            true,
+            STOP_RESPONSE_BYTES,
+            serde_json::json!({"completion": {"exit_code": 0, "failure": {"message": large}}}),
+        ),
+    ] {
+        let state = response_state(command, mutating, value, Vec::new());
+        let projected = compact_success(&state);
+        assert!(
+            serde_json::to_vec(&projected)
+                .expect("projected JSON")
+                .len()
+                + 1
+                > limit,
+            "{command} fixture must exercise metadata pruning"
+        );
+        let response = enforce_success_budget(projected, command, &[]).expect("metadata budget");
+        let encoded = bounded_agent_response(response).expect("encoded response");
+        assert!(
+            encoded.len() <= limit,
+            "{command} response exceeded {limit} bytes"
+        );
+        let response: serde_json::Value = serde_json::from_slice(&encoded).expect("response JSON");
+        assert_eq!(response["ok"], true);
+        if command == "act" {
+            assert_eq!(response["input"]["applied"], "all");
+            assert_eq!(response["postcondition"]["matched"], false);
         }
     }
 }

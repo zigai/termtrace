@@ -37,6 +37,44 @@ struct StateHashRow<'state> {
 
 /// Hash normalized semantic terminal state using the stable v2 contract.
 pub fn semantic_state_hash(state: &SemanticState) -> Result<String, ScreenFrameError> {
+    let mut hash = semantic_state_metadata_hasher(state)?;
+    for row in &state.grid {
+        hash.update(hash_semantic_row(row)?.as_bytes());
+    }
+    return Ok(hash.finalize().to_hex().to_string());
+}
+
+/// Hash one semantic row, excluding transient renderer dirtiness.
+pub fn hash_semantic_row(row: &RowState) -> Result<blake3::Hash, ScreenFrameError> {
+    let normalized = StateHashRow {
+        row: row.row,
+        soft_wrapped: row.soft_wrapped,
+        wrap_continuation: row.wrap_continuation,
+        cells: &row.cells,
+    };
+    let mut hash = blake3::Hasher::new();
+    serde_json::to_writer(&mut hash, &normalized)
+        .map_err(|_| return ScreenFrameError::Serialization)?;
+    return Ok(hash.finalize());
+}
+
+/// Compose a v2 state hash from metadata and cached row hashes in grid order.
+///
+/// Callers must supply one digest from [`hash_semantic_row`] per state grid row.
+pub fn semantic_state_hash_from_row_hashes(
+    state: &SemanticState,
+    row_hashes: &[blake3::Hash],
+) -> Result<String, ScreenFrameError> {
+    let mut hash = semantic_state_metadata_hasher(state)?;
+    for row_hash in row_hashes {
+        hash.update(row_hash.as_bytes());
+    }
+    return Ok(hash.finalize().to_hex().to_string());
+}
+
+fn semantic_state_metadata_hasher(
+    state: &SemanticState,
+) -> Result<blake3::Hasher, ScreenFrameError> {
     let metadata = StateHashMetadata {
         cols: state.cols,
         rows: state.rows,
@@ -50,19 +88,30 @@ pub fn semantic_state_hash(state: &SemanticState) -> Result<String, ScreenFrameE
     hash.update(SEMANTIC_STATE_HASH_DOMAIN);
     serde_json::to_writer(&mut hash, &metadata)
         .map_err(|_| return ScreenFrameError::Serialization)?;
-    for row in &state.grid {
-        let normalized = StateHashRow {
-            row: row.row,
-            soft_wrapped: row.soft_wrapped,
-            wrap_continuation: row.wrap_continuation,
-            cells: &row.cells,
-        };
-        let mut row_hash = blake3::Hasher::new();
-        serde_json::to_writer(&mut row_hash, &normalized)
-            .map_err(|_| return ScreenFrameError::Serialization)?;
-        hash.update(row_hash.finalize().as_bytes());
+    return Ok(hash);
+}
+
+/// Project viewport rows as text, replacing empty cells with spaces and
+/// trimming only trailing ASCII spaces from each newline-separated row.
+#[must_use]
+pub fn semantic_viewport_text(state: &SemanticState) -> String {
+    let mut output = String::new();
+    for (index, row) in state.grid.iter().enumerate() {
+        for cell in &row.cells {
+            if cell.grapheme.is_empty() {
+                output.push(' ');
+            } else {
+                output.push_str(&cell.grapheme);
+            }
+        }
+        while output.ends_with(' ') {
+            output.pop();
+        }
+        if index + 1 < state.grid.len() {
+            output.push('\n');
+        }
     }
-    return Ok(hash.finalize().to_hex().to_string());
+    return output;
 }
 
 /// Resolve and validate a requested region without allocating projection rows.

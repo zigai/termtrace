@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 use crate::{
     Error, Result,
-    analysis::diagnostics::diagnose,
+    analysis::diagnostics::diagnose_states,
     diff::diff_inspections_with_semantic_states,
     replay::{StateInspection, visit_states},
 };
@@ -65,6 +65,7 @@ pub fn analyze_last_action(
     let mut before_inspection: Option<StateInspection> = None;
     let mut after_inspection: Option<StateInspection> = None;
     let mut presentation_eligible_states = 0_u64;
+    let mut states = Vec::new();
 
     visit_states(log, |record, state| {
         if record
@@ -82,6 +83,7 @@ pub fn analyze_last_action(
             record: record.clone(),
             state: state.clone(),
         });
+        states.push(record.clone());
         return Ok(());
     })?;
 
@@ -95,9 +97,17 @@ pub fn analyze_last_action(
     let (difference, before, after) =
         diff_inspections_with_semantic_states(from_point, to_point, from_inspection, to_inspection);
     let output_generated = output_summary(log, action.intent_event_seq);
-    let diagnostic_report = diagnose(log, DiagnosticCheck::all(), broad_change_percent, &[])?;
-    let action_token_ids = frame_event_records(&log.events)?
-        .into_iter()
+    let tokens = frame_event_records(&log.events)?;
+    let diagnostic_report = diagnose_states(
+        log,
+        DiagnosticCheck::all(),
+        broad_change_percent,
+        &[],
+        &states,
+        &tokens,
+    );
+    let action_token_ids = tokens
+        .iter()
         .filter(|token| {
             return token
                 .source
@@ -244,31 +254,24 @@ fn action_boundary(
         intended_bytes =
             intended_bytes.saturating_add(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX));
         first_intent_event_seq.get_or_insert(intent.seq);
-        let result = log
+        let (result_seq, atom_status, atom_bytes_written, atom_error_code) = log
             .events
             .iter()
-            .find(|record| {
-                return record.seq > intent.seq
-                    && matches!(
-                        record.event,
-                        Event::InputResult {
-                            operation_id: result_id,
-                            ..
-                        } if result_id == *operation_id
-                    );
+            .find_map(|record| match &record.event {
+                Event::InputResult {
+                    operation_id: result_id,
+                    status,
+                    bytes_written,
+                    error_code,
+                    ..
+                } if record.seq > intent.seq && result_id == operation_id => {
+                    return Some((record.seq, status, bytes_written, error_code));
+                }
+                _ => return None,
             })
             .ok_or_else(|| return task_error("input intent has no canonical input result"))?;
-        let Event::InputResult {
-            status: atom_status,
-            bytes_written: atom_bytes_written,
-            error_code: atom_error_code,
-            ..
-        } = &result.event
-        else {
-            return Err(task_error("matched input result changed event type"));
-        };
         bytes_written = bytes_written.saturating_add(*atom_bytes_written);
-        last_result_event_seq = Some(result.seq);
+        last_result_event_seq = Some(result_seq);
         if *atom_status == OperationStatus::Failed {
             status = OperationStatus::Failed;
             if error_code.is_none() {

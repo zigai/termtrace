@@ -17,7 +17,7 @@ use termtrace_model::{
 };
 
 use super::terminal::{RawTerminalGuard, TerminalInputDrain, query_terminal, resize_and_query};
-use crate::{Error, Result};
+use crate::{Error, Result, error::finish_with_cleanup};
 
 /// Configuration for replaying canonical events into a native terminal.
 #[derive(Clone, Debug)]
@@ -163,7 +163,7 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
     let result = timed_playback(options, &log, source_range, &mut resize_intents);
     finish_with_cleanup(result, drain.stop())?;
     query_terminal()?;
-    write_create_new(&options.ready_file, b"ready\n")?;
+    write_secure(&options.ready_file, b"ready\n")?;
     thread::sleep(options.final_hold);
     return Ok(());
 }
@@ -311,20 +311,6 @@ fn emit_event(
     return Ok(());
 }
 
-pub(super) fn finish_with_cleanup<T>(primary: Result<T>, cleanup: Result<()>) -> Result<T> {
-    match (primary, cleanup) {
-        (Ok(value), Ok(())) => return Ok(value),
-        (Err(error), Ok(())) => return Err(error),
-        (Ok(_), Err(error)) => return Err(error),
-        (Err(primary), Err(cleanup)) => {
-            return Err(Error::CleanupFailed {
-                primary: Box::new(primary),
-                cleanup: Box::new(cleanup),
-            });
-        }
-    }
-}
-
 fn sleep_until(target: Instant) {
     if let Some(remaining) = target.checked_duration_since(Instant::now()) {
         thread::sleep(remaining);
@@ -344,10 +330,7 @@ fn write_create_new_json(path: &Path, value: &impl serde::Serialize) -> Result<(
             source,
         };
     })?;
-    return write_create_new(path, &encoded);
-}
-fn write_create_new(path: &Path, bytes: &[u8]) -> Result<()> {
-    return write_secure(path, bytes).map_err(Error::from);
+    return write_secure(path, &encoded).map_err(Error::from);
 }
 fn output_error(source: io::Error) -> Error {
     return Error::Filesystem {

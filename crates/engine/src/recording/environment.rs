@@ -11,6 +11,7 @@ use termtrace_model::execution::environment::{
     ChildEnvironmentPolicy, ColorPolicy, EnvironmentBase, EnvironmentSpec,
 };
 
+use super::support::terminal_error;
 use crate::{Error, Result};
 
 /// Exact child environment and its persisted derivation policy.
@@ -29,7 +30,7 @@ impl EffectiveEnvironment {
     /// ambient variable.
     pub fn resolve(spec: &EnvironmentSpec, term: &str) -> Result<Self> {
         spec.validate()
-            .map_err(|error| return environment_error(error.to_string()))?;
+            .map_err(|error| return terminal_error("validate environment", error.to_string()))?;
         return Self::resolve_validated(spec, term);
     }
 
@@ -138,13 +139,6 @@ fn digest_variables(variables: &BTreeMap<OsString, OsString>) -> String {
         hasher.update(value);
     }
     return hasher.finalize().to_hex().to_string();
-}
-
-fn environment_error(reason: impl Into<String>) -> Error {
-    return Error::TerminalOperation {
-        operation: "validate environment",
-        reason: reason.into(),
-    };
 }
 
 #[cfg(test)]

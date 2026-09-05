@@ -22,7 +22,7 @@ use termtrace_engine::{
         CaptureQuality, StatePoint, project_screen_frame, resolved_screen_state_for_session,
         state_text,
     },
-    recording::control::evaluate_screen_predicate,
+    recording::control::{compile_screen_predicate, evaluate_screen_predicate},
 };
 use termtrace_evidence::session::read_manifest;
 use termtrace_model::{
@@ -174,6 +174,8 @@ fn completed_screen_wait(
     predicate: ScreenPredicate,
     stable_for_ns: u64,
 ) -> Result<ScreenWaitOutcome> {
+    let compiled = compile_screen_predicate(&predicate)
+        .map_err(|reason| return Error::InvalidOperation { reason })?;
     let (state, source, presented) =
         resolved_screen_state_for_session(session, StatePoint::LatestPresented, false)?;
     let frame = project_screen_frame(
@@ -185,7 +187,7 @@ fn completed_screen_wait(
     )
     .map_err(Error::ScreenFrame)?;
     let viewport_text = state_text(&state);
-    let matched = evaluate_screen_predicate(&predicate, &state, &viewport_text, &frame.state_hash);
+    let matched = evaluate_screen_predicate(&compiled, &state, &viewport_text, &frame.state_hash);
     let observed_monotonic_ns = match &frame.source {
         ScreenFrameSource::Actor {
             observed_monotonic_ns,
@@ -236,7 +238,75 @@ pub fn send_request_response(
     session_directory: impl AsRef<Path>,
     request: &ControlRequest,
 ) -> Result<ControlResponse> {
-    let session_directory = session_directory.as_ref();
+    return exchange(
+        session_directory.as_ref(),
+        request,
+        ExchangeTiming::Timeout(control_response_timeout(
+            &request.command,
+            Duration::from_secs(2),
+        )),
+    );
+}
+
+pub(crate) enum ExchangeTiming {
+    /// Command-derived socket timeout, including any operation-specific slack.
+    Timeout(Duration),
+    /// Caller-owned total budget, recomputed before request and response I/O.
+    Deadline(Instant),
+}
+
+impl ExchangeTiming {
+    pub(crate) fn deadline(timeout: Duration) -> Result<Self> {
+        return Instant::now()
+            .checked_add(timeout)
+            .map(Self::Deadline)
+            .ok_or_else(|| {
+                return Error::InvalidDuration {
+                    field: "request_timeout",
+                    reason: "request timeout exceeds the monotonic clock range".to_owned(),
+                };
+            });
+    }
+
+    fn remaining(
+        &self,
+        session: &Path,
+        phase: &'static str,
+        request_dispatched: bool,
+    ) -> Result<Duration> {
+        return match self {
+            Self::Timeout(timeout) => Ok(*timeout),
+            Self::Deadline(deadline) => deadline
+                .checked_duration_since(Instant::now())
+                .filter(|remaining| return !remaining.is_zero())
+                .ok_or_else(|| {
+                    return control_transport_error(
+                        session,
+                        phase,
+                        Duration::ZERO,
+                        request_dispatched,
+                        IoError::new(ErrorKind::TimedOut, "control deadline elapsed"),
+                    );
+                }),
+        };
+    }
+}
+
+pub(crate) fn exchange(
+    session_directory: &Path,
+    request: &ControlRequest,
+    timing: ExchangeTiming,
+) -> Result<ControlResponse> {
+    let stream = connect_session_control(session_directory)?;
+    return exchange_stream(session_directory, stream, request, timing);
+}
+
+fn exchange_stream(
+    session_directory: &Path,
+    mut stream: UnixStream,
+    request: &ControlRequest,
+    timing: ExchangeTiming,
+) -> Result<ControlResponse> {
     let socket = PathBuf::from("<abstract-control-socket>");
     let mut request_frame = serde_json::to_vec(request).map_err(|source| {
         return Error::InvalidJson {
@@ -253,8 +323,7 @@ pub fn send_request_response(
         });
     }
     request_frame.push(b'\n');
-    let mut stream = connect_session_control(session_directory)?;
-    let timeout = control_response_timeout(&request.command, Duration::from_secs(2));
+    let timeout = timing.remaining(session_directory, "write request", false)?;
     stream
         .set_read_timeout(Some(timeout))
         .and_then(|()| return stream.set_write_timeout(Some(timeout)))
@@ -272,6 +341,16 @@ pub fn send_request_response(
     })?;
     stream.shutdown(Shutdown::Write).map_err(|source| {
         return control_transport_error(session_directory, "finish request", timeout, true, source);
+    })?;
+    let timeout = timing.remaining(session_directory, "read response", true)?;
+    stream.set_read_timeout(Some(timeout)).map_err(|source| {
+        return control_transport_error(
+            session_directory,
+            "configure response deadline",
+            timeout,
+            true,
+            source,
+        );
     })?;
 
     let mut encoded = Vec::new();
@@ -389,7 +468,7 @@ fn validate_response_frame(session: &Path, timeout: Duration, encoded: &[u8]) ->
     return validate_frame(encoded);
 }
 
-pub(crate) fn validate_frame(encoded: &[u8]) -> Result<()> {
+fn validate_frame(encoded: &[u8]) -> Result<()> {
     if encoded.is_empty()
         || encoded.last() != Some(&b'\n')
         || u64::try_from(encoded.len()).unwrap_or(u64::MAX) > MAX_CONTROL_MESSAGE_BYTES
@@ -408,6 +487,28 @@ mod tests {
     use termtrace_model::protocol::control::ControlCommand;
 
     use super::*;
+
+    #[test]
+    fn stop_request_obeys_the_supplied_deadline() {
+        let (client, server) = UnixStream::pair().expect("socket pair");
+        let request = ControlRequest::new(ControlCommand::Stop);
+        let error = exchange_stream(
+            Path::new("/session"),
+            client,
+            &request,
+            ExchangeTiming::deadline(Duration::from_millis(20)).expect("deadline"),
+        )
+        .expect_err("withheld stop response must time out");
+        assert!(matches!(
+            error,
+            Error::ControlTimeout {
+                phase: "read response",
+                request_dispatched: true,
+                ..
+            }
+        ));
+        drop(server);
+    }
 
     #[test]
     fn missing_live_actor_has_a_typed_lifecycle_error() {

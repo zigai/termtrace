@@ -1,97 +1,96 @@
 use super::*;
 
-pub(super) fn validate_action_postcondition(postcondition: &ActionPostcondition) -> Result<()> {
+pub(super) enum AdmittedPostcondition {
+    None,
+    Idle {
+        stable_for_ns: u64,
+        timeout_ns: u64,
+    },
+    Screen {
+        predicate: CompiledScreenPredicate,
+        timeout_ns: u64,
+    },
+}
+
+pub(super) struct AdmittedAction {
+    pub(super) postcondition: AdmittedPostcondition,
+    pub(super) projection: ScreenProjectionRequest,
+}
+
+pub(super) fn compile_action_postcondition(
+    postcondition: &ActionPostcondition,
+) -> Result<AdmittedPostcondition> {
     match postcondition {
-        ActionPostcondition::None => return Ok(()),
+        ActionPostcondition::None => return Ok(AdmittedPostcondition::None),
         ActionPostcondition::Idle {
             stable_for_ns,
             timeout_ns,
-        } => {
-            if *stable_for_ns > 0
-                && *timeout_ns > 0
-                && *timeout_ns <= 3_600_000_000_000
-                && *stable_for_ns <= *timeout_ns
-            {
-                return Ok(());
-            }
+        } if *stable_for_ns > 0
+            && *timeout_ns > 0
+            && *timeout_ns <= 3_600_000_000_000
+            && *stable_for_ns <= *timeout_ns =>
+        {
+            return Ok(AdmittedPostcondition::Idle {
+                stable_for_ns: *stable_for_ns,
+                timeout_ns: *timeout_ns,
+            });
         }
         ActionPostcondition::Screen {
             predicate,
             timeout_ns,
-        } => {
-            if *timeout_ns > 0
-                && *timeout_ns <= 3_600_000_000_000
-                && validate_screen_predicate(predicate).is_ok()
-            {
-                return Ok(());
+        } if *timeout_ns > 0 && *timeout_ns <= 3_600_000_000_000 => {
+            if let Ok(predicate) = compile_screen_predicate(predicate) {
+                return Ok(AdmittedPostcondition::Screen {
+                    predicate,
+                    timeout_ns: *timeout_ns,
+                });
             }
         }
+        _ => {}
     }
     return Err(control_rejected(
         "invalid_action_postcondition",
         "action postcondition exceeds its predicate limits or durations do not satisfy stable <= timeout <= 1h",
     ));
 }
+
 pub(super) fn evaluate_action_postcondition(
-    pending: &mut PendingInputSequence,
+    waiting: &mut action::WaitingAction,
     event_log: &EventLogWriter,
     session_id: Uuid,
     live: &LiveTerminal,
     child_exited: bool,
     output_closed: bool,
-) -> Result<Option<ControlData>> {
-    let input = pending.input.clone().ok_or_else(|| {
-        return terminal_error(
-            "evaluate actor-ordered action",
-            "postcondition started without applied input",
-        );
-    })?;
-    let postcondition = pending.postcondition.as_ref().ok_or_else(|| {
-        return terminal_error(
-            "evaluate actor-ordered action",
-            "missing action postcondition",
-        );
-    })?;
-    let projection = pending.projection.as_ref().ok_or_else(|| {
-        return terminal_error(
-            "evaluate actor-ordered action",
-            "missing action screen projection",
-        );
-    })?;
-    let state_hash = presented_state_hash(live)?;
-    let viewport_text = semantic_viewport_text(&live.presented);
+) -> Result<Option<ActionPostconditionResult>> {
     let now = Instant::now();
     let child_completed = child_exited && output_closed;
-    let started_at = pending.postcondition_started_at.unwrap_or(now);
-    return match postcondition {
-        ActionPostcondition::None => {
-            let boundaries = actor_boundaries(event_log);
+    let started_at = waiting.started_at;
+    let projection = &waiting.action.projection;
+    return match &waiting.action.postcondition {
+        AdmittedPostcondition::None => {
             let frame = actor_screen_frame(
                 session_id,
                 event_log,
                 live,
-                boundaries.clone(),
+                actor_boundaries(event_log),
                 projection,
                 CaptureQuality::Live,
             )?;
-            Ok(Some(ControlData::ActionApplied {
-                input,
-                postcondition: ActionPostconditionResult::None {
-                    matched: true,
-                    frame,
-                },
-                boundaries,
+            Ok(Some(ActionPostconditionResult::None {
+                matched: true,
+                frame,
             }))
         }
-        ActionPostcondition::Idle {
+        AdmittedPostcondition::Idle {
             stable_for_ns,
             timeout_ns,
         } => {
-            match &pending.matching_state {
+            let state_hash = presented_state_hash(live)?;
+            match &waiting.matching_state {
                 Some((prior_hash, _)) if prior_hash == &state_hash => {}
-                _ => pending.matching_state = Some((state_hash, now)),
+                _ => waiting.matching_state = Some((state_hash, now)),
             }
-            let stable = pending.matching_state.as_ref().is_some_and(|(_, since)| {
+            let stable = waiting.matching_state.as_ref().is_some_and(|(_, since)| {
                 return since.elapsed() >= Duration::from_nanos(*stable_for_ns);
             });
             let deadline = !child_exited && now >= started_at + Duration::from_nanos(*timeout_ns);
@@ -114,29 +113,26 @@ pub(super) fn evaluate_action_postcondition(
             } else {
                 CaptureQuality::Live
             };
-            let boundaries = actor_boundaries(event_log);
             let frame = actor_screen_frame(
                 session_id,
                 event_log,
                 live,
-                boundaries.clone(),
+                actor_boundaries(event_log),
                 projection,
                 capture_quality,
             )?;
-            Ok(Some(ControlData::ActionApplied {
-                input,
-                postcondition: ActionPostconditionResult::Idle {
-                    matched: stable,
-                    quality,
-                    frame,
-                },
-                boundaries,
+            Ok(Some(ActionPostconditionResult::Idle {
+                matched: stable,
+                quality,
+                frame,
             }))
         }
-        ActionPostcondition::Screen {
+        AdmittedPostcondition::Screen {
             predicate,
             timeout_ns,
         } => {
+            let state_hash = presented_state_hash(live)?;
+            let viewport_text = semantic_viewport_text(&live.presented);
             let matched =
                 evaluate_screen_predicate(predicate, &live.presented, &viewport_text, &state_hash);
             let deadline = !child_exited && now >= started_at + Duration::from_nanos(*timeout_ns);
@@ -157,23 +153,18 @@ pub(super) fn evaluate_action_postcondition(
             } else {
                 CaptureQuality::Live
             };
-            let boundaries = actor_boundaries(event_log);
             let frame = actor_screen_frame(
                 session_id,
                 event_log,
                 live,
-                boundaries.clone(),
+                actor_boundaries(event_log),
                 projection,
                 capture_quality,
             )?;
-            Ok(Some(ControlData::ActionApplied {
-                input,
-                postcondition: ActionPostconditionResult::Screen {
-                    matched,
-                    quality,
-                    frame,
-                },
-                boundaries,
+            Ok(Some(ActionPostconditionResult::Screen {
+                matched,
+                quality,
+                frame,
             }))
         }
     };

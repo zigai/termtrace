@@ -1,6 +1,6 @@
 use crate::cli::{
     artifacts::{
-        args::{VideoCursorStyleArg, VideoFacadeArgs, VideoPresetArg, VideoSourceArg},
+        args::{VideoCursorStyleArg, VideoFacadeArgs},
         run_video_facade,
     },
     control::{args::StopArgs, run_stop},
@@ -45,10 +45,7 @@ use crate::cli::tmux::{args::TmuxConnectionArgs, setup::run_tmux_disable};
 
 use super::{
     OPTION_AGGREGATE_MANIFEST, OPTION_COVERAGE, OPTION_PANE_SESSION,
-    args::{
-        TmuxBundleArgs, TmuxCoverageMode, TmuxRecordArgs, TmuxStopArgs, TmuxVideoArgs,
-        TmuxVideoPreset, TmuxVideoRenderer,
-    },
+    args::{TmuxBundleArgs, TmuxCoverageMode, TmuxRecordArgs, TmuxStopArgs, TmuxVideoArgs},
     client::{TmuxClient, option_path, option_text, same_executable},
     setup::{enable_prepared_tmux_setup, prepare_tmux_setup, tmux_config_fragment},
     supervisor::tmux_status_report,
@@ -324,16 +321,9 @@ pub(in crate::cli) fn run_tmux_video(
         dry_run: false,
         preview_out: None,
         edit: None,
-        preset: match arguments.preset {
-            TmuxVideoPreset::Docs => VideoPresetArg::Docs,
-            TmuxVideoPreset::Social => VideoPresetArg::Social,
-            TmuxVideoPreset::Lossless => VideoPresetArg::Lossless,
-        },
+        preset: arguments.preset,
         fps: arguments.fps,
-        renderer: match arguments.renderer {
-            TmuxVideoRenderer::Semantic => VideoSourceArg::Semantic,
-            TmuxVideoRenderer::Native => VideoSourceArg::Native,
-        },
+        renderer: arguments.renderer,
         semantic_raster_profile: None,
         resolution: None,
         scale: None,

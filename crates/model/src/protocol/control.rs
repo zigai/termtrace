@@ -21,6 +21,12 @@ pub const CONTROL_PROTOCOL_VERSION: u32 = 15;
 /// Maximum encoded request or response size.
 pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 1024 * 1024;
 
+/// Derive an input atom's operation identity from its request and zero-based index.
+pub fn derive_input_operation_id(request_id: Uuid, index: usize) -> Uuid {
+    let atom_number = u128::try_from(index).unwrap_or(u128::MAX).saturating_add(1);
+    return Uuid::from_u128(request_id.as_u128() ^ atom_number);
+}
+
 /// Safely supported process-group signals.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -828,10 +834,15 @@ mod tests {
 
     #[test]
     fn request_schema_rejects_unknown_fields() {
-        let encoded = format!(
-            r#"{{"version":1,"request_id":"{}","command":"ping","extra":true}}"#,
-            Uuid::from_u128(1)
-        );
-        assert!(serde_json::from_str::<ControlRequest>(&encoded).is_err());
+        let request = ControlRequest::new(ControlCommand::Ping);
+        let mut encoded = serde_json::to_value(&request).expect("ping request serializes");
+        let decoded = serde_json::from_value::<ControlRequest>(encoded.clone())
+            .expect("unmodified ping request is accepted");
+        assert_eq!(decoded, request);
+        encoded
+            .as_object_mut()
+            .expect("control request serializes as an object")
+            .insert("extra".to_owned(), serde_json::Value::Bool(true));
+        assert!(serde_json::from_value::<ControlRequest>(encoded).is_err());
     }
 }

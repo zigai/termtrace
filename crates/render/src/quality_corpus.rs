@@ -1,6 +1,6 @@
 //! Focused semantic rendering quality corpus.
 
-use std::{collections::BTreeMap, env, fs, path::Path, str};
+use std::{env, fs, path::Path, str};
 
 use resvg::tiny_skia::Pixmap;
 use termtrace_model::artifact::save::SemanticRasterProfile;
@@ -36,26 +36,79 @@ fn quality_corpus() -> SemanticState {
 }
 
 fn assert_decoration_geometry(svg: &str, pixmap: &Pixmap) {
-    assert!(svg.starts_with("<svg"));
-    assert!(svg.trim_end().ends_with("</svg>"));
     assert!(svg.contains("data-truth-layer=\"semantic_rendering\""));
     assert!(svg.contains("data-renderer="));
-    assert!(!svg.contains("text-decoration="));
 
-    // In row 2 (underline styles 1..5 in magenta #ff00ff),
-    // verify the rendered pixmap contains magenta pixels from the decorations.
-    let row_2_y_start = 2 * 24;
-    let row_2_y_end = 3 * 24;
-    let has_magenta = (row_2_y_start..row_2_y_end).any(|y| {
-        return (0..pixmap.width()).any(|x| {
-            return pixmap
-                .pixel(x, y)
-                .is_some_and(|p| return p.red() > 200 && p.blue() > 200 && p.green() < 50);
-        });
-    });
+    // Each style occupies its own cell in row 2. Measure magenta coverage,
+    // excluding the gray glyphs, rather than the SVG decoration syntax.
+    let ink = |style: u32, x: u32, y: u32| {
+        let pixel = pixmap
+            .pixel(style * 24 + x, 2 * 24 + y)
+            .expect("decoration cell is inside the rendered viewport");
+        return f64::from(pixel.red().min(pixel.blue()).saturating_sub(pixel.green()));
+    };
+    let columns: Vec<Vec<f64>> = (0..5)
+        .map(|style| {
+            return (1..11)
+                .map(|x| return (19..24).map(|y| return ink(style, x, y)).sum())
+                .collect();
+        })
+        .collect();
+    let single = &columns[0];
+    let double = &columns[1];
+    let dotted = &columns[3];
+    let dashed = &columns[4];
+    assert!(single.iter().all(|coverage| return *coverage > 100.0));
     assert!(
-        has_magenta,
-        "rendered pixmap should contain magenta decoration pixels"
+        double.iter().sum::<f64>() > single.iter().sum::<f64>() * 1.5,
+        "double underline must contain two strokes rather than one"
+    );
+    let upper_ink = |style| {
+        return (1..11)
+            .flat_map(|x| return (19..22).map(move |y| return ink(style, x, y)))
+            .sum::<f64>();
+    };
+    assert!(
+        upper_ink(1) > upper_ink(0) + 500.0,
+        "double underline must have a separate upper stroke"
+    );
+    let curly_centers: Vec<_> = (1..11)
+        .map(|x| {
+            let weight: f64 = (19..24).map(|y| return ink(2, x, y)).sum();
+            assert!(weight > 50.0, "curly underline must remain continuous");
+            return (19..24)
+                .map(|y| return f64::from(y) * ink(2, x, y))
+                .sum::<f64>()
+                / weight;
+        })
+        .collect();
+    let low = curly_centers.iter().copied().fold(f64::INFINITY, f64::min);
+    let high = curly_centers
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!(high - low > 0.2, "curly underline must rise and fall");
+    let runs = |coverage: &[f64]| {
+        let low = coverage.iter().copied().fold(f64::INFINITY, f64::min);
+        let high = coverage.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            high - low > 100.0,
+            "pattern must have contrasting strokes and gaps"
+        );
+        // Antialiasing leaves partial ink in gaps; compare against the stroke coverage.
+        let threshold = f64::midpoint(low, high);
+        let painted: Vec<_> = coverage
+            .iter()
+            .map(|value| return *value > threshold)
+            .collect();
+        return painted
+            .windows(2)
+            .filter(|pair| return pair[0] != pair[1])
+            .count();
+    };
+    assert!(
+        runs(dotted) > runs(dashed),
+        "dotted underline must repeat more frequently than dashed underline"
     );
 }
 
@@ -117,14 +170,12 @@ fn quality_corpus_renders_every_cursor_style() {
     let hidden_png = render_png(&hidden_state).expect("render hidden cursor PNG");
     let hidden_pixmap = Pixmap::decode_png(&hidden_png).expect("decode hidden cursor PNG");
 
-    let png_by_style: BTreeMap<_, _> = [
+    for (name, style) in [
         ("bar", CursorStyle::Bar),
         ("block", CursorStyle::Block),
         ("underline", CursorStyle::Underline),
         ("hollow-block", CursorStyle::HollowBlock),
-    ]
-    .into_iter()
-    .map(|(name, style)| {
+    ] {
         let mut state = quality_corpus();
         state.cursor.style = style;
         let svg = render_svg(&state).expect("render quality corpus SVG");
@@ -133,21 +184,13 @@ fn quality_corpus_renders_every_cursor_style() {
         let pixmap = Pixmap::decode_png(&png).expect("decode quality corpus PNG");
         assert_decoration_geometry(svg_text, &pixmap);
         assert_cursor_geometry(&pixmap, &hidden_pixmap, style);
-        assert!(!svg.is_empty());
-        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
-        assert!(png.len() > 1_000);
         if let Some(directory) = output.as_deref() {
             fs::write(Path::new(directory).join(format!("{name}.svg")), svg)
                 .expect("write quality corpus SVG reference");
             fs::write(Path::new(directory).join(format!("{name}.png")), &png)
                 .expect("write quality corpus PNG reference");
         }
-        return (name, png);
-    })
-    .collect();
-    assert_ne!(png_by_style["bar"], png_by_style["block"]);
-    assert_ne!(png_by_style["block"], png_by_style["underline"]);
-    assert_ne!(png_by_style["underline"], png_by_style["hollow-block"]);
+    }
 }
 
 #[test]

@@ -459,27 +459,41 @@ impl Driver {
                             require_capability(NATIVE_SCREENSHOT_CAPABILITY).map_err(|error| {
                                 return driver_failure_from_error(error, Some(path.clone()));
                             })?;
-                            let (target, geometry_solver) = native_capture_target(path, *viewport)
-                                .map_err(|error| {
-                                    return driver_failure_from_error(error, Some(path.clone()));
-                                })?;
-                            capture(&CaptureOptions {
-                                session_directory: path.clone(),
-                                width: target.width,
-                                height: target.height,
-                                fps: 24,
-                                start_monotonic_ns: None,
-                                end_monotonic_ns: None,
-                                state_selection: StateSelection::Presented,
-                                geometry_solver,
-                                kind: CaptureKind::Screenshot {
-                                    state_id: inspection.record.state_id,
-                                    state_hash: inspection.record.state_hash,
-                                    event_seq,
-                                    event_byte_offset: inspection.record.event_byte_offset,
+                            let helper = env::current_exe().map_err(|source| {
+                                return driver_failure_from_error(
+                                    termtrace_media::Error::Filesystem {
+                                        path: PathBuf::from("<current-executable>"),
+                                        source,
+                                    },
+                                    Some(path.clone()),
+                                );
+                            })?;
+                            let (target, geometry_solver) = native_capture_target(
+                                &helper, path, *viewport,
+                            )
+                            .map_err(|error| {
+                                return driver_failure_from_error(error, Some(path.clone()));
+                            })?;
+                            capture(
+                                &helper,
+                                &CaptureOptions {
+                                    session_directory: path.clone(),
+                                    width: target.width,
+                                    height: target.height,
+                                    fps: 24,
+                                    start_monotonic_ns: None,
+                                    end_monotonic_ns: None,
+                                    state_selection: StateSelection::Presented,
+                                    geometry_solver,
+                                    kind: CaptureKind::Screenshot {
+                                        state_id: inspection.record.state_id,
+                                        state_hash: inspection.record.state_hash,
+                                        event_seq,
+                                        event_byte_offset: inspection.record.event_byte_offset,
+                                    },
+                                    destination: Some(destination.clone()),
                                 },
-                                destination: Some(destination.clone()),
-                            })
+                            )
                             .map(|outcome| {
                                 return DriverData::Artifact {
                                     artifact_type: "native_screenshot".to_owned(),

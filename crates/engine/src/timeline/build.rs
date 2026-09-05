@@ -8,12 +8,12 @@ use std::{
 #[cfg(test)]
 use std::cell::Cell;
 
-use serde::Deserialize;
-
 use termtrace_evidence::event_log::EventLog;
 use termtrace_model::{
     execution::event::Event,
-    terminal::replay::{DERIVED_DIRECTORY, StateIndexEntry, StateRecord, StateSelector},
+    terminal::replay::{
+        ControlSourceIndexEntry, DERIVED_DIRECTORY, StateIndexEntry, StateRecord, StateSelector,
+    },
     terminal::state::SemanticState,
     terminal::vt::VtToken,
 };
@@ -458,13 +458,6 @@ impl<'log> AuxiliaryTimelineCursor<'log> {
             return Ok(Some(entry));
         }
     }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ControlSourceIndexEntry {
-    event_seq: u64,
-    control_index_offset: u64,
 }
 
 fn locate_range_control_offset(log: &EventLog, range: SourceRange) -> Result<Option<u64>> {

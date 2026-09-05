@@ -5,45 +5,55 @@ pub(in crate::recording) struct PendingInputSequence {
     pub(super) response_sender: mpsc::SyncSender<ControlResponse>,
     pub(super) command_hash: String,
     pub(super) event_start_seq: u64,
-    pub(super) execution: InputSequenceExecution,
-    pub(super) postcondition: Option<ActionPostcondition>,
-    pub(super) projection: Option<ScreenProjectionRequest>,
-    pub(super) input: Option<ActionInputResult>,
-    pub(super) postcondition_started_at: Option<Instant>,
+    pub(super) phase: InputSequencePhase,
+}
+
+pub(super) enum InputSequencePhase {
+    Applying {
+        execution: InputSequenceExecution,
+        action: Option<AdmittedAction>,
+    },
+    Waiting(WaitingAction),
+}
+
+pub(super) struct WaitingAction {
+    pub(super) input: ActionInputResult,
+    pub(super) action: AdmittedAction,
+    pub(super) started_at: Instant,
     pub(super) matching_state: Option<(String, Instant)>,
 }
 
 impl PendingInputSequence {
     pub(in crate::recording) fn next_deadline(&self) -> Instant {
-        if self.input.is_none() {
-            return self.execution.next_deadline();
-        }
-        let Some(postcondition) = &self.postcondition else {
-            return Instant::now();
-        };
-        let started_at = self.postcondition_started_at.unwrap_or_else(Instant::now);
-        return match postcondition {
-            ActionPostcondition::None => Instant::now(),
-            ActionPostcondition::Idle {
-                stable_for_ns,
-                timeout_ns,
-            } => {
-                let deadline = started_at + Duration::from_nanos(*timeout_ns);
-                self.matching_state
-                    .as_ref()
-                    .map_or(deadline, |(_, since)| {
-                        return *since + Duration::from_nanos(*stable_for_ns);
-                    })
-                    .min(deadline)
-            }
-            ActionPostcondition::Screen { timeout_ns, .. } => {
-                started_at + Duration::from_nanos(*timeout_ns)
-            }
+        return match &self.phase {
+            InputSequencePhase::Applying { execution, .. } => execution.next_deadline(),
+            InputSequencePhase::Waiting(waiting) => match &waiting.action.postcondition {
+                AdmittedPostcondition::None => Instant::now(),
+                AdmittedPostcondition::Idle {
+                    stable_for_ns,
+                    timeout_ns,
+                } => {
+                    let deadline = waiting.started_at + Duration::from_nanos(*timeout_ns);
+                    waiting
+                        .matching_state
+                        .as_ref()
+                        .map_or(deadline, |(_, since)| {
+                            return *since + Duration::from_nanos(*stable_for_ns);
+                        })
+                        .min(deadline)
+                }
+                AdmittedPostcondition::Screen { timeout_ns, .. } => {
+                    waiting.started_at + Duration::from_nanos(*timeout_ns)
+                }
+            },
         };
     }
 
     pub(super) fn exclusive(&self) -> bool {
-        return self.postcondition.is_some();
+        return !matches!(
+            &self.phase,
+            InputSequencePhase::Applying { action: None, .. }
+        );
     }
 }
 impl SessionActor<'_> {
@@ -55,64 +65,85 @@ impl SessionActor<'_> {
         let Some(mut pending) = self.pending_input_sequence.take() else {
             return Ok(());
         };
-        let screen_postcondition_ready = pending.input.is_some()
-            && matches!(
-                &pending.postcondition,
-                Some(ActionPostcondition::Screen { .. })
-            );
+        let screen_postcondition_ready = matches!(
+            &pending.phase,
+            InputSequencePhase::Waiting(WaitingAction {
+                action: AdmittedAction {
+                    postcondition: AdmittedPostcondition::Screen { .. },
+                    ..
+                },
+                ..
+            })
+        );
         if !screen_postcondition_ready && !output_closed && Instant::now() < pending.next_deadline()
         {
             self.pending_input_sequence = Some(pending);
             return Ok(());
         }
-        let terminal_outcome = if pending.input.is_some() {
-            match evaluate_action_postcondition(
-                &mut pending,
-                &self.event_log,
-                self.session_id,
-                &self.live,
-                child_exited,
-                output_closed,
-            ) {
-                Ok(Some(data)) => Ok(data),
-                Ok(None) => {
-                    self.pending_input_sequence = Some(pending);
-                    return Ok(());
+        let terminal_outcome = loop {
+            match pending.phase {
+                InputSequencePhase::Applying {
+                    mut execution,
+                    action,
+                } => {
+                    match execution.advance(
+                        self.spawned.writer.as_mut(),
+                        &mut self.event_log,
+                        &mut self.live.semantic,
+                    ) {
+                        Ok(None) => {
+                            pending.phase = InputSequencePhase::Applying { execution, action };
+                            self.pending_input_sequence = Some(pending);
+                            return Ok(());
+                        }
+                        Ok(Some(input)) => {
+                            if let Some(action) = action {
+                                pending.phase = InputSequencePhase::Waiting(WaitingAction {
+                                    input,
+                                    action,
+                                    started_at: Instant::now(),
+                                    matching_state: None,
+                                });
+                            } else {
+                                break Ok(ControlData::InputSequenceApplied {
+                                    sequence_id: input.sequence_id,
+                                    atom_count: input.atom_count,
+                                    bytes_written: input.bytes_written,
+                                    first_intent_event_seq: input.first_intent_event_seq,
+                                    last_result_event_seq: input.last_result_event_seq,
+                                    pace_ns: input.pace_ns,
+                                    atoms: input.atoms,
+                                    boundaries: actor_boundaries(&self.event_log),
+                                });
+                            }
+                        }
+                        Err(error) => break Err(error),
+                    }
                 }
-                Err(error) => Err(error),
-            }
-        } else {
-            match pending.execution.advance(
-                self.spawned.writer.as_mut(),
-                &mut self.event_log,
-                &mut self.live.semantic,
-            ) {
-                Ok(None) => {
-                    self.pending_input_sequence = Some(pending);
-                    return Ok(());
-                }
-                Ok(Some(data)) if pending.postcondition.is_some() => {
-                    let input = action_input_result(data)?;
-                    pending.input = Some(input);
-                    pending.postcondition_started_at = Some(Instant::now());
+                InputSequencePhase::Waiting(mut waiting) => {
                     match evaluate_action_postcondition(
-                        &mut pending,
+                        &mut waiting,
                         &self.event_log,
                         self.session_id,
                         &self.live,
                         child_exited,
                         output_closed,
                     ) {
-                        Ok(Some(data)) => Ok(data),
+                        Ok(Some(postcondition)) => {
+                            break Ok(ControlData::ActionApplied {
+                                input: waiting.input,
+                                postcondition,
+                                boundaries: actor_boundaries(&self.event_log),
+                            });
+                        }
                         Ok(None) => {
+                            pending.phase = InputSequencePhase::Waiting(waiting);
                             self.pending_input_sequence = Some(pending);
                             return Ok(());
                         }
-                        Err(error) => Err(error),
+                        Err(error) => break Err(error),
                     }
                 }
-                Ok(Some(data)) => Ok(data),
-                Err(error) => Err(error),
             }
         };
         let current_state_hash = presented_state_hash(&self.live)?;
@@ -122,13 +153,26 @@ impl SessionActor<'_> {
             }
             _ => 0,
         };
-        let response = input_sequence_response(
-            pending.request.request_id,
-            atom_count,
-            &terminal_outcome,
-            current_state_hash,
-            &self.event_log,
-        );
+        let (response, terminal_error) = match terminal_outcome {
+            Ok(data) => (
+                ControlResponse {
+                    version: CONTROL_PROTOCOL_VERSION,
+                    request_id: pending.request.request_id,
+                    result: ControlResult::Ok { data },
+                },
+                None,
+            ),
+            Err(error) => {
+                let response = input_sequence_error_response(
+                    pending.request.request_id,
+                    atom_count,
+                    &error,
+                    current_state_hash,
+                    &self.event_log,
+                );
+                (response, Some(error))
+            }
+        };
         self.mutation_history.remember(
             pending.request.request_id,
             &pending.request.command,
@@ -144,59 +188,27 @@ impl SessionActor<'_> {
                 "input sequence response receiver disconnected"
             );
         }
-        return match terminal_outcome {
-            Ok(_)
-            | Err(
+        return match terminal_error {
+            None
+            | Some(
                 Error::ControlRejected { .. }
                 | Error::InputSequenceIncomplete { .. }
                 | Error::GhosttyVt { .. }
                 | Error::ScreenFrame(_),
             ) => Ok(()),
-            Err(error) => Err(error),
+            Some(error) => Err(error),
         };
     }
 }
-pub(super) fn action_input_result(data: ControlData) -> Result<ActionInputResult> {
-    let ControlData::InputSequenceApplied {
-        sequence_id,
-        atom_count,
-        bytes_written,
-        first_intent_event_seq,
-        last_result_event_seq,
-        pace_ns,
-        atoms,
-        ..
-    } = data
-    else {
-        return Err(terminal_error(
-            "complete actor-ordered action",
-            "input sequence returned an unexpected payload",
-        ));
-    };
-    return Ok(ActionInputResult {
-        sequence_id,
-        atom_count,
-        bytes_written,
-        first_intent_event_seq,
-        last_result_event_seq,
-        pace_ns,
-        atoms,
-    });
-}
-pub(super) fn input_sequence_response(
+pub(super) fn input_sequence_error_response(
     request_id: Uuid,
     atom_count: u32,
-    outcome: &Result<ControlData>,
+    outcome: &Error,
     current_state_hash: String,
     event_log: &EventLogWriter,
 ) -> ControlResponse {
     return match outcome {
-        Ok(data) => ControlResponse {
-            version: CONTROL_PROTOCOL_VERSION,
-            request_id,
-            result: ControlResult::Ok { data: data.clone() },
-        },
-        Err(Error::InputSequenceIncomplete {
+        Error::InputSequenceIncomplete {
             sequence_id,
             failed_atom_index,
             failed_operation_id,
@@ -206,7 +218,7 @@ pub(super) fn input_sequence_response(
             first_intent_event_seq,
             last_result_event_seq,
             reason,
-        }) => ControlResponse {
+        } => ControlResponse {
             version: CONTROL_PROTOCOL_VERSION,
             request_id,
             result: ControlResult::Error {
@@ -234,22 +246,14 @@ pub(super) fn input_sequence_response(
                 }),
             },
         },
-        Err(Error::ScreenFrame(error)) => ControlResponse {
-            version: CONTROL_PROTOCOL_VERSION,
+        Error::ScreenFrame(error) => screen_frame_error_response(
             request_id,
-            result: ControlResult::Error {
-                code: screen_frame_error_code(error).to_owned(),
-                message: error.to_string(),
-                details: Some(ControlErrorDetails {
-                    current_presented_state_hash: current_state_hash,
-                    boundaries: actor_boundaries(event_log),
-                    scope: "action_terminating_screen_frame".to_owned(),
-                    input_sequence: None,
-                    screen_frame: Some(screen_frame_failure_details(error)),
-                }),
-            },
-        },
-        Err(Error::ControlRejected { code, message }) => ControlResponse {
+            error,
+            current_state_hash,
+            event_log,
+            "action_terminating_screen_frame",
+        ),
+        Error::ControlRejected { code, message } => ControlResponse {
             version: CONTROL_PROTOCOL_VERSION,
             request_id,
             result: ControlResult::Error {
@@ -264,8 +268,6 @@ pub(super) fn input_sequence_response(
                 }),
             },
         },
-        Err(error) => {
-            control_error_response(request_id, control_error_code(error), error.to_string())
-        }
+        error => control_error_response(request_id, control_error_code(error), error.to_string()),
     };
 }

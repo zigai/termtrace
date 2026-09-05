@@ -30,7 +30,8 @@ struct TaggedByte {
 #[derive(Debug)]
 pub struct VtFramer {
     state: FramerState,
-    token: Vec<TaggedByte>,
+    token: Vec<u8>,
+    source: Vec<VtSourceSegment>,
     printable_utf8_remaining: u8,
     next_token_id: u64,
     max_token_bytes: usize,
@@ -49,6 +50,7 @@ impl VtFramer {
         return Self {
             state: FramerState::Ground,
             token: Vec::new(),
+            source: Vec::new(),
             printable_utf8_remaining: 0,
             next_token_id: 0,
             max_token_bytes,
@@ -131,12 +133,9 @@ impl VtFramer {
                 return self.consume_string(byte, kind, osc, emitted);
             }
             FramerState::StringEscape { kind, osc } => {
+                let value = byte.value;
                 self.push(byte)?;
-                if self
-                    .token
-                    .last()
-                    .is_some_and(|value| return value.value == b'\\')
-                {
+                if value == b'\\' {
                     emitted.push(self.emit(kind)?);
                     self.state = FramerState::Ground;
                 } else {
@@ -191,37 +190,37 @@ impl VtFramer {
     }
 
     fn consume_escape(&mut self, byte: TaggedByte, emitted: &mut Vec<VtToken>) -> Result<()> {
+        let value = byte.value;
         self.push(byte)?;
-        match self.token.last().map(|value| return value.value) {
-            Some(b'[') if self.token.len() == 2 => self.state = FramerState::Csi,
-            Some(b']') if self.token.len() == 2 => {
+        match value {
+            b'[' if self.token.len() == 2 => self.state = FramerState::Csi,
+            b']' if self.token.len() == 2 => {
                 self.state = FramerState::String {
                     kind: VtTokenKind::Osc,
                     osc: true,
                 };
             }
-            Some(b'P') if self.token.len() == 2 => {
+            b'P' if self.token.len() == 2 => {
                 self.state = FramerState::String {
                     kind: VtTokenKind::Dcs,
                     osc: false,
                 };
             }
-            Some(b'_') if self.token.len() == 2 => {
+            b'_' if self.token.len() == 2 => {
                 self.state = FramerState::String {
                     kind: VtTokenKind::Apc,
                     osc: false,
                 };
             }
-            Some(0x30..=0x7e) => {
+            0x30..=0x7e => {
                 emitted.push(self.emit(VtTokenKind::Esc)?);
                 self.state = FramerState::Ground;
             }
-            Some(0x20..=0x2f) => {}
-            Some(_) => {
+            0x20..=0x2f => {}
+            _ => {
                 emitted.push(self.emit(VtTokenKind::Unknown)?);
                 self.state = FramerState::Ground;
             }
-            None => {}
         }
         return Ok(());
     }
@@ -291,7 +290,20 @@ impl VtFramer {
                 reason: "VT token exceeds configured byte bound".to_owned(),
             });
         }
-        self.token.push(byte);
+        self.token.push(byte.value);
+        if let Some(last) = self.source.last_mut()
+            && last.event_seq == byte.event_seq
+            && last.end_byte_offset == byte.byte_offset
+        {
+            last.end_byte_offset = last.end_byte_offset.saturating_add(1);
+        } else {
+            self.source.push(VtSourceSegment {
+                event_seq: byte.event_seq,
+                start_byte_offset: byte.byte_offset,
+                end_byte_offset: byte.byte_offset.saturating_add(1),
+                monotonic_ns: byte.monotonic_ns,
+            });
+        }
         return Ok(());
     }
 
@@ -304,27 +316,8 @@ impl VtFramer {
     }
 
     fn emit(&mut self, kind: VtTokenKind) -> Result<VtToken> {
-        let tagged = mem::take(&mut self.token);
-        let raw = tagged
-            .iter()
-            .map(|byte| return byte.value)
-            .collect::<Vec<_>>();
-        let mut source = Vec::<VtSourceSegment>::new();
-        for byte in &tagged {
-            if let Some(last) = source.last_mut()
-                && last.event_seq == byte.event_seq
-                && last.end_byte_offset == byte.byte_offset
-            {
-                last.end_byte_offset = last.end_byte_offset.saturating_add(1);
-                continue;
-            }
-            source.push(VtSourceSegment {
-                event_seq: byte.event_seq,
-                start_byte_offset: byte.byte_offset,
-                end_byte_offset: byte.byte_offset.saturating_add(1),
-                monotonic_ns: byte.monotonic_ns,
-            });
-        }
+        let raw = mem::take(&mut self.token);
+        let source = mem::take(&mut self.source);
         let description = describe(kind, &raw);
         let token = VtToken {
             token_id: self.next_token_id,
@@ -427,6 +420,59 @@ mod tests {
             .flat_map(|token| return token.raw.as_bytes().iter().copied())
             .collect::<Vec<_>>();
         assert_eq!(recombined, b"A\x1b[2J\x1b]0;title\x1b\\\xe7\x95\x8c");
+    }
+
+    #[test]
+    fn preserves_noncontiguous_offsets_and_first_segment_timestamps() {
+        let mut framer = VtFramer::default();
+        for (event_seq, monotonic_ns, offset, byte) in [
+            (4, 10, 5, b'A'),
+            (4, 20, 6, b'B'),
+            (4, 30, 12, b'C'),
+            (7, 40, 0, b'D'),
+            (4, 50, 13, b'E'),
+        ] {
+            assert!(
+                framer
+                    .feed_byte_at(event_seq, monotonic_ns, offset, byte)
+                    .expect("feed positioned byte")
+                    .is_empty()
+            );
+        }
+        let tokens = framer.finish().expect("finish positioned bytes");
+        let [token] = tokens.as_slice() else {
+            panic!("printable stream must emit one token");
+        };
+        assert_eq!(token.raw.as_bytes(), b"ABCDE");
+        assert_eq!(
+            token.source,
+            [
+                VtSourceSegment {
+                    event_seq: 4,
+                    start_byte_offset: 5,
+                    end_byte_offset: 7,
+                    monotonic_ns: 10,
+                },
+                VtSourceSegment {
+                    event_seq: 4,
+                    start_byte_offset: 12,
+                    end_byte_offset: 13,
+                    monotonic_ns: 30,
+                },
+                VtSourceSegment {
+                    event_seq: 7,
+                    start_byte_offset: 0,
+                    end_byte_offset: 1,
+                    monotonic_ns: 40,
+                },
+                VtSourceSegment {
+                    event_seq: 4,
+                    start_byte_offset: 13,
+                    end_byte_offset: 14,
+                    monotonic_ns: 50,
+                },
+            ]
+        );
     }
 
     #[test]

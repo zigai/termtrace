@@ -95,19 +95,6 @@ pub(super) fn unix_now_ns() -> Result<u128> {
             };
         });
 }
-pub(super) fn finish_with_cleanup<T>(primary: Result<T>, cleanup: Result<()>) -> Result<T> {
-    match (primary, cleanup) {
-        (Ok(value), Ok(())) => return Ok(value),
-        (Err(error), Ok(())) => return Err(error),
-        (Ok(_), Err(error)) => return Err(error),
-        (Err(primary), Err(cleanup)) => {
-            return Err(Error::CleanupFailed {
-                primary: Box::new(primary),
-                cleanup: Box::new(cleanup),
-            });
-        }
-    }
-}
 pub(super) fn outcome(directory: PathBuf, kind: &CaptureKind) -> CaptureOutcome {
     return CaptureOutcome {
         video: matches!(kind, CaptureKind::Video).then(|| return directory.join("session.mkv")),

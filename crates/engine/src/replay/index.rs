@@ -21,9 +21,9 @@ use termtrace_model::{
     artifact::metadata::ArtifactSourceRange,
     execution::event::Event,
     terminal::replay::{
-        DERIVED_DIRECTORY, GHOSTTY_REVISION, IndexOptions, IndexOutcome, ReplayArtifacts,
-        ReplayManifest, STATE_FORMAT_VERSION, SemanticReplayCheckpoint, SourceRange,
-        StateIndexEntry, StateInspection, StateRecord, StateSelection, StateSelector,
+        ControlSourceIndexEntry, DERIVED_DIRECTORY, GHOSTTY_REVISION, IndexOptions, IndexOutcome,
+        ReplayArtifacts, ReplayManifest, STATE_FORMAT_VERSION, SemanticReplayCheckpoint,
+        SourceRange, StateIndexEntry, StateInspection, StateRecord, StateSelection, StateSelector,
     },
     terminal::vt::VtToken,
     value::ByteString,
@@ -31,10 +31,10 @@ use termtrace_model::{
 use termtrace_terminal::VtFramer;
 
 use super::{
-    ReplaySeed, invalid_replay, json_error, replay_for_index, resolve_source_range, state_delta,
-    timeline_event, validate_replay_seed,
+    ReplaySeed, invalid_replay, json_error, replay_for_index, state_delta, timeline_event,
+    validate_replay_seed,
 };
-use crate::{Error, Result};
+use crate::{Error, Result, timeline::resolve_source_range};
 
 const REPLAY_CHECKPOINT_STATE_INTERVAL: u64 = 128;
 
@@ -315,11 +315,6 @@ fn checkpoint_precedes_selector(record: &StateRecord, selector: &CheckpointSelec
 }
 
 type ControlIndexPoint = ((u64, u64, u8, u64), u64);
-#[derive(Serialize)]
-struct ControlSourceIndexEntry {
-    event_seq: u64,
-    control_index_offset: u64,
-}
 
 fn write_control_index(
     directory: &Path,
@@ -503,14 +498,10 @@ pub(crate) fn write_index(
                     )?;
                     checkpoint = true;
                 }
-                Err(Error::InvalidReplay { reason })
-                    if reason.starts_with(
-                        "replay checkpoint VT seed does not reconstruct semantic fields",
-                    ) =>
-                {
+                Err(Error::CheckpointReconstruction { mismatched_fields }) => {
                     tracing::debug!(
                         state_id = record.state_id,
-                        %reason,
+                        ?mismatched_fields,
                         "skipped non-reconstructable semantic replay checkpoint"
                     );
                 }

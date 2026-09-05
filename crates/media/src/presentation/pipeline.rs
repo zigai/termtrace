@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeSet,
     fmt::Write as _,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -21,10 +20,11 @@ use crate::{Error, Result};
 use super::{
     NANOS_PER_SECOND,
     ffmpeg::{
-        append_change_visualization, append_pixel_transforms, command_version, filter_path_value,
+        append_change_visualization, append_pixel_transforms, command_version,
         prepare_subtitle_resources, probe_delivery_video, render_contact_sheet,
         render_low_resolution_preview, write_source_frame_hashes,
     },
+    filter_path_value,
     mapping::{read_semantic_frame_spans, write_presentation_map},
     plan_error,
     planning::{materialize_planned_source, validate_planned_source},
@@ -205,57 +205,74 @@ pub(super) fn select_preview_frames(
     plan: &PresentationPlan,
     options: PreviewOptions,
 ) -> Result<Vec<u64>> {
-    let candidates = if options.change_only {
-        let mut frames = BTreeSet::new();
-        match plan
-            .change_visualization
-            .as_ref()
-            .map(|change| return change.source)
-        {
-            Some(ChangeSource::SemanticCells) => {
-                let hold = plan.change_visualization.as_ref().map_or(0, |change| {
-                    return u64::from(change.hold_frames);
-                });
-                for change in &plan.change_frames {
-                    for frame in &change.output_frames {
-                        for held in *frame
-                            ..=frame
-                                .saturating_add(hold)
-                                .min(plan.output_frame_count.saturating_sub(1))
-                        {
-                            frames.insert(held);
-                        }
-                    }
-                }
-            }
-            Some(ChangeSource::EncodedPixels) => {
-                frames.extend(1..plan.output_frame_count);
-            }
-            None => {}
-        }
-        frames.into_iter().collect::<Vec<_>>()
+    let mut intervals = if !options.change_only {
+        vec![(0, plan.output_frame_count)]
     } else {
-        (0..plan.output_frame_count).collect::<Vec<_>>()
+        match plan.change_visualization.as_ref() {
+            Some(change) if change.source == ChangeSource::SemanticCells => {
+                let hold = u64::from(change.hold_frames);
+                let mut intervals = plan
+                    .change_frames
+                    .iter()
+                    .flat_map(|change| {
+                        return change.output_frames.iter().map(|frame| {
+                            return (
+                                *frame,
+                                frame
+                                    .saturating_add(hold)
+                                    .saturating_add(1)
+                                    .min(plan.output_frame_count),
+                            );
+                        });
+                    })
+                    .filter(|(start, end)| return start < end)
+                    .collect::<Vec<_>>();
+                intervals.sort_unstable();
+                intervals
+            }
+            Some(_) => vec![(1, plan.output_frame_count)],
+            None => Vec::new(),
+        }
     };
-    if candidates.is_empty() {
+    let mut merged: Vec<(u64, u64)> = Vec::with_capacity(intervals.len());
+    for (start, end) in intervals
+        .drain(..)
+        .filter(|(start, end)| return start < end)
+    {
+        if let Some(prior) = merged.last_mut()
+            && start <= prior.1
+        {
+            prior.1 = prior.1.max(end);
+        } else {
+            merged.push((start, end));
+        }
+    }
+    let candidates: u64 = merged.iter().map(|(start, end)| return end - start).sum();
+    let count = u64::from(options.max_frames).min(candidates);
+    if count == 0 {
         return Err(plan_error("preview selection contains no frames"));
     }
-    let count = usize::from(options.max_frames).min(candidates.len());
-    if count == 1 {
-        return candidates
-            .first()
-            .copied()
-            .map(|frame| return vec![frame])
-            .ok_or_else(|| return plan_error("preview selection contains no frames"));
+    let mut selected = Vec::with_capacity(usize::from(options.max_frames));
+    let mut intervals = merged.into_iter();
+    let mut interval = intervals.next();
+    let mut preceding = 0;
+    for index in 0..count {
+        let candidate_index = if count == 1 {
+            0
+        } else {
+            u64::try_from(u128::from(index) * u128::from(candidates - 1) / u128::from(count - 1))
+                .map_err(|_error| return plan_error("preview sample index overflowed"))?
+        };
+        while let Some((start, end)) = interval {
+            let length = end - start;
+            if candidate_index - preceding < length {
+                selected.push(start + candidate_index - preceding);
+                break;
+            }
+            preceding += length;
+            interval = intervals.next();
+        }
     }
-    let mut selected = (0..count)
-        .filter_map(|index| {
-            let candidate_index =
-                index.saturating_mul(candidates.len().saturating_sub(1)) / count.saturating_sub(1);
-            return candidates.get(candidate_index).copied();
-        })
-        .collect::<Vec<_>>();
-    selected.dedup();
     return Ok(selected);
 }
 

@@ -18,8 +18,8 @@ pub use control::control_socket_name;
 pub use environment::EffectiveEnvironment;
 pub use lifecycle::{record, record_with_output};
 pub use model::{RecordOptions, RecordOutcome};
+pub(crate) use process::terminate_process_group;
 pub use support::{
     inherited_geometry, parse_environment_spec, read_environment_spec, resolve_ghostty_profile,
     resolved_terminal_colors, restore_ghostty_profile,
 };
-pub(crate) use process::terminate_process_group;
