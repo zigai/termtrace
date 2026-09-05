@@ -668,6 +668,10 @@ impl SessionActor<'_> {
                     ProcessSignal::Terminate,
                     false,
                 )?;
+                if self.host_signal_kill_deadline.is_none() {
+                    self.host_signal_kill_deadline =
+                        Some(Instant::now() + HOST_SIGNAL_GRACE_PERIOD);
+                }
                 return Ok(ControlData::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),
                 });

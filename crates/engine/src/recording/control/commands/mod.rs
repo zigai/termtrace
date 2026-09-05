@@ -43,6 +43,7 @@ use super::super::{
     },
     model::TerminalGeometry,
     presentation::{LiveTerminal, find_text_regions, resize_semantic, semantic_viewport_text},
+    runtime::HOST_SIGNAL_GRACE_PERIOD,
     support::{
         actor_boundaries, control_error_response, control_rejected, finish_with_cleanup,
         terminal_error, validate_control_input,
