@@ -25,6 +25,11 @@ on:
 permissions:
   contents: read
 
+env:
+  TERM: xterm-256color
+  LANG: C.UTF-8
+  LC_ALL: C.UTF-8
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.suite || github.event.schedule }}
   cancel-in-progress: true
@@ -45,21 +50,33 @@ jobs:
         with:
           bun-version: 1.3.14
       - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: 0.12.10
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: deep-security
       - name: Audit Rust dependencies
         run: |
           cargo install cargo-audit --version 0.22.2 --locked
-          cargo audit --file Cargo.lock
-          cargo audit --file fuzz/Cargo.lock
+          scripts/ci-run.sh audit-rust cargo audit --file Cargo.lock
+          scripts/ci-run.sh audit-fuzz cargo audit --file fuzz/Cargo.lock
       - name: Audit TypeScript dependencies
         working-directory: packages/typescript
-        run: bun audit
+        run: |
+          bun install --frozen-lockfile
+          ../../scripts/ci-run.sh audit-typescript bun --cwd packages/typescript audit
       - name: Audit Python dependencies
         run: |
           uv export --project packages/python --locked --group dev --format requirements-txt --no-hashes --output-file "$RUNNER_TEMP/python-requirements.txt"
-          uvx --from pip-audit==2.10.1 pip-audit --requirement "$RUNNER_TEMP/python-requirements.txt"
+          scripts/ci-run.sh audit-python uvx --from pip-audit==2.10.1 pip-audit --requirement "$RUNNER_TEMP/python-requirements.txt"
+      - name: Upload security failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: security-failure
+          path: target/ci-evidence/
+          include-hidden-files: true
+          if-no-files-found: warn
 
   fuzz:
     if: >-
@@ -79,21 +96,24 @@ jobs:
           shared-key: deep-fuzz
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --version 0.13.2 --locked
-      - name: Bootstrap pinned Ghostty
-        run: scripts/bootstrap.sh
+      - name: Provision fuzz runtime
+        run: scripts/ci-run.sh setup scripts/ci-setup.sh core
       - name: Run bounded fuzz campaigns
         run: |
-          cargo fuzz run output_projection fuzz/corpus/output_projection -- -max_total_time=60 -timeout=5 -max_len=4096
-          cargo fuzz run control_protocol fuzz/corpus/control_protocol -- -max_total_time=60 -timeout=5 -max_len=16384
-          cargo fuzz run event_log fuzz/corpus/event_log -- -max_total_time=60 -timeout=5 -max_len=262144
-          cargo fuzz run bundle_archive fuzz/corpus/bundle_archive -- -max_total_time=60 -timeout=5 -max_len=262144
+          scripts/ci-run.sh fuzz-output cargo fuzz run output_projection fuzz/corpus/output_projection -- -max_total_time=60 -timeout=5 -max_len=4096
+          scripts/ci-run.sh fuzz-control cargo fuzz run control_protocol fuzz/corpus/control_protocol -- -max_total_time=60 -timeout=5 -max_len=16384
+          scripts/ci-run.sh fuzz-events cargo fuzz run event_log fuzz/corpus/event_log -- -max_total_time=60 -timeout=5 -max_len=262144
+          scripts/ci-run.sh fuzz-bundle cargo fuzz run bundle_archive fuzz/corpus/bundle_archive -- -max_total_time=60 -timeout=5 -max_len=262144
       - name: Upload fuzz failures
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: fuzz-failures
-          path: fuzz/artifacts/
-          if-no-files-found: ignore
+          path: |
+            fuzz/artifacts/
+            target/ci-evidence/
+          include-hidden-files: true
+          if-no-files-found: warn
 
   miri:
     if: >-
@@ -112,7 +132,15 @@ jobs:
         with:
           shared-key: deep-miri
       - run: cargo miri setup
-      - run: cargo miri test --locked -p termtrace-model --lib
+      - run: scripts/ci-run.sh miri cargo miri test --locked -p termtrace-model --lib
+      - name: Upload Miri failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: miri-failure
+          path: target/ci-evidence/
+          include-hidden-files: true
+          if-no-files-found: warn
 
   sanitizer:
     if: >-
@@ -133,10 +161,18 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: deep-asan
-      - name: Bootstrap pinned Ghostty
-        run: scripts/bootstrap.sh
+      - name: Provision sanitizer runtime
+        run: scripts/ci-run.sh setup scripts/ci-setup.sh core
       - name: Run address sanitizer over the terminal boundary
-        run: cargo test --locked -Zbuild-std --target x86_64-unknown-linux-gnu -p termtrace-terminal --lib
+        run: scripts/ci-run.sh sanitizer cargo test --locked -Zbuild-std --target x86_64-unknown-linux-gnu -p termtrace-terminal --lib
+      - name: Upload sanitizer failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sanitizer-failure
+          path: target/ci-evidence/
+          include-hidden-files: true
+          if-no-files-found: warn
 
   concurrency-model:
     if: >-
@@ -151,9 +187,17 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: deep-concurrency-model
-      - name: Bootstrap pinned Ghostty
-        run: scripts/bootstrap.sh
-      - run: cargo test --locked -p termtrace-engine connection_limiter
+      - name: Provision concurrency runtime
+        run: scripts/ci-run.sh setup scripts/ci-setup.sh core
+      - run: scripts/ci-run.sh concurrency cargo test --locked -p termtrace-engine connection_limiter
+      - name: Upload concurrency failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: concurrency-failure
+          path: target/ci-evidence/
+          include-hidden-files: true
+          if-no-files-found: warn
 
   coverage:
     if: >-
@@ -172,17 +216,21 @@ jobs:
           shared-key: deep-coverage
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --version 0.8.7 --locked
-      - name: Bootstrap pinned Ghostty
-        run: scripts/bootstrap.sh
+      - name: Provision coverage runtime
+        run: scripts/ci-run.sh setup scripts/ci-setup.sh native
       - name: Generate diagnostic coverage artifact
         run: |
           mkdir -p coverage
-          cargo llvm-cov --locked --workspace --lib --bins --lcov --output-path coverage/lcov.info
+          scripts/ci-run.sh coverage cargo llvm-cov --locked --workspace --lib --bins --lcov --output-path coverage/lcov.info
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
         with:
           name: rust-coverage
-          path: coverage/lcov.info
-          if-no-files-found: error
+          path: |
+            coverage/lcov.info
+            target/ci-evidence/
+          include-hidden-files: true
+          if-no-files-found: warn
 
   mutation:
     if: >-
@@ -199,16 +247,19 @@ jobs:
           shared-key: deep-mutation
       - name: Install cargo-mutants
         run: cargo install cargo-mutants --version 27.1.0 --locked
-      - name: Bootstrap pinned Ghostty
-        run: scripts/bootstrap.sh
+      - name: Provision mutation runtime
+        run: scripts/ci-run.sh setup scripts/ci-setup.sh core
       - name: Mutate the streaming control-stripper boundary
-        run: cargo mutants --cargo-arg=--locked -p termtrace-terminal -f crates/terminal/src/output_projection.rs --timeout 60 --jobs 2
+        run: scripts/ci-run.sh mutation cargo mutants --cargo-arg=--locked -p termtrace-terminal -f crates/terminal/src/output_projection.rs --timeout 60 --jobs 2
       - name: Upload mutation diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: mutation-results
-          path: mutants.out/
+          path: |
+            mutants.out/
+            target/ci-evidence/
+          include-hidden-files: true
           if-no-files-found: warn
 
   benchmarks:
@@ -222,11 +273,21 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@46511b1c83438f0dd37c02d843619ece5a4abb5b # 1.97.1
       - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: 0.12.10
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: deep-benchmarks
-      - name: Bootstrap pinned native dependencies
-        run: scripts/bootstrap.sh
+      - name: Provision benchmark runtime
+        run: scripts/ci-run.sh setup scripts/ci-setup.sh native
+      - name: Install locked client dependencies
+        run: |
+          bun install --cwd packages/typescript --frozen-lockfile
+          uv sync --project packages/python --locked --group dev
+          echo "$GITHUB_WORKSPACE/packages/python/.venv/bin" >> "$GITHUB_PATH"
       - name: Build optimized Termtrace binary
         run: cargo build --locked --release --all-features
       - name: Record advisory benchmark evidence
@@ -235,12 +296,16 @@ jobs:
           RENDER_REPETITIONS: 2
           RENDER_WARMUPS: 1
         run: |
-          benchmarks/run-agent-workflows.sh
-          benchmarks/run-durability.sh
-          benchmarks/run-render.sh
+          scripts/ci-run.sh benchmark-agent benchmarks/run-agent-workflows.sh
+          scripts/ci-run.sh benchmark-durability benchmarks/run-durability.sh
+          scripts/ci-run.sh benchmark-render benchmarks/run-render.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
         with:
           name: benchmark-results-${{ github.sha }}
-          path: benchmarks/results/
-          if-no-files-found: error
+          path: |
+            benchmarks/results/
+            target/ci-evidence/
+          include-hidden-files: true
+          if-no-files-found: warn
           retention-days: 90

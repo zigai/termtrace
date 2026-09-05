@@ -5,9 +5,10 @@ pub(crate) use assert_cmd::cargo::CargoError;
 pub(crate) use predicates::prelude::*;
 pub(crate) use std::{
     collections::{BTreeMap, BTreeSet},
+    env,
     ffi::{OsStr, OsString},
     fs::{self, File, Permissions},
-    io::{BufRead, BufReader, Read, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     ops::{Deref, DerefMut},
     os::unix::{
         ffi::{OsStrExt, OsStringExt},
@@ -75,7 +76,30 @@ impl DerefMut for StdCommand {
     }
 }
 
-pub(crate) use tempfile::TempDir;
+#[derive(Debug)]
+pub(crate) struct TempDir(tempfile::TempDir);
+
+impl TempDir {
+    pub(crate) fn new() -> io::Result<Self> {
+        let directory =
+            env::var_os("TERMTRACE_CI_EVIDENCE_ROOT").map_or_else(tempfile::TempDir::new, |root| {
+                return tempfile::TempDir::new_in(root);
+            });
+        return directory.map(Self);
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        return self.0.path();
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        if thread::panicking() && env::var_os("TERMTRACE_CI_EVIDENCE_ROOT").is_some() {
+            self.0.disable_cleanup(true);
+        }
+    }
+}
 pub(crate) use termtrace_engine::{
     inspection::{inspect_session, wait_for_completion, wait_for_output},
     recording::control_socket_name,

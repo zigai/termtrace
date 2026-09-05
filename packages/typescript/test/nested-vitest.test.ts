@@ -8,9 +8,15 @@ const packageRoot = resolve(import.meta.dir, "..");
 const fixtureRoot = join(import.meta.dir, "fixtures", "vitest-consumer");
 const rootFixture = join(import.meta.dir, "fixtures", "root-consumer");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "termtrace-vitest-consumer-"));
+let consumerPassed = false;
+let commandSequence = 0;
 
 afterAll(async () => {
-    await rm(temporaryRoot, { recursive: true, force: true });
+    if (consumerPassed || process.env.TERMTRACE_CI_EVIDENCE_ROOT === undefined) {
+        await rm(temporaryRoot, { recursive: true, force: true });
+    } else {
+        console.error(`Retained packed-consumer failure evidence: ${temporaryRoot}`);
+    }
 });
 
 describe("packed Vitest consumer", () => {
@@ -58,12 +64,11 @@ describe("packed Vitest consumer", () => {
         const evidenceRoot = join(temporaryRoot, "evidence");
         const environment = {
             ...process.env,
-            CI: "",
             TERMTRACE_TEST_EVIDENCE_ROOT: evidenceRoot,
             TERMTRACE_BINARY: termtraceBinary,
         };
         const firstRun = await run(
-            ["bun", "run", "vitest", "run", "--config", "vitest.config.ts"],
+            ["bun", "run", "vitest", "run", "--config", "vitest.config.ts", "--update"],
             vitestConsumer,
             environment,
         );
@@ -128,6 +133,7 @@ describe("packed Vitest consumer", () => {
         expect(evidenceFiles.map((path) => basename(path))).toContain("completion.json");
         expect(evidenceFiles.map((path) => basename(path))).toContain("manifest.json");
         expect(evidenceFiles.some((path) => path.endsWith(".sock"))).toBe(false);
+        consumerPassed = true;
     }, 180_000);
 });
 
@@ -148,9 +154,9 @@ async function writeConsumerPackage(
         ? {
               ...common,
               devDependencies: {
-                  "@types/node": "^24.0.0",
-                  typescript: "^5.8.3",
-                  vitest: "^4.1.3",
+                  "@types/node": "26.2.0",
+                  typescript: "5.9.3",
+                  vitest: "4.1.10",
               },
           }
         : common;
@@ -177,9 +183,15 @@ async function run(
         new Response(child.stderr).text(),
         child.exited,
     ]);
+    commandSequence += 1;
+    await writeFile(
+        join(temporaryRoot, `command-${commandSequence}.log`),
+        `${command.join(" ")}\n${stdout}\n${stderr}`,
+        "utf8",
+    );
     return {
         exitCode,
-        output: `${stdout}\n${stderr}`.slice(-16_384),
+        output: `${stdout}\n${stderr}`,
     };
 }
 
