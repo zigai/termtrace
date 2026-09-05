@@ -307,7 +307,7 @@ fn child_completed_wait_returns_the_output_drained_frame() {
         .success();
 
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
-    let output = wait
+    let result = wait
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
             "--response",
@@ -322,13 +322,17 @@ fn child_completed_wait_returns_the_output_drained_frame() {
         .assert()
         .code(1)
         .get_output()
-        .stdout
         .clone();
-    let waited: serde_json::Value =
-        serde_json::from_slice(&output).expect("child-completed wait response");
+    let output = &result.stdout;
+    let waited: serde_json::Value = serde_json::from_slice(output).unwrap_or_else(|error| {
+        panic!(
+            "child-completed wait response: {error}; stderr: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    });
     assert_eq!(waited["quality"], "child_completed");
     assert!(
-        String::from_utf8_lossy(&output).contains("TAIL_SENTINEL"),
+        String::from_utf8_lossy(output).contains("TAIL_SENTINEL"),
         "terminating wait frame omitted queued PTY output: {waited}"
     );
 

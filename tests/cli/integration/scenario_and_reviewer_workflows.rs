@@ -16,10 +16,10 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
             "version": 2,
             "name": "ready workflow",
             "launch": {
-                "command": ["/bin/sh", "-c", "test \"$SCENARIO_ID\" = ready; printf Ready; IFS= read -r line; printf Done; sleep 30"],
+                "command": ["/bin/sh", "-c", "test \"$SCENARIO_ID\" = ready && printf Ready && IFS= read -r line && printf Done && sleep 30"],
                 "environment": {
                     "base": "clear",
-                    "set": { "SCENARIO_ID": ByteString::from(b"ready".as_slice()) },
+                    "set": { "SCENARIO_ID": "ready" },
                     "copy": ["PATH"],
                     "unset": [],
                     "color": "never"
@@ -54,10 +54,10 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
             "version": 2,
             "name": "simple workflow",
             "launch": {
-                "command": ["/bin/sh", "-c", "test \"$SCENARIO_ID\" = simple; printf SIMPLE; sleep 30"],
+                "command": ["/bin/sh", "-c", "test \"$SCENARIO_ID\" = simple && printf SIMPLE && sleep 30"],
                 "environment": {
                     "base": "clear",
-                    "set": { "SCENARIO_ID": ByteString::from(b"simple".as_slice()) },
+                    "set": { "SCENARIO_ID": "simple" },
                     "copy": ["PATH"],
                     "unset": [],
                     "color": "auto"
@@ -180,7 +180,7 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
                 "command": ["/bin/sh", "-c", "printf Ready; sleep 30"],
                 "environment": {
                     "base": "clear",
-                    "set": { "SCENARIO_SECRET": ByteString::from(b"scenario-private".as_slice()) },
+                    "set": { "SCENARIO_SECRET": "scenario-private" },
                     "copy": ["PATH"],
                     "unset": [],
                     "color": "never"
@@ -260,21 +260,23 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
         .expect("encoded secret");
     assert!(
         !copied_scenario
-            .windows(encoded_secret.len())
-            .any(|window| return window == encoded_secret)
+            .windows(b"scenario-private".len())
+            .any(|window| return window == b"scenario-private")
     );
     let encoded_secret = &encoded_secret[1..encoded_secret.len() - 1];
     for entry in fs_err::read_dir(failure).expect("failure artifacts") {
         let path = entry.expect("failure artifact entry").path();
         if path.is_file() {
             let bytes = fs_err::read(&path).expect("failure artifact");
-            assert!(
-                !bytes
-                    .windows(encoded_secret.len())
-                    .any(|window| return window == encoded_secret),
-                "scenario secret leaked into {}",
-                path.display()
-            );
+            for secret in [b"scenario-private".as_slice(), encoded_secret] {
+                assert!(
+                    !bytes
+                        .windows(secret.len())
+                        .any(|window| return window == secret),
+                    "scenario secret leaked into {}",
+                    path.display()
+                );
+            }
         }
     }
 }

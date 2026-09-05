@@ -1,6 +1,7 @@
 //! artifacts and bundles CLI integration tests.
 
 use crate::support::*;
+use resvg::tiny_skia::{IntRect, Pixmap};
 
 #[test]
 fn save_atomically_publishes_one_state_with_manifested_files() {
@@ -15,7 +16,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
             "--",
             "/bin/sh",
             "-c",
-            "printf 'A\\033[1mA\\033[22;3mA\\033[1mA\\033[0m AgÉgj ─│█ 界\\r\\n\\033[58;2;255;0;255m\\033[4:1m1 \\033[4:2m2 \\033[4:3m3 \\033[4:4m4 \\033[4:5m5\\033[0m \\033[9mstrike\\033[0m \\033[53moverline\\033[0m'; printf '\\033[2 q\\033[1;1H'",
+            "printf 'A\\033[1mA\\033[22;3mA\\033[1mA\\033[0m AgÉgj ─│█ 界\\r\\n\\033[58;2;255;0;255m\\033[4:1m1 \\033[4:2m2 \\033[4:3m3 \\033[4:4m4 \\033[4:5m5\\033[0m \\033[9mstrike\\033[0m \\033[53moverline\\033[0m'; printf '\\033[?25l'",
         ])
         .assert()
         .success();
@@ -142,41 +143,85 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
             .contains(">A<")
     );
     let svg = fs_err::read_to_string(destination.join("screen.svg")).expect("saved SVG");
-    assert!(svg.contains("data-truth-layer=\"semantic_rendering\""));
-    assert_eq!(svg.matches("@font-face").count(), 5);
-    assert!(
-        svg.matches("font-family=\"Termtrace JetBrains Mono\"")
-            .count()
-            >= 4
-    );
-    assert!(
-        svg.matches("font-family=\"Termtrace Symbols Nerd Font\"")
-            .count()
-            >= 2
-    );
-    for attributes in [
-        "font-weight=\"normal\" font-style=\"normal\"",
-        "font-weight=\"bold\" font-style=\"normal\"",
-        "font-weight=\"normal\" font-style=\"italic\"",
-        "font-weight=\"bold\" font-style=\"italic\"",
-    ] {
-        assert!(svg.contains(attributes));
-    }
-    assert!(svg.contains("></text>") && svg.contains("></text>"));
-    assert!(svg.contains("stroke=\"#ff00ff\""));
-    assert!(svg.contains("stroke-dasharray"));
-    assert!(svg.contains("<path d="));
-    assert!(svg.contains("<line "));
-    let png = fs_err::read(destination.join("screen.png")).expect("saved PNG");
-    assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+    let document = roxmltree::Document::parse(&svg).expect("valid saved SVG");
     assert_eq!(
-        (
-            u32::from_be_bytes(png[16..20].try_into().expect("PNG width")),
-            u32::from_be_bytes(png[20..24].try_into().expect("PNG height")),
-        ),
-        (1920, 1080),
-        "the default semantic screenshot must match the default 1080p recording canvas"
+        document.root_element().attribute("data-truth-layer"),
+        Some("semantic_rendering")
     );
+    let png = fs_err::read(destination.join("screen.png")).expect("saved PNG");
+    let image = Pixmap::decode_png(&png).expect("decode saved PNG");
+    assert_eq!((image.width(), image.height()), (1920, 1080),);
+    let cell = |column: i32| {
+        return image
+            .clone_rect(IntRect::from_xywh(column * 12, 0, 12, 24).expect("cell rectangle"))
+            .expect("fixture cell inside exported image")
+            .data()
+            .to_vec();
+    };
+    let styles = (0..4).map(cell).collect::<Vec<_>>();
+    for (index, style) in styles.iter().enumerate() {
+        assert_ne!(style, &cell(6), "style {index} must render an A, not blank");
+        for other in styles.iter().skip(index + 1) {
+            assert_ne!(
+                style, other,
+                "bold and italic faces must remain visually distinct"
+            );
+        }
+    }
+    assert_ne!(
+        cell(4),
+        cell(6),
+        "first fallback symbol must have visible ink"
+    );
+    assert_ne!(
+        cell(5),
+        cell(6),
+        "second fallback symbol must have visible ink"
+    );
+    assert_ne!(
+        cell(4),
+        cell(5),
+        "fallback symbols must not collapse to one missing-glyph box"
+    );
+
+    let image = &image;
+    let underline_masks = (0..5)
+        .map(|style| {
+            return (19..24)
+                .flat_map(|y| {
+                    return (0..12).map(move |x| {
+                        let pixel = image
+                            .pixel(style * 24 + x, 24 + y)
+                            .expect("underline pixel inside exported image");
+                        return pixel.red().min(pixel.blue()).saturating_sub(pixel.green());
+                    });
+                })
+                .collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
+    for (index, mask) in underline_masks.iter().enumerate() {
+        assert!(
+            mask.iter().any(|ink| return *ink > 100),
+            "underline {index} must be magenta"
+        );
+        for other in underline_masks.iter().skip(index + 1) {
+            assert_ne!(
+                mask, other,
+                "underline styles must remain visually distinct"
+            );
+        }
+    }
+    for (start, end, y) in [(120, 192, 38), (204, 300, 25)] {
+        assert!(
+            (start..end).all(|x| {
+                let pixel = image
+                    .pixel(x, y)
+                    .expect("decoration pixel inside exported image");
+                return pixel.red() > 50 && pixel.green() > 50 && pixel.blue() > 50;
+            }),
+            "strike and overline must span their decorated text"
+        );
+    }
     for file in manifest["files"].as_array().expect("manifested files") {
         let path = destination.join(file["path"].as_str().expect("relative path"));
         let bytes = fs_err::read(path).expect("saved member");

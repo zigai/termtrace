@@ -1,4 +1,5 @@
 use super::*;
+use std::env;
 
 #[test]
 fn tmux_kill_pane_closes_canonical_recording() {
@@ -95,16 +96,7 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
         TmuxPaneLaunchKind::DefaultCommand
     );
     let log = EventLog::read(recording.join("events.jsonl")).expect("default-command event log");
-    let output = log
-        .events
-        .iter()
-        .filter_map(|record| match &record.event {
-            Event::Output { data } => return Some(data.as_bytes()),
-            _ => return None,
-        })
-        .flatten()
-        .copied()
-        .collect::<Vec<_>>();
+    let output = canonical_output_bytes(&log);
     assert!(
         output
             .windows(b"TMUX_DEFAULT_COMMAND".len())
@@ -197,6 +189,12 @@ fn tmux_new_recording_allocates_a_socket_instead_of_reusing_default_server() {
             .expect("allocated socket name bytes");
     let allocated_socket = String::from_utf8(allocated_socket_bytes.into_bytes())
         .expect("UTF-8 allocated socket name");
+    let _aggregate_server = PrivateTmux {
+        binary: server.binary.clone(),
+        socket: allocated_socket.clone(),
+        session: "aggregate".to_owned(),
+        tmux_tmpdir: Some(tmux_tmpdir.clone()),
+    };
     assert_ne!(allocated_socket, "default");
     assert!(
         allocated_socket.starts_with("termtrace-recording-"),
@@ -226,11 +224,6 @@ fn tmux_new_recording_allocates_a_socket_instead_of_reusing_default_server() {
         .assert()
         .success()
         .stderr(predicate::str::contains("no server running").not());
-    let _ = StdCommand::new(&server.binary)
-        .args(["-L", allocated_socket.as_str(), "kill-server"])
-        .env("TMUX_TMPDIR", tmux_tmpdir)
-        .env_remove("TMUX")
-        .status();
 }
 
 #[test]
@@ -268,6 +261,12 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
         .get_output()
         .stdout
         .clone();
+    let _server = PrivateTmux {
+        binary: binary.clone(),
+        socket: socket.clone(),
+        session: "original".to_owned(),
+        tmux_tmpdir: env::var_os("TMUX_TMPDIR").map(PathBuf::from),
+    };
     let response: serde_json::Value =
         serde_json::from_slice(&started).expect("aggregate start response");
     let manifest_path = response["manifest"]
@@ -335,7 +334,4 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
             .iter()
             .all(|pane| return pane["session_name"] != "impostor");
     }));
-    let _ = StdCommand::new(&binary)
-        .args(["-L", socket.as_str(), "kill-server"])
-        .status();
 }

@@ -282,7 +282,7 @@ fn restart_verifies_resupplied_environment_and_requires_explicit_change() {
             "--",
             "/bin/sh",
             "-c",
-            "test \"${#RESTART_SECRET}\" -eq 16; trap 'exit 0' TERM; while :; do sleep .1; done",
+            "trap 'exit 0' TERM; while :; do sleep .1; done",
         ])
         .write_stdin(serde_json::to_vec(&original).expect("start environment JSON"))
         .assert()

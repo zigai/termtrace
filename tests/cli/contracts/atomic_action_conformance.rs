@@ -53,7 +53,7 @@ struct SdkSummary {
     matched: bool,
     presented: bool,
     retry_exact: bool,
-    stable_same_state: bool,
+    stable_quality: bool,
     actor_boundaries: bool,
 }
 
@@ -71,9 +71,19 @@ fn shared_fixture_matches_through_every_public_sdk_facade() {
     let python_async = python_summary(&fixture_path, temporary.path(), true);
     let typescript = typescript_summary(&fixture_path, temporary.path());
 
-    assert_eq!(python_sync, rust, "Python sync parity");
-    assert_eq!(python_async, rust, "Python async parity");
-    assert_eq!(typescript, rust, "TypeScript parity");
+    let expected = SdkSummary {
+        state_hash_valid: true,
+        atom_count: fixture.expected_atom_count,
+        matched: true,
+        presented: true,
+        retry_exact: true,
+        stable_quality: true,
+        actor_boundaries: true,
+    };
+    assert_eq!(rust, expected, "Rust conformance outcomes");
+    assert_eq!(python_sync, expected, "Python sync conformance outcomes");
+    assert_eq!(python_async, expected, "Python async conformance outcomes");
+    assert_eq!(typescript, expected, "TypeScript conformance outcomes");
 }
 
 #[test]
@@ -368,10 +378,9 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
         matched,
         presented: result.frame.presented,
         retry_exact: retry == result,
-        stable_same_state: stable.quality == StableCaptureQuality::Stable,
+        stable_quality: stable.quality == StableCaptureQuality::Stable,
         actor_boundaries,
     };
-    assert_eq!(summary.atom_count, fixture.expected_atom_count);
     session
         .stop(Some(Duration::from_secs(5)))
         .expect("stop Rust fixture");
@@ -463,7 +472,7 @@ options = ActionOptions(request_id=fixture["request_id"], if_state=initial.state
 result = session.act(atoms, options)
 retry = session.act(atoms, options)
 stable = session.screen.capture_stable(StableOptions(Duration.milliseconds(20), Duration.seconds(2)))
-summary = {"state_hash_valid": len(result.frame.state_hash) == 64, "atom_count": result.input.completed_atoms, "matched": result.postcondition.quality in ("matched", "matched_unsettled") and fixture["expected_text"] in result.frame.viewport_text, "presented": result.frame.presented, "retry_exact": retry == result, "stable_same_state": stable.quality == "stable", "actor_boundaries": result.frame.boundaries is not None and result.frame.boundaries == result.frame.source.boundaries}
+summary = {"state_hash_valid": len(result.frame.state_hash) == 64, "atom_count": result.input.completed_atoms, "matched": result.postcondition.quality in ("matched", "matched_unsettled") and fixture["expected_text"] in result.frame.viewport_text, "presented": result.frame.presented, "retry_exact": retry == result, "stable_quality": stable.quality == "stable", "actor_boundaries": result.frame.boundaries is not None and result.frame.boundaries == result.frame.source.boundaries}
 session.stop()
 session.evidence.complete()
 session.close()
@@ -486,7 +495,7 @@ async def main():
     result = await session.act(atoms, options)
     retry = await session.act(atoms, options)
     stable = await session.screen.capture_stable(StableOptions(Duration.milliseconds(20), Duration.seconds(2)))
-    summary = {"state_hash_valid": len(result.frame.state_hash) == 64, "atom_count": result.input.completed_atoms, "matched": result.postcondition.quality in ("matched", "matched_unsettled") and fixture["expected_text"] in result.frame.viewport_text, "presented": result.frame.presented, "retry_exact": retry == result, "stable_same_state": stable.quality == "stable", "actor_boundaries": result.frame.boundaries is not None and result.frame.boundaries == result.frame.source.boundaries}
+    summary = {"state_hash_valid": len(result.frame.state_hash) == 64, "atom_count": result.input.completed_atoms, "matched": result.postcondition.quality in ("matched", "matched_unsettled") and fixture["expected_text"] in result.frame.viewport_text, "presented": result.frame.presented, "retry_exact": retry == result, "stable_quality": stable.quality == "stable", "actor_boundaries": result.frame.boundaries is not None and result.frame.boundaries == result.frame.source.boundaries}
     await session.stop()
     await session.evidence.complete()
     await session.close()
@@ -508,7 +517,7 @@ const result = await session.act(atoms, options)
 const retry = await session.act(atoms, options)
 const stable = await session.screen.captureStable({ stableFor: Duration.milliseconds(20), timeout: Duration.seconds(2) })
 const retryExact = retry.requestId === result.requestId && retry.frame.frameHash === result.frame.frameHash && retry.input.completedAtoms === result.input.completedAtoms && retry.input.firstIntentEventSeq === result.input.firstIntentEventSeq && retry.input.lastResultEventSeq === result.input.lastResultEventSeq && retry.completion.kind === result.completion.kind && retry.completion.quality === result.completion.quality
-const summary = { state_hash_valid: result.frame.stateHash.length === 64, atom_count: result.input.completedAtoms, matched: result.completion.kind === "screen" && (result.completion.quality === "matched" || result.completion.quality === "matched_unsettled") && result.frame.viewportText.includes(fixture.expected_text), presented: result.frame.presented, retry_exact: retryExact, stable_same_state: stable.quality === "stable", actor_boundaries: result.frame.source.boundaries !== undefined }
+const summary = { state_hash_valid: result.frame.stateHash.length === 64, atom_count: result.input.completedAtoms, matched: result.completion.kind === "screen" && (result.completion.quality === "matched" || result.completion.quality === "matched_unsettled") && result.frame.viewportText.includes(fixture.expected_text), presented: result.frame.presented, retry_exact: retryExact, stable_quality: stable.quality === "stable", actor_boundaries: result.frame.source.boundaries !== undefined }
 await session.stop()
 await session.complete(10000)
 await session.close()

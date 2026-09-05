@@ -81,16 +81,7 @@ fn tmux_default_pane_is_a_complete_termtrace_recording() {
             }
         );
     }));
-    let output = log
-        .events
-        .iter()
-        .filter_map(|record| match &record.event {
-            Event::Output { data } => return Some(data.as_bytes()),
-            _ => return None,
-        })
-        .flatten()
-        .copied()
-        .collect::<Vec<_>>();
+    let output = canonical_output_bytes(&log);
     assert!(
         output
             .windows(b"TMUX_RECORDED".len())

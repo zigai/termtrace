@@ -19,18 +19,8 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
         .assert()
         .success();
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
-    let expected = log
-        .events
-        .iter()
-        .filter_map(|record| {
-            return match &record.event {
-                Event::Output { data } => Some(data.as_bytes()),
-                _ => None,
-            };
-        })
-        .flatten()
-        .copied()
-        .collect::<Vec<_>>();
+    let expected = canonical_output_bytes(&log);
+    assert_eq!(expected, b"A\x1b[?1049h\x1b[31mB\x1b[0m\xffC");
 
     let mut output = Command::cargo_bin("termtrace").expect("binary should build");
     output
@@ -39,15 +29,18 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
         .arg("--raw")
         .assert()
         .success()
-        .stdout(predicate::eq(expected.clone()));
+        .stdout(predicate::eq(expected));
 
-    let output_events = log
+    let (first, selected_bytes) = log
         .events
         .iter()
-        .filter(|record| return matches!(record.event, Event::Output { .. }))
-        .map(|record| return record.seq)
-        .collect::<Vec<_>>();
-    let first = output_events.first().copied().expect("output event");
+        .find_map(|record| {
+            return match &record.event {
+                Event::Output { data } => Some((record.seq, data.as_bytes())),
+                _ => None,
+            };
+        })
+        .expect("output event");
     let mut bounded = Command::cargo_bin("termtrace").expect("binary should build");
     bounded
         .args(["analyze", "output"])
@@ -61,7 +54,7 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
         ])
         .assert()
         .success()
-        .stdout(predicate::eq(expected));
+        .stdout(predicate::eq(selected_bytes));
 
     let projection_manifest = temporary.path().join("output-projection.json");
     let mut stripped = Command::cargo_bin("termtrace").expect("binary should build");
@@ -116,18 +109,8 @@ fn output_follow_emits_each_durable_prefix_once_until_completion() {
     let followed = follower.wait_with_output().expect("wait for follower");
     assert!(followed.status.success(), "{followed:?}");
     let log = EventLog::read(session.join("events.jsonl")).expect("completed event log");
-    let expected = log
-        .events
-        .iter()
-        .filter_map(|record| {
-            return match &record.event {
-                Event::Output { data } => Some(data.as_bytes()),
-                _ => None,
-            };
-        })
-        .flatten()
-        .copied()
-        .collect::<Vec<_>>();
+    let expected = canonical_output_bytes(&log);
+    assert_eq!(expected, b"A\x1b[31mB\xff");
     assert_eq!(followed.stdout, expected);
     let stripped = StdCommand::new(binary)
         .args(["analyze", "output"])
@@ -167,18 +150,25 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
             .windows(b"secret-bytes".len())
             .any(|w| return w == b"secret-bytes")
     );
-    let mut lines = output
+    let mut byte_count = 0;
+    for line in output
         .split(|byte| return *byte == b'\n')
-        .filter(|line| return !line.is_empty());
-    let line = lines.next().expect("metadata event JSON line");
-    let record: serde_json::Value = serde_json::from_slice(line).expect("metadata event JSON");
-    assert_eq!(record["event_type"], "output");
-    assert_eq!(record["metadata_only"], true);
-    assert!(record["event"].is_null());
-    let payload = &record["byte_payloads"][0];
-    assert_eq!(payload["field"], "data");
-    assert_eq!(payload["byte_count"], 12);
-    assert!(lines.next().is_none());
+        .filter(|line| return !line.is_empty())
+    {
+        let record: serde_json::Value = serde_json::from_slice(line).expect("metadata event JSON");
+        assert_eq!(record["event_type"], "output");
+        assert_eq!(record["metadata_only"], true);
+        assert!(record["event"].is_null());
+        let payloads = record["byte_payloads"]
+            .as_array()
+            .expect("byte payload metadata");
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0]["field"], "data");
+        byte_count += payloads[0]["byte_count"]
+            .as_u64()
+            .expect("output byte count");
+    }
+    assert_eq!(byte_count, b"secret-bytes".len() as u64);
 
     let mut exact = Command::cargo_bin("termtrace").expect("binary should build");
     let exact_output = exact

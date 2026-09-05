@@ -1,4 +1,5 @@
 use super::*;
+use std::env;
 
 #[test]
 fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
@@ -151,6 +152,12 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         .get_output()
         .stdout
         .clone();
+    let _server = PrivateTmux {
+        binary: binary.clone(),
+        socket: socket.clone(),
+        session: "aggregate".to_owned(),
+        tmux_tmpdir: env::var_os("TMUX_TMPDIR").map(PathBuf::from),
+    };
     let started: serde_json::Value =
         serde_json::from_slice(&output).expect("aggregate start response");
     assert_eq!(started["name"], "work");
@@ -374,7 +381,4 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
             .expect("stopped aggregate manifest JSON");
     assert_eq!(stopped["lifecycle"], "completed");
     assert_eq!(stopped["composite_track"]["lifecycle"], "completed");
-    let _ = StdCommand::new(binary)
-        .args(["-L", socket.as_str(), "kill-server"])
-        .status();
 }

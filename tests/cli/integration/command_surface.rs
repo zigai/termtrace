@@ -1,6 +1,7 @@
 //! command surface CLI integration tests.
 
 use crate::support::*;
+use std::env;
 
 #[test]
 fn root_help_groups_commands_by_workflow() {
@@ -675,6 +676,96 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .stderr(predicate::str::contains("semantic-video --explain"));
     assert!(!export.exists(), "blocked export created its destination");
     assert_no_entry_with_prefix(temporary.path(), ".presentation-");
+}
+
+#[test]
+#[ignore = "requires native Ghostty capture tools and FFmpeg with libx264"]
+fn retained_native_video_exports_without_native_capture_tools() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("retained-native-session");
+    Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf RETAINED_NATIVE; sleep 0.25"])
+        .assert()
+        .success();
+    Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .args(["analyze", "index", "--session"])
+        .arg(&session)
+        .assert()
+        .success();
+    Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .args(["artifact", "capture", "--session"])
+        .arg(&session)
+        .args(["--fps", "24"])
+        .assert()
+        .success();
+    let retained_manifest = fs::read(session.join("visual/manifest.json"))
+        .expect("retained verified native capture manifest");
+
+    let presentation_tools = temporary.path().join("presentation-tools");
+    fs::create_dir_all(&presentation_tools).expect("isolated presentation tool directory");
+    let search_path = env::var_os("PATH").expect("host executable search path");
+    for name in ["ffmpeg", "ffprobe"] {
+        let executable = env::split_paths(&search_path)
+            .map(|directory| return directory.join(name))
+            .find(|path| return path.is_file())
+            .expect("required presentation executable");
+        symlink(
+            fs::canonicalize(executable).expect("absolute presentation executable"),
+            presentation_tools.join(name),
+        )
+        .expect("expose only presentation tools");
+    }
+    Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .env("PATH", &presentation_tools)
+        .args(["doctor", "--require", "native-video"])
+        .assert()
+        .code(1);
+    Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .env("PATH", &presentation_tools)
+        .args(["doctor", "--require", "presentation"])
+        .assert()
+        .success();
+
+    let destination = temporary.path().join("retained.mp4");
+    let output = Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .env("PATH", &presentation_tools)
+        .args(["video"])
+        .arg(&session)
+        .args(["--renderer", "native", "--fps", "24", "--out"])
+        .arg(&destination)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).expect("video result JSON");
+    assert_eq!(report["renderer"], "native");
+    assert!(
+        destination.is_file(),
+        "retained native export must publish its destination"
+    );
+    let manifest = PathBuf::from(
+        report["manifest"]
+            .as_str()
+            .expect("published manifest path"),
+    );
+    assert!(
+        manifest.is_file(),
+        "retained native export must publish its manifest"
+    );
+    assert_eq!(
+        fs::read(session.join("visual/manifest.json")).expect("retained capture manifest"),
+        retained_manifest,
+        "export must reuse native evidence without recapture"
+    );
 }
 
 #[test]

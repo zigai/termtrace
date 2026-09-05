@@ -1,7 +1,7 @@
 use super::*;
 use termtrace_model::{
     protocol::control::CONTROL_PROTOCOL_VERSION,
-    registry::{RegistryEntry, REGISTRY_ENTRY_FORMAT, REGISTRY_ENTRY_VERSION},
+    registry::{REGISTRY_ENTRY_FORMAT, REGISTRY_ENTRY_VERSION, RegistryEntry},
     value::ByteString,
 };
 #[test]

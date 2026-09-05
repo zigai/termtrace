@@ -23,7 +23,7 @@ fn environment_values_never_enter_recorder_argv_or_manifest() {
             "--",
             "/bin/sh",
             "-c",
-            "test -n \"$TERMTRACE_SECRET\"; sleep 30",
+            "test -n \"$TERMTRACE_SECRET\" && printf ENV_READY && sleep 30",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -37,6 +37,8 @@ fn environment_values_never_enter_recorder_argv_or_manifest() {
         .write_all(&encoded)
         .expect("write environment stdin");
     wait_for_control(&session);
+    wait_for_output(&session, b"ENV_READY", Duration::from_secs(5))
+        .expect("child received secret environment");
     let argv = fs_err::read(format!("/proc/{}/cmdline", recorder.id())).expect("recorder argv");
     assert!(
         !argv

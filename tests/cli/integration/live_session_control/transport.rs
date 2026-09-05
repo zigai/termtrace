@@ -250,5 +250,5 @@ fn live_control_uses_a_bounded_endpoint_for_long_evidence_paths() {
         output.status.success(),
         "long-path recorder failed: {output:?}"
     );
-    assert!(!session.join("control.sock").exists());
+    assert!(!control_endpoint_is_reachable(&session));
 }

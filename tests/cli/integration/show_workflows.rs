@@ -279,21 +279,7 @@ fn artifact_import_chains_ansi_files_and_stdin() {
         blake3::hash(&ansi_bytes).to_hex().to_string()
     );
     let imported_log = EventLog::read(imported.join("events.jsonl")).expect("import event log");
-    assert_eq!(
-        imported_log
-            .events
-            .iter()
-            .filter_map(|record| {
-                return match &record.event {
-                    Event::Output { data } => Some(data.as_bytes()),
-                    _ => None,
-                };
-            })
-            .flatten()
-            .copied()
-            .collect::<Vec<_>>(),
-        ansi_bytes
-    );
+    assert_eq!(canonical_output_bytes(&imported_log), ansi_bytes);
 
     let mut show = Command::cargo_bin("termtrace").expect("binary should build");
     show.arg("show")

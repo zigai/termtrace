@@ -15,7 +15,7 @@ fn concurrent_client_launches_keep_environment_snapshots_isolated() {
             return thread::spawn(move || {
                 let value = format!("isolated-{index}-{}", "x".repeat(index));
                 let script = format!(
-                    "test \"${{#ISOLATED_ID}}\" -eq {}; printf OK; sleep 30",
+                    "test \"${{#ISOLATED_ID}}\" -eq {} && printf OK && sleep 30",
                     value.len()
                 );
                 let terminal = ClientTerminal::new(env!("CARGO_BIN_EXE_termtrace"), &evidence);

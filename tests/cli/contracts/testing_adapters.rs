@@ -1,5 +1,13 @@
 use std::{
-    env, error::Error as StdError, ffi::OsString, fs, panic, process::Command, time::Duration,
+    collections::BTreeMap,
+    env,
+    error::Error as StdError,
+    ffi::OsString,
+    fs, panic,
+    path::PathBuf,
+    process::Command,
+    thread,
+    time::{Duration, Instant},
 };
 
 use tempfile::TempDir;
@@ -11,6 +19,7 @@ use termtrace_model::{
 use termtrace_sdk::{
     ScreenFrameQuery, StableCaptureOptions, Terminal,
     assertions::SnapshotProfile,
+    control_endpoint_is_reachable,
     locator::{LocatorSpec, StyleFilter},
     testing::{
         EvidencePolicy, TerminalTest, TerminalTestConfig, TestFailure, TestOutcome,
@@ -214,13 +223,34 @@ fn rust_test_helper_creates_and_reports_snapshot_mismatches() {
 fn rust_test_helper_timeout_retains_evidence_and_reaps_session() {
     let temporary = TempDir::new().expect("temporary directory");
     let terminal = Terminal::new(env!("CARGO_BIN_EXE_termtrace"), temporary.path());
-    let config = TerminalTestConfig::new(terminal, looping_command());
+    let pid_path = temporary.path().join("recorded.pid");
+    let command = vec![
+        OsString::from("/bin/sh"),
+        OsString::from("-c"),
+        OsString::from(
+            "trap 'exit 0' TERM; printf '%s' $$ > \"$1\"; printf READY; while :; do sleep .1; done",
+        ),
+        OsString::from("timeout-fixture"),
+        pid_path.clone().into_os_string(),
+    ];
+    let mut config = TerminalTestConfig::new(terminal, command);
+    config.evidence_policy = EvidencePolicy::Always;
     let mut test = TerminalTest::launch(config).expect("launch timed test");
     test.session()
         .expect("open test session")
         .output()
         .wait_for(b"READY", Duration::from_secs(5))
         .expect("READY output");
+    let session_path = test
+        .session()
+        .expect("open test session")
+        .path()
+        .to_path_buf();
+    assert!(control_endpoint_is_reachable(&session_path));
+    let recorded_pid: u32 = fs::read_to_string(&pid_path)
+        .expect("recorded process PID")
+        .parse()
+        .expect("numeric recorded process PID");
 
     let report = test.finalize(TestOutcome::TimedOut);
     assert!(report.retained);
@@ -235,12 +265,53 @@ fn rust_test_helper_timeout_retains_evidence_and_reaps_session() {
         })
         .expect("verified canonical evidence");
     assert!(canonical.join("completion.json").is_file());
-    assert!(!canonical.join("control.sock").exists());
+    assert!(!control_endpoint_is_reachable(&session_path));
+    let process_path = PathBuf::from(format!("/proc/{recorded_pid}"));
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while process_path.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        !process_path.exists(),
+        "recorded child survived finalization"
+    );
     let evidence = report
         .evidence_directory
+        .as_ref()
         .expect("retained timeout evidence");
     assert!(evidence.join("semantic-screenshot/screen.png").is_file());
     assert!(evidence.join("debug-bundle/manifest.json").is_file());
+    let inventory = || {
+        let mut pending = vec![evidence.clone()];
+        let mut files = BTreeMap::new();
+        while let Some(path) = pending.pop() {
+            if path.is_dir() {
+                pending.extend(
+                    fs::read_dir(path)
+                        .expect("retained directory")
+                        .map(|entry| return entry.expect("retained directory entry").path()),
+                );
+            } else {
+                files.insert(
+                    path.clone(),
+                    fs::read(path).expect("retained artifact bytes"),
+                );
+            }
+        }
+        return files;
+    };
+    let before = inventory();
+    let repeated = test.finalize(TestOutcome::Passed);
+    assert_eq!(repeated.outcome, TestOutcome::TimedOut);
+    assert_eq!(
+        repeated, report,
+        "finalization must preserve the first evidence report"
+    );
+    assert_eq!(
+        inventory(),
+        before,
+        "repeated finalization must not rewrite, duplicate, or delete artifacts"
+    );
 }
 
 #[test]

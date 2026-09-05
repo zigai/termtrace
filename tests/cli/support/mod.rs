@@ -118,6 +118,21 @@ pub(crate) use termtrace_sdk::{
 };
 pub(crate) use zstd::stream::read::Decoder;
 
+pub(crate) fn canonical_output_bytes(log: &EventLog) -> Vec<u8> {
+    return log
+        .events
+        .iter()
+        .filter_map(|record| {
+            return match &record.event {
+                Event::Output { data } => Some(data.as_bytes()),
+                _ => None,
+            };
+        })
+        .flatten()
+        .copied()
+        .collect();
+}
+
 pub(crate) fn wait_for_control(session: &Path) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while !control_endpoint_is_reachable(session) {
@@ -225,12 +240,10 @@ pub(crate) fn validate_json_file(schema: &str, instance: &Path) {
     reason = "test helper failures should stop at the invalid fixture"
 )]
 pub(crate) fn validate_json_lines(schema: &str, instance: &Path) {
-    for line in fs_err::read_to_string(instance)
-        .expect("JSONL instance")
-        .lines()
-    {
-        validate_json_value(schema, &serde_json::from_str(line).expect("JSONL value"));
-    }
+    validate_json_lines_text(
+        schema,
+        &fs_err::read_to_string(instance).expect("JSONL instance"),
+    );
 }
 
 #[allow(
@@ -249,27 +262,46 @@ pub(crate) fn read_zstd_text(path: &Path) -> String {
 
 #[allow(
     clippy::expect_used,
+    clippy::panic,
     reason = "schema validation is an assertion helper used only by integration tests"
 )]
 pub(crate) fn validate_json_lines_text(schema: &str, text: &str) {
-    for line in text.lines() {
-        validate_json_value(schema, &serde_json::from_str(line).expect("JSONL value"));
+    let validator = compile_schema(schema);
+    for (index, line) in text.lines().enumerate() {
+        let value = serde_json::from_str(line).expect("JSONL value");
+        if let Err(error) = validator.validate(&value) {
+            panic!("{schema} rejected record {}: {error}", index + 1);
+        }
     }
 }
 
 #[allow(
     clippy::expect_used,
-    clippy::panic,
     reason = "schema validation is an assertion helper used only by integration tests"
 )]
-pub(crate) fn validate_json_value(schema: &str, instance: &serde_json::Value) {
+pub(crate) fn compile_schema(schema: &str) -> jsonschema::Validator {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("schemas")
         .join(schema);
     let schema_value: serde_json::Value =
         serde_json::from_slice(&fs_err::read(path).expect("schema file")).expect("schema JSON");
-    let validator = jsonschema::validator_for(&schema_value).expect("valid schema");
+    return jsonschema::validator_for(&schema_value).expect("valid schema");
+}
+
+pub(crate) fn validate_json_value(schema: &str, instance: &serde_json::Value) {
+    validate_compiled_json_value(&compile_schema(schema), schema, instance);
+}
+
+#[allow(
+    clippy::panic,
+    reason = "schema validation is an assertion helper used only by integration tests"
+)]
+pub(crate) fn validate_compiled_json_value(
+    validator: &jsonschema::Validator,
+    schema: &str,
+    instance: &serde_json::Value,
+) {
     if let Err(error) = validator.validate(instance) {
-        panic!("{schema} rejected instance: {error}");
+        panic!("{schema} rejected instance {instance}: {error}");
     }
 }

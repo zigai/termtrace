@@ -429,8 +429,10 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
         "event-log-header.schema.json",
         &serde_json::from_str(event_lines.next().expect("event header")).expect("header JSON"),
     );
+    let event_schema = compile_schema("event-record.schema.json");
     for line in event_lines {
-        validate_json_value(
+        validate_compiled_json_value(
+            &event_schema,
             "event-record.schema.json",
             &serde_json::from_str(line).expect("event JSON"),
         );

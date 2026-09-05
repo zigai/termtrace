@@ -87,7 +87,7 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
     assert_terminal_snapshot(session, snapshot)
     session.close()
     launched = terminal.launch(
-        ["/bin/sh", "-c", "test \"${#CLIENT_SECRET}\" -eq 20; test -z \"${HOME+x}\"; printf PY_LAUNCH; sleep 30"],
+        ["/bin/sh", "-c", "test \"${#CLIENT_SECRET}\" -eq 20 && test -z \"${HOME+x}\" && printf PY_LAUNCH && sleep 30"],
         evidence_root=sys.argv[3],
         environment=EnvironmentOptions(inherit_env=False, set={"CLIENT_SECRET": "python-private-value"}, copy=["PATH"], color="never"),
         output_byte_budget=1000000,
@@ -151,7 +151,7 @@ async def main():
         assert Path(semantic_image.primary).is_file()
         await session.close()
         launched = await terminal.launch(
-            ["/bin/sh", "-c", "test \"${#CLIENT_SECRET}\" -eq 19; test -z \"${HOME+x}\"; printf ASYNC_LAUNCH; sleep 30"],
+            ["/bin/sh", "-c", "test \"${#CLIENT_SECRET}\" -eq 19 && test -z \"${HOME+x}\" && printf ASYNC_LAUNCH && sleep 30"],
             evidence_root=sys.argv[3],
             environment=EnvironmentOptions(inherit_env=False, set={"CLIENT_SECRET": "async-private-value"}, copy=["PATH"]),
             output_byte_budget=1000000,
@@ -221,7 +221,7 @@ if (semanticImage.kind !== "artifact" || !existsSync(String(semanticImage.primar
 await assertScreenText(attached, "TYPESCRIPT")
 if ((await stableTerminalSnapshot(attached)).version !== 1) throw new Error("missing stable snapshot")
 await using launched = await terminal.launch({
-  command: ["/bin/sh", "-c", "test \"${#CLIENT_SECRET}\" -eq 16; test -z \"${HOME+x}\"; printf TS_LAUNCH; sleep 30"],
+  command: ["/bin/sh", "-c", "test \"${#CLIENT_SECRET}\" -eq 16 && test -z \"${HOME+x}\" && printf TS_LAUNCH && sleep 30"],
   evidenceRoot: process.argv[4],
   environment: { inheritEnv: false, set: { CLIENT_SECRET: "ts-private-value" }, copy: ["PATH"], color: "never" },
   outputByteBudget: 1000000,
