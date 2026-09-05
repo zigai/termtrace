@@ -45,14 +45,14 @@ format:
   cargo fmt --all
   bun run --cwd packages/typescript format
   uv run --project packages/python --locked --group dev ruff format packages/python/termtrace packages/python/scripts packages/python/tests
-  shfmt -i 4 -ci -w benchmarks examples fixtures packaging scripts tests install.sh
+  shfmt -i 4 -ci -w benchmarks examples fixtures scripts tests install.sh
 
 # verify formatting without modifying files
 format-check:
   cargo fmt --all -- --check
   bun run --cwd packages/typescript format:check
   uv run --project packages/python --locked --group dev ruff format --check packages/python/termtrace packages/python/scripts packages/python/tests
-  shfmt -i 4 -ci -d benchmarks examples fixtures packaging scripts tests install.sh
+  shfmt -i 4 -ci -d benchmarks examples fixtures scripts tests install.sh
 
 # run the complete native recording, replay, video, and screenshot smoke test
 smoke:

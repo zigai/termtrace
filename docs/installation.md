@@ -123,14 +123,6 @@ Native screenshots and video use the installed GTK terminal application on Xvfb.
 
 `doctor` probes the actual launch and codec path. Tool presence alone is not considered readiness.
 
-An optional container definition is available at `packaging/native/Containerfile`. Build it with an OCI base pinned by digest:
-
-```bash
-scripts/build-native-image.sh termtrace/native:VERSION ubuntu@sha256:EXACT_DIGEST
-```
-
-Pixels produced there describe that container environment, not every workstation.
-
 ## Shell completions
 
 Generate completions from the installed command graph:
