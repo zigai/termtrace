@@ -290,6 +290,36 @@
       ],
       "type": "object"
     },
+    "ClockSample": {
+      "additionalProperties": false,
+      "description": "A system monotonic clock bracket around a session-relative clock sample.",
+      "properties": {
+        "session_monotonic_ns": {
+          "description": "Session-relative time sampled inside the system clock bracket.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "system_monotonic_ns": {
+          "description": "Midpoint of the system CLOCK_MONOTONIC bracket.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "uncertainty_ns": {
+          "description": "Maximum error of the midpoint mapping, in nanoseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_monotonic_ns",
+        "system_monotonic_ns",
+        "uncertainty_ns"
+      ],
+      "type": "object"
+    },
     "ColorSpec": {
       "description": "Cell color source before default-color fallback.",
       "oneOf": [
@@ -385,6 +415,55 @@
     "ControlData": {
       "description": "Successful response payload.",
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Read-only actor authority for a durable event-file suffix.",
+          "properties": {
+            "device": {
+              "description": "Device of the writer's open file descriptor.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "durable": {
+              "$ref": "#/$defs/LiveEventCursor",
+              "description": "Latest data-synchronized position."
+            },
+            "header_hash": {
+              "description": "Canonical header hash retained by the writer.",
+              "type": "string"
+            },
+            "inode": {
+              "description": "Inode of the writer's open file descriptor.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "event_cursor",
+              "type": "string"
+            },
+            "start": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LiveEventCursor"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Requested position, if still retained and durable."
+            }
+          },
+          "required": [
+            "kind",
+            "device",
+            "inode",
+            "header_hash",
+            "durable"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "description": "No additional data is required.",
@@ -691,6 +770,10 @@
               "$ref": "#/$defs/ActorBoundaries",
               "description": "Durable and observed canonical positions at status evaluation."
             },
+            "clock_sample": {
+              "$ref": "#/$defs/ClockSample",
+              "description": "Bounded mapping between session-relative and system monotonic time."
+            },
             "kind": {
               "const": "status",
               "type": "string"
@@ -707,7 +790,8 @@
           },
           "required": [
             "kind",
-            "boundaries"
+            "boundaries",
+            "clock_sample"
           ],
           "type": "object"
         },
@@ -1371,6 +1455,41 @@
           "type": "string"
         }
       ]
+    },
+    "LiveEventCursor": {
+      "additionalProperties": false,
+      "description": "An actor-owned position immediately after a canonical record (or the header).",
+      "properties": {
+        "event_hash": {
+          "description": "Hash of the preceding record or header.",
+          "type": "string"
+        },
+        "file_offset": {
+          "description": "Byte offset of the next record.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "monotonic_ns": {
+          "description": "Timestamp of the preceding record, or zero at the header.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_event_seq": {
+          "description": "Sequence of the next record.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "next_event_seq",
+        "file_offset",
+        "event_hash",
+        "monotonic_ns"
+      ],
+      "type": "object"
     },
     "ModeState": {
       "description": "Terminal modes relevant to presentation and input.",

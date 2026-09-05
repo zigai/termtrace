@@ -603,6 +603,26 @@ export interface DriverResponse {
                */
               data:
                 | {
+                    /**
+                     * Device of the writer's open file descriptor.
+                     */
+                    device: number;
+                    durable: LiveEventCursor;
+                    /**
+                     * Canonical header hash retained by the writer.
+                     */
+                    header_hash: string;
+                    /**
+                     * Inode of the writer's open file descriptor.
+                     */
+                    inode: number;
+                    kind: "event_cursor";
+                    /**
+                     * Requested position, if still retained and durable.
+                     */
+                    start?: LiveEventCursor1 | null;
+                  }
+                | {
                     boundaries: ActorBoundaries;
                     kind: "acknowledged";
                   }
@@ -773,6 +793,7 @@ export interface DriverResponse {
                   }
                 | {
                     boundaries: ActorBoundaries7;
+                    clock_sample: ClockSample;
                     kind: "status";
                     /**
                      * Child process identifier when available.
@@ -1165,6 +1186,48 @@ export interface DriverResponse {
    * Driver protocol version.
    */
   version: number;
+}
+/**
+ * Latest data-synchronized position.
+ */
+export interface LiveEventCursor {
+  /**
+   * Hash of the preceding record or header.
+   */
+  event_hash: string;
+  /**
+   * Byte offset of the next record.
+   */
+  file_offset: number;
+  /**
+   * Timestamp of the preceding record, or zero at the header.
+   */
+  monotonic_ns: number;
+  /**
+   * Sequence of the next record.
+   */
+  next_event_seq: number;
+}
+/**
+ * An actor-owned position immediately after a canonical record (or the header).
+ */
+export interface LiveEventCursor1 {
+  /**
+   * Hash of the preceding record or header.
+   */
+  event_hash: string;
+  /**
+   * Byte offset of the next record.
+   */
+  file_offset: number;
+  /**
+   * Timestamp of the preceding record, or zero at the header.
+   */
+  monotonic_ns: number;
+  /**
+   * Sequence of the next record.
+   */
+  next_event_seq: number;
 }
 /**
  * Durable and observed canonical positions after the operation.
@@ -2265,6 +2328,23 @@ export interface ActorBoundaries6 {
 export interface ActorBoundaries7 {
   durable: CanonicalBoundary;
   observed: CanonicalBoundary1;
+}
+/**
+ * Bounded mapping between session-relative and system monotonic time.
+ */
+export interface ClockSample {
+  /**
+   * Session-relative time sampled inside the system clock bracket.
+   */
+  session_monotonic_ns: number;
+  /**
+   * Midpoint of the system CLOCK_MONOTONIC bracket.
+   */
+  system_monotonic_ns: number;
+  /**
+   * Maximum error of the midpoint mapping, in nanoseconds.
+   */
+  uncertainty_ns: number;
 }
 /**
  * Durable and observed source boundaries at observation time.

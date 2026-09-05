@@ -290,6 +290,13 @@ export interface DriverRequest {
               command: "status";
             }
           | {
+              command: "event_cursor";
+              /**
+               * Requested next event; absent from retention when explicit historical reading is needed.
+               */
+              next_event_seq: number;
+            }
+          | {
               command: "snapshot";
             }
           | {
@@ -1167,6 +1174,10 @@ export interface DriverRequest {
          * Process-local session handle.
          */
         handle: string;
+        /**
+         * Maximum semantic screenshot artifact bytes, including its manifest; native requires absent.
+         */
+        max_bytes?: number | null;
         method: "screenshot";
         /**
          * Exact selected state point.
@@ -1239,6 +1250,10 @@ export interface DriverRequest {
          * Process-local session handle.
          */
         handle: string;
+        /**
+         * Maximum generated bundle bytes, including its manifest.
+         */
+        max_bytes?: number | null;
         method: "bundle";
         /**
          * Explicit sensitivity profile.

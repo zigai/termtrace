@@ -4,10 +4,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub use crate::terminal::observation::ActorBoundaries;
 use crate::{
     execution::event::InputKind,
     terminal::{
-        observation::ActorBoundaries,
         screen::{
             FrameDetail, InvalidRegionReason, ScreenFrame, ScreenProjectionRequest, ScreenRegion,
         },
@@ -16,15 +16,27 @@ use crate::{
     value::ByteString,
 };
 
+/// A system monotonic clock bracket around a session-relative clock sample.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClockSample {
+    /// Session-relative time sampled inside the system clock bracket.
+    pub session_monotonic_ns: u64,
+    /// Midpoint of the system CLOCK_MONOTONIC bracket.
+    pub system_monotonic_ns: u64,
+    /// Maximum error of the midpoint mapping, in nanoseconds.
+    pub uncertainty_ns: u64,
+}
+
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 15;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 16;
 /// Maximum encoded request or response size.
 pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 1024 * 1024;
 
 /// Derive an input atom's operation identity from its request and zero-based index.
 pub fn derive_input_operation_id(request_id: Uuid, index: usize) -> Uuid {
-    let atom_number = u128::try_from(index).unwrap_or(u128::MAX).saturating_add(1);
-    return Uuid::from_u128(request_id.as_u128() ^ atom_number);
+    let name = format!("termtrace/input-atom/v1/{request_id}/{index}");
+    return Uuid::new_v5(&Uuid::NAMESPACE_URL, name.as_bytes());
 }
 
 /// Safely supported process-group signals.
@@ -266,6 +278,11 @@ pub enum ControlCommand {
     Ping,
     /// Return current process and event counters.
     Status,
+    /// Return actor-owned durable event-file positions for incremental following.
+    EventCursor {
+        /// Requested next event; absent from retention when explicit historical reading is needed.
+        next_event_seq: u64,
+    },
     /// Return the latest presentation-eligible semantic viewport.
     Snapshot,
     /// Return one bounded rich projection of the latest presented state.
@@ -423,10 +440,37 @@ impl ControlRequest {
     }
 }
 
+/// An actor-owned position immediately after a canonical record (or the header).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LiveEventCursor {
+    /// Sequence of the next record.
+    pub next_event_seq: u64,
+    /// Byte offset of the next record.
+    pub file_offset: u64,
+    /// Hash of the preceding record or header.
+    pub event_hash: String,
+    /// Timestamp of the preceding record, or zero at the header.
+    pub monotonic_ns: u64,
+}
+
 /// Successful response payload.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlData {
+    /// Read-only actor authority for a durable event-file suffix.
+    EventCursor {
+        /// Device of the writer's open file descriptor.
+        device: u64,
+        /// Inode of the writer's open file descriptor.
+        inode: u64,
+        /// Canonical header hash retained by the writer.
+        header_hash: String,
+        /// Requested position, if still retained and durable.
+        start: Option<LiveEventCursor>,
+        /// Latest data-synchronized position.
+        durable: LiveEventCursor,
+    },
     /// No additional data is required.
     Acknowledged {
         /// Durable and observed canonical positions after the operation.
@@ -522,6 +566,8 @@ pub enum ControlData {
         pid: Option<u32>,
         /// Durable and observed canonical positions at status evaluation.
         boundaries: ActorBoundaries,
+        /// Bounded mapping between session-relative and system monotonic time.
+        clock_sample: ClockSample,
     },
     /// Observer-only latest presented terminal state.
     Snapshot {

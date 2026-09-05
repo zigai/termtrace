@@ -51,11 +51,21 @@ class ControlCommand2(Struct, forbid_unknown_fields=True, tag_field='command', t
     pass
 
 
-class ControlCommand3(Struct, forbid_unknown_fields=True, tag_field='command', tag='snapshot'):
+class ControlCommand3(Struct, forbid_unknown_fields=True, tag_field='command', tag='event_cursor'):
+    next_event_seq: Annotated[
+        int,
+        Meta(
+            description='Requested next event; absent from retention when explicit historical reading is needed.',
+            ge=0,
+        ),
+    ]
+
+
+class ControlCommand4(Struct, forbid_unknown_fields=True, tag_field='command', tag='snapshot'):
     pass
 
 
-class ControlCommand11(Struct, forbid_unknown_fields=True, tag_field='command', tag='paste'):
+class ControlCommand12(Struct, forbid_unknown_fields=True, tag_field='command', tag='paste'):
     data: Annotated[
         Base64Bytes,
         Meta(
@@ -64,7 +74,7 @@ class ControlCommand11(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-class ControlCommand12(Struct, forbid_unknown_fields=True, tag_field='command', tag='focus'):
+class ControlCommand13(Struct, forbid_unknown_fields=True, tag_field='command', tag='focus'):
     focused: Annotated[
         bool,
         Meta(
@@ -79,7 +89,7 @@ class ControlCommand12(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-class ControlCommand14(Struct, forbid_unknown_fields=True, tag_field='command', tag='activate'):
+class ControlCommand15(Struct, forbid_unknown_fields=True, tag_field='command', tag='activate'):
     strict: Annotated[
         bool,
         Meta(
@@ -95,7 +105,7 @@ class ControlCommand14(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-class ControlCommand15(Struct, forbid_unknown_fields=True, tag_field='command', tag='resize'):
+class ControlCommand16(Struct, forbid_unknown_fields=True, tag_field='command', tag='resize'):
     cols: Annotated[int, Meta(description='Terminal columns.', ge=0, le=65535)]
     pixel_height: Annotated[
         int, Meta(description='Total pixel height.', ge=0, le=65535)
@@ -104,11 +114,11 @@ class ControlCommand15(Struct, forbid_unknown_fields=True, tag_field='command', 
     rows: Annotated[int, Meta(description='Terminal rows.', ge=0, le=65535)]
 
 
-class ControlCommand17(Struct, forbid_unknown_fields=True, tag_field='command', tag='mark'):
+class ControlCommand18(Struct, forbid_unknown_fields=True, tag_field='command', tag='mark'):
     label: Annotated[str, Meta(description='Non-empty marker label.')]
 
 
-class ControlCommand18(Struct, forbid_unknown_fields=True, tag_field='command', tag='stop'):
+class ControlCommand19(Struct, forbid_unknown_fields=True, tag_field='command', tag='stop'):
     pass
 
 
@@ -207,6 +217,14 @@ class DriverMethod17(Struct, forbid_unknown_fields=True, tag_field='method', tag
     destination: Annotated[str, Meta(description='New no-replace bundle directory.')]
     handle: Annotated[str, Meta(description='Process-local session handle.')]
     profile: Annotated[BundleProfile, Meta(description='Explicit sensitivity profile.')]
+    max_bytes: (
+        Annotated[
+            int,
+            Meta(description='Maximum generated bundle bytes, including its manifest.', ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
 class DriverMethod18(Struct, forbid_unknown_fields=True, tag_field='method', tag='detach'):
@@ -561,7 +579,7 @@ class VerificationLevel(StrEnum):
     signature = 'signature'
 
 
-class ControlCommand7(Struct, forbid_unknown_fields=True, tag_field='command', tag='input'):
+class ControlCommand8(Struct, forbid_unknown_fields=True, tag_field='command', tag='input'):
     data: Annotated[
         Base64Bytes, Meta(description='Raw bytes encoded as Base64 in JSON.')
     ]
@@ -579,12 +597,12 @@ class ControlCommand7(Struct, forbid_unknown_fields=True, tag_field='command', t
     ) = UNSET
 
 
-class ControlCommand10(Struct, forbid_unknown_fields=True, tag_field='command', tag='key'):
+class ControlCommand11(Struct, forbid_unknown_fields=True, tag_field='command', tag='key'):
     key: Annotated[NamedKey, Meta(description='Layout-independent key.')]
     modifiers: Annotated[KeyModifiers, Meta(description='Typed modifier state.')]
 
 
-class ControlCommand13(Struct, forbid_unknown_fields=True, tag_field='command', tag='pointer'):
+class ControlCommand14(Struct, forbid_unknown_fields=True, tag_field='command', tag='pointer'):
     column: Annotated[
         int, Meta(description='Zero-based viewport column.', ge=0, le=65535)
     ]
@@ -600,7 +618,7 @@ class ControlCommand13(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-class ControlCommand16(Struct, forbid_unknown_fields=True, tag_field='command', tag='signal'):
+class ControlCommand17(Struct, forbid_unknown_fields=True, tag_field='command', tag='signal'):
     signal: Annotated[ProcessSignal, Meta(description='Signal to send.')]
 
 
@@ -663,6 +681,14 @@ class DriverMethod15(Struct, forbid_unknown_fields=True, tag_field='method', tag
     renderer: Annotated[
         DriverScreenshotRenderer, Meta(description='Explicit truth renderer.')
     ]
+    max_bytes: (
+        Annotated[
+            int,
+            Meta(description='Maximum semantic screenshot artifact bytes, including its manifest; native requires absent.', ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
     viewport: (
         Annotated[
             CaptureTarget,
@@ -733,14 +759,14 @@ class ScreenProjectionRequest(Struct, forbid_unknown_fields=True):
     ) = UNSET
 
 
-class ControlCommand4(Struct, forbid_unknown_fields=True, tag_field='command', tag='screen_frame'):
+class ControlCommand5(Struct, forbid_unknown_fields=True, tag_field='command', tag='screen_frame'):
     projection: Annotated[
         ScreenProjectionRequest,
         Meta(description='Requested rich detail and exact optional viewport region.'),
     ]
 
 
-class ControlCommand6(Struct, forbid_unknown_fields=True, tag_field='command', tag='capture_stable'):
+class ControlCommand7(Struct, forbid_unknown_fields=True, tag_field='command', tag='capture_stable'):
     projection: Annotated[
         ScreenProjectionRequest,
         Meta(description='Rich projection returned from the exact terminating state.'),
@@ -753,7 +779,7 @@ class ControlCommand6(Struct, forbid_unknown_fields=True, tag_field='command', t
     ]
 
 
-class ControlCommand8(Struct, forbid_unknown_fields=True, tag_field='command', tag='input_sequence'):
+class ControlCommand9(Struct, forbid_unknown_fields=True, tag_field='command', tag='input_sequence'):
     atoms: Annotated[
         list[InputSequenceAtom],
         Meta(
@@ -808,7 +834,7 @@ class ActionPostcondition3(Struct, forbid_unknown_fields=True, tag_field='condit
 ActionPostcondition: TypeAlias = Annotated[ActionPostcondition1 | ActionPostcondition2 | ActionPostcondition3, Meta(description='Presented-state condition retained under exclusive actor ordering after input.')]
 
 
-class ControlCommand5(Struct, forbid_unknown_fields=True, tag_field='command', tag='wait_screen'):
+class ControlCommand6(Struct, forbid_unknown_fields=True, tag_field='command', tag='wait_screen'):
     predicate: Annotated[ScreenPredicate, Meta(description='Exact screen predicate.')]
     projection: Annotated[
         ScreenProjectionRequest,
@@ -824,7 +850,7 @@ class ControlCommand5(Struct, forbid_unknown_fields=True, tag_field='command', t
     ]
 
 
-class ControlCommand9(Struct, forbid_unknown_fields=True, tag_field='command', tag='act'):
+class ControlCommand10(Struct, forbid_unknown_fields=True, tag_field='command', tag='act'):
     atoms: Annotated[
         list[InputSequenceAtom],
         Meta(
@@ -856,7 +882,7 @@ class ControlCommand9(Struct, forbid_unknown_fields=True, tag_field='command', t
     ]
 
 
-ControlCommand: TypeAlias = Annotated[ControlCommand1 | ControlCommand2 | ControlCommand3 | ControlCommand4 | ControlCommand5 | ControlCommand6 | ControlCommand7 | ControlCommand8 | ControlCommand9 | ControlCommand10 | ControlCommand11 | ControlCommand12 | ControlCommand13 | ControlCommand14 | ControlCommand15 | ControlCommand16 | ControlCommand17 | ControlCommand18, Meta(description='One command sent to the live session actor.')]
+ControlCommand: TypeAlias = Annotated[ControlCommand1 | ControlCommand2 | ControlCommand3 | ControlCommand4 | ControlCommand5 | ControlCommand6 | ControlCommand7 | ControlCommand8 | ControlCommand9 | ControlCommand10 | ControlCommand11 | ControlCommand12 | ControlCommand13 | ControlCommand14 | ControlCommand15 | ControlCommand16 | ControlCommand17 | ControlCommand18 | ControlCommand19, Meta(description='One command sent to the live session actor.')]
 
 
 class DriverMethod4(Struct, forbid_unknown_fields=True, tag_field='method', tag='control'):
@@ -885,3 +911,42 @@ class ScreenPredicate13(Struct, forbid_unknown_fields=True, tag_field='predicate
 
 
 ScreenPredicate: TypeAlias = Annotated[ScreenPredicate1 | ScreenPredicate2 | ScreenPredicate3 | ScreenPredicate4 | ScreenPredicate5 | ScreenPredicate6 | ScreenPredicate7 | ScreenPredicate8 | ScreenPredicate9 | ScreenPredicate10 | ScreenPredicate11 | ScreenPredicate12 | ScreenPredicate13, Meta(description='Exact predicate evaluated against the latest presented viewport.')]
+
+# Stable names for anonymous tagged-union variants.
+ControlPingCommand: TypeAlias = ControlCommand1
+ControlStatusCommand: TypeAlias = ControlCommand2
+ControlEventCursorCommand: TypeAlias = ControlCommand3
+ControlSnapshotCommand: TypeAlias = ControlCommand4
+ControlPasteCommand: TypeAlias = ControlCommand12
+ControlFocusCommand: TypeAlias = ControlCommand13
+ControlActivateCommand: TypeAlias = ControlCommand15
+ControlResizeCommand: TypeAlias = ControlCommand16
+ControlMarkCommand: TypeAlias = ControlCommand18
+ControlStopCommand: TypeAlias = ControlCommand19
+ControlInputCommand: TypeAlias = ControlCommand8
+ControlKeyCommand: TypeAlias = ControlCommand11
+ControlPointerCommand: TypeAlias = ControlCommand14
+ControlSignalCommand: TypeAlias = ControlCommand17
+ControlScreenFrameCommand: TypeAlias = ControlCommand5
+ControlCaptureStableCommand: TypeAlias = ControlCommand7
+ControlInputSequenceCommand: TypeAlias = ControlCommand9
+ControlWaitScreenCommand: TypeAlias = ControlCommand6
+ControlActCommand: TypeAlias = ControlCommand10
+DriverHelloMethod: TypeAlias = DriverMethod1
+DriverAttachMethod: TypeAlias = DriverMethod3
+DriverWaitOutputMethod: TypeAlias = DriverMethod5
+DriverCompletionMethod: TypeAlias = DriverMethod6
+DriverCompleteMethod: TypeAlias = DriverMethod7
+DriverDiscardCompletedMethod: TypeAlias = DriverMethod8
+DriverTimelineMethod: TypeAlias = DriverMethod11
+DriverDiagnoseMethod: TypeAlias = DriverMethod13
+DriverEventsMethod: TypeAlias = DriverMethod14
+DriverBundleMethod: TypeAlias = DriverMethod17
+DriverDetachMethod: TypeAlias = DriverMethod18
+DriverLaunchMethod: TypeAlias = DriverMethod2
+DriverObserveMethod: TypeAlias = DriverMethod9
+DriverDiffMethod: TypeAlias = DriverMethod12
+DriverScreenshotMethod: TypeAlias = DriverMethod15
+DriverVerifyMethod: TypeAlias = DriverMethod16
+DriverScreenFrameMethod: TypeAlias = DriverMethod10
+DriverControlMethod: TypeAlias = DriverMethod4

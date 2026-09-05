@@ -55,6 +55,25 @@ class CaptureQuality(StrEnum):
     incomplete = 'incomplete'
 
 
+class ClockSample(Struct, forbid_unknown_fields=True):
+    session_monotonic_ns: Annotated[
+        int,
+        Meta(
+            description='Session-relative time sampled inside the system clock bracket.',
+            ge=0,
+        ),
+    ]
+    system_monotonic_ns: Annotated[
+        int, Meta(description='Midpoint of the system CLOCK_MONOTONIC bracket.', ge=0)
+    ]
+    uncertainty_ns: Annotated[
+        int,
+        Meta(
+            description='Maximum error of the midpoint mapping, in nanoseconds.', ge=0
+        ),
+    ]
+
+
 class ColorSpec1(Struct, forbid_unknown_fields=True, tag_field='kind', tag='none'):
     pass
 
@@ -520,6 +539,25 @@ class LifecycleKind(StrEnum):
     spawned = 'spawned'
     output_closed = 'output_closed'
     stopping = 'stopping'
+
+
+class LiveEventCursor(Struct, forbid_unknown_fields=True):
+    event_hash: Annotated[
+        str, Meta(description='Hash of the preceding record or header.')
+    ]
+    file_offset: Annotated[
+        int, Meta(description='Byte offset of the next record.', ge=0)
+    ]
+    monotonic_ns: Annotated[
+        int,
+        Meta(
+            description='Timestamp of the preceding record, or zero at the header.',
+            ge=0,
+        ),
+    ]
+    next_event_seq: Annotated[
+        int, Meta(description='Sequence of the next record.', ge=0)
+    ]
 
 
 class MutationJournalStatus(StrEnum):
@@ -1172,7 +1210,30 @@ class ColorState(Struct, forbid_unknown_fields=True):
     ) = UNSET
 
 
-class ControlData1(Struct, forbid_unknown_fields=True, tag_field='kind', tag='acknowledged'):
+class ControlData1(Struct, forbid_unknown_fields=True, tag_field='kind', tag='event_cursor'):
+    device: Annotated[
+        int, Meta(description="Device of the writer's open file descriptor.", ge=0)
+    ]
+    durable: Annotated[
+        LiveEventCursor, Meta(description='Latest data-synchronized position.')
+    ]
+    header_hash: Annotated[
+        str, Meta(description='Canonical header hash retained by the writer.')
+    ]
+    inode: Annotated[
+        int, Meta(description="Inode of the writer's open file descriptor.", ge=0)
+    ]
+    start: (
+        Annotated[
+            LiveEventCursor,
+            Meta(description='Requested position, if still retained and durable.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+
+
+class ControlData2(Struct, forbid_unknown_fields=True, tag_field='kind', tag='acknowledged'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(
@@ -1181,7 +1242,7 @@ class ControlData1(Struct, forbid_unknown_fields=True, tag_field='kind', tag='ac
     ]
 
 
-class ControlData2(Struct, forbid_unknown_fields=True, tag_field='kind', tag='input_applied'):
+class ControlData3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='input_applied'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(description='Durable and observed positions after application.'),
@@ -1202,7 +1263,7 @@ class ControlData2(Struct, forbid_unknown_fields=True, tag_field='kind', tag='in
     ]
 
 
-class ControlData3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='input_sequence_applied'):
+class ControlData4(Struct, forbid_unknown_fields=True, tag_field='kind', tag='input_sequence_applied'):
     atom_count: Annotated[
         int, Meta(description='Number of atoms applied completely.', ge=0)
     ]
@@ -1236,7 +1297,7 @@ class ControlData3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='in
     ) = UNSET
 
 
-class ControlData5(Struct, forbid_unknown_fields=True, tag_field='kind', tag='input_noop'):
+class ControlData6(Struct, forbid_unknown_fields=True, tag_field='kind', tag='input_noop'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(description='Durable and observed positions at evaluation.'),
@@ -1249,7 +1310,7 @@ class ControlData5(Struct, forbid_unknown_fields=True, tag_field='kind', tag='in
     ]
 
 
-class ControlData6(Struct, forbid_unknown_fields=True, tag_field='kind', tag='activated'):
+class ControlData7(Struct, forbid_unknown_fields=True, tag_field='kind', tag='activated'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(description='Durable and observed positions after application.'),
@@ -1281,11 +1342,17 @@ class ControlData6(Struct, forbid_unknown_fields=True, tag_field='kind', tag='ac
     text: Annotated[str, Meta(description='Exact matched text.')]
 
 
-class ControlData7(Struct, forbid_unknown_fields=True, tag_field='kind', tag='status'):
+class ControlData8(Struct, forbid_unknown_fields=True, tag_field='kind', tag='status'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(
             description='Durable and observed canonical positions at status evaluation.'
+        ),
+    ]
+    clock_sample: Annotated[
+        ClockSample,
+        Meta(
+            description='Bounded mapping between session-relative and system monotonic time.'
         ),
     ]
     pid: (
@@ -1298,7 +1365,7 @@ class ControlData7(Struct, forbid_unknown_fields=True, tag_field='kind', tag='st
     ) = UNSET
 
 
-class ControlData12(Struct, forbid_unknown_fields=True, tag_field='kind', tag='marked'):
+class ControlData13(Struct, forbid_unknown_fields=True, tag_field='kind', tag='marked'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(description='Durable and observed canonical positions after the marker.'),
@@ -1838,7 +1905,7 @@ class CellStyle(Struct, forbid_unknown_fields=True):
     underline_color: Annotated[ColorSpec, Meta(description='Underline color source.')]
 
 
-class ControlData8(Struct, forbid_unknown_fields=True, tag_field='kind', tag='snapshot'):
+class ControlData9(Struct, forbid_unknown_fields=True, tag_field='kind', tag='snapshot'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(description='Durable and observed source boundaries at observation time.'),
@@ -2414,7 +2481,7 @@ class ActionPostconditionResult3(Struct, forbid_unknown_fields=True, tag_field='
 ActionPostconditionResult: TypeAlias = Annotated[ActionPostconditionResult1 | ActionPostconditionResult2 | ActionPostconditionResult3, Meta(description='Exact postcondition result returned without releasing actor ordering.')]
 
 
-class ControlData4(Struct, forbid_unknown_fields=True, tag_field='kind', tag='action_applied'):
+class ControlData5(Struct, forbid_unknown_fields=True, tag_field='kind', tag='action_applied'):
     boundaries: Annotated[
         ActorBoundaries,
         Meta(
@@ -2433,7 +2500,7 @@ class ControlData4(Struct, forbid_unknown_fields=True, tag_field='kind', tag='ac
     ]
 
 
-class ControlData9(Struct, forbid_unknown_fields=True, tag_field='kind', tag='screen_frame'):
+class ControlData10(Struct, forbid_unknown_fields=True, tag_field='kind', tag='screen_frame'):
     frame: Annotated[
         ScreenFrame,
         Meta(
@@ -2442,7 +2509,7 @@ class ControlData9(Struct, forbid_unknown_fields=True, tag_field='kind', tag='sc
     ]
 
 
-class ControlData10(Struct, forbid_unknown_fields=True, tag_field='kind', tag='stable_snapshot'):
+class ControlData11(Struct, forbid_unknown_fields=True, tag_field='kind', tag='stable_snapshot'):
     first_observed_monotonic_ns: Annotated[
         int,
         Meta(
@@ -2487,7 +2554,7 @@ class DriverResponse(Struct, forbid_unknown_fields=True):
     version: Annotated[int, Meta(description='Driver protocol version.', ge=0)]
 
 
-class ControlData11(Struct, forbid_unknown_fields=True, tag_field='kind', tag='screen_wait'):
+class ControlData12(Struct, forbid_unknown_fields=True, tag_field='kind', tag='screen_wait'):
     frame: Annotated[
         ScreenFrame, Meta(description='Exact satisfying or terminating frame.')
     ]
@@ -2520,7 +2587,7 @@ class ControlData11(Struct, forbid_unknown_fields=True, tag_field='kind', tag='s
     ) = UNSET
 
 
-ControlData: TypeAlias = Annotated[ControlData1 | ControlData2 | ControlData3 | ControlData4 | ControlData5 | ControlData6 | ControlData7 | ControlData8 | ControlData9 | ControlData10 | ControlData11 | ControlData12, Meta(description='Successful response payload.')]
+ControlData: TypeAlias = Annotated[ControlData1 | ControlData2 | ControlData3 | ControlData4 | ControlData5 | ControlData6 | ControlData7 | ControlData8 | ControlData9 | ControlData10 | ControlData11 | ControlData12 | ControlData13, Meta(description='Successful response payload.')]
 
 
 class DriverData3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='control'):
@@ -2568,17 +2635,18 @@ DriverTimelineData: TypeAlias = DriverData8
 DriverScreenFrameData: TypeAlias = DriverData7
 DriverDiffData: TypeAlias = DriverData9
 DriverControlData: TypeAlias = DriverData3
-ControlAcknowledgedData: TypeAlias = ControlData1
-ControlInputAppliedData: TypeAlias = ControlData2
-ControlInputSequenceAppliedData: TypeAlias = ControlData3
-ControlInputNoopData: TypeAlias = ControlData5
-ControlActivatedData: TypeAlias = ControlData6
-ControlStatusData: TypeAlias = ControlData7
-ControlMarkedData: TypeAlias = ControlData12
-ControlSnapshotData: TypeAlias = ControlData8
-ControlActionAppliedData: TypeAlias = ControlData4
-ControlScreenFrameData: TypeAlias = ControlData9
-ControlStableSnapshotData: TypeAlias = ControlData10
-ControlScreenWaitData: TypeAlias = ControlData11
+ControlEventCursorData: TypeAlias = ControlData1
+ControlAcknowledgedData: TypeAlias = ControlData2
+ControlInputAppliedData: TypeAlias = ControlData3
+ControlInputSequenceAppliedData: TypeAlias = ControlData4
+ControlInputNoopData: TypeAlias = ControlData6
+ControlActivatedData: TypeAlias = ControlData7
+ControlStatusData: TypeAlias = ControlData8
+ControlMarkedData: TypeAlias = ControlData13
+ControlSnapshotData: TypeAlias = ControlData9
+ControlActionAppliedData: TypeAlias = ControlData5
+ControlScreenFrameData: TypeAlias = ControlData10
+ControlStableSnapshotData: TypeAlias = ControlData11
+ControlScreenWaitData: TypeAlias = ControlData12
 DriverErrorResult: TypeAlias = DriverResult2
 DriverOkResult: TypeAlias = DriverResult1

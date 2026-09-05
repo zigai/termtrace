@@ -44,7 +44,7 @@
         "request_id": "00000000-0000-0000-0000-000000000003",
         "result": {
           "status": "error",
-          "code": "stale_state",
+          "code": "stale_observation",
           "message": "state changed",
           "retry_safety": "safe_new_request",
           "uncertain": false,

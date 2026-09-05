@@ -12,7 +12,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_ROOT = PACKAGE_ROOT.parents[1]
 GENERATED_ROOT = PACKAGE_ROOT / "termtrace" / "transport" / "generated"
 MODELS = (
-    ("driver-request.schema.json", "driver_request.py", False),
+    ("driver-request.schema.json", "driver_request.py", True),
     ("driver-response.schema.json", "driver_response.py", True),
 )
 
@@ -117,6 +117,8 @@ def _normalize(source: str, schema_name: str, add_aliases: bool) -> str:
         "DriverData": "Driver{tag}Data",
         "ControlData": "Control{tag}Data",
         "DriverResult": "Driver{tag}Result",
+        "ControlCommand": "Control{tag}Command",
+        "DriverMethod": "Driver{tag}Method",
     }
     for class_prefix, alias_template in alias_groups.items():
         pattern = re.compile(rf"class ({class_prefix}\d+)\(Struct,[^\n]*tag='([^']+)'[^\n]*\):")

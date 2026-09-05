@@ -191,6 +191,8 @@ pub enum DriverMethod {
         renderer: DriverScreenshotRenderer,
         /// Optional strict native viewport; absent runs the solver.
         viewport: Option<CaptureTarget>,
+        /// Maximum semantic screenshot artifact bytes, including its manifest; native requires absent.
+        max_bytes: Option<u64>,
     },
     /// Verify attached completed evidence without mutation.
     Verify {
@@ -207,6 +209,8 @@ pub enum DriverMethod {
         destination: PathBuf,
         /// Explicit sensitivity profile.
         profile: BundleProfile,
+        /// Maximum generated bundle bytes, including its manifest.
+        max_bytes: Option<u64>,
     },
     /// Release only the process-local handle.
     Detach {

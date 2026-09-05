@@ -111,6 +111,27 @@
         },
         {
           "additionalProperties": false,
+          "description": "Return actor-owned durable event-file positions for incremental following.",
+          "properties": {
+            "command": {
+              "const": "event_cursor",
+              "type": "string"
+            },
+            "next_event_seq": {
+              "description": "Requested next event; absent from retention when explicit historical reading is needed.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "command",
+            "next_event_seq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Return the latest presentation-eligible semantic viewport.",
           "properties": {
             "command": {
