@@ -158,8 +158,6 @@ export class Locator {
                 matchingState = undefined;
             }
             const remaining = deadline - observedAt;
-            if (remaining <= 0)
-                throw new LocatorTimeoutError(describe(this.spec), lastFrame.stateHash);
             await sleep(Math.min(intervalMs, remaining), undefined, { signal: options.signal });
         }
     }

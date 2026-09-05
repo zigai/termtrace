@@ -1,3 +1,5 @@
+import { setTimeout as sleep } from "node:timers/promises";
+
 import { describe, expect, test } from "bun:test";
 
 import { Duration, encodeAction, parseActionResult } from "../src/session/actions.js";
@@ -32,6 +34,7 @@ import {
     type ScreenRow,
 } from "../src/screen/frame.js";
 import { normalizeFrame } from "../src/screen/snapshots.js";
+import { StyleExpectation } from "../src/testing/vitest/matcher-input.js";
 
 const style: CellStyle = Object.freeze({
     foreground: Object.freeze({ kind: "none" }),
@@ -261,6 +264,37 @@ describe("rich frame queries", () => {
         expect(styled[0]?.ranges).toEqual([{ row: 0, startColumn: 0, endColumn: 2 }]);
     });
 
+    test("query and Vitest style boundaries preserve signed underline and color matching", () => {
+        const coloredAppearance: ScreenAppearance = Object.freeze({
+            ...appearance,
+            style: Object.freeze({
+                ...style,
+                underline: -1,
+                foreground: Object.freeze({ kind: "palette", value: 2 }),
+                underlineColor: Object.freeze({
+                    kind: "rgb",
+                    value: Object.freeze({ r: 4, g: 5, b: 6 }),
+                }),
+            }),
+            resolvedBackground: Object.freeze({ r: 1, g: 2, b: 3 }),
+        });
+        const frame = frameFor([
+            [{ grapheme: "x", appearance: coloredAppearance }, { grapheme: "y" }],
+        ]);
+        const input = {
+            underline: -1,
+            foreground: { kind: "palette", value: 2 },
+            background: "#010203",
+            underlineColor: { kind: "rgb", value: { r: 4, g: 5, b: 6 } },
+            resolvedForeground: null,
+        };
+        const filter = StyleExpectation.parse(input);
+        input.foreground.value = 3;
+        const matches = evaluateQuery(frame, styleQuery(filter));
+        expect(matches.map((match) => match.text)).toEqual(["x"]);
+        expect(matches[0]?.ranges).toEqual([{ row: 0, startColumn: 0, endColumn: 1 }]);
+    });
+
     test("intersects nested regions and rejects scopes outside returned evidence", () => {
         const frame = frameFor([
             [{ grapheme: "a" }, { grapheme: "b" }, { grapheme: "c" }, { grapheme: "d" }],
@@ -303,19 +337,31 @@ describe("lazy locator request accounting", () => {
     });
 
     test("wait requires an unchanged satisfying state and honors cancellation", async () => {
-        const frame = frameFor([[{ grapheme: "o" }, { grapheme: "k" }]], "stable-state");
-        let requests = 0;
+        const initial = frameFor([[{ grapheme: "o" }, { grapheme: "k" }]], "initial-state");
+        const final = frameFor([[{ grapheme: "o" }, { grapheme: "k" }]], "final-state");
+        const stableForMs = 80;
+        let initialReturned = false;
+        let finalObservedAt: number | undefined;
         const locator = new Locator(async () => {
-            requests += 1;
-            return frame;
+            if (!initialReturned) {
+                initialReturned = true;
+                return initial;
+            }
+            if (finalObservedAt === undefined) {
+                await sleep(stableForMs / 2);
+                finalObservedAt = performance.now();
+            }
+            return final;
         }, textQuery("ok"));
         const result = await locator.wait({
-            timeout: Duration.milliseconds(100),
+            timeout: Duration.seconds(2),
             interval: Duration.milliseconds(1),
-            stableFor: Duration.milliseconds(3),
+            stableFor: Duration.milliseconds(stableForMs),
         });
-        expect(result.frame).toBe(frame);
-        expect(requests).toBeGreaterThan(1);
+        const settledAt = performance.now();
+        expect(result.frame).toBe(final);
+        if (finalObservedAt === undefined) throw new Error("final state was not observed");
+        expect(settledAt - finalObservedAt).toBeGreaterThanOrEqual(stableForMs);
 
         const controller = new AbortController();
         controller.abort(new Error("cancelled locator wait"));
@@ -341,6 +387,13 @@ describe("Screen rich-frame requests", () => {
     test("forwards historical points and requires requested stability", async () => {
         const frame = frameFor([[{ grapheme: "o" }, { grapheme: "k" }]], "stable-state");
         const wire = wireFrame(frame);
+        const finalWire = wireFrame(
+            frameFor([[{ grapheme: "o" }, { grapheme: "k" }]], "final-state"),
+        );
+        const stableForMs = 80;
+        let waitingForStability = false;
+        let initialReturned = false;
+        let finalObservedAt: number | undefined;
         const requests: Array<Extract<SessionMethodFields, { readonly method: "screen_frame" }>> =
             [];
         const requestOptions: Array<{ readonly signal?: AbortSignal }> = [];
@@ -349,7 +402,7 @@ describe("Screen rich-frame requests", () => {
             control(): Promise<never> {
                 return Promise.reject(new Error("control is outside this screen test seam"));
             },
-            request<Kind extends DriverDataKind>(
+            async request<Kind extends DriverDataKind>(
                 methodFields: SessionMethodFields,
                 expectedKind: Kind,
                 options: DriverRequestOptions = {},
@@ -358,6 +411,18 @@ describe("Screen rich-frame requests", () => {
                     throw new Error("screen test received a non-frame request");
                 requests.push(methodFields);
                 requestOptions.push(options);
+                let captured = wire;
+                if (waitingForStability) {
+                    if (!initialReturned) {
+                        initialReturned = true;
+                    } else {
+                        if (finalObservedAt === undefined) {
+                            await sleep(stableForMs / 2);
+                            finalObservedAt = performance.now();
+                        }
+                        captured = finalWire;
+                    }
+                }
                 const requestId = "00000000-0000-0000-0000-000000000012";
                 const response = parseDriverResponse(
                     {
@@ -365,14 +430,14 @@ describe("Screen rich-frame requests", () => {
                         request_id: requestId,
                         result: {
                             status: "ok",
-                            data: { kind: "screen_frame", frame: wire },
+                            data: { kind: "screen_frame", frame: captured },
                         },
                     },
                     requestId,
                 );
                 if (response._tag === "Failure")
                     throw new Error("screen test response must be successful");
-                return Promise.resolve(expectDriverData(response.data, expectedKind));
+                return expectDriverData(response.data, expectedKind);
             },
         };
         const screen = new Screen(session);
@@ -390,13 +455,15 @@ describe("Screen rich-frame requests", () => {
         expect(requests[0]?.point).toEqual({ selector: "event_seq", event_seq: 7 });
         expect(requestOptions[0]?.signal).toBe(controller.signal);
 
-        requests.length = 0;
+        waitingForStability = true;
         const stable = await screen.waitForText("ok", {
-            timeoutMs: 100,
-            stableForMs: 3,
+            timeoutMs: 2_000,
+            stableForMs,
         });
-        expect(stable.stateHash).toBe("stable-state");
-        expect(requests.length).toBeGreaterThan(1);
+        const settledAt = performance.now();
+        expect(stable.stateHash).toBe("final-state");
+        if (finalObservedAt === undefined) throw new Error("final state was not observed");
+        expect(settledAt - finalObservedAt).toBeGreaterThanOrEqual(stableForMs);
     });
 
     test("preserves already-aborted wait cancellation without capturing", async () => {

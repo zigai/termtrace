@@ -1,4 +1,5 @@
 import { ResourceLimitError } from "../errors.js";
+import { materializeRow } from "./cells.js";
 import type {
     ColorSource,
     Rgb,
@@ -102,7 +103,7 @@ export function normalizeFrame(
                 softWrapped: row.softWrapped,
                 wrapContinuation: row.wrapContinuation,
                 text: row.text,
-                cells: row.cells ?? expandCells(row.row, row.spans),
+                cells: materializeRow(row),
             }),
         ),
     );
@@ -194,27 +195,4 @@ function equalNullableRgb(left: Rgb | null, right: Rgb | null): boolean {
 
 function equalRgb(left: Rgb, right: Rgb): boolean {
     return left.r === right.r && left.g === right.g && left.b === right.b;
-}
-
-function expandCells(
-    row: number,
-    spans: ScreenFrame["rows"][number]["spans"],
-): ReadonlyArray<ScreenCell> {
-    const cells: ScreenCell[] = [];
-    for (const span of spans) {
-        for (let index = 0; index < span.cells.length; index += 1) {
-            const cell = span.cells[index];
-            if (cell !== undefined)
-                cells.push(
-                    Object.freeze({
-                        row,
-                        column: span.startColumn + index,
-                        grapheme: cell.grapheme,
-                        wideKind: cell.wideKind,
-                        appearance: span.appearance,
-                    }),
-                );
-        }
-    }
-    return Object.freeze(cells);
 }

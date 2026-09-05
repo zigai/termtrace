@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import { basename, join, resolve } from "node:path";
 import { test, type TestContext } from "vitest";
 
 import type { Session } from "../../session/session.js";
 import { Termtrace } from "../../termtrace.js";
 import { closeAfterSetupFailure, finishHookTimeout, finishTerminalTest } from "./lifecycle.js";
+import { boundedPathPart, digest } from "./artifact-path.js";
 import type {
     CreateTerminalTestOptions,
     MutableArtifacts,
@@ -15,8 +15,6 @@ import type {
     TerminalTestFixtures,
     TerminalTestTask,
 } from "./types.js";
-
-const MAX_PATH_PART_LENGTH = 64;
 
 /**
  * Create an isolated Vitest API. The adapter starts no process until a runnable test's
@@ -146,15 +144,15 @@ function identifyTask(task: TestContext["task"]): TerminalTestTask {
         id: task.id,
         name: task.name,
         filePath: task.file.filepath,
-        worker: boundedTaskPart(workerSource),
+        worker: boundedPathPart(workerSource),
         retry,
         repeat,
     });
 }
 
 function evidenceRootFor(callerRoot: string, task: TerminalTestTask): string {
-    const moduleIdentity = `${boundedTaskPart(basename(task.filePath))}-${digest(task.filePath)}`;
-    const testIdentity = `${boundedTaskPart(task.name)}-${digest(task.id)}`;
+    const moduleIdentity = `${boundedPathPart(basename(task.filePath))}-${digest(task.filePath)}`;
+    const testIdentity = `${boundedPathPart(task.name)}-${digest(task.id)}`;
     return join(
         resolve(callerRoot),
         "vitest",
@@ -163,19 +161,6 @@ function evidenceRootFor(callerRoot: string, task: TerminalTestTask): string {
         testIdentity,
         `retry-${task.retry}-repeat-${task.repeat}`,
     );
-}
-
-function boundedTaskPart(value: string): string {
-    const normalized = value
-        .normalize("NFKC")
-        .replace(/[^A-Za-z0-9._-]+/gu, "-")
-        .replace(/^[._-]+|[._-]+$/gu, "");
-    const prefix = normalized.length === 0 ? "unnamed" : normalized.slice(0, MAX_PATH_PART_LENGTH);
-    return `${prefix}-${digest(value)}`;
-}
-
-function digest(value: string): string {
-    return createHash("sha256").update(value).digest("hex").slice(0, 12);
 }
 
 function validateOptions(options: CreateTerminalTestOptions): void {

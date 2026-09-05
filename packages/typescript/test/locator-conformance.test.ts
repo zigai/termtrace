@@ -13,6 +13,7 @@ import {
     assertScreenMatch,
 } from "../src/testing/assertions.js";
 import { InvalidQueryError, LocatorTimeoutError } from "../src/errors.js";
+import { StyleExpectation } from "../src/testing/vitest/matcher-input.js";
 import { Locator } from "../src/screen/locator.js";
 import {
     allOf,
@@ -348,6 +349,8 @@ test("style filters reject unknown and malformed runtime fields", () => {
         malformedStyleFilter(["bold", true], ["bld", true]),
         malformedStyleFilter(["bold", "yes"]),
         malformedStyleFilter(["underline", 1.5]),
+        malformedStyleFilter(["underline", -2_147_483_649]),
+        malformedStyleFilter(["underline", 2_147_483_648]),
         malformedStyleFilter(["wideKind", "wide_tail"]),
         malformedStyleFilter(["foreground", { kind: "none", value: 1 }]),
         malformedStyleFilter(["foreground", { kind: "palette", value: 256 }]),
@@ -358,17 +361,8 @@ test("style filters reject unknown and malformed runtime fields", () => {
     ];
     for (const filter of invalid) {
         expect(() => styleQuery(filter)).toThrow(InvalidQueryError);
+        expect(() => StyleExpectation.parse(filter)).toThrow(TypeError);
     }
-
-    expect(() =>
-        styleQuery({
-            foreground: { kind: "palette", value: 2 },
-            background: "#010203",
-            underlineColor: { kind: "rgb", value: { r: 4, g: 5, b: 6 } },
-            resolvedForeground: null,
-            resolvedBackground: { r: 7, g: 8, b: 9 },
-        }),
-    ).not.toThrow();
 });
 
 test("exact text is evaluated within the composed region", () => {

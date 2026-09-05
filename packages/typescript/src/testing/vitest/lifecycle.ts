@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import { lstat, mkdir, rm } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
 import type { Session } from "../../session/session.js";
 import type { Termtrace } from "../../termtrace.js";
 import type { FailureArtifactOptions, MutableArtifacts } from "./types.js";
+import { boundedPathPart } from "./artifact-path.js";
 
 const DEFAULT_SCREENSHOT_BYTES = 4 * 1024 * 1024;
 const FINISH_HOOK_OVERHEAD_MS = 5_000;
@@ -143,7 +143,7 @@ async function captureFailureArtifacts(
     const failures: unknown[] = [];
     const artifactRoot = join(
         evidenceRoot,
-        `session-${boundedArtifactPart(session.sessionId)}`,
+        `session-${boundedPathPart(session.sessionId)}`,
         "failure",
     );
     await collectFailure(failures, async () =>
@@ -299,17 +299,4 @@ function artifactDiagnostic(artifacts: MutableArtifacts | undefined): string {
         artifacts.bundle === undefined ? undefined : `Failure bundle: ${artifacts.bundle}`,
     ].filter((value): value is string => value !== undefined);
     return values.join("\n").slice(0, 2048);
-}
-
-function boundedArtifactPart(value: string): string {
-    const normalized = value
-        .normalize("NFKC")
-        .replace(/[^A-Za-z0-9._-]+/gu, "-")
-        .replace(/^[._-]+|[._-]+$/gu, "");
-    const prefix = normalized.length === 0 ? "unnamed" : normalized.slice(0, 64);
-    return `${prefix}-${digest(value)}`;
-}
-
-function digest(value: string): string {
-    return createHash("sha256").update(value).digest("hex").slice(0, 12);
 }

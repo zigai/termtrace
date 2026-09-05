@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StyleFilter",
+  "type": "object",
+  "additionalProperties": false,
+  "minProperties": 1,
+  "properties": {
+    "bold": { "type": "boolean" },
+    "faint": { "type": "boolean" },
+    "italic": { "type": "boolean" },
+    "blink": { "type": "boolean" },
+    "inverse": { "type": "boolean" },
+    "invisible": { "type": "boolean" },
+    "strikethrough": { "type": "boolean" },
+    "overline": { "type": "boolean" },
+    "underline": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+    "selected": { "type": "boolean" },
+    "wideKind": { "enum": ["narrow", "wide", "spacer_tail", "spacer_head"] },
+    "foreground": { "$ref": "#/$defs/colorMatcher" },
+    "background": { "$ref": "#/$defs/colorMatcher" },
+    "underlineColor": { "$ref": "#/$defs/colorSource" },
+    "resolvedForeground": { "$ref": "#/$defs/resolvedColor" },
+    "resolvedBackground": { "$ref": "#/$defs/resolvedColor" }
+  },
+  "$defs": {
+    "byte": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "hex": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+    "rgb": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["r", "g", "b"],
+      "properties": {
+        "r": { "$ref": "#/$defs/byte" },
+        "g": { "$ref": "#/$defs/byte" },
+        "b": { "$ref": "#/$defs/byte" }
+      }
+    },
+    "colorSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "none" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": { "const": "palette" },
+            "value": { "$ref": "#/$defs/byte" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": { "const": "rgb" },
+            "value": { "$ref": "#/$defs/rgb" }
+          }
+        }
+      ]
+    },
+    "colorMatcher": {
+      "oneOf": [{ "$ref": "#/$defs/colorSource" }, { "$ref": "#/$defs/hex" }]
+    },
+    "resolvedColor": {
+      "oneOf": [{ "$ref": "#/$defs/rgb" }, { "$ref": "#/$defs/hex" }, { "type": "null" }]
+    }
+  }
+}

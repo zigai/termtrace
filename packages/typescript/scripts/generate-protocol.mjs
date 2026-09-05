@@ -94,3 +94,33 @@ for (const contract of contracts) {
         }
     }
 }
+
+const styleSchemaPath = resolve(packageRoot, "src/screen/style-filter.schema.json");
+const styleSchema = JSON.parse(await readFile(styleSchemaPath, "utf8"));
+const styleAjv = new Ajv2020({
+    allErrors: false,
+    code: { esm: true, lines: true, source: true },
+    strict: true,
+    validateFormats: false,
+});
+const validateStyle = styleAjv.compile(styleSchema);
+const styleBundle = await build({
+    bundle: true,
+    format: "esm",
+    legalComments: "none",
+    minify: true,
+    platform: "node",
+    stdin: {
+        contents: standaloneCode(styleAjv, validateStyle),
+        loader: "js",
+        resolveDir: packageRoot,
+        sourcefile: "validate-style-filter.js",
+    },
+    write: false,
+});
+const styleOutput = styleBundle.outputFiles[0];
+if (styleOutput === undefined) throw new Error("esbuild produced no style-filter validator");
+await writeFile(
+    resolve(outputDirectory, "validate-style-filter.ts"),
+    `/* Generated from src/screen/style-filter.schema.json. DO NOT EDIT. */\n// @ts-nocheck -- generated and bundled Ajv validator code\n${styleOutput.text}`,
+);

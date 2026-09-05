@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "vitest";
+import { afterAll, expect } from "vitest";
 import { createTerminalTest } from "@termtrace/test/vitest";
 
 const evidenceRoot = process.env.TERMTRACE_TEST_EVIDENCE_ROOT;
@@ -61,8 +61,4 @@ terminalTest("isolates retry evidence", { retry: 1 }, async ({ evidenceRoot: att
 
 afterAll(() => {
     expect(new Set(parallelSessions).size).toBe(2);
-});
-
-test("ordinary Vitest remains available", () => {
-    expect(true).toBe(true);
 });

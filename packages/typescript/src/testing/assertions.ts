@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { Duration } from "../session/actions.js";
 import type { Session } from "../session/session.js";
 import { NoMatchError, MultipleMatchesError } from "../errors.js";
+import { cellContentIsNeutral, materializeRow } from "../screen/cells.js";
 import {
     evaluateQuery,
     matchHasStyle,
@@ -126,7 +127,9 @@ export function assertNoWrappedRows(frame: ScreenFrame): void {
 export function assertNeutralRegion(frame: ScreenFrame, region: Region): void {
     evaluateQuery(frame, regionQuery(region));
     const cells = cellsInRegion(frame, region);
-    const nonNeutral = cells.filter((cell) => !isNeutral(cell)).length;
+    const nonNeutral = cells.filter(
+        (cell) => !cellContentIsNeutral(cell.grapheme, cell.wideKind, cell.appearance),
+    ).length;
     const expected = region.width * region.height;
     if (cells.length !== expected || nonNeutral > 0) {
         throw new AssertionMismatchError(
@@ -223,56 +226,13 @@ function cellsInRegion(frame: ScreenFrame, region: Region): ScreenCell[] {
     const right = region.left + region.width;
     for (const row of frame.rows) {
         if (row.row < region.top || row.row >= bottom) continue;
-        if (row.cells !== null) {
-            cells.push(
-                ...row.cells.filter((cell) => cell.column >= region.left && cell.column < right),
-            );
-            continue;
-        }
-        for (const span of row.spans) {
-            for (let offset = 0; offset < span.cells.length; offset += 1) {
-                const cell = span.cells[offset];
-                const column = span.startColumn + offset;
-                if (cell !== undefined && column >= region.left && column < right) {
-                    cells.push(
-                        Object.freeze({
-                            row: row.row,
-                            column,
-                            grapheme: cell.grapheme,
-                            wideKind: cell.wideKind,
-                            appearance: span.appearance,
-                        }),
-                    );
-                }
-            }
-        }
+        cells.push(
+            ...materializeRow(row).filter(
+                (cell) => cell.column >= region.left && cell.column < right,
+            ),
+        );
     }
     return cells;
-}
-
-function isNeutral(cell: ScreenCell): boolean {
-    const style = cell.appearance.style;
-    return (
-        (cell.grapheme === "" || cell.grapheme === " ") &&
-        (cell.wideKind === "narrow" ||
-            cell.wideKind === "spacer_head" ||
-            cell.wideKind === "spacer_tail") &&
-        style.foreground.kind === "none" &&
-        style.background.kind === "none" &&
-        style.underlineColor.kind === "none" &&
-        !style.bold &&
-        !style.faint &&
-        !style.italic &&
-        style.underline === 0 &&
-        !style.blink &&
-        !style.inverse &&
-        !style.invisible &&
-        !style.strikethrough &&
-        !style.overline &&
-        !cell.appearance.selected &&
-        cell.appearance.resolvedForeground === null &&
-        cell.appearance.resolvedBackground === null
-    );
 }
 
 function assertCursorField(

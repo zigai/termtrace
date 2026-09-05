@@ -167,8 +167,22 @@ export function normalizeInputAtoms(
 ): ReadonlyArray<WireInputSequenceAtom> {
     if (atoms.length < 1 || atoms.length > 4096)
         throw new InvalidAtomError("input must contain 1 through 4096 atoms");
+    const match = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-)([0-9a-f]{12})$/iu.exec(
+        requestId,
+    );
+    const prefix = match?.[1];
+    const tail = match?.[2];
+    if (prefix === undefined || tail === undefined)
+        throw new InvalidAtomError("requestId must be a UUID");
+    const suffix = BigInt(`0x${tail}`);
     return Object.freeze(
-        atoms.map((atom, index) => encodeAtom(atom, operationId(requestId, index), callerIntent)),
+        atoms.map((atom, index) =>
+            encodeAtom(
+                atom,
+                `${prefix}${(suffix ^ BigInt(index + 1)).toString(16).padStart(12, "0")}`,
+                callerIntent,
+            ),
+        ),
     );
 }
 
@@ -392,16 +406,6 @@ function normalizeKey(key: KeyInput): KeyInput {
     if (key.letter.length === 0 || Array.from(key.letter).length !== 1)
         throw new InvalidAtomError("letter key must contain exactly one Unicode scalar");
     return Object.freeze({ letter: key.letter });
-}
-function operationId(requestId: string, index: number): string {
-    const match = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-)([0-9a-f]{12})$/iu.exec(
-        requestId,
-    );
-    const prefix = match?.[1];
-    const tail = match?.[2];
-    if (prefix === undefined || tail === undefined)
-        throw new InvalidAtomError("requestId must be a UUID");
-    return `${prefix}${(BigInt(`0x${tail}`) ^ BigInt(index + 1)).toString(16).padStart(12, "0")}`;
 }
 
 type WireActionResult = Extract<ControlResult, { readonly kind: "action_applied" }>;

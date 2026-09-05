@@ -1,50 +1,18 @@
-import type { ColorSource, Rgb, WideKind } from "../../screen/frame.js";
+import { InvalidQueryError } from "../../errors.js";
+import { StyleFilterInput } from "../../screen/style-filter.js";
 import type { StyleFilter } from "../../screen/queries.js";
 import type { SnapshotOptions, SnapshotProfile } from "../../screen/snapshots.js";
 import type { TerminalCursorExpectation } from "./types.js";
 
 type Mutable<Value> = { -readonly [Key in keyof Value]: Value[Key] };
 type MatcherExpectationSource = {
-    readonly background?: unknown;
-    readonly blink?: unknown;
-    readonly bold?: unknown;
     readonly column?: unknown;
-    readonly faint?: unknown;
-    readonly foreground?: unknown;
     readonly includeCursor?: unknown;
     readonly includeModes?: unknown;
-    readonly inverse?: unknown;
-    readonly invisible?: unknown;
-    readonly italic?: unknown;
-    readonly b?: unknown;
-    readonly kind?: unknown;
     readonly maxCells?: unknown;
-    readonly overline?: unknown;
-    readonly g?: unknown;
-    readonly resolvedBackground?: unknown;
-    readonly resolvedForeground?: unknown;
     readonly row?: unknown;
-    readonly selected?: unknown;
-    readonly strikethrough?: unknown;
-    readonly r?: unknown;
-    readonly underline?: unknown;
-    readonly underlineColor?: unknown;
-    readonly value?: unknown;
     readonly visible?: unknown;
-    readonly wideKind?: unknown;
 };
-
-const BOOLEAN_STYLE_FIELDS = [
-    "bold",
-    "faint",
-    "italic",
-    "blink",
-    "inverse",
-    "invisible",
-    "strikethrough",
-    "overline",
-    "selected",
-] as const;
 
 export const TextExpectation = {
     parse(input: unknown): string | RegExp {
@@ -91,37 +59,14 @@ export const CountExpectation = {
 
 export const StyleExpectation = {
     parse(input: unknown): StyleFilter {
-        const value = MatcherExpectationSource.parse(input, "style expectation");
-        const wideKind = OptionalWideKind.parse(value.wideKind);
-        const underline = OptionalNonnegativeInteger.parse(value.underline, "underline");
-        const foreground = OptionalColorMatcher.parse(value.foreground, "foreground");
-        const background = OptionalColorMatcher.parse(value.background, "background");
-        const underlineColor = OptionalColorSource.parse(value.underlineColor, "underline");
-        const resolvedForeground = OptionalRgbMatcher.parse(
-            value.resolvedForeground,
-            "resolved foreground",
-        );
-        const resolvedBackground = OptionalRgbMatcher.parse(
-            value.resolvedBackground,
-            "resolved background",
-        );
-        const expectation: Mutable<StyleFilter> = {};
-        for (const field of BOOLEAN_STYLE_FIELDS) {
-            const fieldValue = OptionalBoolean.parse(value[field], field);
-            if (fieldValue !== undefined) expectation[field] = fieldValue;
+        try {
+            return StyleFilterInput.parse(input);
+        } catch (cause) {
+            if (cause instanceof InvalidQueryError) {
+                throw new TypeError(cause.message, { cause });
+            }
+            throw cause;
         }
-        if (underline !== undefined) expectation.underline = underline;
-        if (wideKind !== undefined) expectation.wideKind = wideKind;
-        if (foreground !== undefined) expectation.foreground = foreground;
-        if (background !== undefined) expectation.background = background;
-        if (underlineColor !== undefined) expectation.underlineColor = underlineColor;
-        if (resolvedForeground !== undefined) {
-            expectation.resolvedForeground = resolvedForeground;
-        }
-        if (resolvedBackground !== undefined) {
-            expectation.resolvedBackground = resolvedBackground;
-        }
-        return Object.freeze(expectation);
     },
 };
 
@@ -204,109 +149,5 @@ const OptionalNonnegativeInteger = {
             throw new TypeError(`${label} must be a nonnegative safe integer`);
         }
         return value;
-    },
-};
-
-const OptionalWideKind = {
-    parse(input: unknown): WideKind | undefined {
-        if (input === undefined) {
-            return undefined;
-        }
-        if (
-            input === "narrow" ||
-            input === "wide" ||
-            input === "spacer_tail" ||
-            input === "spacer_head"
-        ) {
-            return input;
-        }
-        throw new TypeError("wideKind has an unknown value");
-    },
-};
-
-const OptionalColorMatcher = {
-    parse(input: unknown, label: string): ColorSource | `#${string}` | undefined {
-        if (input instanceof Object) {
-            return OptionalColorSource.parse(input, label);
-        }
-        const stringValue = String(input);
-        if (input === stringValue) {
-            return parseHexColor(stringValue, label);
-        }
-        return OptionalColorSource.parse(input, label);
-    },
-};
-
-const OptionalRgbMatcher = {
-    parse(input: unknown, label: string): Rgb | `#${string}` | null | undefined {
-        if (input instanceof Object) {
-            return OptionalRgb.parse(input, label);
-        }
-        const stringValue = String(input);
-        if (input === stringValue) {
-            return parseHexColor(stringValue, label);
-        }
-        return OptionalRgb.parse(input, label);
-    },
-};
-
-function parseHexColor(input: string, label: string): `#${string}` {
-    if (!/^#[0-9a-fA-F]{6}$/u.test(input)) {
-        throw new TypeError(`${label} must use #RRGGBB syntax`);
-    }
-    // SAFETY: the anchored expression proves the complete #RRGGBB representation;
-    // TypeScript cannot derive a template-literal type from a regular-expression match.
-    return input as `#${string}`;
-}
-
-const OptionalColorSource = {
-    parse(input: unknown, label: string): ColorSource | undefined {
-        if (input === undefined) {
-            return undefined;
-        }
-        const value = MatcherExpectationSource.parse(input, `${label} color`);
-        if (value.kind === "none") {
-            return Object.freeze({ kind: "none" });
-        }
-        if (value.kind === "palette") {
-            const index = OptionalNonnegativeInteger.parse(value.value, `${label} palette index`);
-            if (index === undefined || index > 255) {
-                throw new TypeError(`${label} palette index must be between 0 and 255`);
-            }
-            return Object.freeze({ kind: "palette", value: index });
-        }
-        if (value.kind === "rgb") {
-            return Object.freeze({ kind: "rgb", value: RgbExpectation.parse(value.value, label) });
-        }
-        throw new TypeError(`${label} color kind is invalid`);
-    },
-};
-
-const OptionalRgb = {
-    parse(input: unknown, label: string): Rgb | null | undefined {
-        if (input === undefined || input === null) {
-            return input;
-        }
-        return RgbExpectation.parse(input, label);
-    },
-};
-
-const RgbExpectation = {
-    parse(input: unknown, label: string): Rgb {
-        const value = MatcherExpectationSource.parse(input, label);
-        const red = OptionalNonnegativeInteger.parse(value.r, `${label} red`);
-        const green = OptionalNonnegativeInteger.parse(value.g, `${label} green`);
-        const blue = OptionalNonnegativeInteger.parse(value.b, `${label} blue`);
-        if (
-            red === undefined ||
-            green === undefined ||
-            blue === undefined ||
-            red > 255 ||
-            green > 255 ||
-            blue > 255
-        ) {
-            throw new TypeError(`${label} RGB channels must be bytes`);
-        }
-        return Object.freeze({ r: red, g: green, b: blue });
     },
 };

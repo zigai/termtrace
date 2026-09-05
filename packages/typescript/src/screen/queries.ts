@@ -1,5 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { InvalidQueryError, InvalidRegionError, ResourceLimitError } from "../errors.js";
+import { StyleFilterInput } from "./style-filter.js";
+import { materializeRow } from "./cells.js";
 import type {
     ColorSource,
     Region,
@@ -59,35 +61,6 @@ export type ScreenMatch = {
 const MAX_DESCRIPTION = 256;
 const MAX_EXCERPT = 320;
 const MAX_MATCHES = 10_000;
-const STYLE_FILTER_FIELDS: Readonly<Record<keyof StyleFilter, true>> = Object.freeze({
-    bold: true,
-    faint: true,
-    italic: true,
-    blink: true,
-    inverse: true,
-    invisible: true,
-    strikethrough: true,
-    overline: true,
-    underline: true,
-    selected: true,
-    wideKind: true,
-    foreground: true,
-    background: true,
-    underlineColor: true,
-    resolvedForeground: true,
-    resolvedBackground: true,
-});
-const BOOLEAN_STYLE_FILTER_FIELDS = [
-    "bold",
-    "faint",
-    "italic",
-    "blink",
-    "inverse",
-    "invisible",
-    "strikethrough",
-    "overline",
-    "selected",
-] as const;
 
 export function textQuery(
     query: TextQuery,
@@ -280,63 +253,10 @@ function evaluateComposition(
     if (text !== undefined) {
         const matches = evaluateText(frame, text, description, region);
         if (style === undefined) return matches;
-        return matches.filter((match) => matchSatisfies(frame, match, style));
+        return matches.filter((match) => matchHasStyle(match, style.style));
     }
     if (style !== undefined) return evaluateStyle(frame, style.style, description, region);
     return region === undefined ? [] : evaluateArea(frame, region, description);
-}
-
-function matchSatisfies(frame: ScreenFrame, match: ScreenMatch, spec: LocatorSpec): boolean {
-    switch (spec.kind) {
-        case "row":
-            return match.ranges.every((range) => range.row === spec.row);
-        case "region": {
-            const bottom = spec.region.top + spec.region.height;
-            const right = spec.region.left + spec.region.width;
-            return match.ranges.every(
-                (range) =>
-                    range.row >= spec.region.top &&
-                    range.row < bottom &&
-                    range.startColumn >= spec.region.left &&
-                    range.endColumn <= right,
-            );
-        }
-        case "style": {
-            const parsedFilter = parseStyleFilter(spec.style);
-            const cells = cellsForMatch(frame, match).filter(
-                (cell) =>
-                    cell.wideKind === "narrow" ||
-                    cell.wideKind === "wide" ||
-                    spec.style.wideKind === cell.wideKind,
-            );
-            return cells.length > 0 && cells.every((cell) => matchesStyle(cell, parsedFilter));
-        }
-        case "text":
-            return findTextMatches(match.text, spec.query, spec.exact === true).length > 0;
-        case "all":
-            return spec.specs.every((nested) => matchSatisfies(frame, match, nested));
-    }
-}
-
-function materializeRow(row: ScreenRow): ReadonlyArray<ScreenCell> {
-    if (row.cells !== null) return row.cells;
-    const cells: ScreenCell[] = [];
-    for (const span of row.spans) {
-        for (let index = 0; index < span.cells.length; index += 1) {
-            const spanCell = span.cells[index];
-            if (spanCell === undefined) continue;
-            cells.push(
-                Object.freeze({
-                    row: row.row,
-                    column: span.startColumn + index,
-                    grapheme: spanCell.grapheme,
-                    wideKind: spanCell.wideKind,
-                    appearance: span.appearance,
-                }),
-            );
-        }
-    }
-    return cells;
 }
 
 type TextUnit = {
@@ -532,148 +452,35 @@ type ParsedStyleFilter = {
     readonly resolvedBackground: Rgb | null | undefined;
 };
 
-function parseStyleFilter(style: StyleFilter): ParsedStyleFilter {
-    if (style === undefined || style === null || Array.isArray(style))
-        throw new InvalidQueryError("style query must be an object");
-    const values = Object.fromEntries(Object.entries(style));
-    const fields = Object.keys(values);
-    if (fields.length === 0)
-        throw new InvalidQueryError("style query must contain at least one filter");
-    const unknownField = fields.find((field) => !Object.hasOwn(STYLE_FILTER_FIELDS, field));
-    if (unknownField !== undefined)
-        throw new InvalidQueryError(`unknown style filter field ${unknownField}`);
-    const undefinedField = fields.find((field) => values[field] === undefined);
-    if (undefinedField !== undefined)
-        throw new InvalidQueryError(`${undefinedField} style filter must not be undefined`);
-    for (const field of BOOLEAN_STYLE_FILTER_FIELDS) {
-        const value = values[field];
-        if (value !== undefined && value !== true && value !== false)
-            throw new InvalidQueryError(`${field} style filter must be boolean`);
-    }
-    const underline = values.underline;
-    const parsedUnderline = Number(underline);
-    if (
-        underline !== undefined &&
-        (!Number.isSafeInteger(parsedUnderline) ||
-            parsedUnderline !== underline ||
-            parsedUnderline < -2_147_483_648 ||
-            parsedUnderline > 2_147_483_647)
-    )
-        throw new InvalidQueryError("underline style filter must be a signed 32-bit integer");
-    const wideKind = values.wideKind;
-    if (
-        wideKind !== undefined &&
-        wideKind !== "narrow" &&
-        wideKind !== "wide" &&
-        wideKind !== "spacer_tail" &&
-        wideKind !== "spacer_head"
-    )
-        throw new InvalidQueryError("wideKind style filter is invalid");
-
-    const foreground = parseColorMatcher(style.foreground, "foreground");
-    const background = parseColorMatcher(style.background, "background");
-    if (style.underlineColor !== undefined)
-        colorSourceSchema.parse(style.underlineColor, "underlineColor");
+function parseStyleFilter(input: StyleFilter): ParsedStyleFilter {
+    const style = StyleFilterInput.parse(input);
+    const foreground = parseColorMatcher(style.foreground);
+    const background = parseColorMatcher(style.background);
     return Object.freeze({
         filter: style,
         sourceForeground: foreground.source,
         sourceBackground: background.source,
-        resolvedForeground:
-            foreground.resolved ??
-            parseResolvedColor(style.resolvedForeground, "resolvedForeground"),
-        resolvedBackground:
-            background.resolved ??
-            parseResolvedColor(style.resolvedBackground, "resolvedBackground"),
+        resolvedForeground: foreground.resolved ?? parseResolvedColor(style.resolvedForeground),
+        resolvedBackground: background.resolved ?? parseResolvedColor(style.resolvedBackground),
     });
 }
 
-const rgbSchema = Object.freeze({
-    parse(value: unknown, field: string): Rgb {
-        if (value === null || Array.isArray(value))
-            throw new InvalidQueryError(`${field} style filter must be an RGB color`);
-        const channels = Object.fromEntries(Object.entries(Object(value)));
-        const r = Number(channels.r);
-        const g = Number(channels.g);
-        const b = Number(channels.b);
-        if (
-            Object.keys(channels).length !== 3 ||
-            !Number.isSafeInteger(r) ||
-            r !== channels.r ||
-            r < 0 ||
-            r > 255 ||
-            !Number.isSafeInteger(g) ||
-            g !== channels.g ||
-            g < 0 ||
-            g > 255 ||
-            !Number.isSafeInteger(b) ||
-            b !== channels.b ||
-            b < 0 ||
-            b > 255
-        )
-            throw new InvalidQueryError(`${field} RGB color must contain integer r, g, b channels`);
-        return Object.freeze({ r, g, b });
-    },
-});
-
-const colorSourceSchema = Object.freeze({
-    parse(value: unknown, field: string): ColorSource {
-        if (value === null || Array.isArray(value))
-            throw new InvalidQueryError(`${field} style filter must be a color source`);
-        const source = Object.fromEntries(Object.entries(Object(value)));
-        if (source.kind === "none") {
-            if (Object.keys(source).length !== 1)
-                throw new InvalidQueryError(`${field} none color source has unknown fields`);
-            return Object.freeze({ kind: "none" });
-        }
-        if (source.kind === "palette") {
-            const palette = Number(source.value);
-            if (
-                Object.keys(source).length !== 2 ||
-                !Number.isSafeInteger(palette) ||
-                palette !== source.value ||
-                palette < 0 ||
-                palette > 255
-            )
-                throw new InvalidQueryError(`${field} palette color source is invalid`);
-            return Object.freeze({ kind: "palette", value: palette });
-        }
-        if (source.kind === "rgb") {
-            if (Object.keys(source).length !== 2)
-                throw new InvalidQueryError(`${field} RGB color source has unknown fields`);
-            return Object.freeze({ kind: "rgb", value: rgbSchema.parse(source.value, field) });
-        }
-        throw new InvalidQueryError(`${field} color source kind is invalid`);
-    },
-});
-
-function parseColorMatcher(
-    value: ColorSource | `#${string}` | undefined,
-    field: string,
-): ParsedColorMatcher {
+function parseColorMatcher(value: ColorSource | `#${string}` | undefined): ParsedColorMatcher {
     if (value === undefined) return Object.freeze({ source: undefined, resolved: undefined });
-    const fields = Object.fromEntries(Object.entries(value));
-    if (fields.kind === undefined)
-        return Object.freeze({ source: undefined, resolved: parseHexRgb(String(value)) });
+    if (!(value instanceof Object))
+        return Object.freeze({ source: undefined, resolved: parseHexRgb(value) });
     return Object.freeze({
-        source: colorSourceSchema.parse(value, field),
+        source: value,
         resolved: undefined,
     });
 }
 
-function parseResolvedColor(
-    value: Rgb | `#${string}` | null | undefined,
-    field: string,
-): Rgb | null | undefined {
+function parseResolvedColor(value: Rgb | `#${string}` | null | undefined): Rgb | null | undefined {
     if (value === undefined || value === null) return value;
-    const fields = Object.fromEntries(Object.entries(value));
-    if (Object.hasOwn(fields, "r") || Object.hasOwn(fields, "g") || Object.hasOwn(fields, "b"))
-        return rgbSchema.parse(value, field);
-    return parseHexRgb(String(value));
+    return value instanceof Object ? value : parseHexRgb(value);
 }
 
 function parseHexRgb(value: string): Rgb {
-    if (!/^#[0-9a-fA-F]{6}$/u.test(value))
-        throw new InvalidQueryError("resolved colors must use #RRGGBB syntax");
     return Object.freeze({
         r: Number.parseInt(value.slice(1, 3), 16),
         g: Number.parseInt(value.slice(3, 5), 16),

@@ -1,7 +1,8 @@
 import { Snapshots, type MatcherState } from "vitest";
 
 import { MultipleMatchesError, NoMatchError } from "../../errors.js";
-import { ScreenFrame, type ScreenCell, type WideKind } from "../../screen/frame.js";
+import { ScreenFrame } from "../../screen/frame.js";
+import { cellContentIsNeutral } from "../../screen/cells.js";
 import { Locator } from "../../screen/locator.js";
 import { allOf, evaluateQuery, styleQuery, type ScreenMatch } from "../../screen/queries.js";
 import { Screen } from "../../screen/screen.js";
@@ -347,31 +348,4 @@ function matchIsNeutral(match: ScreenMatch): boolean {
         }
     }
     return true;
-}
-
-function cellContentIsNeutral(
-    grapheme: string,
-    wideKind: WideKind,
-    appearance: ScreenCell["appearance"],
-): boolean {
-    const style = appearance.style;
-    return (
-        (grapheme === "" || grapheme === " ") &&
-        (wideKind === "narrow" || wideKind === "spacer_head" || wideKind === "spacer_tail") &&
-        style.foreground.kind === "none" &&
-        style.background.kind === "none" &&
-        style.underlineColor.kind === "none" &&
-        !style.bold &&
-        !style.faint &&
-        !style.italic &&
-        !style.blink &&
-        !style.inverse &&
-        !style.invisible &&
-        !style.strikethrough &&
-        !style.overline &&
-        style.underline === 0 &&
-        !appearance.selected &&
-        appearance.resolvedForeground === null &&
-        appearance.resolvedBackground === null
-    );
 }
