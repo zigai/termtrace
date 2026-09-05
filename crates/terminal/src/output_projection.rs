@@ -91,10 +91,7 @@ impl ControlStripper {
             }
             StripState::Csi => {
                 self.push_control(byte);
-                if byte == 0x18 || byte == 0x1a {
-                    self.finish_control();
-                    self.state = StripState::Ground;
-                } else if (0x40..=0x7e).contains(&byte) {
+                if byte == 0x18 || byte == 0x1a || (0x40..=0x7e).contains(&byte) {
                     self.finish_control();
                     self.state = StripState::Ground;
                 }
@@ -131,10 +128,7 @@ impl ControlStripper {
             }
             StripState::OscEscape | StripState::StringEscape => {
                 self.push_control(byte);
-                if byte == b'\\' {
-                    self.finish_control();
-                    self.state = StripState::Ground;
-                } else if byte == 0x18 || byte == 0x1a {
+                if byte == b'\\' || byte == 0x18 || byte == 0x1a {
                     self.finish_control();
                     self.state = StripState::Ground;
                 } else {
