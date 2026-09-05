@@ -153,7 +153,7 @@ jobs:
           shared-key: deep-concurrency-model
       - name: Bootstrap pinned Ghostty
         run: scripts/bootstrap.sh
-      - run: cargo test --locked -p termtrace-engine connection_limiter_model_never_oversubscribes_or_leaks -- --ignored
+      - run: cargo test --locked -p termtrace-engine connection_limiter
 
   coverage:
     if: >-

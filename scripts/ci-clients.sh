@@ -7,8 +7,8 @@ cd "$root"
 bun install --cwd packages/typescript --frozen-lockfile
 scripts/generate-client-protocol.sh
 git diff --exit-code -- \
-    packages/python/termtrace/_generated \
-    packages/typescript/src/generated
+    packages/python/termtrace/transport/generated \
+    packages/typescript/src/transport/generated
 
 bun run --cwd packages/typescript format:check
 bun run --cwd packages/typescript lint

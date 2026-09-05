@@ -5,7 +5,7 @@ source "$(dirname "$0")/lib.sh"
 
 umask 077
 require_demo_tools jq ffmpeg ffprobe ghostty python3 Xvfb dbus-run-session
-build_termtrace
+cargo build --manifest-path "$DEMO_REPO_ROOT/Cargo.toml" --locked --release
 
 OUTPUT_ROOT=${1:-"$DEMO_REPO_ROOT/demo-artifacts"}
 DEMO_DIRECTORY=$OUTPUT_ROOT/showcase

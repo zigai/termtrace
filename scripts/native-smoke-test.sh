@@ -499,28 +499,41 @@ check_less_than() {
     return 1
 }
 
-check_files_differ() {
+check_pixels_differ() {
     local id="$1"
     local left="$2"
     local right="$3"
-    local status
-    if cmp -s "$left" "$right"; then
+    local status pixels
+    pixels="$(mktemp -d)" || return 1
+    if ! ffmpeg -v error -i "$left" -frames:v 1 -f rawvideo -pix_fmt rgb24 \
+        "$pixels/left.rgb" >>"$log" 2>&1 ||
+        ! ffmpeg -v error -i "$right" -frames:v 1 -f rawvideo -pix_fmt rgb24 \
+            "$pixels/right.rgb" >>"$log" 2>&1; then
+        rm -rf "$pixels"
         failed_check="$id"
-        failed_expected="files have different content"
-        failed_observed="files are byte-identical"
+        failed_expected="two decodable screenshots"
+        failed_observed="screenshot pixel decoding failed"
         failed_file="$left and $right"
         return 1
+    fi
+    if cmp -s "$pixels/left.rgb" "$pixels/right.rgb"; then
+        status=0
     else
         status=$?
     fi
+    rm -rf "$pixels"
     if [[ "$status" == 1 ]]; then
         printf '[check:%s] pass\n' "$id" >>"$log"
         clear_failed_check
         return 0
     fi
     failed_check="$id"
-    failed_expected="two readable files with different content"
-    failed_observed="cmp failed with status $status"
+    failed_expected="screenshots have different decoded pixels"
+    if [[ "$status" == 0 ]]; then
+        failed_observed="screenshots have identical decoded pixels"
+    else
+        failed_observed="pixel comparison failed with status $status"
+    fi
     failed_file="$left and $right"
     return 1
 }
@@ -796,7 +809,7 @@ validate_smoke_artifacts() {
       ] - $directories | length == 0)
     ' "catalog includes the five expected full, ranged, and point-capture artifact roots" \
         '{count: length, directories: map(.artifact_directory)}' slurp
-    check_files_differ "full_and_range_screenshots_differ" \
+    check_pixels_differ "full_and_range_screenshots_differ" \
         "$output/visual/final.png" "$range_visual/final.png"
     check_session_integrity
 }

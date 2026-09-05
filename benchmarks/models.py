@@ -21,17 +21,6 @@ class BenchmarkRunManifest:
     format: str = "termtrace-benchmark-run"
     version: int = 1
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "format": self.format,
-            "version": self.version,
-            "command": self.command,
-            "termtrace_commit": self.termtrace_commit,
-            "binary": self.binary,
-            "host": self.host,
-            "started_unix_ns": self.started_unix_ns,
-        }
-
 
 @dataclass(frozen=True, slots=True)
 class AgentWorkflowResult:
@@ -43,9 +32,6 @@ class AgentWorkflowResult:
     maximum_commands: int
     passed: bool
 
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
 
 @dataclass(frozen=True, slots=True)
 class DurabilityResult:
@@ -55,16 +41,6 @@ class DurabilityResult:
     elapsed_ns: int
     maximum_rss_bytes: int
     durability: Any
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "mode": self.mode,
-            "iteration": self.iteration,
-            "payload_bytes": self.payload_bytes,
-            "elapsed_ns": self.elapsed_ns,
-            "maximum_rss_bytes": self.maximum_rss_bytes,
-            "durability": self.durability,
-        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,9 +82,6 @@ class RenderResult:
     iteration: int
     elapsed_ns: int
     artifact_hash: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
 
 
 def main() -> None:
@@ -162,7 +135,7 @@ def main() -> None:
             host=args.host,
             started_unix_ns=args.started_unix_ns,
         )
-        print(json.dumps(manifest.to_dict(), indent=2))
+        print(json.dumps(asdict(manifest), indent=2))
     elif args.subcommand == "emit-agent-workflow-result":
         passed = (
             args.stdout_bytes <= args.max_stdout_bytes
@@ -177,9 +150,11 @@ def main() -> None:
             maximum_commands=args.max_commands,
             passed=passed,
         )
-        print(json.dumps(result.to_dict(), separators=(",", ":")))
+        print(json.dumps(asdict(result), separators=(",", ":")))
     elif args.subcommand == "emit-durability-result":
-        completion_data = json.loads(Path(args.completion_file).read_text(encoding="utf-8"))
+        completion_data = json.loads(
+            Path(args.completion_file).read_text(encoding="utf-8")
+        )
         durability_info = (
             completion_data[0]["durability"]
             if isinstance(completion_data, list)
@@ -193,7 +168,7 @@ def main() -> None:
             maximum_rss_bytes=args.max_rss_kib * 1024,
             durability=durability_info,
         )
-        print(json.dumps(durability.to_dict(), separators=(",", ":")))
+        print(json.dumps(asdict(durability), separators=(",", ":")))
     elif args.subcommand == "emit-render-edit":
         edit = RenderEditManifest(
             clips=[
@@ -213,7 +188,7 @@ def main() -> None:
             elapsed_ns=args.elapsed_ns,
             artifact_hash=args.artifact_hash,
         )
-        print(json.dumps(render.to_dict(), separators=(",", ":")))
+        print(json.dumps(asdict(render), separators=(",", ":")))
 
 
 if __name__ == "__main__":

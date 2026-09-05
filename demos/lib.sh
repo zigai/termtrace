@@ -16,10 +16,6 @@ require_demo_tools() {
     done
 }
 
-build_termtrace() {
-    cargo build --manifest-path "$DEMO_REPO_ROOT/Cargo.toml" --locked --release
-}
-
 prepare_demo_directory() {
     local directory=$1
     if [[ -e $directory ]]; then
