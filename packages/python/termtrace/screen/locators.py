@@ -11,12 +11,10 @@ from termtrace.duration import Duration, duration
 from termtrace.errors import (
     InvalidQueryError,
     LocatorTimeoutError,
-    MultipleMatchesError,
-    NoMatchError,
     RequestTimeoutError,
 )
 from termtrace.screen.frame import ScreenFrame
-from termtrace.screen.queries import LocatorSpec, ScreenMatch, describe, evaluate
+from termtrace.screen.queries import LocatorSpec, Query, ScreenMatch, describe, evaluate
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,37 +38,15 @@ class Locator:
         return len(self.all())
 
     def single(self) -> ScreenMatch:
-        frame = self._capture(None)
-        matches = evaluate(frame, self.spec)
-        if not matches:
-            raise NoMatchError("query did not match the current frame", state_hash=frame.state_hash)
-        if len(matches) != 1:
-            raise MultipleMatchesError(
-                len(matches),
-                [match.text for match in matches],
-                state_hash=frame.state_hash,
-                ranges=[match.ranges for match in matches],
-            )
-        return matches[0]
+        return Query(self._capture(None), self.spec).single()
 
     def first(self) -> ScreenMatch:
-        frame = self._capture(None)
-        matches = evaluate(frame, self.spec)
-        if not matches:
-            raise NoMatchError("query did not match the current frame", state_hash=frame.state_hash)
-        return matches[0]
+        return Query(self._capture(None), self.spec).first()
 
     def nth(self, index: int) -> ScreenMatch:
         if index < 0:
             raise InvalidQueryError("match index must be nonnegative")
-        frame = self._capture(None)
-        matches = evaluate(frame, self.spec)
-        if index >= len(matches):
-            raise NoMatchError(
-                f"query has no match at zero-based index {index}",
-                state_hash=frame.state_hash,
-            )
-        return matches[index]
+        return Query(self._capture(None), self.spec).nth(index)
 
     def wait(
         self,
@@ -125,12 +101,6 @@ class Locator:
             else:
                 matching_state = None
             remaining = deadline - observed_at
-            if remaining <= 0:
-                raise LocatorTimeoutError(
-                    "locator wait reached its deadline",
-                    last_frame=last_frame,
-                    query=describe(self.spec),
-                )
             time.sleep(min(interval_value.nanoseconds, remaining) / 1_000_000_000)
 
 
@@ -153,37 +123,15 @@ class AsyncLocator:
         return len(await self.all())
 
     async def single(self) -> ScreenMatch:
-        frame = await self._capture(None)
-        matches = evaluate(frame, self.spec)
-        if not matches:
-            raise NoMatchError("query did not match the current frame", state_hash=frame.state_hash)
-        if len(matches) != 1:
-            raise MultipleMatchesError(
-                len(matches),
-                [match.text for match in matches],
-                state_hash=frame.state_hash,
-                ranges=[match.ranges for match in matches],
-            )
-        return matches[0]
+        return Query(await self._capture(None), self.spec).single()
 
     async def first(self) -> ScreenMatch:
-        frame = await self._capture(None)
-        matches = evaluate(frame, self.spec)
-        if not matches:
-            raise NoMatchError("query did not match the current frame", state_hash=frame.state_hash)
-        return matches[0]
+        return Query(await self._capture(None), self.spec).first()
 
     async def nth(self, index: int) -> ScreenMatch:
         if index < 0:
             raise InvalidQueryError("match index must be nonnegative")
-        frame = await self._capture(None)
-        matches = evaluate(frame, self.spec)
-        if index >= len(matches):
-            raise NoMatchError(
-                f"query has no match at zero-based index {index}",
-                state_hash=frame.state_hash,
-            )
-        return matches[index]
+        return Query(await self._capture(None), self.spec).nth(index)
 
     async def wait(
         self,
@@ -240,12 +188,6 @@ class AsyncLocator:
             else:
                 matching_state = None
             remaining = deadline - observed_at
-            if remaining <= 0:
-                raise LocatorTimeoutError(
-                    "locator wait reached its deadline",
-                    last_frame=last_frame,
-                    query=describe(self.spec),
-                )
             await asyncio.sleep(min(interval_value.nanoseconds, remaining) / 1_000_000_000)
 
 

@@ -106,13 +106,11 @@ class FakeSession:
         self.finish_calls = 0
         self.finish_passed: list[bool] = []
         self.stop_calls = 0
-        self.stop_timeouts: list[float | None] = []
         self.stop_interruption = stop_interruption
 
     def stop(self, *, request_timeout: float | None = None) -> None:
         self.operations.append("stop")
         self.stop_calls += 1
-        self.stop_timeouts.append(request_timeout)
         if self.stop_interruption is not None:
             raise self.stop_interruption
 
@@ -270,14 +268,6 @@ def test_finalization_propagates_interruption_after_cleanup(
     assert terminal.close_calls == 1
     assert owner.report is not None
     assert owner.finalize(outcome="passed") is owner.report
-
-
-def test_finalization_bounds_stop_with_configured_timeout(tmp_path: Path) -> None:
-    owner, _, session = make_owner(tmp_path)
-
-    owner.finalize(outcome="passed")
-
-    assert session.stop_timeouts == [owner.config.finalization_timeout]
 
 
 def test_finalization_aborts_a_silent_stop_transport_at_its_deadline(

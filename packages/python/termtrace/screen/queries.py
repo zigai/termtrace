@@ -272,36 +272,19 @@ def _wrapped_matches(
     results: list[ScreenMatch] = []
     for group in groups:
         streams: list[str] = []
-        offsets: list[tuple[int, dict[int, tuple[int, int]], tuple[ScreenCell, ...]]] = []
+        offsets: list[tuple[int, int, dict[int, tuple[int, int]], tuple[ScreenCell, ...]]] = []
         total = 0
         for cells in group:
             stream, boundaries = _cell_stream(cells)
             streams.append(stream)
-            offsets.append((total, boundaries, cells))
+            offsets.append((total, len(stream), boundaries, cells))
             total += len(stream)
         combined = "".join(streams)
-        spans: tuple[tuple[int, int], ...]
-        if spec.exact:
-            spans = ((0, len(combined)),) if _full_match(combined, spec.query) else ()
-        elif isinstance(spec.query, str):
-            found: list[tuple[int, int]] = []
-            start_at = 0
-            while True:
-                found_at = combined.find(spec.query, start_at)
-                if found_at < 0:
-                    break
-                found.append((found_at, found_at + len(spec.query)))
-                start_at = found_at + 1
-            spans = tuple(found)
-        else:
-            spans = tuple((match.start(), match.end()) for match in spec.query.finditer(combined))
-        for start, end in spans:
-            if start == end:
-                raise InvalidQueryError("regular expression produced a zero-width match")
+        for start, end in _text_spans(combined, spec):
             covered_ranges: list[CellRange] = []
-            for base, boundaries, cells in offsets:
+            for base, stream_length, boundaries, cells in offsets:
                 local_start = max(start - base, 0)
-                local_end = min(end - base, len(_cell_stream(cells)[0]))
+                local_end = min(end - base, stream_length)
                 if local_start >= local_end:
                     continue
                 if local_start not in boundaries or local_end not in boundaries:
@@ -371,25 +354,8 @@ def _text_matches(
     frame: ScreenFrame, cells: tuple[ScreenCell, ...], spec: TextSpec, query: str
 ) -> list[ScreenMatch]:
     stream, boundaries = _cell_stream(cells)
-    spans: tuple[tuple[int, int], ...]
-    if spec.exact:
-        spans = ((0, len(stream)),) if _full_match(stream, spec.query) else ()
-    elif isinstance(spec.query, str):
-        found: list[tuple[int, int]] = []
-        start = 0
-        while True:
-            index = stream.find(spec.query, start)
-            if index < 0:
-                break
-            found.append((index, index + len(spec.query)))
-            start = index + 1
-        spans = tuple(found)
-    else:
-        spans = tuple((match.start(), match.end()) for match in spec.query.finditer(stream))
     results: list[ScreenMatch] = []
-    for start, end in spans:
-        if start == end:
-            raise InvalidQueryError("regular expression produced a zero-width match")
+    for start, end in _text_spans(stream, spec):
         if start not in boundaries or end not in boundaries:
             raise InvalidQueryError("text match is not aligned to complete terminal graphemes")
         first, after = boundaries[start][0], boundaries[end][1]
@@ -466,6 +432,27 @@ def _match_has_style(screen_match: ScreenMatch, expected: StyleFilter) -> bool:
             if not _matches_style(cell, expected):
                 return False
     return covered
+
+
+def _text_spans(stream: str, spec: TextSpec) -> tuple[tuple[int, int], ...]:
+    spans: tuple[tuple[int, int], ...]
+    if spec.exact:
+        spans = ((0, len(stream)),) if _full_match(stream, spec.query) else ()
+    elif isinstance(spec.query, str):
+        found: list[tuple[int, int]] = []
+        start = 0
+        while True:
+            index = stream.find(spec.query, start)
+            if index < 0:
+                break
+            found.append((index, index + len(spec.query)))
+            start = index + 1
+        spans = tuple(found)
+    else:
+        spans = tuple((match.start(), match.end()) for match in spec.query.finditer(stream))
+    if any(start == end for start, end in spans):
+        raise InvalidQueryError("regular expression produced a zero-width match")
+    return spans
 
 
 def _full_match(value: str, query: str | Pattern[str]) -> bool:

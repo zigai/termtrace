@@ -226,23 +226,77 @@ def test_nested_regions_intersect_and_out_of_frame_scopes_fail() -> None:
         evaluate(frame, region(Region(0, 3, 2, 1)))
 
 
-def test_locator_wait_requires_unchanged_state_and_errors_include_identity() -> None:
-    frame = _frame()
-    requests = 0
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_client", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize("reset", ["changed_state", "nonmatching"])
+async def test_locator_wait_restarts_stability_after_state_changes(
+    monkeypatch: pytest.MonkeyPatch, async_client: bool, reset: str
+) -> None:
+    frame_a = _frame()
+    frame_b = replace(frame_a, state_hash="state-b")
+    if reset == "nonmatching":
+        row = frame_a.rows[0]
+        interrupted = replace(
+            frame_a,
+            state_hash="missing",
+            rows=(
+                replace(
+                    row,
+                    text="A文 ",
+                    cells=(row.cells[0], replace(row.cells[1], grapheme="文"), *row.cells[2:]),
+                ),
+                frame_a.rows[1],
+            ),
+        )
+        stable_frame = frame_a
+        stable_since = 2
+    else:
+        interrupted = frame_b
+        stable_frame = frame_b
+        stable_since = 1
+    elapsed = 0
 
     def capture(request_timeout: float | None) -> ScreenFrame:
-        nonlocal requests
-        requests += 1
-        return frame
+        if elapsed == 0:
+            return frame_a
+        if elapsed == 1:
+            return interrupted
+        return stable_frame
 
-    locator = Locator(capture, text("界"))
-    result = locator.wait(
-        timeout=Duration.milliseconds(100),
-        interval=Duration.milliseconds(1),
-        stable_for=Duration.milliseconds(3),
+    def sleep(seconds: float) -> None:
+        nonlocal elapsed
+        elapsed += int(seconds)
+
+    async def capture_async(request_timeout: float | None) -> ScreenFrame:
+        return capture(request_timeout)
+
+    async def sleep_async(seconds: float) -> None:
+        sleep(seconds)
+
+    monkeypatch.setattr(
+        "termtrace.screen.locators.time.monotonic_ns", lambda: elapsed * 1_000_000_000
     )
-    assert result.frame is frame
-    assert requests > 1
+    monkeypatch.setattr("termtrace.screen.locators.time.sleep", sleep)
+    monkeypatch.setattr("termtrace.screen.locators.asyncio.sleep", sleep_async)
+    if async_client:
+        result = await AsyncLocator(capture_async, text("界")).wait(
+            timeout=Duration.seconds(10),
+            interval=Duration.seconds(1),
+            stable_for=Duration.seconds(3),
+        )
+    else:
+        result = Locator(capture, text("界")).wait(
+            timeout=Duration.seconds(10),
+            interval=Duration.seconds(1),
+            stable_for=Duration.seconds(3),
+        )
+    assert result.frame is stable_frame
+    assert elapsed == stable_since + 3
+    assert result.matches[0].text == "界"
+
+
+def test_locator_cardinality_errors_include_frame_identity() -> None:
+    frame = _frame()
 
     with pytest.raises(MultipleMatchesError) as captured:
         Locator(lambda request_timeout: frame, text("A")).single()

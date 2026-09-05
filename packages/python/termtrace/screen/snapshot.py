@@ -46,11 +46,15 @@ def normalize_frame(
     """Normalize an already captured exact frame without issuing I/O."""
     if profile not in ("text", "spans", "cells"):
         raise ValueError(f"unknown snapshot profile {profile!r}")
-    cells = sum(len(row.expanded_cells()) for row in frame.rows)
-    if profile == "cells" and cells > maximum_cells:
-        raise ResourceLimitError(
-            f"cell snapshot requested {cells} cells; maximum is {maximum_cells}"
+    if profile == "cells":
+        cells = sum(
+            len(row.cells) if row.cells else sum(len(span.cells) for span in row.spans)
+            for row in frame.rows
         )
+        if cells > maximum_cells:
+            raise ResourceLimitError(
+                f"cell snapshot requested {cells} cells; maximum is {maximum_cells}"
+            )
     values: list[tuple[str, SnapshotValue]] = [
         ("version", frame.version),
         ("profile", profile),

@@ -9,7 +9,7 @@ from typing import Literal, Self, TypeVar
 
 import msgspec
 
-from termtrace.atoms import InputAtom, KeyboardAtom, encode_input_sequence
+from termtrace.atoms import InputAtom, KeyboardAtom
 from termtrace.duration import Duration, duration, seconds_to_milliseconds
 from termtrace.errors import (
     StableCaptureIncompleteError,
@@ -30,11 +30,10 @@ from termtrace.session.actions import (
     StableCapture,
     StableOptions,
 )
-from termtrace.session.requests import action_request, require_complete_action
 from termtrace.session.commands import (
+    events_page_request,
     evidence_bundle_request,
     evidence_verify_request,
-    events_page_request,
     keyboard_paste_command,
     keyboard_press_command,
     keyboard_sequence_command,
@@ -50,6 +49,7 @@ from termtrace.session.commands import (
     screen_observe_request,
     screen_wait_command,
 )
+from termtrace.session.requests import action_request, require_complete_action
 from termtrace.session.wire import (
     normalize_action,
     normalize_screen_wait,
@@ -78,7 +78,6 @@ from termtrace.transport.protocol import (
     DriverVerificationData,
     EventPage,
     JsonObject,
-    JsonValue,
     Observation,
     SemanticDiff,
     TimelinePage,
@@ -139,13 +138,8 @@ class AsyncSession:
                 request_timeout=request_timeout,
             )
         except StaleStateError as e:
-            raise StaleStateError(
-                str(e),
-                expected_state_hash=if_state,
-                current_state_hash=e.current_state_hash,
-                retry_safety=e.retry_safety,
-                evidence=e.evidence,
-            ) from e
+            e.expected_state_hash = if_state
+            raise
         return response.data
 
     async def completion(self) -> Completion:
@@ -460,12 +454,11 @@ class AsyncKeyboard:
         self,
         key: str,
         *,
-        caller_intent: str | None = None,
         request_id: str | None = None,
         if_state: str | None = None,
     ) -> ControlResult:
         return await self._session.control(
-            keyboard_press_command(key, caller_intent=caller_intent),
+            keyboard_press_command(key),
             request_id=request_id,
             if_state=if_state,
         )
@@ -488,12 +481,11 @@ class AsyncKeyboard:
         self,
         data: str | bytes | memoryview,
         *,
-        caller_intent: str | None = None,
         request_id: str | None = None,
         if_state: str | None = None,
     ) -> ControlResult:
         return await self._session.control(
-            keyboard_paste_command(data, caller_intent=caller_intent),
+            keyboard_paste_command(data),
             request_id=request_id,
             if_state=if_state,
         )
@@ -711,9 +703,6 @@ class AsyncNative:
         point: JsonObject | None = None,
         viewport: tuple[int, int] | None = None,
     ) -> Artifact:
-        target: JsonValue = (
-            None if viewport is None else {"width": viewport[0], "height": viewport[1]}
-        )
         return await self._session.request(
             native_screenshot_request(destination, point=point, viewport=viewport),
             DriverArtifactData,
@@ -727,7 +716,6 @@ class AsyncOutput:
     async def wait_for_bytes(
         self, data: bytes | memoryview, *, timeout: float = 10.0
     ) -> WaitOutcome:
-        import base64
 
         return await self._session.wait_for_output(
             output_wait_payload(data),

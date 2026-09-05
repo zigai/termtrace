@@ -13,7 +13,7 @@ import msgspec
 from termtrace.duration import Duration
 from termtrace.errors import InvalidAtomError, InvalidDurationError
 from termtrace.transport.generated import driver_request as request_wire
-from termtrace.transport.protocol import JsonObject, JsonValue
+from termtrace.transport.protocol import JsonObject, JsonValue, wire_json_object
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,10 +76,7 @@ def encode_input_sequence(
         pace_ns=pace.nanoseconds,
         include_atom_outcomes=verbose,
     )
-    data = msgspec.to_builtins(command)
-    if not isinstance(data, dict) or not all(isinstance(key, str) for key in data):
-        raise AssertionError("input command did not serialize to an object")
-    return data
+    return wire_json_object(command)
 
 
 def encode_atoms(

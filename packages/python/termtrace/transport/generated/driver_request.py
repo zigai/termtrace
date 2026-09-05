@@ -629,7 +629,7 @@ class DriverMethod2(Struct, forbid_unknown_fields=True, tag_field='method', tag=
             ResourceLimits, Meta(description='Non-truncating runtime resource limits.')
         ]
         | UnsetType
-    ) = field(default_factory=dict)
+    ) = field(default_factory=ResourceLimits)
     working_directory: (
         Annotated[str, Meta(description='Optional child working directory.')]
         | None

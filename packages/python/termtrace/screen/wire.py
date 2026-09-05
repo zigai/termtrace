@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TypeVar
-
-import msgspec
 
 from termtrace.errors import ProtocolMismatchError
 from termtrace.screen.frame import (
@@ -33,10 +30,7 @@ from termtrace.screen.frame import (
 )
 from termtrace.transport.generated import driver_request as request_wire
 from termtrace.transport.generated import driver_response as response_wire
-from termtrace.transport.protocol import JsonObject
-
-WireT = TypeVar("WireT", bound=msgspec.Struct)
-OptionalT = TypeVar("OptionalT")
+from termtrace.transport.protocol import JsonObject, optional_wire, parse_wire, wire_json_object
 
 
 def encode_frame_request(value: FrameRequest) -> JsonObject:
@@ -52,13 +46,13 @@ def encode_frame_request(value: FrameRequest) -> JsonObject:
         detail=request_wire.FrameDetail(value.detail),
         region=region,
     )
-    return _json_object(wire_value)
+    return wire_json_object(wire_value)
 
 
 def normalize_frame(
     value: response_wire.ScreenFrame | Mapping[str, object],
 ) -> ScreenFrame:
-    wire_value = _parse(value, response_wire.ScreenFrame, "screen frame")
+    wire_value = parse_wire(value, response_wire.ScreenFrame, "screen frame")
     detail, rows = _rows(wire_value.data)
     source = _source(wire_value.source)
     return ScreenFrame(
@@ -78,33 +72,6 @@ def normalize_frame(
         rows=rows,
         detail=detail,
     )
-
-
-def _parse(
-    value: msgspec.Struct | Mapping[str, object],
-    wire_type: type[WireT],
-    label: str,
-) -> WireT:
-    if isinstance(value, wire_type):
-        return value
-    data = msgspec.to_builtins(value) if isinstance(value, msgspec.Struct) else value
-    try:
-        return msgspec.convert(data, type=wire_type, strict=True)
-    except msgspec.ValidationError:
-        raise ProtocolMismatchError(f"{label} does not match the protocol schema") from None
-
-
-def _optional(value: OptionalT | None | msgspec.UnsetType) -> OptionalT | None:
-    if value is None or isinstance(value, msgspec.UnsetType):
-        return None
-    return value
-
-
-def _json_object(value: msgspec.Struct) -> JsonObject:
-    data = msgspec.to_builtins(value)
-    if not isinstance(data, dict) or not all(isinstance(key, str) for key in data):
-        raise AssertionError("msgspec struct did not serialize to an object")
-    return data
 
 
 def _rows(
@@ -164,8 +131,8 @@ def _cell(value: response_wire.ScreenCell) -> ScreenCell:
 
 
 def _appearance(value: response_wire.ScreenAppearance) -> Appearance:
-    foreground = _optional(value.resolved_foreground)
-    background = _optional(value.resolved_background)
+    foreground = optional_wire(value.resolved_foreground)
+    background = optional_wire(value.resolved_background)
     return Appearance(
         _style(value.style),
         None if foreground is None else _rgb(foreground),
@@ -221,13 +188,13 @@ def _rgb(value: response_wire.Rgb) -> Rgb:
 
 def _cursor(value: response_wire.CursorState) -> Cursor:
     return Cursor(
-        _optional(value.row),
-        _optional(value.column),
+        optional_wire(value.row),
+        optional_wire(value.column),
         value.visible,
         value.blinking,
         value.style.value,
         value.in_viewport,
-        _optional(value.wide_tail),
+        optional_wire(value.wide_tail),
     )
 
 
@@ -246,7 +213,7 @@ def _mode(value: response_wire.TerminalMode) -> TerminalMode:
 
 
 def _colors(value: response_wire.ColorState) -> Colors:
-    cursor = _optional(value.cursor)
+    cursor = optional_wire(value.cursor)
     return Colors(
         _rgb(value.foreground),
         _rgb(value.background),
@@ -287,13 +254,13 @@ def _source(value: response_wire.ScreenFrameSource) -> FrameSource:
         )
     return FrameSource(
         "resolved",
-        session_id=_optional(value.session_id),
+        session_id=optional_wire(value.session_id),
         source_kind=value.source_kind.value,
         source_completed=value.source_completed,
         state_point=_state_point(value.state_point),
-        state_id=_optional(value.state_id),
-        event_seq=_optional(value.event_seq),
-        monotonic_ns=_optional(value.monotonic_ns),
+        state_id=optional_wire(value.state_id),
+        event_seq=optional_wire(value.event_seq),
+        monotonic_ns=optional_wire(value.monotonic_ns),
         boundary=_boundary(value.boundary),
         integrity=value.integrity.value,
         resolution=value.resolution.value,

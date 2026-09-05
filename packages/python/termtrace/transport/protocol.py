@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TypeAlias, TypeVar
 
 import msgspec
@@ -71,7 +72,34 @@ TimelinePage: TypeAlias = DriverTimelineData
 Frame: TypeAlias = ObservationFrame
 
 ResponseDataT = TypeVar("ResponseDataT", bound=msgspec.Struct)
+WireT = TypeVar("WireT", bound=msgspec.Struct)
+OptionalT = TypeVar("OptionalT")
 _RESPONSE_DECODER = msgspec.json.Decoder(WireDriverResponse)
+
+
+def parse_wire(
+    value: msgspec.Struct | Mapping[str, object],
+    wire_type: type[WireT],
+    label: str,
+) -> WireT:
+    if isinstance(value, wire_type):
+        return value
+    data = msgspec.to_builtins(value) if isinstance(value, msgspec.Struct) else value
+    try:
+        return msgspec.convert(data, type=wire_type, strict=True)
+    except msgspec.ValidationError:
+        raise ProtocolMismatchError(f"{label} does not match the protocol schema") from None
+
+
+def optional_wire(value: OptionalT | None | msgspec.UnsetType) -> OptionalT | None:
+    return None if isinstance(value, msgspec.UnsetType) else value
+
+
+def wire_json_object(value: msgspec.Struct) -> JsonObject:
+    data = msgspec.to_builtins(value)
+    if not isinstance(data, dict) or not all(isinstance(key, str) for key in data):
+        raise AssertionError("msgspec struct did not serialize to an object")
+    return data
 
 
 def encode_driver_request(method: JsonObject, request_id: str) -> bytes:
@@ -222,4 +250,7 @@ __all__ = [
     "WaitOutcome",
     "decode_driver_response",
     "encode_driver_request",
+    "optional_wire",
+    "parse_wire",
+    "wire_json_object",
 ]

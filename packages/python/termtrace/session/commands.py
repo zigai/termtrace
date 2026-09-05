@@ -15,25 +15,19 @@ from termtrace.atoms import KeyboardAtom, encode_input_sequence
 from termtrace.duration import Duration, duration
 from termtrace.screen.frame import FrameRequest
 from termtrace.screen.wire import encode_frame_request
-from termtrace.transport.protocol import JsonObject, JsonValue
+from termtrace.transport.generated import driver_request as request_wire
+from termtrace.transport.protocol import JsonObject, JsonValue, wire_json_object
 
 
-def keyboard_press_command(
-    key: str,
-    *,
-    caller_intent: str | None = None,
-) -> JsonObject:
-    return {
-        "command": "key",
-        "key": key,
-        "modifiers": {
-            "shift": False,
-            "control": False,
-            "alt": False,
-            "super_key": False,
-        },
-        "caller_intent": caller_intent,
-    }
+def keyboard_press_command(key: str) -> JsonObject:
+    return wire_json_object(
+        request_wire.ControlCommand10(
+            key=key,
+            modifiers=request_wire.KeyModifiers(
+                shift=False, control=False, alt=False, super_key=False
+            ),
+        )
+    )
 
 
 def keyboard_type_command(
@@ -49,17 +43,9 @@ def keyboard_type_command(
     }
 
 
-def keyboard_paste_command(
-    data: str | bytes | memoryview,
-    *,
-    caller_intent: str | None = None,
-) -> JsonObject:
+def keyboard_paste_command(data: str | bytes | memoryview) -> JsonObject:
     raw = data.encode() if isinstance(data, str) else bytes(data)
-    return {
-        "command": "paste",
-        "data": base64.b64encode(raw).decode(),
-        "caller_intent": caller_intent,
-    }
+    return wire_json_object(request_wire.ControlCommand11(data=base64.b64encode(raw).decode()))
 
 
 def keyboard_sequence_command(
@@ -152,59 +138,12 @@ def pointer_drag_command(
     }
 
 
-def pointer_move_command(
-    column: int,
-    row: int,
-    *,
-    strict: bool = False,
-) -> JsonObject:
-    return {
-        "command": "pointer",
-        "column": column,
-        "row": row,
-        "operation": {"kind": "move"},
-        "strict": strict,
-    }
-
-
 def pointer_focus_command(
     focused: bool,
     *,
     strict: bool = False,
 ) -> JsonObject:
     return {"command": "focus", "focused": focused, "strict": strict}
-
-
-def pointer_down_command(
-    column: int,
-    row: int,
-    *,
-    button: str = "left",
-    strict: bool = False,
-) -> JsonObject:
-    return {
-        "command": "pointer",
-        "column": column,
-        "row": row,
-        "operation": {"kind": "down", "button": button},
-        "strict": strict,
-    }
-
-
-def pointer_up_command(
-    column: int,
-    row: int,
-    *,
-    button: str = "left",
-    strict: bool = False,
-) -> JsonObject:
-    return {
-        "command": "pointer",
-        "column": column,
-        "row": row,
-        "operation": {"kind": "up", "button": button},
-        "strict": strict,
-    }
 
 
 def screen_wait_command(
