@@ -161,7 +161,7 @@ def decode_driver_response(
             )
         if result.code in ("protocol_mismatch", "unsupported_protocol"):
             raise ProtocolMismatchError("driver rejected the protocol contract")
-        if result.code == "stale_state" and details is not None:
+        if result.code == "stale_observation" and details is not None:
             raise StaleStateError(
                 result.message,
                 expected_state_hash=None,
