@@ -1,8 +1,14 @@
-use crate::cli::output::ResponseWriter;
+use crate::cli::{
+    artifacts::{
+        args::{VideoCursorStyleArg, VideoFacadeArgs, VideoPresetArg, VideoSourceArg},
+        run_video_facade,
+    },
+    control::{args::StopArgs, run_stop},
+    output::ResponseWriter,
+};
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env,
     ffi::OsString,
     fs::{File, OpenOptions, Permissions},
     io::{self, Write as _},
@@ -35,6 +41,7 @@ use termtrace_model::{
 };
 
 use crate::cli::output::write_json_line;
+use crate::cli::tmux::{args::TmuxConnectionArgs, setup::run_tmux_disable};
 
 use super::{
     OPTION_AGGREGATE_MANIFEST, OPTION_COVERAGE, OPTION_PANE_SESSION,
@@ -227,25 +234,31 @@ pub(in crate::cli) fn run_tmux_stop(
         manifest
     };
 
-    let executable = env::current_exe().into_diagnostic()?;
-    let mut stop = ProcessCommand::new(&executable);
-    stop.arg("--response")
-        .arg("full")
-        .arg("stop")
-        .arg(&initial_manifest.composite_track.alias);
-    if arguments.wait {
-        stop.arg("--wait");
-    }
-    stop.arg("--timeout-ms")
-        .arg(arguments.timeout_ms.to_string());
-    if let Some(root) = arguments.output_root.as_ref() {
-        stop.env("TERMTRACE_STATE_DIR", root);
-    }
-    let output = stop.stderr(Stdio::inherit()).output().into_diagnostic()?;
-    if !output.status.success() {
+    let session_path = match &initial_manifest.composite_track.session {
+        Some(session) => PathBuf::from(OsString::from_vec(session.as_bytes().to_vec())),
+        None => {
+            let registry = match arguments.output_root.as_ref() {
+                Some(root) => SessionRegistry::open(root).into_diagnostic()?,
+                None => SessionRegistry::open_default().into_diagnostic()?,
+            };
+            registry
+                .resolve(&initial_manifest.composite_track.alias)
+                .into_diagnostic()?
+                .session_path()
+        }
+    };
+    let stop_args = StopArgs {
+        session: session_path,
+        wait: arguments.wait,
+        timeout_ms: arguments.timeout_ms,
+        expected_presented_state_hash: None,
+        request_id: None,
+    };
+    let mut quiet_response = ResponseWriter::quiet();
+    let exit_code = run_stop(&mut quiet_response, stop_args)?;
+    if exit_code != ExitCode::SUCCESS {
         return Err(miette::miette!(
-            "composite tmux client track stop exited with {}",
-            output.status
+            "composite tmux client track stop exited with failure"
         ));
     }
     let client = client_from_manifest(&initial_manifest);
@@ -260,20 +273,15 @@ pub(in crate::cli) fn run_tmux_stop(
             )?;
         }
     }
-    let mut disable = ProcessCommand::new(&executable);
-    disable
-        .arg("--response")
-        .arg("full")
-        .arg("tmux")
-        .arg("disable");
-    disable.arg("--tmux").arg(&client.executable);
-    if let Some(socket_name) = &client.socket_name {
-        disable.arg("-L").arg(socket_name);
-    }
-    if let Some(socket_path) = &client.socket_path {
-        disable.arg("-S").arg(socket_path);
-    }
-    let _ = disable.output();
+    let mut quiet_response = ResponseWriter::quiet();
+    let _ = run_tmux_disable(
+        &mut quiet_response,
+        TmuxConnectionArgs {
+            tmux: client.executable.clone(),
+            socket_name: client.socket_name.clone(),
+            socket_path: client.socket_path,
+        },
+    );
     let manifest = {
         let _manifest_lock = lock_tmux_manifest(&manifest_path)?;
         let mut manifest = read_tmux_manifest(&manifest_path)?;
@@ -310,42 +318,38 @@ pub(in crate::cli) fn run_tmux_video(
     let session = manifest.composite_track.session.ok_or_else(|| {
         return miette::miette!("aggregate tmux recording has no linked composite client track");
     })?;
-    let executable = env::current_exe().into_diagnostic()?;
-    let mut command = ProcessCommand::new(executable);
-    command
-        .arg("--response")
-        .arg("full")
-        .arg("video")
-        .arg(PathBuf::from(OsString::from_vec(session.into_bytes())))
-        .arg("--out")
-        .arg(arguments.out)
-        .arg("--preset")
-        .arg(match arguments.preset {
-            TmuxVideoPreset::Docs => "docs",
-            TmuxVideoPreset::Social => "social",
-            TmuxVideoPreset::Lossless => "lossless",
-        });
-    if let Some(fps) = arguments.fps {
-        command.arg("--fps").arg(fps.to_string());
-    }
-    let output = command
-        .arg("--renderer")
-        .arg(match arguments.renderer {
-            TmuxVideoRenderer::Semantic => "semantic",
-            TmuxVideoRenderer::Native => "native",
-        })
-        .stderr(Stdio::inherit())
-        .output()
-        .into_diagnostic()?;
-    if !output.status.success() {
-        return Err(miette::miette!(
-            "aggregate composite video renderer exited with {}",
-            output.status
-        ));
-    }
-    let video_response: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|error| return miette::miette!("video facade returned invalid JSON: {error}"))?;
-    return write_json_line(response, &video_response);
+    let video_args = VideoFacadeArgs {
+        session: PathBuf::from(OsString::from_vec(session.into_bytes())),
+        out: Some(arguments.out),
+        dry_run: false,
+        preview_out: None,
+        edit: None,
+        preset: match arguments.preset {
+            TmuxVideoPreset::Docs => VideoPresetArg::Docs,
+            TmuxVideoPreset::Social => VideoPresetArg::Social,
+            TmuxVideoPreset::Lossless => VideoPresetArg::Lossless,
+        },
+        fps: arguments.fps,
+        renderer: match arguments.renderer {
+            TmuxVideoRenderer::Semantic => VideoSourceArg::Semantic,
+            TmuxVideoRenderer::Native => VideoSourceArg::Native,
+        },
+        semantic_raster_profile: None,
+        resolution: None,
+        scale: None,
+        start_marker: None,
+        end_marker: None,
+        trim_idle: false,
+        hold_start: None,
+        hold_end: None,
+        cursor_style: VideoCursorStyleArg::Recorded,
+        columns: 4,
+        tile_width: 320,
+        max_frames: 12,
+        change_only: false,
+        preview_width: 640,
+    };
+    return run_video_facade(response, video_args);
 }
 
 pub(in crate::cli) fn run_tmux_bundle(
@@ -370,8 +374,8 @@ pub(in crate::cli) fn run_tmux_bundle(
 
 pub(super) fn coverage_from_options(client: &TmuxClient) -> Result<TmuxCoverageMode> {
     let text = option_text(client, OPTION_COVERAGE)?;
-    <TmuxCoverageMode as clap::ValueEnum>::from_str(&text, true)
-        .map_err(|_| return miette::miette!("unsupported tmux coverage mode `{text}`"))
+    return <TmuxCoverageMode as clap::ValueEnum>::from_str(&text, true)
+        .map_err(|_| return miette::miette!("unsupported tmux coverage mode `{text}`"));
 }
 
 pub(super) fn refresh_configured_aggregate_manifest(client: &TmuxClient) -> Result<()> {

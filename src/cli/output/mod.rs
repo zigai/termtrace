@@ -112,6 +112,15 @@ impl ResponseWriter {
     pub(in crate::cli) fn mode(&self) -> ResolvedResponseMode {
         return self.state.mode;
     }
+
+    pub(in crate::cli) fn quiet() -> Self {
+        return Self::new(
+            ResolvedResponseMode::Quiet,
+            Vec::new(),
+            String::new(),
+            false,
+        );
+    }
 }
 
 mod envelope;
