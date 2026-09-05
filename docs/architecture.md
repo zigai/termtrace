@@ -141,6 +141,11 @@ Replay validates the canonical log and feeds output bytes through the pinned sem
 
 Native capture launches the installed terminal application on a private display and loads the exact flattened replay input chosen in `ghostty-profile.ghostty`. Fitted recordings retain the measured viewport, grid, cell size, and a separate fingerprint of the effective output Ghostty subsequently reports. Capture verifies that fingerprint and the geometry before playback instead of guessing font metrics. The subsequent report is retained as the visual diagnostic `ghostty-effective-config.txt`.
 
+The media library owns native subprocess lifetimes but receives the Termtrace
+helper executable explicitly. CLI composition supplies its executable; SDK
+sessions retain the configured Termtrace binary for both launch and attach.
+The embedding application is not assumed to implement Termtrace subcommands.
+
 Semantic video instead schedules presentation-eligible replay states onto deterministic frame boundaries, renders them with the bundled semantic renderer, and retains exact state-to-frame spans. It requires no native display stack, but it is labeled semantic rendering and does not claim Ghostty pixel parity. Presentation source selection is explicit and never falls back automatically; native remains the default.
 
 Derived manifests bind their source range, component versions, configuration, and member hashes. Completed derivations are cataloged separately; the closed execution log is never reopened.

@@ -63,7 +63,7 @@ quality through its immutable frame.
 `keyboard.sequence` admits all typed text, byte, key, and paste atoms under one
 optional `if_state` guard and caller-owned `request_id`.
 
-The public session façade is handwritten. Internal request and response models are generated from the Rust-owned JSON Schemas and decoded with `msgspec`; do not edit files under `termtrace/_generated/`.
+The public session façade is handwritten. Internal request and response models are generated from the Rust-owned JSON Schemas and decoded with `msgspec`; do not edit files under `termtrace/transport/generated/`.
 
 ## Pytest integration
 

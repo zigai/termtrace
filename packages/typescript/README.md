@@ -134,4 +134,4 @@ Vitest exposes its cancellation signal as the ordinary test-context `signal`. Pa
 | Failure verification/screenshot/bundle         | Explicit evidence APIs          | Automatic best-effort, secondary on error    |
 | Supported runner/platform                      | Runner-neutral Node.js on Linux | Vitest 4.1.3–4.x on Linux                    |
 
-The public session facade is handwritten. Rust-owned JSON Schemas remain the wire authority; generated request/response types and Ajv validators under `src/generated/` are not edited by hand.
+The public session facade is handwritten. Rust-owned JSON Schemas remain the wire authority; generated request/response types and Ajv validators under `src/transport/generated/` are not edited by hand.

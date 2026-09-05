@@ -51,6 +51,12 @@ with Terminal(evidence_root=".termtrace-evidence") as terminal:
 
 `AsyncTerminal` exposes the same domain results through native asyncio methods. Sync and async transports share the generated models, request encoding, response decoding, correlation checks, and error translation.
 
+Direct `keyboard.press()` and `keyboard.paste()` use the generated key/paste
+contracts and do not accept `caller_intent`. To retain intent with those inputs,
+use `keyboard.sequence([KeyAtom("enter", caller_intent="submit")])` or a
+`PasteAtom` with `caller_intent`; import these atoms from `termtrace`.
+`keyboard.type()` continues to accept intent directly.
+
 The Python package keeps immutable rich-screen behavior under
 `termtrace/screen`: `frame`, `queries`, `locators`, `snapshot`, and wire
 conversion. Session request/action workflows and sync/async session objects live
