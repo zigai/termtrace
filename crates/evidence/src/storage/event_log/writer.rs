@@ -1,6 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{BufWriter, Write},
+    io::{self, BufWriter, Write},
     os::unix::fs::OpenOptionsExt as _,
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -8,7 +8,7 @@ use std::{
 
 use blake3::Hash;
 use termtrace_model::{
-    execution::event::{Event, EventBody, EventLogHeader, EventRecord},
+    execution::event::{Event, EventBody, EventLogHeader},
     execution::event_log::{CanonicalBoundary, DurabilityMode, DurabilityPolicy, DurabilityRecord},
 };
 
@@ -275,23 +275,40 @@ impl EventLogWriter {
                     "output byte count overflow",
                 );
             })?;
-        let record = EventRecord {
-            seq,
-            monotonic_ns,
-            prev_hash: self.previous_hash.to_hex().to_string(),
-            hash: hash.to_hex().to_string(),
-            event,
-        };
-        let record_bytes = serde_json::to_vec(&record).map_err(|source| {
+        let search_limit = body_bytes.len().min(64);
+        let search_slice = body_bytes
+            .get(..search_limit)
+            .unwrap_or(body_bytes.as_slice());
+        let event_offset = search_slice
+            .windows(8)
+            .position(|window| return window == b"\"event\":")
+            .ok_or_else(|| {
+                return Error::InvalidJson {
+                    path: self.path.clone(),
+                    json_path: "$".to_owned(),
+                    source: serde_json::Error::io(io::Error::other("event key not found in body")),
+                };
+            })?;
+        let (prefix, suffix) = body_bytes.split_at_checked(event_offset).ok_or_else(|| {
             return Error::InvalidJson {
                 path: self.path.clone(),
                 json_path: "$".to_owned(),
-                source,
+                source: serde_json::Error::io(io::Error::other("invalid event slice offset")),
             };
         })?;
         let write_result = self
             .writer
-            .write_all(&record_bytes)
+            .write_all(prefix)
+            .and_then(|()| return self.writer.write_all(b"\"prev_hash\":\""))
+            .and_then(|()| {
+                return self
+                    .writer
+                    .write_all(self.previous_hash.to_hex().as_bytes());
+            })
+            .and_then(|()| return self.writer.write_all(b"\",\"hash\":\""))
+            .and_then(|()| return self.writer.write_all(hash.to_hex().as_bytes()))
+            .and_then(|()| return self.writer.write_all(b"\","))
+            .and_then(|()| return self.writer.write_all(suffix))
             .and_then(|()| return self.writer.write_all(b"\n"));
         let write_result = if durable {
             write_result
