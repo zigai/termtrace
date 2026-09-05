@@ -31,6 +31,25 @@ from termtrace.session.actions import (
     StableOptions,
 )
 from termtrace.session.requests import action_request, require_complete_action
+from termtrace.session.commands import (
+    evidence_bundle_request,
+    evidence_verify_request,
+    events_page_request,
+    keyboard_paste_command,
+    keyboard_press_command,
+    keyboard_sequence_command,
+    keyboard_type_command,
+    native_screenshot_request,
+    output_wait_payload,
+    pointer_click_command,
+    pointer_drag_command,
+    pointer_focus_command,
+    pointer_multi_click_command,
+    pointer_scroll_command,
+    screen_frame_request,
+    screen_observe_request,
+    screen_wait_command,
+)
 from termtrace.session.wire import (
     normalize_action,
     normalize_screen_wait,
@@ -294,14 +313,7 @@ class Screen:
         return self._session.control({"command": "snapshot"})
 
     def text(self) -> str:
-        data = self._session.request(
-            {
-                "method": "observe",
-                "point": {"selector": "latest_presented"},
-                "include_hidden": False,
-            },
-            DriverObservationData,
-        )
+        data = self._session.request(screen_observe_request(), DriverObservationData)
         return data.observation.frame.viewport_text
 
     def frame(
@@ -311,12 +323,7 @@ class Screen:
         request_timeout: float | None = None,
     ) -> ScreenFrame:
         data = self._session.request(
-            {
-                "method": "screen_frame",
-                "point": {"selector": "latest_presented"},
-                "include_hidden": False,
-                "projection": encode_frame_request(options),
-            },
+            screen_frame_request(options),
             DriverScreenFrameData,
             request_timeout=request_timeout,
         )
@@ -366,18 +373,13 @@ class Screen:
         timeout: Duration | int | float = Duration.seconds(10),
         frame: FrameRequest = FrameRequest(),
     ) -> ScreenWaitResult:
-        stable_value = duration(stable_for)
-        timeout_value = duration(timeout)
-        if timeout_value.nanoseconds == 0:
-            raise ValueError("screen wait timeout must be greater than zero")
         response = self._session.control(
-            {
-                "command": "wait_screen",
-                "predicate": predicate,
-                "stable_for_ns": stable_value.nanoseconds,
-                "timeout_ns": timeout_value.nanoseconds,
-                "projection": encode_frame_request(frame),
-            }
+            screen_wait_command(
+                predicate,
+                stable_for=stable_for,
+                timeout=timeout,
+                frame=frame,
+            )
         )
         return normalize_screen_wait(response)
 
@@ -476,17 +478,7 @@ class Keyboard:
         if_state: str | None = None,
     ) -> ControlResult:
         return self._session.control(
-            {
-                "command": "key",
-                "key": key,
-                "modifiers": {
-                    "shift": False,
-                    "control": False,
-                    "alt": False,
-                    "super_key": False,
-                },
-                "caller_intent": caller_intent,
-            },
+            keyboard_press_command(key, caller_intent=caller_intent),
             request_id=request_id,
             if_state=if_state,
         )
@@ -499,15 +491,11 @@ class Keyboard:
         request_id: str | None = None,
         if_state: str | None = None,
     ) -> ControlResult:
-        import base64
-
-        command: JsonObject = {
-            "command": "input",
-            "data": base64.b64encode(text.encode()).decode(),
-            "input_kind": "text",
-            "caller_intent": caller_intent,
-        }
-        return self._session.control(command, request_id=request_id, if_state=if_state)
+        return self._session.control(
+            keyboard_type_command(text, caller_intent=caller_intent),
+            request_id=request_id,
+            if_state=if_state,
+        )
 
     def paste(
         self,
@@ -517,15 +505,8 @@ class Keyboard:
         request_id: str | None = None,
         if_state: str | None = None,
     ) -> ControlResult:
-        import base64
-
-        raw = data.encode() if isinstance(data, str) else bytes(data)
         return self._session.control(
-            {
-                "command": "paste",
-                "data": base64.b64encode(raw).decode(),
-                "caller_intent": caller_intent,
-            },
+            keyboard_paste_command(data, caller_intent=caller_intent),
             request_id=request_id,
             if_state=if_state,
         )
@@ -542,7 +523,7 @@ class Keyboard:
         """Apply a complete atom list under one state guard and request ID."""
         sequence_id = request_id or str(uuid.uuid4())
         return self._session.control(
-            encode_input_sequence(
+            keyboard_sequence_command(
                 atoms,
                 pace_ms=pace_ms,
                 verbose=verbose,
@@ -568,13 +549,7 @@ class Pointer:
         if_state: str | None = None,
     ) -> ControlResult:
         return self._session.control(
-            {
-                "command": "pointer",
-                "column": column,
-                "row": row,
-                "operation": {"kind": "click", "button": button},
-                "strict": strict,
-            },
+            pointer_click_command(column, row, button=button, strict=strict),
             request_id=request_id,
             if_state=if_state,
         )
@@ -590,13 +565,7 @@ class Pointer:
         if_state: str | None = None,
     ) -> ControlResult:
         return self._session.control(
-            {
-                "command": "pointer",
-                "column": column,
-                "row": row,
-                "operation": {"kind": "scroll", "lines": lines},
-                "strict": strict,
-            },
+            pointer_scroll_command(column, row, lines, strict=strict),
             request_id=request_id,
             if_state=if_state,
         )
@@ -613,13 +582,7 @@ class Pointer:
         if_state: str | None = None,
     ) -> ControlResult:
         return self._session.control(
-            {
-                "command": "pointer",
-                "column": column,
-                "row": row,
-                "operation": {"kind": "multi_click", "button": button, "count": count},
-                "strict": strict,
-            },
+            pointer_multi_click_command(column, row, count, button=button, strict=strict),
             request_id=request_id,
             if_state=if_state,
         )
@@ -638,19 +601,15 @@ class Pointer:
         if_state: str | None = None,
     ) -> ControlResult:
         return self._session.control(
-            {
-                "command": "pointer",
-                "column": from_column,
-                "row": from_row,
-                "operation": {
-                    "kind": "drag",
-                    "button": button,
-                    "to_column": to_column,
-                    "to_row": to_row,
-                    "steps": steps,
-                },
-                "strict": strict,
-            },
+            pointer_drag_command(
+                from_column,
+                from_row,
+                to_column,
+                to_row,
+                button=button,
+                steps=steps,
+                strict=strict,
+            ),
             request_id=request_id,
             if_state=if_state,
         )
@@ -664,7 +623,7 @@ class Pointer:
         if_state: str | None = None,
     ) -> ControlResult:
         return self._session.control(
-            {"command": "focus", "focused": focused, "strict": strict},
+            pointer_focus_command(focused, strict=strict),
             request_id=request_id,
             if_state=if_state,
         )
@@ -745,12 +704,11 @@ class Events:
         metadata_only: bool = False,
     ) -> EventPage:
         return self._session.request(
-            {
-                "method": "events",
-                "from_event_seq": from_event_seq,
-                "limit": limit,
-                "metadata_only": metadata_only,
-            },
+            events_page_request(
+                from_event_seq=from_event_seq,
+                limit=limit,
+                metadata_only=metadata_only,
+            ),
             DriverEventsData,
         )
 
@@ -766,17 +724,8 @@ class Native:
         point: JsonObject | None = None,
         viewport: tuple[int, int] | None = None,
     ) -> Artifact:
-        target: JsonValue = (
-            None if viewport is None else {"width": viewport[0], "height": viewport[1]}
-        )
         return self._session.request(
-            {
-                "method": "screenshot",
-                "point": point or {"selector": "latest_presented"},
-                "destination": str(destination),
-                "renderer": "native",
-                "viewport": target,
-            },
+            native_screenshot_request(destination, point=point, viewport=viewport),
             DriverArtifactData,
         )
 
@@ -801,7 +750,7 @@ class Evidence:
         request_timeout: float | None = None,
     ) -> VerificationReport:
         result = self._session.request(
-            {"method": "verify", "level": level},
+            evidence_verify_request(level),
             DriverVerificationData,
             request_timeout=request_timeout,
         )
@@ -815,11 +764,7 @@ class Evidence:
         request_timeout: float | None = None,
     ) -> BundleResult:
         return self._session.request(
-            {
-                "method": "bundle",
-                "destination": str(destination),
-                "profile": profile,
-            },
+            evidence_bundle_request(destination, profile),
             DriverBundleData,
             request_timeout=request_timeout,
         )
@@ -830,10 +775,8 @@ class Output:
         self._session = session
 
     def wait_for_bytes(self, data: bytes | memoryview, *, timeout: float = 10.0) -> WaitOutcome:
-        import base64
-
         return self._session.wait_for_output(
-            base64.b64encode(bytes(data)).decode(),
+            output_wait_payload(data),
             timeout_ms=seconds_to_milliseconds(timeout),
         )
 

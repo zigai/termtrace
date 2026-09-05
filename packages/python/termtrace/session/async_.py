@@ -31,6 +31,25 @@ from termtrace.session.actions import (
     StableOptions,
 )
 from termtrace.session.requests import action_request, require_complete_action
+from termtrace.session.commands import (
+    evidence_bundle_request,
+    evidence_verify_request,
+    events_page_request,
+    keyboard_paste_command,
+    keyboard_press_command,
+    keyboard_sequence_command,
+    keyboard_type_command,
+    native_screenshot_request,
+    output_wait_payload,
+    pointer_click_command,
+    pointer_drag_command,
+    pointer_focus_command,
+    pointer_multi_click_command,
+    pointer_scroll_command,
+    screen_frame_request,
+    screen_observe_request,
+    screen_wait_command,
+)
 from termtrace.session.wire import (
     normalize_action,
     normalize_screen_wait,
@@ -284,14 +303,7 @@ class AsyncScreen:
         return await self._session.control({"command": "snapshot"})
 
     async def text(self) -> str:
-        data = await self._session.request(
-            {
-                "method": "observe",
-                "point": {"selector": "latest_presented"},
-                "include_hidden": False,
-            },
-            DriverObservationData,
-        )
+        data = await self._session.request(screen_observe_request(), DriverObservationData)
         return data.observation.frame.viewport_text
 
     async def frame(
@@ -301,12 +313,7 @@ class AsyncScreen:
         request_timeout: float | None = None,
     ) -> ScreenFrame:
         data = await self._session.request(
-            {
-                "method": "screen_frame",
-                "point": {"selector": "latest_presented"},
-                "include_hidden": False,
-                "projection": encode_frame_request(options),
-            },
+            screen_frame_request(options),
             DriverScreenFrameData,
             request_timeout=request_timeout,
         )
@@ -356,18 +363,13 @@ class AsyncScreen:
         timeout: Duration | int | float = Duration.seconds(10),
         frame: FrameRequest = FrameRequest(),
     ) -> ScreenWaitResult:
-        stable_value = duration(stable_for)
-        timeout_value = duration(timeout)
-        if timeout_value.nanoseconds == 0:
-            raise ValueError("screen wait timeout must be greater than zero")
         response = await self._session.control(
-            {
-                "command": "wait_screen",
-                "predicate": predicate,
-                "stable_for_ns": stable_value.nanoseconds,
-                "timeout_ns": timeout_value.nanoseconds,
-                "projection": encode_frame_request(frame),
-            }
+            screen_wait_command(
+                predicate,
+                stable_for=stable_for,
+                timeout=timeout,
+                frame=frame,
+            )
         )
         return normalize_screen_wait(response)
 
@@ -463,17 +465,7 @@ class AsyncKeyboard:
         if_state: str | None = None,
     ) -> ControlResult:
         return await self._session.control(
-            {
-                "command": "key",
-                "key": key,
-                "modifiers": {
-                    "shift": False,
-                    "control": False,
-                    "alt": False,
-                    "super_key": False,
-                },
-                "caller_intent": caller_intent,
-            },
+            keyboard_press_command(key, caller_intent=caller_intent),
             request_id=request_id,
             if_state=if_state,
         )
@@ -486,15 +478,8 @@ class AsyncKeyboard:
         request_id: str | None = None,
         if_state: str | None = None,
     ) -> ControlResult:
-        import base64
-
         return await self._session.control(
-            {
-                "command": "input",
-                "data": base64.b64encode(text.encode()).decode(),
-                "input_kind": "text",
-                "caller_intent": caller_intent,
-            },
+            keyboard_type_command(text, caller_intent=caller_intent),
             request_id=request_id,
             if_state=if_state,
         )
@@ -507,15 +492,8 @@ class AsyncKeyboard:
         request_id: str | None = None,
         if_state: str | None = None,
     ) -> ControlResult:
-        import base64
-
-        raw = data.encode() if isinstance(data, str) else bytes(data)
         return await self._session.control(
-            {
-                "command": "paste",
-                "data": base64.b64encode(raw).decode(),
-                "caller_intent": caller_intent,
-            },
+            keyboard_paste_command(data, caller_intent=caller_intent),
             request_id=request_id,
             if_state=if_state,
         )
@@ -532,7 +510,7 @@ class AsyncKeyboard:
         """Apply a complete atom list under one state guard and request ID."""
         sequence_id = request_id or str(uuid.uuid4())
         return await self._session.control(
-            encode_input_sequence(
+            keyboard_sequence_command(
                 atoms,
                 pace_ms=pace_ms,
                 verbose=verbose,
@@ -558,13 +536,7 @@ class AsyncPointer:
         if_state: str | None = None,
     ) -> ControlResult:
         return await self._session.control(
-            {
-                "command": "pointer",
-                "column": column,
-                "row": row,
-                "operation": {"kind": "click", "button": button},
-                "strict": strict,
-            },
+            pointer_click_command(column, row, button=button, strict=strict),
             request_id=request_id,
             if_state=if_state,
         )
@@ -578,7 +550,7 @@ class AsyncPointer:
         if_state: str | None = None,
     ) -> ControlResult:
         return await self._session.control(
-            {"command": "focus", "focused": focused, "strict": strict},
+            pointer_focus_command(focused, strict=strict),
             request_id=request_id,
             if_state=if_state,
         )
@@ -595,13 +567,7 @@ class AsyncPointer:
         if_state: str | None = None,
     ) -> ControlResult:
         return await self._session.control(
-            {
-                "command": "pointer",
-                "column": column,
-                "row": row,
-                "operation": {"kind": "multi_click", "button": button, "count": count},
-                "strict": strict,
-            },
+            pointer_multi_click_command(column, row, count, button=button, strict=strict),
             request_id=request_id,
             if_state=if_state,
         )
@@ -620,19 +586,15 @@ class AsyncPointer:
         if_state: str | None = None,
     ) -> ControlResult:
         return await self._session.control(
-            {
-                "command": "pointer",
-                "column": from_column,
-                "row": from_row,
-                "operation": {
-                    "kind": "drag",
-                    "button": button,
-                    "to_column": to_column,
-                    "to_row": to_row,
-                    "steps": steps,
-                },
-                "strict": strict,
-            },
+            pointer_drag_command(
+                from_column,
+                from_row,
+                to_column,
+                to_row,
+                button=button,
+                steps=steps,
+                strict=strict,
+            ),
             request_id=request_id,
             if_state=if_state,
         )
@@ -648,13 +610,7 @@ class AsyncPointer:
         if_state: str | None = None,
     ) -> ControlResult:
         return await self._session.control(
-            {
-                "command": "pointer",
-                "column": column,
-                "row": row,
-                "operation": {"kind": "scroll", "lines": lines},
-                "strict": strict,
-            },
+            pointer_scroll_command(column, row, lines, strict=strict),
             request_id=request_id,
             if_state=if_state,
         )
@@ -735,12 +691,11 @@ class AsyncEvents:
         metadata_only: bool = False,
     ) -> EventPage:
         return await self._session.request(
-            {
-                "method": "events",
-                "from_event_seq": from_event_seq,
-                "limit": limit,
-                "metadata_only": metadata_only,
-            },
+            events_page_request(
+                from_event_seq=from_event_seq,
+                limit=limit,
+                metadata_only=metadata_only,
+            ),
             DriverEventsData,
         )
 
@@ -760,13 +715,7 @@ class AsyncNative:
             None if viewport is None else {"width": viewport[0], "height": viewport[1]}
         )
         return await self._session.request(
-            {
-                "method": "screenshot",
-                "point": point or {"selector": "latest_presented"},
-                "destination": str(destination),
-                "renderer": "native",
-                "viewport": target,
-            },
+            native_screenshot_request(destination, point=point, viewport=viewport),
             DriverArtifactData,
         )
 
@@ -781,7 +730,7 @@ class AsyncOutput:
         import base64
 
         return await self._session.wait_for_output(
-            base64.b64encode(bytes(data)).decode(),
+            output_wait_payload(data),
             timeout_ms=seconds_to_milliseconds(timeout),
         )
 
@@ -802,9 +751,7 @@ class AsyncEvidence:
     async def verify(
         self, level: Literal["structure", "content", "durability_record"] = "content"
     ) -> VerificationReport:
-        result = await self._session.request(
-            {"method": "verify", "level": level}, DriverVerificationData
-        )
+        result = await self._session.request(evidence_verify_request(level), DriverVerificationData)
         return result.report
 
     async def bundle(
@@ -813,10 +760,6 @@ class AsyncEvidence:
         profile: Literal["screen", "debug", "forensic"] = "screen",
     ) -> BundleResult:
         return await self._session.request(
-            {
-                "method": "bundle",
-                "destination": str(destination),
-                "profile": profile,
-            },
+            evidence_bundle_request(destination, profile),
             DriverBundleData,
         )
