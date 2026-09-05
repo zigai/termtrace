@@ -94,12 +94,14 @@ impl CapabilityReport {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
 
     #[test]
     fn stable_capability_ids_include_semantic_video() {
         assert!(CAPABILITY_IDS.contains(&SEMANTIC_VIDEO_CAPABILITY));
-        let unique_ids: std::collections::BTreeSet<_> = CAPABILITY_IDS.iter().copied().collect();
+        let unique_ids: BTreeSet<_> = CAPABILITY_IDS.iter().copied().collect();
         assert_eq!(
             unique_ids.len(),
             CAPABILITY_IDS.len(),

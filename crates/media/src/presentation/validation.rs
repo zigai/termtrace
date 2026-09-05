@@ -321,10 +321,10 @@ pub(super) fn validate_ass_resource(path: &Path) -> Result<()> {
     let escaped = path
         .to_str()
         .map(|value| {
-            value
+            return value
                 .replace('\\', "\\\\")
                 .replace(':', "\\:")
-                .replace('\'', "\\'")
+                .replace('\'', "\\'");
         })
         .ok_or_else(|| return plan_error("ASS subtitle resource path is not valid UTF-8"))?;
     let filter = format!("ass='{escaped}'");

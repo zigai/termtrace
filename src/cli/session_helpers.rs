@@ -206,18 +206,23 @@ pub(super) fn resolve_state_point(
     context: &str,
 ) -> Result<StatePoint> {
     match (state, state_hash, event_seq, at, at_marker) {
-        (Some(state_id), None, None, None, None) => Ok(StatePoint::StateId { state_id }),
-        (None, Some(state_hash), None, None, None) => Ok(StatePoint::StateHash { state_hash }),
-        (None, None, Some(event_seq), None, None) => Ok(StatePoint::EventSeq { event_seq }),
+        (Some(state_id), None, None, None, None) => return Ok(StatePoint::StateId { state_id }),
+        (None, Some(state_hash), None, None, None) => {
+            return Ok(StatePoint::StateHash { state_hash });
+        }
+        (None, None, Some(event_seq), None, None) => return Ok(StatePoint::EventSeq { event_seq }),
         (None, None, None, Some(monotonic_ns), None) => {
-            Ok(StatePoint::MonotonicNs { monotonic_ns })
+            return Ok(StatePoint::MonotonicNs { monotonic_ns });
         }
-        (None, None, None, None, Some(label)) => Ok(StatePoint::Marker { label }),
+        (None, None, None, None, Some(label)) => return Ok(StatePoint::Marker { label }),
         (None, None, None, None, None) => {
-            default.ok_or_else(|| miette::miette!("exactly one {context} selector is required"))
+            return default
+                .ok_or_else(|| miette::miette!("exactly one {context} selector is required"));
         }
-        _ => Err(miette::miette!(
-            "exactly one {context} selector may be supplied"
-        )),
+        _ => {
+            return Err(miette::miette!(
+                "exactly one {context} selector may be supplied"
+            ));
+        }
     }
 }

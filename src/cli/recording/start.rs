@@ -97,7 +97,7 @@ pub(in crate::cli) fn run_start(
             );
         }
         if paths.session.join("session.json").is_file()
-            && termtrace_engine::registry::recorder_identity(&paths.session).is_some()
+            && recorder_identity(&paths.session).is_some()
         {
             let ready_at = ready_since.get_or_insert_with(Instant::now);
             if ready_at.elapsed() >= Duration::from_millis(30) {
@@ -301,7 +301,11 @@ fn start_postcondition(
                 pattern: pattern.clone(),
             },
         ),
-        (None, None) => unreachable!("start postcondition was requested"),
+        (None, None) => {
+            return Err(miette::miette!(
+                "start postcondition requires until-idle, until-screen, or until-screen-regex"
+            ));
+        }
     };
     let matched = wait_for_screen(session, predicate, Duration::ZERO, synchronization.timeout)
         .into_diagnostic()?;

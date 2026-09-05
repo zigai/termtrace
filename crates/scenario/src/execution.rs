@@ -213,9 +213,14 @@ fn execute_step(
             let predicate = match (&wait.contains, &wait.absent) {
                 (Some(text), None) => ScreenPredicate::Contains { text: text.clone() },
                 (None, Some(text)) => ScreenPredicate::Absent { text: text.clone() },
-                _ => unreachable!(
-                    "validated scenario wait step requires exactly one of contains or absent"
-                ),
+                _ => {
+                    return Err(step_failure(
+                        index,
+                        step,
+                        Vec::new(),
+                        "scenario wait step requires exactly one of contains or absent".to_owned(),
+                    ));
+                }
             };
             let matched = session
                 .screen()
@@ -415,7 +420,10 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
     let [start_label, end_label] = match assertion.between_markers.as_slice() {
         [start, end] => [start.as_str(), end.as_str()],
         _ => {
-            unreachable!("validated scenario timeline assertion requires exactly two marker labels")
+            return Err(operation(
+                "assert timeline",
+                "scenario timeline assertion requires exactly two marker labels",
+            ));
         }
     };
     let log = EventLog::read(session.join("events.jsonl"))

@@ -464,11 +464,15 @@ fn facade_render_configuration_survives_normalization_inputs() {
         (1_920, 1_080)
     );
     assert_eq!(
-        edit.render_config.as_ref().map(|c| c.preset.as_str()),
+        edit.render_config
+            .as_ref()
+            .map(|c| return c.preset.as_str()),
         Some("lossless")
     );
     assert_eq!(
-        edit.render_config.as_ref().map(|c| c.renderer.as_str()),
+        edit.render_config
+            .as_ref()
+            .map(|c| return c.renderer.as_str()),
         Some("semantic")
     );
     assert_eq!(edit.delivery.crf, 0);

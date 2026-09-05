@@ -292,59 +292,62 @@ impl TryFrom<ConformanceQuery> for LocatorSpec {
                 } else {
                     LocatorSpec::text(value)?
                 };
-                Ok(spec.across_soft_wraps(cross_soft_wraps))
+                return Ok(spec.across_soft_wraps(cross_soft_wraps));
             }
-            ConformanceQuery::Regex { pattern } => LocatorSpec::native_regex(pattern),
+            ConformanceQuery::Regex { pattern } => return LocatorSpec::native_regex(pattern),
             ConformanceQuery::Style {
                 bold,
                 resolved_background,
             } => {
                 let bg = resolved_background.and_then(|color| {
                     if color == "#3b1e1c" {
-                        Some(Rgb {
+                        return Some(Rgb {
                             r: 59,
                             g: 30,
                             b: 28,
-                        })
+                        });
                     } else {
-                        None
+                        return None;
                     }
                 });
-                Ok(LocatorSpec::default().with_style(StyleFilter {
+                return Ok(LocatorSpec::default().with_style(StyleFilter {
                     bold,
                     resolved_background: bg.map(Some),
                     ..StyleFilter::default()
-                }))
+                }));
             }
-            ConformanceQuery::Row { row } => Ok(LocatorSpec::default().in_row(row)),
+            ConformanceQuery::Row { row } => return Ok(LocatorSpec::default().in_row(row)),
             ConformanceQuery::Region {
                 top,
                 left,
                 width,
                 height,
-            } => LocatorSpec::default().in_region(ScreenRegion {
-                top,
-                left,
-                right: left.saturating_add(width),
-                bottom: top.saturating_add(height),
-            }),
+            } => {
+                return LocatorSpec::default().in_region(ScreenRegion {
+                    top,
+                    left,
+                    right: left.saturating_add(width),
+                    bottom: top.saturating_add(height),
+                });
+            }
             ConformanceQuery::All { specs } => {
                 let mut combined = LocatorSpec::default();
                 for spec in specs {
                     combined = combined.and(LocatorSpec::try_from(spec)?)?;
                 }
-                Ok(combined)
+                return Ok(combined);
             }
         }
     }
 }
 
 fn conformance_spec(value: &serde_json::Value) -> Result<LocatorSpec, QueryError> {
-    let query: ConformanceQuery =
-        serde_json::from_value(value.clone()).map_err(|e| QueryError::InvalidQuery {
+    let query: ConformanceQuery = serde_json::from_value(value.clone()).map_err(|e| {
+        return QueryError::InvalidQuery {
             reason: e.to_string(),
-        })?;
-    LocatorSpec::try_from(query)
+        };
+    })?;
+    return LocatorSpec::try_from(query);
 }
 
 #[test]

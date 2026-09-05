@@ -267,9 +267,11 @@ pub fn verify_ssh_receipt(
         .prefix("termtrace-receipt-")
         .permissions(Permissions::from_mode(0o700))
         .tempdir()
-        .map_err(|source| Error::Filesystem {
-            path: env::temp_dir(),
-            source,
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: env::temp_dir(),
+                source,
+            };
         })?;
     let signature_path = temporary_directory.path().join("receipt.sig");
     write_temporary(&signature_path, receipt.signature.value.as_bytes())?;

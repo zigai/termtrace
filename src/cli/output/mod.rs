@@ -47,15 +47,15 @@ pub(super) enum ResolvedResponseMode {
 impl ResponseMode {
     pub(super) fn resolve(self) -> ResolvedResponseMode {
         match self {
-            Self::Full => ResolvedResponseMode::Full,
-            Self::Quiet => ResolvedResponseMode::Quiet,
-            Self::Human => ResolvedResponseMode::Human,
-            Self::Agent => ResolvedResponseMode::Agent,
+            Self::Full => return ResolvedResponseMode::Full,
+            Self::Quiet => return ResolvedResponseMode::Quiet,
+            Self::Human => return ResolvedResponseMode::Human,
+            Self::Agent => return ResolvedResponseMode::Agent,
             Self::Auto => {
                 if io::stdout().is_terminal() {
-                    ResolvedResponseMode::Human
+                    return ResolvedResponseMode::Human;
                 } else {
-                    ResolvedResponseMode::Agent
+                    return ResolvedResponseMode::Agent;
                 }
             }
         }

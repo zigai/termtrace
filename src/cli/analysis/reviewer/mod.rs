@@ -207,9 +207,9 @@ impl ReviewModel {
             .map_or(0, |entry| return entry.monotonic_ns);
         let predicate = |record: &&EventRecord| {
             if marker {
-                matches!(record.event, Event::Marker { .. })
+                return matches!(record.event, Event::Marker { .. });
             } else {
-                matches!(record.event, Event::InputIntent { .. })
+                return matches!(record.event, Event::InputIntent { .. });
             }
         };
         let target = if direction < 0 {
@@ -218,15 +218,15 @@ impl ReviewModel {
                 .iter()
                 .rev()
                 .filter(predicate)
-                .map(|record| record.monotonic_ns)
-                .find(|time| *time < selected_time)
+                .map(|record| return record.monotonic_ns)
+                .find(|time| return *time < selected_time)
         } else {
             self.log
                 .events
                 .iter()
                 .filter(predicate)
-                .map(|record| record.monotonic_ns)
-                .find(|time| *time > selected_time)
+                .map(|record| return record.monotonic_ns)
+                .find(|time| return *time > selected_time)
         };
         if let Some(time) = target
             && let Some(index) = self

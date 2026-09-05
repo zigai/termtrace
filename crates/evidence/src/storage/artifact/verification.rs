@@ -282,12 +282,12 @@ pub(super) fn normalized_relative_path(path: &Path) -> Result<String> {
 pub fn hash_regular_file(path: &Path) -> Result<(u64, String)> {
     let (mut file, size) = open_regular_file_nofollow(path)?;
     let mut hasher = blake3::Hasher::new();
-    hasher
-        .update_reader(&mut file)
-        .map_err(|source| Error::Filesystem {
+    hasher.update_reader(&mut file).map_err(|source| {
+        return Error::Filesystem {
             path: path.to_path_buf(),
             source,
-        })?;
+        };
+    })?;
     return Ok((size, hasher.finalize().to_hex().to_string()));
 }
 

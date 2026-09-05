@@ -15,11 +15,11 @@ fn native_capabilities_with(
     has_encoder_fn: impl Fn(&str) -> bool,
 ) -> [Capability; 2] {
     let missing = |programs: &[&str]| -> Vec<String> {
-        programs
+        return programs
             .iter()
-            .filter(|program| !available_fn(program))
-            .map(|program| (*program).to_owned())
-            .collect()
+            .filter(|program| return !available_fn(program))
+            .map(|program| return (*program).to_owned())
+            .collect();
     };
     let screenshot_missing = missing(&["ghostty", "Xvfb", "dbus-run-session", "import", "ffprobe"]);
     let video_missing = missing(&["ghostty", "Xvfb", "dbus-run-session", "ffmpeg", "ffprobe"]);
@@ -111,7 +111,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn native_video_does_not_require_screenshot_only_import() {
-        let [screenshot, video] = native_capabilities_with(|prog| prog != "import", |_| true);
+        let [screenshot, video] =
+            native_capabilities_with(|prog| return prog != "import", |_| return true);
         assert_eq!(screenshot.status, CapabilityStatus::Blocked);
         assert!(screenshot.detail.contains("import"));
         assert_eq!(video.status, CapabilityStatus::Ready);

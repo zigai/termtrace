@@ -64,7 +64,8 @@ use crate::cli::{
     },
     output::{write_json_line, write_progress},
     session_helpers::{
-        resolve_cli_range, resolve_session, resolve_session_path, write_session_lifecycle,
+        resolve_cli_range, resolve_session, resolve_session_path, resolve_state_point,
+        write_session_lifecycle,
     },
     tooling::require_cli_capability,
 };
@@ -457,52 +458,56 @@ struct VideoPresetConfig {
 impl VideoPresetConfig {
     fn from_preset(preset: VideoPresetArg) -> Self {
         match preset {
-            VideoPresetArg::Docs => Self {
-                name: "docs",
-                fps: 30,
-                hold_start: Duration::from_millis(500),
-                hold_end: Duration::from_millis(1_000),
-                delivery: PresentationDelivery {
-                    codec: "h264".to_owned(),
-                    pixel_format: "yuv420p".to_owned(),
-                    crf: 18,
-                    encoder_preset: "slow".to_owned(),
-                },
-                default_raster_profile: SemanticRasterProfile::Direct,
-            },
-            VideoPresetArg::Social => Self {
-                name: "social",
-                fps: 60,
-                hold_start: Duration::from_millis(250),
-                hold_end: Duration::from_millis(750),
-                delivery: PresentationDelivery {
-                    codec: "h264".to_owned(),
-                    pixel_format: "yuv420p".to_owned(),
-                    crf: 20,
-                    encoder_preset: "medium".to_owned(),
-                },
-                default_raster_profile: SemanticRasterProfile::Direct,
-            },
-            VideoPresetArg::Lossless => Self {
-                name: "lossless",
-                fps: 60,
-                hold_start: Duration::ZERO,
-                hold_end: Duration::ZERO,
-                delivery: PresentationDelivery {
-                    codec: "h264_rgb".to_owned(),
-                    pixel_format: "rgb24".to_owned(),
-                    crf: 0,
-                    encoder_preset: "veryslow".to_owned(),
-                },
-                default_raster_profile: SemanticRasterProfile::Supersampled2x,
-            },
+            VideoPresetArg::Docs => {
+                return Self {
+                    name: "docs",
+                    fps: 30,
+                    hold_start: Duration::from_millis(500),
+                    hold_end: Duration::from_millis(1_000),
+                    delivery: PresentationDelivery {
+                        codec: "h264".to_owned(),
+                        pixel_format: "yuv420p".to_owned(),
+                        crf: 18,
+                        encoder_preset: "slow".to_owned(),
+                    },
+                    default_raster_profile: SemanticRasterProfile::Direct,
+                };
+            }
+            VideoPresetArg::Social => {
+                return Self {
+                    name: "social",
+                    fps: 60,
+                    hold_start: Duration::from_millis(250),
+                    hold_end: Duration::from_millis(750),
+                    delivery: PresentationDelivery {
+                        codec: "h264".to_owned(),
+                        pixel_format: "yuv420p".to_owned(),
+                        crf: 20,
+                        encoder_preset: "medium".to_owned(),
+                    },
+                    default_raster_profile: SemanticRasterProfile::Direct,
+                };
+            }
+            VideoPresetArg::Lossless => {
+                return Self {
+                    name: "lossless",
+                    fps: 60,
+                    hold_start: Duration::ZERO,
+                    hold_end: Duration::ZERO,
+                    delivery: PresentationDelivery {
+                        codec: "h264_rgb".to_owned(),
+                        pixel_format: "rgb24".to_owned(),
+                        crf: 0,
+                        encoder_preset: "veryslow".to_owned(),
+                    },
+                    default_raster_profile: SemanticRasterProfile::Supersampled2x,
+                };
+            }
         }
     }
 
     fn raster_profile(&self, explicit: Option<SemanticRasterProfileArg>) -> SemanticRasterProfile {
-        explicit
-            .map(Into::into)
-            .unwrap_or(self.default_raster_profile)
+        return explicit.map_or(self.default_raster_profile, Into::into);
     }
 }
 #[cfg(test)]
@@ -701,7 +706,7 @@ pub(super) fn run_capture(
 
 pub(super) fn run_save(response: &mut ResponseWriter, arguments: SaveArgs) -> Result<ExitCode> {
     let session = resolve_session_path(arguments.session)?;
-    let point = crate::cli::session_helpers::resolve_state_point(
+    let point = resolve_state_point(
         arguments.state,
         arguments.state_hash,
         arguments.event_seq,

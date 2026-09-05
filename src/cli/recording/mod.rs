@@ -36,7 +36,7 @@ use termtrace_engine::{
         inherited_geometry, parse_environment_spec, read_environment_spec, record_with_output,
         resolve_ghostty_profile, restore_ghostty_profile,
     },
-    registry::SessionRegistry,
+    registry::{SessionRegistry, recorder_identity},
 };
 use termtrace_evidence::{
     event_log::{DurabilityPolicy, EventLog},

@@ -16,7 +16,7 @@ use termtrace_media::native_capture::validated_visual_manifests;
 use termtrace_model::{
     execution::event::Event,
     registry::RegistryLifecycle,
-    terminal::analysis::{DiagnoseReport, ExplainOutputPage, ExplainReport},
+    terminal::analysis::{DiagnoseReport, ExplainOutputPage, ExplainReport, LastActionAnalysis},
     terminal::diff::SemanticDiff,
     terminal::observation::StatePoint,
     terminal::timeline::{TimelineEntry, TimelineItem},
@@ -33,7 +33,9 @@ use crate::cli::{
         id_list, optional_display, paginate, quoted_text, stable_enum_label, write_json_line,
         write_stdout,
     },
-    session_helpers::{resolve_session, resolve_session_path, write_session_lifecycle},
+    session_helpers::{
+        resolve_session, resolve_session_path, resolve_state_point, write_session_lifecycle,
+    },
 };
 
 pub(in crate::cli) fn run_timeline(
@@ -281,7 +283,7 @@ fn run_last_action_facade<T: serde::Serialize>(
     session: PathBuf,
     broad_change_percent: u8,
     operation: &'static str,
-    select: impl FnOnce(&termtrace_model::terminal::analysis::LastActionAnalysis) -> &T,
+    select: impl FnOnce(&LastActionAnalysis) -> &T,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(session)?;
     if resolved.lifecycle != RegistryLifecycle::Completed {
@@ -404,7 +406,7 @@ fn diff_point(
     monotonic_ns: Option<u64>,
     marker: Option<String>,
 ) -> Result<StatePoint> {
-    crate::cli::session_helpers::resolve_state_point(
+    return resolve_state_point(
         state,
         state_hash,
         event_seq,
@@ -412,7 +414,7 @@ fn diff_point(
         marker,
         None,
         "diff endpoint",
-    )
+    );
 }
 
 fn diff_text(difference: &SemanticDiff) -> Result<String> {

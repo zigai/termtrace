@@ -292,7 +292,7 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
         "multiple checkpoints must be emitted"
     );
     assert!(
-        checkpoint_ids.windows(2).all(|w| w[0] < w[1]),
+        checkpoint_ids.windows(2).all(|w| return w[0] < w[1]),
         "checkpoint IDs must be ordered"
     );
     assert_eq!(checkpoint_ids.first().copied(), Some(0));
@@ -300,7 +300,7 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
         checkpoint_ids
             .last()
             .copied()
-            .is_some_and(|last| last >= 1_000),
+            .is_some_and(|last| return last >= 1_000),
         "must include late resume point"
     );
     for entry in entries.iter().filter(|entry| return entry.checkpoint) {

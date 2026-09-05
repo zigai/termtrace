@@ -48,7 +48,7 @@ pub(in crate::cli) fn run_restart(
     let deadline = Instant::now() + timeout;
     loop {
         if paths.session.join("session.json").is_file()
-            && termtrace_engine::registry::recorder_identity(&paths.session).is_some()
+            && recorder_identity(&paths.session).is_some()
         {
             let successor_manifest = read_manifest(&paths.session).into_diagnostic()?;
             if successor_manifest.lineage.as_ref() != Some(&expected_lineage) {

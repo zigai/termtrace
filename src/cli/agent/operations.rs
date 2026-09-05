@@ -554,9 +554,13 @@ impl Driver {
     }
 
     fn session_path(&self, handle: &Uuid) -> StdResult<&PathBuf, Box<DriverResult>> {
-        return self.sessions.get(handle).map(|s| &s.path).ok_or_else(|| {
-            return driver_failure("unknown_handle", "session handle is not attached", None);
-        });
+        return self
+            .sessions
+            .get(handle)
+            .map(|s| return &s.path)
+            .ok_or_else(|| {
+                return driver_failure("unknown_handle", "session handle is not attached", None);
+            });
     }
 
     fn attach(&mut self, reference: &Path) -> StdResult<DriverData, Box<DriverResult>> {

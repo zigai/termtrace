@@ -13,8 +13,11 @@ use std::{
         net::{SocketAddr, UnixStream},
     },
     path::{Path, PathBuf},
+    result::Result as StdResult,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+use serde::de::{self, Deserialize, Deserializer};
 
 use nix::{
     fcntl::{Flock, FlockArg},
@@ -52,20 +55,20 @@ enum RegistryRecord {
     Entry(RegistryEntry),
 }
 
-impl<'de> serde::Deserialize<'de> for RegistryRecord {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+impl<'de> Deserialize<'de> for RegistryRecord {
+    fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        D: Deserializer<'de>,
     {
         let value = serde_json::Value::deserialize(deserializer)?;
         if value.get("owner_token").is_some() {
             return serde_json::from_value(value)
                 .map(Self::Reservation)
-                .map_err(serde::de::Error::custom);
+                .map_err(de::Error::custom);
         }
         return serde_json::from_value(value)
             .map(Self::Entry)
-            .map_err(serde::de::Error::custom);
+            .map_err(de::Error::custom);
     }
 }
 

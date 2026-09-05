@@ -81,14 +81,14 @@ pub(in crate::cli) fn run_screen(
 }
 
 #[derive(serde::Serialize)]
-struct ScreenResponse<'a> {
+struct ScreenResponse<'response> {
     v: u32,
     ok: bool,
     #[serde(rename = "type")]
     response_type: &'static str,
-    session: &'a Path,
+    session: &'response Path,
     lifecycle: RegistryLifecycle,
-    state: &'a str,
+    state: &'response str,
     quality: CaptureQuality,
     size: [u16; 2],
     ended: bool,
@@ -99,17 +99,17 @@ struct ScreenResponse<'a> {
 }
 
 #[derive(serde::Serialize)]
-pub(super) struct SparseScreenResponse<'a> {
+pub(super) struct SparseScreenResponse<'viewport> {
     encoding: &'static str,
-    rows: Vec<(usize, &'a str)>,
+    rows: Vec<(usize, &'viewport str)>,
     blank_rows_omitted: usize,
 }
 
 #[derive(serde::Serialize)]
-pub(super) struct DiffScreenResponse<'a> {
+pub(super) struct DiffScreenResponse<'viewport> {
     encoding: &'static str,
     since: String,
-    rows: Vec<(usize, &'a str)>,
+    rows: Vec<(usize, &'viewport str)>,
 }
 
 pub(super) fn sparse_screen(viewport_text: &str) -> serde_json::Value {
@@ -118,7 +118,7 @@ pub(super) fn sparse_screen(viewport_text: &str) -> serde_json::Value {
         .enumerate()
         .filter_map(|(row, text)| {
             let text = text.trim_end();
-            return (!text.is_empty()).then(|| (row, text));
+            return (!text.is_empty()).then(|| return (row, text));
         })
         .collect();
     let total_rows = viewport_text.lines().count();
@@ -127,6 +127,10 @@ pub(super) fn sparse_screen(viewport_text: &str) -> serde_json::Value {
         blank_rows_omitted: total_rows.saturating_sub(rows.len()),
         rows,
     };
+    #[expect(
+        clippy::expect_used,
+        reason = "SparseScreenResponse contains only primitive usize and string slices which cannot fail JSON serialization"
+    )]
     return serde_json::to_value(&response).expect("sparse screen serialization");
 }
 
@@ -138,7 +142,7 @@ pub(super) fn diff_screen(before: &str, after: &str, since: String) -> serde_jso
         .filter_map(|row| {
             let old = before_rows.get(row).copied().unwrap_or_default();
             let new = after_rows.get(row).copied().unwrap_or_default();
-            return (old != new).then(|| (row, new.trim_end()));
+            return (old != new).then(|| return (row, new.trim_end()));
         })
         .collect();
     let response = DiffScreenResponse {
@@ -146,5 +150,9 @@ pub(super) fn diff_screen(before: &str, after: &str, since: String) -> serde_jso
         since,
         rows,
     };
+    #[expect(
+        clippy::expect_used,
+        reason = "DiffScreenResponse contains only String and string slices which cannot fail JSON serialization"
+    )]
     return serde_json::to_value(&response).expect("diff screen serialization");
 }

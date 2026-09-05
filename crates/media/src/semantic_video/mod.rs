@@ -10,7 +10,7 @@ use std::{
 use crate::{Error, Result};
 use termtrace_engine::{Error as EngineError, replay::visit_states};
 use termtrace_evidence::{
-    artifact::{hash_regular_file, secure_file, write_secure},
+    artifact::{finish_writer, hash_regular_file, secure_file, secure_writer, write_secure},
     event_log::EventLog,
     session::validate_completed_log,
 };
@@ -445,7 +445,7 @@ fn semantic_ffmpeg_arguments(source: &SemanticVideoSourcePlan, output: &Path) ->
 }
 
 fn write_frame_spans(path: &Path, spans: &[SemanticFrameSpan]) -> Result<()> {
-    let mut writer = termtrace_evidence::artifact::secure_writer(path)?;
+    let mut writer = secure_writer(path)?;
     for span in spans {
         serde_json::to_writer(&mut writer, span).map_err(|source_error| {
             return Error::InvalidJson {
@@ -454,14 +454,14 @@ fn write_frame_spans(path: &Path, spans: &[SemanticFrameSpan]) -> Result<()> {
                 source: source_error,
             };
         })?;
-        writer
-            .write_all(b"\n")
-            .map_err(|source| Error::Filesystem {
+        writer.write_all(b"\n").map_err(|source| {
+            return Error::Filesystem {
                 path: path.to_path_buf(),
                 source,
-            })?;
+            };
+        })?;
     }
-    termtrace_evidence::artifact::finish_writer(writer, path)?;
+    finish_writer(writer, path)?;
     return Ok(());
 }
 

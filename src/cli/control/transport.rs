@@ -232,9 +232,9 @@ pub(in crate::cli) fn run_status(
 }
 
 #[derive(serde::Serialize)]
-struct LiveStatusResponse<'a> {
+struct LiveStatusResponse<'session> {
     kind: &'static str,
-    session: &'a str,
+    session: &'session str,
     lifecycle: &'static str,
     pid: Option<u32>,
     boundary: serde_json::Value,

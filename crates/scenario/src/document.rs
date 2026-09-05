@@ -304,15 +304,17 @@ mod tests {
         let spec =
             to_environment_spec(&scenario.launch.environment).expect("convert to environment spec");
         assert_eq!(
-            spec.set.get("PI_SKIP_VERSION_CHECK").map(|b| b.as_bytes()),
+            spec.set
+                .get("PI_SKIP_VERSION_CHECK")
+                .map(|b| return b.as_bytes()),
             Some(b"1".as_slice())
         );
         assert_eq!(
-            spec.set.get("UNICODE").map(|b| b.as_bytes()),
+            spec.set.get("UNICODE").map(|b| return b.as_bytes()),
             Some("λ".as_bytes())
         );
         assert_eq!(
-            spec.set.get("BINARY").map(|b| b.as_bytes()),
+            spec.set.get("BINARY").map(|b| return b.as_bytes()),
             Some(&[1, 2][..])
         );
 

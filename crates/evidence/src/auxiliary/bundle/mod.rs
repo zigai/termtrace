@@ -194,7 +194,7 @@ pub fn hash_regular_file(path: &Path) -> Result<(u64, String)> {
     let mut hasher = blake3::Hasher::new();
     hasher
         .update_reader(&mut file)
-        .map_err(|source| Error::filesystem(path, source))?;
+        .map_err(|source| return Error::filesystem(path, source))?;
     return Ok((size, hasher.finalize().to_hex().to_string()));
 }
 

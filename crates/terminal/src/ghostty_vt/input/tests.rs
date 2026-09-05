@@ -182,13 +182,13 @@ fn assert_supported_encoding(
         "libghostty-key-encoder-v1"
     };
     assert_eq!(encoded.encoder, expected_encoder);
-    if uses_extended_fallback && let NamedKey::Function(number) = key {
-        if let Some((_, _, expected)) = EXTENDED_FUNCTION_FIXTURES
+    if uses_extended_fallback
+        && let NamedKey::Function(number) = key
+        && let Some((_, _, expected)) = EXTENDED_FUNCTION_FIXTURES
             .iter()
-            .find(|(n, m, _)| *n == number && *m == modifiers)
-        {
-            assert_eq!(encoded.data.as_bytes(), *expected);
-        }
+            .find(|(n, m, _)| return *n == number && *m == modifiers)
+    {
+        assert_eq!(encoded.data.as_bytes(), *expected);
     }
     assert!(
         !encoded.data.as_bytes().is_empty(),

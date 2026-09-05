@@ -1,6 +1,6 @@
 //! Optional, non-canonical asciinema interoperability export.
 
-use std::{collections::HashMap, path::Path, time::Duration};
+use std::{collections::HashMap, io::Write, path::Path, time::Duration};
 
 use serde::Serialize;
 use termtrace_evidence::{
@@ -118,7 +118,7 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
 }
 
 fn write_cast_event(
-    writer: &mut impl std::io::Write,
+    writer: &mut impl Write,
     seconds: f64,
     code: &str,
     data: &str,
@@ -127,14 +127,14 @@ fn write_cast_event(
     return write_line(writer, &(seconds, code, data), path);
 }
 
-fn write_line(writer: &mut impl std::io::Write, value: &impl Serialize, path: &Path) -> Result<()> {
+fn write_line(writer: &mut impl Write, value: &impl Serialize, path: &Path) -> Result<()> {
     serde_json::to_writer(&mut *writer, value)
         .map_err(|source| return Error::json(path, source))?;
-    writer
-        .write_all(b"\n")
-        .map_err(|source| Error::Filesystem {
+    writer.write_all(b"\n").map_err(|source| {
+        return Error::Filesystem {
             path: path.to_path_buf(),
             source,
-        })?;
+        };
+    })?;
     return Ok(());
 }

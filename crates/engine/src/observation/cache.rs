@@ -501,11 +501,11 @@ fn hash_file(path: &Path) -> Result<(u64, String)> {
     }
     let mut reader = BufReader::new(file);
     let mut hasher = blake3::Hasher::new();
-    hasher
-        .update_reader(&mut reader)
-        .map_err(|source| Error::Filesystem {
+    hasher.update_reader(&mut reader).map_err(|source| {
+        return Error::Filesystem {
             path: path.to_path_buf(),
             source,
-        })?;
+        };
+    })?;
     return Ok((metadata.len(), hasher.finalize().to_hex().to_string()));
 }

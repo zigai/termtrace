@@ -162,16 +162,16 @@ pub fn index_session_with_options(
         });
     });
     if let Err(primary) = result {
-        if staging.exists() {
-            if let Err(source) = fs_err::remove_dir_all(&staging) {
-                return Err(Error::CleanupFailed {
-                    primary: Box::new(primary),
-                    cleanup: Box::new(Error::Filesystem {
-                        path: staging,
-                        source,
-                    }),
-                });
-            }
+        if staging.exists()
+            && let Err(source) = fs_err::remove_dir_all(&staging)
+        {
+            return Err(Error::CleanupFailed {
+                primary: Box::new(primary),
+                cleanup: Box::new(Error::Filesystem {
+                    path: staging,
+                    source,
+                }),
+            });
         }
         return Err(primary);
     }

@@ -1,6 +1,7 @@
 //! replay index and playback CLI integration tests.
 
 use crate::support::*;
+use std::sync::mpsc;
 
 #[test]
 fn index_replays_every_distinct_state_deterministically() {
@@ -566,7 +567,7 @@ fn playback_does_not_echo_terminal_query_responses() {
     let mut child = pty.slave.spawn_command(command).expect("spawn playback");
     drop(pty.slave);
     let mut reader = pty.master.try_clone_reader().expect("clone PTY reader");
-    let (query_tx, query_rx) = std::sync::mpsc::channel();
+    let (query_tx, query_rx) = mpsc::channel();
     let reader_thread = thread::spawn(move || {
         let mut output = Vec::new();
         let mut buffer = [0_u8; 128];
@@ -576,7 +577,7 @@ fn playback_does_not_echo_terminal_query_responses() {
                 Ok(0) => break,
                 Ok(n) => {
                     output.extend_from_slice(&buffer[..n]);
-                    if !observed_query && output.windows(query.len()).any(|w| w == query) {
+                    if !observed_query && output.windows(query.len()).any(|w| return w == query) {
                         let _ = query_tx.send(());
                         observed_query = true;
                     }
@@ -584,7 +585,7 @@ fn playback_does_not_echo_terminal_query_responses() {
                 Err(_) => break,
             }
         }
-        output
+        return output;
     });
     let mut writer = pty.master.take_writer().expect("take PTY writer");
     writer

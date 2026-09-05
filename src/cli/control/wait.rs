@@ -15,12 +15,7 @@ pub(in crate::cli) fn run_wait(
     if let Some(stable_for) = arguments.idle {
         return run_idle_wait(response, arguments, stable_for);
     }
-    let predicate = if arguments.output.is_none() {
-        Some(parse_screen_predicate(&arguments)?)
-    } else {
-        None
-    };
-    let resolved = resolve_session(arguments.session)?;
+    let resolved = resolve_session(arguments.session.clone())?;
     if resolved.lifecycle != RegistryLifecycle::Live {
         return write_session_lifecycle(response, &resolved, "wait", ExitCode::FAILURE);
     }
@@ -36,7 +31,7 @@ pub(in crate::cli) fn run_wait(
             &wait_for_output(session, output.as_bytes(), timeout).into_diagnostic()?,
         );
     }
-    let predicate = predicate.expect("predicate parsed");
+    let predicate = parse_screen_predicate(&arguments)?;
     let outcome =
         wait_for_screen(session, predicate, arguments.stable_for, timeout).into_diagnostic()?;
     let matched = outcome.matched

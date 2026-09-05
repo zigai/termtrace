@@ -462,9 +462,11 @@ impl EventProjection {
 
 fn event_metadata(event: &Event) -> serde_json::Value {
     match event {
-        Event::Output { .. } => serde_json::json!({
-            "type": "output",
-        }),
+        Event::Output { .. } => {
+            return serde_json::json!({
+                "type": "output",
+            });
+        }
         Event::InputIntent {
             operation_id,
             source,
@@ -474,21 +476,25 @@ fn event_metadata(event: &Event) -> serde_json::Value {
             semantic_input,
             caller_intent,
             ..
-        } => serde_json::json!({
-            "type": "input_intent",
-            "operation_id": operation_id,
-            "source": source,
-            "input_kind": input_kind,
-            "descriptor": descriptor,
-            "terminal_modes_hash": terminal_modes_hash,
-            "semantic_input": semantic_input,
-            "caller_intent": caller_intent,
-        }),
-        Event::QueryResponse { responder, .. } => serde_json::json!({
-            "type": "query_response",
-            "responder": responder,
-        }),
-        other => serde_json::to_value(other).unwrap_or(serde_json::Value::Null),
+        } => {
+            return serde_json::json!({
+                "type": "input_intent",
+                "operation_id": operation_id,
+                "source": source,
+                "input_kind": input_kind,
+                "descriptor": descriptor,
+                "terminal_modes_hash": terminal_modes_hash,
+                "semantic_input": semantic_input,
+                "caller_intent": caller_intent,
+            });
+        }
+        Event::QueryResponse { responder, .. } => {
+            return serde_json::json!({
+                "type": "query_response",
+                "responder": responder,
+            });
+        }
+        other => return serde_json::to_value(other).unwrap_or(serde_json::Value::Null),
     }
 }
 

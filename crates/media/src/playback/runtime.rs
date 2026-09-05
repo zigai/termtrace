@@ -7,6 +7,7 @@ use std::{
 };
 
 use termtrace_engine::timeline::resolve_source_range;
+use termtrace_evidence::artifact::write_secure;
 use termtrace_evidence::{event_log::EventLog, session::read_manifest};
 use termtrace_model::{
     artifact::playback::{PlaybackFailure, PlaybackTiming},
@@ -346,7 +347,7 @@ fn write_create_new_json(path: &Path, value: &impl serde::Serialize) -> Result<(
     return write_create_new(path, &encoded);
 }
 fn write_create_new(path: &Path, bytes: &[u8]) -> Result<()> {
-    termtrace_evidence::artifact::write_secure(path, bytes).map_err(Error::from)
+    return write_secure(path, bytes).map_err(Error::from);
 }
 fn output_error(source: io::Error) -> Error {
     return Error::Filesystem {

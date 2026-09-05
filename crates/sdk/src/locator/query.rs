@@ -501,13 +501,15 @@ impl QueryResult {
     /// Require exactly one match.
     pub fn single(&self) -> Result<&ScreenMatch, QueryError> {
         match self.all() {
-            [] => Err(QueryError::NoMatch {
-                query: self.spec.description(),
-                state_hash: self.frame.state_hash.clone(),
-                frame_hash: self.frame.frame_hash.clone(),
-            }),
-            [only] => Ok(only),
-            _ => Err(multiple_matches(&self.spec, &self.frame, &self.matches)),
+            [] => {
+                return Err(QueryError::NoMatch {
+                    query: self.spec.description(),
+                    state_hash: self.frame.state_hash.clone(),
+                    frame_hash: self.frame.frame_hash.clone(),
+                });
+            }
+            [only] => return Ok(only),
+            _ => return Err(multiple_matches(&self.spec, &self.frame, &self.matches)),
         }
     }
 

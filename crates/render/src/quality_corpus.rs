@@ -1,6 +1,6 @@
 //! Focused semantic rendering quality corpus.
 
-use std::{env, fs, path::Path, str};
+use std::{collections::BTreeMap, env, fs, path::Path, str};
 
 use resvg::tiny_skia::Pixmap;
 use termtrace_model::artifact::save::SemanticRasterProfile;
@@ -47,11 +47,11 @@ fn assert_decoration_geometry(svg: &str, pixmap: &Pixmap) {
     let row_2_y_start = 2 * 24;
     let row_2_y_end = 3 * 24;
     let has_magenta = (row_2_y_start..row_2_y_end).any(|y| {
-        (0..pixmap.width()).any(|x| {
-            pixmap
+        return (0..pixmap.width()).any(|x| {
+            return pixmap
                 .pixel(x, y)
-                .is_some_and(|p| p.red() > 200 && p.blue() > 200 && p.green() < 50)
-        })
+                .is_some_and(|p| return p.red() > 200 && p.blue() > 200 && p.green() < 50);
+        });
     });
     assert!(
         has_magenta,
@@ -117,7 +117,7 @@ fn quality_corpus_renders_every_cursor_style() {
     let hidden_png = render_png(&hidden_state).expect("render hidden cursor PNG");
     let hidden_pixmap = Pixmap::decode_png(&hidden_png).expect("decode hidden cursor PNG");
 
-    let png_by_style: std::collections::BTreeMap<_, _> = [
+    let png_by_style: BTreeMap<_, _> = [
         ("bar", CursorStyle::Bar),
         ("block", CursorStyle::Block),
         ("underline", CursorStyle::Underline),
@@ -142,7 +142,7 @@ fn quality_corpus_renders_every_cursor_style() {
             fs::write(Path::new(directory).join(format!("{name}.png")), &png)
                 .expect("write quality corpus PNG reference");
         }
-        (name, png)
+        return (name, png);
     })
     .collect();
     assert_ne!(png_by_style["bar"], png_by_style["block"]);
@@ -183,7 +183,7 @@ fn cursor_visibility_and_wide_tail_are_composed_from_terminal_state() {
 
     let wide_png = render_png(&wide_tail).expect("render wide-tail cursor PNG");
     let wide_pixmap = Pixmap::decode_png(&wide_png).expect("decode wide-tail PNG");
-    let mut hidden_wide = wide_tail.clone();
+    let mut hidden_wide = wide_tail;
     hidden_wide.cursor.visible = false;
     let hidden_wide_png = render_png(&hidden_wide).expect("render hidden wide PNG");
     let hidden_wide_pixmap = Pixmap::decode_png(&hidden_wide_png).expect("decode hidden wide PNG");

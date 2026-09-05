@@ -54,8 +54,10 @@ fn spawn_reader(
                         return;
                     }
                     Ok(length) => {
-                        let output = buffer[..length].to_vec();
-                        if sender.send(RuntimeMessage::Output(output)).is_err() {
+                        let Some(slice) = buffer.get(..length) else {
+                            continue;
+                        };
+                        if sender.send(RuntimeMessage::Output(slice.to_vec())).is_err() {
                             return;
                         }
                     }
@@ -200,8 +202,10 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
         match fd_read(&stdin, &mut buffer) {
             Ok(0) => return,
             Ok(length) => {
-                let input = buffer[..length].to_vec();
-                if sender.send(RuntimeMessage::Input(input)).is_err() {
+                let Some(slice) = buffer.get(..length) else {
+                    continue;
+                };
+                if sender.send(RuntimeMessage::Input(slice.to_vec())).is_err() {
                     return;
                 }
             }
@@ -249,7 +253,7 @@ pub(super) fn spawn_command(
     let (program, arguments) = options
         .command
         .split_first()
-        .expect("record options were validated before process spawn");
+        .ok_or_else(|| return terminal_error("spawn command", "command must not be empty"))?;
     let mut command = CommandBuilder::new(program);
     command.args(arguments);
     command.env_clear();

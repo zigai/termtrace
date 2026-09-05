@@ -130,10 +130,10 @@ pub(super) fn action_postcondition(arguments: &ActArgs) -> ActionPostcondition {
 }
 
 #[derive(serde::Serialize)]
-pub(super) struct ActionObservation<'a> {
-    pub(super) state: &'a str,
+pub(super) struct ActionObservation<'data> {
+    pub(super) state: &'data str,
     #[serde(flatten)]
-    pub(super) frame: &'a ScreenFrame,
+    pub(super) frame: &'data ScreenFrame,
 }
 
 #[cfg(test)]
@@ -146,44 +146,44 @@ pub(super) fn action_observation(frame: &ScreenFrame) -> Result<serde_json::Valu
 }
 
 #[derive(serde::Serialize)]
-pub(super) struct ActionInputSummary<'a> {
+pub(super) struct ActionInputSummary<'data> {
     pub(super) applied: &'static str,
     pub(super) atoms: u32,
     pub(super) bytes: u64,
     pub(super) pace_ns: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) outcomes: Option<&'a [InputSequenceAtomOutcome]>,
+    pub(super) outcomes: Option<&'data [InputSequenceAtomOutcome]>,
 }
 
 #[derive(serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub(super) enum ActionPostconditionSummary<'a> {
+pub(super) enum ActionPostconditionSummary<'data> {
     None {
         matched: bool,
         outcome: &'static str,
     },
     Idle {
         matched: bool,
-        outcome: &'a StableCaptureQuality,
+        outcome: &'data StableCaptureQuality,
     },
     Screen {
         matched: bool,
-        outcome: &'a ScreenPostconditionQuality,
+        outcome: &'data ScreenPostconditionQuality,
     },
 }
 
 #[derive(serde::Serialize)]
-pub(super) struct ActionAppliedOutput<'a> {
+pub(super) struct ActionAppliedOutput<'data> {
     pub(super) v: u32,
     pub(super) ok: bool,
     #[serde(rename = "type")]
     pub(super) response_type: &'static str,
     pub(super) request_id: uuid::Uuid,
-    pub(super) input: ActionInputSummary<'a>,
-    pub(super) postcondition: ActionPostconditionSummary<'a>,
-    pub(super) observation: ActionObservation<'a>,
+    pub(super) input: ActionInputSummary<'data>,
+    pub(super) postcondition: ActionPostconditionSummary<'data>,
+    pub(super) observation: ActionObservation<'data>,
     pub(super) ended: bool,
-    pub(super) boundaries: &'a ActorBoundaries,
+    pub(super) boundaries: &'data ActorBoundaries,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) code: Option<&'static str>,
 }
@@ -314,13 +314,13 @@ pub(super) struct ActionErrorPostcondition {
 }
 
 #[derive(serde::Serialize)]
-pub(super) struct ActionErrorObservation<'a> {
-    pub(super) state: &'a str,
-    pub(super) scope: &'a str,
+pub(super) struct ActionErrorObservation<'data> {
+    pub(super) state: &'data str,
+    pub(super) scope: &'data str,
 }
 
 #[derive(serde::Serialize)]
-pub(super) struct ActionErrorOutput<'a> {
+pub(super) struct ActionErrorOutput<'data> {
     pub(super) v: u32,
     pub(super) ok: bool,
     #[serde(rename = "type")]
@@ -330,9 +330,9 @@ pub(super) struct ActionErrorOutput<'a> {
     pub(super) request_id: uuid::Uuid,
     pub(super) input: ActionFailedInputSummary,
     pub(super) postcondition: ActionErrorPostcondition,
-    pub(super) observation: Option<ActionErrorObservation<'a>>,
+    pub(super) observation: Option<ActionErrorObservation<'data>>,
     pub(super) ended: bool,
-    pub(super) boundaries: Option<&'a ActorBoundaries>,
+    pub(super) boundaries: Option<&'data ActorBoundaries>,
 }
 
 pub(super) fn action_error_response(
@@ -396,6 +396,10 @@ pub(super) fn action_error_response(
         ended,
         boundaries,
     };
+    #[expect(
+        clippy::expect_used,
+        reason = "ActionErrorOutput contains only primitive serializable types and cannot fail JSON serialization"
+    )]
     return serde_json::to_value(&output).expect("action error serialization");
 }
 

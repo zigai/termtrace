@@ -1,6 +1,6 @@
 //! Deterministic semantic-state SVG scene construction.
 
-use std::fmt::Write;
+use std::fmt::{self, Display, Formatter, Write};
 use std::mem;
 
 use base64::Engine;
@@ -459,8 +459,8 @@ fn resolve_color(spec: ColorSpec, default: Rgb, palette: &[Rgb]) -> Rgb {
 #[derive(Clone, Copy)]
 struct HexColor(Rgb);
 
-impl std::fmt::Display for HexColor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for HexColor {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         return write!(f, "#{:02x}{:02x}{:02x}", self.0.r, self.0.g, self.0.b);
     }
 }
@@ -469,10 +469,10 @@ fn color_hex(color: Rgb) -> HexColor {
     return HexColor(color);
 }
 
-struct EscapedXml<'a>(&'a str);
+struct EscapedXml<'text>(&'text str);
 
-impl std::fmt::Display for EscapedXml<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for EscapedXml<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         for ch in self.0.chars() {
             match ch {
                 '&' => f.write_str("&amp;")?,
@@ -577,18 +577,16 @@ mod tests {
             ttf_parser::Face::parse(font_set.regular_face_bytes(), 0).expect("parse regular font");
         let advance = regular
             .glyph_index('A')
-            .and_then(|g| regular.glyph_hor_advance(g))
+            .and_then(|g| return regular.glyph_hor_advance(g))
             .expect("glyph advance");
         let scaled_advance = (f32::from(advance) * (SEMANTIC_FONT_SIZE as f32)
             / f32::from(regular.units_per_em()))
         .round() as u16;
         assert_eq!(scaled_advance, SEMANTIC_CELL_WIDTH);
 
-        let symbols = ttf_parser::Face::parse(
-            font_set.face_bytes(termtrace_model::artifact::save::SemanticFontRole::SymbolsFallback),
-            0,
-        )
-        .expect("parse symbols font");
+        let symbols =
+            ttf_parser::Face::parse(font_set.face_bytes(SemanticFontRole::SymbolsFallback), 0)
+                .expect("parse symbols font");
         let symbols_height = (f32::from(symbols.ascender() - symbols.descender())
             * (SEMANTIC_SYMBOLS_FONT_SIZE as f32)
             / f32::from(symbols.units_per_em()))
