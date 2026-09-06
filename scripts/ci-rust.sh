@@ -17,5 +17,8 @@ bash scripts/check-github-action-pins.sh
 
 cargo machete
 cargo fmt --all -- --check
+cargo fmt --manifest-path tests/consumers/rust/Cargo.toml -- --check
+cargo test --locked -p termtrace-sdk --no-default-features
+cargo clippy --locked -p termtrace-sdk --no-default-features --all-targets -- -D warnings
 cargo test --locked --workspace --lib --bins
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings

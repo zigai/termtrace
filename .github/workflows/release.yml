@@ -40,6 +40,7 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: sudo apt-get update && sudo apt-get install --yes b3sum
+      - run: python3 scripts/check-release-versions.py
       - run: cargo install cargo-zigbuild --version 0.23.0 --locked
       - run: scripts/bootstrap.sh
         env:
@@ -49,11 +50,15 @@ jobs:
           zig=$(find .tools -type f -path '*/zig' -perm -u+x -print -quit)
           test -n "$zig"
           dirname "$zig" >> "$GITHUB_PATH"
-      - run: cargo test --locked --all-features
+      - run: cargo test --locked --workspace --all-features
       - run: cargo zigbuild --locked --release --all-features --target "${{ matrix.target }}.2.28"
         env:
           TERMTRACE_BUILD_REVISION: ${{ github.sha }}
       - run: scripts/check-glibc-compat.sh "target/${{ matrix.target }}/release/termtrace" 2.28
+      - name: Test standalone Rust process client
+        run: bash scripts/ci-rust-consumer.sh
+        env:
+          TERMTRACE_BIN: ${{ github.workspace }}/target/${{ matrix.target }}/release/termtrace
       - run: bun install --cwd packages/typescript --frozen-lockfile && bun run --cwd packages/typescript build
       - name: Package deterministic archive
         run: |
@@ -104,13 +109,17 @@ jobs:
           uv venv --python 3.11 "$wheel_root/venv"
           uv pip install --python "$wheel_root/venv/bin/python" dist/python/*.whl
           "$wheel_root/venv/bin/termtrace" doctor --require core,semantic
+          cp tests/consumers/python/smoke.py "$wheel_root/smoke.py"
+          (cd "$wheel_root" && env -u TERMTRACE_BINARY "$wheel_root/venv/bin/python" smoke.py)
       - name: Test npm command
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           npm_root=$(mktemp -d)
           trap 'rm -rf "$npm_root"' EXIT
-          npm install --global --prefix "$npm_root" dist/npm/termtrace-cli-linux-x64-*.tgz dist/npm/termtrace-test-*.tgz
-          node "$npm_root/lib/node_modules/@termtrace/test/bin/termtrace.js" doctor --require core,semantic
+          npm install --prefix "$npm_root" dist/npm/termtrace-cli-linux-x64-*.tgz dist/npm/termtrace-test-*.tgz
+          node "$npm_root/node_modules/@termtrace/test/bin/termtrace.js" doctor --require core,semantic
+          cp tests/consumers/typescript/smoke.mjs "$npm_root/smoke.mjs"
+          (cd "$npm_root" && env -u TERMTRACE_BINARY node smoke.mjs)
       - name: Checksum client packages
         run: find dist/python dist/npm -type f -print0 | sort -z | xargs -0 sha256sum > "dist/termtrace-${{ matrix.target }}-packages.sha256"
       - name: Generate CycloneDX SBOM
@@ -138,9 +147,88 @@ jobs:
             dist/npm/*
           if-no-files-found: error
 
-  publish:
+  rust-packages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@46511b1c83438f0dd37c02d843619ece5a4abb5b # 1.97.1
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - run: python3 scripts/check-release-versions.py
+      - run: scripts/bootstrap.sh
+      - run: cargo test --locked -p termtrace-sdk --no-default-features
+      - run: bash scripts/build-rust-packages.sh
+      - uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: dist/rust/*.crate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: termtrace-rust-packages
+          path: dist/rust/*
+          if-no-files-found: error
+
+  publish-python:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: termtrace-*-unknown-linux-gnu
+          path: dist
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: 0.12.10
+      - name: Publish tested wheels to PyPI
+        run: uv publish --trusted-publishing always --check-url https://pypi.org/simple dist/python/*.whl
+
+  publish-npm:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: termtrace-*-unknown-linux-gnu
+          path: dist
+          merge-multiple: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.13.0
+          registry-url: https://registry.npmjs.org
+      - name: Publish platform binaries before the client
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for package in dist/npm/termtrace-cli-*.tgz; do
+            npm publish "$package" --access public --provenance
+          done
+          npm publish dist/npm/termtrace-test-*.tgz --access public --provenance
+
+  publish-crates:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, rust-packages]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@46511b1c83438f0dd37c02d843619ece5a4abb5b # 1.97.1
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - run: scripts/bootstrap.sh
+      - name: Publish the tested Rust dependency graph
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          TERMTRACE_GHOSTTY_PREFIX: ${{ github.workspace }}/vendor/ghostty/zig-out
+        run: |
+          cargo publish --locked \
+            -p termtrace-model -p termtrace-terminal -p termtrace-evidence \
+            -p termtrace-engine -p termtrace-render -p termtrace-media \
+            -p termtrace-export -p termtrace-sdk
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, rust-packages, publish-python, publish-npm, publish-crates]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5

@@ -9,3 +9,4 @@ uv sync --project packages/python --locked --group dev
 # for those consumers as well as the tests that explicitly invoke uv.
 export PATH="$root/packages/python/.venv/bin:$PATH"
 cargo test --locked --test cli
+bash scripts/ci-rust-consumer.sh
