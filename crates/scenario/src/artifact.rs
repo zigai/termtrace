@@ -1,12 +1,20 @@
 use std::{
+    fmt::Display,
     fs::Permissions,
+    io::Write as _,
     os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
 };
 
 use serde::Serialize;
-use termtrace_engine::{analysis::diagnostics::diagnose, timeline::build_timeline};
-use termtrace_evidence::event_log::EventLog;
+use termtrace_engine::{
+    Error as EngineError, analysis::diagnostics::diagnose_snapshot,
+    timeline::visit_snapshot_timeline_while,
+};
+use termtrace_evidence::{
+    artifact::{finish_writer, secure_writer},
+    session::SessionSnapshot,
+};
 use termtrace_model::{
     protocol::control::ControlData, terminal::analysis::DiagnosticCheck,
     terminal::state::SemanticState, value::ByteString,
@@ -15,7 +23,10 @@ use zstd::stream::decode_all;
 
 use termtrace_model::scenario::{Scenario, ScenarioReport};
 
-use crate::{Error, Result, error::invalid};
+use crate::{
+    Error, Result,
+    error::{invalid, operation},
+};
 
 pub(crate) fn snapshot_path(failure_root: &Path, name: &str) -> Result<PathBuf> {
     let artifact_root = failure_root
@@ -108,13 +119,12 @@ fn populate_failure(
             }
         }
     }
-    match EventLog::read(report.canonical_session.join("events.jsonl")) {
-        Ok(log) => {
-            match build_timeline(&log, true, true, None) {
-                Ok(timeline) => write_json(temporary.join("timeline.json"), &timeline)?,
-                Err(error) => derivation_errors.push(format!("timeline: {error}")),
+    match SessionSnapshot::capture(&report.canonical_session, None) {
+        Ok(snapshot) => {
+            if let Err(error) = write_timeline(&snapshot, &temporary.join("timeline.json")) {
+                derivation_errors.push(format!("timeline: {error}"));
             }
-            match diagnose(&log, DiagnosticCheck::all(), 50, &[]) {
+            match diagnose_snapshot(&snapshot, DiagnosticCheck::all(), 50) {
                 Ok(diagnosis) => write_json(temporary.join("diagnose.json"), &diagnosis)?,
                 Err(error) => derivation_errors.push(format!("diagnose: {error}")),
             }
@@ -125,6 +135,41 @@ fn populate_failure(
         write_json(temporary.join("derivation-errors.json"), &derivation_errors)?;
     }
     return Ok(());
+}
+
+fn write_timeline(snapshot: &SessionSnapshot, path: &Path) -> Result<()> {
+    let write = (|| -> Result<()> {
+        let mut output =
+            secure_writer(path).map_err(|error| return operation("create timeline", error))?;
+        output
+            .write_all(b"[\n")
+            .map_err(|error| return operation("write timeline", error))?;
+        let mut first = true;
+        visit_snapshot_timeline_while(snapshot, true, true, None, |entry| {
+            if !first {
+                output.write_all(b",\n").map_err(timeline_error)?;
+            }
+            first = false;
+            serde_json::to_writer(&mut output, &entry).map_err(timeline_error)?;
+            return Ok(true);
+        })
+        .map_err(|error| return operation("derive timeline", error))?;
+        output
+            .write_all(b"\n]\n")
+            .map_err(|error| return operation("write timeline", error))?;
+        finish_writer(output, path).map_err(|error| return operation("finish timeline", error))?;
+        return Ok(());
+    })();
+    if write.is_err() {
+        let _cleanup = fs_err::remove_file(path);
+    }
+    return write;
+}
+
+fn timeline_error(error: impl Display) -> EngineError {
+    return EngineError::InvalidReplay {
+        reason: format!("write scenario timeline: {error}"),
+    };
 }
 
 pub(crate) fn write_bytes(path: PathBuf, bytes: &[u8]) -> Result<()> {

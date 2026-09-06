@@ -3,16 +3,20 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
     result::Result as StdResult,
+    sync::atomic::AtomicBool,
     time::Duration,
 };
 
 use termtrace_engine::{
-    analysis::diagnostics::diagnose,
+    analysis::diagnostics::diagnose_snapshot,
     observation::{StatePoint, observe_session_with_options, state_text},
-    replay::{StateSelector, inspect_many, replay},
-    timeline::build_timeline_page,
+    replay::visit_snapshot_states_while,
+    timeline::build_session_timeline_page,
 };
-use termtrace_evidence::{event_log::EventLog, session::validate_completed_log};
+use termtrace_evidence::{
+    event_log::EventLogCursor,
+    session::{SessionSnapshot, validate_completed_session},
+};
 use termtrace_model::{
     execution::event::{Event, InputKind},
     protocol::control::{ControlCommand, ControlRequest, ScreenPredicate, ScreenWaitQuality},
@@ -159,9 +163,7 @@ pub(crate) fn run_validated(
 }
 
 fn validate_replay_closure(session: &Path, steps: &[ScenarioStepResult]) -> Result<()> {
-    let log = EventLog::read(session.join("events.jsonl"))
-        .map_err(|error| return operation("read replay closure event log", error))?;
-    let completion = validate_completed_log(session, &log)
+    let completion = validate_completed_session(session)
         .map_err(|error| return operation("validate replay closure", error))?;
     let asserted_hashes: BTreeSet<&String> = steps
         .iter()
@@ -191,7 +193,7 @@ fn validate_replay_closure(session: &Path, steps: &[ScenarioStepResult]) -> Resu
     );
     observe_session_with_options(session, final_point, true)
         .map_err(|error| return operation("observe final replay state", error))?;
-    let page = build_timeline_page(&log, true, true, None, 0, 64)
+    let page = build_session_timeline_page(session, true, true, None, 0, 64)
         .map_err(|error| return operation("build replay closure timeline", error))?;
     if page.entries.is_empty() {
         return Err(invalid("replay closure produced an empty timeline page"));
@@ -426,71 +428,71 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
             ));
         }
     };
-    let log = EventLog::read(session.join("events.jsonl"))
-        .map_err(|error| return operation("read timeline assertion event log", error))?;
+    let snapshot = SessionSnapshot::capture(session, None)
+        .map_err(|error| return operation("snapshot timeline assertion", error))?;
     let marker_time = |label: &str| -> Result<u64> {
-        let matches: Vec<u64> = log
-            .events
-            .iter()
-            .filter_map(|record| match &record.event {
-                Event::Marker { label: value, .. } if value == label => {
-                    return Some(record.monotonic_ns);
-                }
-                _ => return None,
-            })
-            .collect();
-        let [time] = matches.as_slice() else {
+        let mut cursor = EventLogCursor::open(snapshot.path().join("events.jsonl"))
+            .map_err(|error| return operation("read timeline assertion", error))?;
+        let mut count = 0_u64;
+        let mut time = 0;
+        while let Some(record) = cursor
+            .next_record()
+            .map_err(|error| return operation("read timeline assertion", error))?
+        {
+            if matches!(record.event, Event::Marker { label: value, .. } if value == label) {
+                count = count.saturating_add(1);
+                time = record.monotonic_ns;
+            }
+        }
+        if count != 1 {
             return Err(invalid(format!(
-                "timeline marker `{label}` must occur exactly once, found {}",
-                matches.len()
+                "timeline marker `{label}` must occur exactly once, found {count}"
             )));
-        };
-        return Ok(*time);
+        }
+        return Ok(time);
     };
     let start = marker_time(start_label)?;
     let end = marker_time(end_label)?;
     if end < start {
         return Err(invalid("timeline markers are in reverse order"));
     }
-    let replayed =
-        replay(&log).map_err(|error| return operation("replay timeline assertion", error))?;
-    let ranged_states: Vec<_> = replayed
-        .states
-        .iter()
-        .filter(|state| return state.monotonic_ns >= start && state.monotonic_ns <= end)
-        .collect();
-    if let Some(text) = &assertion.no_presented_screen_contains {
-        let presented_selectors: Vec<_> = ranged_states
-            .iter()
-            .filter(|state| return state.presented)
-            .map(|state| return StateSelector::StateId(state.state_id))
-            .collect();
-        if !presented_selectors.is_empty() {
-            let inspections = inspect_many(&log, &presented_selectors)
-                .map_err(|error| return operation("inspect timeline assertion states", error))?;
-            for inspected in inspections {
-                if state_text(&inspected.state).contains(text) {
-                    return Err(invalid(format!(
-                        "a presented state between `{start_label}` and `{end_label}` contained forbidden text"
-                    )));
-                }
+    let mut state_bounds = None::<(u64, u64)>;
+    let mut forbidden = false;
+    visit_snapshot_states_while(&snapshot, None, &AtomicBool::new(false), |record, state| {
+        if record.monotonic_ns >= start && record.monotonic_ns <= end {
+            if let Some((_, last)) = &mut state_bounds {
+                *last = record.state_id;
+            } else {
+                state_bounds = Some((record.state_id, record.state_id));
+            }
+            if record.presented
+                && assertion
+                    .no_presented_screen_contains
+                    .as_ref()
+                    .is_some_and(|text| return state_text(state).contains(text))
+            {
+                forbidden = true;
             }
         }
+        return Ok(true);
+    })
+    .map_err(|error| return operation("replay timeline assertion", error))?;
+    if forbidden {
+        return Err(invalid(format!(
+            "a presented state between `{start_label}` and `{end_label}` contained forbidden text"
+        )));
     }
     if let Some(code) = &assertion.no_finding {
-        let report = diagnose(&log, DiagnosticCheck::all(), 50, &[])
+        let report = diagnose_snapshot(&snapshot, DiagnosticCheck::all(), 50)
             .map_err(|error| return operation("diagnose timeline assertion", error))?;
-        let state_ids: BTreeSet<u64> = ranged_states
-            .iter()
-            .map(|state| return state.state_id)
-            .collect();
         if report.findings.iter().any(|finding| {
             return finding.code == *code
                 && (finding.state_ids.is_empty()
-                    || finding
-                        .state_ids
-                        .iter()
-                        .any(|state_id| return state_ids.contains(state_id)));
+                    || finding.state_ids.iter().any(|state_id| {
+                        return state_bounds.is_some_and(|(first, last)| {
+                            return *state_id >= first && *state_id <= last;
+                        });
+                    }));
         }) {
             return Err(invalid(format!(
                 "diagnostic finding `{code}` overlapped `{start_label}` through `{end_label}`"
