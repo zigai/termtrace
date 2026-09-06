@@ -4,6 +4,74 @@ use crate::support::*;
 use std::env;
 
 #[test]
+fn session_recovery_preserves_context_and_never_claims_completion() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("source.termtrace");
+    let recovered = temporary.path().join("recovered.termtrace");
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/echo", "RECOVERED-CONTEXT"])
+        .assert()
+        .success();
+    let log_path = session.join("events.jsonl");
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&log_path)
+        .expect("source log")
+        .write_all(b"{\"partial\"")
+        .expect("damage tail");
+    let original = fs_err::read(&log_path).expect("original bytes");
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["integrity", "recover", "--session"])
+        .arg(&session)
+        .arg("--out")
+        .arg(&recovered)
+        .assert()
+        .success();
+    assert_eq!(
+        fs_err::read(session.join("session.json")).expect("source manifest"),
+        fs_err::read(recovered.join("session.json")).expect("recovered manifest")
+    );
+    assert_eq!(fs_err::read(&log_path).expect("source retained"), original);
+    assert!(!recovered.join("completion.json").exists());
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs_err::read(recovered.join("recovery.json")).expect("report"))
+            .expect("report JSON");
+    assert_eq!(report["complete_evidence"], false);
+    assert!(report["recovery"]["discarded_tail"].is_object());
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .arg("show")
+        .arg(&recovered)
+        .arg("--recover-prefix")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("RECOVERED-CONTEXT"));
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["integrity", "recover", "--session"])
+        .arg(&session)
+        .arg("--out")
+        .arg(&recovered)
+        .assert()
+        .failure();
+    fs_err::write(session.join("session.json"), b"{}").expect("damage manifest");
+    let invalid = temporary.path().join("invalid.termtrace");
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["integrity", "recover", "--session"])
+        .arg(&session)
+        .arg("--out")
+        .arg(&invalid)
+        .assert()
+        .failure();
+    assert!(!invalid.exists());
+}
+
+#[test]
 fn root_help_groups_commands_by_workflow() {
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
 

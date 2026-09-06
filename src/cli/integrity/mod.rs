@@ -7,7 +7,9 @@ use std::{fmt::Write as _, mem::take, process::ExitCode};
 
 use miette::{IntoDiagnostic as _, Result};
 use termtrace_evidence::{
-    event_log::EventLog, receipt::create_ssh_receipt, session::verify_session_with_trust,
+    event_log::EventLog,
+    receipt::create_ssh_receipt,
+    session::{recover_session, verify_session_with_trust},
 };
 
 use crate::cli::{
@@ -74,7 +76,15 @@ pub(super) fn run_recover(
     response: &mut ResponseWriter,
     arguments: RecoverArgs,
 ) -> Result<ExitCode> {
-    let report = EventLog::recover_prefix(arguments.event_log, arguments.out).into_diagnostic()?;
+    let report = if let Some(session) = arguments.session {
+        recover_session(&session, &arguments.out).into_diagnostic()?
+    } else if let Some(event_log) = arguments.event_log {
+        EventLog::recover_prefix(event_log, arguments.out).into_diagnostic()?
+    } else {
+        return Err(miette::miette!(
+            "recovery requires --session or --event-log"
+        ));
+    };
     return write_json_line(response, &report);
 }
 

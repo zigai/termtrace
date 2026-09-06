@@ -75,9 +75,12 @@ pub(in crate::cli) struct SignArgs {
 #[derive(Debug, Args)]
 pub(in crate::cli) struct RecoverArgs {
     /// Damaged or truncated source event log.
+    #[arg(long, required_unless_present = "session", conflicts_with = "session")]
+    pub(in crate::cli) event_log: Option<PathBuf>,
+    /// Recover a session directory with its manifest and visual profile; remains incomplete.
     #[arg(long)]
-    pub(in crate::cli) event_log: PathBuf,
-    /// New recovered event-log path in an owner-only directory.
+    pub(in crate::cli) session: Option<PathBuf>,
+    /// New recovered log path, or session directory with --session.
     #[arg(long)]
     pub(in crate::cli) out: PathBuf,
 }

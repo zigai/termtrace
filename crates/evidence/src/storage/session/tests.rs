@@ -40,6 +40,7 @@ fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
         ..ChildEnvironmentPolicy::default()
     };
     let manifest = SessionManifest {
+        failure_policy: Default::default(),
         format: SESSION_MANIFEST_FORMAT.to_owned(),
         version: SESSION_MANIFEST_VERSION,
         session_id,
