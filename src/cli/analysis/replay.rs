@@ -14,7 +14,7 @@ use termtrace_engine::{
 };
 use termtrace_media::{
     native_capture::validated_visual_manifests,
-    playback::{PlaybackOptions, playback},
+    playback::{PlaybackOptions, playback, playback_worker},
     presentation::markers as list_markers,
 };
 use termtrace_model::terminal::{replay::StateSelection, reviewer::ReviewerCapabilities};
@@ -22,7 +22,7 @@ use termtrace_model::terminal::{replay::StateSelection, reviewer::ReviewerCapabi
 use crate::cli::{
     analysis::args::{
         CacheArgs, CacheCommand, IndexArgs, InspectArgs, InspectFormat, MarkersArgs, PlaybackArgs,
-        ReviewArgs,
+        PlaybackWorkerArgs, ReviewArgs,
     },
     analysis::reviewer::run as run_reviewer,
     output::{row_text, write_json_line, write_stdout},
@@ -131,6 +131,16 @@ pub(in crate::cli) fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> 
         endpoint_event_byte_offset: arguments.endpoint_event_byte_offset,
         instant: arguments.instant,
     })
+    .into_diagnostic()?;
+    return Ok(ExitCode::SUCCESS);
+}
+
+pub(in crate::cli) fn run_playback_worker(arguments: PlaybackWorkerArgs) -> Result<ExitCode> {
+    playback_worker(
+        &arguments.session,
+        &arguments.socket,
+        &arguments.geometry_file,
+    )
     .into_diagnostic()?;
     return Ok(ExitCode::SUCCESS);
 }

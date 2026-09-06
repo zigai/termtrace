@@ -242,7 +242,7 @@ fn probe_staged(
     let root = materialize_profile(&staging.join("ghostty-profile"), &profile.replay_config)?;
     let lease = DisplayLease::acquire()?;
     let display = format!(":{}", lease.number);
-    let mut xvfb = spawn_xvfb(&lease, target.width, target.height, staging)?;
+    let mut xvfb = spawn_xvfb(Some(helper), &lease, target.width, target.height, staging)?;
     wait_for_x_socket(&lease, &mut xvfb, Duration::from_secs(5))?;
     let report_path = staging.join("geometry.json");
     let mut ghostty = spawn_geometry_probe(

@@ -15,6 +15,7 @@ mod control;
 mod dispatch;
 mod integrity;
 mod output;
+mod owned;
 mod parsers;
 mod recording;
 mod registry;

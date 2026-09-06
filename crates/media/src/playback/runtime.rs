@@ -8,7 +8,10 @@ use std::{
 
 use termtrace_engine::timeline::resolve_source_range;
 use termtrace_evidence::artifact::write_secure;
-use termtrace_evidence::{event_log::EventLog, session::read_manifest};
+use termtrace_evidence::{
+    event_log::{EventLogCursor, EventLogSummary},
+    session::read_manifest,
+};
 use termtrace_model::{
     artifact::playback::{PlaybackFailure, PlaybackTiming},
     execution::event::{Event, OperationStatus},
@@ -122,10 +125,10 @@ fn validate_options(options: &PlaybackOptions) -> Result<()> {
 }
 
 fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result<()> {
-    let log = EventLog::read(options.session_directory.join("events.jsonl"))?;
+    let log = EventLogSummary::read(options.session_directory.join("events.jsonl"))?;
     let final_ns = log
-        .events
-        .last()
+        .terminal
+        .as_ref()
         .map_or(0, |record| return record.monotonic_ns);
     let source_range = resolve_source_range(
         options.start_monotonic_ns,
@@ -137,11 +140,15 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
         let manifest = read_manifest(&options.session_directory)?;
         let mut grid = (manifest.geometry.cols, manifest.geometry.rows);
         let mut output = io::stdout().lock();
-        for record in log
-            .events
-            .iter()
-            .take_while(|record| return record.monotonic_ns < range.start_monotonic_ns)
-        {
+        let mut cursor = EventLogCursor::open(options.session_directory.join("events.jsonl"))?;
+        validate_playback_header(&cursor, &log)?;
+        while let Some(record) = cursor.next_record()? {
+            if record.seq >= log.event_count {
+                return Err(changed_source());
+            }
+            if record.monotonic_ns >= range.start_monotonic_ns {
+                continue;
+            }
             emit_event(
                 &mut output,
                 &mut resize_intents,
@@ -149,6 +156,7 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
                 Some(&mut grid),
             )?;
         }
+        validate_playback_boundary(&cursor, &log)?;
         let reported = query_terminal()?;
         if (reported.cols, reported.rows) != grid {
             return Err(Error::InvalidReplay {
@@ -170,7 +178,7 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
 
 fn timed_playback(
     options: &PlaybackOptions,
-    log: &EventLog,
+    log: &EventLogSummary,
     source_range: Option<SourceRange>,
     resize_intents: &mut HashMap<uuid::Uuid, (u16, u16)>,
 ) -> Result<()> {
@@ -185,6 +193,11 @@ fn timed_playback(
     write_create_new_json(
         &options.timing_file,
         &PlaybackTiming {
+            source_event_hash: log
+                .terminal
+                .as_ref()
+                .map(|record| return record.hash.clone()),
+            source_event_count: log.event_count,
             replay_origin_unix_ns,
             speed: 1,
             source_range,
@@ -195,18 +208,24 @@ fn timed_playback(
     )?;
     sleep_until(monotonic_origin);
     let mut output = io::stdout().lock();
-    for record in &log.events {
+    let mut cursor = EventLogCursor::open(options.session_directory.join("events.jsonl"))?;
+    validate_playback_header(&cursor, log)?;
+    let mut endpoint_seen = false;
+    while let Some(record) = cursor.next_record()? {
+        if record.seq >= log.event_count {
+            return Err(changed_source());
+        }
         if source_range.is_some_and(|range| return record.monotonic_ns < range.start_monotonic_ns) {
             continue;
         }
         if source_range.is_some_and(|range| return record.monotonic_ns >= range.end_monotonic_ns) {
-            break;
+            continue;
         }
         if options
             .endpoint_event_seq
             .is_some_and(|endpoint| return record.seq > endpoint)
         {
-            break;
+            continue;
         }
         let relative_ns = source_range.map_or(record.monotonic_ns, |range| {
             return record.monotonic_ns.saturating_sub(range.start_monotonic_ns);
@@ -221,9 +240,16 @@ fn timed_playback(
                 &record.event,
                 options.endpoint_event_byte_offset,
             )?;
-            break;
+            endpoint_seen = true;
+            continue;
         }
         emit_event(&mut output, resize_intents, &record.event, None)?;
+    }
+    validate_playback_boundary(&cursor, log)?;
+    if options.endpoint_event_seq.is_some() && !endpoint_seen {
+        return Err(Error::InvalidReplay {
+            reason: "playback endpoint is absent from the source".to_owned(),
+        });
     }
     if let Some(range) = source_range {
         sleep_until(monotonic_origin + Duration::from_nanos(range.duration_ns()));
@@ -231,7 +257,30 @@ fn timed_playback(
     return Ok(());
 }
 
-fn emit_endpoint(
+fn validate_playback_header(cursor: &EventLogCursor, source: &EventLogSummary) -> Result<()> {
+    if cursor.header() != &source.header {
+        return Err(changed_source());
+    }
+    return Ok(());
+}
+
+fn validate_playback_boundary(cursor: &EventLogCursor, source: &EventLogSummary) -> Result<()> {
+    cursor.validate_source_identity()?;
+    if let Some(terminal) = &source.terminal {
+        cursor.validate_boundary(source.event_count, &terminal.hash)?;
+    } else if cursor.next_event_seq() != 0 {
+        return Err(changed_source());
+    }
+    return Ok(());
+}
+
+fn changed_source() -> Error {
+    return Error::InvalidReplay {
+        reason: "canonical source changed during playback".to_owned(),
+    };
+}
+
+pub(super) fn emit_endpoint(
     output: &mut impl io::Write,
     resize_intents: &mut HashMap<uuid::Uuid, (u16, u16)>,
     event: &Event,
@@ -270,7 +319,7 @@ fn emit_endpoint(
     return emit_event(output, resize_intents, event, None);
 }
 
-fn emit_event(
+pub(super) fn emit_event(
     output: &mut impl io::Write,
     resize_intents: &mut HashMap<uuid::Uuid, (u16, u16)>,
     event: &Event,

@@ -2,7 +2,10 @@
 name = "termtrace-media"
 version = "0.1.0"
 edition = "2024"
-publish = false
+description = "Native terminal capture and media production for Termtrace"
+repository = "https://github.com/zigai/termtrace"
+license-file.workspace = true
+rust-version = "1.97.1"
 
 [dependencies]
 blake3 = "1.8.2"
@@ -12,11 +15,11 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 thiserror = "2.0.17"
 uuid = { version = "1.18.1", features = ["serde", "v7"] }
-termtrace-model = { path = "../model" }
-termtrace-terminal = { path = "../terminal" }
-termtrace-evidence = { path = "../evidence" }
-termtrace-engine = { path = "../engine" }
-termtrace-render = { path = "../render" }
+termtrace-model = { version = "=0.1.0", path = "../model" }
+termtrace-terminal = { version = "=0.1.0", path = "../terminal" }
+termtrace-evidence = { version = "=0.1.0", path = "../evidence" }
+termtrace-engine = { version = "=0.1.0", path = "../engine" }
+termtrace-render = { version = "=0.1.0", path = "../render" }
 
 [dev-dependencies]
 tempfile = "3.23.0"

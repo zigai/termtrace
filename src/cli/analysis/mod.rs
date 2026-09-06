@@ -14,7 +14,7 @@ mod show;
 mod streams;
 
 pub(in crate::cli) use replay::{
-    run_cache, run_index, run_inspect, run_markers, run_playback, run_review,
+    run_cache, run_index, run_inspect, run_markers, run_playback, run_playback_worker, run_review,
 };
 pub(in crate::cli) use reports::{
     run_diagnose, run_diagnose_facade, run_diff, run_explain, run_inspect_facade, run_timeline,

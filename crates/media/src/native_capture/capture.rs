@@ -1,16 +1,13 @@
-use std::{fs, path::Path, process::Command, thread, time::Duration};
+use std::{fs, path::Path, process::Command, sync::atomic::AtomicBool, thread, time::Duration};
 
-use termtrace_engine::{
-    replay::{StateSelector, inspect},
-    timeline::resolve_source_range,
-};
+use termtrace_engine::{replay::visit_session_states_while, timeline::resolve_source_range};
 use termtrace_evidence::{
     artifact::{
         append_artifact_root, collect_artifact_members, commit_directory, create_private_directory,
         sync_directory, verify_artifact_members, write_secure,
     },
-    event_log::EventLog,
-    session::{read_manifest, validate_completed_log},
+    event_log::EventLogSummary,
+    session::{read_completion, read_manifest, validate_completion_summary_candidate},
 };
 use termtrace_model::{
     artifact::metadata::ArtifactSourceRange,
@@ -20,7 +17,7 @@ use termtrace_model::{
         VISUAL_MANIFEST_VERSION, VisualManifest, visual_directory_name_for,
     },
     execution::session::GHOSTTY_REPLAY_PROFILE_NAME,
-    terminal::replay::{SourceRange, StateIndexEntry},
+    terminal::replay::SourceRange,
 };
 
 use crate::error::finish_with_cleanup;
@@ -28,7 +25,9 @@ use crate::error::finish_with_cleanup;
 use super::{
     Error, Result,
     geometry::validate_capture_geometry,
-    index::{read_state_index, validate_replay_manifest, write_video_map},
+    index::{
+        StateIndexSource, validate_acquisition_frames, validate_replay_manifest, write_video_map,
+    },
     media::{
         capture_screenshot, capture_stable_x11_frame, probe_screenshot, probe_video,
         spawn_video_ffmpeg,
@@ -59,11 +58,15 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
             session: options.session_directory.clone(),
         });
     }
-    let log = EventLog::read(options.session_directory.join("events.jsonl"))?;
-    validate_completed_log(&options.session_directory, &log)?;
+    let log = EventLogSummary::read(options.session_directory.join("events.jsonl"))?;
+    validate_completion_summary_candidate(
+        &options.session_directory,
+        &log,
+        &read_completion(&options.session_directory)?,
+    )?;
     let final_ns = log
-        .events
-        .last()
+        .terminal
+        .as_ref()
         .map_or(0, |record| return record.monotonic_ns);
     let range = resolve_source_range(
         options.start_monotonic_ns,
@@ -100,7 +103,7 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
     require_native_tools(&options.kind)?;
     let staging = parent.join(format!(".visual.{}.tmp", uuid::Uuid::now_v7()));
     create_private_directory(&staging)?;
-    if let Err(error) = capture_staged(helper, options, &log, &states, range, &staging) {
+    if let Err(error) = capture_staged(helper, options, &log, states.as_ref(), range, &staging) {
         return Err(preserve_failed(parent, &staging, error));
     }
     if let Err(error) = commit_directory(parent, &staging, &destination)
@@ -143,7 +146,9 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
             },
             &manifest_bytes,
             &log.header.session_manifest_hash,
-            log.events.last().map(|record| return record.hash.as_str()),
+            log.terminal
+                .as_ref()
+                .map(|record| return record.hash.as_str()),
             range.map(|range| {
                 return ArtifactSourceRange {
                     start_monotonic_ns: range.start_monotonic_ns,
@@ -157,21 +162,18 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
 
 fn selected_states(
     options: &CaptureOptions,
-    log: &EventLog,
+    log: &EventLogSummary,
     range: Option<SourceRange>,
-) -> Result<Vec<StateIndexEntry>> {
+) -> Result<Option<StateIndexSource>> {
     match &options.kind {
         CaptureKind::Video => {
-            let states =
-                read_state_index(&options.session_directory, range, options.state_selection)?;
-            validate_replay_manifest(
+            return validate_replay_manifest(
                 &options.session_directory,
                 log,
-                &states,
                 range,
                 options.state_selection,
-            )?;
-            return Ok(states);
+            )
+            .map(Some);
         }
         CaptureKind::Screenshot {
             state_id,
@@ -184,30 +186,30 @@ fn selected_states(
                     reason: "native screenshot endpoints cannot use a time range".to_owned(),
                 });
             }
-            let selected = inspect(log, StateSelector::StateId(*state_id))?;
-            if !selected.record.presented
-                || selected.record.state_hash != *state_hash
-                || selected.record.event_seq != Some(*event_seq)
-                || selected.record.event_byte_offset != *event_byte_offset
-            {
+            let mut selected = None;
+            visit_session_states_while(
+                &options.session_directory,
+                &AtomicBool::new(false),
+                |record, _| {
+                    if record.state_id == *state_id {
+                        selected = Some(record.clone());
+                    }
+                    return Ok(record.state_id < *state_id);
+                },
+            )?;
+            if selected.is_none_or(|record| {
+                return !record.presented
+                    || record.state_hash != *state_hash
+                    || record.event_seq != Some(*event_seq)
+                    || record.event_byte_offset != *event_byte_offset;
+            }) {
                 return Err(Error::InvalidReplay {
                     reason:
                         "native screenshot endpoint does not match one presented semantic state"
                             .to_owned(),
                 });
             }
-            return Ok(vec![StateIndexEntry {
-                state_id: *state_id,
-                state_hash: state_hash.clone(),
-                event_seq: Some(*event_seq),
-                event_byte_offset: *event_byte_offset,
-                monotonic_ns: selected.record.monotonic_ns,
-                presented: true,
-                checkpoint: false,
-                timeline_rank: None,
-                control_index_offset: None,
-                control_rank: None,
-            }]);
+            return Ok(None);
         }
     }
 }
@@ -215,8 +217,8 @@ fn selected_states(
 fn capture_staged(
     helper: &Path,
     options: &CaptureOptions,
-    log: &EventLog,
-    states: &[StateIndexEntry],
+    log: &EventLogSummary,
+    states: Option<&StateIndexSource>,
     range: Option<SourceRange>,
     staging: &Path,
 ) -> Result<()> {
@@ -296,7 +298,7 @@ fn capture_staged(
     };
     let lease = DisplayLease::acquire()?;
     let display = format!(":{}", lease.number);
-    let mut xvfb = spawn_xvfb(&lease, options.width, options.height, staging)?;
+    let mut xvfb = spawn_xvfb(Some(helper), &lease, options.width, options.height, staging)?;
     wait_for_x_socket(&lease, &mut xvfb, Duration::from_secs(5))?;
     let geometry_path = staging.join("geometry-preflight.json");
     let timing_file = staging.join("playback-timing.json");
@@ -338,7 +340,13 @@ fn capture_staged(
             ..
         } => (Some(*event_seq), *event_byte_offset, true),
     };
-    if timing.source_range != range
+    if timing.source_event_hash
+        != log
+            .terminal
+            .as_ref()
+            .map(|record| return record.hash.clone())
+        || timing.source_event_count != log.event_count
+        || timing.source_range != range
         || (
             timing.endpoint_event_seq,
             timing.endpoint_event_byte_offset,
@@ -349,7 +357,7 @@ fn capture_staged(
             reason: "playback timing handshake does not match capture request".to_owned(),
         });
     }
-    let capture_started = unix_now_ns()?;
+    let mut capture_started = unix_now_ns()?;
     let screenshot = staging.join("final.png");
     let (video_probe, frame_samples) = match &options.kind {
         CaptureKind::Video => {
@@ -358,7 +366,7 @@ fn capture_staged(
             let mut ffmpeg = spawn_video_ffmpeg(options, staging, &display, &video)?;
             let duration = range.map_or_else(
                 || {
-                    return log.events.last().map_or(Duration::ZERO, |event| {
+                    return log.terminal.as_ref().map_or(Duration::ZERO, |event| {
                         return Duration::from_nanos(event.monotonic_ns);
                     });
                 },
@@ -373,23 +381,33 @@ fn capture_staged(
             wait_for_success(&mut ghostty, Duration::from_secs(10), staging)?;
             stop_ffmpeg(&mut ffmpeg, Duration::from_secs(10), staging)?;
             secure_permissions(&video)?;
+            let probe = probe_video(&video, options.fps, options.width, options.height)?;
+            let packets = probe
+                .get("streams")
+                .and_then(serde_json::Value::as_array)
+                .and_then(|streams| return streams.first())
+                .and_then(|stream| return stream.get("nb_read_packets"))
+                .and_then(serde_json::Value::as_str)
+                .and_then(|count| return count.parse().ok())
+                .ok_or_else(|| {
+                    return Error::InvalidReplay {
+                        reason: "encoded frame count is missing".to_owned(),
+                    };
+                })?;
+            capture_started =
+                validate_acquisition_frames(&staging.join("ffmpeg-video.log"), packets)?;
             write_video_map(
                 &staging.join("video-map.jsonl"),
-                states,
-                options.fps,
-                capture_started,
+                states.ok_or_else(|| {
+                    return Error::InvalidReplay {
+                        reason: "video capture has no validated state index".to_owned(),
+                    };
+                })?,
+                &staging.join("ffmpeg-video.log"),
                 timing.replay_origin_unix_ns,
                 range,
             )?;
-            (
-                Some(probe_video(
-                    &video,
-                    options.fps,
-                    options.width,
-                    options.height,
-                )?),
-                Vec::new(),
-            )
+            (Some(probe), Vec::new())
         }
         CaptureKind::Screenshot { .. } => {
             wait_for_file(&ready_file, &mut ghostty, Duration::from_secs(25))?;
@@ -440,7 +458,7 @@ fn capture_staged(
     let visual = VisualManifest {
         version: VISUAL_MANIFEST_VERSION,
         session_id: log.header.session_id,
-        source_event_hash: log.events.last().map(|event| return event.hash.clone()),
+        source_event_hash: log.terminal.as_ref().map(|event| return event.hash.clone()),
         source_range: range,
         state_selection: options.state_selection,
         geometry_report,
@@ -481,7 +499,7 @@ fn capture_staged(
     return Ok(());
 }
 
-fn validate_options(options: &CaptureOptions) -> Result<()> {
+pub(super) fn validate_options(options: &CaptureOptions) -> Result<()> {
     if options.width < 320 || options.height < 200 || !matches!(options.fps, 24 | 30 | 60) {
         return Err(Error::InvalidReplay {
             reason: "native capture requires at least 320x200 pixels and 24, 30, or 60 FPS"
@@ -490,7 +508,7 @@ fn validate_options(options: &CaptureOptions) -> Result<()> {
     }
     return Ok(());
 }
-fn require_native_tools(kind: &CaptureKind) -> Result<()> {
+pub(super) fn require_native_tools(kind: &CaptureKind) -> Result<()> {
     for program in ["Xvfb", "dbus-run-session", "ghostty", "ffprobe"] {
         which(program)?;
     }
@@ -544,7 +562,7 @@ fn which(program: &str) -> Result<()> {
     }
     return Ok(());
 }
-fn preserve_failed(parent: &Path, staging: &Path, error: Error) -> Error {
+pub(super) fn preserve_failed(parent: &Path, staging: &Path, error: Error) -> Error {
     let evidence = parent.join(format!("visual-failed-{}", uuid::Uuid::now_v7()));
     match commit_directory(parent, staging, &evidence).and_then(|()| return sync_directory(parent))
     {

@@ -4,7 +4,7 @@ use std::{
     os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use serde::de::DeserializeOwned;
@@ -42,11 +42,11 @@ pub(super) fn status_error_with_logs(program: &str, status: ExitStatus, staging:
         reason: format!("exited with {status}: {}", stderr.trim()),
     };
 }
-pub(super) fn command_output(program: &str, args: &[&str]) -> Result<Vec<u8>> {
+pub(super) fn command_output(program: &'static str, args: &[&str]) -> Result<Vec<u8>> {
     return command_output_in_profile(program, args, None);
 }
 pub(super) fn command_output_in_profile(
-    program: &str,
+    program: &'static str,
     args: &[&str],
     profile: Option<&Path>,
 ) -> Result<Vec<u8>> {
@@ -55,20 +55,7 @@ pub(super) fn command_output_in_profile(
     if let Some(root) = profile {
         command.env("XDG_CONFIG_HOME", root);
     }
-    let output = command
-        .output()
-        .map_err(|error| return external_error(program, error))?;
-    if !output.status.success() {
-        return Err(Error::ExternalCommand {
-            operation: program.to_owned(),
-            reason: format!(
-                "exited with {}: {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            ),
-        });
-    }
-    return Ok(output.stdout);
+    return super::process::probe_output(program, &mut command, Duration::from_secs(15));
 }
 pub(super) fn secure_permissions(path: &Path) -> Result<()> {
     let mut permissions = fs::metadata(path)

@@ -489,6 +489,19 @@ pub(in crate::cli) struct PlaybackArgs {
 }
 
 #[derive(Debug, Args)]
+pub(in crate::cli) struct PlaybackWorkerArgs {
+    /// Canonical source session.
+    #[arg(long)]
+    pub(in crate::cli) session: PathBuf,
+    /// Private parent protocol socket.
+    #[arg(long)]
+    pub(in crate::cli) socket: PathBuf,
+    /// Initial measured terminal geometry.
+    #[arg(long)]
+    pub(in crate::cli) geometry_file: PathBuf,
+}
+
+#[derive(Debug, Args)]
 pub(in crate::cli) struct MarkersArgs {
     /// Completed canonical session.
     pub(in crate::cli) session: PathBuf,

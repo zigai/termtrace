@@ -19,6 +19,8 @@ mod integrity_and_receipts;
 mod launch_validation_and_stdio;
 #[path = "cli/integration/live_session_control/mod.rs"]
 mod live_session_control;
+#[path = "cli/integration/original_native.rs"]
+mod original_native;
 #[path = "cli/integration/output_events_and_postprocessing.rs"]
 mod output_events_and_postprocessing;
 #[path = "cli/integration/recording_basics.rs"]

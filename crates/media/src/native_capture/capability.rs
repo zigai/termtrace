@@ -162,7 +162,7 @@ fn probe_staged(
 ) -> Result<[ProbeResult; 2]> {
     let lease = DisplayLease::acquire()?;
     let display = format!(":{}", lease.number);
-    let mut xvfb = spawn_xvfb(&lease, WIDTH, HEIGHT, staging)?;
+    let mut xvfb = spawn_xvfb(None, &lease, WIDTH, HEIGHT, staging)?;
     wait_for_x_socket(&lease, &mut xvfb, remaining(deadline)?)?;
     let ready = staging.join("fixture-ready");
     // The fixture is a shell builtin-only program, not the caller's executable: library hosts

@@ -1,7 +1,7 @@
 use std::{
     fs::{self, OpenOptions},
     io::{ErrorKind, Read, Write as _},
-    os::unix::fs::OpenOptionsExt as _,
+    os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
     os::unix::process::CommandExt as _,
     path::{Path, PathBuf},
     process::{self, Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio},
@@ -10,7 +10,8 @@ use std::{
 };
 
 use nix::{
-    fcntl::{FcntlArg, OFlag, fcntl},
+    errno::Errno,
+    fcntl::{FcntlArg, Flock, FlockArg, OFlag, fcntl},
     sys::signal::{Signal, killpg},
     unistd::Pid,
 };
@@ -34,7 +35,8 @@ pub(super) struct ManagedChild {
 }
 pub(super) struct DisplayLease {
     pub(super) number: u16,
-    lock_path: PathBuf,
+    // Persistent inode with a kernel lock; owner death releases the lease.
+    _lock: Flock<fs::File>,
 }
 
 struct ProbeOutput {
@@ -83,10 +85,20 @@ pub(crate) fn probe_output(
     command: &mut Command,
     timeout: Duration,
 ) -> Result<Vec<u8>> {
+    return probe_output_with_check(name, command, timeout, || return Ok(()));
+}
+
+pub(super) fn probe_output_with_check(
+    name: &'static str,
+    command: &mut Command,
+    timeout: Duration,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<Vec<u8>> {
     command.stdin(Stdio::null());
     let mut process = ManagedChild::spawn_group(name, command)?;
     let deadline = Instant::now() + timeout;
     loop {
+        check()?;
         if let Some(status) = process.try_wait()? {
             if !status.success() {
                 return Err(process.failure(status));
@@ -124,15 +136,21 @@ pub(super) fn ghostty_overrides() -> Vec<String> {
 }
 
 pub(super) fn spawn_xvfb(
+    helper: Option<&Path>,
     lease: &DisplayLease,
     width: u16,
     height: u16,
     staging: &Path,
 ) -> Result<ManagedChild> {
     let log = secure_file(&staging.join("xvfb.log"))?;
+    let mut command = if let Some(helper) = helper {
+        owned_command(helper, "Xvfb")?
+    } else {
+        Command::new("Xvfb")
+    };
     let mut process = ManagedChild::spawn_group(
         "Xvfb",
-        Command::new("Xvfb")
+        command
             .arg(format!(":{}", lease.number))
             .args([
                 "-screen",
@@ -163,25 +181,25 @@ pub(super) fn spawn_geometry_probe(
 ) -> Result<ManagedChild> {
     let stdout = secure_file(&staging.join(format!("{stem}.stdout.log")))?;
     let stderr = secure_file(&staging.join(format!("{stem}.stderr.log")))?;
-    let child = Command::new("dbus-run-session")
-        .arg("--")
-        .arg("ghostty")
-        .args(overrides)
-        .arg("-e")
-        .arg(helper)
-        .arg("geometry-probe")
-        .arg("--out")
-        .arg(report)
-        .env("DISPLAY", display)
-        .env("XDG_CONFIG_HOME", profile)
-        .env("GDK_BACKEND", "x11")
-        .env("LIBGL_ALWAYS_SOFTWARE", "1")
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
-        .spawn()
-        .map_err(|error| return external_error("ghostty geometry probe", error))?;
-    return Ok(ManagedChild::new("ghostty geometry probe", child));
+    return ManagedChild::spawn_logged(
+        "ghostty geometry probe",
+        owned_command(helper, "dbus-run-session")?
+            .arg("--")
+            .arg("ghostty")
+            .args(overrides)
+            .arg("-e")
+            .arg(helper)
+            .arg("geometry-probe")
+            .arg("--out")
+            .arg(report)
+            .env("DISPLAY", display)
+            .env("XDG_CONFIG_HOME", profile)
+            .env("GDK_BACKEND", "x11")
+            .env("LIBGL_ALWAYS_SOFTWARE", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr)),
+    );
 }
 
 #[allow(
@@ -202,7 +220,7 @@ pub(super) fn spawn_ghostty(
 ) -> Result<ManagedChild> {
     let stdout = secure_file(&staging.join("ghostty.stdout.log"))?;
     let stderr = secure_file(&staging.join("ghostty.stderr.log"))?;
-    let mut command = Command::new("dbus-run-session");
+    let mut command = owned_command(helper, "dbus-run-session")?;
     command
         .arg("--")
         .arg("ghostty")
@@ -260,10 +278,31 @@ pub(super) fn spawn_ghostty(
     if let Some(profile) = profile {
         command.env("XDG_CONFIG_HOME", profile);
     }
-    let child = command
-        .spawn()
-        .map_err(|error| return external_error("ghostty", error))?;
-    return Ok(ManagedChild::new("ghostty", child));
+    return ManagedChild::spawn_logged("ghostty", &mut command);
+}
+
+/// Launch the explicit helper supervisor without interpolating executable arguments.
+pub(super) fn owned_command(helper: &Path, program: &str) -> Result<Command> {
+    let parent = process::id();
+    let identity = fs::read_to_string(format!("/proc/{parent}/stat"))
+        .map_err(|error| return external_error("native process identity", error))?;
+    let ticks = identity
+        .rsplit_once(')')
+        .and_then(|(_, fields)| return fields.split_whitespace().nth(19))
+        .ok_or_else(|| {
+            return external_error("native process identity", "missing process start ticks");
+        })?;
+    let mut command = Command::new(helper);
+    command.args([
+        "owned-process",
+        "--parent-pid",
+        &parent.to_string(),
+        "--parent-start-ticks",
+        ticks,
+        "--",
+        program,
+    ]);
+    return Ok(command);
 }
 
 impl DisplayLease {
@@ -277,18 +316,53 @@ impl DisplayLease {
             let lock_path = PathBuf::from(format!("/tmp/termtrace-X{number}.lock"));
             match OpenOptions::new()
                 .write(true)
-                .create_new(true)
+                .create(true)
+                .truncate(false)
+                .custom_flags(OFlag::O_NOFOLLOW.bits())
                 .mode(0o600)
                 .open(&lock_path)
             {
-                Ok(mut file) => {
+                Ok(file) => {
+                    let metadata = file.metadata().map_err(|source| {
+                        return Error::Filesystem {
+                            path: lock_path.clone(),
+                            source,
+                        };
+                    })?;
+                    if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 {
+                        return Err(external_error(
+                            "native display lease",
+                            "lease must be a private regular file",
+                        ));
+                    }
+                    let mut file = match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
+                        Ok(lock) => lock,
+                        Err((_, Errno::EWOULDBLOCK)) => continue,
+                        Err((_, error)) => {
+                            return Err(external_error("native display lease", error));
+                        }
+                    };
+                    if Path::new(&format!("/tmp/.X{number}-lock")).exists()
+                        || Path::new(&format!("/tmp/.X11-unix/X{number}")).exists()
+                    {
+                        continue;
+                    }
+                    file.set_len(0).map_err(|source| {
+                        return Error::Filesystem {
+                            path: lock_path.clone(),
+                            source,
+                        };
+                    })?;
                     writeln!(file, "{}", process::id()).map_err(|source| {
                         return Error::Filesystem {
                             path: lock_path.clone(),
                             source,
                         };
                     })?;
-                    return Ok(Self { number, lock_path });
+                    return Ok(Self {
+                        number,
+                        _lock: file,
+                    });
                 }
                 Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
                 Err(source) => {
@@ -305,13 +379,27 @@ impl DisplayLease {
         });
     }
 }
-impl Drop for DisplayLease {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.lock_path);
-    }
-}
 
 impl ManagedChild {
+    pub(super) fn id(&self) -> Option<u32> {
+        return self.child.as_ref().map(Child::id);
+    }
+    /// Own a process group while preserving the caller's file-backed output streams.
+    pub(super) fn spawn_logged(name: &'static str, command: &mut Command) -> Result<Self> {
+        let child = command
+            .process_group(0)
+            .spawn()
+            .map_err(|error| return external_error(name, error))?;
+        let mut managed = Self::new(name, child);
+        let child = managed
+            .child
+            .as_ref()
+            .ok_or_else(|| return external_error(name, "managed child is unavailable"))?;
+        managed.group = Some(Pid::from_raw(
+            i32::try_from(child.id()).map_err(|error| return external_error(name, error))?,
+        ));
+        return Ok(managed);
+    }
     pub(super) fn new(name: &'static str, child: Child) -> Self {
         return Self {
             name,
@@ -588,4 +676,57 @@ fn status_error(program: &str, status: ExitStatus) -> Error {
         operation: program.to_owned(),
         reason: format!("exited with {status}"),
     };
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+
+    #[test]
+    fn completed_launcher_cannot_leave_a_background_writer() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let marker = directory.path().join("survived");
+        let mut child = ManagedChild::spawn_logged(
+            "test launcher",
+            Command::new("sh")
+                .args([
+                    "-c",
+                    "(sleep 0.5; printf survived > \"$1\") & exit 0",
+                    "test",
+                ])
+                .arg(&marker)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+        .expect("launch process group");
+        wait_for_success(&mut child, Duration::from_secs(2), directory.path())
+            .expect("launcher exits successfully");
+        thread::sleep(Duration::from_millis(600));
+        assert!(
+            !marker.exists(),
+            "background child survived launcher cleanup"
+        );
+    }
+
+    #[test]
+    fn logged_process_timeout_reaps_the_owned_child() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mut child = ManagedChild::spawn_logged(
+            "test stalled capture",
+            Command::new("sh")
+                .args(["-c", "exec sleep 60"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+        .expect("launch stalled child");
+        let started = Instant::now();
+        let result = wait_for_success(&mut child, Duration::from_millis(30), directory.path());
+        assert!(result.is_err());
+        child.terminate();
+        assert!(child.child.is_none());
+        assert!(child.group.is_none());
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 }

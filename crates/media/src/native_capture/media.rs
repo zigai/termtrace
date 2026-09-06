@@ -3,7 +3,7 @@ use std::{
     path::Path,
     process::{Command, Stdio},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use termtrace_evidence::artifact::{secure_file, write_secure};
@@ -11,7 +11,7 @@ use termtrace_model::artifact::visual::{CaptureOptions, NativeFrameSample};
 
 use super::{
     Error, Result,
-    process::ManagedChild,
+    process::{ManagedChild, probe_output, probe_output_with_check, wait_for_success},
     util::{external_error, unix_now_ns},
 };
 
@@ -28,45 +28,46 @@ pub(super) fn spawn_video_ffmpeg(
         .map_err(|source| return Error::Filesystem { path, source })?;
     let size = format!("{}x{}", options.width, options.height);
     let fps = options.fps.to_string();
-    let child = Command::new("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "info",
-            "-f",
-            "x11grab",
-            "-framerate",
-            &fps,
-            "-draw_mouse",
-            "0",
-            "-video_size",
-            &size,
-            "-i",
-            display,
-            "-an",
-            "-r",
-            &fps,
-            "-c:v",
-            "libx264rgb",
-            "-threads",
-            "1",
-            "-crf",
-            "0",
-            "-preset",
-            "ultrafast",
-            "-pix_fmt",
-            "rgb24",
-            "-fps_mode",
-            "cfr",
-            "-y",
-        ])
-        .arg(video)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::from(clone))
-        .stderr(Stdio::from(log))
-        .spawn()
-        .map_err(|error| return external_error("ffmpeg", error))?;
-    return Ok(ManagedChild::new("ffmpeg", child));
+    return ManagedChild::spawn_logged(
+        "ffmpeg",
+        Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "info",
+                "-copyts",
+                "-f",
+                "x11grab",
+                "-framerate",
+                &fps,
+                "-draw_mouse",
+                "0",
+                "-video_size",
+                &size,
+                "-i",
+                display,
+                "-an",
+                "-vf",
+                "showinfo,setpts=PTS-STARTPTS",
+                "-c:v",
+                "libx264rgb",
+                "-threads",
+                "1",
+                "-crf",
+                "0",
+                "-preset",
+                "ultrafast",
+                "-pix_fmt",
+                "rgb24",
+                "-fps_mode",
+                "passthrough",
+                "-y",
+            ])
+            .arg(video)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::from(clone))
+            .stderr(Stdio::from(log)),
+    );
 }
 
 pub(super) fn capture_screenshot(
@@ -76,34 +77,32 @@ pub(super) fn capture_screenshot(
     screenshot: &Path,
 ) -> Result<()> {
     let size = format!("{}x{}", options.width, options.height);
-    let output = Command::new("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "x11grab",
-            "-draw_mouse",
-            "0",
-            "-video_size",
-            &size,
-            "-i",
-            display,
-            "-frames:v",
-            "1",
-            "-y",
-        ])
-        .arg(screenshot)
-        .output()
-        .map_err(|error| return external_error("ffmpeg screenshot", error))?;
-    write_secure(&staging.join("ffmpeg-screenshot.log"), &output.stderr)?;
-    if !output.status.success() {
-        return Err(Error::ExternalCommand {
-            operation: "ffmpeg screenshot".to_owned(),
-            reason: format!("exited with {}", output.status),
-        });
-    }
-    return Ok(());
+    let log = secure_file(&staging.join("ffmpeg-screenshot.log"))?;
+    let mut child = ManagedChild::spawn_logged(
+        "ffmpeg screenshot",
+        Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "x11grab",
+                "-draw_mouse",
+                "0",
+                "-video_size",
+                &size,
+                "-i",
+                display,
+                "-frames:v",
+                "1",
+                "-y",
+            ])
+            .arg(screenshot)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::from(log)),
+    )?;
+    return wait_for_success(&mut child, Duration::from_secs(15), staging);
 }
 
 pub(super) fn capture_stable_x11_frame(
@@ -111,25 +110,47 @@ pub(super) fn capture_stable_x11_frame(
     display: &str,
     screenshot: &Path,
 ) -> Result<Vec<NativeFrameSample>> {
+    return capture_stable_x11_frame_with_check(
+        staging,
+        display,
+        screenshot,
+        Duration::from_secs(30),
+        || return Ok(()),
+    );
+}
+
+pub(super) fn capture_stable_x11_frame_with_check(
+    staging: &Path,
+    display: &str,
+    screenshot: &Path,
+    timeout: Duration,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<Vec<NativeFrameSample>> {
+    let deadline = Instant::now() + timeout;
     let mut samples: Vec<NativeFrameSample> = Vec::new();
     let mut previous_hash: Option<String> = None;
     let mut stable_run = 0_u8;
     let mut log: Vec<u8> = Vec::new();
     for sample in 0_u16..20 {
+        check()?;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(external_error("X11 frame import", "capture timed out"));
+        }
         let path = staging.join(format!(".native-sample-{sample:04}.png"));
-        let output = Command::new("import")
-            .args(["-silent", "-window", "root"])
-            .arg(format!("png:{}", path.display()))
-            .env("DISPLAY", display)
-            .output()
-            .map_err(|error| return external_error("X11 frame import", error))?;
-        log.extend_from_slice(&output.stderr);
-        if !output.status.success() {
+        let output = probe_output_with_check(
+            "X11 frame import",
+            Command::new("import")
+                .args(["-silent", "-window", "root"])
+                .arg(format!("png:{}", path.display()))
+                .env("DISPLAY", display),
+            remaining,
+            &mut check,
+        );
+        if let Err(error) = output {
+            log.extend_from_slice(error.to_string().as_bytes());
             write_secure(&staging.join("x11-screenshot.log"), &log)?;
-            return Err(Error::ExternalCommand {
-                operation: "X11 frame import".to_owned(),
-                reason: format!("exited with {}", output.status),
-            });
+            return Err(error);
         }
         let bytes = fs::read(&path).map_err(|source| {
             return Error::Filesystem {
@@ -227,30 +248,46 @@ pub(super) fn validate_screenshot_probe(
     return Ok(());
 }
 fn ffprobe(path: &Path, args: &[&str]) -> Result<serde_json::Value> {
-    let output = Command::new("ffprobe")
-        .args(["-v", "error"])
-        .args(args)
-        .args(["-of", "json"])
-        .arg(path)
-        .output()
-        .map_err(|error| return external_error("ffprobe", error))?;
-    if !output.status.success() {
-        return Err(Error::ExternalCommand {
-            operation: "ffprobe".to_owned(),
-            reason: format!(
-                "exited with {}: {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            ),
-        });
-    }
-    return serde_json::from_slice(&output.stdout).map_err(|source| {
+    let output = probe_output(
+        "ffprobe",
+        Command::new("ffprobe")
+            .args(["-v", "error"])
+            .args(args)
+            .args(["-of", "json"])
+            .arg(path),
+        Duration::from_secs(30),
+    )?;
+    return serde_json::from_slice(&output).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
             json_path: "$".to_owned(),
             source,
         };
     });
+}
+
+pub(super) fn probe_variable_video(
+    path: &Path,
+    width: u16,
+    height: u16,
+) -> Result<serde_json::Value> {
+    let probe = ffprobe(path, &["-count_packets", "-show_streams", "-show_format"])?;
+    let stream = first_stream(&probe)?;
+    if stream.get("width").and_then(serde_json::Value::as_u64) != Some(u64::from(width))
+        || stream.get("height").and_then(serde_json::Value::as_u64) != Some(u64::from(height))
+        || stream
+            .get("nb_read_packets")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| return value.parse::<u64>().ok())
+            .unwrap_or(0)
+            == 0
+    {
+        return Err(external_error(
+            "Wayland video",
+            "encoded stream has incorrect geometry or no frames",
+        ));
+    }
+    return Ok(probe);
 }
 fn first_stream(probe: &serde_json::Value) -> Result<&serde_json::Value> {
     return probe

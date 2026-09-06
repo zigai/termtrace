@@ -1,6 +1,7 @@
 use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
+mod native_screenshot;
 use args::ArtifactSubcommand;
 
 use std::{
@@ -16,13 +17,12 @@ use std::{
 use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::{
     Error,
-    diff::inspect_point,
-    timeline::{SourceRange, resolve_source_selection},
+    timeline::{SourceRange, resolve_session_source_selection},
 };
 use termtrace_evidence::{
     artifact::write_secure,
-    event_log::EventLog,
-    session::{read_manifest, validate_completed_log},
+    event_log::{EventLogCursor, EventLogSummary},
+    session::{read_manifest, validate_completed_session},
 };
 use termtrace_export::{
     archive::{create as create_bundle_archive, verify as verify_bundle_archive},
@@ -37,7 +37,7 @@ use termtrace_media::presentation::{
     EDIT_PLAN_VERSION, EditPlan, PixelTransform, PresentationDelivery, PresentationSource,
     PresentationSourceRequest, PreviewOptions, VideoIdlePolicy, VideoRenderConfig,
     export as export_presentation, plan_with_source as plan_presentation,
-    preview as preview_presentation, read_edit_plan, video_clip_ranges, video_clips,
+    preview as preview_presentation, read_edit_plan, video_clip_ranges_session, video_clips,
 };
 use termtrace_media::save::{save, save_screenshot_batch};
 use termtrace_model::{
@@ -46,8 +46,7 @@ use termtrace_model::{
     execution::event::Event,
     execution::session::CaptureTarget,
     protocol::capability::{
-        NATIVE_SCREENSHOT_CAPABILITY, NATIVE_VIDEO_CAPABILITY, PRESENTATION_CAPABILITY,
-        SEMANTIC_VIDEO_CAPABILITY,
+        NATIVE_VIDEO_CAPABILITY, PRESENTATION_CAPABILITY, SEMANTIC_VIDEO_CAPABILITY,
     },
     registry::RegistryLifecycle,
     terminal::observation::StatePoint,
@@ -148,19 +147,21 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
             String::from_utf8_lossy(&process.stderr)
         ));
     }
-    let log = EventLog::read(arguments.out.join("events.jsonl")).into_diagnostic()?;
-    validate_completed_log(&arguments.out, &log).into_diagnostic()?;
-    let imported: Vec<u8> = log
-        .events
-        .iter()
-        .filter_map(|record| match &record.event {
-            Event::Output { data } => return Some(data.as_bytes()),
-            _ => return None,
-        })
-        .flatten()
-        .copied()
-        .collect();
-    if imported != bytes {
+    validate_completed_session(&arguments.out).into_diagnostic()?;
+    let mut cursor = EventLogCursor::open(arguments.out.join("events.jsonl")).into_diagnostic()?;
+    let mut offset = 0_usize;
+    while let Some(record) = cursor.next_record().into_diagnostic()? {
+        if let Event::Output { data } = record.event {
+            let end = offset.saturating_add(data.as_bytes().len());
+            if bytes.get(offset..end) != Some(data.as_bytes()) {
+                return Err(miette::miette!(
+                    "ANSI import canonical output does not match the exact source bytes"
+                ));
+            }
+            offset = end;
+        }
+    }
+    if offset != bytes.len() {
         return Err(miette::miette!(
             "ANSI import canonical output does not match the exact source bytes"
         ));
@@ -255,14 +256,14 @@ pub(super) fn run_video_facade(
         let edit = read_edit_plan(edit_path).into_diagnostic()?;
         plan_presentation(&session, &edit, source).into_diagnostic()?
     } else {
-        let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
-        validate_completed_log(&session, &log).into_diagnostic()?;
-        let final_monotonic_ns = log
-            .events
-            .last()
+        validate_completed_session(&session).into_diagnostic()?;
+        let summary = EventLogSummary::read(session.join("events.jsonl")).into_diagnostic()?;
+        let final_monotonic_ns = summary
+            .terminal
+            .as_ref()
             .map_or(0, |record| return record.monotonic_ns);
-        let mut selected = resolve_source_selection(
-            &log,
+        let mut selected = resolve_session_source_selection(
+            &session,
             None,
             None,
             arguments.start_marker.as_deref(),
@@ -279,14 +280,15 @@ pub(super) fn run_video_facade(
                 "video range must contain positive recorded time"
             ));
         }
-        let ranges = video_clip_ranges(
-            &log,
+        let ranges = video_clip_ranges_session(
+            &session,
             selected,
             arguments.trim_idle.then_some(VideoIdlePolicy {
                 threshold_ns: VIDEO_IDLE_THRESHOLD_NS,
                 context_ns: VIDEO_IDLE_CONTEXT_NS,
             }),
-        );
+        )
+        .into_diagnostic()?;
         let provisional =
             facade_edit_plan(&arguments, &ranges, provisional_fps, hold_start, hold_end)?;
         let first_plan = plan_presentation(&session, &provisional, source).into_diagnostic()?;
@@ -699,60 +701,12 @@ pub(super) fn run_screenshot(
                 "native screenshots cannot render hidden synchronized-output states"
             ));
         }
-        if points.len() != 1 {
-            return Err(miette::miette!(
-                "native screenshot batches are not yet a single-process operation; select one state"
-            ));
-        }
-        let point = points
-            .first()
-            .ok_or_else(|| return miette::miette!("missing native screenshot point"))?;
-        let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
-        validate_completed_log(&session, &log).into_diagnostic()?;
-        let inspection = inspect_point(&log, point).into_diagnostic()?;
-        if !inspection.record.presented {
-            return Err(miette::miette!(
-                "native screenshots reject states that were not presentation eligible"
-            ));
-        }
-        let event_seq = inspection.record.event_seq.ok_or_else(|| {
-            return miette::miette!("the initial blank state has no native replay endpoint");
-        })?;
-        require_cli_capability(NATIVE_SCREENSHOT_CAPABILITY)?;
-        let helper = env::current_exe().into_diagnostic()?;
-        let (target, geometry_solver) =
-            native_capture_target(&helper, &session, arguments.viewport).into_diagnostic()?;
-        let outcome = capture(
-            &helper,
-            &CaptureOptions {
-                session_directory: session,
-                width: target.width,
-                height: target.height,
-                fps: 24,
-                start_monotonic_ns: None,
-                end_monotonic_ns: None,
-                state_selection: StateSelection::Presented,
-                geometry_solver,
-                kind: CaptureKind::Screenshot {
-                    state_id: inspection.record.state_id,
-                    state_hash: inspection.record.state_hash,
-                    event_seq,
-                    event_byte_offset: inspection.record.event_byte_offset,
-                },
-                destination: Some(arguments.out),
-            },
-        )
-        .into_diagnostic()?;
-        return write_json_line(
+        return native_screenshot::run(
             response,
-            &serde_json::json!({
-                "kind": "native_screenshot",
-                "truth_layer": "native",
-                "directory": outcome.directory,
-                "image": outcome.screenshot,
-                "manifest": outcome.directory.join("manifest.json"),
-                "presentation_evidence": "post_endpoint_stable_capture",
-            }),
+            &session,
+            &points,
+            &arguments.out,
+            arguments.viewport,
         );
     }
     if arguments.viewport.is_some() || arguments.strict {

@@ -1,5 +1,5 @@
 use std::{
-    fs::{File, OpenOptions},
+    fs::{self, DirEntry, File, OpenOptions, ReadDir},
     io::{self, BufRead as _, BufReader, Read as _},
     mem::size_of,
     os::unix::fs::OpenOptionsExt as _,
@@ -8,9 +8,11 @@ use std::{
 };
 
 use nix::libc::{O_NOFOLLOW, O_NONBLOCK};
+use serde::de::DeserializeOwned;
+use termtrace_model::terminal::replay::ReplayEndpoint;
 
 use termtrace_engine::analysis::diagnostics::ValidatedVisualManifest;
-use termtrace_evidence::{event_log::EventLog, session::read_manifest};
+use termtrace_evidence::{event_log::EventLogSummary, session::read_manifest};
 use termtrace_model::artifact::visual::VideoMapEntry;
 
 use termtrace_model::artifact::visual::{
@@ -18,6 +20,97 @@ use termtrace_model::artifact::visual::{
 };
 
 use super::{Error, Result};
+
+/// Verify a persistent-worker screenshot and its exact canonical replay endpoint.
+///
+/// Live prefix captures remain verifiable after recording completes or grows. The
+/// recorded prefix commitment, semantic endpoint, visual configuration and payload
+/// hashes are checked independently; pixel presentation remains a sampling claim.
+///
+/// # Errors
+/// Returns malformed-artifact, source-validation, replay, or cancellation failures.
+pub fn validate_replay_screenshot(
+    session: &Path,
+    directory: &Path,
+    cancelled: &AtomicBool,
+) -> Result<ReplayEndpoint> {
+    use termtrace_engine::observation::{replay_endpoint_for_prefix, replay_endpoint_for_session};
+    use termtrace_evidence::{artifact::verify_artifact_members, event_log::EventLogCursor};
+    use termtrace_model::terminal::observation::StatePoint;
+
+    check_review_cancelled(cancelled)?;
+    let manifest: VisualManifest = bounded_json(&directory.join("manifest.json"))?;
+    let endpoint: ReplayEndpoint = bounded_json(&directory.join("replay-endpoint.json"))?;
+    if !manifest
+        .members
+        .iter()
+        .any(|member| return member.path == "replay-endpoint.json")
+    {
+        return Err(invalid(
+            "native screenshot has no committed replay endpoint",
+        ));
+    }
+    verify_artifact_members(directory, &manifest.members)?;
+    check_review_cancelled(cancelled)?;
+    let canonical = read_manifest(session)?;
+    let header = EventLogCursor::open(session.join(&canonical.event_log))?;
+    validate_visual_manifest_binding(
+        &manifest,
+        canonical
+            .ghostty_visual
+            .as_ref()
+            .map(|profile| return profile.effective_config_hash.as_str()),
+        &header.header().colors.source,
+    )?;
+    let actual = if endpoint.source_complete {
+        let point = endpoint
+            .state_id
+            .map_or(StatePoint::LatestPresented, |state_id| {
+                return StatePoint::StateId { state_id };
+            });
+        replay_endpoint_for_session(session, &point, cancelled)?
+    } else {
+        replay_endpoint_for_prefix(session, &endpoint.boundary, cancelled)?
+    };
+    if endpoint != actual
+        || manifest.capture_kind != "screenshot"
+        || manifest.session_id != endpoint.session_id
+        || manifest.source_event_hash.as_deref() != Some(endpoint.boundary.event_hash.as_str())
+        || manifest.selected_state_id != endpoint.state_id
+        || manifest.selected_state_hash.as_deref() != Some(endpoint.state_hash.as_str())
+        || manifest.endpoint_event_seq != endpoint.event_seq
+        || manifest.endpoint_event_byte_offset != endpoint.event_byte_offset
+        || (manifest.geometry_report.cols, manifest.geometry_report.rows)
+            != (endpoint.cols, endpoint.rows)
+    {
+        return Err(invalid(
+            "native screenshot does not match its canonical replay endpoint",
+        ));
+    }
+    return Ok(endpoint);
+}
+
+fn bounded_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
+    let mut bytes = Vec::new();
+    open_review_file(path)
+        .and_then(|file| return file.take(1024 * 1024 + 1).read_to_end(&mut bytes))
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            };
+        })?;
+    if bytes.len() > 1024 * 1024 {
+        return Err(invalid("native artifact JSON exceeds 1 MiB"));
+    }
+    return serde_json::from_slice(&bytes).map_err(|source| {
+        return Error::InvalidJson {
+            path: path.to_path_buf(),
+            json_path: "$".to_owned(),
+            source,
+        };
+    });
+}
 
 /// Validate the version and effective-configuration member binding of a visual manifest.
 ///
@@ -92,7 +185,7 @@ pub fn validated_visual_manifests(
 ) -> Result<Vec<ValidatedVisualManifest>> {
     let session = session.as_ref();
     let session_manifest = read_manifest(session)?;
-    let canonical_log = EventLog::read(session.join(&session_manifest.event_log))?;
+    let canonical_log = EventLogSummary::read(session.join(&session_manifest.event_log))?;
     let expected_profile_hash = session_manifest
         .ghostty_visual
         .as_ref()
@@ -190,7 +283,8 @@ pub fn validated_visual_manifests_for_state(
     cancelled: &AtomicBool,
 ) -> Result<Vec<ValidatedVisualManifest>> {
     use termtrace_engine::observation::{
-        StatePoint, semantic_state_with_hash_for_session_cancellable,
+        StatePoint, presented_replay_endpoint_for_session,
+        semantic_state_with_hash_for_session_cancellable,
     };
     use termtrace_evidence::{event_log::EventLogCursor, session::read_completion};
 
@@ -202,12 +296,20 @@ pub fn validated_visual_manifests_for_state(
     )?;
     let session_manifest = read_manifest(session)?;
     let completion = read_completion(session)?;
+    let Some(selected_endpoint) = presented_replay_endpoint_for_session(
+        session,
+        &StatePoint::StateId { state_id },
+        cancelled,
+    )?
+    else {
+        return Ok(Vec::new());
+    };
     let canonical = EventLogCursor::open(session.join(&session_manifest.event_log))?;
     let expected_profile_hash = session_manifest
         .ghostty_visual
         .as_ref()
         .map(|profile| return profile.effective_config_hash.as_str());
-    let directory = fs_err::read_dir(session).map_err(|source| {
+    let directory = VisualDirectories::open(session).map_err(|source| {
         return Error::Filesystem {
             path: session.to_path_buf(),
             source,
@@ -262,8 +364,14 @@ pub fn validated_visual_manifests_for_state(
         let Ok(manifest) = serde_json::from_slice::<VisualManifest>(&bytes) else {
             continue;
         };
+        let replay_screenshot = manifest
+            .members
+            .iter()
+            .any(|member| return member.path == "replay-endpoint.json");
         if manifest.session_id != session_manifest.session_id
-            || manifest.source_event_hash.as_deref() != Some(completion.final_event_hash.as_str())
+            || !replay_screenshot
+                && manifest.source_event_hash.as_deref()
+                    != Some(completion.final_event_hash.as_str())
             || validate_visual_manifest_binding(
                 &manifest,
                 expected_profile_hash,
@@ -273,6 +381,14 @@ pub fn validated_visual_manifests_for_state(
         {
             continue;
         }
+        let resolved_screenshot = if replay_screenshot {
+            let endpoint = validate_replay_screenshot(session, &entry.path(), cancelled)?;
+            endpoint.state_hash == selected_endpoint.state_hash
+                && endpoint.event_seq == selected_endpoint.event_seq
+                && endpoint.event_byte_offset == selected_endpoint.event_byte_offset
+        } else {
+            false
+        };
         let map_path = entry.path().join("video-map.jsonl");
         let mut video_map = Vec::new();
         match open_review_file(&map_path) {
@@ -338,7 +454,10 @@ pub fn validated_visual_manifests_for_state(
                 });
             }
         }
-        if manifest.selected_state_id != Some(state_id) && video_map.is_empty() {
+        if manifest.selected_state_id != Some(state_id)
+            && !resolved_screenshot
+            && video_map.is_empty()
+        {
             continue;
         }
         retained_bytes = retained_bytes
@@ -353,9 +472,12 @@ pub fn validated_visual_manifests_for_state(
             .strip_prefix(session)
             .unwrap_or(&manifest_path)
             .to_path_buf();
-        let visual =
+        let mut visual =
             ValidatedVisualManifest::new(relative.clone(), manifest, video_map, |_| return Ok(()))
                 .map_err(Error::from)?;
+        if resolved_screenshot {
+            visual.bind_screenshot_state(state_id, &selected_endpoint)?;
+        }
         validated.push((relative, visual));
     }
     check_review_cancelled(cancelled)?;
@@ -382,6 +504,49 @@ fn check_review_cancelled(cancelled: &AtomicBool) -> Result<()> {
         return Err(invalid("native reviewer query cancelled"));
     }
     return Ok(());
+}
+
+/// Retain only two directory iterators while visiting standalone and batch captures.
+struct VisualDirectories {
+    root: ReadDir,
+    batch: Option<ReadDir>,
+}
+
+impl VisualDirectories {
+    fn open(session: &Path) -> io::Result<Self> {
+        return Ok(Self {
+            root: fs::read_dir(session)?,
+            batch: None,
+        });
+    }
+}
+
+impl Iterator for VisualDirectories {
+    type Item = io::Result<DirEntry>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(batch) = &mut self.batch {
+            if let Some(entry) = batch.next() {
+                return Some(entry);
+            }
+            self.batch = None;
+        }
+        let entry = match self.root.next()? {
+            Ok(entry) => entry,
+            Err(error) => return Some(Err(error)),
+        };
+        match entry.file_type() {
+            Ok(kind) if kind.is_dir() && entry.path().join("batch-manifest.json").is_file() => {
+                match fs::read_dir(entry.path()) {
+                    Ok(batch) => self.batch = Some(batch),
+                    Err(error) => return Some(Err(error)),
+                }
+            }
+            Ok(_) => {}
+            Err(error) => return Some(Err(error)),
+        }
+        return Some(Ok(entry));
+    }
 }
 
 fn open_review_file(path: &Path) -> io::Result<File> {

@@ -7,7 +7,7 @@ use crate::cli::command::Command;
 use crate::cli::{
     analysis::{
         dispatch as dispatch_analyze, run_diagnose_facade, run_inspect_facade, run_playback,
-        run_show,
+        run_playback_worker, run_show,
     },
     artifacts::{
         dispatch as dispatch_artifact, run_bug_report_facade, run_bundle, run_screenshot,
@@ -18,6 +18,7 @@ use crate::cli::{
     },
     integrity::dispatch as dispatch_integrity,
     output::ResponseWriter,
+    owned,
     recording::{run_geometry_probe, run_record, run_restart, run_start},
     registry::dispatch as dispatch_registry,
     scenario::run_test,
@@ -52,6 +53,8 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: Command) -> Resul
         Command::Version(arguments) => run_version(response, arguments),
         Command::Agent => run_driver(),
         Command::Playback(arguments) => run_playback(arguments),
+        Command::PlaybackWorker(arguments) => run_playback_worker(arguments),
+        Command::OwnedProcess(arguments) => owned::run(arguments),
         Command::GeometryProbe(arguments) => run_geometry_probe(arguments),
         Command::Show(arguments) => run_show(response, arguments),
         Command::Screen(arguments) => run_screen(response, arguments),

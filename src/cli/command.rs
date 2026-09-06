@@ -5,7 +5,7 @@ use clap::{CommandFactory as _, Parser, Subcommand, ValueEnum as _};
 use crate::cli::{
     analysis::args::{
         AnalyzeArgs, AnalyzeSubcommand, DiagnoseFacadeArgs, InspectFacadeArgs, PlaybackArgs,
-        ShowArgs,
+        PlaybackWorkerArgs, ShowArgs,
     },
     artifacts::args::{
         ArtifactArgs, ArtifactSubcommand, BugReportFacadeArgs, BundleArgs, ScreenshotArgs,
@@ -14,6 +14,7 @@ use crate::cli::{
     control::args::{ActArgs, ControlArgs, ScreenArgs, SendArgs, StatusArgs, StopArgs, WaitArgs},
     integrity::args::{IntegrityArgs, IntegritySubcommand},
     output::{ResponseField, ResponseMode},
+    owned::OwnedProcessArgs,
     recording::args::{GeometryProbeArgs, RecordArgs, RestartArgs, StartArgs},
     registry::args::{RegistryArgs, RegistrySubcommand},
     scenario::args::TestArgs,
@@ -138,6 +139,12 @@ pub(super) enum Command {
     /// Internal timed event playback used as Ghostty's child process.
     #[command(hide = true)]
     Playback(PlaybackArgs),
+    /// Internal persistent endpoint replay used as Ghostty's child process.
+    #[command(hide = true)]
+    PlaybackWorker(PlaybackWorkerArgs),
+    /// Supervise one private native process group against parent process identity.
+    #[command(hide = true)]
+    OwnedProcess(OwnedProcessArgs),
     /// Internal live terminal geometry probe.
     #[command(hide = true)]
     GeometryProbe(GeometryProbeArgs),
@@ -296,6 +303,8 @@ pub(super) fn preserves_requested_output(command: &Command) -> bool {
         | Command::BugReport(_)
         | Command::Agent
         | Command::Playback(_)
+        | Command::PlaybackWorker(_)
+        | Command::OwnedProcess(_)
         | Command::GeometryProbe(_) => true,
         Command::Show(_) => true,
         Command::Artifact(arguments) => {
