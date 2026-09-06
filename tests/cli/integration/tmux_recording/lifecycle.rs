@@ -1,5 +1,42 @@
 use super::*;
+use nix::{
+    sys::signal::{Signal, kill},
+    unistd::Pid,
+};
 use std::env;
+
+#[test]
+fn tmux_server_crash_closes_idle_recording_without_leaking_the_shell() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let server = PrivateTmux::new(&temporary, "/bin/sh");
+    let session = server.pane_session("%0");
+    server
+        .command()
+        .args(["send-keys", "-t", "%0", "printf CRASH_READY", "Enter"])
+        .status()
+        .expect("request ready output");
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .arg("wait")
+        .arg(&session)
+        .args(["--output", "CRASH_READY"])
+        .assert()
+        .success();
+    let output = server
+        .command()
+        .args(["display-message", "-p", "#{pid}"])
+        .output()
+        .expect("server identity");
+    let pid = String::from_utf8(output.stdout)
+        .expect("PID text")
+        .trim()
+        .parse::<i32>()
+        .expect("PID");
+    kill(Pid::from_raw(pid), Signal::SIGKILL).expect("crash owned tmux server");
+    wait_for_path(&session.join("completion.json"));
+    let log = EventLog::read(session.join("events.jsonl")).expect("crash evidence");
+    validate_completed_log(&session, &log).expect("complete crash evidence");
+}
 
 #[test]
 fn tmux_kill_pane_closes_canonical_recording() {

@@ -1,3 +1,5 @@
+use termtrace_model::execution::session::RecordingFailurePolicy;
+
 use std::{
     env,
     ffi::OsString,
@@ -29,9 +31,9 @@ use termtrace_model::{
 use termtrace_sdk::control_endpoint_is_reachable;
 
 use super::{
-    OPTION_CELL_HEIGHT, OPTION_CELL_WIDTH, OPTION_GHOSTTY_CONFIG, OPTION_ORIGINAL_COMMAND,
-    OPTION_ORIGINAL_SHELL, OPTION_OUTPUT_ROOT, OPTION_PANE_SESSION, OPTION_PROFILE_MODE,
-    OPTION_TERM, OPTION_TERMTRACE, OPTION_VERSION, TMUX_INTEGRATION_VERSION,
+    OPTION_AGGREGATE_MANIFEST, OPTION_CELL_HEIGHT, OPTION_CELL_WIDTH, OPTION_GHOSTTY_CONFIG,
+    OPTION_ORIGINAL_COMMAND, OPTION_ORIGINAL_SHELL, OPTION_OUTPUT_ROOT, OPTION_PANE_SESSION,
+    OPTION_PROFILE_MODE, OPTION_TERM, OPTION_TERMTRACE, OPTION_VERSION, TMUX_INTEGRATION_VERSION,
     args::TmuxRunArgs,
     client::{
         TmuxClient, option_path, option_text, parse_option, query_number, query_text,
@@ -66,8 +68,8 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
         ));
     }
 
-    let explicitly_selected =
-        arguments.force || arguments.shell_command.is_some() || !arguments.command.is_empty();
+    let explicitly_selected = !arguments.pane_launch
+        && (arguments.force || arguments.shell_command.is_some() || !arguments.command.is_empty());
     let (command, launch_kind) = tmux_child_command(&client, arguments)?;
     client.unset_pane_option(&pane, OPTION_PANE_SESSION)?;
     let scope = scope_from_options(&client)?;
@@ -143,6 +145,7 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
     let (publication_cancel, publication) =
         publish_pane_recording_when_ready(client, pane.clone(), paths.session.clone())?;
     let options = RecordOptions {
+        failure_policy: RecordingFailurePolicy::Preserve,
         output_directory: paths.session,
         creation_alias,
         lineage: None,
@@ -193,16 +196,34 @@ fn publish_pane_recording_when_ready(
     pane: String,
     session: PathBuf,
 ) -> Result<(mpsc::SyncSender<()>, thread::JoinHandle<Result<()>>)> {
+    // Retain this before recording begins: the pane or the whole server may be
+    // gone by the time a short recording finishes publishing its manifest.
+    let aggregate = option_path(&client, OPTION_AGGREGATE_MANIFEST)?;
     let (cancel, cancellation) = mpsc::sync_channel(1);
     let thread = thread::Builder::new()
         .name("termtrace-tmux-publication".to_owned())
         .spawn(move || {
+            let mut registered = false;
             loop {
+                if !registered && session.join("session.json").is_file() {
+                    if let Some(path) = &aggregate {
+                        super::aggregate::register_pane_track(path, &pane, &session)?;
+                    }
+                    registered = true;
+                }
                 if control_endpoint_is_reachable(&session) {
                     return client.set_pane_option(&pane, OPTION_PANE_SESSION, session.as_os_str());
                 }
                 match cancellation.recv_timeout(Duration::from_millis(5)) {
-                    Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+                    Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        if !registered
+                            && session.join("session.json").is_file()
+                            && let Some(path) = &aggregate
+                        {
+                            super::aggregate::register_pane_track(path, &pane, &session)?;
+                        }
+                        return Ok(());
+                    }
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
                 }
             }
@@ -230,6 +251,17 @@ fn tmux_child_command(
     client: &TmuxClient,
     arguments: TmuxRunArgs,
 ) -> Result<(Vec<OsString>, TmuxPaneLaunchKind)> {
+    if arguments.pane_launch {
+        let launch_kind = validate_pane_launch(&arguments.command)?;
+        let mut command = vec![
+            env::current_exe().into_diagnostic()?.into_os_string(),
+            OsString::from("tmux"),
+            OsString::from("exec-pane"),
+            OsString::from("--"),
+        ];
+        command.extend(arguments.command);
+        return Ok((command, launch_kind));
+    }
     if let Some(shell_command) = arguments.shell_command {
         return Ok((
             vec![
@@ -265,6 +297,62 @@ fn tmux_child_command(
     return Ok((
         vec![OsString::from_vec(shell), OsString::from("-l")],
         TmuxPaneLaunchKind::DefaultShell,
+    ));
+}
+
+fn validate_pane_launch(arguments: &[OsString]) -> Result<TmuxPaneLaunchKind> {
+    let [mode, shell, rest @ ..] = arguments else {
+        return Err(miette::miette!("pane launch requires a mode and shell"));
+    };
+    if shell.is_empty() {
+        return Err(miette::miette!("pane launch shell is empty"));
+    }
+    return match (mode.to_str(), rest.len()) {
+        (Some("login"), 0) => Ok(TmuxPaneLaunchKind::DefaultShell),
+        (Some("shell"), 1) => Ok(TmuxPaneLaunchKind::ShellCommand),
+        (Some("exec"), 2..) => Ok(TmuxPaneLaunchKind::ExplicitArgv),
+        _ => Err(miette::miette!(
+            "invalid pane launch mode or argument count"
+        )),
+    };
+}
+
+pub(super) fn exec_pane_launch(arguments: &[OsString]) -> Result<ExitCode> {
+    let kind = validate_pane_launch(arguments)?;
+    let [_, shell, rest @ ..] = arguments else {
+        return Err(miette::miette!("pane launch requires a mode and shell"));
+    };
+    let mut command = match kind {
+        TmuxPaneLaunchKind::ExplicitArgv => {
+            let [program, arguments @ ..] = rest else {
+                return Err(miette::miette!("pane executable is missing"));
+            };
+            let mut command = ProcessCommand::new(program);
+            command.args(arguments);
+            command
+        }
+        TmuxPaneLaunchKind::DefaultShell | TmuxPaneLaunchKind::ShellCommand => {
+            let basename = Path::new(shell).file_name().unwrap_or(shell);
+            let mut command = ProcessCommand::new(shell);
+            if kind == TmuxPaneLaunchKind::DefaultShell {
+                let mut argv0 = OsString::from("-");
+                argv0.push(basename);
+                command.arg0(argv0);
+            } else {
+                let [source] = rest else {
+                    return Err(miette::miette!("pane shell command is missing"));
+                };
+                command.arg0(basename).arg("-c").arg(source);
+            }
+            command
+        }
+        TmuxPaneLaunchKind::DefaultCommand => {
+            return Err(miette::miette!("unsupported pane launch kind"));
+        }
+    };
+    let error = command.exec();
+    return Err(miette::miette!(
+        "could not execute tmux pane launch: {error}"
     ));
 }
 

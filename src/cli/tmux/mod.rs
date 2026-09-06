@@ -12,6 +12,7 @@ mod recording;
 mod scope;
 mod setup;
 mod supervisor;
+mod watchdog;
 
 pub(super) use aggregate::{run_tmux_bundle, run_tmux_record, run_tmux_stop, run_tmux_video};
 pub(super) use args::{TmuxArgs, TmuxSubcommand};
@@ -30,6 +31,8 @@ const OPTION_TMUX: &str = "@termtrace-tmux-executable";
 const OPTION_OUTPUT_ROOT: &str = "@termtrace-output-root";
 const OPTION_ORIGINAL_COMMAND: &str = "@termtrace-original-default-command";
 const OPTION_ORIGINAL_SHELL: &str = "@termtrace-original-default-shell";
+const OPTION_LAUNCH_HOOK: &str = "@termtrace-launch-hook";
+const OPTION_ORIGINAL_LAUNCH_HOOK: &str = "@termtrace-original-pane-launch-command";
 const OPTION_PROFILE_MODE: &str = "@termtrace-ghostty-profile";
 const OPTION_GHOSTTY_CONFIG: &str = "@termtrace-ghostty-config";
 const OPTION_CELL_WIDTH: &str = "@termtrace-cell-width";
@@ -43,7 +46,7 @@ const OPTION_GRANDFATHERED_PID: &str = "@termtrace-grandfathered-pid";
 const OPTION_SELECTED_PID: &str = "@termtrace-selected-pid";
 const OPTION_EXCLUDED_PID: &str = "@termtrace-excluded-pid";
 const OPTION_SUPERVISOR_PID: &str = "@termtrace-supervisor-pid";
-const SUPERVISOR_LOCK: &str = "termtrace-recording-supervisor";
+const OPTION_WATCHDOG_PID: &str = "@termtrace-watchdog-pid";
 const SUPERVISOR_INTERVAL: Duration = Duration::from_millis(250);
 const UNRECORDED_GRACE: Duration = Duration::from_millis(500);
 
@@ -60,6 +63,8 @@ const RESERVED_OPTIONS: &[&str] = &[
     OPTION_OUTPUT_ROOT,
     OPTION_ORIGINAL_COMMAND,
     OPTION_ORIGINAL_SHELL,
+    OPTION_LAUNCH_HOOK,
+    OPTION_ORIGINAL_LAUNCH_HOOK,
     OPTION_PROFILE_MODE,
     OPTION_GHOSTTY_CONFIG,
     OPTION_COVERAGE,
@@ -69,12 +74,18 @@ const RESERVED_OPTIONS: &[&str] = &[
     OPTION_TERM,
     OPTION_SCOPE,
     OPTION_SUPERVISOR_PID,
+    OPTION_WATCHDOG_PID,
 ];
 
 pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -> Result<ExitCode> {
     return match command {
         TmuxSubcommand::Record(arguments) => run_tmux_record(response, arguments),
         TmuxSubcommand::Status(arguments) => run_tmux_status(response, arguments),
+        TmuxSubcommand::Events(arguments) => aggregate::run_tmux_events(response, arguments),
+        TmuxSubcommand::Tracks(arguments) => {
+            aggregate::run_tmux_catalog(response, arguments, false)
+        }
+        TmuxSubcommand::Gaps(arguments) => aggregate::run_tmux_catalog(response, arguments, true),
         TmuxSubcommand::Stop(arguments) => run_tmux_stop(response, arguments),
         TmuxSubcommand::Video(arguments) => run_tmux_video(response, arguments),
         TmuxSubcommand::Bundle(arguments) => run_tmux_bundle(response, arguments),
@@ -83,7 +94,9 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
         TmuxSubcommand::Disable(arguments) => run_tmux_disable(response, arguments),
         TmuxSubcommand::Scope(arguments) => run_tmux_scope(response, arguments),
         TmuxSubcommand::Run(arguments) => run_tmux_pane(arguments),
+        TmuxSubcommand::ExecPane(arguments) => recording::exec_pane_launch(&arguments.command),
         TmuxSubcommand::Guard(arguments) => run_tmux_guard(arguments),
         TmuxSubcommand::Supervise => run_tmux_supervisor(),
+        TmuxSubcommand::Watchdog => watchdog::run(),
     };
 }

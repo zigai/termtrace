@@ -1,0 +1,133 @@
+diff --git a/Makefile.am b/Makefile.am
+index cbdb4e86..83df18cb 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -203,6 +203,7 @@ dist_tmux_SOURCES = \
+ 	session.c \
+ 	sort.c \
+ 	spawn.c \
++	pane-launch.c pane-launch.h pane-launch-options.h \
+ 	status.c \
+ 	style.c \
+ 	tmux-protocol.h \
+diff --git a/options-table.c b/options-table.c
+index 5d171b16..d6fb37ad 100644
+--- a/options-table.c
++++ b/options-table.c
+@@ -783,6 +783,7 @@ const struct options_table_entry options_table[] = {
+ 	  .text = "Action to take on a bell alert."
+ 	},
+ 
++#include "pane-launch-options.h"
+ 	{ .name = "default-command",
+ 	  .type = OPTIONS_TABLE_STRING,
+ 	  .scope = OPTIONS_TABLE_SESSION,
+diff --git a/pane-launch-options.h b/pane-launch-options.h
+new file mode 100644
+index 00000000..edd62bc1
+--- /dev/null
++++ b/pane-launch-options.h
+@@ -0,0 +1,7 @@
++	{ .name = "pane-launch-command",
++	  .type = OPTIONS_TABLE_STRING,
++	  .scope = OPTIONS_TABLE_SESSION,
++	  .default_str = "",
++	  .text = "Command run before every pane process, with launch mode, "
++		  "shell and original arguments as positional parameters."
++	},
+diff --git a/pane-launch.c b/pane-launch.c
+new file mode 100644
+index 00000000..ab7dbd35
+--- /dev/null
++++ b/pane-launch.c
+@@ -0,0 +1,57 @@
++/*
++ * Copyright (c) 2026 Termtrace contributors
++ *
++ * Permission to use, copy, modify, and distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++#include <sys/types.h>
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <unistd.h>
++
++#include "tmux.h"
++#include "pane-launch.h"
++
++/* Called in the child after tmux has prepared its terminal and environment. */
++void
++pane_launch(struct session *s, struct window_pane *wp)
++{
++	const char	 *command, *mode;
++	char		**argv;
++	int		  i;
++
++	command = options_get_string(s->options, "pane-launch-command");
++	if (*command == '\0')
++		return;
++	if (wp->argc == 0)
++		mode = "login";
++	else if (wp->argc == 1)
++		mode = "shell";
++	else
++		mode = "exec";
++
++	/* Original arguments are never interpolated into shell source. */
++	argv = xcalloc((size_t)wp->argc + 7, sizeof *argv);
++	argv[0] = (char *)"/bin/sh";
++	argv[1] = (char *)"-c";
++	argv[2] = (char *)command;
++	argv[3] = (char *)"pane-launch";
++	argv[4] = (char *)mode;
++	argv[5] = wp->shell;
++	for (i = 0; i < wp->argc; i++)
++		argv[i + 6] = wp->argv[i];
++	execv(argv[0], argv);
++	perror("pane-launch-command");
++	_exit(1);
++}
+diff --git a/pane-launch.h b/pane-launch.h
+new file mode 100644
+index 00000000..b8de97f4
+--- /dev/null
++++ b/pane-launch.h
+@@ -0,0 +1,7 @@
++/* Optional pane launch interception. */
++#ifndef PANE_LAUNCH_H
++#define PANE_LAUNCH_H
++
++void pane_launch(struct session *, struct window_pane *);
++
++#endif
+diff --git a/spawn.c b/spawn.c
+index 361d207e..e6bc0722 100644
+--- a/spawn.c
++++ b/spawn.c
+@@ -27,6 +27,7 @@
+ #include <unistd.h>
+ 
+ #include "tmux.h"
++#include "pane-launch.h"
+ 
+ /*
+  * Set up the environment and create a new window and pane or a new pane.
+@@ -542,6 +543,7 @@ spawn_pane(struct spawn_context *sc, char **cause)
+ 	sigprocmask(SIG_SETMASK, &oldset, NULL);
+ 	log_close();
+ 	environ_push(child);
++	pane_launch(s, new_wp);
+ 
+ 	/*
+ 	 * If given multiple arguments, use execvp(). Copy the arguments to

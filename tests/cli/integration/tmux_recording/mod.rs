@@ -1,8 +1,7 @@
 use crate::support::*;
 use serde::Deserialize;
 
-use termtrace_evidence::artifact::verify_artifact_members;
-use termtrace_model::artifact::tmux::TmuxBundleManifest;
+use termtrace_model::artifact::tmux::{TmuxBundleTrack, TmuxStreamingBundleManifest};
 mod bundle;
 mod coverage;
 mod lifecycle;

@@ -19,6 +19,12 @@ pub(in crate::cli) enum TmuxSubcommand {
     Record(TmuxRecordArgs),
     /// Report aggregate recording lifecycle, or audit a server when NAME is omitted.
     Status(TmuxStatusArgs),
+    /// Read a bounded page of complete aggregate lifecycle history.
+    Events(TmuxEventsArgs),
+    /// Read a bounded page of every immutable pane recording incarnation.
+    Tracks(TmuxCatalogArgs),
+    /// Read historical coverage intervals, including resolved gaps.
+    Gaps(TmuxCatalogArgs),
     /// Stop an aggregate recording and its composite client track.
     Stop(TmuxStopArgs),
     /// Render the aggregate recording's composite client track.
@@ -35,12 +41,18 @@ pub(in crate::cli) enum TmuxSubcommand {
     Scope(TmuxScopeArgs),
     /// Run one pane command through a full Termtrace-owned PTY recording.
     Run(TmuxRunArgs),
+    /// Restore the exact tmux launch semantics inside the recorded PTY.
+    #[command(hide = true)]
+    ExecPane(TmuxExecPaneArgs),
     /// Enforce the configured coverage policy for one newly created pane.
     #[command(hide = true)]
     Guard(TmuxGuardArgs),
     /// Audit pane ownership for the lifetime of one tmux server.
     #[command(hide = true)]
     Supervise,
+    /// Restart a failed pane observer while recording remains enabled.
+    #[command(hide = true)]
+    Watchdog,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -97,6 +109,9 @@ impl TmuxCoverageMode {
 
 #[derive(Clone, Debug, Args)]
 pub(in crate::cli) struct TmuxSetupArgs {
+    /// Intercept every launch and respawn; requires the supplied tmux launch-hook patch.
+    #[arg(long)]
+    pub(in crate::cli) launch_hook: bool,
     /// Managed Termtrace state root; defaults to the normal per-user state root.
     #[arg(long)]
     pub(in crate::cli) output_root: Option<PathBuf>,
@@ -183,6 +198,30 @@ pub(in crate::cli) struct TmuxStatusArgs {
     /// Emit a structured status report.
     #[arg(long)]
     pub(in crate::cli) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(in crate::cli) struct TmuxEventsArgs {
+    /// Aggregate recording name.
+    pub(in crate::cli) name: String,
+    /// Managed state root containing aggregate tmux recordings.
+    #[arg(long)]
+    pub(in crate::cli) output_root: Option<PathBuf>,
+    /// Inclusive first lifecycle sequence.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(in crate::cli) from_sequence: u64,
+    /// Maximum number of events returned, subject to a four-megabyte page limit.
+    #[arg(long, default_value_t = 128, value_parser = clap::value_parser!(u16).range(1..=4096))]
+    pub(in crate::cli) limit: u16,
+}
+
+#[derive(Debug, Args)]
+pub(in crate::cli) struct TmuxCatalogArgs {
+    #[command(flatten)]
+    pub(in crate::cli) page: TmuxEventsArgs,
+    /// Return only unfinished tracks or unresolved coverage intervals.
+    #[arg(long)]
+    pub(in crate::cli) active_only: bool,
 }
 
 #[derive(Debug, Args)]
@@ -295,6 +334,9 @@ pub(in crate::cli) struct TmuxScopeArgs {
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct TmuxRunArgs {
+    /// Arguments were supplied by the optional tmux pre-exec hook.
+    #[arg(long, hide = true, conflicts_with_all = ["force", "shell_command"])]
+    pub(in crate::cli) pane_launch: bool,
     /// Record the saved default command even when the pane is outside the managed scope.
     #[arg(long, conflicts_with_all = ["shell_command", "command"])]
     pub(in crate::cli) force: bool,
@@ -305,6 +347,12 @@ pub(in crate::cli) struct TmuxRunArgs {
 
     /// Exact executable and arguments; omission restores tmux's saved default.
     #[arg(last = true, allow_hyphen_values = true)]
+    pub(in crate::cli) command: Vec<OsString>,
+}
+
+#[derive(Debug, Args)]
+pub(in crate::cli) struct TmuxExecPaneArgs {
+    #[arg(last = true, required = true, num_args = 2.., allow_hyphen_values = true)]
     pub(in crate::cli) command: Vec<OsString>,
 }
 

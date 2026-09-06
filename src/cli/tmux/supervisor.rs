@@ -20,7 +20,7 @@ use crate::cli::output::{optional_display, write_json_line, write_stdout};
 use super::{
     OPTION_EXCLUDED_PID, OPTION_GRANDFATHERED_PID, OPTION_OUTPUT_ROOT, OPTION_PANE_SESSION,
     OPTION_SELECTED_PID, OPTION_SUPERVISOR_PID, OPTION_TERMTRACE, OPTION_TMUX, OPTION_VERSION,
-    SUPERVISOR_INTERVAL, SUPERVISOR_LOCK, TMUX_INTEGRATION_VERSION, UNRECORDED_GRACE,
+    SUPERVISOR_INTERVAL, TMUX_INTEGRATION_VERSION, UNRECORDED_GRACE,
     aggregate::{
         coverage_from_options, refresh_configured_aggregate_manifest, run_tmux_recording_status,
     },
@@ -30,7 +30,7 @@ use super::{
         TmuxScopeMode, TmuxScopePolicy, mark_pane_scope_decision, pane_matches_scope,
         pane_scope_decision, parse_scope_identifier, scope_from_options,
     },
-    setup::{setup_from_options, tmux_wrapper_command},
+    setup::{launch_option, setup_from_options, tmux_wrapper_command},
 };
 
 #[derive(serde::Serialize)]
@@ -186,10 +186,15 @@ pub(in crate::cli) fn run_tmux_supervisor() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let expected = PathBuf::from(OsString::from_vec(client.option(OPTION_TERMTRACE)?));
-    if !claim_supervisor(&client, &expected)? {
+    let Some(_lock) = super::watchdog::claim(&client, "supervisor")? else {
         return Ok(ExitCode::SUCCESS);
-    }
-    let result = supervise_tmux_panes(&client, &expected);
+    };
+    client.set_option(
+        OPTION_SUPERVISOR_PID,
+        OsStr::new(&process::id().to_string()),
+    )?;
+    let result = super::aggregate::record_observer_start(&client)
+        .and_then(|()| return supervise_tmux_panes(&client, &expected));
     let cleanup = release_supervisor(&client);
     match (result, cleanup) {
         (Ok(()), Ok(())) => return Ok(ExitCode::SUCCESS),
@@ -197,34 +202,6 @@ pub(in crate::cli) fn run_tmux_supervisor() -> Result<ExitCode> {
         (Err(primary), Err(cleanup)) => {
             return Err(miette::miette!(
                 "tmux supervisor failed: {primary}; cleanup also failed: {cleanup}"
-            ));
-        }
-    }
-}
-
-pub(super) fn claim_supervisor(client: &TmuxClient, expected: &Path) -> Result<bool> {
-    client.run(["wait-for", "-L", SUPERVISOR_LOCK])?;
-    let claim = (|| {
-        let current_pid = process::id();
-        let existing = option_text(client, OPTION_SUPERVISOR_PID)?
-            .parse::<u32>()
-            .ok();
-        if let Some(pid) = existing
-            && pid != current_pid
-            && process_id_has_role(pid, expected, b"supervise")?.unwrap_or(false)
-        {
-            return Ok(false);
-        }
-        client.set_option(OPTION_SUPERVISOR_PID, OsStr::new(&current_pid.to_string()))?;
-        return Ok(true);
-    })();
-    let unlock = client.run(["wait-for", "-U", SUPERVISOR_LOCK]);
-    match (claim, unlock) {
-        (Ok(claimed), Ok(())) => return Ok(claimed),
-        (Err(error), Ok(())) | (Ok(_), Err(error)) => return Err(error),
-        (Err(primary), Err(cleanup)) => {
-            return Err(miette::miette!(
-                "could not claim tmux supervisor: {primary}; unlock also failed: {cleanup}"
             ));
         }
     }
@@ -357,12 +334,12 @@ pub(super) fn tmux_status_report(client: &TmuxClient) -> Result<TmuxStatusReport
             configured_executable.clone().unwrap_or_default(),
             client.option(OPTION_TMUX)?,
         )?;
-        Some(tmux_wrapper_command(&setup))
+        Some((launch_option(&setup), tmux_wrapper_command(&setup)))
     } else {
         None
     };
-    let default_command_matches = expected_wrapper.as_ref().is_some_and(|wrapper| {
-        return client.option("default-command").ok().as_deref() == Some(wrapper.as_bytes());
+    let default_command_matches = expected_wrapper.as_ref().is_some_and(|(option, wrapper)| {
+        return client.option(option).ok().as_deref() == Some(wrapper.as_bytes());
     });
     let pane_rows = pane_process_rows(client)?;
     let mut panes = Vec::with_capacity(pane_rows.len());
@@ -474,7 +451,7 @@ pub(super) fn process_id_has_role(
 
 pub(super) fn pane_process_rows(client: &TmuxClient) -> Result<Vec<PaneProcessRow>> {
     let format = format!(
-        "#{{pane_id}}\t#{{pane_pid}}\t#{{{OPTION_GRANDFATHERED_PID}}}\t#{{{OPTION_SELECTED_PID}}}\t#{{{OPTION_EXCLUDED_PID}}}\t#{{session_id}}\t#{{window_id}}"
+        "#{{pane_dead}}\t#{{pane_id}}\t#{{pane_pid}}\t#{{{OPTION_GRANDFATHERED_PID}}}\t#{{{OPTION_SELECTED_PID}}}\t#{{{OPTION_EXCLUDED_PID}}}\t#{{session_id}}\t#{{window_id}}"
     );
     let output = client.output(["list-panes", "-a", "-F", format.as_str()])?;
     let mut panes = BTreeMap::<String, PaneProcessRow>::new();
@@ -482,7 +459,10 @@ pub(super) fn pane_process_rows(client: &TmuxClient) -> Result<Vec<PaneProcessRo
         if line.is_empty() {
             continue;
         }
-        let mut fields = line.splitn(7, |byte| return *byte == b'\t');
+        let mut fields = line.splitn(8, |byte| return *byte == b'\t');
+        if fields.next() == Some(b"1") {
+            continue;
+        }
         let pane_id = parse_scope_identifier(fields.next(), b'%', "pane")?;
         let pid = fields
             .next()
@@ -531,13 +511,18 @@ pub(super) fn grandfather_current_panes(client: &TmuxClient) -> Result<()> {
 }
 
 pub(super) fn clear_managed_pane_options(client: &TmuxClient) -> Result<()> {
-    for pane in pane_process_rows(client)? {
+    let panes = client.output(["list-panes", "-a", "-F", "#{pane_id}"])?;
+    for line in panes
+        .split(|byte| return *byte == b'\n')
+        .filter(|line| return !line.is_empty())
+    {
+        let pane_id = parse_scope_identifier(Some(line), b'%', "pane")?;
         for option in [
             OPTION_GRANDFATHERED_PID,
             OPTION_SELECTED_PID,
             OPTION_EXCLUDED_PID,
         ] {
-            client.unset_pane_option(&pane.pane_id, option)?;
+            client.unset_pane_option(&pane_id, option)?;
         }
     }
     return Ok(());

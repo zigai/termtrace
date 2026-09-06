@@ -1,7 +1,10 @@
 //! Complete, atomically published evidence exports for aggregate tmux recordings.
 
+use termtrace_evidence::{tmux_catalog::TmuxCatalog, tmux_journal};
+
 use std::{
     cell::Cell,
+    collections::BTreeSet,
     ffi::OsString,
     os::unix::{
         ffi::{OsStrExt as _, OsStringExt as _},
@@ -25,6 +28,8 @@ use termtrace_model::{
 use uuid::Uuid;
 
 use crate::{Error, Result, bundle};
+
+pub mod streaming;
 
 const MAX_AGGREGATE_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_TMUX_BUNDLE_MANIFEST_BYTES: u64 = 64 * 1024 * 1024;
@@ -57,7 +62,7 @@ pub fn create(
     )?;
     let aggregate = parse_aggregate(aggregate_manifest, &aggregate_bytes)?;
     validate_aggregate(&aggregate)?;
-    let source_tracks = source_tracks(&aggregate)?;
+    let source_tracks = source_tracks(aggregate_manifest, &aggregate)?;
     validate_destination(destination, aggregate_manifest, &source_tracks)?;
 
     let parent = destination
@@ -70,6 +75,16 @@ pub fn create(
         &staging.join("aggregate-recording-manifest.json"),
         &aggregate_bytes,
     )?;
+    if let Some(boundary) = &aggregate.lifecycle_journal {
+        let source_directory = aggregate_manifest
+            .parent()
+            .ok_or_else(|| return Error::invalid("tmux manifest has no parent"))?;
+        tmux_journal::copy_committed(
+            &source_directory.join(tmux_journal::JOURNAL_NAME),
+            &staging.join("aggregate-lifecycle.jsonl"),
+            boundary,
+        )?;
+    }
     create_private_directory(&staging.join("tracks"))?;
 
     let mut tracks: Vec<TmuxBundleTrack> = Vec::with_capacity(source_tracks.len());
@@ -145,7 +160,7 @@ pub fn verify(
     )?;
     let aggregate = parse_aggregate(aggregate_manifest, &aggregate_bytes)?;
     validate_aggregate(&aggregate)?;
-    let source_tracks = source_tracks(&aggregate)?;
+    let source_tracks = source_tracks(aggregate_manifest, &aggregate)?;
     return verify_contents(
         directory,
         aggregate_manifest,
@@ -159,35 +174,102 @@ struct SourceTrack {
     role: &'static str,
     pane_id: Option<String>,
     session: PathBuf,
+    session_id: Uuid,
 }
 
 fn parse_aggregate(path: &Path, bytes: &[u8]) -> Result<TmuxRecordingManifest> {
     return serde_json::from_slice(bytes).map_err(|source| return Error::json(path, source));
 }
 
-fn source_tracks(aggregate: &TmuxRecordingManifest) -> Result<Vec<SourceTrack>> {
+fn source_tracks(
+    aggregate_manifest: &Path,
+    aggregate: &TmuxRecordingManifest,
+) -> Result<Vec<SourceTrack>> {
+    let mut tracks = Vec::new();
+    visit_source_tracks(aggregate_manifest, aggregate, |track| {
+        if tracks.len() >= MAX_AGGREGATE_TRACKS {
+            return Err(Error::invalid(
+                "aggregate export exceeds its materialized track budget; use streaming export",
+            ));
+        }
+        tracks.push(track);
+        return Ok(());
+    })?;
+    return Ok(tracks);
+}
+
+fn visit_source_tracks(
+    aggregate_manifest: &Path,
+    aggregate: &TmuxRecordingManifest,
+    mut visit: impl FnMut(SourceTrack) -> Result<()>,
+) -> Result<()> {
     let composite = aggregate.composite_track.session.as_ref().ok_or_else(|| {
         return Error::invalid("aggregate tmux recording has no linked composite track");
     })?;
-    if aggregate.pane_tracks.len().saturating_add(1) > MAX_AGGREGATE_TRACKS {
-        return Err(Error::invalid(format!(
-            "aggregate tmux recording exceeds {MAX_AGGREGATE_TRACKS} linked tracks"
-        )));
-    }
-    let mut tracks: Vec<SourceTrack> = Vec::with_capacity(aggregate.pane_tracks.len() + 1);
-    tracks.push(SourceTrack {
+    visit(SourceTrack {
         role: "composite",
         pane_id: None,
         session: path_from_bytes(composite),
-    });
-    for (pane_id, session) in &aggregate.pane_tracks {
-        tracks.push(SourceTrack {
-            role: "pane",
-            pane_id: Some(pane_id.clone()),
-            session: path_from_bytes(session),
-        });
+        session_id: aggregate
+            .composite_track
+            .session_id
+            .ok_or_else(|| return Error::invalid("composite track has no identity"))?,
+    })?;
+    let mut current = aggregate
+        .pane_tracks
+        .iter()
+        .map(|(pane, session)| return (pane.clone(), path_from_bytes(session)))
+        .collect::<BTreeSet<_>>();
+    if aggregate.catalog.is_some() {
+        let directory = aggregate_manifest
+            .parent()
+            .ok_or_else(|| return Error::invalid("aggregate manifest has no parent"))?;
+        let catalog = TmuxCatalog::read_verified(directory, aggregate)?;
+        let mut next = 0;
+        loop {
+            let page = catalog.tracks(next, 128, false)?;
+            if page.is_empty() {
+                break;
+            }
+            for entry in page {
+                next = entry
+                    .sequence
+                    .checked_add(1)
+                    .ok_or_else(|| return Error::invalid("tmux catalog sequence overflow"))?;
+                current.remove(&(
+                    entry.track.pane_id.clone(),
+                    path_from_bytes(&entry.track.session),
+                ));
+                visit(SourceTrack {
+                    role: "pane",
+                    pane_id: Some(entry.track.pane_id),
+                    session: path_from_bytes(&entry.track.session),
+                    session_id: entry.track.session_id,
+                })?;
+            }
+        }
+    } else {
+        for (identity, track) in &aggregate.track_history {
+            if identity != &track.session_id {
+                return Err(Error::invalid(
+                    "historical pane track identity differs from its inventory key",
+                ));
+            }
+            current.remove(&(track.pane_id.clone(), path_from_bytes(&track.session)));
+            visit(SourceTrack {
+                role: "pane",
+                pane_id: Some(track.pane_id.clone()),
+                session: path_from_bytes(&track.session),
+                session_id: track.session_id,
+            })?;
+        }
     }
-    return Ok(tracks);
+    if !current.is_empty() {
+        return Err(Error::invalid(
+            "current pane track is missing from the historical inventory",
+        ));
+    }
+    return Ok(());
 }
 
 fn path_from_bytes(bytes: &ByteString) -> PathBuf {
@@ -268,6 +350,13 @@ fn verify_contents(
     source_tracks: &[SourceTrack],
 ) -> Result<TmuxBundleManifest> {
     ensure_bounded_tree(directory, MAX_AGGREGATE_BUNDLE_ENTRIES)?;
+    if let Some(boundary) = &aggregate.lifecycle_journal {
+        tmux_journal::visit(
+            &directory.join("aggregate-lifecycle.jsonl"),
+            boundary,
+            |_| return Ok(()),
+        )?;
+    }
     let manifest_path = directory.join("manifest.json");
     let manifest_bytes = read_regular_bounded(
         &manifest_path,
@@ -320,7 +409,8 @@ fn verify_contents(
         }
         let policy = BundleVerificationPolicy::new(&source.session, BundleProfile::Forensic);
         let nested = bundle::verify_profile(&directory.join(&track.directory), &policy)?;
-        if track.session_id != nested.session_id
+        if track.session_id != source.session_id
+            || track.session_id != nested.session_id
             || track.source_final_event_hash != nested.source_final_event_hash
         {
             return Err(Error::invalid(format!(
