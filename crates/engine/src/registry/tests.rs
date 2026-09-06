@@ -1,3 +1,5 @@
+use termtrace_model::execution::session::RecordingFailurePolicy;
+
 use super::*;
 use crate::recording::{RecordOptions, record};
 use std::{ffi::OsString, os::unix::fs::symlink};
@@ -152,6 +154,7 @@ fn retarget_uses_compare_and_swap_and_preserves_previous_binding_on_failure() {
 
 fn record_fixture(output_directory: PathBuf) -> PathBuf {
     record(&RecordOptions {
+        failure_policy: RecordingFailurePolicy::Stop,
         output_directory: output_directory.clone(),
         creation_alias: None,
         lineage: None,

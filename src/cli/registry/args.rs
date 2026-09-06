@@ -64,6 +64,9 @@ pub(in crate::cli) struct GcArgs {
     /// Always retain this many newest completed unregistered recordings.
     #[arg(long, default_value_t = 20)]
     pub(in crate::cli) keep_latest: u64,
+    /// Target bytes for completed managed recordings; overrides age, preserves names/newest.
+    #[arg(long)]
+    pub(in crate::cli) max_completed_bytes: Option<u64>,
     /// Apply the reported deletions; omission is a read-only dry run.
     #[arg(long)]
     pub(in crate::cli) apply: bool,

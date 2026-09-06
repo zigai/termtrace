@@ -121,9 +121,10 @@ pub(super) fn run_remove(response: &mut ResponseWriter, arguments: RemoveArgs) -
 pub(super) fn run_gc(response: &mut ResponseWriter, arguments: GcArgs) -> Result<ExitCode> {
     let registry = SessionRegistry::open_default().into_diagnostic()?;
     let report = registry
-        .garbage_collect(
+        .garbage_collect_with_quota(
             arguments.older_than_days,
             arguments.keep_latest,
+            arguments.max_completed_bytes,
             arguments.apply,
         )
         .into_diagnostic()?;

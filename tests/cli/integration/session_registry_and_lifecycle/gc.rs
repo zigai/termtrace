@@ -1,9 +1,139 @@
 use super::*;
+use std::{fs::File, time::SystemTime};
 use termtrace_model::{
     protocol::control::CONTROL_PROTOCOL_VERSION,
     registry::{REGISTRY_ENTRY_FORMAT, REGISTRY_ENTRY_VERSION, RegistryEntry},
     value::ByteString,
 };
+
+#[test]
+fn quota_removes_oldest_first_and_reports_protected_excess() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let sessions = state.join("sessions");
+    fs_err::create_dir_all(&sessions).expect("managed sessions");
+    for directory in [&state, &sessions] {
+        fs_err::set_permissions(directory, Permissions::from_mode(0o700)).expect("private state");
+    }
+    let oldest = sessions.join("oldest.termtrace");
+    let newest = sessions.join("newest.termtrace");
+    let pinned = sessions.join("pinned.termtrace");
+    for (index, session) in [&oldest, &newest, &pinned].into_iter().enumerate() {
+        Command::cargo_bin("termtrace")
+            .expect("binary")
+            .args(["record", "--no-input", "--out"])
+            .arg(session)
+            .args(["--", "/bin/echo", "QUOTA"])
+            .assert()
+            .success();
+        File::open(session.join("completion.json"))
+            .expect("completion")
+            .set_modified(
+                SystemTime::UNIX_EPOCH
+                    + Duration::from_secs(u64::try_from(index).expect("index") + 1),
+            )
+            .expect("order completions");
+    }
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["session", "register", "pinned", "--session"])
+        .arg(&pinned)
+        .assert()
+        .success();
+    for apply in [false, true] {
+        let mut command = Command::cargo_bin("termtrace").expect("binary");
+        command.env("TERMTRACE_STATE_DIR", &state).args([
+            "session",
+            "gc",
+            "--older-than-days",
+            "18446744073709551615",
+            "--keep-latest",
+            "1",
+            "--max-completed-bytes",
+            "0",
+        ]);
+        if apply {
+            command.arg("--apply");
+        }
+        let output = command.assert().success();
+        let report: serde_json::Value =
+            serde_json::from_slice(&output.get_output().stdout).expect("quota report");
+        assert_eq!(report["candidates"].as_array().map(Vec::len), Some(1));
+        assert_eq!(
+            report["candidates"][0]["session"],
+            oldest.to_str().expect("path")
+        );
+        assert_eq!(report["protected_registered"], 1);
+        assert!(report["quota_excess_bytes"].as_u64().expect("excess") > 0);
+        assert_eq!(
+            report["quota_excess_bytes"],
+            report["completed_bytes_after_plan"]
+        );
+        assert_eq!(oldest.exists(), !apply);
+        assert!(newest.is_dir());
+        assert!(pinned.is_dir());
+    }
+}
+
+#[test]
+fn retention_never_terminates_an_authenticated_idle_recorder() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let started = Command::cargo_bin("termtrace")
+        .expect("binary")
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "--response",
+            "full",
+            "start",
+            "idle",
+            "--",
+            "/bin/sleep",
+            "15",
+        ])
+        .assert()
+        .success();
+    let response: serde_json::Value =
+        serde_json::from_slice(&started.get_output().stdout).expect("start response");
+    let canonical: ByteString =
+        serde_json::from_value(response["canonical_session"].clone()).expect("session path");
+    let session = PathBuf::from(OsString::from_vec(canonical.into_bytes()));
+    File::open(session.join("events.jsonl"))
+        .expect("event log")
+        .set_modified(SystemTime::UNIX_EPOCH)
+        .expect("age event log");
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "session",
+            "gc",
+            "--older-than-days",
+            "1",
+            "--keep-latest",
+            "0",
+            "--apply",
+        ])
+        .assert()
+        .success();
+    let status = Command::cargo_bin("termtrace")
+        .expect("binary")
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["status", "idle"])
+        .assert()
+        .success();
+    assert_eq!(
+        compact_json_line(&status.get_output().stdout)["lifecycle"],
+        "live"
+    );
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "idle", "--wait"])
+        .assert()
+        .success();
+}
 #[test]
 fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomplete_evidence() {
     let temporary = TempDir::new().expect("temporary directory");

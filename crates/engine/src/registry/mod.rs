@@ -27,8 +27,7 @@ use nix::{
 };
 use termtrace_evidence::{
     artifact::write_secure,
-    event_log::EventLog,
-    session::{read_completion, read_manifest, validate_completed_log},
+    session::{read_completion, read_manifest},
 };
 use termtrace_model::{
     execution::session::{SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION},
