@@ -5,6 +5,7 @@ use std::{
     io::{Read, Write},
     path::PathBuf,
     sync::mpsc,
+    time::Instant,
 };
 
 use crate::analysis::profile::ResolvedGhosttyProfile;
@@ -15,8 +16,8 @@ use termtrace_model::{
     execution::event::TerminalColors,
     execution::provenance::ProvenancePolicy,
     execution::session::{
-        GeometryProvenance, ImportProvenance, ResourceLimitOutcome, ResourceLimits, SessionLineage,
-        TmuxPaneProvenance,
+        GeometryProvenance, ImportProvenance, RecordingFailurePolicy, ResourceLimitOutcome,
+        ResourceLimits, SessionLineage, TmuxPaneProvenance,
     },
     protocol::control::{ControlRequest, ControlResponse, ProcessSignal},
 };
@@ -32,6 +33,8 @@ pub(in crate::recording) struct SpawnedCommand {
 /// Configuration for one recorded command.
 #[derive(Clone, Debug)]
 pub struct RecordOptions {
+    /// Stop owned tests or preserve interactive applications after recorder failure.
+    pub failure_policy: RecordingFailurePolicy,
     /// New session directory.
     pub output_directory: PathBuf,
     /// Optional friendly invocation alias retained only as creation context.
@@ -92,11 +95,15 @@ pub struct RecordOutcome {
 }
 
 pub(super) enum RuntimeMessage {
-    Output(Vec<u8>),
+    Output {
+        data: Vec<u8>,
+        observed: Instant,
+    },
     OutputClosed,
     ReadFailed(String),
     Input(Vec<u8>),
     InputFailed(String),
+    TerminalInputClosed,
     Resize(TerminalGeometry),
     ResizeFailed(String),
     HostSignal(ProcessSignal),

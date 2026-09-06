@@ -588,6 +588,18 @@ impl SessionActor<'_> {
                     boundaries: actor_boundaries(&self.event_log),
                 });
             }
+            ControlCommand::Application { data } => {
+                data.validate().map_err(|reason| {
+                    return control_rejected("invalid_application_event", reason);
+                })?;
+                self.event_log.append(Event::Application {
+                    operation_id: request_id,
+                    data: data.clone(),
+                })?;
+                return Ok(ControlData::Acknowledged {
+                    boundaries: actor_boundaries(&self.event_log),
+                });
+            }
             ControlCommand::Mark { label } => {
                 let label = label.trim();
                 if label.is_empty() || label.len() > 256 {

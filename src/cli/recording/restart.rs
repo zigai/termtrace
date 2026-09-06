@@ -154,7 +154,8 @@ pub(super) fn restarted_record_options(
     let manifest_bytes = fs_err::read(predecessor.join("session.json")).into_diagnostic()?;
     let manifest = read_manifest(predecessor).into_diagnostic()?;
     let completion = wait_for_completion(predecessor, Duration::ZERO).into_diagnostic()?;
-    let event_log = EventLog::read(predecessor.join(&manifest.event_log)).into_diagnostic()?;
+    let event_log =
+        EventLogSummary::read(predecessor.join(&manifest.event_log)).into_diagnostic()?;
     let working_directory = manifest
         .working_directory
         .as_ref()
@@ -191,7 +192,7 @@ pub(super) fn restarted_record_options(
     let environment = if let Some(environment) = environment_override {
         let effective = EffectiveEnvironment::resolve(&environment, &term).into_diagnostic()?;
         if !overrides.allow_environment_change
-            && effective.policy().effective_digest != manifest.child_environment.effective_digest
+            && !matches_predecessor_environment(effective, &manifest, predecessor)?
         {
             return Err(miette::miette!(
                 "supplied environment does not match the predecessor commitment; pass --allow-environment-change for an intentional successor override"
@@ -199,9 +200,10 @@ pub(super) fn restarted_record_options(
         }
         environment
     } else {
-        restart_environment(&manifest, &term)?
+        restart_environment(&manifest, &term, predecessor)?
     };
     let mut options = RecordOptions {
+        failure_policy: manifest.failure_policy,
         output_directory,
         creation_alias,
         lineage: Some(SessionLineage {
@@ -264,6 +266,7 @@ pub(super) fn restarted_record_options(
 pub(super) fn restart_environment(
     manifest: &SessionManifest,
     term: &str,
+    predecessor: &Path,
 ) -> Result<EnvironmentSpec> {
     let policy = &manifest.child_environment;
     let mut environment = EnvironmentSpec {
@@ -284,12 +287,27 @@ pub(super) fn restart_environment(
             .insert(name.clone(), ByteString::from(value.as_os_str().as_bytes()));
     }
     let effective = EffectiveEnvironment::resolve(&environment, term).into_diagnostic()?;
-    if effective.policy().effective_digest != policy.effective_digest {
+    if !matches_predecessor_environment(effective, manifest, predecessor)? {
         return Err(miette::miette!(
             "current environment does not match the predecessor's committed effective environment; exact restart refused"
         ));
     }
     return Ok(environment);
+}
+
+fn matches_predecessor_environment(
+    mut effective: EffectiveEnvironment,
+    manifest: &SessionManifest,
+    predecessor: &Path,
+) -> Result<bool> {
+    // Older recordings predate the recorder-owned instrumentation variable.
+    if effective.policy().effective_digest == manifest.child_environment.effective_digest {
+        return Ok(true);
+    }
+    effective
+        .set_recording_session(predecessor)
+        .into_diagnostic()?;
+    return Ok(effective.policy().effective_digest == manifest.child_environment.effective_digest);
 }
 
 pub(super) fn restart_overrides_from_args(arguments: &RestartArgs) -> Result<RestartOverrides> {

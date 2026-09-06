@@ -1,3 +1,5 @@
+use termtrace_model::execution::session::RecordingFailurePolicy;
+
 use std::{ffi::OsString, path::PathBuf, time::Duration};
 
 use clap::{Args, ValueEnum};
@@ -23,6 +25,21 @@ pub(in crate::cli) struct GeometryProbeArgs {
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct RecordArgs {
+    /// Acquire original command pixels in a private Ghostty display, with video and final PNG.
+    #[arg(long, conflicts_with_all = ["no_input", "restart_source", "environment_spec_stdin", "import_source_kind", "on_recording_error"])]
+    pub(in crate::cli) original_native: bool,
+    /// Original capture rate: 24, 30, or 60 frames per second.
+    #[arg(long, requires = "original_native")]
+    pub(in crate::cli) original_fps: Option<u16>,
+    /// Original pixel source: a private display, or a portal-selected Wayland window.
+    #[arg(long, requires = "original_native", value_enum)]
+    pub(in crate::cli) original_backend: Option<OriginalBackendArg>,
+    /// Internal commitment for an already-resolved original capture profile.
+    #[arg(long, hide = true, requires = "ghostty_config")]
+    pub(in crate::cli) resolved_ghostty_profile_provenance: Option<String>,
+    /// Behavior after a recorder error (default: preserve interactive input, stop headless jobs).
+    #[arg(long, value_enum)]
+    pub(in crate::cli) on_recording_error: Option<RecordingFailurePolicyArg>,
     /// New owner-only session directory.
     #[arg(long)]
     pub(in crate::cli) out: PathBuf,
@@ -58,6 +75,27 @@ pub(in crate::cli) struct RecordArgs {
 
     #[command(flatten)]
     pub(in crate::cli) recording: RecordingArgs,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(in crate::cli) enum OriginalBackendArg {
+    PrivateX11,
+    WaylandPortal,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(in crate::cli) enum RecordingFailurePolicyArg {
+    Preserve,
+    Stop,
+}
+
+impl From<RecordingFailurePolicyArg> for RecordingFailurePolicy {
+    fn from(policy: RecordingFailurePolicyArg) -> Self {
+        return match policy {
+            RecordingFailurePolicyArg::Preserve => Self::Preserve,
+            RecordingFailurePolicyArg::Stop => Self::Stop,
+        };
+    }
 }
 
 #[derive(Debug, Args)]

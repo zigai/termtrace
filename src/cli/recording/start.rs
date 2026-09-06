@@ -332,14 +332,26 @@ pub(super) fn detached_record_arguments(
     session: &Path,
     recording: &RecordingArgs,
 ) -> Vec<OsString> {
+    return record_arguments(Some(alias), session, recording, false);
+}
+
+pub(super) fn record_arguments(
+    alias: Option<&str>,
+    session: &Path,
+    recording: &RecordingArgs,
+    forward_stdin: bool,
+) -> Vec<OsString> {
     let mut arguments = vec![
         OsString::from("record"),
-        OsString::from("--no-input"),
         OsString::from("--out"),
         session.as_os_str().to_os_string(),
-        OsString::from("--session-alias"),
-        OsString::from(alias),
     ];
+    if !forward_stdin {
+        arguments.push(OsString::from("--no-input"));
+    }
+    if let Some(alias) = alias {
+        push_record_option(&mut arguments, "--session-alias", OsStr::new(alias));
+    }
     if let Some(cwd) = &recording.cwd {
         push_record_option(&mut arguments, "--cwd", cwd.as_os_str());
     }
@@ -437,9 +449,11 @@ pub(super) fn detached_record_arguments(
             OsStr::new(&format!("{}ms", value.as_millis())),
         );
     }
-    let idle_timeout = recording
-        .idle_timeout
-        .unwrap_or(Duration::from_secs(15 * 60));
+    let idle_timeout = recording.idle_timeout.unwrap_or(if forward_stdin {
+        Duration::ZERO
+    } else {
+        Duration::from_secs(15 * 60)
+    });
     if !idle_timeout.is_zero() {
         push_record_option(
             &mut arguments,

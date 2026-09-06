@@ -9,6 +9,7 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
+    time::Instant,
 };
 
 use nix::{
@@ -54,10 +55,17 @@ fn spawn_reader(
                         return;
                     }
                     Ok(length) => {
+                        let observed = Instant::now();
                         let Some(slice) = buffer.get(..length) else {
                             continue;
                         };
-                        if sender.send(RuntimeMessage::Output(slice.to_vec())).is_err() {
+                        if sender
+                            .send(RuntimeMessage::Output {
+                                data: slice.to_vec(),
+                                observed,
+                            })
+                            .is_err()
+                        {
                             return;
                         }
                     }
@@ -185,6 +193,17 @@ fn geometry_from_winsize(size: Winsize, fallback: TerminalGeometry) -> Option<Te
 
 fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
     let stdin = io::stdin();
+    let terminal = match isatty(&stdin) {
+        Ok(terminal) => terminal,
+        Err(Errno::EIO) => {
+            let _ = sender.send(RuntimeMessage::TerminalInputClosed);
+            return;
+        }
+        Err(error) => {
+            let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
+            return;
+        }
+    };
     let mut buffer = [0_u8; READ_BUFFER_BYTES];
     loop {
         let mut descriptors = [
@@ -206,7 +225,12 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
             continue;
         }
         match fd_read(&stdin, &mut buffer) {
-            Ok(0) => return,
+            Ok(0) => {
+                if terminal {
+                    let _ = sender.send(RuntimeMessage::TerminalInputClosed);
+                }
+                return;
+            }
             Ok(length) => {
                 let Some(slice) = buffer.get(..length) else {
                     continue;
@@ -216,6 +240,10 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
                 }
             }
             Err(Errno::EINTR) => {}
+            Err(Errno::EIO) if terminal => {
+                let _ = sender.send(RuntimeMessage::TerminalInputClosed);
+                return;
+            }
             Err(error) => {
                 let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
                 return;
@@ -533,7 +561,10 @@ mod tests {
         let thread = thread::spawn(move || {
             let (sender, receiver) = mpsc::sync_channel(1);
             sender
-                .send(RuntimeMessage::Output(vec![b'a']))
+                .send(RuntimeMessage::Output {
+                    data: vec![b'a'],
+                    observed: Instant::now(),
+                })
                 .expect("fill inbox");
             let (reading_sender, reading) = mpsc::sync_channel(1);
             let (workers, receiver) = RuntimeWorkers::start(
@@ -578,7 +609,10 @@ mod tests {
     fn runtime_workers_partial_startup_failure_disconnects_full_inbox() {
         let (sender, receiver) = mpsc::sync_channel(1);
         sender
-            .send(RuntimeMessage::Output(vec![b'a']))
+            .send(RuntimeMessage::Output {
+                data: vec![b'a'],
+                observed: Instant::now(),
+            })
             .expect("fill inbox");
         let (completed_sender, completed) = mpsc::sync_channel(1);
         let blocked_sender = sender.clone();

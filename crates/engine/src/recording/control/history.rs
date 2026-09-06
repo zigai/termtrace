@@ -1,6 +1,6 @@
 //! Durable mutation replay and bounded in-memory retry caching.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 use uuid::Uuid;
 
@@ -13,8 +13,6 @@ use super::super::{
 };
 use crate::Result;
 
-const MAX_SESSION_MUTATIONS: u64 = 1_000_000;
-
 struct CachedMutation {
     command_hash: String,
     response: ControlResponse,
@@ -25,7 +23,6 @@ pub(in crate::recording) struct MutationHistory {
     cached: HashMap<Uuid, CachedMutation>,
     order: VecDeque<Uuid>,
     capacity: usize,
-    operation_ids: HashSet<Uuid>,
 }
 
 impl MutationHistory {
@@ -35,7 +32,6 @@ impl MutationHistory {
             cached: HashMap::new(),
             order: VecDeque::new(),
             capacity,
-            operation_ids: HashSet::new(),
         };
     }
 
@@ -63,18 +59,16 @@ impl MutationHistory {
     }
 
     pub(super) fn is_full(&self) -> bool {
-        return self.journal.len() >= MAX_SESSION_MUTATIONS || !self.journal.has_record_capacity();
+        return !self.journal.has_record_capacity();
     }
 
     pub(in crate::recording) fn reserve_operation(&mut self, operation_id: Uuid) -> Result<()> {
-        if self.operation_ids.contains(&operation_id) {
+        if !self.journal.reserve_operations(&[operation_id])? {
             return Err(control_rejected(
                 "operation_id_collision",
                 "operation identifier was already reserved by another mutation",
             ));
         }
-        self.check_operation_capacity(1)?;
-        self.operation_ids.insert(operation_id);
         return Ok(());
     }
 
@@ -86,35 +80,16 @@ impl MutationHistory {
         if let ControlCommand::InputSequence { atoms, .. } | ControlCommand::Act { atoms, .. } =
             command
         {
-            if atoms.iter().any(|atom| {
-                return self
-                    .operation_ids
-                    .contains(&input_sequence_operation_id(atom));
-            }) {
+            let identifiers: Vec<_> = atoms.iter().map(input_sequence_operation_id).collect();
+            if !self.journal.reserve_operations(&identifiers)? {
                 return Err(control_rejected(
                     "operation_id_collision",
                     "input sequence operation identifier was already reserved by another mutation",
                 ));
             }
-            self.check_operation_capacity(atoms.len())?;
-            self.operation_ids
-                .extend(atoms.iter().map(input_sequence_operation_id));
             return Ok(());
         }
         return self.reserve_operation(request_id);
-    }
-
-    fn check_operation_capacity(&self, additional: usize) -> Result<()> {
-        let count = u64::try_from(self.operation_ids.len()).unwrap_or(u64::MAX);
-        if count.saturating_add(u64::try_from(additional).unwrap_or(u64::MAX))
-            > MAX_SESSION_MUTATIONS
-        {
-            return Err(control_rejected(
-                "operation_limit_reached",
-                "session reserved operation identifier limit has been reached",
-            ));
-        }
-        return Ok(());
     }
 
     pub(in crate::recording) fn remember(
@@ -197,15 +172,15 @@ mod tests {
     };
 
     #[test]
-    fn operation_capacity_rejects_whole_batch_without_evicting_reserved_ids() {
+    fn duplicate_operation_rejects_whole_batch_without_reserving_new_ids() {
         let temporary = tempfile::TempDir::new().expect("temporary directory");
         let journal = MutationJournal::create(temporary.path()).expect("journal");
         let mut history = MutationHistory::new(journal, 1);
-        history.operation_ids = (0..MAX_SESSION_MUTATIONS - 1)
-            .map(|id| return Uuid::from_u128(u128::from(id)))
-            .collect();
-        let first = Uuid::from_u128(u128::from(MAX_SESSION_MUTATIONS));
-        let second = Uuid::from_u128(u128::from(MAX_SESSION_MUTATIONS) + 1);
+        history
+            .reserve_operation(Uuid::nil())
+            .expect("initial reservation");
+        let first = Uuid::from_u128(1);
+        let second = Uuid::nil();
         let command = ControlCommand::InputSequence {
             atoms: [first, second]
                 .into_iter()
@@ -223,14 +198,14 @@ mod tests {
         };
         assert!(matches!(
             history.reserve_command(Uuid::now_v7(), &command),
-            Err(crate::Error::ControlRejected { code, .. }) if code == "operation_limit_reached"
+            Err(crate::Error::ControlRejected { code, .. }) if code == "operation_id_collision"
         ));
         history
             .reserve_operation(first)
-            .expect("rejected batch retained one free slot");
+            .expect("rejected batch did not reserve its first identifier");
         assert!(matches!(
             history.reserve_operation(second),
-            Err(crate::Error::ControlRejected { code, .. }) if code == "operation_limit_reached"
+            Err(crate::Error::ControlRejected { code, .. }) if code == "operation_id_collision"
         ));
         assert!(matches!(
             history.reserve_operation(Uuid::nil()),

@@ -1,10 +1,21 @@
+use std::fs;
+use termtrace_model::execution::session::RecordingFailurePolicy;
+
 use super::*;
 
 pub(in crate::cli) fn run_record(
     response: &mut ResponseWriter,
     arguments: RecordArgs,
 ) -> Result<ExitCode> {
+    if arguments.original_native {
+        return super::original::run_original(response, arguments);
+    }
     let RecordArgs {
+        original_native: _,
+        original_fps: _,
+        original_backend: _,
+        resolved_ghostty_profile_provenance,
+        on_recording_error,
         out,
         no_input,
         session_alias,
@@ -121,7 +132,24 @@ pub(in crate::cli) fn run_record(
     let needs_profile = arguments.ghostty_config.is_some()
         || !overrides.is_empty()
         || matches!(arguments.geometry, GeometryMode::Fit);
-    let ghostty_profile = if needs_profile {
+    let ghostty_profile = if let Some(provenance) = resolved_ghostty_profile_provenance {
+        if !overrides.is_empty() {
+            return Err(miette::miette!(
+                "resolved native profile cannot carry additional visual overrides"
+            ));
+        }
+        let path = arguments
+            .ghostty_config
+            .as_deref()
+            .ok_or_else(|| miette::miette!("resolved native profile requires a config file"))?;
+        Some(
+            restore_ghostty_profile(
+                fs::read(path).into_diagnostic()?,
+                serde_json::from_str(&provenance).into_diagnostic()?,
+            )
+            .into_diagnostic()?,
+        )
+    } else if needs_profile {
         Some(
             resolve_ghostty_profile(arguments.ghostty_config.as_deref(), overrides)
                 .into_diagnostic()?,
@@ -146,6 +174,14 @@ pub(in crate::cli) fn run_record(
     let outcome = record_for_response(
         response,
         &RecordOptions {
+            failure_policy: on_recording_error.map_or(
+                if no_input {
+                    RecordingFailurePolicy::Stop
+                } else {
+                    RecordingFailurePolicy::Preserve
+                },
+                Into::into,
+            ),
             output_directory: out,
             creation_alias: session_alias,
             lineage: None,

@@ -1,8 +1,10 @@
 //! Runtime orchestration for one-shot PTY recording.
 
+use termtrace_model::execution::session::RecordingFailurePolicy;
+
 use std::{
     io,
-    mem::replace,
+    mem::{replace, take},
     path::PathBuf,
     sync::mpsc::{self, RecvTimeoutError},
     time::{Duration, Instant},
@@ -54,10 +56,11 @@ pub(super) fn consume_runtime(
     initial_geometry: TerminalGeometry,
     control_socket: &str,
     host_signals: Signals,
+    startup_error: Option<Error>,
 ) -> Result<RuntimeOutcome> {
     let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
     let reader = replace(&mut actor.spawned.reader, Box::new(io::empty()));
-    let (workers, receiver) = RuntimeWorkers::start(
+    let started = RuntimeWorkers::start(
         reader,
         &sender,
         receiver,
@@ -65,10 +68,22 @@ pub(super) fn consume_runtime(
         initial_geometry,
         control_socket,
         host_signals,
-    )?;
+    );
+    let (workers, receiver) = match started {
+        Ok(started) => started,
+        Err(error) => {
+            terminate_process_group(actor.spawned.pid);
+            let _ = actor.spawned.child.kill();
+            let _ = actor.spawned.child.wait();
+            return Err(error);
+        }
+    };
     drop(sender);
 
     let result = (|| {
+        if let Some(error) = startup_error {
+            return Err(error);
+        }
         let mut control_shutdown_started = false;
         let started_at = Instant::now();
         let mut last_activity_at = Instant::now();
@@ -85,10 +100,10 @@ pub(super) fn consume_runtime(
             let mut received_output = false;
             match receiver.recv_timeout(receive_timeout) {
                 Ok(message) => {
-                    received_output = matches!(&message, RuntimeMessage::Output(_));
+                    received_output = matches!(&message, RuntimeMessage::Output { .. });
                     if matches!(
                         &message,
-                        RuntimeMessage::Output(_)
+                        RuntimeMessage::Output { .. }
                             | RuntimeMessage::Input(_)
                             | RuntimeMessage::Control { .. }
                             | RuntimeMessage::Resize(_)
@@ -210,9 +225,14 @@ pub(super) fn consume_runtime(
             .ok_or_else(|| return terminal_error("wait for child", "missing exit status"));
     })();
 
-    if result.is_err() {
+    if let Err(error) = &result
+        && actor.failure_policy == RecordingFailurePolicy::Preserve
+    {
+        super::degraded::preserve_terminal(actor, &receiver, error);
+    } else if result.is_err() {
         terminate_process_group(actor.spawned.pid);
         let _ = actor.spawned.child.kill();
+        let _ = actor.spawned.child.wait();
     }
     let status = workers.finish(receiver, result)?;
 
@@ -225,6 +245,29 @@ pub(super) fn consume_runtime(
 }
 
 impl SessionActor<'_> {
+    fn forward_host_signal(
+        &mut self,
+        signal: ProcessSignal,
+        code: &str,
+        message: &str,
+    ) -> Result<()> {
+        self.host_signal_kill_deadline
+            .get_or_insert_with(|| return Instant::now() + HOST_SIGNAL_GRACE_PERIOD);
+        self.event_log.append(Event::HostError {
+            code: code.to_owned(),
+            message: message.to_owned(),
+        })?;
+        let operation_id = Uuid::now_v7();
+        self.mutation_history.reserve_operation(operation_id)?;
+        return apply_signal(
+            self.spawned.pid,
+            &mut self.event_log,
+            operation_id,
+            signal,
+            true,
+        );
+    }
+
     fn enforce_resource_limits(
         &mut self,
         started_at: Instant,
@@ -307,33 +350,51 @@ impl SessionActor<'_> {
         return Ok(());
     }
 
+    fn mirror_bytes(&mut self, data: &[u8]) -> Result<()> {
+        if self.progress.mirror_open
+            && let Err(source) = self
+                .output
+                .write_all(data)
+                .and_then(|()| return self.output.flush())
+        {
+            if !self.continue_after_output_mirror_closes {
+                return Err(Error::Filesystem {
+                    path: PathBuf::from("<stdout>"),
+                    source,
+                });
+            }
+            self.progress.mirror_open = false;
+            self.event_log.append(Event::HostError {
+                code: "output_mirror_closed".to_owned(),
+                message: format!(
+                    "presentation output closed while canonical PTY recording continued: {source}"
+                ),
+            })?;
+        }
+        return Ok(());
+    }
+
     fn process_runtime_message(&mut self, message: RuntimeMessage) -> Result<()> {
         match message {
-            RuntimeMessage::Output(data) => {
+            RuntimeMessage::Output { data, observed } => {
+                // Establish canonical causality before any fallible mirror, parser, or reply.
+                let source_event_seq = match self.event_log.append_observed_output(
+                    Event::Output {
+                        data: ByteString::from(data.as_slice()),
+                    },
+                    Some(observed),
+                ) {
+                    Ok(sequence) => sequence,
+                    Err(error) => {
+                        self.progress.unrecorded_output = data;
+                        return Err(error.into());
+                    }
+                };
+                self.live.source_event_seq = Some(source_event_seq);
                 self.progress.output_bytes = self
                     .progress
                     .output_bytes
                     .saturating_add(u64::try_from(data.len()).unwrap_or(u64::MAX));
-                if self.progress.mirror_open
-                    && let Err(source) = self
-                        .output
-                        .write_all(&data)
-                        .and_then(|()| return self.output.flush())
-                {
-                    if !self.continue_after_output_mirror_closes {
-                        return Err(Error::Filesystem {
-                            path: PathBuf::from("<stdout>"),
-                            source,
-                        });
-                    }
-                    self.progress.mirror_open = false;
-                    self.event_log.append(Event::HostError {
-                    code: "output_mirror_closed".to_owned(),
-                    message: format!(
-                        "presentation output closed while canonical PTY recording continued: {source}"
-                    ),
-                })?;
-                }
                 process_semantic_output(
                     &mut self.live,
                     self.spawned.writer.as_mut(),
@@ -341,13 +402,16 @@ impl SessionActor<'_> {
                     &mut self.mutation_history,
                     &data,
                 )?;
+                let mirrored = if self.live.suppress_mirrored_queries {
+                    take(&mut self.live.mirror_output)
+                } else {
+                    data
+                };
+                self.mirror_bytes(&mirrored)?;
                 let latest = self.live.semantic.snapshot()?;
                 if !latest.modes.synchronized_output {
                     self.live.presented = latest;
                 }
-                self.event_log.append_output(Event::Output {
-                    data: ByteString::from(data),
-                })?;
             }
             RuntimeMessage::OutputClosed => {
                 let pending = self.live.presentation_tracker.finish();
@@ -363,6 +427,13 @@ impl SessionActor<'_> {
                     if !latest.modes.synchronized_output {
                         self.live.presented = latest;
                     }
+                }
+                if self.live.suppress_mirrored_queries {
+                    self.live
+                        .mirror_output
+                        .append(&mut self.live.mirror_sequence);
+                    let mirrored = take(&mut self.live.mirror_output);
+                    self.mirror_bytes(&mirrored)?;
                 }
                 self.progress.output_closed = true;
                 self.event_log.append(Event::Lifecycle {
@@ -412,25 +483,20 @@ impl SessionActor<'_> {
                 return Err(terminal_error("read terminal geometry", reason));
             }
             RuntimeMessage::HostSignal(signal) => {
-                self.event_log.append(Event::HostError {
-                    code: "recorder_signal_received".to_owned(),
-                    message: format!(
+                self.forward_host_signal(
+                    signal,
+                    "recorder_signal_received",
+                    &format!(
                         "recorder received {signal:?}; forwarding it to the child process group"
                     ),
-                })?;
-                let operation_id = Uuid::now_v7();
-                self.mutation_history.reserve_operation(operation_id)?;
-                apply_signal(
-                    self.spawned.pid,
-                    &mut self.event_log,
-                    operation_id,
-                    signal,
-                    true,
                 )?;
-                if self.host_signal_kill_deadline.is_none() {
-                    self.host_signal_kill_deadline =
-                        Some(Instant::now() + HOST_SIGNAL_GRACE_PERIOD);
-                }
+            }
+            RuntimeMessage::TerminalInputClosed => {
+                self.forward_host_signal(
+                    ProcessSignal::Hangup,
+                    "terminal_input_closed",
+                    "attached terminal input closed; sending hangup to the child process group",
+                )?;
             }
             RuntimeMessage::Control { request, response } => {
                 self.handle_control_request(request, response)?;

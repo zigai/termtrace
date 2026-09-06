@@ -45,7 +45,7 @@ use super::{
     presentation::{LiveTerminal, geometry_cell_size},
     process::{
         create_session_directory, invalid_geometry, register_host_signals,
-        resolve_working_directory, spawn_command, terminate_process_group,
+        resolve_working_directory, spawn_command,
     },
     raw_terminal::RawTerminalGuard,
     support::{finish_with_cleanup, terminal_error},
@@ -114,7 +114,7 @@ pub fn record_with_output(
 
 fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordOutcome> {
     let pty_size = validate_options(options)?;
-    let effective_environment =
+    let mut effective_environment =
         EffectiveEnvironment::resolve_validated(&options.environment, &options.term)?;
     // Resolve this once and pass the same owned path to provenance and spawn.
     // Leaving cwd unset is not equivalent: portable-pty falls back to $HOME,
@@ -127,6 +127,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     // is buffered until the actor can audit it and reap the owned process group.
     let host_signals = register_host_signals()?;
     create_session_directory(&options.output_directory)?;
+    effective_environment.set_recording_session(&options.output_directory)?;
     if let Some(profile) = &options.ghostty_profile {
         write_secure(
             &options.output_directory.join(GHOSTTY_REPLAY_PROFILE_NAME),
@@ -171,7 +172,30 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         options.durability_policy.clone(),
     )?;
 
-    let mut spawned = match spawn_command(
+    let actor_state: Result<(LiveTerminal, MutationJournal)> = (|| {
+        let live = initialize_live_terminal(TerminalGeometry::from(pty_size), &options.colors)?;
+        let journal = MutationJournal::create(&options.output_directory)?;
+        return Ok((live, journal));
+    })();
+    let (live, journal) = match actor_state {
+        Ok(state) => state,
+        Err(error) => {
+            let failure = SessionFailure {
+                code: recorder_failure_code(&error).to_owned(),
+                message: error.to_string(),
+            };
+            let closure_result = close_failed_recording(
+                options,
+                &mut event_log,
+                session_id,
+                &session_manifest_hash,
+                &event_header_hash,
+                &failure,
+            );
+            return finish_with_cleanup(Err(error), closure_result);
+        }
+    };
+    let spawned = match spawn_command(
         options,
         &working_directory,
         pty_size,
@@ -194,52 +218,13 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
             return finish_with_cleanup(Err(error), closure_result);
         }
     };
-    if let Err(error) = event_log.append(Event::Lifecycle {
-        lifecycle_kind: LifecycleKind::Spawned,
-        pid: spawned.pid,
-    }) {
-        let error = Error::from(error);
-        terminate_process_group(spawned.pid);
-        let _ = spawned.child.kill();
-        let failure = SessionFailure {
-            code: recorder_failure_code(&error).to_owned(),
-            message: error.to_string(),
-        };
-        let closure_result = close_failed_recording(
-            options,
-            &mut event_log,
-            session_id,
-            &session_manifest_hash,
-            &event_header_hash,
-            &failure,
-        );
-        return finish_with_cleanup(Err(error), closure_result);
-    }
-    let actor_state: Result<(LiveTerminal, MutationJournal)> = (|| {
-        let live = initialize_live_terminal(TerminalGeometry::from(pty_size), &options.colors)?;
-        let journal = MutationJournal::create(&options.output_directory)?;
-        return Ok((live, journal));
-    })();
-    let (live, journal) = match actor_state {
-        Ok(state) => state,
-        Err(error) => {
-            terminate_process_group(spawned.pid);
-            let _ = spawned.child.kill();
-            let failure = SessionFailure {
-                code: recorder_failure_code(&error).to_owned(),
-                message: error.to_string(),
-            };
-            let closure_result = close_failed_recording(
-                options,
-                &mut event_log,
-                session_id,
-                &session_manifest_hash,
-                &event_header_hash,
-                &failure,
-            );
-            return finish_with_cleanup(Err(error), closure_result);
-        }
-    };
+    let startup_error = event_log
+        .append(Event::Lifecycle {
+            lifecycle_kind: LifecycleKind::Spawned,
+            pid: spawned.pid,
+        })
+        .err()
+        .map(Error::from);
     let mut actor = SessionActor::new(
         spawned,
         event_log,
@@ -251,17 +236,18 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         MUTATION_CACHE_CAPACITY,
         options.resource_limits.clone(),
     );
+    actor.failure_policy = options.failure_policy;
+    actor.live.suppress_mirrored_queries = options.forward_stdin;
     let runtime = match consume_runtime(
         &mut actor,
         options.forward_stdin,
         TerminalGeometry::from(pty_size),
         &control_socket,
         host_signals,
+        startup_error,
     ) {
         Ok(runtime) => runtime,
         Err(error) => {
-            terminate_process_group(actor.spawned.pid);
-            let _ = actor.spawned.child.kill();
             let failure = SessionFailure {
                 code: recorder_failure_code(&error).to_owned(),
                 message: error.to_string(),
@@ -370,6 +356,7 @@ fn write_session_manifest(
     effective_environment: &EffectiveEnvironment,
 ) -> Result<String> {
     let manifest = SessionManifest {
+        failure_policy: options.failure_policy,
         format: SESSION_MANIFEST_FORMAT.to_owned(),
         version: SESSION_MANIFEST_VERSION,
         session_id,
@@ -635,6 +622,11 @@ fn initialize_live_terminal(
         presented,
         query_tracker: QueryTracker::default(),
         pending_query_responses: Vec::new(),
+        source_event_seq: None,
+        source_byte_offset: None,
+        suppress_mirrored_queries: false,
+        mirror_output: Vec::new(),
+        mirror_sequence: Vec::new(),
         geometry,
     });
 }

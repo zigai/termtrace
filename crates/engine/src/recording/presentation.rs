@@ -24,6 +24,11 @@ pub(super) struct LiveTerminal {
     pub(super) query_tracker: QueryTracker,
     pub(super) pending_query_responses: Vec<Vec<u8>>,
     pub(super) geometry: TerminalGeometry,
+    pub(super) source_event_seq: Option<u64>,
+    pub(super) source_byte_offset: Option<u64>,
+    pub(super) suppress_mirrored_queries: bool,
+    pub(super) mirror_output: Vec<u8>,
+    pub(super) mirror_sequence: Vec<u8>,
 }
 
 pub(super) fn process_semantic_output(
@@ -33,7 +38,8 @@ pub(super) fn process_semantic_output(
     mutation_history: &mut MutationHistory,
     data: &[u8],
 ) -> Result<()> {
-    for byte in data {
+    for (offset, byte) in data.iter().enumerate() {
+        live.source_byte_offset = Some(u64::try_from(offset).unwrap_or(u64::MAX));
         match live.presentation_tracker.push(*byte) {
             PresentationAction::Immediate => {
                 process_semantic_bytes(
@@ -83,10 +89,27 @@ pub(super) fn process_semantic_bytes(
     data: &[u8],
 ) -> Result<()> {
     for byte in data {
+        let was_tracking = live.query_tracker.is_tracking();
         let complete = live.query_tracker.push(*byte);
         live.semantic.write(slice::from_ref(byte));
         live.pending_query_responses
             .extend(live.semantic.take_responses());
+        if live.suppress_mirrored_queries {
+            if was_tracking || complete || live.query_tracker.is_tracking() {
+                live.mirror_sequence.push(*byte);
+            } else {
+                live.mirror_output.push(*byte);
+            }
+            if complete || !live.query_tracker.is_tracking() {
+                if live.pending_query_responses.is_empty() {
+                    live.mirror_output.append(&mut live.mirror_sequence);
+                } else {
+                    // A query answered by the pinned VT must not reach the outer
+                    // terminal, whose reply would otherwise be forwarded as input.
+                    live.mirror_sequence.clear();
+                }
+            }
+        }
         if complete
             || (!live.query_tracker.is_tracking() && !live.pending_query_responses.is_empty())
         {
@@ -94,6 +117,8 @@ pub(super) fn process_semantic_bytes(
             for response in take(&mut live.pending_query_responses) {
                 let operation_id = Uuid::now_v7();
                 event_log.append(Event::QueryResponse {
+                    source_event_seq: live.source_event_seq,
+                    source_byte_offset: live.source_byte_offset,
                     query: query.clone(),
                     response: ByteString::from(response.as_slice()),
                     responder: "pinned-libghostty-vt".to_owned(),

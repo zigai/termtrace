@@ -39,7 +39,7 @@ use termtrace_engine::{
     registry::{SessionRegistry, recorder_identity},
 };
 use termtrace_evidence::{
-    event_log::{DurabilityPolicy, EventLog},
+    event_log::{DurabilityPolicy, EventLogSummary},
     session::{manifest_hash, read_manifest},
 };
 use termtrace_media::native_capture::probe_ghostty_geometry;
@@ -77,6 +77,7 @@ const DEFAULT_DURABILITY_MAX_UNCOMMITTED_BYTES: u64 = 65_536;
 const GEOMETRY_QUERY_TIMEOUT: Duration = Duration::from_secs(3);
 
 mod geometry;
+mod original;
 mod record;
 mod restart;
 mod start;

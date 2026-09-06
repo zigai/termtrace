@@ -5,6 +5,7 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     os::unix::ffi::{OsStrExt as _, OsStringExt as _},
+    path::Path,
 };
 
 use termtrace_model::execution::environment::{
@@ -22,6 +23,30 @@ pub struct EffectiveEnvironment {
 }
 
 impl EffectiveEnvironment {
+    /// Bind recorder-owned application instrumentation to a canonical session path.
+    ///
+    /// Updates the full environment commitment. Restart validation may bind the
+    /// predecessor path before comparing its commitment; the successor recorder
+    /// subsequently replaces this path with its own identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the session path cannot be canonicalized.
+    pub fn set_recording_session(&mut self, session: &Path) -> Result<()> {
+        let canonical = session.canonicalize().map_err(|source| {
+            return Error::Filesystem {
+                path: session.to_path_buf(),
+                source,
+            };
+        })?;
+        self.variables.insert(
+            OsString::from("TERMTRACE_SESSION"),
+            canonical.into_os_string(),
+        );
+        self.policy.effective_digest = digest_variables(&self.variables);
+        return Ok(());
+    }
+
     /// Resolve one child environment without launching a process.
     ///
     /// # Errors

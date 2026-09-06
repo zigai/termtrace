@@ -1,3 +1,5 @@
+use termtrace_model::execution::session::RecordingFailurePolicy;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::OsString,
@@ -69,6 +71,7 @@ fn cached_test_response(request_id: Uuid, next_event_seq: u64) -> ControlRespons
 
 fn isolated_options(output_directory: PathBuf, command: Vec<OsString>) -> RecordOptions {
     return RecordOptions {
+        failure_policy: RecordingFailurePolicy::Stop,
         output_directory,
         creation_alias: None,
         lineage: None,
@@ -94,6 +97,53 @@ fn isolated_options(output_directory: PathBuf, command: Vec<OsString>) -> Record
 }
 
 struct FailingOutput;
+
+#[test]
+fn preserve_policy_keeps_the_application_alive_after_a_mirror_failure() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let survived = temporary.path().join("survived");
+    let session = temporary.path().join("preserved");
+    let mut options = isolated_options(
+        session.clone(),
+        vec![
+            OsString::from("/bin/sh"),
+            OsString::from("-c"),
+            OsString::from("printf trigger; sleep 0.1; printf alive > \"$1\"; printf later"),
+            OsString::from("survival-test"),
+            survived.clone().into_os_string(),
+        ],
+    );
+    options.failure_policy = RecordingFailurePolicy::Preserve;
+    assert!(record_to(&options, &mut FailingOutput).is_err());
+    assert_eq!(
+        fs_err::read(&survived).expect("application survived"),
+        b"alive"
+    );
+    let health: serde_json::Value = serde_json::from_slice(
+        &fs_err::read(session.join("recording-health.json")).expect("degraded health"),
+    )
+    .expect("health JSON");
+    assert_eq!(health["complete_evidence"], false);
+    assert_eq!(health["unrecorded_output_bytes"], 0);
+    let log = EventLog::read(session.join("events.jsonl")).expect("retained raw output");
+    let output: Vec<u8> = log
+        .events
+        .iter()
+        .filter_map(|record| match &record.event {
+            Event::Output { data } => return Some(data.as_bytes()),
+            _ => return None,
+        })
+        .flatten()
+        .copied()
+        .collect();
+    assert_eq!(output, b"triggerlater");
+    assert!(
+        read_completion(&session)
+            .expect("failure completion")
+            .failure
+            .is_some()
+    );
+}
 
 impl Write for FailingOutput {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -129,6 +179,20 @@ fn fatal_actor_exit_writes_durable_failure_completion() {
     assert!(completion.durability.final_sync_completed);
     assert!(!session.join(SESSION_FAILURE_NAME).exists());
     let log = EventLog::read(session.join("events.jsonl")).expect("failure event log");
+    let recorded_output: Vec<u8> = log
+        .events
+        .iter()
+        .filter_map(|record| match &record.event {
+            Event::Output { data } => return Some(data.as_bytes()),
+            _ => return None,
+        })
+        .flatten()
+        .copied()
+        .collect();
+    assert_eq!(
+        recorded_output, b"fatal-output",
+        "a mirror failure must not discard observed bytes"
+    );
     assert!(matches!(
         log.events.last().map(|record| return &record.event),
         Some(Event::Exit {
@@ -642,6 +706,47 @@ fn terminates_descendants_that_retain_the_slave_pty() {
 }
 
 #[test]
+fn attached_mirror_suppresses_answered_split_queries_and_preserves_display_sequences() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let command = vec![
+        OsString::from("/usr/bin/python3"),
+        OsString::from("-c"),
+        OsString::from(
+            "import os,tty,time,select; tty.setraw(0); os.write(1,b'\\x1b[31mvisible\\x1b[0m'); os.write(1,b'\\x1b['); time.sleep(.02); os.write(1,b'6n'); r=os.read(0,32); extra=select.select([0],[],[],.05)[0]; os.write(1,b'GOT:'+r.hex().encode()+b':'+str(bool(extra)).encode())",
+        ),
+    ];
+    let mut options = isolated_options(temporary.path().join("attached-query"), command);
+    options.forward_stdin = true;
+    let mut mirrored = Vec::new();
+    let outcome = record_to(&options, &mut mirrored).expect("attached recording");
+    assert!(mirrored.starts_with(b"\x1b[31mvisible\x1b[0m"));
+    assert!(!mirrored.windows(4).any(|bytes| return bytes == b"\x1b[6n"));
+    assert!(
+        mirrored.ends_with(b":False"),
+        "no second reply: {mirrored:?}"
+    );
+    let log = EventLog::read(outcome.event_log).expect("canonical evidence");
+    assert_eq!(
+        log.events
+            .iter()
+            .filter(|record| return matches!(record.event, Event::QueryResponse { .. }))
+            .count(),
+        1
+    );
+    let original: Vec<u8> = log
+        .events
+        .iter()
+        .filter_map(|record| match &record.event {
+            Event::Output { data } => return Some(data.as_bytes()),
+            _ => return None,
+        })
+        .flatten()
+        .copied()
+        .collect();
+    assert!(original.windows(4).any(|bytes| return bytes == b"\x1b[6n"));
+}
+
+#[test]
 fn answers_and_audits_terminal_queries() {
     let temporary = TempDir::new().expect("temporary directory");
     let command = vec![
@@ -656,6 +761,44 @@ fn answers_and_audits_terminal_queries() {
 
     let outcome = record_to(&options, &mut output).expect("record query command");
     let log = EventLog::read(outcome.event_log).expect("valid query log");
+    let (reply_index, query_source, offset) = log
+        .events
+        .iter()
+        .enumerate()
+        .find_map(|(index, record)| {
+            if let Event::QueryResponse {
+                source_event_seq,
+                source_byte_offset,
+                ..
+            } = &record.event
+            {
+                return Some((
+                    index,
+                    source_event_seq.expect("query source"),
+                    source_byte_offset.expect("query byte offset"),
+                ));
+            }
+            return None;
+        })
+        .expect("query reply");
+    let query_record = log
+        .events
+        .iter()
+        .find(|record| return record.seq == query_source)
+        .expect("source output");
+    assert!(
+        query_record.seq < log.events[reply_index].seq,
+        "observed query precedes its reply"
+    );
+    assert!(
+        query_record
+            .observed_monotonic_ns
+            .is_some_and(|time| return time <= query_record.monotonic_ns)
+    );
+    let Event::Output { data } = &query_record.event else {
+        panic!("query must reference output")
+    };
+    assert_eq!(data.as_bytes()[offset as usize], b'n');
 
     assert!(output.windows(4).any(|window| return window == b"GOT:"));
     assert!(log.events.iter().any(|record| matches!(

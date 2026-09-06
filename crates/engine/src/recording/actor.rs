@@ -4,7 +4,9 @@ use std::{io::Write, time::Instant};
 
 use portable_pty::ExitStatus;
 use termtrace_evidence::{event_log::EventLogWriter, request_journal::MutationJournal};
-use termtrace_model::execution::session::{ResourceLimitOutcome, ResourceLimits};
+use termtrace_model::execution::session::{
+    RecordingFailurePolicy, ResourceLimitOutcome, ResourceLimits,
+};
 use uuid::Uuid;
 
 use super::{
@@ -18,6 +20,7 @@ pub(super) struct RuntimeProgress {
     pub(super) mirror_open: bool,
     pub(super) output_bytes: u64,
     pub(super) resource_limit: Option<ResourceLimitOutcome>,
+    pub(super) unrecorded_output: Vec<u8>,
 }
 
 /// Sole mutable owner of a recording process and its ordered actor state.
@@ -42,6 +45,7 @@ pub(super) struct SessionActor<'runtime> {
     pub(super) host_signal_kill_deadline: Option<Instant>,
     pub(super) process_group_killed: bool,
     pub(super) resource_limits: ResourceLimits,
+    pub(super) failure_policy: RecordingFailurePolicy,
 }
 
 impl<'runtime> SessionActor<'runtime> {
@@ -71,6 +75,7 @@ impl<'runtime> SessionActor<'runtime> {
                 mirror_open: true,
                 output_bytes: 0,
                 resource_limit: None,
+                unrecorded_output: Vec::new(),
             },
             exit_status: None,
             drain_deadline: None,
@@ -78,6 +83,7 @@ impl<'runtime> SessionActor<'runtime> {
             host_signal_kill_deadline: None,
             process_group_killed: false,
             resource_limits,
+            failure_policy: RecordingFailurePolicy::Stop,
         };
     }
 }
