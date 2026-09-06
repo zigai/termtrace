@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "Strict TypeScript client for canonical terminal evidence",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/termtrace.git",
+    "directory": "packages/typescript"
+  },
   "bin": {
     "termtrace": "bin/termtrace.js"
   },

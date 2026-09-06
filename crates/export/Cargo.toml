@@ -2,13 +2,16 @@
 name = "termtrace-export"
 version = "0.1.0"
 edition = "2024"
-publish = false
+description = "Verifiable terminal evidence exports for Termtrace"
+repository = "https://github.com/zigai/termtrace"
+license-file.workspace = true
+rust-version = "1.97.1"
 
 [dependencies]
-termtrace-model = { path = "../model" }
-termtrace-evidence = { path = "../evidence" }
-termtrace-engine = { path = "../engine" }
-termtrace-render = { path = "../render" }
+termtrace-model = { version = "=0.1.0", path = "../model" }
+termtrace-evidence = { version = "=0.1.0", path = "../evidence" }
+termtrace-engine = { version = "=0.1.0", path = "../engine" }
+termtrace-render = { version = "=0.1.0", path = "../render" }
 blake3 = "1.8.2"
 fs-err = "3.2.0"
 serde = { version = "1.0.228", features = ["derive"] }

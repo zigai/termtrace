@@ -2,7 +2,10 @@
 name = "termtrace-model"
 version = "0.1.0"
 edition = "2024"
-publish = false
+description = "Versioned data and protocol contracts for Termtrace terminal recordings"
+repository = "https://github.com/zigai/termtrace"
+license-file.workspace = true
+rust-version = "1.97.1"
 
 [dependencies]
 base64 = "0.22.1"

@@ -30,6 +30,7 @@ mkdir -p "$staging/bin" dist/npm
 
 install -m 0555 "$binary" "$staging/bin/termtrace"
 install -m 0444 crates/render/assets/fonts/NOTICE "$staging/NOTICE"
+install -m 0444 LICENSE "$staging/LICENSE"
 
 "$staging/bin/termtrace" doctor --require semantic
 
@@ -46,8 +47,9 @@ manifest = {
     "os": [os_name],
     "cpu": [arch],
     "bin": {"termtrace": "bin/termtrace"},
-    "files": ["bin/termtrace", "NOTICE"],
+    "files": ["bin/termtrace", "NOTICE", "LICENSE"],
     "license": "MIT",
+    "repository": {"type": "git", "url": "git+https://github.com/zigai/termtrace.git"},
 }
 pathlib.Path(path).write_text(json.dumps(manifest, indent=2) + "\n")
 PY
