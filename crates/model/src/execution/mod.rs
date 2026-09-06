@@ -1,5 +1,6 @@
 //! Execution history, environment, session, provenance, and durability contracts.
 
+pub mod application;
 pub mod environment;
 pub mod event;
 pub mod event_log;

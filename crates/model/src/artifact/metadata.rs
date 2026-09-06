@@ -1,5 +1,6 @@
 //! Shared metadata contracts for derived artifact members and source ranges.
 
+use crate::execution::event_log::CanonicalBoundary;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -44,7 +45,7 @@ pub struct ArtifactSourceRange {
     pub end_monotonic_ns: u64,
 }
 
-/// One hash-chained post-completion artifact-root entry.
+/// One hash-chained artifact-root entry bound to completion or an explicit prefix.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ArtifactRootRecord {
@@ -72,4 +73,7 @@ pub struct ArtifactRootRecord {
     pub source_event_hash: Option<String>,
     /// Selected half-open canonical source interval, if any.
     pub source_range: Option<ArtifactSourceRange>,
+    /// Explicit canonical prefix for a derivation made before source completion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_prefix: Option<CanonicalBoundary>,
 }

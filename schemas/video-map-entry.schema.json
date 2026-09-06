@@ -3,6 +3,22 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "State-to-video mapping entry.",
   "properties": {
+    "acquisition_unix_ns": {
+      "description": "Actual X11 acquisition timestamp of the correlated frame, when available.",
+      "format": "uint128",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "correlation": {
+      "description": "Correlation is based on clocks; it does not prove terminal presentation.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "frame": {
       "description": "Approximate zero-based video frame; absent for suppressed states.",
       "format": "uint64",

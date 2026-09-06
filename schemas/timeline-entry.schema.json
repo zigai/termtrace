@@ -1,5 +1,86 @@
 {
   "$defs": {
+    "ApplicationEvent": {
+      "additionalProperties": false,
+      "description": "Caller-reported process and clock information, not independently verified identity.\n\nThe enclosing canonical event supplies recorder time and session identity. A process\ninstance UUID distinguishes PID reuse. Span identifiers are scoped to that instance.",
+      "properties": {
+        "attributes": {
+          "additionalProperties": true,
+          "description": "Sensitive application data, excluded from metadata-only exports.",
+          "type": "object"
+        },
+        "kind": {
+          "$ref": "#/$defs/ApplicationEventKind",
+          "description": "Event or span lifecycle transition."
+        },
+        "monotonic_ns": {
+          "description": "Caller-reported monotonic nanoseconds since instrumentation initialization.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "Diagnostic name, from 1 to 256 UTF-8 bytes.",
+          "type": "string"
+        },
+        "parent_span_id": {
+          "description": "Optional parent span in the same process instance.",
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "process_id": {
+          "description": "Caller-reported operating-system PID.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "process_instance_id": {
+          "description": "Stable UUID for the emitting process instance.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "span_id": {
+          "description": "Span identity; required for span lifecycle transitions.",
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "process_instance_id",
+        "process_id",
+        "monotonic_ns",
+        "kind",
+        "name",
+        "attributes"
+      ],
+      "type": "object"
+    },
+    "ApplicationEventKind": {
+      "description": "Application instrumentation lifecycle.",
+      "oneOf": [
+        {
+          "const": "event",
+          "description": "A discrete diagnostic event.",
+          "type": "string"
+        },
+        {
+          "const": "span_start",
+          "description": "Beginning of a caller-owned span.",
+          "type": "string"
+        },
+        {
+          "const": "span_end",
+          "description": "End of a caller-owned span; unmatched starts remain visibly incomplete.",
+          "type": "string"
+        }
+      ]
+    },
     "Base64Bytes": {
       "contentEncoding": "base64",
       "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
@@ -321,6 +402,31 @@
         },
         {
           "additionalProperties": false,
+          "description": "Structured application instrumentation received over the control socket.",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ApplicationEvent",
+              "description": "Caller-reported diagnostic payload."
+            },
+            "operation_id": {
+              "description": "Caller-owned request identity for durable deduplication.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": {
+              "const": "application",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A terminal capability query and corresponding response.",
           "properties": {
             "query": {
@@ -334,6 +440,24 @@
             "response": {
               "$ref": "#/$defs/Base64Bytes",
               "description": "Response bytes sent back to the child."
+            },
+            "source_byte_offset": {
+              "description": "Inclusive offset of the query's final byte in that output event.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "source_event_seq": {
+              "description": "Canonical output event containing the end of the query.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "type": {
               "const": "query_response",

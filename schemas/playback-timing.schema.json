@@ -55,6 +55,21 @@
       "minimum": 0,
       "type": "integer"
     },
+    "source_event_count": {
+      "default": 0,
+      "description": "Number of events in the validated playback source.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "source_event_hash": {
+      "default": null,
+      "description": "Final hash of the canonical prefix validated by this playback process.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "source_range": {
       "anyOf": [
         {

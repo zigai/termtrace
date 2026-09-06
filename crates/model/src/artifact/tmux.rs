@@ -11,7 +11,7 @@ use crate::{artifact::metadata::ArtifactMember, value::ByteString};
 /// Stable aggregate tmux recording manifest format.
 pub const TMUX_RECORDING_FORMAT: &str = "termtrace-tmux-recording";
 /// Current aggregate tmux recording manifest version.
-pub const TMUX_RECORDING_VERSION: u32 = 2;
+pub const TMUX_RECORDING_VERSION: u32 = 4;
 /// Stable aggregate tmux bundle format.
 pub const TMUX_BUNDLE_FORMAT: &str = "termtrace-tmux-bundle";
 /// Current aggregate tmux bundle schema version.
@@ -102,6 +102,17 @@ pub struct TmuxLifecycleEvent {
     pub value: Option<String>,
 }
 
+/// Committed prefix of the append-only lifecycle journal beside the snapshot.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TmuxJournalBoundary {
+    /// Complete newline-framed bytes committed by this snapshot.
+    pub bytes: u64,
+    /// Last committed lifecycle sequence.
+    pub sequence: u64,
+    /// Hash of the last journal record.
+    pub hash: String,
+}
+
 /// One uncovered pane or explicit observation limitation.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct TmuxCoverageGap {
@@ -120,6 +131,51 @@ pub struct TmuxCoverageGap {
     /// Wall-clock time when the gap was first observed to be resolved.
     #[serde(default)]
     pub resolved_unix_ns: Option<u128>,
+}
+
+/// Aggregate identity, links, lifecycle, and coverage for a full tmux recording.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TmuxPaneTrack {
+    /// Stable pane ID; a pane may have arbitrarily many recording incarnations.
+    pub pane_id: String,
+    /// Immutable canonical recording identity.
+    pub session_id: Uuid,
+    /// Exact canonical session path.
+    pub session: ByteString,
+    /// Time this incarnation was linked to the aggregate.
+    pub linked_unix_ns: u128,
+}
+
+/// Counts committed with the lifecycle journal's indexed inventory.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TmuxCatalogSummary {
+    /// Recording incarnations retained in complete history.
+    pub tracks: u64,
+    /// Linked incarnations without an observed canonical completion.
+    pub unfinished_tracks: u64,
+    /// All coverage intervals, including resolved intervals.
+    pub coverage_gaps: u64,
+}
+
+/// One bounded-page result from the complete recording inventory.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TmuxTrackCatalogEntry {
+    /// Lifecycle sequence that first linked this incarnation.
+    pub sequence: u64,
+    /// Immutable pane recording identity and path.
+    pub track: TmuxPaneTrack,
+    /// Whether canonical completion was observed.
+    pub completed: bool,
+}
+
+/// One historical coverage interval from the lifecycle catalog.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TmuxGapCatalogEntry {
+    /// Lifecycle sequence that opened this interval.
+    pub sequence: u64,
+    /// Latest committed state of the interval.
+    pub gap: TmuxCoverageGap,
 }
 
 /// Aggregate identity, links, lifecycle, and coverage for a full tmux recording.
@@ -161,9 +217,17 @@ pub struct TmuxRecordingManifest {
     pub panes: Vec<TmuxPaneSnapshot>,
     /// Stable pane IDs linked to pane-specific Termtrace sessions.
     pub pane_tracks: BTreeMap<String, ByteString>,
+    /// Recent recording incarnations, bounded to 128; the catalog retains complete history.
+    pub track_history: BTreeMap<Uuid, TmuxPaneTrack>,
+    /// Complete historical counts; the lifecycle journal is authoritative for this index.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<TmuxCatalogSummary>,
     /// Observed pane, window, session, layout, focus, zoom, and mode transitions.
     pub events: Vec<TmuxLifecycleEvent>,
-    /// Historical uncovered panes and limitations, including their resolution.
+    /// Durable full lifecycle history; `events` contains only its recent tail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle_journal: Option<TmuxJournalBoundary>,
+    /// Currently unresolved coverage gaps; resolved intervals remain in the journal/catalog.
     pub coverage_gaps: Vec<TmuxCoverageGap>,
 }
 
@@ -205,4 +269,28 @@ pub struct TmuxBundleManifest {
     pub tracks: Vec<TmuxBundleTrack>,
     /// Whole-file inventory excluding this root manifest.
     pub members: Vec<ArtifactMember>,
+}
+
+/// Bounded manifest for an aggregate export with a streamed track inventory.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TmuxStreamingBundleManifest {
+    /// Stable format identifier.
+    pub format: String,
+    /// Manifest schema version.
+    pub version: u32,
+    /// Immutable aggregate recording identity.
+    pub recording_id: Uuid,
+    /// Friendly recording name.
+    pub recording_name: String,
+    /// Exact source aggregate manifest path bytes.
+    pub aggregate_manifest: ByteString,
+    /// BLAKE3 of the caller-owned aggregate snapshot.
+    pub aggregate_manifest_blake3: String,
+    /// Number of nested forensic bundles, including the composite.
+    pub track_count: u64,
+    /// Exact byte count of tracks.jsonl.
+    pub track_inventory_bytes: u64,
+    /// BLAKE3 of tracks.jsonl; each row is a TmuxBundleTrack.
+    pub track_inventory_blake3: String,
 }

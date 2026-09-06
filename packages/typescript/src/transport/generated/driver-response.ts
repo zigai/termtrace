@@ -470,6 +470,14 @@ export type Event =
       type: "marker";
     }
   | {
+      data: ApplicationEvent;
+      /**
+       * Caller-owned request identity for durable deduplication.
+       */
+      operation_id: string;
+      type: "application";
+    }
+  | {
       /**
        * Query bytes emitted by the child.
        */
@@ -482,6 +490,14 @@ export type Event =
        * Response bytes sent back to the child.
        */
       response: string;
+      /**
+       * Inclusive offset of the query's final byte in that output event.
+       */
+      source_byte_offset?: number | null;
+      /**
+       * Canonical output event containing the end of the query.
+       */
+      source_event_seq?: number | null;
       type: "query_response";
     }
   | {
@@ -3746,6 +3762,14 @@ export interface TimelineEntry {
               type: "marker";
             }
           | {
+              data: ApplicationEvent;
+              /**
+               * Caller-owned request identity for durable deduplication.
+               */
+              operation_id: string;
+              type: "application";
+            }
+          | {
               /**
                * Query bytes emitted by the child.
                */
@@ -3758,6 +3782,14 @@ export interface TimelineEntry {
                * Response bytes sent back to the child.
                */
               response: string;
+              /**
+               * Inclusive offset of the query's final byte in that output event.
+               */
+              source_byte_offset?: number | null;
+              /**
+               * Canonical output event containing the end of the query.
+               */
+              source_event_seq?: number | null;
               type: "query_response";
             }
           | {
@@ -3807,6 +3839,45 @@ export interface TimelineEntry {
    * Canonical session offset.
    */
   monotonic_ns: number;
+}
+/**
+ * Caller-reported diagnostic payload.
+ */
+export interface ApplicationEvent {
+  /**
+   * Sensitive application data, excluded from metadata-only exports.
+   */
+  attributes: {
+    [k: string]: unknown;
+  };
+  /**
+   * Event or span lifecycle transition.
+   */
+  kind: "event" | "span_start" | "span_end";
+  /**
+   * Caller-reported monotonic nanoseconds since instrumentation initialization.
+   */
+  monotonic_ns: number;
+  /**
+   * Diagnostic name, from 1 to 256 UTF-8 bytes.
+   */
+  name: string;
+  /**
+   * Optional parent span in the same process instance.
+   */
+  parent_span_id?: string | null;
+  /**
+   * Caller-reported operating-system PID.
+   */
+  process_id: number;
+  /**
+   * Stable UUID for the emitting process instance.
+   */
+  process_instance_id: string;
+  /**
+   * Span identity; required for span lifecycle transitions.
+   */
+  span_id?: string | null;
 }
 /**
  * Exact token and canonical source segments.

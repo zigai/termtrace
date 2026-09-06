@@ -1,0 +1,120 @@
+{
+  "$defs": {
+    "CanonicalBoundary": {
+      "additionalProperties": false,
+      "description": "Actor-consistent position in the canonical event stream.",
+      "properties": {
+        "event_hash": {
+          "description": "Hash of the preceding event, or the event header at sequence zero.",
+          "type": "string"
+        },
+        "next_event_seq": {
+          "description": "Sequence number that will be assigned to the next event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_bytes": {
+          "description": "PTY output bytes included through this boundary.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "next_event_seq",
+        "event_hash",
+        "output_bytes"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/replay-endpoint.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "An exact presentation-eligible endpoint within a validated canonical prefix.",
+  "properties": {
+    "boundary": {
+      "$ref": "#/$defs/CanonicalBoundary",
+      "description": "Exact source prefix that was validated during resolution."
+    },
+    "cols": {
+      "description": "Canonical viewport columns at the endpoint.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "event_byte_offset": {
+      "description": "Inclusive output byte offset when the endpoint is an output event.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "event_seq": {
+      "description": "Final emitted event; absent for the initial blank state.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "monotonic_ns": {
+      "description": "Semantic source timestamp when known.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "rows": {
+      "description": "Canonical viewport rows at the endpoint.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "session_id": {
+      "description": "Canonical session identity.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "session_manifest_hash": {
+      "description": "Commitment to the source session manifest.",
+      "type": "string"
+    },
+    "source_complete": {
+      "description": "Whether the selected source has validated durable completion.",
+      "type": "boolean"
+    },
+    "state_hash": {
+      "description": "Hash of the complete normalized semantic state at the endpoint.",
+      "type": "string"
+    },
+    "state_id": {
+      "description": "Dense state identifier when the resolver calculated it.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "session_id",
+    "session_manifest_hash",
+    "source_complete",
+    "boundary",
+    "state_hash",
+    "cols",
+    "rows"
+  ],
+  "title": "ReplayEndpoint",
+  "type": "object"
+}

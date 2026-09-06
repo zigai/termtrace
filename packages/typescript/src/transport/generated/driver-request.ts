@@ -858,6 +858,10 @@ export interface DriverRequest {
               label: string;
             }
           | {
+              command: "application";
+              data: ApplicationEvent;
+            }
+          | {
               command: "stop";
             };
         /**
@@ -1478,6 +1482,45 @@ export interface KeyModifiers1 {
    */
   super_key: boolean;
   [k: string]: unknown;
+}
+/**
+ * Bounded caller-reported diagnostic record.
+ */
+export interface ApplicationEvent {
+  /**
+   * Sensitive application data, excluded from metadata-only exports.
+   */
+  attributes: {
+    [k: string]: unknown;
+  };
+  /**
+   * Event or span lifecycle transition.
+   */
+  kind: "event" | "span_start" | "span_end";
+  /**
+   * Caller-reported monotonic nanoseconds since instrumentation initialization.
+   */
+  monotonic_ns: number;
+  /**
+   * Diagnostic name, from 1 to 256 UTF-8 bytes.
+   */
+  name: string;
+  /**
+   * Optional parent span in the same process instance.
+   */
+  parent_span_id?: string | null;
+  /**
+   * Caller-reported operating-system PID.
+   */
+  process_id: number;
+  /**
+   * Stable UUID for the emitting process instance.
+   */
+  process_instance_id: string;
+  /**
+   * Span identity; required for span lifecycle transitions.
+   */
+  span_id?: string | null;
 }
 /**
  * Requested rich detail and exact optional viewport region.

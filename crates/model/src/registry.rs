@@ -182,6 +182,18 @@ pub struct GarbageCollectionReport {
     pub older_than_days: u64,
     /// Newest completed, unregistered recordings protected regardless of age.
     pub keep_latest: u64,
+    /// Optional target for total completed managed-session bytes.
+    #[serde(default)]
+    pub max_completed_bytes: Option<u64>,
+    /// Bytes in validated completed managed sessions at scan time, including named evidence.
+    #[serde(default)]
+    pub completed_bytes_before: u64,
+    /// Completed bytes remaining if the reported candidates are deleted.
+    #[serde(default)]
+    pub completed_bytes_after_plan: u64,
+    /// Bytes exceeding the target after planning because protected evidence is retained.
+    #[serde(default)]
+    pub quota_excess_bytes: u64,
     /// Completed managed recordings protected by a registry alias.
     pub protected_registered: u64,
     /// Live, incomplete, malformed, or non-directory entries never considered.

@@ -1,0 +1,74 @@
+{
+  "$defs": {
+    "TmuxCoverageGap": {
+      "description": "One uncovered pane or explicit observation limitation.",
+      "properties": {
+        "detail": {
+          "description": "Human-readable limitation or uncovered-state description.",
+          "type": "string"
+        },
+        "first_observed_unix_ns": {
+          "default": 0,
+          "description": "First observation wall-clock time.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "description": "Stable gap category.",
+          "type": "string"
+        },
+        "last_observed_unix_ns": {
+          "default": 0,
+          "description": "Most recent observation wall-clock time.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pane_id": {
+          "description": "Related pane ID, or none for an aggregate limitation.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolved_unix_ns": {
+          "default": null,
+          "description": "Wall-clock time when the gap was first observed to be resolved.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "detail"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/tmux-gap-catalog-entry.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One historical coverage interval from the lifecycle catalog.",
+  "properties": {
+    "gap": {
+      "$ref": "#/$defs/TmuxCoverageGap",
+      "description": "Latest committed state of the interval."
+    },
+    "sequence": {
+      "description": "Lifecycle sequence that opened this interval.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "sequence",
+    "gap"
+  ],
+  "title": "TmuxGapCatalogEntry",
+  "type": "object"
+}

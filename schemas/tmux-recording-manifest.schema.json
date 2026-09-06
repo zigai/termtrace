@@ -5,6 +5,36 @@
       "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
       "type": "string"
     },
+    "TmuxCatalogSummary": {
+      "additionalProperties": false,
+      "description": "Counts committed with the lifecycle journal's indexed inventory.",
+      "properties": {
+        "coverage_gaps": {
+          "description": "All coverage intervals, including resolved intervals.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tracks": {
+          "description": "Recording incarnations retained in complete history.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "unfinished_tracks": {
+          "description": "Linked incarnations without an observed canonical completion.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tracks",
+        "unfinished_tracks",
+        "coverage_gaps"
+      ],
+      "type": "object"
+    },
     "TmuxCompositeTrack": {
       "description": "Link from an aggregate recording to its outer tmux client recording.",
       "properties": {
@@ -88,6 +118,33 @@
       "required": [
         "kind",
         "detail"
+      ],
+      "type": "object"
+    },
+    "TmuxJournalBoundary": {
+      "description": "Committed prefix of the append-only lifecycle journal beside the snapshot.",
+      "properties": {
+        "bytes": {
+          "description": "Complete newline-framed bytes committed by this snapshot.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hash": {
+          "description": "Hash of the last journal record.",
+          "type": "string"
+        },
+        "sequence": {
+          "description": "Last committed lifecycle sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "bytes",
+        "sequence",
+        "hash"
       ],
       "type": "object"
     },
@@ -222,6 +279,37 @@
       ],
       "type": "object"
     },
+    "TmuxPaneTrack": {
+      "description": "Aggregate identity, links, lifecycle, and coverage for a full tmux recording.",
+      "properties": {
+        "linked_unix_ns": {
+          "description": "Time this incarnation was linked to the aggregate.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pane_id": {
+          "description": "Stable pane ID; a pane may have arbitrarily many recording incarnations.",
+          "type": "string"
+        },
+        "session": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact canonical session path."
+        },
+        "session_id": {
+          "description": "Immutable canonical recording identity.",
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pane_id",
+        "session_id",
+        "session",
+        "linked_unix_ns"
+      ],
+      "type": "object"
+    },
     "TmuxRecordingCoverage": {
       "description": "Coverage policy committed by an aggregate tmux recording.",
       "oneOf": [
@@ -267,6 +355,17 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Aggregate identity, links, lifecycle, and coverage for a full tmux recording.",
   "properties": {
+    "catalog": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TmuxCatalogSummary"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Complete historical counts; the lifecycle journal is authoritative for this index."
+    },
     "composite_track": {
       "$ref": "#/$defs/TmuxCompositeTrack",
       "description": "Link to the composite outer-client recording."
@@ -276,7 +375,7 @@
       "description": "Coverage enforcement policy."
     },
     "coverage_gaps": {
-      "description": "Historical uncovered panes and limitations, including their resolution.",
+      "description": "Currently unresolved coverage gaps; resolved intervals remain in the journal/catalog.",
       "items": {
         "$ref": "#/$defs/TmuxCoverageGap"
       },
@@ -302,6 +401,17 @@
     "lifecycle": {
       "$ref": "#/$defs/TmuxRecordingLifecycle",
       "description": "Aggregate lifecycle."
+    },
+    "lifecycle_journal": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TmuxJournalBoundary"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Durable full lifecycle history; `events` contains only its recent tail."
     },
     "name": {
       "description": "Friendly aggregate recording name.",
@@ -390,6 +500,13 @@
       "$ref": "#/$defs/Base64Bytes",
       "description": "Exact tmux executable path bytes."
     },
+    "track_history": {
+      "additionalProperties": {
+        "$ref": "#/$defs/TmuxPaneTrack"
+      },
+      "description": "Recent recording incarnations, bounded to 128; the catalog retains complete history.",
+      "type": "object"
+    },
     "updated_unix_ns": {
       "description": "Last supervisor update wall-clock time.",
       "format": "uint128",
@@ -416,6 +533,7 @@
     "composite_track",
     "panes",
     "pane_tracks",
+    "track_history",
     "events",
     "coverage_gaps"
   ],

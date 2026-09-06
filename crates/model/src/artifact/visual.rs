@@ -23,7 +23,7 @@ pub const GHOSTTY_EFFECTIVE_CONFIG_NAME: &str = "ghostty-effective-config.txt";
 /// Native capture configuration.
 #[derive(Clone, Debug)]
 pub struct CaptureOptions {
-    /// Source session directory with semantic index.
+    /// Source session directory, or new session destination for original execution capture.
     pub session_directory: PathBuf,
     /// Xvfb/capture width in pixels.
     pub width: u16,
@@ -111,6 +111,12 @@ pub struct VideoMapEntry {
     pub frame: Option<u64>,
     /// Whether Ghostty was allowed to present this state.
     pub presented: bool,
+    /// Actual X11 acquisition timestamp of the correlated frame, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acquisition_unix_ns: Option<u128>,
+    /// Correlation is based on clocks; it does not prove terminal presentation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation: Option<String>,
 }
 
 /// Provenance and probe evidence for native visual artifacts.
@@ -129,13 +135,13 @@ pub struct VisualManifest {
     pub state_selection: StateSelection,
     /// Parent-side Ghostty geometry preflight at the capture viewport.
     pub geometry_report: TerminalGeometryReport,
-    /// Video frame rate.
+    /// Video frame rate; zero denotes compositor-controlled variable timing for Wayland originals.
     pub fps: u16,
     /// Capture width.
     pub width: u16,
     /// Capture height.
     pub height: u16,
-    /// Wall-clock time used as approximate video frame zero.
+    /// First X11 acquisition, first Wayland collector receipt, or screenshot request wall-clock time.
     pub capture_started_unix_ns: u128,
     /// Playback event-time origin.
     pub replay_origin_unix_ns: u128,
@@ -153,7 +159,7 @@ pub struct VisualManifest {
     pub screenshot_probe: serde_json::Value,
     /// Whole-file integrity and classification for every payload member.
     pub members: Vec<ArtifactMember>,
-    /// `video` or `screenshot`.
+    /// `video`, `screenshot`, or `original_execution`.
     pub capture_kind: String,
     /// Exact selected state identifier for direct screenshots.
     pub selected_state_id: Option<u64>,

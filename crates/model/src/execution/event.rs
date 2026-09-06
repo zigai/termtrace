@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::application::ApplicationEvent;
 use crate::value::ByteString;
 
 /// Current on-disk event-log format version.
@@ -337,8 +338,21 @@ pub enum Event {
         /// User-provided marker label.
         label: String,
     },
+    /// Structured application instrumentation received over the control socket.
+    Application {
+        /// Caller-owned request identity for durable deduplication.
+        operation_id: Uuid,
+        /// Caller-reported diagnostic payload.
+        data: ApplicationEvent,
+    },
     /// A terminal capability query and corresponding response.
     QueryResponse {
+        /// Canonical output event containing the end of the query.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_event_seq: Option<u64>,
+        /// Inclusive offset of the query's final byte in that output event.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_byte_offset: Option<u64>,
         /// Query bytes emitted by the child.
         query: ByteString,
         /// Response bytes sent back to the child.
@@ -396,6 +410,10 @@ pub struct EventRecord {
     pub seq: u64,
     /// Nanoseconds elapsed from the session's monotonic origin.
     pub monotonic_ns: u64,
+    /// PTY read completion time, when observed separately from canonical append time.
+    /// This is not the application's write time or a framebuffer presentation time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_monotonic_ns: Option<u64>,
     /// BLAKE3 hash of the preceding header or event.
     pub prev_hash: String,
     /// BLAKE3 hash of this record's canonical body and `prev_hash`.
@@ -462,6 +480,17 @@ impl EventProjection {
 
 fn event_metadata(event: &Event) -> serde_json::Value {
     match event {
+        Event::Application { operation_id, data } => {
+            return serde_json::json!({
+                "type": "application",
+                "operation_id": operation_id,
+                "process_instance_id": data.process_instance_id,
+                "process_id": data.process_id,
+                "kind": data.kind,
+                "span_id": data.span_id,
+                "parent_span_id": data.parent_span_id,
+            });
+        }
         Event::Output { .. } => {
             return serde_json::json!({
                 "type": "output",
@@ -510,6 +539,7 @@ pub fn event_type(event: &Event) -> &'static str {
         Event::SignalIntent { .. } => "signal_intent",
         Event::SignalResult { .. } => "signal_result",
         Event::Marker { .. } => "marker",
+        Event::Application { .. } => "application",
         Event::QueryResponse { .. } => "query_response",
         Event::Lifecycle { .. } => "lifecycle",
         Event::Exit { .. } => "exit",
@@ -547,6 +577,9 @@ pub struct EventBody<'event> {
     pub seq: u64,
     /// Session-monotonic event time.
     pub monotonic_ns: u64,
+    /// Original observation time, covered by the canonical integrity chain.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_monotonic_ns: Option<u64>,
     /// Event payload.
     pub event: &'event Event,
 }

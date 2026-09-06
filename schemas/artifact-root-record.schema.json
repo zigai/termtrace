@@ -22,12 +22,40 @@
         "end_monotonic_ns"
       ],
       "type": "object"
+    },
+    "CanonicalBoundary": {
+      "additionalProperties": false,
+      "description": "Actor-consistent position in the canonical event stream.",
+      "properties": {
+        "event_hash": {
+          "description": "Hash of the preceding event, or the event header at sequence zero.",
+          "type": "string"
+        },
+        "next_event_seq": {
+          "description": "Sequence number that will be assigned to the next event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_bytes": {
+          "description": "PTY output bytes included through this boundary.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "next_event_seq",
+        "event_hash",
+        "output_bytes"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/artifact-root-record.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "One hash-chained post-completion artifact-root entry.",
+  "description": "One hash-chained artifact-root entry bound to completion or an explicit prefix.",
   "properties": {
     "artifact_directory": {
       "description": "Artifact directory relative to the canonical session.",
@@ -74,6 +102,17 @@
         "string",
         "null"
       ]
+    },
+    "source_prefix": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CanonicalBoundary"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Explicit canonical prefix for a derivation made before source completion."
     },
     "source_range": {
       "anyOf": [

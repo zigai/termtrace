@@ -8,6 +8,12 @@ from typing import Annotated, Any, TypeAlias
 from msgspec import UNSET, Meta, Struct, UnsetType, field
 
 
+class ApplicationEventKind(StrEnum):
+    event = 'event'
+    span_start = 'span_start'
+    span_end = 'span_end'
+
+
 class ArtifactSensitivity(StrEnum):
     sensitive_terminal_data = 'sensitive_terminal_data'
     operational_metadata = 'operational_metadata'
@@ -265,7 +271,7 @@ class Event8(Struct, forbid_unknown_fields=True, tag_field='type', tag='marker')
     ]
 
 
-class Event9(Struct, forbid_unknown_fields=True, tag_field='type', tag='query_response'):
+class Event10(Struct, forbid_unknown_fields=True, tag_field='type', tag='query_response'):
     query: Annotated[Base64Bytes, Meta(description='Query bytes emitted by the child.')]
     responder: Annotated[
         str, Meta(description='Component that generated the response.')
@@ -273,9 +279,25 @@ class Event9(Struct, forbid_unknown_fields=True, tag_field='type', tag='query_re
     response: Annotated[
         Base64Bytes, Meta(description='Response bytes sent back to the child.')
     ]
+    source_byte_offset: (
+        Annotated[
+            int,
+            Meta(description="Inclusive offset of the query's final byte in that output event.", ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    source_event_seq: (
+        Annotated[
+            int,
+            Meta(description='Canonical output event containing the end of the query.', ge=0),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
-class Event11(Struct, forbid_unknown_fields=True, tag_field='type', tag='exit'):
+class Event12(Struct, forbid_unknown_fields=True, tag_field='type', tag='exit'):
     code: (
         Annotated[
             int,
@@ -299,7 +321,7 @@ class Event11(Struct, forbid_unknown_fields=True, tag_field='type', tag='exit'):
     ) = UNSET
 
 
-class Event12(Struct, forbid_unknown_fields=True, tag_field='type', tag='host_error'):
+class Event13(Struct, forbid_unknown_fields=True, tag_field='type', tag='host_error'):
     code: Annotated[str, Meta(description='Stable diagnostic code.')]
     message: Annotated[str, Meta(description='Redacted human-readable message.')]
 
@@ -1151,6 +1173,50 @@ class ActorBoundaries(Struct, forbid_unknown_fields=True):
     ]
 
 
+class ApplicationEvent(Struct, forbid_unknown_fields=True):
+    attributes: Annotated[
+        dict[str, Any],
+        Meta(
+            description='Sensitive application data, excluded from metadata-only exports.'
+        ),
+    ]
+    kind: Annotated[
+        ApplicationEventKind, Meta(description='Event or span lifecycle transition.')
+    ]
+    monotonic_ns: Annotated[
+        int,
+        Meta(
+            description='Caller-reported monotonic nanoseconds since instrumentation initialization.',
+            ge=0,
+        ),
+    ]
+    name: Annotated[
+        str, Meta(description='Diagnostic name, from 1 to 256 UTF-8 bytes.')
+    ]
+    process_id: Annotated[
+        int, Meta(description='Caller-reported operating-system PID.', ge=0)
+    ]
+    process_instance_id: Annotated[
+        str, Meta(description='Stable UUID for the emitting process instance.')
+    ]
+    parent_span_id: (
+        Annotated[
+            str,
+            Meta(description='Optional parent span in the same process instance.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    span_id: (
+        Annotated[
+            str,
+            Meta(description='Span identity; required for span lifecycle transitions.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+
+
 class ArtifactMember(Struct, forbid_unknown_fields=True):
     blake3: Annotated[str, Meta(description='BLAKE3 of the complete file.')]
     byte_length: Annotated[int, Meta(description='Exact byte length.', ge=0)]
@@ -1529,7 +1595,17 @@ class Event7(Struct, forbid_unknown_fields=True, tag_field='type', tag='signal_r
     ) = UNSET
 
 
-class Event10(Struct, forbid_unknown_fields=True, tag_field='type', tag='lifecycle'):
+class Event9(Struct, forbid_unknown_fields=True, tag_field='type', tag='application'):
+    data: Annotated[
+        ApplicationEvent, Meta(description='Caller-reported diagnostic payload.')
+    ]
+    operation_id: Annotated[
+        str,
+        Meta(description='Caller-owned request identity for durable deduplication.'),
+    ]
+
+
+class Event11(Struct, forbid_unknown_fields=True, tag_field='type', tag='lifecycle'):
     lifecycle_kind: Annotated[LifecycleKind, Meta(description='Transition kind.')]
     pid: (
         Annotated[int, Meta(description='Child process ID when available.', ge=0)]
@@ -1538,7 +1614,7 @@ class Event10(Struct, forbid_unknown_fields=True, tag_field='type', tag='lifecyc
     ) = UNSET
 
 
-Event: TypeAlias = Annotated[Event1 | Event2 | Event3 | Event4 | Event5 | Event6 | Event7 | Event8 | Event9 | Event10 | Event11 | Event12, Meta(description='One ordered session event.')]
+Event: TypeAlias = Annotated[Event1 | Event2 | Event3 | Event4 | Event5 | Event6 | Event7 | Event8 | Event9 | Event10 | Event11 | Event12 | Event13, Meta(description='One ordered session event.')]
 
 
 class EventProjection(Struct, forbid_unknown_fields=True):

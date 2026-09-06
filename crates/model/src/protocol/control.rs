@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 pub use crate::terminal::observation::ActorBoundaries;
 use crate::{
-    execution::event::InputKind,
+    execution::{application::ApplicationEvent, event::InputKind},
     terminal::{
         screen::{
             FrameDetail, InvalidRegionReason, ScreenFrame, ScreenProjectionRequest, ScreenRegion,
@@ -29,7 +29,7 @@ pub struct ClockSample {
 }
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 16;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 17;
 /// Maximum encoded request or response size.
 pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 1024 * 1024;
 
@@ -401,6 +401,11 @@ pub enum ControlCommand {
     Mark {
         /// Non-empty marker label.
         label: String,
+    },
+    /// Append application instrumentation independently of PTY traffic.
+    Application {
+        /// Bounded caller-reported diagnostic record.
+        data: ApplicationEvent,
     },
     /// Request graceful child termination.
     Stop,

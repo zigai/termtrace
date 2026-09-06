@@ -192,7 +192,13 @@ fn validate_name(name: &str) -> Result<(), ModelValidationError> {
 fn reserved_name(name: &str) -> bool {
     return matches!(
         name,
-        "TERM" | "COLORTERM" | "NO_COLOR" | "FORCE_COLOR" | "CLICOLOR" | "CLICOLOR_FORCE"
+        "TERM"
+            | "COLORTERM"
+            | "TERMTRACE_SESSION"
+            | "NO_COLOR"
+            | "FORCE_COLOR"
+            | "CLICOLOR"
+            | "CLICOLOR_FORCE"
     );
 }
 

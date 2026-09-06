@@ -8,6 +8,12 @@ use crate::terminal::replay::SourceRange;
 /// Clock handshake written before playback begins.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PlaybackTiming {
+    /// Final hash of the canonical prefix validated by this playback process.
+    #[serde(default)]
+    pub source_event_hash: Option<String>,
+    /// Number of events in the validated playback source.
+    #[serde(default)]
+    pub source_event_count: u64,
     /// Wall-clock time corresponding to source-range start (or event time zero).
     pub replay_origin_unix_ns: u128,
     /// Playback speed multiplier (`1` for native timing).

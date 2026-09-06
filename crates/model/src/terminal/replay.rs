@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     artifact::metadata::ArtifactMember,
+    execution::event_log::CanonicalBoundary,
     terminal::state::{
         CellState, CellStyle, ColorState, CursorState, DirtyState, ModeState, SemanticState,
         TerminalMetadata,
@@ -21,6 +22,34 @@ pub const GHOSTTY_REVISION: &str = "55a3e33ab26a23d75b274b23c7f76d837db00578";
 pub const STATE_FORMAT_VERSION: u32 = 5;
 /// Relative directory containing replay-derived artifacts.
 pub const DERIVED_DIRECTORY: &str = "derived";
+
+/// An exact presentation-eligible endpoint within a validated canonical prefix.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayEndpoint {
+    /// Canonical session identity.
+    pub session_id: Uuid,
+    /// Commitment to the source session manifest.
+    pub session_manifest_hash: String,
+    /// Whether the selected source has validated durable completion.
+    pub source_complete: bool,
+    /// Exact source prefix that was validated during resolution.
+    pub boundary: CanonicalBoundary,
+    /// Dense state identifier when the resolver calculated it.
+    pub state_id: Option<u64>,
+    /// Hash of the complete normalized semantic state at the endpoint.
+    pub state_hash: String,
+    /// Canonical viewport columns at the endpoint.
+    pub cols: u16,
+    /// Canonical viewport rows at the endpoint.
+    pub rows: u16,
+    /// Final emitted event; absent for the initial blank state.
+    pub event_seq: Option<u64>,
+    /// Inclusive output byte offset when the endpoint is an output event.
+    pub event_byte_offset: Option<u64>,
+    /// Semantic source timestamp when known.
+    pub monotonic_ns: Option<u64>,
+}
 
 /// A non-empty half-open interval on the canonical monotonic timeline.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

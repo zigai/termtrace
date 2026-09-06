@@ -33,6 +33,17 @@ pub const VERIFICATION_REPORT_FORMAT: &str = "termtrace-verification";
 /// Verification report schema version.
 pub const VERIFICATION_REPORT_VERSION: u32 = 4;
 
+/// Behavior when recording fails while an owned application is still running.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordingFailurePolicy {
+    /// Stop and reap an owned test or explicitly strict recording.
+    #[default]
+    Stop,
+    /// Preserve the PTY connection and application while reporting degraded evidence.
+    Preserve,
+}
+
 /// Canonical runtime resource limits for one recording.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -159,6 +170,9 @@ pub enum MutationJournalStatus {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionManifest {
+    /// Explicit application-lifecycle policy for recorder failures.
+    #[serde(default)]
+    pub failure_policy: RecordingFailurePolicy,
     /// Stable format identifier.
     pub format: String,
     /// Schema version.

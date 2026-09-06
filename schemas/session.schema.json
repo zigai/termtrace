@@ -625,6 +625,21 @@
       ],
       "type": "object"
     },
+    "RecordingFailurePolicy": {
+      "description": "Behavior when recording fails while an owned application is still running.",
+      "oneOf": [
+        {
+          "const": "stop",
+          "description": "Stop and reap an owned test or explicitly strict recording.",
+          "type": "string"
+        },
+        {
+          "const": "preserve",
+          "description": "Preserve the PTY connection and application while reporting degraded evidence.",
+          "type": "string"
+        }
+      ]
+    },
     "ResourceLimits": {
       "additionalProperties": false,
       "description": "Canonical runtime resource limits for one recording.",
@@ -974,6 +989,11 @@
     "execution_provenance": {
       "$ref": "#/$defs/ExecutionProvenance",
       "description": "Sensitivity-aware execution provenance and its explicit collection policy."
+    },
+    "failure_policy": {
+      "$ref": "#/$defs/RecordingFailurePolicy",
+      "default": "stop",
+      "description": "Explicit application-lifecycle policy for recorder failures."
     },
     "format": {
       "description": "Stable format identifier.",

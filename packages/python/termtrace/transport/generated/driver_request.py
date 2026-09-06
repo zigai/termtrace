@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, TypeAlias
+from typing import Annotated, Any, Literal, TypeAlias
 
 from msgspec import UNSET, Meta, Struct, UnsetType, convert, field
 
@@ -19,6 +19,12 @@ class ActionPostcondition2(Struct, forbid_unknown_fields=True, tag_field='condit
     timeout_ns: Annotated[
         int, Meta(description='Server-side monotonic deadline interval.', ge=0)
     ]
+
+
+class ApplicationEventKind(StrEnum):
+    event = 'event'
+    span_start = 'span_start'
+    span_end = 'span_end'
 
 
 Base64Bytes: TypeAlias = Annotated[str, Meta(pattern='^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$')]
@@ -118,7 +124,7 @@ class ControlCommand18(Struct, forbid_unknown_fields=True, tag_field='command', 
     label: Annotated[str, Meta(description='Non-empty marker label.')]
 
 
-class ControlCommand19(Struct, forbid_unknown_fields=True, tag_field='command', tag='stop'):
+class ControlCommand20(Struct, forbid_unknown_fields=True, tag_field='command', tag='stop'):
     pass
 
 
@@ -579,6 +585,50 @@ class VerificationLevel(StrEnum):
     signature = 'signature'
 
 
+class ApplicationEvent(Struct, forbid_unknown_fields=True):
+    attributes: Annotated[
+        dict[str, Any],
+        Meta(
+            description='Sensitive application data, excluded from metadata-only exports.'
+        ),
+    ]
+    kind: Annotated[
+        ApplicationEventKind, Meta(description='Event or span lifecycle transition.')
+    ]
+    monotonic_ns: Annotated[
+        int,
+        Meta(
+            description='Caller-reported monotonic nanoseconds since instrumentation initialization.',
+            ge=0,
+        ),
+    ]
+    name: Annotated[
+        str, Meta(description='Diagnostic name, from 1 to 256 UTF-8 bytes.')
+    ]
+    process_id: Annotated[
+        int, Meta(description='Caller-reported operating-system PID.', ge=0)
+    ]
+    process_instance_id: Annotated[
+        str, Meta(description='Stable UUID for the emitting process instance.')
+    ]
+    parent_span_id: (
+        Annotated[
+            str,
+            Meta(description='Optional parent span in the same process instance.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+    span_id: (
+        Annotated[
+            str,
+            Meta(description='Span identity; required for span lifecycle transitions.'),
+        ]
+        | None
+        | UnsetType
+    ) = UNSET
+
+
 class ControlCommand8(Struct, forbid_unknown_fields=True, tag_field='command', tag='input'):
     data: Annotated[
         Base64Bytes, Meta(description='Raw bytes encoded as Base64 in JSON.')
@@ -620,6 +670,12 @@ class ControlCommand14(Struct, forbid_unknown_fields=True, tag_field='command', 
 
 class ControlCommand17(Struct, forbid_unknown_fields=True, tag_field='command', tag='signal'):
     signal: Annotated[ProcessSignal, Meta(description='Signal to send.')]
+
+
+class ControlCommand19(Struct, forbid_unknown_fields=True, tag_field='command', tag='application'):
+    data: Annotated[
+        ApplicationEvent, Meta(description='Bounded caller-reported diagnostic record.')
+    ]
 
 
 class DriverMethod2(Struct, forbid_unknown_fields=True, tag_field='method', tag='launch'):
@@ -882,7 +938,7 @@ class ControlCommand10(Struct, forbid_unknown_fields=True, tag_field='command', 
     ]
 
 
-ControlCommand: TypeAlias = Annotated[ControlCommand1 | ControlCommand2 | ControlCommand3 | ControlCommand4 | ControlCommand5 | ControlCommand6 | ControlCommand7 | ControlCommand8 | ControlCommand9 | ControlCommand10 | ControlCommand11 | ControlCommand12 | ControlCommand13 | ControlCommand14 | ControlCommand15 | ControlCommand16 | ControlCommand17 | ControlCommand18 | ControlCommand19, Meta(description='One command sent to the live session actor.')]
+ControlCommand: TypeAlias = Annotated[ControlCommand1 | ControlCommand2 | ControlCommand3 | ControlCommand4 | ControlCommand5 | ControlCommand6 | ControlCommand7 | ControlCommand8 | ControlCommand9 | ControlCommand10 | ControlCommand11 | ControlCommand12 | ControlCommand13 | ControlCommand14 | ControlCommand15 | ControlCommand16 | ControlCommand17 | ControlCommand18 | ControlCommand19 | ControlCommand20, Meta(description='One command sent to the live session actor.')]
 
 
 class DriverMethod4(Struct, forbid_unknown_fields=True, tag_field='method', tag='control'):
@@ -922,11 +978,12 @@ ControlFocusCommand: TypeAlias = ControlCommand13
 ControlActivateCommand: TypeAlias = ControlCommand15
 ControlResizeCommand: TypeAlias = ControlCommand16
 ControlMarkCommand: TypeAlias = ControlCommand18
-ControlStopCommand: TypeAlias = ControlCommand19
+ControlStopCommand: TypeAlias = ControlCommand20
 ControlInputCommand: TypeAlias = ControlCommand8
 ControlKeyCommand: TypeAlias = ControlCommand11
 ControlPointerCommand: TypeAlias = ControlCommand14
 ControlSignalCommand: TypeAlias = ControlCommand17
+ControlApplicationCommand: TypeAlias = ControlCommand19
 ControlScreenFrameCommand: TypeAlias = ControlCommand5
 ControlCaptureStableCommand: TypeAlias = ControlCommand7
 ControlInputSequenceCommand: TypeAlias = ControlCommand9

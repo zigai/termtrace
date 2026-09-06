@@ -197,11 +197,11 @@
   "description": "Provenance and probe evidence for native visual artifacts.",
   "properties": {
     "capture_kind": {
-      "description": "`video` or `screenshot`.",
+      "description": "`video`, `screenshot`, or `original_execution`.",
       "type": "string"
     },
     "capture_started_unix_ns": {
-      "description": "Wall-clock time used as approximate video frame zero.",
+      "description": "First X11 acquisition, first Wayland collector receipt, or screenshot request wall-clock time.",
       "format": "uint128",
       "minimum": 0,
       "type": "integer"
@@ -236,7 +236,7 @@
       ]
     },
     "fps": {
-      "description": "Video frame rate.",
+      "description": "Video frame rate; zero denotes compositor-controlled variable timing for Wayland originals.",
       "format": "uint16",
       "maximum": 65535,
       "minimum": 0,

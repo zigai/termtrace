@@ -215,6 +215,9 @@ registry!(
     ("replay-manifest.schema.json",
         replay::ReplayManifest
     ),
+    ("replay-endpoint.schema.json",
+        replay::ReplayEndpoint
+    ),
     ("semantic-replay-checkpoint.schema.json",
         replay::SemanticReplayCheckpoint
     ),
@@ -319,6 +322,15 @@ registry!(
     ),
     ("tmux-bundle-manifest.schema.json",
         tmux::TmuxBundleManifest
+    ),
+    ("tmux-streaming-bundle-manifest.schema.json",
+        tmux::TmuxStreamingBundleManifest
+    ),
+    ("tmux-track-catalog-entry.schema.json",
+        tmux::TmuxTrackCatalogEntry
+    ),
+    ("tmux-gap-catalog-entry.schema.json",
+        tmux::TmuxGapCatalogEntry
     ),
     ("acceptance-benchmark.schema.json",
         manual generate_acceptance_benchmark_schema
