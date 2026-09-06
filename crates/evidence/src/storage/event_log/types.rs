@@ -43,6 +43,16 @@ impl SessionClock {
     pub fn elapsed_ns(&self) -> u64 {
         return u64::try_from(self.monotonic_origin.elapsed().as_nanos()).unwrap_or(u64::MAX);
     }
+
+    /// Convert a collector observation into this session's monotonic timebase.
+    pub fn observed_ns(&self, observed: Instant) -> u64 {
+        return u64::try_from(
+            observed
+                .saturating_duration_since(self.monotonic_origin)
+                .as_nanos(),
+        )
+        .unwrap_or(u64::MAX);
+    }
 }
 
 /// Fully validated canonical event log loaded into memory.

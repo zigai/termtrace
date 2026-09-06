@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeMap,
     fmt::Write as _,
     io::{BufRead, BufReader, Write},
     path::Path,
@@ -14,27 +13,34 @@ use termtrace_evidence::{
         finish_writer, secure_file, secure_writer, sync_directory, verify_artifact_members,
         write_secure,
     },
-    event_log::EventLog,
-    session::validate_completed_log,
+    event_log::{EventLog, EventLogSummary},
+    session::{read_completion, validate_completion_summary_candidate},
 };
 use termtrace_model::{
     artifact::metadata::ArtifactSourceRange,
-    execution::event::Event,
     terminal::replay::{
-        ControlSourceIndexEntry, DERIVED_DIRECTORY, GHOSTTY_REVISION, IndexOptions, IndexOutcome,
-        ReplayArtifacts, ReplayManifest, STATE_FORMAT_VERSION, SemanticReplayCheckpoint,
-        SourceRange, StateIndexEntry, StateInspection, StateRecord, StateSelection, StateSelector,
+        DERIVED_DIRECTORY, GHOSTTY_REVISION, IndexOptions, IndexOutcome, ReplayArtifacts,
+        ReplayManifest, STATE_FORMAT_VERSION, SemanticReplayCheckpoint, SourceRange,
+        StateIndexEntry, StateInspection, StateRecord, StateSelection, StateSelector,
     },
-    terminal::vt::VtToken,
     value::ByteString,
 };
-use termtrace_terminal::VtFramer;
 
 use super::{
-    ReplaySeed, invalid_replay, json_error, replay_for_index, state_delta, timeline_event,
-    validate_replay_seed,
+    ReplaySeed, engine::validate_generated_replay_seed, invalid_replay, json_error,
+    replay_for_index, state_delta, trust::SourceIdentity,
 };
 use crate::{Error, Result, timeline::resolve_source_range};
+
+mod control;
+mod rank;
+mod source;
+#[cfg(test)]
+mod tests;
+
+use control::write_control_index;
+use rank::TimelineRanks;
+use source::IndexSource;
 
 const REPLAY_CHECKPOINT_STATE_INTERVAL: u64 = 128;
 
@@ -86,16 +92,27 @@ pub fn index_session_with_options(
         });
     }
     let event_path = session_directory.join("events.jsonl");
-    let log = EventLog::read(&event_path)?;
+    let identity = completion_exists
+        .then(|| return SourceIdentity::capture(session_directory))
+        .transpose()?;
+    let summary = if completion_exists {
+        EventLogSummary::read(&event_path)?
+    } else {
+        EventLogSummary::snapshot(&event_path)?
+    };
     let source_complete = if completion_exists {
-        validate_completed_log(session_directory, &log)?;
+        validate_completion_summary_candidate(
+            session_directory,
+            &summary,
+            &read_completion(session_directory)?,
+        )?;
         true
     } else {
         false
     };
-    let final_monotonic_ns = log
-        .events
-        .last()
+    let final_monotonic_ns = summary
+        .terminal
+        .as_ref()
         .map_or(0, |record| return record.monotonic_ns);
     let source_range = resolve_source_range(
         options.start_monotonic_ns,
@@ -104,8 +121,8 @@ pub fn index_session_with_options(
     )?;
     let mut directory_name = derived_directory_name_for(source_range, options.state_selection);
     if !source_complete {
-        let source_hash = log.events.last().map_or_else(
-            || return log.header.session_id.simple().to_string(),
+        let source_hash = summary.terminal.as_ref().map_or_else(
+            || return summary.header.session_id.simple().to_string(),
             |record| {
                 return record.hash.clone();
             },
@@ -120,14 +137,17 @@ pub fn index_session_with_options(
     }
     let staging = session_directory.join(format!(".derived.{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
-    let result = write_index(
+    let result = write_source_index(
         &staging,
-        &log,
+        &IndexSource::File(&event_path, &summary),
         source_range,
         source_complete,
         options.state_selection,
     )
     .and_then(|(artifacts, retained_state_count)| {
+        if let Some(identity) = identity.as_ref() {
+            identity.check(session_directory)?;
+        }
         commit_directory(session_directory, &staging, &destination)?;
         let manifest_path = destination.join("manifest.json");
         let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
@@ -142,8 +162,11 @@ pub fn index_session_with_options(
                 &destination,
                 "semantic_index",
                 &manifest_bytes,
-                &log.header.session_manifest_hash,
-                log.events.last().map(|record| return record.hash.as_str()),
+                &summary.header.session_manifest_hash,
+                summary
+                    .terminal
+                    .as_ref()
+                    .map(|record| return record.hash.as_str()),
                 source_range.map(|range| {
                     return ArtifactSourceRange {
                         start_monotonic_ns: range.start_monotonic_ns,
@@ -314,114 +337,7 @@ fn checkpoint_precedes_selector(record: &StateRecord, selector: &CheckpointSelec
     };
 }
 
-type ControlIndexPoint = ((u64, u64, u8, u64), u64);
-
-fn write_control_index(
-    directory: &Path,
-    log: &EventLog,
-    source_range: Option<SourceRange>,
-) -> Result<(Vec<ControlIndexPoint>, u64)> {
-    let path = directory.join("control-index.jsonl");
-    let mut writer = secure_writer(&path)?;
-    let mut framer = VtFramer::default();
-    let mut points: Vec<ControlIndexPoint> = Vec::new();
-    let mut source_offsets: BTreeMap<u64, u64> = BTreeMap::new();
-    let mut file_offset = 0_u64;
-    for record in &log.events {
-        let Event::Output { data } = &record.event else {
-            continue;
-        };
-        for token in framer.feed(record.seq, record.monotonic_ns, data.as_bytes())? {
-            append_control_index_token(
-                &mut writer,
-                &path,
-                source_range,
-                token,
-                &mut points,
-                &mut source_offsets,
-                &mut file_offset,
-            )?;
-        }
-    }
-    for token in framer.finish()? {
-        append_control_index_token(
-            &mut writer,
-            &path,
-            source_range,
-            token,
-            &mut points,
-            &mut source_offsets,
-            &mut file_offset,
-        )?;
-    }
-    finish_writer(writer, &path)?;
-    let source_index_path = directory.join("control-source-index.jsonl");
-    let mut source_index = secure_writer(&source_index_path)?;
-    for (event_seq, control_index_offset) in source_offsets {
-        write_json_line(
-            &mut source_index,
-            &ControlSourceIndexEntry {
-                event_seq,
-                control_index_offset,
-            },
-            &source_index_path,
-        )?;
-    }
-    finish_writer(source_index, &source_index_path)?;
-    return Ok((points, file_offset));
-}
-
-fn append_control_index_token(
-    writer: &mut impl Write,
-    path: &Path,
-    source_range: Option<SourceRange>,
-    token: VtToken,
-    points: &mut Vec<ControlIndexPoint>,
-    source_offsets: &mut BTreeMap<u64, u64>,
-    file_offset: &mut u64,
-) -> Result<()> {
-    if source_range.is_some_and(|range| {
-        return !token
-            .source
-            .iter()
-            .any(|segment| return range.contains(segment.monotonic_ns));
-    }) {
-        return Ok(());
-    }
-    let Some(first) = token.source.first() else {
-        return Ok(());
-    };
-    let encoded = serde_json::to_vec(&token)
-        .map_err(|source| return json_error(path.to_path_buf(), source))?;
-    points.push((
-        (first.monotonic_ns, first.event_seq, 1, token.token_id),
-        *file_offset,
-    ));
-    for source in &token.source {
-        source_offsets
-            .entry(source.event_seq)
-            .and_modify(|offset| *offset = (*offset).min(*file_offset))
-            .or_insert(*file_offset);
-    }
-    writer.write_all(&encoded).map_err(|source| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        };
-    })?;
-    writer.write_all(b"\n").map_err(|source| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        };
-    })?;
-    *file_offset = file_offset
-        .checked_add(u64::try_from(encoded.len()).unwrap_or(u64::MAX))
-        .and_then(|offset| return offset.checked_add(1))
-        .ok_or_else(|| return invalid_replay("control index byte offset overflow"))?;
-    return Ok(());
-}
-
+#[cfg(test)]
 pub(crate) fn write_index(
     directory: &Path,
     log: &EventLog,
@@ -429,16 +345,24 @@ pub(crate) fn write_index(
     source_complete: bool,
     state_selection: StateSelection,
 ) -> Result<(ReplayArtifacts, u64)> {
-    let (control_points, control_index_len) = write_control_index(directory, log, source_range)?;
-    let canonical_keys: Vec<(u64, u64, u8, u64)> = log
-        .events
-        .iter()
-        .filter(|record| {
-            return source_range.is_none_or(|range| return range.contains(record.monotonic_ns))
-                && timeline_event(&record.event);
-        })
-        .map(|record| return (record.monotonic_ns, record.seq, 0, 0))
-        .collect();
+    return write_source_index(
+        directory,
+        &IndexSource::Memory(log),
+        source_range,
+        source_complete,
+        state_selection,
+    );
+}
+
+fn write_source_index(
+    directory: &Path,
+    source: &IndexSource<'_>,
+    source_range: Option<SourceRange>,
+    source_complete: bool,
+    state_selection: StateSelection,
+) -> Result<(ReplayArtifacts, u64)> {
+    write_control_index(directory, source, source_range)?;
+    let mut ranks = TimelineRanks::new(directory, source.records()?, source_range)?;
     let states_path = directory.join("states.jsonl.zst");
     let states_file = secure_file(&states_path)?;
     let mut states = zstd::stream::write::Encoder::new(states_file, 3).map_err(|source| {
@@ -472,97 +396,93 @@ pub(crate) fn write_index(
     let mut retained_state_count = 0_u64;
     let mut final_retained_state_hash = None;
     let mut previous_retained_state = None;
-    let artifacts = replay_for_index(log, source_range, |mut record, state, engine| {
-        let checkpoint_candidate = state_selection == StateSelection::All
-            && !state.modes.alternate_screen
-            && record.state_id % REPLAY_CHECKPOINT_STATE_INTERVAL == 0;
-        let mut checkpoint = false;
-        if checkpoint_candidate && let Some(engine_vt) = engine.format_replay_seed()? {
-            let inspection = StateInspection {
-                record: record.clone(),
-                state: state.clone(),
-            };
-            let seed = ReplaySeed {
-                inspection: inspection.clone(),
-                engine_vt: engine_vt.clone(),
-            };
-            match validate_replay_seed(log, &seed) {
-                Ok(()) => {
-                    write_json_line(
-                        &mut checkpoints,
-                        &SemanticReplayCheckpoint {
-                            inspection,
-                            engine_vt: ByteString::from(engine_vt),
-                        },
-                        directory,
-                    )?;
-                    checkpoint = true;
+    let mut records = source.records()?;
+    let artifacts = replay_for_index(
+        source.header(),
+        records.by_ref(),
+        source_range,
+        |mut record, state, engine| {
+            let checkpoint_candidate = state_selection == StateSelection::All
+                && !state.modes.alternate_screen
+                && record.state_id % REPLAY_CHECKPOINT_STATE_INTERVAL == 0;
+            let mut checkpoint = false;
+            if checkpoint_candidate && let Some(engine_vt) = engine.format_replay_seed()? {
+                let inspection = StateInspection {
+                    record: record.clone(),
+                    state: state.clone(),
+                };
+                let seed = ReplaySeed {
+                    inspection: inspection.clone(),
+                    engine_vt: engine_vt.clone(),
+                };
+                match validate_generated_replay_seed(source.header(), &seed) {
+                    Ok(()) => {
+                        write_json_line(
+                            &mut checkpoints,
+                            &SemanticReplayCheckpoint {
+                                inspection,
+                                engine_vt: ByteString::from(engine_vt),
+                            },
+                            directory,
+                        )?;
+                        checkpoint = true;
+                    }
+                    Err(Error::CheckpointReconstruction { mismatched_fields }) => {
+                        tracing::debug!(
+                            state_id = record.state_id,
+                            ?mismatched_fields,
+                            "skipped non-reconstructable semantic replay checkpoint"
+                        );
+                    }
+                    Err(error) => return Err(error),
                 }
-                Err(Error::CheckpointReconstruction { mismatched_fields }) => {
-                    tracing::debug!(
-                        state_id = record.state_id,
-                        ?mismatched_fields,
-                        "skipped non-reconstructable semantic replay checkpoint"
-                    );
-                }
-                Err(error) => return Err(error),
             }
-        }
-        if state_selection == StateSelection::Presented && !record.presented {
+            if state_selection == StateSelection::Presented && !record.presented {
+                return Ok(());
+            }
+            if state_selection == StateSelection::Presented {
+                record.state_id = retained_state_count;
+                record.delta = state_delta(previous_retained_state.as_ref(), state);
+                previous_retained_state = Some(state.clone());
+            }
+            write_json_line(&mut states, &record, directory)?;
+            let state_key = (
+                record.monotonic_ns,
+                record.event_seq.unwrap_or(0),
+                2,
+                record.event_byte_offset.unwrap_or(0),
+            );
+            let (timeline_rank, control_index_offset, control_rank) = if checkpoint {
+                let (rank, offset, control_count) = ranks.before(state_key, record.state_id)?;
+                (Some(rank), Some(offset), Some(control_count))
+            } else {
+                (None, None, None)
+            };
+            let entry = StateIndexEntry {
+                state_id: record.state_id,
+                state_hash: record.state_hash.clone(),
+                event_seq: record.event_seq,
+                event_byte_offset: record.event_byte_offset,
+                monotonic_ns: record.monotonic_ns,
+                presented: record.presented,
+                checkpoint,
+                timeline_rank,
+                control_index_offset,
+                control_rank,
+            };
+            write_json_line(&mut index, &entry, directory)?;
+            final_retained_state_hash = Some(record.state_hash);
+            retained_state_count = retained_state_count
+                .checked_add(1)
+                .ok_or_else(|| return invalid_replay("retained semantic state count overflow"))?;
             return Ok(());
-        }
-        if state_selection == StateSelection::Presented {
-            record.state_id = retained_state_count;
-            record.delta = state_delta(previous_retained_state.as_ref(), state);
-            previous_retained_state = Some(state.clone());
-        }
-        write_json_line(&mut states, &record, directory)?;
-        let state_key = (
-            record.monotonic_ns,
-            record.event_seq.unwrap_or(0),
-            2,
-            record.event_byte_offset.unwrap_or(0),
-        );
-        let (timeline_rank, control_index_offset, control_rank) = if checkpoint {
-            let canonical_count = canonical_keys.partition_point(|key| return *key < state_key);
-            let control_count = control_points.partition_point(|(key, _)| return *key < state_key);
-            let rank = record
-                .state_id
-                .checked_add(u64::try_from(canonical_count).unwrap_or(u64::MAX))
-                .and_then(|rank| {
-                    return rank.checked_add(u64::try_from(control_count).unwrap_or(u64::MAX));
-                })
-                .ok_or_else(|| return invalid_replay("checkpoint timeline rank overflow"))?;
-            let offset = control_points
-                .get(control_count)
-                .map_or(control_index_len, |(_, offset)| return *offset);
-            (
-                Some(rank),
-                Some(offset),
-                Some(u64::try_from(control_count).unwrap_or(u64::MAX)),
-            )
-        } else {
-            (None, None, None)
-        };
-        let entry = StateIndexEntry {
-            state_id: record.state_id,
-            state_hash: record.state_hash.clone(),
-            event_seq: record.event_seq,
-            event_byte_offset: record.event_byte_offset,
-            monotonic_ns: record.monotonic_ns,
-            presented: record.presented,
-            checkpoint,
-            timeline_rank,
-            control_index_offset,
-            control_rank,
-        };
-        write_json_line(&mut index, &entry, directory)?;
-        final_retained_state_hash = Some(record.state_hash);
-        retained_state_count = retained_state_count
-            .checked_add(1)
-            .ok_or_else(|| return invalid_replay("retained semantic state count overflow"))?;
-        return Ok(());
-    })?;
+        },
+    )?;
+    // Range replay can stop early; verify that its pass still reaches the same
+    // complete canonical prefix before publishing any derived artifact.
+    for record in records {
+        drop(record?);
+    }
     let states_file = states.finish().map_err(|source| {
         return Error::Filesystem {
             path: states_path.clone(),
@@ -594,8 +514,8 @@ pub(crate) fn write_index(
     let members = collect_artifact_members(directory)?;
     let manifest = ReplayManifest {
         version: STATE_FORMAT_VERSION,
-        session_id: log.header.session_id,
-        source_event_hash: log.events.last().map(|record| return record.hash.clone()),
+        session_id: source.header().session_id,
+        source_event_hash: source.final_hash().map(str::to_owned),
         source_range,
         source_complete,
         state_selection,

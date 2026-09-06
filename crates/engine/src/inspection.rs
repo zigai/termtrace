@@ -6,11 +6,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::replay::inspect;
+use crate::replay::{inspect_prefix_stream, inspect_session_stream};
 use crate::{Error, Result};
 use termtrace_evidence::{
-    event_log::{EventLog, EventLogCursor},
-    session::{validate_completed_log, validate_completed_session},
+    event_log::{EventLogCursor, EventLogSummary},
+    session::validate_completed_session,
 };
 pub use termtrace_model::terminal::inspection::WaitOutcome;
 use termtrace_model::{
@@ -25,11 +25,12 @@ pub fn inspect_session(
     selector: StateSelector,
 ) -> Result<StateInspection> {
     let session = session_directory.as_ref();
-    let log = EventLog::read(session.join("events.jsonl"))?;
     if session.join("completion.json").is_file() {
-        validate_completed_log(session, &log)?;
+        validate_completed_session(session)?;
+        return inspect_session_stream(session, selector, None);
     }
-    return inspect(&log, selector);
+    EventLogSummary::read(session.join("events.jsonl"))?;
+    return inspect_prefix_stream(session, selector);
 }
 
 /// Wait until exact bytes appear in the bounded canonical output stream.

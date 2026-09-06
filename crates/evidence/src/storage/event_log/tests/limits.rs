@@ -39,7 +39,6 @@ fn enforces_aggregate_event_log_limits_before_retention() {
 
     let count_error = parse_event_log_with_limits(
         &path,
-        false,
         None,
         EventLogLimits {
             event_count: 1,
@@ -51,7 +50,6 @@ fn enforces_aggregate_event_log_limits_before_retention() {
 
     let payload_error = parse_event_log_with_limits(
         &path,
-        false,
         None,
         EventLogLimits {
             decoded_payload_bytes: 5,
@@ -80,7 +78,6 @@ fn enforces_aggregate_event_log_limits_before_retention() {
 
     let encoded_error = parse_event_log_with_limits(
         &path,
-        false,
         None,
         EventLogLimits {
             encoded_bytes: 1,
@@ -92,7 +89,6 @@ fn enforces_aggregate_event_log_limits_before_retention() {
 
     let prefix_error = parse_event_log_with_limits(
         &path,
-        false,
         Some(2),
         EventLogLimits {
             event_count: 1,

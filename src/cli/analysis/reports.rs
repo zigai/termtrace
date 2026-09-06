@@ -1,17 +1,26 @@
 use crate::cli::output::ResponseWriter;
 
-use std::{fmt::Write as _, mem::take, path::PathBuf, process::ExitCode};
+use std::{
+    fmt::Write as _,
+    io::{BufRead as _, BufReader, BufWriter, Seek as _, SeekFrom, Write as _},
+    mem::take,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::{
+    Error as EngineError,
     analysis::{
-        diagnostics::{diagnose, explain},
-        last_action::analyze_last_action,
+        diagnostics::{diagnose_session, explain_session},
+        last_action::analyze_last_action_session,
     },
-    diff::diff_states_with_semantic_states,
-    timeline::{build_timeline, build_timeline_page, resolve_source_selection},
+    diff::diff_session_states_with_semantic_states,
+    timeline::{
+        SourceRange, build_session_timeline_page, resolve_session_source_selection,
+        visit_session_timeline_while,
+    },
 };
-use termtrace_evidence::{event_log::EventLog, session::validate_completed_log};
 use termtrace_media::native_capture::validated_visual_manifests;
 use termtrace_model::{
     execution::event::Event,
@@ -42,26 +51,23 @@ pub(in crate::cli) fn run_timeline(
     response: &mut ResponseWriter,
     arguments: TimelineArgs,
 ) -> Result<ExitCode> {
-    let session = resolve_session_path(arguments.session)?;
-    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
-    validate_completed_log(&session, &log).into_diagnostic()?;
-    let range = resolve_source_selection(
-        &log,
+    let session = resolve_session_path(arguments.session.clone())?;
+    let range = resolve_session_source_selection(
+        &session,
         arguments.range.start_monotonic_ns,
         arguments.range.end_monotonic_ns,
         arguments.range.from_marker.as_deref(),
         arguments.range.to_marker.as_deref(),
     )
     .into_diagnostic()?;
-    let (entries, page, partial) = if arguments.page.all {
-        let entries = build_timeline(&log, arguments.all_states, arguments.controls, range)
-            .into_diagnostic()?;
-        paginate(entries, &arguments.page)
-    } else {
+    if arguments.page.all {
+        return run_all_timeline(response, &session, &arguments, range);
+    }
+    let (entries, page, partial) = {
         let limit = u16::try_from(arguments.page.limit)
             .map_err(|_| return miette::miette!("timeline page limit exceeds 65535"))?;
-        let timeline_page = build_timeline_page(
-            &log,
+        let timeline_page = build_session_timeline_page(
+            &session,
             arguments.all_states,
             arguments.controls,
             range,
@@ -120,13 +126,87 @@ pub(in crate::cli) fn run_timeline(
     return write_stdout(response, output);
 }
 
+fn run_all_timeline(
+    response: &mut ResponseWriter,
+    session: &Path,
+    arguments: &TimelineArgs,
+    range: Option<SourceRange>,
+) -> Result<ExitCode> {
+    let mut staged = tempfile::tempfile().into_diagnostic()?;
+    let mut total = 0_usize;
+    {
+        let mut writer = BufWriter::new(&mut staged);
+        visit_session_timeline_while(
+            session,
+            arguments.all_states,
+            arguments.controls,
+            range,
+            |entry| {
+                if total >= arguments.page.offset {
+                    serde_json::to_writer(&mut writer, &entry).map_err(|source| {
+                        return EngineError::InvalidJson {
+                            path: PathBuf::from("<timeline-output>"),
+                            json_path: "$".to_owned(),
+                            source,
+                        };
+                    })?;
+                    writer.write_all(b"\n").map_err(|source| {
+                        return EngineError::Filesystem {
+                            path: PathBuf::from("<timeline-output>"),
+                            source,
+                        };
+                    })?;
+                }
+                total = total.saturating_add(1);
+                return Ok(true);
+            },
+        )
+        .into_diagnostic()?;
+        writer.flush().into_diagnostic()?;
+    }
+    staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
+    for line in BufReader::new(&mut staged).lines() {
+        let entry: TimelineEntry =
+            serde_json::from_str(&line.into_diagnostic()?).into_diagnostic()?;
+        if arguments.jsonl {
+            write_json_line(response, &entry)?;
+        } else {
+            write_stdout(response, format!("{}\n", timeline_text(&entry)?))?;
+        }
+    }
+    let offset = arguments.page.offset.min(total);
+    if offset != 0 {
+        let page = OutputPage {
+            offset,
+            limit: None,
+            total: Some(total),
+            returned: total.saturating_sub(offset),
+            truncated: false,
+            next_offset: None,
+        };
+        if arguments.jsonl {
+            write_json_line(
+                response,
+                &serde_json::json!({ "kind": "output_page", "page": page }),
+            )?;
+        } else {
+            write_stdout(
+                response,
+                format!(
+                    "page: {}\n",
+                    serde_json::to_string(&page).into_diagnostic()?
+                ),
+            )?;
+        }
+    }
+    return Ok(ExitCode::SUCCESS);
+}
+
 pub(in crate::cli) fn run_diff(
     response: &mut ResponseWriter,
     arguments: DiffArgs,
 ) -> Result<ExitCode> {
     let session = resolve_session_path(arguments.session)?;
-    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
-    validate_completed_log(&session, &log).into_diagnostic()?;
     let from = diff_point(
         arguments.from_state,
         arguments.from_state_hash,
@@ -142,7 +222,7 @@ pub(in crate::cli) fn run_diff(
         arguments.to_marker,
     )?;
     let (difference, before_state, after_state) =
-        diff_states_with_semantic_states(&log, from, to).into_diagnostic()?;
+        diff_session_states_with_semantic_states(&session, from, to).into_diagnostic()?;
     let changed = difference.changed;
     let _output_status = match arguments.format {
         DiffFormat::Text => write_stdout(response, diff_text(&difference)?)?,
@@ -174,8 +254,6 @@ pub(in crate::cli) fn run_explain(
     arguments: ExplainArgs,
 ) -> Result<ExitCode> {
     let session = resolve_session_path(arguments.session)?;
-    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
-    validate_completed_log(&session, &log).into_diagnostic()?;
     let target = diff_point(
         arguments.state,
         arguments.state_hash,
@@ -183,7 +261,7 @@ pub(in crate::cli) fn run_explain(
         arguments.at,
         arguments.marker,
     )?;
-    let mut report = explain(&log, target, arguments.context).into_diagnostic()?;
+    let mut report = explain_session(&session, target, arguments.context).into_diagnostic()?;
     let (tokens, tokens_page, tokens_partial) = paginate(take(&mut report.tokens), &arguments.page);
     let (states, states_page, states_partial) = paginate(take(&mut report.states), &arguments.page);
     let (findings, findings_page, findings_partial) =
@@ -232,11 +310,9 @@ pub(in crate::cli) fn run_diagnose(
     arguments: DiagnoseArgs,
 ) -> Result<ExitCode> {
     let session = resolve_session_path(arguments.session)?;
-    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
-    validate_completed_log(&session, &log).into_diagnostic()?;
     let visual_evidence = validated_visual_manifests(&session).into_diagnostic()?;
-    let mut report = diagnose(
-        &log,
+    let mut report = diagnose_session(
+        &session,
         arguments.check,
         arguments.broad_change_percent,
         &visual_evidence,
@@ -277,10 +353,8 @@ fn run_last_action_facade<T: serde::Serialize>(
     if resolved.lifecycle != RegistryLifecycle::Completed {
         return write_session_lifecycle(response, &resolved, operation, ExitCode::FAILURE);
     }
-    let log = EventLog::read(resolved.path.join("events.jsonl")).into_diagnostic()?;
-    validate_completed_log(&resolved.path, &log).into_diagnostic()?;
     let analysis =
-        analyze_last_action(&resolved.path, &log, broad_change_percent).into_diagnostic()?;
+        analyze_last_action_session(&resolved.path, broad_change_percent).into_diagnostic()?;
     return write_json_line(response, select(&analysis));
 }
 

@@ -12,8 +12,10 @@ use std::{
 use uuid::Uuid;
 
 use termtrace_evidence::event_log::{EventLog, EventLogCursor};
+use termtrace_evidence::session::{SessionSnapshot, validate_completed_session};
 use termtrace_model::{
     execution::event::{Event, EventLogHeader, EventRecord, OperationStatus},
+    execution::event_log::CanonicalBoundary,
     terminal::replay::{
         CollectedReplay, DERIVED_DIRECTORY, ReplayArtifacts, SourceRange, StateInspection,
         StateRecord, StateSelector,
@@ -294,18 +296,42 @@ pub(crate) fn inspect_latest_presented_stream(
     let header = cursor.header().clone();
     let records = from_fn(|| return cursor.next_record().transpose())
         .map(|record| return record.map(Cow::Owned).map_err(Error::from));
-    let endpoint = inspect_latest_presented_records(
-        &header,
-        records,
-        ReplayLimits {
-            output_bytes: 1024 * 1024 * 1024,
-            elapsed: Duration::from_secs(3600),
-            ..DEFAULT_REPLAY_LIMITS
-        },
-        cancelled,
-    )?;
+    let endpoint =
+        inspect_latest_presented_records(&header, records, INDEX_REPLAY_LIMITS, cancelled)?;
     let _pending = cursor.finish()?;
     return Ok(endpoint);
+}
+
+pub(crate) fn inspect_latest_presented_prefix(
+    path: &Path,
+    boundary: &CanonicalBoundary,
+    cancelled: &AtomicBool,
+) -> Result<(EventLogHeader, EndpointInspection)> {
+    let mut cursor = EventLogCursor::open(path)?;
+    let header = cursor.header().clone();
+    let mut output_bytes = 0_u64;
+    let records = from_fn(|| {
+        if cursor.next_event_seq() >= boundary.next_event_seq {
+            return None;
+        }
+        let record = cursor.next_record().transpose();
+        if let Some(Ok(record)) = &record
+            && let Event::Output { data } = &record.event
+        {
+            output_bytes = output_bytes
+                .saturating_add(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX));
+        }
+        return record.map(|record| return record.map(Cow::Owned).map_err(Error::from));
+    });
+    let endpoint =
+        inspect_latest_presented_records(&header, records, INDEX_REPLAY_LIMITS, Some(cancelled))?;
+    cursor.validate_boundary(boundary.next_event_seq, &boundary.event_hash)?;
+    if output_bytes != boundary.output_bytes {
+        return Err(invalid_replay(
+            "validated prefix output-byte count does not match its boundary",
+        ));
+    }
+    return Ok((header, endpoint));
 }
 
 fn inspect_latest_presented_records<'record>(
@@ -537,6 +563,73 @@ pub type RenderedStateFormats = Vec<(Format, Vec<u8>)>;
 /// One selected state and all requested engine-native representations.
 pub type StateInspectionWithFormats = (StateInspection, RenderedStateFormats);
 
+/// Resolve a batch in one streamed replay, retaining only the requested states.
+///
+/// # Errors
+/// Rejects incomplete/changing evidence, missing selectors, and replay failures.
+pub fn inspect_completed_many(
+    session: &Path,
+    selectors: &[StateSelector],
+) -> Result<Vec<StateInspection>> {
+    let source = super::trust::SourceIdentity::capture(session)?;
+    validate_completed_session(session)?;
+    if selectors.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut selected = vec![None; selectors.len()];
+    visit_session_states_while(session, &AtomicBool::new(false), |record, state| {
+        for (selector, slot) in selectors.iter().zip(&mut selected) {
+            if state_selector_matches(selector, record) {
+                *slot = Some(StateInspection {
+                    record: record.clone(),
+                    state: state.clone(),
+                });
+            }
+        }
+        return Ok(true);
+    })?;
+    source.check(session)?;
+    return selected
+        .into_iter()
+        .enumerate()
+        .map(|(index, inspection)| {
+            return inspection.ok_or_else(|| {
+                return invalid_replay(format!(
+                    "no semantic state matches selector at index {index}"
+                ));
+            });
+        })
+        .collect();
+}
+
+/// Inspect one completed canonical session with bounded replay memory.
+///
+/// # Errors
+/// Rejects incomplete/changing evidence, missing selectors, and replay failures.
+pub fn inspect_completed_session(
+    session: &Path,
+    selector: StateSelector,
+) -> Result<StateInspection> {
+    let (inspection, _) = inspect_completed_session_with_formats(session, selector, &[])?;
+    return Ok(inspection);
+}
+
+/// Inspect and format one completed state in a single streamed replay.
+///
+/// # Errors
+/// Rejects incomplete/changing evidence, missing selectors, and replay/format failures.
+pub fn inspect_completed_session_with_formats(
+    session: &Path,
+    selector: StateSelector,
+    formats: &[Format],
+) -> Result<StateInspectionWithFormats> {
+    let source = super::trust::SourceIdentity::capture(session)?;
+    validate_completed_session(session)?;
+    let inspection = inspect_session_stream_with_formats(session, selector, formats)?;
+    source.check(session)?;
+    return Ok(inspection);
+}
+
 /// Reconstruct one selected state and requested engine-native formats in one replay.
 ///
 /// # Errors
@@ -611,12 +704,30 @@ pub(crate) fn inspect_session_stream(
     selector: StateSelector,
     cancelled: Option<&AtomicBool>,
 ) -> Result<StateInspection> {
+    return inspect_recording_stream(session, selector, cancelled, true);
+}
+
+pub(crate) fn inspect_prefix_stream(
+    session: &Path,
+    selector: StateSelector,
+) -> Result<StateInspection> {
+    return inspect_recording_stream(session, selector, None, false);
+}
+
+fn inspect_recording_stream(
+    session: &Path,
+    selector: StateSelector,
+    cancelled: Option<&AtomicBool>,
+    completed: bool,
+) -> Result<StateInspection> {
     let never_cancelled = AtomicBool::new(false);
     let mut selected = None;
-    visit_session_states_while(
+    visit_recording_states_with_engine(
         session,
         cancelled.unwrap_or(&never_cancelled),
-        |record, state| {
+        completed,
+        None,
+        |record, state, _| {
             if state_selector_matches(&selector, record) {
                 selected = Some(StateInspection {
                     record: record.clone(),
@@ -637,6 +748,31 @@ pub(crate) fn inspect_session_stream(
     return selected.ok_or_else(|| return invalid_replay("no semantic state matches the selector"));
 }
 
+pub(crate) fn inspect_session_stream_with_formats(
+    session: &Path,
+    selector: StateSelector,
+    formats: &[Format],
+) -> Result<StateInspectionWithFormats> {
+    let mut selected = None;
+    let mut rendered = Vec::new();
+    visit_session_states_with_engine(session, &AtomicBool::new(false), |record, state, engine| {
+        if state_selector_matches(&selector, record) {
+            selected = Some(StateInspection {
+                record: record.clone(),
+                state: state.clone(),
+            });
+            rendered.clear();
+            for format in formats {
+                rendered.push((*format, engine.format(*format)?));
+            }
+        }
+        return Ok(true);
+    })?;
+    let inspection =
+        selected.ok_or_else(|| return invalid_replay("no semantic state matches the selector"))?;
+    return Ok((inspection, rendered));
+}
+
 pub(super) fn replay_with(
     log: &EventLog,
     source_range: Option<SourceRange>,
@@ -645,12 +781,24 @@ pub(super) fn replay_with(
     return replay_with_limits(log, source_range, DEFAULT_REPLAY_LIMITS, state_sink);
 }
 
-pub(super) fn replay_for_index(
-    log: &EventLog,
+pub(super) fn replay_for_index<'record>(
+    header: &EventLogHeader,
+    records: impl Iterator<Item = Result<Cow<'record, EventRecord>>>,
     source_range: Option<SourceRange>,
-    state_sink: impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<()>,
+    mut state_sink: impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<()>,
 ) -> Result<ReplayArtifacts> {
-    return replay_with_limits(log, source_range, INDEX_REPLAY_LIMITS, state_sink);
+    return replay_records(
+        ReplayBuilder::new(header, INDEX_REPLAY_LIMITS)?,
+        records,
+        source_range,
+        true,
+        None,
+        None,
+        |record, state, engine| {
+            state_sink(record, state, engine)?;
+            return Ok(true);
+        },
+    );
 }
 
 fn replay_with_seed(
@@ -711,8 +859,23 @@ pub(super) fn replay_with_seed_and_limits(
     );
 }
 
+#[cfg(test)]
 pub(super) fn validate_replay_seed(log: &EventLog, seed: &ReplaySeed) -> Result<()> {
     drop(ReplayBuilder::from_seed(log, DEFAULT_REPLAY_LIMITS, seed)?);
+    return Ok(());
+}
+
+pub(super) fn validate_generated_replay_seed(
+    header: &EventLogHeader,
+    seed: &ReplaySeed,
+) -> Result<()> {
+    // Generated seeds already come from the canonical replay cursor. Only their
+    // reconstructability needs checking here; imported seeds still validate source cursors.
+    drop(ReplayBuilder::from_seed_state(
+        header,
+        DEFAULT_REPLAY_LIMITS,
+        seed,
+    )?);
     return Ok(());
 }
 
@@ -775,18 +938,89 @@ pub fn visit_session_states_while(
     cancelled: &AtomicBool,
     mut visitor: impl FnMut(&StateRecord, &SemanticState) -> Result<bool>,
 ) -> Result<()> {
-    let source = super::trust::SourceIdentity::capture(session)?;
+    return visit_session_states_with_engine(session, cancelled, |record, state, _| {
+        return visitor(record, state);
+    });
+}
+
+/// Visit byte-granular states in a half-open range without retaining history.
+///
+/// The caller must validate completed-source integrity before using partial results.
+///
+/// # Errors
+/// Rejects invalid visited records, source changes, and replay failures.
+pub fn visit_session_states_range_while(
+    session: &Path,
+    range: Option<SourceRange>,
+    cancelled: &AtomicBool,
+    mut visitor: impl FnMut(&StateRecord, &SemanticState) -> Result<bool>,
+) -> Result<()> {
+    return visit_recording_states_with_engine(
+        session,
+        cancelled,
+        true,
+        range,
+        |record, state, _| return visitor(record, state),
+    );
+}
+
+fn visit_session_states_with_engine(
+    session: &Path,
+    cancelled: &AtomicBool,
+    visitor: impl FnMut(&StateRecord, &SemanticState, &GhosttyVt) -> Result<bool>,
+) -> Result<()> {
+    return visit_recording_states_with_engine(session, cancelled, true, None, visitor);
+}
+
+/// Visit exact states in an owned, verified finite prefix without claiming completion.
+///
+/// # Errors
+/// Rejects modified snapshots, replay failures, and cancellation.
+pub fn visit_snapshot_states_while(
+    snapshot: &SessionSnapshot,
+    range: Option<SourceRange>,
+    cancelled: &AtomicBool,
+    mut visitor: impl FnMut(&StateRecord, &SemanticState) -> Result<bool>,
+) -> Result<()> {
+    return visit_recording_states_with_engine(
+        snapshot.path(),
+        cancelled,
+        false,
+        range,
+        |record, state, _| return visitor(record, state),
+    );
+}
+
+pub(crate) fn visit_recording_states_range_while(
+    session: &Path,
+    completed: bool,
+    range: Option<SourceRange>,
+    cancelled: &AtomicBool,
+    mut visitor: impl FnMut(&StateRecord, &SemanticState) -> Result<bool>,
+) -> Result<()> {
+    return visit_recording_states_with_engine(
+        session,
+        cancelled,
+        completed,
+        range,
+        |record, state, _| return visitor(record, state),
+    );
+}
+
+fn visit_recording_states_with_engine(
+    session: &Path,
+    cancelled: &AtomicBool,
+    completed: bool,
+    range: Option<SourceRange>,
+    mut visitor: impl FnMut(&StateRecord, &SemanticState, &GhosttyVt) -> Result<bool>,
+) -> Result<()> {
+    let source = if completed {
+        super::trust::SourceIdentity::capture(session)?
+    } else {
+        super::trust::SourceIdentity::capture_candidate(session)?
+    };
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
-    let builder = ReplayBuilder::new(
-        cursor.header(),
-        ReplayLimits {
-            output_bytes: 1024 * 1024 * 1024,
-            capture_attempts: 1024 * 1024 * 1024 + 1_000_001,
-            state_count: 1024 * 1024 * 1024 + 1_000_001,
-            cell_work: 1024 * 1024 * 1024 * 1_000_000,
-            elapsed: Duration::from_secs(3600),
-        },
-    )?;
+    let builder = ReplayBuilder::new(cursor.header(), INDEX_REPLAY_LIMITS)?;
     let mut exhausted = false;
     let records = from_fn(|| {
         let next = cursor.next_record().transpose();
@@ -797,16 +1031,20 @@ pub fn visit_session_states_while(
     replay_records(
         builder,
         records,
-        None,
+        range,
         false,
         None,
         Some(cancelled),
-        |record, state, _| return visitor(&record, state),
+        |record, state, engine| return visitor(&record, state, engine),
     )?;
     if exhausted {
         let _pending = cursor.finish()?;
     }
-    source.check(session)?;
+    if completed {
+        source.check(session)?;
+    } else if source != super::trust::SourceIdentity::capture_candidate(session)? {
+        return Err(invalid_replay("canonical prefix changed during replay"));
+    }
     return Ok(());
 }
 
@@ -1180,6 +1418,15 @@ impl ReplayBuilder {
                 }
             }
         }
+        return Self::from_seed_state(&log.header, limits, seed);
+    }
+
+    fn from_seed_state(
+        header: &EventLogHeader,
+        limits: ReplayLimits,
+        seed: &ReplaySeed,
+    ) -> Result<Self> {
+        let record = &seed.inspection.record;
         let state = &seed.inspection.state;
         if semantic_state_hash(state)? != record.state_hash {
             return Err(invalid_replay(
@@ -1187,7 +1434,7 @@ impl ReplayBuilder {
             ));
         }
         let mut engine = GhosttyVt::new(state.cols, state.rows, 100_000)?;
-        engine.apply_terminal_colors(&log.header.colors)?;
+        engine.apply_terminal_colors(&header.colors)?;
         engine.write(&seed.engine_vt);
         drop(engine.take_responses());
         engine.write(b"\x1b]2;");

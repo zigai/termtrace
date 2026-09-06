@@ -3,6 +3,7 @@
 use std::{process::Child, sync::mpsc::channel};
 
 use crate::support::*;
+use termtrace_engine::timeline::resolve_session_prefix_source_selection;
 
 #[test]
 fn output_raw_reproduces_exact_canonical_child_bytes() {
@@ -445,6 +446,7 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
     };
     *label = "forgery".to_owned();
     let body = serde_json::to_vec(&EventBody {
+        observed_monotonic_ns: record.observed_monotonic_ns,
         seq: record.seq,
         monotonic_ns: record.monotonic_ns,
         event: &record.event,
@@ -686,4 +688,25 @@ fn marker_listing_distinguishes_each_repeated_label_occurrence() {
     );
     assert_eq!(markers[0]["occurrence_index"], 1);
     assert_eq!(markers[1]["occurrence_index"], 2);
+    let first_seq = markers[0]["event_seq"]
+        .as_u64()
+        .expect("first marker event");
+    let first_time = markers[0]["monotonic_ns"]
+        .as_u64()
+        .expect("first marker time");
+    let selected = resolve_session_prefix_source_selection(
+        &session,
+        Some(first_seq + 1),
+        None,
+        None,
+        Some("repeated"),
+        None,
+    )
+    .expect("later duplicate excluded by finite prefix")
+    .expect("selected range");
+    assert_eq!(selected.start_monotonic_ns, first_time);
+    assert_eq!(selected.end_monotonic_ns, first_time + 1);
+    assert!(resolve_session_prefix_source_selection(
+        &session, None, None, None, Some("repeated"), None,
+    ).is_err());
 }

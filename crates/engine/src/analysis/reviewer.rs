@@ -6,13 +6,14 @@ use std::{
     os::unix::fs::DirBuilderExt as _,
     path::{Path, PathBuf},
     process,
+    sync::atomic::AtomicBool,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use termtrace_evidence::{
     artifact::{commit_directory, write_secure},
-    event_log::EventLog,
-    session::validate_completed_log,
+    event_log::EventLogCursor,
+    session::validate_completed_session,
 };
 use termtrace_model::{
     execution::event::Event,
@@ -24,9 +25,9 @@ use termtrace_model::{
 
 use crate::{
     Error, Result,
-    analysis::diagnostics::{ValidatedVisualManifest, native_correlations},
+    analysis::diagnostics::{ValidatedVisualManifest, visit_native_correlations},
     observation::state_text,
-    replay::{inspect, visit_states},
+    replay::{inspect_completed_session, visit_session_states_while},
 };
 
 mod pager;
@@ -40,42 +41,41 @@ pub fn summarize(
     visual_evidence: &[ValidatedVisualManifest],
 ) -> Result<ReviewSummary> {
     let session = session.as_ref().to_path_buf();
-    let log = EventLog::read(session.join("events.jsonl"))?;
-    validate_completed_log(&session, &log)?;
+    let completion = validate_completed_session(&session)?;
     let mut state_count = 0_u64;
     let mut presented_state_count = 0_u64;
     let mut final_state_hash = String::new();
-    visit_states(&log, |record, _| {
+    visit_session_states_while(&session, &AtomicBool::new(false), |record, _| {
         state_count = state_count.saturating_add(1);
         if record.presented {
             presented_state_count = presented_state_count.saturating_add(1);
         }
         final_state_hash.clone_from(&record.state_hash);
-        return Ok(());
+        return Ok(true);
     })?;
     if state_count == 0 {
         return Err(review_error(
             "completed session contains no semantic states",
         ));
     }
-    let native_correlation_count = u64::try_from(
-        native_correlations(&log, visual_evidence)
-            .values()
-            .map(Vec::len)
-            .sum::<usize>(),
-    )
-    .unwrap_or(u64::MAX);
+    let mut native_correlation_count = 0_u64;
+    visit_native_correlations(completion.session_id, None, visual_evidence, |_| {
+        native_correlation_count = native_correlation_count.saturating_add(1);
+    });
+    let mut marker_count = 0_u64;
+    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    while let Some(record) = cursor.next_record()? {
+        if matches!(record.event, Event::Marker { .. }) {
+            marker_count = marker_count.saturating_add(1);
+        }
+    }
+    cursor.validate_boundary(completion.event_count, &completion.final_event_hash)?;
+    let _pending = cursor.finish()?;
     return Ok(ReviewSummary {
         canonical_session: session,
         state_count,
         presented_state_count,
-        marker_count: u64::try_from(
-            log.events
-                .iter()
-                .filter(|record| matches!(record.event, Event::Marker { .. }))
-                .count(),
-        )
-        .unwrap_or(u64::MAX),
+        marker_count,
         native_correlation_count,
         final_state_hash,
         rendering_policy: "semantic_cells_only_no_raw_replay".to_owned(),
@@ -86,10 +86,9 @@ pub fn summarize(
 pub fn search(session: impl AsRef<Path>, query: &str) -> Result<ReviewSearchResult> {
     validate_query(query)?;
     let session = session.as_ref().to_path_buf();
-    let log = EventLog::read(session.join("events.jsonl"))?;
-    validate_completed_log(&session, &log)?;
+    validate_completed_session(&session)?;
     let mut matches: Vec<ReviewSearchMatch> = Vec::new();
-    visit_states(&log, |record, state| {
+    visit_session_states_while(&session, &AtomicBool::new(false), |record, state| {
         if state_text(state).contains(query) {
             matches.push(ReviewSearchMatch {
                 state_id: record.state_id,
@@ -99,7 +98,7 @@ pub fn search(session: impl AsRef<Path>, query: &str) -> Result<ReviewSearchResu
                 selector: format!("--state {}", record.state_id),
             });
         }
-        return Ok(());
+        return Ok(true);
     })?;
     return Ok(ReviewSearchResult {
         canonical_session: session,
@@ -115,11 +114,11 @@ pub fn export_state(
     destination: impl AsRef<Path>,
 ) -> Result<ReviewExportManifest> {
     let session = session.as_ref().to_path_buf();
-    let log = EventLog::read(session.join("events.jsonl"))?;
-    validate_completed_log(&session, &log)?;
-    let inspection = inspect(&log, StateSelector::StateId(state_id)).map_err(|error| {
-        return review_error(format!("review state {state_id} does not exist: {error}"));
-    })?;
+    let completion = validate_completed_session(&session)?;
+    let inspection = inspect_completed_session(&session, StateSelector::StateId(state_id))
+        .map_err(|error| {
+            return review_error(format!("review state {state_id} does not exist: {error}"));
+        })?;
     let state_json = serde_json::to_vec_pretty(&inspection).map_err(|source_error| {
         return Error::InvalidJson {
             path: PathBuf::from("<review-state>"),
@@ -146,7 +145,7 @@ pub fn export_state(
         &temporary,
         destination,
         &session,
-        &log,
+        &completion.final_event_hash,
         &inspection.record,
         state_json,
         screen,
@@ -161,7 +160,7 @@ fn export_into(
     temporary: &Path,
     destination: &Path,
     session: &Path,
-    log: &EventLog,
+    source_final_event_hash: &str,
     state: &StateRecord,
     state_json: Vec<u8>,
     screen: String,
@@ -173,10 +172,7 @@ fn export_into(
         canonical_session: session.to_path_buf(),
         state_id: state.state_id,
         state_hash: state.state_hash.clone(),
-        source_final_event_hash: log.events.last().map_or_else(
-            || return log.header.session_manifest_hash.clone(),
-            |record| return record.hash.clone(),
-        ),
+        source_final_event_hash: source_final_event_hash.to_owned(),
         state_json_blake3: blake3::hash(&state_json).to_hex().to_string(),
         screen_text_blake3: blake3::hash(screen.as_bytes()).to_hex().to_string(),
     };

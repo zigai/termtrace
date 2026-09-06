@@ -11,7 +11,8 @@ mod tests;
 
 pub use pipeline::{export, preview};
 pub use planning::{
-    VideoIdlePolicy, markers, plan, plan_with_source, video_clip_ranges, video_clips,
+    VideoIdlePolicy, markers, plan, plan_with_source, video_clip_ranges, video_clip_ranges_session,
+    video_clips,
 };
 pub use termtrace_model::artifact::presentation::{
     AnnotationAnchor, AnnotationPosition, AnnotationScope, AnnotationStyle, CaptionLayout,

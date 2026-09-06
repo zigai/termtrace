@@ -1,4 +1,4 @@
-use std::str::from_utf8;
+use std::{str::from_utf8, sync::atomic::AtomicBool};
 
 use proptest::{collection, prelude::*};
 use uuid::Uuid;
@@ -6,7 +6,10 @@ use zstd::stream::decode_all;
 
 use super::engine::{inspect_latest_presented_fast, inspect_latest_presented_fast_with_limits};
 use super::*;
-use termtrace_evidence::{artifact::create_private_directory, event_log::EventLog};
+use termtrace_evidence::{
+    artifact::create_private_directory,
+    event_log::{EventLog, EventLogWriter, SessionClock},
+};
 use termtrace_model::{
     execution::event::{Event, EventLogHeader, EventRecord},
     terminal::state::{DirtyState, WideKind},
@@ -27,6 +30,7 @@ fn output_log(data: &[u8]) -> EventLog {
             "xterm-ghostty",
         ),
         events: vec![EventRecord {
+            observed_monotonic_ns: None,
             seq: 0,
             monotonic_ns: 1,
             prev_hash: "0".repeat(64),
@@ -47,6 +51,43 @@ fn output_log_with_geometry(data: &[u8], cols: u16, rows: u16) -> EventLog {
     log.header.pixel_width = cols.saturating_mul(8);
     log.header.pixel_height = rows.saturating_mul(16);
     return log;
+}
+
+#[test]
+fn explicit_live_prefix_excludes_later_output_and_hidden_sync_bytes() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let session = directory.path().join("session");
+    create_private_directory(&session).expect("private session");
+    let path = session.join("events.jsonl");
+    let clock = SessionClock::now().expect("clock");
+    let mut header = output_log(b"").header;
+    header.started_unix_ns = clock.started_unix_ns();
+    let mut writer = EventLogWriter::create(&path, &header, clock).expect("canonical writer");
+    writer
+        .append(Event::Output {
+            data: ByteString::from(b"OLD\x1b[?2026hHIDDEN".as_slice()),
+        })
+        .expect("first output");
+    let boundary = writer.durable_boundary();
+    writer
+        .append(Event::Output {
+            data: ByteString::from(b"\x1b[?2026lNEW".as_slice()),
+        })
+        .expect("later output");
+    let (_, endpoint) = inspect_latest_presented_prefix(&path, &boundary, &AtomicBool::new(false))
+        .expect("frozen prefix");
+    let expected =
+        inspect_latest_presented_fast(&output_log(b"OLD")).expect("expected visible state");
+    assert_eq!(endpoint.state_hash, expected.state_hash);
+    assert_eq!(endpoint.event_seq, Some(0));
+    assert_eq!(endpoint.event_byte_offset, Some(2));
+    let mut wrong_bytes = boundary.clone();
+    wrong_bytes.output_bytes += 1;
+    assert!(inspect_latest_presented_prefix(&path, &wrong_bytes, &AtomicBool::new(false)).is_err());
+    let mut wrong_hash = boundary.clone();
+    wrong_hash.event_hash = "0".repeat(64);
+    assert!(inspect_latest_presented_prefix(&path, &wrong_hash, &AtomicBool::new(false)).is_err());
+    assert!(inspect_latest_presented_prefix(&path, &boundary, &AtomicBool::new(true)).is_err());
 }
 
 #[test]
@@ -71,6 +112,7 @@ fn fast_endpoint_budgets_deferred_snapshots_across_many_output_records() {
     log.events = (0_u64..256)
         .map(|seq| {
             return EventRecord {
+                observed_monotonic_ns: None,
                 seq,
                 monotonic_ns: seq.saturating_add(1),
                 prev_hash: "0".repeat(64),

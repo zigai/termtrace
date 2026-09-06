@@ -1,11 +1,14 @@
 use std::{
-    collections::{HashMap, HashSet},
     fs::{File, OpenOptions},
-    io::{BufRead as _, BufReader, BufWriter, Write as _},
+    io::{
+        BufRead as _, BufReader, BufWriter, ErrorKind, Read as _, Seek as _, SeekFrom, Write as _,
+    },
     os::unix::fs::OpenOptionsExt as _,
     path::{Path, PathBuf},
+    str,
 };
 
+use rusqlite::{Connection, OptionalExtension as _, params};
 use serde::{Deserialize, Serialize};
 use termtrace_model::{
     execution::event::Event,
@@ -17,7 +20,11 @@ use termtrace_model::{
 };
 use uuid::Uuid;
 
-use crate::storage::{Error, Result, event_log::EventLogCursor};
+use crate::storage::{
+    Error, Result,
+    event_log::EventLogCursor,
+    identifier_index::{IdentifierSet, RequestIndex, RequestPosition, index_error},
+};
 
 pub use termtrace_model::execution::request_journal::{
     MUTATION_JOURNAL_FORMAT, MUTATION_JOURNAL_NAME, MUTATION_JOURNAL_VERSION,
@@ -55,6 +62,7 @@ pub struct MutationJournal {
     next_seq: u64,
     encoded_bytes: u64,
     previous_hash: String,
+    index: RequestIndex,
 }
 
 impl MutationJournal {
@@ -74,7 +82,9 @@ impl MutationJournal {
         file.sync_data()
             .map_err(|source| return Error::filesystem(&path, source))?;
         sync_parent_directory(&path)?;
+        let index = RequestIndex::create(&session.join("mutation-index.sqlite3"))?;
         return Ok(Self {
+            index,
             path,
             writer: BufWriter::new(file),
             next_seq: 0,
@@ -101,7 +111,15 @@ impl MutationJournal {
         return self
             .encoded_bytes
             .checked_add(MAX_MUTATION_JOURNAL_RECORD_BYTES)
-            .is_some_and(|bytes| return bytes <= MAX_MUTATION_JOURNAL_BYTES);
+            .is_some();
+    }
+
+    /// Atomically reserve operation identifiers for the lifetime of this recording.
+    ///
+    /// # Errors
+    /// Returns an error if the disk index cannot commit the reservation.
+    pub fn reserve_operations(&mut self, identifiers: &[Uuid]) -> Result<bool> {
+        return self.index.reserve(identifiers);
     }
 
     /// Find a completed request by its correlation identifier.
@@ -113,21 +131,37 @@ impl MutationJournal {
         self.writer
             .flush()
             .map_err(|source| return Error::filesystem(&self.path, source))?;
-        let reader = BufReader::new(
-            File::open(&self.path)
-                .map_err(|source| return Error::filesystem(&self.path, source))?,
-        );
-        let mut previous_hash = "0".repeat(64);
-        let mut matched = None;
-        for (index, line) in reader.lines().enumerate() {
-            let line = line.map_err(|source| return Error::filesystem(&self.path, source))?;
-            let record = decode_record(&line, index, &previous_hash, &self.path)?;
-            previous_hash = record.hash.clone();
-            if matched.is_none() && record.request_id == request_id {
-                matched = Some(record);
-            }
+        let Some(position) = self.index.lookup(request_id)? else {
+            return Ok(None);
+        };
+        if position.length > MAX_MUTATION_JOURNAL_RECORD_BYTES {
+            return Err(Error::invalid("mutation index record length exceeds limit"));
         }
-        return Ok(matched);
+        let mut file = File::open(&self.path)
+            .map_err(|source| return Error::filesystem(&self.path, source))?;
+        file.seek(SeekFrom::Start(position.offset))
+            .map_err(|source| return Error::filesystem(&self.path, source))?;
+        let mut line = String::new();
+        file.take(position.length)
+            .read_to_string(&mut line)
+            .map_err(|source| return Error::filesystem(&self.path, source))?;
+        let sequence = usize::try_from(position.sequence)
+            .map_err(|_| return Error::invalid("mutation sequence exceeds platform range"))?;
+        let record = decode_record(
+            line.trim_end_matches('\n'),
+            sequence,
+            &position.previous_hash,
+            &self.path,
+        )?;
+        if record.request_id != request_id
+            || record.hash != position.hash
+            || u64::try_from(line.len()).unwrap_or(u64::MAX) != position.length
+        {
+            return Err(Error::invalid(
+                "mutation journal does not match its committed index",
+            ));
+        }
+        return Ok(Some(record));
     }
 
     /// Durably append a completed request and its canonical event boundary.
@@ -196,10 +230,7 @@ impl MutationJournal {
         encoded.push(b'\n');
         let record_bytes = u64::try_from(encoded.len()).unwrap_or(u64::MAX);
         if record_bytes > MAX_MUTATION_JOURNAL_RECORD_BYTES
-            || self
-                .encoded_bytes
-                .checked_add(record_bytes)
-                .is_none_or(|bytes| return bytes > MAX_MUTATION_JOURNAL_BYTES)
+            || self.encoded_bytes.checked_add(record_bytes).is_none()
         {
             return Err(Error::invalid(
                 "mutation journal byte budget would be exceeded",
@@ -210,6 +241,16 @@ impl MutationJournal {
             .and_then(|()| return self.writer.flush())
             .and_then(|()| return self.writer.get_ref().sync_data())
             .map_err(|source| return Error::filesystem(&self.path, source))?;
+        self.index.insert(
+            request_id,
+            &RequestPosition {
+                offset: self.encoded_bytes,
+                length: record_bytes,
+                sequence: record.seq,
+                previous_hash: record.prev_hash.clone(),
+                hash: record.hash.clone(),
+            },
+        )?;
         self.encoded_bytes = self.encoded_bytes.saturating_add(record_bytes);
         self.next_seq = self
             .next_seq
@@ -285,6 +326,72 @@ pub fn read_mutation_journal(path: &Path) -> Result<Vec<MutationJournalRecord>> 
     return Ok(records);
 }
 
+/// Streaming journal reader with a per-record bound and no lifetime allocation limit.
+pub struct MutationJournalCursor {
+    path: PathBuf,
+    reader: Option<BufReader<File>>,
+    sequence: usize,
+    previous_hash: String,
+}
+
+impl MutationJournalCursor {
+    /// Open a journal; an absent journal is an empty stream.
+    ///
+    /// # Errors
+    /// Returns an error for an inaccessible or nonregular journal.
+    pub fn open(path: &Path) -> Result<Self> {
+        let reader = match fs_err::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_file() => Some(BufReader::new(
+                File::open(path).map_err(|source| return Error::filesystem(path, source))?,
+            )),
+            Ok(_) => return Err(Error::invalid("mutation journal must be a regular file")),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(source) => return Err(Error::filesystem(path, source)),
+        };
+        return Ok(Self {
+            path: path.to_path_buf(),
+            reader,
+            sequence: 0,
+            previous_hash: "0".repeat(64),
+        });
+    }
+
+    /// Read and hash-validate one complete record.
+    ///
+    /// # Errors
+    /// Returns an error for malformed, truncated, or oversized records.
+    pub fn next_record(&mut self) -> Result<Option<MutationJournalRecord>> {
+        let Some(reader) = self.reader.as_mut() else {
+            return Ok(None);
+        };
+        let mut line = Vec::new();
+        let bytes = reader
+            .by_ref()
+            .take(MAX_MUTATION_JOURNAL_RECORD_BYTES + 1)
+            .read_until(b'\n', &mut line)
+            .map_err(|source| return Error::filesystem(&self.path, source))?;
+        if bytes == 0 {
+            return Ok(None);
+        }
+        if u64::try_from(bytes).unwrap_or(u64::MAX) > MAX_MUTATION_JOURNAL_RECORD_BYTES
+            || line.last() != Some(&b'\n')
+        {
+            return Err(Error::invalid(
+                "mutation journal record is oversized or unterminated",
+            ));
+        }
+        let line = str::from_utf8(&line)
+            .map_err(|_| return Error::invalid("mutation journal is not UTF-8"))?;
+        let record = decode_record(line, self.sequence, &self.previous_hash, &self.path)?;
+        self.sequence = self
+            .sequence
+            .checked_add(1)
+            .ok_or_else(|| return Error::invalid("mutation journal sequence overflow"))?;
+        self.previous_hash = record.hash.clone();
+        return Ok(Some(record));
+    }
+}
+
 /// Validate a session's mutation journal against its canonical event log.
 ///
 /// Returns the number of validated journal records.
@@ -294,8 +401,34 @@ pub fn read_mutation_journal(path: &Path) -> Result<Vec<MutationJournalRecord>> 
 /// Returns an error when journal records or their event boundaries are inconsistent.
 pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
     let path = session.join(MUTATION_JOURNAL_NAME);
-    let records = read_mutation_journal(&path)?;
-    if records.is_empty() {
+    let mut journal = MutationJournalCursor::open(&path)?;
+    let database = Connection::open("").map_err(index_error)?;
+    database
+        .execute_batch(
+            "PRAGMA cache_size=-1024; PRAGMA journal_mode=OFF; PRAGMA temp_store=FILE;
+        CREATE TABLE boundaries (seq INTEGER PRIMARY KEY, hash TEXT);
+        CREATE TABLE operations (seq INTEGER PRIMARY KEY, id BLOB NOT NULL);",
+        )
+        .map_err(index_error)?;
+    let mut identifiers = IdentifierSet::default();
+    let mut count = 0_u64;
+    let mut final_hash = String::new();
+    while let Some(record) = journal.next_record()? {
+        if !identifiers.insert(record.request_id)? {
+            return Err(Error::invalid(
+                "mutation journal repeats a request identifier",
+            ));
+        }
+        database
+            .execute(
+                "INSERT OR IGNORE INTO boundaries (seq) VALUES (?1)",
+                [record.event_end_seq],
+            )
+            .map_err(index_error)?;
+        count += 1;
+        final_hash = record.hash;
+    }
+    if count == 0 {
         return Ok(0);
     }
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
@@ -307,59 +440,72 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
         };
     })?;
     let header_hash = blake3::hash(&header_bytes).to_hex().to_string();
-    let boundaries: HashSet<u64> = records
-        .iter()
-        .map(|record| return record.event_end_seq)
-        .collect();
-    let mut hashes = HashMap::new();
-    hashes.insert(0, header_hash);
-    let mut operations = Vec::new();
-    let mut event_count = 0;
-    while let Some(event) = cursor.next_record()? {
-        event_count = event.seq + 1;
-        if let Some(operation_id) = event_operation_id(&event.event) {
-            operations.push((event.seq, operation_id));
-        }
-        if boundaries.contains(&event_count) {
-            hashes.insert(event_count, event.hash);
+    database
+        .execute("UPDATE boundaries SET hash=?1 WHERE seq=0", [&header_hash])
+        .map_err(index_error)?;
+    {
+        let mut boundary = database
+            .prepare("UPDATE boundaries SET hash=?1 WHERE seq=?2")
+            .map_err(index_error)?;
+        let mut operation = database
+            .prepare("INSERT INTO operations VALUES (?1, ?2)")
+            .map_err(index_error)?;
+        while let Some(event) = cursor.next_record()? {
+            boundary
+                .execute(params![event.hash, event.seq + 1])
+                .map_err(index_error)?;
+            if let Some(id) = event_operation_id(&event.event) {
+                operation
+                    .execute(params![event.seq, id.as_bytes().as_slice()])
+                    .map_err(index_error)?;
+            }
         }
     }
     let _pending = cursor.finish()?;
-    let mut request_ids: HashSet<Uuid> = HashSet::new();
-    for record in &records {
-        if !request_ids.insert(record.request_id) {
-            return Err(Error::invalid(
-                "mutation journal repeats a request identifier",
-            ));
-        }
-        if record.event_end_seq > event_count {
-            return Err(Error::invalid(
-                "mutation journal event range exceeds the canonical log",
-            ));
-        }
-        let expected_hash = hashes
-            .get(&record.event_end_seq)
-            .ok_or_else(|| return Error::invalid("journal event boundary is missing"))?;
-        if record.event_hash != *expected_hash {
+    let mut journal = MutationJournalCursor::open(&path)?;
+    let mut verified_count = 0;
+    let mut verified_hash = String::new();
+    while let Some(record) = journal.next_record()? {
+        let expected_hash: Option<String> = database
+            .query_row(
+                "SELECT hash FROM boundaries WHERE seq=?1",
+                [record.event_end_seq],
+                |row| return row.get(0),
+            )
+            .optional()
+            .map_err(index_error)?
+            .flatten();
+        if expected_hash.as_ref() != Some(&record.event_hash) {
             return Err(Error::invalid(
                 "mutation journal event hash does not match the canonical boundary",
             ));
         }
         if record.event_end_seq > record.event_start_seq {
-            let mut actual_operation_ids: Vec<Uuid> = Vec::new();
-            let start = operations.partition_point(|(seq, _)| return *seq < record.event_start_seq);
-            for operation_id in operations
-                .get(start..)
-                .unwrap_or_default()
-                .iter()
-                .take_while(|(seq, _)| return *seq < record.event_end_seq)
-                .map(|(_, operation_id)| return *operation_id)
-            {
-                if actual_operation_ids.last() != Some(&operation_id) {
-                    actual_operation_ids.push(operation_id);
+            let mut statement = database
+                .prepare("SELECT id FROM operations WHERE seq>=?1 AND seq<?2 ORDER BY seq")
+                .map_err(index_error)?;
+            let mut rows = statement
+                .query([record.event_start_seq, record.event_end_seq])
+                .map_err(index_error)?;
+            let mut previous = None;
+            let mut actual_count = 0;
+            while let Some(row) = rows.next().map_err(index_error)? {
+                let bytes: Vec<u8> = row.get(0).map_err(index_error)?;
+                let id = Uuid::from_slice(&bytes).map_err(|_| {
+                    return Error::invalid("canonical operation identifier index is invalid");
+                })?;
+                if previous == Some(id) {
+                    continue;
                 }
+                if record.operation_ids.get(actual_count) != Some(&id) {
+                    return Err(Error::invalid(
+                        "mutation journal operation IDs do not match its canonical range",
+                    ));
+                }
+                previous = Some(id);
+                actual_count += 1;
             }
-            if actual_operation_ids.is_empty() || record.operation_ids != actual_operation_ids {
+            if actual_count == 0 || actual_count != record.operation_ids.len() {
                 return Err(Error::invalid(
                     "mutation journal operation IDs do not match its canonical range",
                 ));
@@ -377,8 +523,15 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
                 "mutation response boundary does not match its canonical range",
             ));
         }
+        verified_count += 1;
+        verified_hash = record.hash;
     }
-    return Ok(u64::try_from(records.len()).unwrap_or(u64::MAX));
+    if verified_count != count || verified_hash != final_hash {
+        return Err(Error::invalid(
+            "mutation journal changed during verification",
+        ));
+    }
+    return Ok(count);
 }
 
 fn response_boundaries(response: &ControlResponse) -> Option<&ActorBoundaries> {
@@ -414,7 +567,8 @@ fn event_operation_id(event: &Event) -> Option<Uuid> {
         | Event::ResizeResult { operation_id, .. }
         | Event::SignalIntent { operation_id, .. }
         | Event::SignalResult { operation_id, .. }
-        | Event::Marker { operation_id, .. } => Some(*operation_id),
+        | Event::Marker { operation_id, .. }
+        | Event::Application { operation_id, .. } => Some(*operation_id),
         _ => None,
     };
 }

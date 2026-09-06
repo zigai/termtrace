@@ -3,6 +3,7 @@ pub(crate) mod event_log;
 pub(crate) mod session;
 
 mod error;
+pub(crate) mod identifier_index;
 
 pub(crate) use error::{CompletionIntegrityError, CompletionIntegrityKind};
 pub use error::{Error, Result};

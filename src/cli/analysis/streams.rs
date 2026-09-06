@@ -1,8 +1,7 @@
 use crate::cli::output::ResponseWriter;
 
 use std::{
-    borrow::Cow,
-    io::{BufRead as _, BufReader, BufWriter, Seek as _, SeekFrom, Write as _},
+    io::{self, BufRead as _, BufReader, BufWriter, Seek as _, SeekFrom, Write as _},
     path::Path,
     process::ExitCode,
     thread,
@@ -10,11 +9,9 @@ use std::{
 };
 
 use miette::{IntoDiagnostic as _, Result};
-use termtrace_engine::timeline::resolve_source_selection;
+use termtrace_engine::timeline::resolve_session_source_selection;
 use termtrace_evidence::{
-    artifact::write_secure,
-    event_log::{EventLog, EventLogCursor},
-    session::{validate_completed_log, validate_completed_session},
+    artifact::write_secure, event_log::EventLogCursor, session::validate_completed_session,
 };
 use termtrace_model::{
     execution::event::{Event, EventProjection, EventRecord, event_type},
@@ -27,8 +24,8 @@ use termtrace_terminal::ControlStripper;
 use crate::cli::{
     analysis::args::{EventsArgs, OutputArgs},
     output::{
-        paginate, projection_warning, write_follow_json_line, write_follow_stdout, write_json_line,
-        write_projection_warning, write_stdout,
+        projection_warning, response_output, write_follow_json_line, write_follow_stdout,
+        write_json_line, write_projection_warning,
     },
     session_helpers::resolve_session_path,
 };
@@ -61,17 +58,16 @@ pub(in crate::cli) fn run_output(
             arguments.strip_controls,
         );
     }
-    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
-    let completion = validate_completed_log(&session, &log).into_diagnostic()?;
-    let time_range = resolve_source_selection(
-        &log,
+    let completion = validate_completed_session(&session).into_diagnostic()?;
+    let time_range = resolve_session_source_selection(
+        &session,
         arguments.range.start_monotonic_ns,
         arguments.range.end_monotonic_ns,
         arguments.range.from_marker.as_deref(),
         arguments.range.to_marker.as_deref(),
     )
     .into_diagnostic()?;
-    let event_count = u64::try_from(log.events.len()).unwrap_or(u64::MAX);
+    let event_count = completion.event_count;
     let from_event = arguments.from_event_seq.unwrap_or(0);
     let to_event = arguments.to_event_seq.unwrap_or(event_count);
     if from_event > to_event || to_event > event_count {
@@ -79,50 +75,60 @@ pub(in crate::cli) fn run_output(
             "output event range must satisfy 0 <= FROM <= TO <= {event_count}"
         ));
     }
-    let mut output = Vec::new();
-    for record in &log.events {
-        if record.seq < from_event
-            || record.seq >= to_event
-            || time_range.is_some_and(|range| return !range.contains(record.monotonic_ns))
-        {
-            continue;
+    let mut cursor = EventLogCursor::open(session.join("events.jsonl")).into_diagnostic()?;
+    let session_id = cursor.header().session_id;
+    let mut staged = tempfile::tempfile().into_diagnostic()?;
+    let mut source_hash = blake3::Hasher::new();
+    let mut output_hash = blake3::Hasher::new();
+    let mut source_bytes = 0_u64;
+    let mut output_bytes = 0_u64;
+    let mut stripper = ControlStripper::default();
+    {
+        let mut writer = BufWriter::new(&mut staged);
+        while let Some(record) = cursor.next_record().into_diagnostic()? {
+            if record.seq < from_event
+                || record.seq >= to_event
+                || time_range.is_some_and(|range| return !range.contains(record.monotonic_ns))
+            {
+                continue;
+            }
+            if let Event::Output { data } = record.event {
+                source_hash.update(data.as_bytes());
+                source_bytes = source_bytes
+                    .saturating_add(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX));
+                let stripped;
+                let bytes = if arguments.strip_controls {
+                    stripped = stripper.feed(data.as_bytes());
+                    stripped.as_slice()
+                } else {
+                    data.as_bytes()
+                };
+                output_hash.update(bytes);
+                output_bytes =
+                    output_bytes.saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+                writer.write_all(bytes).into_diagnostic()?;
+            }
         }
-        if let Event::Output { data } = &record.event {
-            output.extend_from_slice(data.as_bytes());
-        }
+        writer.flush().into_diagnostic()?;
     }
-    let source = output;
-    let (output, quality, dropped, alternate_screen) = if arguments.strip_controls {
-        let mut stripper = ControlStripper::default();
-        let stripped = stripper.feed(&source);
-        let alternate_screen = stripper.alternate_screen_observed();
-        let quality = if alternate_screen {
-            OutputProjectionQuality::UnsuitableForFullScreen
-        } else {
-            OutputProjectionQuality::LossyLineOriented
-        };
-        (
-            Cow::Owned(stripped),
-            quality,
-            stripper
-                .source_byte_count()
-                .saturating_sub(stripper.output_byte_count()),
-            alternate_screen,
-        )
+    cursor
+        .validate_boundary(event_count, &completion.final_event_hash)
+        .into_diagnostic()?;
+    let _pending = cursor.finish().into_diagnostic()?;
+    let alternate_screen = stripper.alternate_screen_observed();
+    let quality = if !arguments.strip_controls {
+        OutputProjectionQuality::ExactBytes
+    } else if alternate_screen {
+        OutputProjectionQuality::UnsuitableForFullScreen
     } else {
-        (
-            Cow::Borrowed(source.as_slice()),
-            OutputProjectionQuality::ExactBytes,
-            0,
-            false,
-        )
+        OutputProjectionQuality::LossyLineOriented
     };
     let warning = projection_warning(quality);
     if let Some(path) = &arguments.manifest {
         let report = OutputProjectionReport {
             format: "termtrace-output-projection".to_owned(),
             version: 1,
-            session_id: log.header.session_id,
+            session_id,
             final_event_hash: completion.final_event_hash,
             from_event_seq: from_event,
             to_event_seq: to_event,
@@ -133,11 +139,11 @@ pub(in crate::cli) fn run_output(
             }
             .to_owned(),
             projection_quality: quality,
-            source_byte_count: u64::try_from(source.len()).unwrap_or(u64::MAX),
-            source_blake3: blake3::hash(&source).to_hex().to_string(),
-            output_byte_count: u64::try_from(output.len()).unwrap_or(u64::MAX),
-            output_blake3: blake3::hash(&output).to_hex().to_string(),
-            dropped_byte_count: dropped,
+            source_byte_count: source_bytes,
+            source_blake3: source_hash.finalize().to_hex().to_string(),
+            output_byte_count: output_bytes,
+            output_blake3: output_hash.finalize().to_hex().to_string(),
+            dropped_byte_count: source_bytes.saturating_sub(output_bytes),
             alternate_screen_observed: alternate_screen,
             warning: warning.map(str::to_owned),
         };
@@ -151,99 +157,55 @@ pub(in crate::cli) fn run_output(
             warning.unwrap_or("control-stripped output is lossy"),
         )?;
     }
-    return write_stdout(response, output);
+    staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
+    let mut output = response_output(response);
+    match io::copy(&mut staged, &mut output).and_then(|_| return output.flush()) {
+        Ok(()) => return Ok(ExitCode::SUCCESS),
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => return Ok(ExitCode::SUCCESS),
+        Err(error) => return Err(error).into_diagnostic(),
+    }
 }
 
 fn follow_output(
     response: &mut ResponseWriter,
     session: &Path,
-    mut next_event_seq: u64,
+    next_event_seq: u64,
     end_event_seq: Option<u64>,
     strip_controls: bool,
 ) -> Result<ExitCode> {
-    let mut control_failure_since = None;
     let mut stripper = ControlStripper::default();
-    loop {
-        let completion_exists = session.join("completion.json").is_file();
-        let log = if completion_exists {
-            let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
-            validate_completed_log(session, &log).into_diagnostic()?;
-            log
-        } else {
-            let response = match request(session, ControlCommand::Status) {
-                Ok(response) => {
-                    control_failure_since = None;
-                    response
-                }
-                Err(_) if session.join("completion.json").is_file() => continue,
-                Err(error) => {
-                    let since = control_failure_since.get_or_insert_with(Instant::now);
-                    if since.elapsed() >= Duration::from_secs(2) {
-                        return Err(error).into_diagnostic();
-                    }
-                    thread::sleep(Duration::from_millis(20));
-                    continue;
-                }
-            };
-            let ControlData::Status { boundaries, .. } = response else {
-                return Err(miette::miette!(
-                    "live status returned an unexpected response"
-                ));
-            };
-            EventLog::read_prefix(
-                session.join("events.jsonl"),
-                boundaries.durable.next_event_seq,
-            )
-            .into_diagnostic()?
-        };
-        let available = u64::try_from(log.events.len()).unwrap_or(u64::MAX);
-        if next_event_seq > available {
-            return Err(miette::miette!(
-                "output resume cursor {next_event_seq} exceeds durable event count {available}"
-            ));
-        }
-        let emit_end = end_event_seq.unwrap_or(available).min(available);
-        let mut bytes = Vec::new();
-        for record in &log.events {
-            if record.seq < next_event_seq || record.seq >= emit_end {
-                continue;
-            }
-            if let Event::Output { data } = &record.event {
-                bytes.extend_from_slice(data.as_bytes());
-            }
-        }
-        let emitted = if strip_controls {
-            stripper.feed(&bytes)
-        } else {
-            bytes
-        };
-        if !emitted.is_empty() && !write_follow_stdout(response, &emitted)? {
-            return Ok(ExitCode::SUCCESS);
-        }
-        next_event_seq = emit_end;
-        if completion_exists && end_event_seq.is_some_and(|end| return end > available) {
-            return Err(miette::miette!(
-                "output end cursor exceeds completed event count {available}"
-            ));
-        }
-        if end_event_seq.is_some_and(|end| return next_event_seq >= end)
-            || (completion_exists && next_event_seq >= available)
-        {
-            if strip_controls {
-                let quality = if stripper.alternate_screen_observed() {
-                    OutputProjectionQuality::UnsuitableForFullScreen
+    let result = follow_records(
+        response,
+        session,
+        next_event_seq,
+        end_event_seq,
+        &["output".to_owned()],
+        |response, record| {
+            if let Event::Output { data } = record.event {
+                let stripped;
+                let bytes = if strip_controls {
+                    stripped = stripper.feed(data.as_bytes());
+                    stripped.as_slice()
                 } else {
-                    OutputProjectionQuality::LossyLineOriented
+                    data.as_bytes()
                 };
-                write_projection_warning(
-                    response,
-                    projection_warning(quality).unwrap_or("control-stripped output is lossy"),
-                )?;
+                return write_follow_stdout(response, bytes);
             }
-            return Ok(ExitCode::SUCCESS);
-        }
-        thread::sleep(Duration::from_millis(20));
+            return Ok(true);
+        },
+    )?;
+    if strip_controls {
+        let quality = if stripper.alternate_screen_observed() {
+            OutputProjectionQuality::UnsuitableForFullScreen
+        } else {
+            OutputProjectionQuality::LossyLineOriented
+        };
+        write_projection_warning(
+            response,
+            projection_warning(quality).unwrap_or("control-stripped output is lossy"),
+        )?;
     }
+    return Ok(result);
 }
 
 pub(in crate::cli) fn run_events(
@@ -270,17 +232,16 @@ pub(in crate::cli) fn run_events(
             arguments.metadata_only,
         );
     }
-    let log = EventLog::read(session.join("events.jsonl")).into_diagnostic()?;
-    validate_completed_log(&session, &log).into_diagnostic()?;
-    let time_range = resolve_source_selection(
-        &log,
+    let completion = validate_completed_session(&session).into_diagnostic()?;
+    let time_range = resolve_session_source_selection(
+        &session,
         arguments.range.start_monotonic_ns,
         arguments.range.end_monotonic_ns,
         arguments.range.from_marker.as_deref(),
         arguments.range.to_marker.as_deref(),
     )
     .into_diagnostic()?;
-    let event_count = u64::try_from(log.events.len()).unwrap_or(u64::MAX);
+    let event_count = completion.event_count;
     let from_event = arguments.from_event_seq.unwrap_or(0);
     let to_event = arguments.to_event_seq.unwrap_or(event_count);
     if from_event > to_event || to_event > event_count {
@@ -288,47 +249,65 @@ pub(in crate::cli) fn run_events(
             "event range must satisfy 0 <= FROM <= TO <= {event_count}"
         ));
     }
-    let mut records = Vec::new();
-    for record in &log.events {
-        let kind = event_type(&record.event);
-        if record.seq < from_event
-            || record.seq >= to_event
-            || time_range.is_some_and(|range| return !range.contains(record.monotonic_ns))
-            || (!arguments.event_types.is_empty()
-                && !arguments
-                    .event_types
-                    .iter()
-                    .any(|value| return value == kind))
-        {
-            continue;
+    let mut cursor = EventLogCursor::open(session.join("events.jsonl")).into_diagnostic()?;
+    let mut staged = tempfile::tempfile().into_diagnostic()?;
+    let mut total = 0_usize;
+    let mut returned = 0_usize;
+    let mut next_event_seq = None;
+    {
+        let mut writer = BufWriter::new(&mut staged);
+        while let Some(record) = cursor.next_record().into_diagnostic()? {
+            let kind = event_type(&record.event);
+            if record.seq < from_event
+                || record.seq >= to_event
+                || time_range.is_some_and(|range| return !range.contains(record.monotonic_ns))
+                || (!arguments.event_types.is_empty()
+                    && !arguments
+                        .event_types
+                        .iter()
+                        .any(|value| return value == kind))
+            {
+                continue;
+            }
+            if total >= arguments.page.offset {
+                if arguments.page.all || returned < arguments.page.limit {
+                    serde_json::to_writer(
+                        &mut writer,
+                        &EventProjection::from_record(&record, arguments.metadata_only),
+                    )
+                    .into_diagnostic()?;
+                    writer.write_all(b"\n").into_diagnostic()?;
+                    returned = returned.saturating_add(1);
+                } else if next_event_seq.is_none() {
+                    next_event_seq = Some(record.seq);
+                }
+            }
+            total = total.saturating_add(1);
         }
-        records.push(record);
+        writer.flush().into_diagnostic()?;
     }
-    let next_event_seq = (!arguments.page.all)
-        .then(|| {
-            return records
-                .get(arguments.page.offset.saturating_add(arguments.page.limit))
-                .map(|record| return record.seq);
-        })
-        .flatten();
-    let (records, page, partial) = paginate(records, &arguments.page);
-    for record in records {
-        let projection = EventProjection::from_record(record, arguments.metadata_only);
-        write_json_line(response, &projection)?;
+    cursor
+        .validate_boundary(event_count, &completion.final_event_hash)
+        .into_diagnostic()?;
+    let _pending = cursor.finish().into_diagnostic()?;
+    staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
+    for line in BufReader::new(&mut staged).lines() {
+        let value: EventProjection =
+            serde_json::from_str(&line.into_diagnostic()?).into_diagnostic()?;
+        write_json_line(response, &value)?;
     }
-    if partial {
-        let mut page = serde_json::to_value(page).into_diagnostic()?;
-        if let Some(object) = page.as_object_mut() {
-            object.insert(
-                "next_event_seq".to_owned(),
-                serde_json::json!(next_event_seq),
-            );
-        }
+    let start = arguments.page.offset.min(total);
+    let end = start.saturating_add(returned);
+    if start != 0 || end < total {
         write_json_line(
             response,
             &serde_json::json!({
                 "kind": "output_page",
-                "page": page,
+                "page": {
+                    "offset": start, "limit": (!arguments.page.all).then_some(arguments.page.limit),
+                    "total": total, "returned": returned, "truncated": end < total,
+                    "next_offset": (end < total).then_some(end), "next_event_seq": next_event_seq,
+                },
             }),
         )?;
     }
@@ -338,10 +317,33 @@ pub(in crate::cli) fn run_events(
 fn follow_events(
     response: &mut ResponseWriter,
     session: &Path,
-    mut next_event_seq: u64,
+    next_event_seq: u64,
     end_event_seq: Option<u64>,
     event_types: &[String],
     metadata_only: bool,
+) -> Result<ExitCode> {
+    return follow_records(
+        response,
+        session,
+        next_event_seq,
+        end_event_seq,
+        event_types,
+        |response, record| {
+            return write_follow_json_line(
+                response,
+                &EventProjection::from_record(&record, metadata_only),
+            );
+        },
+    );
+}
+
+fn follow_records(
+    response: &mut ResponseWriter,
+    session: &Path,
+    mut next_event_seq: u64,
+    end_event_seq: Option<u64>,
+    event_types: &[String],
+    mut emit: impl FnMut(&mut ResponseWriter, EventRecord) -> Result<bool>,
 ) -> Result<ExitCode> {
     let mut cursor = EventLogCursor::open(session.join("events.jsonl")).into_diagnostic()?;
     let mut initialized = false;
@@ -450,10 +452,7 @@ fn follow_events(
                 break;
             }
             let record: EventRecord = serde_json::from_slice(&line).into_diagnostic()?;
-            if !write_follow_json_line(
-                response,
-                &EventProjection::from_record(&record, metadata_only),
-            )? {
+            if !emit(response, record)? {
                 return Ok(ExitCode::SUCCESS);
             }
         }

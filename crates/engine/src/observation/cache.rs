@@ -1,7 +1,7 @@
 use std::{
     fs::OpenOptions,
     io::{BufReader, ErrorKind, Read as _},
-    os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
+    os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
     sync::atomic::AtomicBool,
     time::SystemTime,
@@ -11,6 +11,7 @@ use nix::libc::O_NOFOLLOW;
 use zstd::stream::{encode_all, read::Decoder};
 
 use termtrace_evidence::artifact::{create_private_directory, sync_directory, write_secure};
+use termtrace_evidence::event_log::{CanonicalLogFile, canonical_source_fingerprint};
 use termtrace_model::{
     execution::session::SessionCompletion,
     terminal::observation::{
@@ -42,7 +43,6 @@ const MAX_REPLAY_CACHE_ENTRIES: u64 = 32;
 const MAX_REPLAY_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_REPLAY_CHECKPOINT_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_REPLAY_CHECKPOINT_DECOMPRESSED_BYTES: u64 = 128 * 1024 * 1024;
-const MAX_CANONICAL_EVENT_LOG_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 pub(super) fn load_checkpoint(
     session: &Path,
@@ -473,27 +473,18 @@ fn ensure_private_cache_directory(path: &Path) -> Result<()> {
 }
 
 fn hash_file(path: &Path, cancelled: Option<&AtomicBool>) -> Result<(u64, String)> {
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(O_NOFOLLOW)
-        .open(path)
-        .map_err(|source| {
-            return Error::Filesystem {
-                path: path.to_path_buf(),
-                source,
-            };
-        })?;
-    let metadata = file.metadata().map_err(|source| {
+    let file = CanonicalLogFile::open(path).map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),
             source,
         };
     })?;
-    if !metadata.is_file() || metadata.len() > MAX_CANONICAL_EVENT_LOG_BYTES {
-        return Err(observation_error(
-            "canonical event log must be a bounded regular file",
-        ));
-    }
+    let fingerprint = canonical_source_fingerprint(path).map_err(|source| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        };
+    })?;
     let mut reader = BufReader::new(file);
     let mut hasher = blake3::Hasher::new();
     let mut buffer = [0_u8; 16384];
@@ -509,34 +500,25 @@ fn hash_file(path: &Path, cancelled: Option<&AtomicBool>) -> Result<(u64, String
         if count == 0 {
             break;
         }
-        bytes = bytes.saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
-        if bytes > MAX_CANONICAL_EVENT_LOG_BYTES {
-            return Err(observation_error(
-                "canonical event log grew beyond the streaming byte budget",
-            ));
-        }
+        bytes = bytes
+            .checked_add(u64::try_from(count).unwrap_or(u64::MAX))
+            .ok_or_else(|| return observation_error("canonical byte count overflow"))?;
         hasher.update(
             buffer
                 .get(..count)
                 .ok_or_else(|| return observation_error("invalid hash read length"))?,
         );
     }
-    let after = reader.get_ref().metadata().map_err(|source| {
+    let after = canonical_source_fingerprint(path).map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),
             source,
         };
     })?;
-    if metadata.len() != bytes
-        || metadata.len() != after.len()
-        || metadata.mtime() != after.mtime()
-        || metadata.mtime_nsec() != after.mtime_nsec()
-        || metadata.ctime() != after.ctime()
-        || metadata.ctime_nsec() != after.ctime_nsec()
-    {
+    if fingerprint != after {
         return Err(observation_error(
             "canonical event log changed while hashing",
         ));
     }
-    return Ok((metadata.len(), hasher.finalize().to_hex().to_string()));
+    return Ok((bytes, hasher.finalize().to_hex().to_string()));
 }

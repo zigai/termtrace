@@ -12,7 +12,7 @@ mod verification;
 #[cfg(test)]
 mod tests;
 
-pub use roots::{append_artifact_root, read_artifact_roots};
+pub use roots::{append_artifact_prefix_root, append_artifact_root, read_artifact_roots};
 pub(crate) use secure_fs::sync_parent_directory;
 pub use secure_fs::{
     commit_directory, create_private_directory, finish_writer, secure_file, secure_writer,
@@ -21,7 +21,8 @@ pub use secure_fs::{
 #[cfg(test)]
 pub(crate) use verification::ArtifactMemberEnvelope;
 pub use verification::{
-    collect_artifact_members, hash_regular_file, verify_artifact_members, verify_session_artifacts,
+    collect_artifact_members, hash_regular_file, open_regular_file_nofollow,
+    verify_artifact_members, verify_session_artifacts,
 };
 
 /// Session-relative name of the append-only artifact-root catalog.

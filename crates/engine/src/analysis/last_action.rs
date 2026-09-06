@@ -7,7 +7,7 @@ use std::{
 
 use termtrace_evidence::{
     event_log::EventLog,
-    request_journal::{MUTATION_JOURNAL_NAME, read_mutation_journal},
+    request_journal::{MUTATION_JOURNAL_NAME, MutationJournalCursor},
 };
 use termtrace_model::{
     execution::event::{Event, EventRecord, OperationStatus},
@@ -17,7 +17,7 @@ use termtrace_model::{
         FindingConfidence, LastActionAnalysis, LastActionBoundary, LastActionDiagnosticsReport,
         LastActionReport,
     },
-    terminal::diff::{RowChange, ValueChange},
+    terminal::diff::{RowChange, SemanticDiff, ValueChange},
     terminal::observation::StatePoint,
     terminal::state::{ModeState, SemanticState, TerminalMode},
 };
@@ -30,6 +30,9 @@ use crate::{
     diff::diff_inspections_with_semantic_states,
     replay::{StateInspection, visit_states},
 };
+
+mod stream;
+pub use stream::analyze_last_action_session;
 
 const MAX_ACTION_WARNINGS: usize = 16;
 const MAX_ACTION_FINDINGS: usize = 32;
@@ -120,8 +123,57 @@ pub fn analyze_last_action(
         diagnostic_report.findings,
         difference.from.state_id,
         difference.to.state_id,
-        &action_token_ids,
+        action_token_ids.first().copied(),
     );
+    let source_final_event_hash = log
+        .events
+        .last()
+        .ok_or_else(|| return task_error("canonical input action has no event record"))?
+        .hash
+        .clone();
+    return Ok(finish_analysis(ActionAnalysisInputs {
+        session_id: log.header.session_id,
+        source_final_event_hash,
+        action,
+        difference,
+        before,
+        after,
+        output_generated,
+        presentation_eligible_states,
+        broad_change_percent,
+        findings,
+        findings_truncated,
+    }));
+}
+
+struct ActionAnalysisInputs {
+    session_id: Uuid,
+    source_final_event_hash: String,
+    action: LastActionBoundary,
+    difference: SemanticDiff,
+    before: SemanticState,
+    after: SemanticState,
+    output_generated: ActionOutputSummary,
+    presentation_eligible_states: u64,
+    broad_change_percent: u8,
+    findings: Vec<DiagnosticFinding>,
+    findings_truncated: bool,
+}
+
+fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
+    let ActionAnalysisInputs {
+        session_id,
+        source_final_event_hash,
+        action,
+        difference,
+        before,
+        after,
+        output_generated,
+        presentation_eligible_states,
+        broad_change_percent,
+        findings,
+        findings_truncated,
+    } = inputs;
     let (warnings, warning_limit_reached) = action_warnings(
         &difference.rows,
         &before,
@@ -137,16 +189,10 @@ pub fn analyze_last_action(
         return total.saturating_add(u64::try_from(row.cells.len()).unwrap_or(u64::MAX));
     });
     let mode_changes = changed_modes(difference.modes.as_ref());
-    let source_final_event_hash = log
-        .events
-        .last()
-        .ok_or_else(|| return task_error("canonical input action has no event record"))?
-        .hash
-        .clone();
     let inspection = LastActionReport {
         format: "termtrace-last-action".to_owned(),
         version: 1,
-        session_id: log.header.session_id,
+        session_id,
         source_final_event_hash: source_final_event_hash.clone(),
         action: action.clone(),
         from_state_id: difference.from.state_id,
@@ -164,7 +210,7 @@ pub fn analyze_last_action(
     let diagnostics = LastActionDiagnosticsReport {
         format: "termtrace-last-action-diagnostics".to_owned(),
         version: 1,
-        session_id: log.header.session_id,
+        session_id,
         source_final_event_hash,
         action,
         from_state_id: difference.from.state_id,
@@ -172,18 +218,22 @@ pub fn analyze_last_action(
         findings,
         findings_truncated,
     };
-    return Ok(LastActionAnalysis {
+    return LastActionAnalysis {
         inspection,
         diagnostics,
-    });
+    };
 }
 
 fn last_input_action(session: &Path, log: &EventLog) -> Result<LastActionBoundary> {
-    let journal = read_mutation_journal(&session.join(MUTATION_JOURNAL_NAME))?;
-    for request in journal.iter().rev() {
-        if let Some(action) = journaled_input_action(log, request)? {
-            return Ok(action);
+    let mut journal = MutationJournalCursor::open(&session.join(MUTATION_JOURNAL_NAME))?;
+    let mut last_action = None;
+    while let Some(request) = journal.next_record()? {
+        if let Some(action) = journaled_input_action(log, &request)? {
+            last_action = Some(action);
         }
+    }
+    if let Some(action) = last_action {
+        return Ok(action);
     }
     return unjournaled_input_action(log);
 }
@@ -355,7 +405,7 @@ fn bounded_action_findings(
     findings: Vec<DiagnosticFinding>,
     from_state_id: u64,
     to_state_id: u64,
-    action_token_ids: &[u64],
+    first_action_token_id: Option<u64>,
 ) -> (Vec<DiagnosticFinding>, bool) {
     let mut selected = findings
         .into_iter()
@@ -364,10 +414,9 @@ fn bounded_action_findings(
                 .state_ids
                 .iter()
                 .any(|state_id| return *state_id > from_state_id && *state_id <= to_state_id)
-                || finding
-                    .token_ids
-                    .iter()
-                    .any(|token_id| return action_token_ids.binary_search(token_id).is_ok());
+                || finding.token_ids.iter().any(|token_id| {
+                    return first_action_token_id.is_some_and(|first| return *token_id >= first);
+                });
         })
         .collect::<Vec<_>>();
     let truncated = selected.len() > MAX_ACTION_FINDINGS;

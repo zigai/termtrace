@@ -7,12 +7,82 @@ use std::{
 
 use nix::{fcntl::OFlag, sys::stat::Mode};
 
+use crate::event_log::{CanonicalBoundary, EventLogWriter, SessionClock};
 use tempfile::TempDir;
+use termtrace_model::execution::event::{Event, EventLogHeader};
+use termtrace_model::value::ByteString;
+use uuid::Uuid;
 
 use super::secure_fs::{
     SecureWriteStage, open_file_at, open_parent_directory, write_secure_with_failure,
 };
 use super::*;
+
+#[test]
+fn prefix_catalog_authenticates_old_source_after_growth_and_rejects_wrong_byte_count() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("session");
+    create_private_directory(&session).expect("private session");
+    let clock = SessionClock::now().expect("clock");
+    let manifest_hash = blake3::hash(b"test manifest").to_hex().to_string();
+    let header = EventLogHeader::new(
+        Uuid::now_v7(),
+        &manifest_hash,
+        clock.started_unix_ns(),
+        80,
+        24,
+        640,
+        480,
+        "xterm-ghostty",
+    );
+    let mut writer =
+        EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("writer");
+    writer
+        .append(Event::Output {
+            data: ByteString::from(b"OLD".as_slice()),
+        })
+        .expect("prefix output");
+    let prefix = CanonicalBoundary {
+        next_event_seq: writer.next_seq(),
+        event_hash: writer.current_hash(),
+        output_bytes: 3,
+    };
+    writer
+        .append(Event::Output {
+            data: ByteString::from(b"NEW".as_slice()),
+        })
+        .expect("later output");
+    let final_hash = writer.current_hash();
+    for (index, count) in [3_u64, 4].into_iter().enumerate() {
+        let artifact = session.join(format!("artifact-{index}"));
+        create_private_directory(&artifact).expect("artifact directory");
+        write_secure(&artifact.join("image.txt"), b"pixels").expect("payload");
+        let manifest = ArtifactMemberEnvelope {
+            members: collect_artifact_members(&artifact).expect("members"),
+            source_event_hash: Some(prefix.event_hash.clone()),
+            source_range: None,
+        };
+        let bytes = serde_json::to_vec(&manifest).expect("manifest JSON");
+        write_secure(&artifact.join("manifest.json"), &bytes).expect("manifest");
+        let mut commitment = prefix.clone();
+        commitment.output_bytes = count;
+        append_artifact_prefix_root(
+            &session,
+            &artifact,
+            "prefix-test",
+            &bytes,
+            &manifest_hash,
+            &commitment,
+        )
+        .expect("prefix root");
+        let verified = verify_session_artifacts(&session, &manifest_hash, Some(&final_hash));
+        if index == 0 {
+            assert_eq!(verified.expect("old prefix verifies"), 1);
+        } else {
+            assert!(verified.is_err(), "wrong prefix byte count was accepted");
+        }
+    }
+}
 
 #[test]
 fn generation_budget_rejects_before_writing_excess_bytes() {

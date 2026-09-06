@@ -11,9 +11,84 @@ use termtrace_model::value::ByteString;
 use crate::{
     Error,
     event_log::{
-        EventLog, EventLogCursor, EventLogWriter, OperationKind, PendingOperation, SessionClock,
+        EventLog, EventLogCursor, EventLogSummary, EventLogWriter, OperationKind, PendingOperation,
+        SessionClock,
     },
 };
+
+#[test]
+fn finite_snapshot_excludes_later_appends_and_partial_records() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let path = temporary.path().join("session/events.jsonl");
+    secure_directory(path.parent().expect("parent"));
+    let clock = SessionClock::now().expect("clock");
+    let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("writer");
+    writer
+        .append_at(
+            10,
+            Event::Output {
+                data: ByteString::from(&b"before"[..]),
+            },
+        )
+        .expect("first output");
+    let mut snapshot = EventLogCursor::open_snapshot(&path).expect("snapshot");
+    writer
+        .append_at(
+            20,
+            Event::Output {
+                data: ByteString::from(&b"after"[..]),
+            },
+        )
+        .expect("later output");
+    assert_eq!(
+        snapshot
+            .next_record()
+            .expect("record")
+            .expect("first")
+            .monotonic_ns,
+        10
+    );
+    assert!(snapshot.next_record().expect("snapshot end").is_none());
+    assert!(
+        snapshot
+            .finish_snapshot()
+            .expect("prefix verification")
+            .is_empty()
+    );
+    assert_eq!(
+        EventLogSummary::snapshot(&path)
+            .expect("new snapshot")
+            .event_count,
+        2
+    );
+    drop(writer);
+    OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .expect("append partial record")
+        .write_all(b"{\"unfinished\":")
+        .expect("partial bytes");
+    assert_eq!(
+        EventLogSummary::snapshot(&path)
+            .expect("complete prefix")
+            .event_count,
+        2
+    );
+    assert!(EventLogSummary::read(&path).is_err());
+    let page = EventLog::read_page(&path, 1, 1).expect("bounded prefix page");
+    assert_eq!(page.len(), 1);
+    assert_eq!(page.first().expect("paged event").monotonic_ns, 20);
+    OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .expect("terminate corrupt record")
+        .write_all(b"\n")
+        .expect("terminator");
+    assert!(
+        EventLog::read_page(&path, 0, 1).is_err(),
+        "a valid selected page cannot hide later corruption"
+    );
+}
 
 use super::{
     super::validation::{OWNER_DIRECTORY_MODE, OWNER_FILE_MODE},

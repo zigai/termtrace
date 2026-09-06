@@ -4,21 +4,22 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use termtrace_engine::{
-    analysis::last_action::analyze_last_action, diff::inspect_point, observation::observe_session,
+    analysis::last_action::analyze_last_action_session, observation::observe_session,
+    replay::inspect_completed_session,
 };
 use termtrace_evidence::{
     artifact::{
         collect_artifact_members, commit_directory, create_private_directory, sync_directory,
         write_secure,
     },
-    event_log::EventLog,
-    session::{read_manifest, validate_completed_log},
+    event_log::EventLogCursor,
+    session::{read_manifest, validate_completed_session},
 };
 use termtrace_model::{
     artifact::bug_report::{BugReportManifest, BugReportMetadata, BugReportSessionReference},
     artifact::metadata::ArtifactSensitivity,
     execution::event::Event,
-    terminal::observation::StatePoint,
+    terminal::{observation::StatePoint, replay::StateSelector},
     value::ByteString,
 };
 use termtrace_render::render_png;
@@ -44,14 +45,18 @@ pub fn create(
             "bug-report destination must be outside the canonical session",
         ));
     }
-    let log = EventLog::read(canonical.join("events.jsonl"))?;
-    let completion = validate_completed_log(&canonical, &log)?;
+    let completion = validate_completed_session(&canonical)?;
     let session_manifest = read_manifest(&canonical)?;
-    let analysis = log
-        .events
-        .iter()
-        .any(|record| matches!(&record.event, Event::InputIntent { .. }))
-        .then(|| return analyze_last_action(&canonical, &log, 50))
+    let mut cursor = EventLogCursor::open(canonical.join("events.jsonl"))?;
+    let mut has_input = false;
+    while let Some(record) = cursor.next_record()? {
+        if matches!(record.event, Event::InputIntent { .. }) {
+            has_input = true;
+            break;
+        }
+    }
+    let analysis = has_input
+        .then(|| return analyze_last_action_session(&canonical, 50))
         .transpose()?;
     let observation = observe_session(&canonical, StatePoint::LatestPresented)?;
     let parent = destination
@@ -104,7 +109,8 @@ pub fn create(
         }
         write_json(&staging.join("session-reference.json"), &reference)?;
         if include_screenshot {
-            let screenshot_state = inspect_point(&log, &StatePoint::LatestPresented)?.state;
+            let screenshot_state =
+                inspect_completed_session(&canonical, StateSelector::LatestPresented)?.state;
             write_secure(
                 &staging.join("screenshot.png"),
                 &render_png(&screenshot_state)?,

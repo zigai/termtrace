@@ -5,6 +5,7 @@ use std::{
     thread,
 };
 
+use crate::event_log::EventLogCursor;
 use nix::{
     fcntl::OFlag,
     sys::stat::{Mode, SFlag, fstat},
@@ -13,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use termtrace_model::artifact::metadata::{
     ArtifactMember, ArtifactSensitivity, ArtifactSourceRange,
 };
+use termtrace_model::execution::{event::Event, event_log::CanonicalBoundary};
 
 use crate::storage::{Error, Result};
 
@@ -139,11 +141,20 @@ pub fn verify_session_artifacts(
     let records = read_artifact_roots(&session.join(ARTIFACT_ROOT_LOG))?;
     for record in &records {
         if record.session_manifest_hash != session_manifest_hash
-            || record.source_event_hash.as_deref() != source_event_hash
+            || record.source_prefix.is_none()
+                && record.source_event_hash.as_deref() != source_event_hash
         {
             return Err(Error::invalid(
                 "artifact-root catalog entry does not bind the canonical source roots",
             ));
+        }
+        if let Some(prefix) = &record.source_prefix {
+            if record.source_event_hash.as_deref() != Some(prefix.event_hash.as_str()) {
+                return Err(Error::invalid(
+                    "artifact catalog prefix hash differs from its source root",
+                ));
+            }
+            validate_source_prefix(session, session_manifest_hash, prefix)?;
         }
         let relative = Path::new(&record.artifact_directory);
         normalized_relative_path(relative)?;
@@ -175,6 +186,36 @@ pub fn verify_session_artifacts(
         verify_artifact_members(&directory, &manifest.members)?;
     }
     return Ok(u64::try_from(records.len()).unwrap_or(u64::MAX));
+}
+
+fn validate_source_prefix(
+    session: &Path,
+    manifest_hash: &str,
+    prefix: &CanonicalBoundary,
+) -> Result<()> {
+    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    if cursor.header().session_manifest_hash != manifest_hash {
+        return Err(Error::invalid(
+            "artifact prefix has a different source manifest",
+        ));
+    }
+    let mut output_bytes = 0_u64;
+    while cursor.next_event_seq() < prefix.next_event_seq {
+        let record = cursor
+            .next_record()?
+            .ok_or_else(|| return Error::invalid("artifact source prefix is unavailable"))?;
+        if let Event::Output { data } = record.event {
+            output_bytes = output_bytes
+                .saturating_add(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX));
+        }
+    }
+    cursor.validate_boundary(prefix.next_event_seq, &prefix.event_hash)?;
+    if output_bytes != prefix.output_bytes {
+        return Err(Error::invalid(
+            "artifact prefix output byte count differs from canonical evidence",
+        ));
+    }
+    return Ok(());
 }
 
 fn collect_member_paths(root: &Path, directory: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
@@ -260,13 +301,17 @@ pub fn hash_regular_file(path: &Path) -> Result<(u64, String)> {
     return Ok((size, hasher.finalize().to_hex().to_string()));
 }
 
-fn open_regular_file_nofollow(path: &Path) -> Result<(File, u64)> {
+/// Open a regular artifact file without following symlinks in its path.
+///
+/// # Errors
+/// Returns filesystem errors and rejects nonregular files.
+pub fn open_regular_file_nofollow(path: &Path) -> Result<(File, u64)> {
     let parent = open_parent_directory(path, false)?;
     let leaf = safe_file_name(path)?;
     let fd = open_file_at(
         &parent,
         leaf,
-        OFlag::O_RDONLY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        OFlag::O_RDONLY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK,
         Mode::empty(),
         path,
     )?;
@@ -303,6 +348,7 @@ fn member_schema_type(path: &str) -> Option<&'static str> {
     match Path::new(path).file_name()?.to_str()? {
         "state-index.jsonl" => return Some("state-index-entry.schema.json"),
         "video-map.jsonl" => return Some("video-map-entry.schema.json"),
+        "replay-endpoint.json" => return Some("replay-endpoint.schema.json"),
         "semantic-source-map.jsonl" => return Some("semantic-frame-span.schema.json"),
         _ => return None,
     }
@@ -320,6 +366,7 @@ fn member_relationship(path: &str) -> &'static str {
         "session.mkv" => return "native_capture_master",
         "final.png" => return "native_final_frame",
         "video-map.jsonl" => return "semantic_frame_mapping",
+        "replay-endpoint.json" => return "canonical_replay_endpoint",
         "semantic-source.mkv" => return "semantic_rendering_master",
         "semantic-source-map.jsonl" => return "semantic_source_frame_mapping",
         "semantic-source-manifest.json" => return "semantic_source_manifest",

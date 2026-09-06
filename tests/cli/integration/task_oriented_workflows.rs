@@ -1,6 +1,8 @@
 //! Task-oriented public CLI workflow tests.
 
 use crate::support::*;
+use termtrace_engine::{analysis::last_action, registry::SessionRegistry};
+use termtrace_evidence::event_log::EventLog;
 
 #[test]
 fn doctor_and_wait_help_remain_directly_discoverable() {
@@ -725,6 +727,24 @@ fn last_action_uses_the_full_journaled_multi_atom_request_boundary() {
         .clone();
     let report: serde_json::Value =
         serde_json::from_slice(&output).expect("multi-atom last-action report");
+    let session = SessionRegistry::open(&state)
+        .expect("registry")
+        .resolve("sequence")
+        .expect("recording")
+        .session_path();
+    let log = EventLog::read(session.join("events.jsonl")).expect("canonical source");
+    let legacy = last_action::analyze_last_action(&session, &log, 50)
+        .expect("materialized last-action analysis");
+    let streamed = last_action::analyze_last_action_session(&session, 50)
+        .expect("streamed last-action analysis");
+    assert_eq!(
+        serde_json::to_value(&streamed).expect("streamed JSON"),
+        serde_json::to_value(&legacy).expect("materialized JSON")
+    );
+    assert_eq!(
+        report,
+        serde_json::to_value(&legacy.inspection).expect("inspection JSON")
+    );
     assert_eq!(report["action"]["request_id"], request_id);
     assert_eq!(report["action"]["atom_count"], 2);
     assert_eq!(report["action"]["intended_bytes"], 6);

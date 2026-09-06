@@ -10,6 +10,7 @@ use nix::{libc::O_NOFOLLOW, unistd::geteuid};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use termtrace_evidence::{
     artifact::{secure_file, sync_directory},
+    event_log::canonical_source_fingerprint,
     session::read_manifest,
 };
 
@@ -24,7 +25,7 @@ pub(crate) fn check_cancelled(cancelled: Option<&AtomicBool>) -> Result<()> {
 }
 /// Local-kernel identities are meaningful only under the local verifier's secret MAC.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct SourceIdentity(Vec<FileIdentity>);
+pub(crate) struct SourceIdentity(Vec<FileIdentity>, String);
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct FileIdentity {
@@ -54,6 +55,12 @@ impl SourceIdentity {
                 .iter()
                 .map(|path| return file_identity(path))
                 .collect::<Result<_>>()?,
+            canonical_source_fingerprint(session.join("events.jsonl")).map_err(|source| {
+                return Error::Filesystem {
+                    path: session.join("events.jsonl"),
+                    source,
+                };
+            })?,
         ));
     }
 

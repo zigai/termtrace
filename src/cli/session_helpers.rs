@@ -9,8 +9,10 @@ use std::{
 };
 
 use miette::{IntoDiagnostic as _, Result};
-use termtrace_engine::{registry::SessionRegistry, timeline::resolve_source_selection};
-use termtrace_evidence::event_log::EventLog;
+use termtrace_engine::{
+    registry::SessionRegistry,
+    timeline::{resolve_session_prefix_source_selection, resolve_session_source_selection},
+};
 use termtrace_model::{
     protocol::control::{ControlCommand, ControlData},
     registry::RegistryLifecycle,
@@ -162,7 +164,6 @@ pub(super) fn resolve_cli_range(
     if range.from_marker.is_none() && range.to_marker.is_none() {
         return Ok((range.start_monotonic_ns, range.end_monotonic_ns));
     }
-    let event_path = session.join("events.jsonl");
     let live_event_count = if !session.join("completion.json").is_file() {
         match request(session, ControlCommand::Status).into_diagnostic() {
             Ok(ControlData::Status { boundaries, .. }) => Some(boundaries.durable.next_event_seq),
@@ -179,17 +180,24 @@ pub(super) fn resolve_cli_range(
     } else {
         None
     };
-    let log = match live_event_count {
-        Some(event_count) => EventLog::read_prefix(event_path, event_count).into_diagnostic()?,
-        None => EventLog::read(event_path).into_diagnostic()?,
-    };
-    let resolved = resolve_source_selection(
-        &log,
-        range.start_monotonic_ns,
-        range.end_monotonic_ns,
-        range.from_marker.as_deref(),
-        range.to_marker.as_deref(),
-    )
+    let resolved = if session.join("completion.json").is_file() {
+        resolve_session_source_selection(
+            session,
+            range.start_monotonic_ns,
+            range.end_monotonic_ns,
+            range.from_marker.as_deref(),
+            range.to_marker.as_deref(),
+        )
+    } else {
+        resolve_session_prefix_source_selection(
+            session,
+            live_event_count,
+            range.start_monotonic_ns,
+            range.end_monotonic_ns,
+            range.from_marker.as_deref(),
+            range.to_marker.as_deref(),
+        )
+    }
     .into_diagnostic()?;
     return Ok(resolved.map_or((None, None), |value| {
         return (Some(value.start_monotonic_ns), Some(value.end_monotonic_ns));

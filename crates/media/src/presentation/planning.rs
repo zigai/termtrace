@@ -2,16 +2,19 @@ use std::{
     collections::{BTreeMap, HashMap},
     io::ErrorKind,
     path::{Path, PathBuf},
+    sync::atomic::AtomicBool,
 };
 
 use termtrace_engine::{
-    replay::{StateRecord, StateSelection, replay},
-    timeline::resolve_source_selection,
+    replay::{
+        StateSelection, StateSelector, inspect_completed_session, visit_session_states_while,
+    },
+    timeline::resolve_session_source_selection,
 };
 use termtrace_evidence::{
     artifact::{hash_regular_file, verify_artifact_members},
-    event_log::EventLog,
-    session::{read_manifest, validate_completed_log},
+    event_log::{EventLog, EventLogCursor},
+    session::{read_manifest, validate_completed_session},
 };
 use termtrace_model::{
     artifact::presentation::{
@@ -31,7 +34,9 @@ use termtrace_model::{
 use crate::{
     Error, Result,
     native_capture::validate_visual_manifest_binding,
-    semantic_video::{materialize as materialize_semantic_video, plan as plan_semantic_video},
+    semantic_video::{
+        materialize as materialize_semantic_video, plan_session as plan_semantic_video,
+    },
 };
 
 use super::{
@@ -53,46 +58,91 @@ pub fn video_clip_ranges(
     selected: SourceRange,
     idle: Option<VideoIdlePolicy>,
 ) -> Vec<SourceRange> {
-    let Some(idle) = idle else {
-        return vec![selected];
-    };
-    let mut activity = log
-        .events
-        .iter()
-        .filter(|record| {
-            return selected.contains(record.monotonic_ns)
-                && matches!(&record.event, Event::Output { .. });
-        })
-        .map(|record| return record.monotonic_ns);
-    let Some(first) = activity.next() else {
-        return vec![selected];
-    };
-    let mut ranges = Vec::new();
-    let mut start = first
-        .saturating_sub(idle.context_ns)
-        .max(selected.start_monotonic_ns);
-    let mut previous = first;
-    for timestamp in activity {
-        if timestamp.saturating_sub(previous) > idle.threshold_ns {
-            ranges.push(SourceRange {
+    let mut ranges = IdleRanges::new(selected, idle);
+    for record in &log.events {
+        if matches!(record.event, Event::Output { .. }) {
+            ranges.observe(record.monotonic_ns);
+        }
+    }
+    return ranges.finish();
+}
+
+/// Select output-active video ranges with bounded canonical reads.
+///
+/// # Errors
+/// Rejects invalid canonical evidence and source read failures.
+pub fn video_clip_ranges_session(
+    session: &Path,
+    selected: SourceRange,
+    idle: Option<VideoIdlePolicy>,
+) -> Result<Vec<SourceRange>> {
+    let mut ranges = IdleRanges::new(selected, idle);
+    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    while let Some(record) = cursor.next_record()? {
+        if matches!(record.event, Event::Output { .. }) {
+            ranges.observe(record.monotonic_ns);
+        }
+    }
+    return Ok(ranges.finish());
+}
+
+struct IdleRanges {
+    selected: SourceRange,
+    idle: Option<VideoIdlePolicy>,
+    ranges: Vec<SourceRange>,
+    pending: Option<(u64, u64)>,
+}
+
+impl IdleRanges {
+    fn new(selected: SourceRange, idle: Option<VideoIdlePolicy>) -> Self {
+        return Self {
+            selected,
+            idle,
+            ranges: Vec::new(),
+            pending: None,
+        };
+    }
+
+    fn observe(&mut self, timestamp: u64) {
+        let Some(idle) = self.idle else {
+            return;
+        };
+        if !self.selected.contains(timestamp) {
+            return;
+        }
+        let start = timestamp
+            .saturating_sub(idle.context_ns)
+            .max(self.selected.start_monotonic_ns);
+        if let Some((current_start, previous)) = self.pending {
+            if timestamp.saturating_sub(previous) > idle.threshold_ns {
+                self.ranges.push(SourceRange {
+                    start_monotonic_ns: current_start,
+                    end_monotonic_ns: previous
+                        .saturating_add(idle.context_ns)
+                        .min(self.selected.end_monotonic_ns),
+                });
+                self.pending = Some((start, timestamp));
+            } else {
+                self.pending = Some((current_start, timestamp));
+            }
+        } else {
+            self.pending = Some((start, timestamp));
+        }
+    }
+
+    fn finish(mut self) -> Vec<SourceRange> {
+        if let (Some((start, previous)), Some(idle)) = (self.pending, self.idle) {
+            self.ranges.push(SourceRange {
                 start_monotonic_ns: start,
                 end_monotonic_ns: previous
                     .saturating_add(idle.context_ns)
-                    .min(selected.end_monotonic_ns),
+                    .min(self.selected.end_monotonic_ns),
             });
-            start = timestamp
-                .saturating_sub(idle.context_ns)
-                .max(selected.start_monotonic_ns);
+        } else {
+            self.ranges.push(self.selected);
         }
-        previous = timestamp;
+        return self.ranges;
     }
-    ranges.push(SourceRange {
-        start_monotonic_ns: start,
-        end_monotonic_ns: previous
-            .saturating_add(idle.context_ns)
-            .min(selected.end_monotonic_ns),
-    });
-    return ranges;
 }
 
 /// Build video edits, applying start hold to the first source frame and end hold to the last clip.
@@ -168,59 +218,64 @@ pub fn markers(session: impl AsRef<Path>, fps: u16) -> Result<Vec<MarkerRecord>>
     if fps == 0 {
         return Err(plan_error("marker frame rate must be nonzero"));
     }
-    let log = EventLog::read(session.as_ref().join("events.jsonl"))?;
-    let states = replay(&log)?.states;
-    return marker_records(&log, &states, fps, 0);
+    return marker_records(session.as_ref(), fps, 0);
 }
 
-fn marker_records(
-    log: &EventLog,
-    states: &[StateRecord],
-    fps: u16,
-    capture_start_ns: u64,
-) -> Result<Vec<MarkerRecord>> {
-    let mut occurrence_counts = HashMap::new();
-    for record in &log.events {
-        if let Event::Marker { label, .. } = &record.event {
-            let occurrence = occurrence_counts
-                .entry(label.as_str())
-                .or_insert((0_u64, 0_u64));
-            occurrence.0 = occurrence.0.saturating_add(1);
+fn marker_records(session: &Path, fps: u16, capture_start_ns: u64) -> Result<Vec<MarkerRecord>> {
+    validate_completed_session(session)?;
+    let mut occurrence_counts = HashMap::<String, u64>::new();
+    let mut records = Vec::new();
+    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    while let Some(record) = cursor.next_record()? {
+        if let Event::Marker { label, .. } = record.event {
+            let occurrence = occurrence_counts.entry(label.clone()).or_default();
+            *occurrence = occurrence.saturating_add(1);
+            records.push(MarkerRecord {
+                label,
+                event_seq: record.seq,
+                monotonic_ns: record.monotonic_ns,
+                nominal_frame: frame_floor(
+                    record.monotonic_ns.saturating_sub(capture_start_ns),
+                    fps,
+                ),
+                occurrence_count: 0,
+                occurrence_index: *occurrence,
+                semantic_state_id: None,
+                semantic_state_hash: None,
+                presentation_eligible: false,
+                native_evidence_level: "scheduled_for_frame".to_owned(),
+            });
         }
     }
-    let presented_states = states
-        .iter()
-        .filter(|state| return state.presented)
-        .collect::<Vec<_>>();
-    let mut records = Vec::new();
-    for record in &log.events {
-        let Event::Marker { label, .. } = &record.event else {
-            continue;
-        };
-        let occurrence = occurrence_counts
-            .get_mut(label.as_str())
-            .ok_or_else(|| return plan_error("marker occurrence accounting is inconsistent"))?;
-        occurrence.1 = occurrence.1.saturating_add(1);
-        let (occurrence_count, occurrence_index) = *occurrence;
-        let state_index = presented_states
-            .partition_point(|state| return state.monotonic_ns <= record.monotonic_ns);
-        let semantic_state = state_index
-            .checked_sub(1)
-            .and_then(|index| return presented_states.get(index).copied());
-        records.push(MarkerRecord {
-            label: label.clone(),
-            event_seq: record.seq,
-            monotonic_ns: record.monotonic_ns,
-            nominal_frame: frame_floor(record.monotonic_ns.saturating_sub(capture_start_ns), fps),
-            occurrence_count,
-            occurrence_index,
-            semantic_state_id: semantic_state.map(|state| return state.state_id),
-            semantic_state_hash: semantic_state.map(|state| return state.state_hash.clone()),
-            presentation_eligible: semantic_state.is_some(),
-            native_evidence_level: "scheduled_for_frame".to_owned(),
-        });
+    for record in &mut records {
+        record.occurrence_count = occurrence_counts.get(&record.label).copied().unwrap_or(0);
+    }
+    let mut pending = records.iter_mut().peekable();
+    let mut presented = None::<(u64, String)>;
+    visit_session_states_while(session, &AtomicBool::new(false), |state, _| {
+        while pending
+            .peek()
+            .is_some_and(|marker| return marker.monotonic_ns < state.monotonic_ns)
+        {
+            if let Some(marker) = pending.next() {
+                bind_marker_state(marker, presented.as_ref());
+            }
+        }
+        if state.presented {
+            presented = Some((state.state_id, state.state_hash.clone()));
+        }
+        return Ok(true);
+    })?;
+    for marker in pending {
+        bind_marker_state(marker, presented.as_ref());
     }
     return Ok(records);
+}
+
+fn bind_marker_state(marker: &mut MarkerRecord, state: Option<&(u64, String)>) {
+    marker.semantic_state_id = state.map(|(id, _)| return *id);
+    marker.semantic_state_hash = state.map(|(_, hash)| return hash.clone());
+    marker.presentation_eligible = state.is_some();
 }
 
 /// Resolve a strict edit plan against the default verified native capture.
@@ -241,10 +296,8 @@ pub fn plan_with_source(
 ) -> Result<PresentationPlan> {
     validate_edit_plan(edit)?;
     let session = session.as_ref();
-    let log = EventLog::read(session.join("events.jsonl"))?;
-    validate_completed_log(session, &log)?;
+    let completion = validate_completed_session(session)?;
     let session_manifest = read_manifest(session)?;
-    let states = replay(&log)?.states;
     let ResolvedSource {
         source,
         fps,
@@ -254,21 +307,13 @@ pub fn plan_with_source(
         capture_start_ns: capture_start,
         capture_range,
         semantic_final_frame,
-    } = resolve_source(
-        session,
-        edit,
-        source_request,
-        &log,
-        &states,
-        &session_manifest,
-    )?;
+    } = resolve_source(session, edit, source_request, &session_manifest)?;
     let edit_plan_hash = hash_edit_identity(edit)?;
     let NormalizedClips {
         clips,
         output_frame_count,
     } = normalize_clips(
-        &log,
-        &states,
+        session,
         edit,
         capture_start,
         fps,
@@ -276,8 +321,7 @@ pub fn plan_with_source(
         semantic_final_frame,
     )?;
     let annotations = normalize_annotations(
-        &log,
-        &states,
+        session,
         edit,
         &clips,
         output_frame_count,
@@ -285,7 +329,7 @@ pub fn plan_with_source(
         fps,
     )?;
     let change_frames = normalize_semantic_changes(
-        &states,
+        session,
         edit.change_visualization.as_ref(),
         &clips,
         capture_start,
@@ -295,7 +339,7 @@ pub fn plan_with_source(
         source_geometry,
     )?;
     let cursor_masks = normalize_cursor_masks(
-        &states,
+        session,
         &edit.transforms,
         &clips,
         capture_start,
@@ -310,6 +354,14 @@ pub fn plan_with_source(
         source_height,
         edit.clips.iter().any(|clip| return clip.caption.is_some()),
     )?;
+    let verified = validate_completed_session(session)?;
+    if verified.session_id != completion.session_id
+        || verified.final_event_hash != completion.final_event_hash
+    {
+        return Err(plan_error(
+            "canonical source changed during presentation planning",
+        ));
+    }
     return Ok(PresentationPlan {
         version: PRESENTATION_FORMAT_VERSION,
         edit_plan_hash,
@@ -322,7 +374,7 @@ pub fn plan_with_source(
         output_height,
         render_config: edit.render_config.clone(),
         clips,
-        markers: marker_records(&log, &states, fps, capture_start)?,
+        markers: marker_records(session, fps, capture_start)?,
         annotations,
         subtitles: edit
             .subtitles
@@ -371,10 +423,10 @@ fn resolve_source(
     session: &Path,
     edit: &EditPlan,
     source_request: PresentationSourceRequest,
-    log: &EventLog,
-    states: &[StateRecord],
     session_manifest: &SessionManifest,
 ) -> Result<ResolvedSource> {
+    let cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let header = cursor.header();
     return match source_request {
         PresentationSourceRequest::Native => {
             let visual = session.join(visual_directory_name_for(None, StateSelection::All));
@@ -402,10 +454,10 @@ fn resolve_source(
                     .ghostty_visual
                     .as_ref()
                     .map(|profile| return profile.effective_config_hash.as_str()),
-                &log.header.colors.source,
+                &header.colors.source,
             )?;
             verify_artifact_members(&visual, &manifest.members)?;
-            if manifest.session_id != log.header.session_id {
+            if manifest.session_id != header.session_id {
                 return Err(plan_error(
                     "native capture session identity does not match canonical evidence",
                 ));
@@ -448,18 +500,12 @@ fn resolve_source(
             let mut semantic_start = u64::MAX;
             let mut semantic_end = 0_u64;
             for clip in &edit.clips {
-                let range = resolve_clip(log, states, clip, 0, fps)?;
+                let range = resolve_clip(session, clip, 0, fps)?;
                 semantic_start = semantic_start.min(range.start_monotonic_ns);
                 semantic_end = semantic_end.max(range.end_monotonic_ns);
             }
-            let semantic = plan_semantic_video(
-                session,
-                log,
-                fps,
-                semantic_start,
-                semantic_end,
-                raster_profile,
-            )?;
+            let semantic =
+                plan_semantic_video(session, fps, semantic_start, semantic_end, raster_profile)?;
             let geometry = TerminalGeometryReport {
                 cols: semantic.canvas.cols,
                 rows: semantic.canvas.rows,
@@ -510,8 +556,7 @@ fn hash_edit_identity(edit: &EditPlan) -> Result<String> {
 }
 
 fn normalize_clips(
-    log: &EventLog,
-    states: &[StateRecord],
+    session: &Path,
     edit: &EditPlan,
     capture_start_ns: u64,
     fps: u16,
@@ -521,7 +566,7 @@ fn normalize_clips(
     let mut output_start_frame = 0_u64;
     let mut clips = Vec::new();
     for clip in &edit.clips {
-        let range = resolve_clip(log, states, clip, capture_start_ns, fps)?;
+        let range = resolve_clip(session, clip, capture_start_ns, fps)?;
         if clips.iter().any(|existing: &NormalizedClip| {
             return ranges_overlap(range, existing.source_range);
         }) {
@@ -589,13 +634,9 @@ pub(super) fn validate_planned_source(source: &PresentationSource) -> Result<()>
             Ok(())
         }
         PresentationSource::Semantic { plan } => {
-            let log = EventLog::read(plan.session.join("events.jsonl"))?;
-            validate_completed_log(&plan.session, &log)?;
-            let final_event = log.events.last().ok_or_else(|| {
-                return plan_error("semantic source event log is empty after planning");
-            })?;
-            if log.header.session_id != plan.session_id
-                || final_event.hash != plan.source_event_hash
+            let completion = validate_completed_session(&plan.session)?;
+            if completion.session_id != plan.session_id
+                || completion.final_event_hash != plan.source_event_hash
             {
                 return Err(plan_error(
                     "semantic canonical source changed after edit planning",
@@ -625,8 +666,7 @@ pub(super) fn materialize_planned_source(
 }
 
 fn normalize_annotations(
-    log: &EventLog,
-    states: &[StateRecord],
+    session: &Path,
     edit: &EditPlan,
     clips: &[NormalizedClip],
     output_frame_count: u64,
@@ -652,8 +692,8 @@ fn normalize_annotations(
                 vec![(*output_frame, output_frame + 1)]
             }
             AnnotationScope::Range { from, to } => {
-                let start = resolve_edit_selector(log, states, from, capture_start_ns, fps)?;
-                let end = resolve_edit_selector(log, states, to, capture_start_ns, fps)?;
+                let start = resolve_edit_selector(session, from, capture_start_ns, fps)?;
+                let end = resolve_edit_selector(session, to, capture_start_ns, fps)?;
                 if start >= end {
                     return Err(plan_error("annotation source range is empty or reversed"));
                 }
@@ -722,7 +762,7 @@ fn output_spans_for_source_frames(
     reason = "the semantic/native coordinate boundary is clearer with explicit measured inputs"
 )]
 fn normalize_semantic_changes(
-    states: &[StateRecord],
+    session: &Path,
     visualization: Option<&ChangeVisualization>,
     clips: &[NormalizedClip],
     capture_start_ns: u64,
@@ -747,14 +787,17 @@ fn normalize_semantic_changes(
         }
     }
     let mut changes = Vec::new();
-    for state in states.iter().filter(|state| return state.presented) {
+    visit_session_states_while(session, &AtomicBool::new(false), |state, _| {
+        if !state.presented {
+            return Ok(true);
+        }
         let source_frame = frame_floor(state.monotonic_ns.saturating_sub(capture_start_ns), fps);
         let output_frames = output_frames_by_source
             .get(&source_frame)
             .cloned()
             .unwrap_or_default();
         if output_frames.is_empty() {
-            continue;
+            return Ok(true);
         }
         let changed_regions = state
             .delta
@@ -772,7 +815,7 @@ fn normalize_semantic_changes(
             })
             .collect::<Vec<_>>();
         if changed_regions.is_empty() && state.ghostty_dirty_rows.is_empty() {
-            continue;
+            return Ok(true);
         }
         changes.push(NormalizedChangeFrame {
             state_id: state.state_id,
@@ -783,7 +826,8 @@ fn normalize_semantic_changes(
             dirty_rows: state.ghostty_dirty_rows.clone(),
             evidence_level: "semantic_scheduled_for_frame".to_owned(),
         });
-    }
+        return Ok(true);
+    })?;
     return Ok(changes);
 }
 
@@ -792,7 +836,7 @@ fn normalize_semantic_changes(
     reason = "cursor masks explicitly bind semantic state, video mapping, and measured geometry"
 )]
 fn normalize_cursor_masks(
-    states: &[StateRecord],
+    session: &Path,
     transforms: &[PixelTransform],
     clips: &[NormalizedClip],
     capture_start_ns: u64,
@@ -807,22 +851,39 @@ fn normalize_cursor_masks(
     {
         return Ok(Vec::new());
     }
-    let mut cursor = None::<CursorState>;
     let mut presented_by_frame = BTreeMap::new();
-    for state in states {
+    for clip in clips {
+        for output_frame in clip.output_start_frame..clip.output_end_frame {
+            let (source_frame, _) = mapped_source_frame(clip, output_frame);
+            presented_by_frame.insert(source_frame, None);
+        }
+    }
+    let mut pending = presented_by_frame.iter_mut().peekable();
+    let mut cursor = None::<CursorState>;
+    let mut presented = None;
+    visit_session_states_while(session, &AtomicBool::new(false), |state, _| {
         if let Some(next) = state.delta.cursor.clone() {
             cursor = Some(next);
         }
         if state.presented {
             let source_frame =
                 frame_floor(state.monotonic_ns.saturating_sub(capture_start_ns), fps);
+            while pending
+                .peek()
+                .is_some_and(|(frame, _)| return **frame < source_frame)
+            {
+                if let Some((_, value)) = pending.next() {
+                    *value = presented.clone();
+                }
+            }
             if let Some(cursor) = &cursor {
-                presented_by_frame.insert(
-                    source_frame,
-                    (state.state_id, state.state_hash.clone(), cursor.clone()),
-                );
+                presented = Some((state.state_id, state.state_hash.clone(), cursor.clone()));
             }
         }
+        return Ok(true);
+    })?;
+    for (_, value) in pending {
+        *value = presented.clone();
     }
     let x_origin = source_width.saturating_sub(geometry.text_width) / 2;
     let y_origin = source_height.saturating_sub(geometry.text_height) / 2;
@@ -830,8 +891,7 @@ fn normalize_cursor_masks(
     for clip in clips {
         for output_frame in clip.output_start_frame..clip.output_end_frame {
             let (source_frame, _) = mapped_source_frame(clip, output_frame);
-            let Some((_, (state_id, state_hash, cursor))) =
-                presented_by_frame.range(..=source_frame).next_back()
+            let Some(Some((state_id, state_hash, cursor))) = presented_by_frame.get(&source_frame)
             else {
                 continue;
             };
@@ -974,15 +1034,14 @@ fn scaled_even_dimension(value: u16, numerator: u16, denominator: u16) -> Result
 }
 
 fn resolve_clip(
-    log: &EventLog,
-    states: &[StateRecord],
+    session: &Path,
     clip: &EditClip,
     capture_start_ns: u64,
     fps: u16,
 ) -> Result<SourceRange> {
-    let from = resolve_edit_selector(log, states, &clip.from, capture_start_ns, fps)?;
-    let to = resolve_edit_selector(log, states, &clip.to, capture_start_ns, fps)?;
-    return resolve_source_selection(log, Some(from), Some(to), None, None)?
+    let from = resolve_edit_selector(session, &clip.from, capture_start_ns, fps)?;
+    let to = resolve_edit_selector(session, &clip.to, capture_start_ns, fps)?;
+    return resolve_session_source_selection(session, Some(from), Some(to), None, None)?
         .ok_or_else(|| return plan_error("edit clip must have explicit endpoints"));
 }
 
@@ -992,8 +1051,7 @@ pub(super) fn ranges_overlap(left: SourceRange, right: SourceRange) -> bool {
 }
 
 fn resolve_edit_selector(
-    log: &EventLog,
-    states: &[StateRecord],
+    session: &Path,
     selector: &EditSelector,
     capture_start_ns: u64,
     fps: u16,
@@ -1002,19 +1060,20 @@ fn resolve_edit_selector(
         return Ok(monotonic_ns);
     }
     if let Some(event_seq) = selector.event_seq {
-        return log
-            .events
-            .iter()
-            .find(|record| return record.seq == event_seq)
-            .map(|record| return record.monotonic_ns)
-            .ok_or_else(|| return plan_error(format!("event sequence {event_seq} is absent")));
+        let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+        while let Some(record) = cursor.next_record()? {
+            if record.seq == event_seq {
+                return Ok(record.monotonic_ns);
+            }
+        }
+        return Err(plan_error(format!("event sequence {event_seq} is absent")));
     }
     if let Some(state_id) = selector.state_id {
-        return states
-            .iter()
-            .find(|state| return state.state_id == state_id)
-            .map(|state| return state.monotonic_ns)
-            .ok_or_else(|| return plan_error("no semantic state matches the selector"));
+        return Ok(
+            inspect_completed_session(session, StateSelector::StateId(state_id))?
+                .record
+                .monotonic_ns,
+        );
     }
     if let Some(native_frame) = selector.native_frame {
         if fps == 0 {
@@ -1027,18 +1086,16 @@ fn resolve_edit_selector(
         .marker
         .as_deref()
         .ok_or_else(|| return plan_error("selector has no coordinate"))?;
-    let matching = log
-        .events
-        .iter()
-        .filter(|record| {
-            return matches!(&record.event, Event::Marker { label, .. } if label == marker);
-        })
-        .collect::<Vec<_>>();
-    return match matching.as_slice() {
-        [record] => Ok(record.monotonic_ns),
-        [] => Err(plan_error(format!("marker `{marker}` is absent"))),
-        _ => Err(plan_error(format!("marker `{marker}` is not unique"))),
-    };
+    let mut found = None;
+    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    while let Some(record) = cursor.next_record()? {
+        if matches!(&record.event, Event::Marker { label, .. } if label == marker)
+            && found.replace(record.monotonic_ns).is_some()
+        {
+            return Err(plan_error(format!("marker `{marker}` is not unique")));
+        }
+    }
+    return found.ok_or_else(|| return plan_error(format!("marker `{marker}` is absent")));
 }
 
 pub(super) fn frame_floor(monotonic_ns: u64, fps: u16) -> u64 {

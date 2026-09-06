@@ -490,6 +490,7 @@ fn playback_does_not_echo_terminal_query_responses() {
         .expect("exit event");
     drop(event_log);
     let manifest = SessionManifest {
+        failure_policy: Default::default(),
         format: SESSION_MANIFEST_FORMAT.to_owned(),
         version: SESSION_MANIFEST_VERSION,
         session_id: header.session_id,

@@ -13,8 +13,8 @@ use termtrace_engine::observation::observe_session;
 use termtrace_evidence::{
     artifact::hash_regular_file,
     bundle::{BundleDraft, BundleIdentity, BundleMemberMetadata, verify as verify_bundle},
-    event_log::EventLog,
-    session::{read_manifest, validate_completed_log, verify_session},
+    event_log::{CanonicalLogFile, EventLogCursor},
+    session::{read_manifest, validate_completed_session, verify_session},
 };
 use termtrace_model::{
     artifact::bundle::{
@@ -124,20 +124,23 @@ pub fn create(
     if profile == BundleProfile::Debug {
         let metadata = member_metadata(profile, "events-metadata.jsonl")?;
         let mut writer = draft.start_member("events-metadata.jsonl", metadata)?;
-        for record in &trusted.log.events {
-            serde_json::to_writer(&mut writer, &EventProjection::from_record(record, true))
-                .map_err(|source| return Error::json("events-metadata.jsonl", source))?;
-            writer
-                .write_all(b"\n")
-                .map_err(|source| return Error::filesystem("events-metadata.jsonl", source))?;
-        }
+        trusted.write_event_projection(&mut writer)?;
         writer.finish()?;
     }
     if profile == BundleProfile::Forensic {
         for name in top_level_regular_file_names(&trusted.canonical)? {
             let source = trusted.canonical.join(&name);
-            let mut reader =
-                File::open(&source).map_err(|error| return Error::filesystem(&source, error))?;
+            let mut reader: Box<dyn Read> = if name == "events.jsonl" {
+                Box::new(
+                    CanonicalLogFile::open(&source)
+                        .map_err(|error| return Error::filesystem(&source, error))?,
+                )
+            } else {
+                Box::new(
+                    File::open(&source)
+                        .map_err(|error| return Error::filesystem(&source, error))?,
+                )
+            };
             let relative = format!("canonical/{name}");
             draft.add_member_from_reader(
                 &relative,
@@ -192,7 +195,6 @@ struct TrustedSource {
     canonical: PathBuf,
     manifest: SessionManifest,
     completion: SessionCompletion,
-    log: EventLog,
 }
 
 impl TrustedSource {
@@ -200,15 +202,30 @@ impl TrustedSource {
         let canonical = session
             .canonicalize()
             .map_err(|source| return Error::filesystem(session, source))?;
-        let log = EventLog::read(canonical.join("events.jsonl"))?;
-        let completion = validate_completed_log(&canonical, &log)?;
+        let completion = validate_completed_session(&canonical)?;
         let manifest = read_manifest(&canonical)?;
         return Ok(Self {
             canonical,
             manifest,
             completion,
-            log,
         });
+    }
+
+    fn write_event_projection(&self, writer: &mut impl Write) -> Result<()> {
+        let mut cursor = EventLogCursor::open(self.canonical.join("events.jsonl"))?;
+        while let Some(record) = cursor.next_record()? {
+            serde_json::to_writer(&mut *writer, &EventProjection::from_record(&record, true))
+                .map_err(|source| return Error::json("events-metadata.jsonl", source))?;
+            writer
+                .write_all(b"\n")
+                .map_err(|source| return Error::filesystem("events-metadata.jsonl", source))?;
+        }
+        cursor.validate_boundary(
+            self.completion.event_count,
+            &self.completion.final_event_hash,
+        )?;
+        let _pending = cursor.finish()?;
+        return Ok(());
     }
 
     fn identity(&self, profile: BundleProfile) -> BundleIdentity {
@@ -270,13 +287,7 @@ fn verify_bound_payloads(
     if manifest.profile == BundleProfile::Debug {
         let member = manifest_member(manifest, "events-metadata.jsonl")?;
         let mut expected = HashingWriter::default();
-        for record in &trusted.log.events {
-            serde_json::to_writer(&mut expected, &EventProjection::from_record(record, true))
-                .map_err(|source| return Error::json("events-metadata.jsonl", source))?;
-            expected
-                .write_all(b"\n")
-                .map_err(|source| return Error::filesystem("events-metadata.jsonl", source))?;
-        }
+        trusted.write_event_projection(&mut expected)?;
         if member.byte_length != expected.bytes
             || member.blake3 != expected.hasher.finalize().to_hex().as_str()
         {
@@ -386,13 +397,7 @@ pub(super) fn verify_archived_manifest(
     }
     if policy.profile == BundleProfile::Debug {
         let mut expected = HashingWriter::default();
-        for record in &trusted.log.events {
-            serde_json::to_writer(&mut expected, &EventProjection::from_record(record, true))
-                .map_err(|source| return Error::json("events-metadata.jsonl", source))?;
-            expected
-                .write_all(b"\n")
-                .map_err(|source| return Error::filesystem("events-metadata.jsonl", source))?;
-        }
+        trusted.write_event_projection(&mut expected)?;
         let member = manifest_member(manifest, "events-metadata.jsonl")?;
         if member.byte_length != expected.bytes
             || member.blake3 != expected.hasher.finalize().to_hex().as_str()
@@ -484,7 +489,17 @@ fn verify_canonical_payload(
         ));
     }
     for name in source_names {
-        let expected_hash = hash_regular_file(&source.join(&name))?;
+        let expected_hash = if name == "events.jsonl" {
+            let path = source.join(&name);
+            let mut file = CanonicalLogFile::open(&path)
+                .map_err(|error| return Error::filesystem(&path, error))?;
+            let mut hash = blake3::Hasher::new();
+            let bytes = io::copy(&mut file, &mut hash)
+                .map_err(|error| return Error::filesystem(&path, error))?;
+            (bytes, hash.finalize().to_hex().to_string())
+        } else {
+            hash_regular_file(&source.join(&name))?
+        };
         let actual_hash = hash_regular_file(&directory.join("canonical").join(&name))?;
         if actual_hash != expected_hash {
             return Err(Error::invalid(format!(

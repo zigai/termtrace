@@ -10,23 +10,22 @@ use std::{
 };
 
 use termtrace_engine::{
-    observation::state_text,
-    replay::{inspect_many, inspect_with_formats},
+    observation::{state_selector_for_session, state_text},
+    replay::{inspect_completed_many, inspect_completed_session_with_formats},
 };
 use termtrace_evidence::{
     artifact::{
         BudgetWriter, commit_directory, create_private_directory, hash_regular_file, secure_file,
         sync_directory, write_secure,
     },
-    event_log::{CanonicalBoundary, EventLog},
-    session::{read_manifest, validate_completed_log},
+    event_log::CanonicalBoundary,
+    session::{read_manifest, validate_completed_session},
 };
 use termtrace_model::{
     artifact::save::{
         SaveFormat, SaveManifest, SaveOutcome, SavedFile, ScreenshotBatchEntry,
         ScreenshotBatchManifest, SemanticImageResource, SemanticRasterProfile,
     },
-    execution::event::Event,
     execution::session::{SessionCompletion, SessionManifest},
     terminal::observation::{
         CaptureQuality, Observation, ObservationFrame, ObservationIntegrity, ObservationResolution,
@@ -153,10 +152,9 @@ pub fn save(
     let canonical = session
         .canonicalize()
         .map_err(|source| return filesystem_error(session, source))?;
-    let log = EventLog::read(canonical.join("events.jsonl"))?;
-    let completion = validate_completed_log(&canonical, &log)?;
+    let completion = validate_completed_session(&canonical)?;
     let source_manifest = read_manifest(&canonical)?;
-    let selector = state_selector(&log, &point)?;
+    let selector = state_selector_for_session(&canonical, &point, None)?;
     let engine_formats: Vec<Format> = formats
         .iter()
         .filter_map(|format| match format {
@@ -165,7 +163,8 @@ pub fn save(
             _ => return None,
         })
         .collect();
-    let (inspection, rendered) = inspect_with_formats(&log, selector, &engine_formats)?;
+    let (inspection, rendered) =
+        inspect_completed_session_with_formats(&canonical, selector, &engine_formats)?;
     if !inspection.record.presented && !include_hidden {
         return Err(save_error(
             "selected semantic state is hidden; pass explicit hidden-state permission",
@@ -275,14 +274,15 @@ pub fn save_screenshot_batch(
     let canonical = session
         .canonicalize()
         .map_err(|source| return filesystem_error(session, source))?;
-    let log = EventLog::read(canonical.join("events.jsonl"))?;
-    let completion = validate_completed_log(&canonical, &log)?;
+    let completion = validate_completed_session(&canonical)?;
     let source_manifest = read_manifest(&canonical)?;
     let selectors: Vec<StateSelector> = points
         .iter()
-        .map(|point| return state_selector(&log, point))
+        .map(|point| {
+            return state_selector_for_session(&canonical, point, None).map_err(Error::from);
+        })
         .collect::<Result<Vec<_>>>()?;
-    let inspections = inspect_many(&log, &selectors)?;
+    let inspections = inspect_completed_many(&canonical, &selectors)?;
     if !include_hidden
         && inspections
             .iter()
@@ -533,33 +533,6 @@ fn validate_formats(formats: &[SaveFormat]) -> Result<()> {
         return Err(save_error("save formats must not be repeated"));
     }
     return Ok(());
-}
-
-fn state_selector(log: &EventLog, point: &StatePoint) -> Result<StateSelector> {
-    match point {
-        StatePoint::LatestPresented => return Ok(StateSelector::LatestPresented),
-        StatePoint::StateId { state_id } => return Ok(StateSelector::StateId(*state_id)),
-        StatePoint::StateHash { state_hash } => {
-            return Ok(StateSelector::StateHash(state_hash.clone()));
-        }
-        StatePoint::EventSeq { event_seq } => return Ok(StateSelector::EventSeq(*event_seq)),
-        StatePoint::MonotonicNs { monotonic_ns } => {
-            return Ok(StateSelector::MonotonicNs(*monotonic_ns));
-        }
-        StatePoint::Marker { label } => {
-            let mut matches = log.events.iter().filter(|record| {
-                return matches!(&record.event, Event::Marker { label: value, .. } if value == label)
-            });
-            let event_seq = matches
-                .next()
-                .map(|record| return record.seq)
-                .ok_or_else(|| return save_error("marker does not exist"))?;
-            if matches.next().is_some() {
-                return Err(save_error("marker label is ambiguous"));
-            }
-            return Ok(StateSelector::EventSeq(event_seq));
-        }
-    }
 }
 
 fn semantic_image_resources() -> Result<Vec<SemanticImageResource>> {

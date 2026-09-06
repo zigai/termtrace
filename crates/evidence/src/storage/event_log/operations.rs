@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-};
+use std::{collections::HashMap, path::Path};
 
 use termtrace_model::{
     execution::event::{Event, EventRecord, OperationStatus},
@@ -9,7 +6,7 @@ use termtrace_model::{
 };
 use uuid::Uuid;
 
-use crate::storage::Result;
+use crate::storage::{Result, identifier_index::IdentifierSet};
 
 use super::validation::invalid_log;
 
@@ -17,11 +14,19 @@ pub(super) fn validate_operation_transition(
     path: &Path,
     line: u64,
     record: &EventRecord,
-    seen: &mut HashSet<Uuid>,
+    seen: &mut IdentifierSet,
     pending: &mut HashMap<Uuid, PendingOperation>,
 ) -> Result<()> {
     if let Some((operation_id, kind, expected_bytes)) = operation_intent(&record.event) {
-        if !seen.insert(operation_id) {
+        // Bound simultaneous unfinished operations, independently of session lifetime.
+        if pending.len() >= 65_536 {
+            return Err(invalid_log(
+                path,
+                line,
+                "too many concurrently pending operations",
+            ));
+        }
+        if !seen.insert(operation_id)? {
             return Err(invalid_log(path, line, "operation identifier was reused"));
         }
         pending.insert(

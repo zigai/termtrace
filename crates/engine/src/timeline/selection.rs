@@ -1,4 +1,6 @@
-use termtrace_evidence::event_log::EventLog;
+use std::path::Path;
+
+use termtrace_evidence::event_log::{EventLog, EventLogCursor};
 use termtrace_model::{execution::event::Event, terminal::replay::SourceRange};
 
 use crate::{Error, Result};
@@ -115,6 +117,132 @@ fn resolve_marker(log: &EventLog, label: &str) -> Result<u64> {
             )));
         }
     }
+}
+
+/// Resolve numeric or unique-marker bounds without retaining canonical history.
+///
+/// # Errors
+/// Rejects malformed/changing logs, mixed bounds, ambiguous or missing markers,
+/// and ranges outside the canonical endpoint.
+pub fn resolve_session_source_selection(
+    session: &Path,
+    start: Option<u64>,
+    end: Option<u64>,
+    from_marker: Option<&str>,
+    to_marker: Option<&str>,
+) -> Result<Option<SourceRange>> {
+    return resolve_cursor_source_selection(
+        EventLogCursor::open(session.join("events.jsonl"))?,
+        false,
+        None,
+        start,
+        end,
+        from_marker,
+        to_marker,
+    );
+}
+
+/// Resolve marker bounds against a finite live prefix without retaining its events.
+///
+/// `event_count` freezes an actor-provided durable prefix. When absent, the current
+/// byte boundary is frozen and an unfinished trailing record is excluded.
+///
+/// # Errors
+/// Rejects missing prefixes, replaced or truncated sources, and invalid or ambiguous bounds.
+pub fn resolve_session_prefix_source_selection(
+    session: &Path,
+    event_count: Option<u64>,
+    start: Option<u64>,
+    end: Option<u64>,
+    from_marker: Option<&str>,
+    to_marker: Option<&str>,
+) -> Result<Option<SourceRange>> {
+    return resolve_cursor_source_selection(
+        EventLogCursor::open_snapshot(session.join("events.jsonl"))?,
+        true,
+        event_count,
+        start,
+        end,
+        from_marker,
+        to_marker,
+    );
+}
+
+fn resolve_cursor_source_selection(
+    mut cursor: EventLogCursor,
+    snapshot: bool,
+    event_count: Option<u64>,
+    start: Option<u64>,
+    end: Option<u64>,
+    from_marker: Option<&str>,
+    to_marker: Option<&str>,
+) -> Result<Option<SourceRange>> {
+    if start.is_some() && from_marker.is_some() {
+        return Err(range_error(
+            "choose either `--from` or `--from-marker`, not both",
+        ));
+    }
+    if end.is_some() && to_marker.is_some() {
+        return Err(range_error(
+            "choose either `--to` or `--to-marker`, not both",
+        ));
+    }
+    if from_marker == Some("") || to_marker == Some("") {
+        return Err(range_error("marker label must not be empty"));
+    }
+    if start.is_none() && end.is_none() && from_marker.is_none() && to_marker.is_none() {
+        return Ok(None);
+    }
+    let mut final_time = 0;
+    let mut from = (0_u64, 0_u64);
+    let mut to = (0_u64, 0_u64);
+    while event_count.is_none_or(|limit| return cursor.next_event_seq() < limit) {
+        let Some(record) = cursor.next_record()? else {
+            break;
+        };
+        final_time = record.monotonic_ns;
+        if let Event::Marker { label, .. } = record.event {
+            if from_marker == Some(label.as_str()) {
+                from.0 = from.0.saturating_add(1);
+                from.1 = record.monotonic_ns;
+            }
+            if to_marker == Some(label.as_str()) {
+                to.0 = to.0.saturating_add(1);
+                to.1 = record.monotonic_ns;
+            }
+        }
+    }
+    if event_count.is_some_and(|count| return cursor.next_event_seq() != count) {
+        return Err(range_error(
+            "requested marker-selection prefix is unavailable",
+        ));
+    }
+    let _pending = if snapshot {
+        cursor.finish_snapshot()?
+    } else {
+        cursor.finish()?
+    };
+    let start = from_marker
+        .map(|label| return resolve_found_marker(label, from))
+        .transpose()?
+        .or(start);
+    let end = to_marker
+        .map(|label| return resolve_found_marker(label, to))
+        .transpose()?
+        .or(end);
+    return resolve_source_range(start, end, final_time);
+}
+
+fn resolve_found_marker(label: &str, (count, time): (u64, u64)) -> Result<u64> {
+    return match count {
+        1 => Ok(time),
+        0 => Err(range_error(format!(
+            "marker `{label}` does not exist in the canonical event log"
+        ))),
+        _ => Err(range_error(format!(
+            "marker `{label}` occurs {count} times; marker range selectors require a unique label"
+        ))),
+    };
 }
 pub(super) fn range_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {

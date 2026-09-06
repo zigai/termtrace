@@ -1,3 +1,6 @@
+use crate::semantic_video;
+use termtrace_model::execution::session::RecordingFailurePolicy;
+
 use std::{
     io,
     path::{Path, PathBuf},
@@ -467,6 +470,7 @@ fn facade_render_configuration_survives_normalization() {
     let temporary = tempfile::TempDir::new().expect("temporary session");
     let session = temporary.path().join("session");
     let options = RecordOptions {
+        failure_policy: RecordingFailurePolicy::Stop,
         output_directory: session.clone(),
         creation_alias: None,
         lineage: None,
@@ -547,6 +551,16 @@ fn facade_render_configuration_survives_normalization() {
         },
     )
     .expect("normalize completed semantic evidence");
+    let expected_source =
+        semantic_video::plan(&session, &log, 60, 0, end, SemanticRasterProfile::Direct)
+            .expect("legacy semantic source plan");
+    let PresentationSource::Semantic {
+        plan: actual_source,
+    } = &normalized.source
+    else {
+        panic!("semantic source expected");
+    };
+    assert_eq!(*actual_source, expected_source);
     assert_eq!(normalized.render_config, edit.render_config);
     assert_eq!(
         (normalized.output_width, normalized.output_height),

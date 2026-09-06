@@ -1,6 +1,6 @@
 use std::{
     collections::VecDeque,
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     io::{self, BufWriter, Write},
     os::unix::fs::{MetadataExt as _, OpenOptionsExt as _},
     path::{Path, PathBuf},
@@ -19,6 +19,7 @@ use termtrace_model::{
 use crate::storage::{Error, Result, artifact::sync_parent_directory};
 
 use super::{
+    segments::SegmentWriter,
     types::SessionClock,
     validation::{
         OWNER_FILE_MODE, chained_hash, invalid_log, validate_event_geometry, validate_header,
@@ -31,6 +32,8 @@ use super::{
 struct EncodedEventBody<'event> {
     seq: u64,
     monotonic_ns: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    observed_monotonic_ns: Option<u64>,
     event: &'event RawValue,
 }
 
@@ -39,6 +42,8 @@ struct EncodedEventBody<'event> {
 struct EncodedEventRecord<'event> {
     seq: u64,
     monotonic_ns: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    observed_monotonic_ns: Option<u64>,
     prev_hash: &'event str,
     hash: &'event str,
     event: &'event RawValue,
@@ -66,7 +71,7 @@ impl WriterCursor {
 }
 
 struct CountingWrite<'writer> {
-    writer: &'writer mut BufWriter<File>,
+    writer: &'writer mut BufWriter<SegmentWriter>,
     bytes: u64,
 }
 
@@ -86,7 +91,7 @@ impl Write for CountingWrite<'_> {
 #[derive(Debug)]
 pub struct EventLogWriter {
     path: PathBuf,
-    writer: BufWriter<File>,
+    writer: BufWriter<SegmentWriter>,
     clock: SessionClock,
     next_seq: u64,
     previous_hash: Hash,
@@ -110,6 +115,11 @@ pub struct EventLogWriter {
 }
 
 impl EventLogWriter {
+    /// Canonical event-log path owned by this writer.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        return &self.path;
+    }
     /// Writer descriptor identity and immutable header hash for live followers.
     pub fn source_identity(&self) -> (u64, u64, String) {
         return (
@@ -179,7 +189,7 @@ impl EventLogWriter {
                 && self.durable_output_bytes == self.observed_output_bytes,
         };
     }
-    /// Create a new strict-durability event log.
+    /// Create a new event log using the default durability policy.
     ///
     /// # Errors
     ///
@@ -232,7 +242,13 @@ impl EventLogWriter {
             };
         })?;
         let previous_hash = blake3::hash(&header_bytes);
-        let mut writer = BufWriter::new(file);
+        let storage = SegmentWriter::new(&path, file).map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+        let mut writer = BufWriter::new(storage);
         writer
             .write_all(&header_bytes)
             .and_then(|()| return writer.write_all(b"\n"))
@@ -298,6 +314,17 @@ impl EventLogWriter {
     ///
     /// Returns an error for a non-output event or when persistence fails.
     pub fn append_output(&mut self, event: Event) -> Result<u64> {
+        return self.append_observed_output(event, None);
+    }
+
+    /// Append output with the collector's read-completion timestamp.
+    ///
+    /// The observation and append times are both retained; the durability policy is unchanged.
+    pub fn append_observed_output(
+        &mut self,
+        event: Event,
+        observed: Option<Instant>,
+    ) -> Result<u64> {
         let Event::Output { data } = &event else {
             return Err(invalid_log(
                 &self.path,
@@ -324,7 +351,8 @@ impl EventLogWriter {
                         .is_some_and(|started| return started.elapsed() >= maximum_interval)
             }
         };
-        return self.append_at_policy(self.clock.elapsed_ns(), event, durable);
+        let observation = observed.map(|instant| return self.clock.observed_ns(instant));
+        return self.append_at_observation(self.clock.elapsed_ns(), observation, event, durable);
     }
     /// Synchronize pending bounded-durability output when its time threshold has elapsed.
     ///
@@ -353,6 +381,23 @@ impl EventLogWriter {
         return self.append_at_policy(monotonic_ns, event, true);
     }
     fn append_at_policy(&mut self, monotonic_ns: u64, event: Event, durable: bool) -> Result<u64> {
+        return self.append_at_observation(monotonic_ns, None, event, durable);
+    }
+
+    fn append_at_observation(
+        &mut self,
+        monotonic_ns: u64,
+        observed_monotonic_ns: Option<u64>,
+        event: Event,
+        durable: bool,
+    ) -> Result<u64> {
+        if observed_monotonic_ns.is_some_and(|observed| return observed > monotonic_ns) {
+            return Err(invalid_log(
+                &self.path,
+                self.next_seq + 2,
+                "observation is after append time",
+            ));
+        }
         if self.poisoned {
             return Err(Error::EventLogPoisoned {
                 path: self.path.clone(),
@@ -373,6 +418,7 @@ impl EventLogWriter {
         let body = EncodedEventBody {
             seq,
             monotonic_ns,
+            observed_monotonic_ns,
             event: &payload,
         };
         let body_bytes = serde_json::to_vec(&body).map_err(|source| {
@@ -402,6 +448,7 @@ impl EventLogWriter {
         let record = EncodedEventRecord {
             seq,
             monotonic_ns,
+            observed_monotonic_ns,
             prev_hash: previous_hash_text.as_str(),
             hash: hash_text.as_str(),
             event: &payload,

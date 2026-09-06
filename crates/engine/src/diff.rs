@@ -1,5 +1,6 @@
 //! Deterministic semantic endpoint comparison.
 
+use std::path::Path;
 use termtrace_evidence::event_log::EventLog;
 pub use termtrace_model::terminal::diff::{
     CellChange, DiffEndpoint, RowChange, SemanticDiff, ValueChange,
@@ -11,7 +12,8 @@ use termtrace_model::{
     terminal::state::SemanticState,
 };
 
-use crate::replay::{inspect, inspect_many};
+use crate::observation::state_selector_for_session;
+use crate::replay::{inspect, inspect_completed_many, inspect_many};
 use crate::{Error, Result};
 
 /// Compare two points reconstructed from the same validated event log.
@@ -22,6 +24,34 @@ use crate::{Error, Result};
 pub fn diff_states(log: &EventLog, from: StatePoint, to: StatePoint) -> Result<SemanticDiff> {
     let (difference, _, _) = diff_states_with_semantic_states(log, from, to)?;
     return Ok(difference);
+}
+
+/// Compare completed session endpoints without retaining canonical history.
+///
+/// # Errors
+/// Rejects incomplete/changing evidence, missing/ambiguous selectors, and replay failures.
+pub fn diff_session_states_with_semantic_states(
+    session: &Path,
+    from: StatePoint,
+    to: StatePoint,
+) -> Result<(SemanticDiff, SemanticState, SemanticState)> {
+    let selectors = [
+        state_selector_for_session(session, &from, None)?,
+        state_selector_for_session(session, &to, None)?,
+    ];
+    let mut inspections = inspect_completed_many(session, &selectors)?;
+    let to_inspection = inspections
+        .pop()
+        .ok_or_else(|| return diff_error("missing later diff endpoint"))?;
+    let from_inspection = inspections
+        .pop()
+        .ok_or_else(|| return diff_error("missing earlier diff endpoint"))?;
+    return Ok(diff_inspections_with_semantic_states(
+        from,
+        to,
+        from_inspection,
+        to_inspection,
+    ));
 }
 
 /// Compare two points and retain both complete endpoint states from the same replay.

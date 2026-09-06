@@ -71,7 +71,7 @@ fn test_auxiliary_scan() -> (u64, u64, u64) {
 
 type TimelineKey = (u64, u64, u8, u64);
 
-fn timeline_key(entry: &TimelineEntry) -> TimelineKey {
+pub(super) fn timeline_key(entry: &TimelineEntry) -> TimelineKey {
     let (order, byte_offset) = match &entry.item {
         TimelineItem::CanonicalEvent { .. } => (0, 0),
         TimelineItem::VtToken { token } => (
@@ -93,7 +93,7 @@ fn timeline_key(entry: &TimelineEntry) -> TimelineKey {
     );
 }
 
-fn semantic_timeline_entry(state: &StateRecord) -> TimelineEntry {
+pub(super) fn semantic_timeline_entry(state: &StateRecord) -> TimelineEntry {
     let changed_rows = state
         .delta
         .rows

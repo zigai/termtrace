@@ -13,6 +13,7 @@ fn ranged_timeline_log() -> EventLog {
     let session_id = Uuid::now_v7();
     let events = vec![
         EventRecord {
+            observed_monotonic_ns: None,
             seq: 0,
             monotonic_ns: 1,
             prev_hash: "0".repeat(64),
@@ -22,6 +23,7 @@ fn ranged_timeline_log() -> EventLog {
             },
         },
         EventRecord {
+            observed_monotonic_ns: None,
             seq: 1,
             monotonic_ns: 2,
             prev_hash: "1".repeat(64),
@@ -32,6 +34,7 @@ fn ranged_timeline_log() -> EventLog {
             },
         },
         EventRecord {
+            observed_monotonic_ns: None,
             seq: 2,
             monotonic_ns: 3,
             prev_hash: "2".repeat(64),
@@ -86,6 +89,7 @@ fn indexed_control_log(temporary: &tempfile::TempDir) -> EventLog {
     let mut events: Vec<EventRecord> = Vec::new();
     for seq in 0..400_u64 {
         events.push(EventRecord {
+            observed_monotonic_ns: None,
             seq,
             monotonic_ns: seq.saturating_add(1),
             prev_hash: format!("{:064x}", seq),
@@ -300,6 +304,7 @@ fn late_page_uses_checkpoint_and_retains_only_requested_entries() {
             "xterm-ghostty",
         ),
         events: vec![EventRecord {
+            observed_monotonic_ns: None,
             seq: 0,
             monotonic_ns: 1,
             prev_hash: "0".repeat(64),

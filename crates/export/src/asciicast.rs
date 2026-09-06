@@ -5,7 +5,7 @@ use std::{collections::HashMap, io::Write, path::Path, time::Duration};
 use serde::Serialize;
 use termtrace_evidence::{
     artifact::{finish_writer, secure_writer},
-    event_log::EventLog,
+    event_log::{EventLogCursor, EventLogSummary},
 };
 use termtrace_model::execution::event::{Event, OperationStatus};
 use termtrace_model::value::ByteString;
@@ -39,7 +39,8 @@ struct CastEnvironment<'term> {
 pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<()> {
     let session = session_directory.as_ref();
     let output = output.as_ref();
-    let log = EventLog::read(session.join("events.jsonl"))?;
+    let log = EventLogSummary::read(session.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
     let mut writer = secure_writer(output)?;
     write_line(
         &mut writer,
@@ -57,7 +58,7 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
     )?;
     let mut inputs: HashMap<Uuid, ByteString> = HashMap::new();
     let mut resizes: HashMap<Uuid, (u16, u16)> = HashMap::new();
-    for record in &log.events {
+    while let Some(record) = cursor.next_record()? {
         let seconds = Duration::from_nanos(record.monotonic_ns).as_secs_f64();
         match &record.event {
             Event::Output { data } => write_cast_event(
@@ -113,6 +114,7 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
             _ => {}
         }
     }
+    cursor.finish()?;
     finish_writer(writer, output)?;
     return Ok(());
 }

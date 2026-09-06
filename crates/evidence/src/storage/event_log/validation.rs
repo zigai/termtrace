@@ -175,6 +175,10 @@ fn geometry_limit_reason(kind: &str) -> String {
 }
 
 pub(super) fn validate_event_geometry(path: &Path, line: u64, event: &Event) -> Result<()> {
+    if let Event::Application { data, .. } = event {
+        data.validate()
+            .map_err(|reason| return invalid_log(path, line, reason))?;
+    }
     if let Event::ResizeIntent { cols, rows, .. } = event
         && supported_geometry_cell_count(*cols, *rows).is_none()
     {

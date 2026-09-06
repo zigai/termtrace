@@ -1,6 +1,57 @@
 //! timeline analysis CLI integration tests.
 
 use crate::support::*;
+use termtrace_engine::analysis::diagnostics::{
+    diagnose, diagnose_session, diagnose_snapshot, explain, explain_session,
+};
+use termtrace_engine::timeline::visit_snapshot_timeline_while;
+use termtrace_engine::timeline::{build_session_timeline_page, build_timeline};
+use termtrace_evidence::session::SessionSnapshot;
+use termtrace_model::terminal::analysis::DiagnosticCheck;
+
+#[test]
+fn streamed_diagnostic_detectors_match_materialized_reports() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("detectors");
+    let mut record = Command::cargo_bin("termtrace").expect("binary");
+    record.args(["record", "--no-input", "--out"]).arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf '\\033[?2026hhidden\\033[?2026l\\033[2J\\033[HAAA\\033[HBBB\\033[HAAA\\033[20;30Hjump\\033[3J\\033[?25l\\033[?25h\\033[?25l\\033[6n\\033[6n\\033[6n'"])
+        .assert().success();
+    let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
+    let mut selections = vec![Vec::new()];
+    selections.extend(DiagnosticCheck::all().into_iter().map(|check| vec![check]));
+    for checks in selections {
+        let expected = diagnose(&log, checks.clone(), 1, &[]).expect("materialized diagnostics");
+        let actual = diagnose_session(&session, checks, 1, &[]).expect("streamed diagnostics");
+        assert_eq!(
+            serde_json::to_value(actual).expect("streamed report"),
+            serde_json::to_value(expected).expect("materialized report")
+        );
+    }
+    for count in [0, log.events.len() / 2, log.events.len()] {
+        let count = u64::try_from(count).expect("fixture count");
+        let snapshot = SessionSnapshot::capture(&session, Some(count)).expect("finite snapshot");
+        assert!(!snapshot.path().join("completion.json").exists());
+        let prefix =
+            EventLog::read_prefix(session.join("events.jsonl"), count).expect("legacy prefix");
+        let expected =
+            diagnose(&prefix, DiagnosticCheck::all(), 1, &[]).expect("legacy prefix diagnosis");
+        let actual =
+            diagnose_snapshot(&snapshot, DiagnosticCheck::all(), 1).expect("snapshot diagnosis");
+        assert_eq!(
+            serde_json::to_value(actual).expect("snapshot JSON"),
+            serde_json::to_value(expected).expect("legacy JSON")
+        );
+        let expected = build_timeline(&prefix, true, true, None).expect("legacy prefix timeline");
+        let mut actual = Vec::new();
+        visit_snapshot_timeline_while(&snapshot, true, true, None, |entry| {
+            actual.push(entry);
+            return Ok(true);
+        })
+        .expect("snapshot timeline");
+        assert_eq!(actual, expected);
+    }
+}
 
 #[test]
 fn timeline_streams_presented_states_and_canonical_operations() {
@@ -84,6 +135,22 @@ fn timeline_streams_presented_states_and_canonical_operations() {
     assert!(human.contains(" csi bytes="), "{human}");
     for leaked in ["Some(", "None", " Csi ", "Spawned"] {
         assert!(!human.contains(leaked), "leaked `{leaked}` in:\n{human}");
+    }
+    let log = EventLog::read(session.join("events.jsonl")).expect("comparison source");
+    for (hidden, controls) in [(false, false), (false, true), (true, true)] {
+        let expected = build_timeline(&log, hidden, controls, None).expect("reference timeline");
+        let mut entries = Vec::new();
+        let mut offset = 0;
+        loop {
+            let page = build_session_timeline_page(&session, hidden, controls, None, offset, 3)
+                .expect("streamed page");
+            entries.extend(page.entries);
+            let Some(next) = page.next_offset else {
+                break;
+            };
+            offset = next;
+        }
+        assert_eq!(entries, expected, "hidden={hidden}, controls={controls}");
     }
 }
 
@@ -296,6 +363,26 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         .expect("final state")
         .record
         .state_id;
+    let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
+    for target in [
+        StatePoint::LatestPresented,
+        StatePoint::StateId { state_id: 0 },
+        StatePoint::StateId {
+            state_id: final_state,
+        },
+        StatePoint::EventSeq { event_seq: 1 },
+    ] {
+        for context in [0, 1, 8] {
+            let expected =
+                explain(&log, target.clone(), context).expect("materialized explanation");
+            let actual =
+                explain_session(&session, target.clone(), context).expect("streamed explanation");
+            assert_eq!(
+                serde_json::to_value(actual).expect("streamed JSON"),
+                serde_json::to_value(expected).expect("materialized JSON"),
+            );
+        }
+    }
 
     let mut explain = Command::cargo_bin("termtrace").expect("binary should build");
     explain
@@ -373,6 +460,15 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         ])
         .assert()
         .success();
+    let diagnostic_log =
+        EventLog::read(diagnostic_session.join("events.jsonl")).expect("diagnostic log");
+    let expected = diagnose(&diagnostic_log, Vec::new(), 1, &[]).expect("materialized diagnostics");
+    let actual =
+        diagnose_session(&diagnostic_session, Vec::new(), 1, &[]).expect("streamed diagnostics");
+    assert_eq!(
+        serde_json::to_value(actual).expect("streamed report"),
+        serde_json::to_value(expected).expect("materialized report")
+    );
     let mut diagnose = Command::cargo_bin("termtrace").expect("binary should build");
     diagnose
         .args(["analyze", "diagnose"])

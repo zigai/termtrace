@@ -1,13 +1,12 @@
 use std::{
-    collections::{HashMap, HashSet},
-    fs::{File, Metadata, OpenOptions, symlink_metadata},
-    io::{BufRead, BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write},
+    collections::HashMap,
+    fs::{Metadata, OpenOptions, symlink_metadata},
+    io::{BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write},
     os::unix::fs::{MetadataExt as _, OpenOptionsExt as _},
     path::{Path, PathBuf},
 };
 
 use blake3::Hash;
-use nix::libc::O_NOFOLLOW;
 use termtrace_model::{
     execution::event::{Event, EventBody, EventLogHeader, EventRecord},
     execution::event_log::{
@@ -17,10 +16,13 @@ use termtrace_model::{
 };
 use uuid::Uuid;
 
-use crate::storage::{Error, Result};
+use crate::storage::{
+    Error, Result, artifact::sync_parent_directory, identifier_index::IdentifierSet,
+};
 
 use super::{
     operations::validate_operation_transition,
+    segments::{CanonicalLogFile, SegmentWriter, canonical_source_fingerprint},
     types::{EventLog, EventLogSummary},
     validation::{
         MAX_LINE_BYTES, OWNER_FILE_MODE, chained_hash, invalid_log, parse_json_line, read_line,
@@ -44,43 +46,83 @@ pub(super) const DEFAULT_EVENT_LOG_LIMITS: EventLogLimits = EventLogLimits {
     decoded_payload_bytes: MAX_EVENT_LOG_DECODED_PAYLOAD_BYTES,
 };
 
-// Streaming work limits are distinct from the materializing reader's allocation limits.
+// Streaming validation retains one bounded record and a disk-backed identifier index.
+// The materializing reader keeps its allocation limits; lifetime streaming has none.
 const STREAM_EVENT_LOG_LIMITS: EventLogLimits = EventLogLimits {
-    event_count: 2 * MAX_EVENT_COUNT,
-    encoded_bytes: 4 * 1024 * 1024 * 1024,
-    decoded_payload_bytes: 2 * 1024 * 1024 * 1024,
+    event_count: u64::MAX,
+    encoded_bytes: u64::MAX,
+    decoded_payload_bytes: u64::MAX,
 };
-
-#[derive(Debug)]
-pub(super) struct ParsedEventLog {
-    log: EventLog,
-    valid_lines: u64,
-    issue: Option<RecoveryIssue>,
-}
 
 /// Streaming validator over canonical event records.
 pub struct EventLogCursor {
     path: PathBuf,
     header: EventLogHeader,
     header_hash: Hash,
-    file: File,
+    file: CanonicalLogFile,
     opened_metadata: Metadata,
+    opened_fingerprint: String,
     validation: LogValidation,
     line_number: u64,
     encoded_bytes: u64,
     decoded_payload_bytes: u64,
     buffer: Vec<u8>,
     buffer_start: usize,
+    snapshot_end: Option<u64>,
 }
 
 impl EventLog {
+    /// Read a bounded event page from a verified finite snapshot of an appendable log.
+    ///
+    /// At most 4096 records and 8 MiB of encoded records are retained, except
+    /// that a single valid record may exceed the page byte target. Later
+    /// appends and a partial trailing record are excluded. The returned page
+    /// does not claim durability or session completion.
+    ///
+    /// # Errors
+    /// Rejects an invalid page limit, invalid complete records, or source replacement/truncation.
+    pub fn read_page(
+        path: impl AsRef<Path>,
+        from_event_seq: u64,
+        limit: u16,
+    ) -> Result<Vec<EventRecord>> {
+        if !(1..=4096).contains(&limit) {
+            return Err(invalid_log(
+                path.as_ref(),
+                1,
+                "event page limit must be from 1 through 4096",
+            ));
+        }
+        let mut cursor = EventLogCursor::open_snapshot(path)?;
+        let mut records = Vec::new();
+        let mut bytes = 0_u64;
+        let mut previous_position = cursor.position_offset();
+        let mut full = false;
+        while let Some(record) = cursor.next_record()? {
+            let position = cursor.position_offset();
+            let record_bytes = position.saturating_sub(previous_position);
+            previous_position = position;
+            if record.seq >= from_event_seq && records.len() < usize::from(limit) && !full {
+                let next_bytes = bytes.saturating_add(record_bytes);
+                if !records.is_empty() && next_bytes > 8 * 1024 * 1024 {
+                    full = true;
+                } else {
+                    bytes = next_bytes;
+                    records.push(record);
+                }
+            }
+        }
+        let _pending = cursor.finish_snapshot()?;
+        return Ok(records);
+    }
+
     /// Read and validate a complete event log.
     ///
     /// # Errors
     ///
     /// Returns an error when the file violates size, format, sequencing, or hash-chain limits.
     pub fn read(path: impl AsRef<Path>) -> Result<Self> {
-        return Ok(parse_event_log(path.as_ref(), false, None)?.log);
+        return parse_event_log(path.as_ref(), None);
     }
     /// Read and validate exactly the requested event prefix.
     ///
@@ -88,7 +130,7 @@ impl EventLog {
     ///
     /// Returns an error when the requested prefix is unavailable or invalid.
     pub fn read_prefix(path: impl AsRef<Path>, event_count: u64) -> Result<Self> {
-        return Ok(parse_event_log(path.as_ref(), false, Some(event_count))?.log);
+        return parse_event_log(path.as_ref(), Some(event_count));
     }
     /// Copy the longest valid event prefix into a new owner-only event log.
     ///
@@ -102,10 +144,8 @@ impl EventLog {
     ) -> Result<RecoveryReport> {
         let source = source.as_ref();
         let recovered = recovered.as_ref();
-        let parsed = parse_event_log(source, true, None)?;
-        validate_parent_directory(recovered)?;
-        copy_lines(source, recovered, parsed.valid_lines)?;
-        let verified = Self::read(recovered)?;
+        let discarded_tail = recover_stream(source, recovered)?;
+        let verified = EventLogSummary::read(recovered)?;
         let pending_operations: Vec<PendingOperationReport> = verified
             .pending_operations
             .iter()
@@ -126,8 +166,8 @@ impl EventLog {
         return Ok(RecoveryReport {
             source: source.to_path_buf(),
             recovered: recovered.to_path_buf(),
-            valid_events: u64::try_from(verified.events.len()).unwrap_or(u64::MAX),
-            discarded_tail: parsed.issue,
+            valid_events: verified.event_count,
+            discarded_tail,
             pending_operations,
         });
     }
@@ -137,7 +177,7 @@ struct LogValidation {
     previous_hash: Hash,
     previous_time: u64,
     expected_seq: u64,
-    seen_operations: HashSet<Uuid>,
+    seen_operations: IdentifierSet,
     pending_operations: HashMap<Uuid, PendingOperation>,
     validate_operations: bool,
 }
@@ -145,6 +185,12 @@ struct LogValidation {
 impl LogValidation {
     fn validate_record(&mut self, path: &Path, line: u64, bytes: &[u8]) -> Result<EventRecord> {
         let record: EventRecord = parse_json_line(path, line, bytes)?;
+        if record
+            .observed_monotonic_ns
+            .is_some_and(|observed| return observed > record.monotonic_ns)
+        {
+            return Err(invalid_log(path, line, "observation is after append time"));
+        }
         validate_event_geometry(path, line, &record.event)?;
         if record.seq != self.expected_seq {
             return Err(invalid_log(
@@ -169,6 +215,7 @@ impl LogValidation {
         let body = EventBody {
             seq: record.seq,
             monotonic_ns: record.monotonic_ns,
+            observed_monotonic_ns: record.observed_monotonic_ns,
             event: &record.event,
         };
         let body_bytes = serde_json::to_vec(&body).map_err(|source| {
@@ -209,17 +256,19 @@ impl EventLogCursor {
     /// Returns an error when the file or header is invalid.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
-        let file = OpenOptions::new()
-            .read(true)
-            .custom_flags(O_NOFOLLOW)
-            .open(&path)
-            .map_err(|source| {
-                return Error::Filesystem {
-                    path: path.clone(),
-                    source,
-                };
-            })?;
+        let file = CanonicalLogFile::open(&path).map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
         let opened_metadata = file.metadata().map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+        let opened_fingerprint = canonical_source_fingerprint(&path).map_err(|source| {
             return Error::Filesystem {
                 path: path.clone(),
                 source,
@@ -234,16 +283,6 @@ impl EventLogCursor {
         let encoded_bytes = u64::try_from(header_bytes.len())
             .unwrap_or(u64::MAX)
             .saturating_add(1);
-        if encoded_bytes > STREAM_EVENT_LOG_LIMITS.encoded_bytes {
-            return Err(invalid_log(
-                &path,
-                1,
-                format!(
-                    "event log exceeds {} encoded-byte limit",
-                    STREAM_EVENT_LOG_LIMITS.encoded_bytes
-                ),
-            ));
-        }
         let header: EventLogHeader = parse_json_line(&path, 1, &header_bytes)?;
         validate_header(&path, &header)?;
         let position = reader.stream_position().map_err(|source| {
@@ -266,11 +305,12 @@ impl EventLogCursor {
             header_hash,
             file,
             opened_metadata,
+            opened_fingerprint,
             validation: LogValidation {
                 previous_hash: header_hash,
                 previous_time: 0,
                 expected_seq: 0,
-                seen_operations: HashSet::new(),
+                seen_operations: IdentifierSet::default(),
                 pending_operations: HashMap::new(),
                 validate_operations: true,
             },
@@ -279,7 +319,26 @@ impl EventLogCursor {
             decoded_payload_bytes: 0,
             buffer: Vec::new(),
             buffer_start: 0,
+            snapshot_end: None,
         });
+    }
+
+    /// Open a finite snapshot of the complete records present at the current byte boundary.
+    ///
+    /// Later appends are excluded. An unfinished trailing record remains an explicit
+    /// incomplete prefix and must be finalized with `finish_snapshot`, not `finish`.
+    ///
+    /// # Errors
+    /// Returns an error for an invalid header or unreadable canonical source.
+    pub fn open_snapshot(path: impl AsRef<Path>) -> Result<Self> {
+        let mut cursor = Self::open(path)?;
+        cursor.snapshot_end = Some(cursor.file.len().map_err(|source| {
+            return Error::Filesystem {
+                path: cursor.path.clone(),
+                source,
+            };
+        })?);
+        return Ok(cursor);
     }
     /// Seek to a position supplied by the live actor after checking its source identity.
     ///
@@ -346,7 +405,7 @@ impl EventLogCursor {
                 source,
             };
         })?;
-        let opened = self.file.metadata().map_err(|source| {
+        let logical_length = self.file.len().map_err(|source| {
             return Error::Filesystem {
                 path: self.path.clone(),
                 source,
@@ -355,8 +414,7 @@ impl EventLogCursor {
         if !current.is_file()
             || current.dev() != self.opened_metadata.dev()
             || current.ino() != self.opened_metadata.ino()
-            || opened.len() < self.position_offset()
-            || current.len() < self.position_offset()
+            || logical_length < self.position_offset()
         {
             return Err(invalid_log(
                 &self.path,
@@ -427,7 +485,7 @@ impl EventLogCursor {
                         "line exceeds 64 MiB limit",
                     ));
                 }
-                if self.validation.expected_seq >= STREAM_EVENT_LOG_LIMITS.event_count {
+                if self.validation.expected_seq == STREAM_EVENT_LOG_LIMITS.event_count {
                     return Err(invalid_log(
                         &self.path,
                         self.line_number,
@@ -453,16 +511,6 @@ impl EventLogCursor {
                 let decoded_payload_bytes = self
                     .decoded_payload_bytes
                     .saturating_add(record.event.decoded_payload_bytes());
-                if decoded_payload_bytes > STREAM_EVENT_LOG_LIMITS.decoded_payload_bytes {
-                    return Err(invalid_log(
-                        &self.path,
-                        self.line_number,
-                        format!(
-                            "event log exceeds {} decoded-payload-byte limit",
-                            STREAM_EVENT_LOG_LIMITS.decoded_payload_bytes
-                        ),
-                    ));
-                }
                 self.decoded_payload_bytes = decoded_payload_bytes;
                 self.buffer_start = line_end.saturating_add(1);
                 self.line_number = self.line_number.saturating_add(1);
@@ -484,7 +532,19 @@ impl EventLogCursor {
                 self.buffer_start = 0;
             }
             let mut chunk = [0_u8; 8192];
-            let count = match self.file.read(&mut chunk) {
+            let capacity = self.snapshot_end.map_or(chunk.len(), |end| {
+                return usize::try_from(end.saturating_sub(self.encoded_bytes))
+                    .unwrap_or(usize::MAX)
+                    .min(chunk.len());
+            });
+            let target = chunk.get_mut(..capacity).ok_or_else(|| {
+                return invalid_log(
+                    &self.path,
+                    self.line_number,
+                    "invalid snapshot read capacity",
+                );
+            })?;
+            let count = match self.file.read(target) {
                 Ok(count) => count,
                 Err(error) if error.kind() == ErrorKind::Interrupted => continue,
                 Err(source) => {
@@ -500,16 +560,6 @@ impl EventLogCursor {
             self.encoded_bytes = self
                 .encoded_bytes
                 .saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
-            if self.encoded_bytes > STREAM_EVENT_LOG_LIMITS.encoded_bytes {
-                return Err(invalid_log(
-                    &self.path,
-                    self.line_number,
-                    format!(
-                        "event log exceeds {} encoded-byte limit",
-                        STREAM_EVENT_LOG_LIMITS.encoded_bytes
-                    ),
-                ));
-            }
             self.buffer
                 .extend_from_slice(chunk.get(..count).ok_or_else(|| {
                     return invalid_log(&self.path, self.line_number, "invalid read length");
@@ -520,6 +570,26 @@ impl EventLogCursor {
     /// The validated canonical header.
     pub fn header(&self) -> &EventLogHeader {
         return &self.header;
+    }
+
+    /// Finish a finite snapshot, allowing an unfinished trailing record and later appends.
+    ///
+    /// This validates a prefix only and cannot establish session completion.
+    ///
+    /// # Errors
+    /// Rejects replacement/truncation, suffix-only validation, and non-snapshot cursors.
+    pub fn finish_snapshot(self) -> Result<Vec<PendingOperation>> {
+        if self.snapshot_end.is_none() || !self.validation.validate_operations {
+            return Err(invalid_log(
+                &self.path,
+                self.line_number,
+                "cursor is not a full-prefix snapshot",
+            ));
+        }
+        self.validate_source_identity()?;
+        let mut pending: Vec<_> = self.validation.pending_operations.into_values().collect();
+        pending.sort_by_key(|operation| return operation.intent_seq);
+        return Ok(pending);
     }
 
     /// Require a complete file rather than an appendable live prefix.
@@ -563,6 +633,13 @@ impl EventLogCursor {
         };
         if identity(&self.opened_metadata) != identity(&finished)
             || identity(&finished) != identity(&current)
+            || self.opened_fingerprint
+                != canonical_source_fingerprint(&self.path).map_err(|source| {
+                    return Error::Filesystem {
+                        path: self.path.clone(),
+                        source,
+                    };
+                })?
         {
             return Err(invalid_log(
                 &self.path,
@@ -600,7 +677,25 @@ impl EventLogSummary {
         path: impl AsRef<Path>,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<Self> {
-        let mut cursor = EventLogCursor::open(path)?;
+        return Self::read_cursor(EventLogCursor::open(path)?, &mut check, false);
+    }
+
+    /// Validate a finite prefix of an appendable log without retaining its history.
+    ///
+    /// A partial trailing record is excluded. The returned summary is not a
+    /// completion claim; callers must label artifacts derived from it as incomplete.
+    ///
+    /// # Errors
+    /// Rejects invalid complete records and replacement or truncation of the source.
+    pub fn snapshot(path: impl AsRef<Path>) -> Result<Self> {
+        return Self::read_cursor(EventLogCursor::open_snapshot(path)?, || return Ok(()), true);
+    }
+
+    fn read_cursor(
+        mut cursor: EventLogCursor,
+        mut check: impl FnMut() -> Result<()>,
+        snapshot: bool,
+    ) -> Result<Self> {
         let mut summary = Self {
             header: cursor.header().clone(),
             event_count: 0,
@@ -630,25 +725,24 @@ impl EventLogSummary {
             }
             summary.terminal = Some(record);
         }
-        summary.pending_operations = cursor.finish()?;
+        summary.pending_operations = if snapshot {
+            cursor.finish_snapshot()?
+        } else {
+            cursor.finish()?
+        };
         return Ok(summary);
     }
 }
 
-fn parse_event_log(
-    path: &Path,
-    recover_tail: bool,
-    event_limit: Option<u64>,
-) -> Result<ParsedEventLog> {
-    return parse_event_log_with_limits(path, recover_tail, event_limit, DEFAULT_EVENT_LOG_LIMITS);
+fn parse_event_log(path: &Path, event_limit: Option<u64>) -> Result<EventLog> {
+    return parse_event_log_with_limits(path, event_limit, DEFAULT_EVENT_LOG_LIMITS);
 }
 
 pub(super) fn parse_event_log_with_limits(
     path: &Path,
-    recover_tail: bool,
     event_limit: Option<u64>,
     limits: EventLogLimits,
-) -> Result<ParsedEventLog> {
+) -> Result<EventLog> {
     if event_limit.is_some_and(|limit| return limit > limits.event_count) {
         return Err(invalid_log(
             path,
@@ -659,7 +753,7 @@ pub(super) fn parse_event_log_with_limits(
             ),
         ));
     }
-    let file = File::open(path).map_err(|source| {
+    let file = CanonicalLogFile::open(path).map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),
             source,
@@ -687,16 +781,16 @@ pub(super) fn parse_event_log_with_limits(
         previous_hash: blake3::hash(&header_bytes),
         previous_time: 0,
         expected_seq: 0,
-        seen_operations: HashSet::new(),
+        seen_operations: IdentifierSet::default(),
         pending_operations: HashMap::new(),
         validate_operations: true,
     };
     let mut events: Vec<EventRecord> = Vec::new();
     let mut decoded_payload_bytes = 0_u64;
     let mut line_number = 2_u64;
-    let issue = loop {
+    loop {
         if event_limit == Some(u64::try_from(events.len()).unwrap_or(u64::MAX)) {
-            break None;
+            break;
         }
         let line = match read_line(&mut reader, path, line_number) {
             Ok(Some(line)) => line,
@@ -711,9 +805,8 @@ pub(super) fn parse_event_log_with_limits(
                         ),
                     ));
                 }
-                break None;
+                break;
             }
-            Err(error) if recover_tail => break Some(recovery_issue(&error, line_number)),
             Err(error) => return Err(error),
         };
         encoded_bytes = encoded_bytes.saturating_add(
@@ -730,9 +823,6 @@ pub(super) fn parse_event_log_with_limits(
                     limits.encoded_bytes
                 ),
             );
-            if recover_tail {
-                break Some(recovery_issue(&error, line_number));
-            }
             return Err(error);
         }
         if u64::try_from(events.len()).unwrap_or(u64::MAX) >= limits.event_count {
@@ -741,50 +831,35 @@ pub(super) fn parse_event_log_with_limits(
                 line_number,
                 format!("event log exceeds {} event limit", limits.event_count),
             );
-            if recover_tail {
-                break Some(recovery_issue(&error, line_number));
-            }
             return Err(error);
         }
-        match validation.validate_record(path, line_number, &line) {
-            Ok(record) => {
-                decoded_payload_bytes =
-                    decoded_payload_bytes.saturating_add(record.event.decoded_payload_bytes());
-                if decoded_payload_bytes > limits.decoded_payload_bytes {
-                    let error = invalid_log(
-                        path,
-                        line_number,
-                        format!(
-                            "event log exceeds {} decoded-payload-byte limit",
-                            limits.decoded_payload_bytes
-                        ),
-                    );
-                    if recover_tail {
-                        break Some(recovery_issue(&error, line_number));
-                    }
-                    return Err(error);
-                }
-                events.push(record);
+        {
+            let record = validation.validate_record(path, line_number, &line)?;
+            decoded_payload_bytes =
+                decoded_payload_bytes.saturating_add(record.event.decoded_payload_bytes());
+            if decoded_payload_bytes > limits.decoded_payload_bytes {
+                let error = invalid_log(
+                    path,
+                    line_number,
+                    format!(
+                        "event log exceeds {} decoded-payload-byte limit",
+                        limits.decoded_payload_bytes
+                    ),
+                );
+                return Err(error);
             }
-            Err(error) if recover_tail => break Some(recovery_issue(&error, line_number)),
-            Err(error) => return Err(error),
+            events.push(record);
         }
         line_number = line_number.saturating_add(1);
-    };
+    }
     let mut pending_operations: Vec<PendingOperation> =
         validation.pending_operations.into_values().collect();
     pending_operations.sort_by_key(|operation| return operation.intent_seq);
-    return Ok(ParsedEventLog {
-        valid_lines: u64::try_from(events.len())
-            .unwrap_or(u64::MAX)
-            .saturating_add(1),
-        log: EventLog {
-            header,
-            events,
-            pending_operations,
-            source_path: Some(path.to_path_buf()),
-        },
-        issue,
+    return Ok(EventLog {
+        header,
+        events,
+        pending_operations,
+        source_path: Some(path.to_path_buf()),
     });
 }
 
@@ -805,53 +880,58 @@ fn recovery_issue(error: &Error, fallback_line: u64) -> RecoveryIssue {
     }
 }
 
-fn copy_lines(source: &Path, recovered: &Path, count: u64) -> Result<()> {
-    let input = File::open(source).map_err(|source_error| {
-        return Error::Filesystem {
-            path: source.to_path_buf(),
-            source: source_error,
-        };
-    })?;
+fn recover_stream(source: &Path, recovered: &Path) -> Result<Option<RecoveryIssue>> {
+    validate_parent_directory(recovered)?;
+    let input =
+        CanonicalLogFile::open(source).map_err(|error| return Error::filesystem(source, error))?;
+    let mut reader = BufReader::new(input);
+    let header_bytes = read_line(&mut reader, source, 1)?
+        .ok_or_else(|| return invalid_log(source, 1, "missing header"))?;
+    let header: EventLogHeader = parse_json_line(source, 1, &header_bytes)?;
+    validate_header(source, &header)?;
+    let mut validation = LogValidation {
+        previous_hash: blake3::hash(&header_bytes),
+        previous_time: 0,
+        expected_seq: 0,
+        seen_operations: IdentifierSet::default(),
+        pending_operations: HashMap::new(),
+        validate_operations: true,
+    };
     let output = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(OWNER_FILE_MODE)
         .open(recovered)
-        .map_err(|source| {
-            return Error::Filesystem {
-                path: recovered.to_path_buf(),
-                source,
-            };
-        })?;
-    let mut reader = BufReader::new(input);
-    let mut writer = BufWriter::new(output);
-    for line in 1..=count {
-        let mut bytes: Vec<u8> = Vec::new();
-        let read = reader
-            .read_until(b'\n', &mut bytes)
-            .map_err(|source_error| {
-                return Error::Filesystem {
-                    path: source.to_path_buf(),
-                    source: source_error,
-                };
-            })?;
-        if read == 0 || bytes.last() != Some(&b'\n') {
-            return Err(invalid_log(source, line, "valid prefix copy was truncated"));
+        .map_err(|error| return Error::filesystem(recovered, error))?;
+    let storage = SegmentWriter::new(recovered, output)
+        .map_err(|error| return Error::filesystem(recovered, error))?;
+    let mut writer = BufWriter::new(storage);
+    writer
+        .write_all(&header_bytes)
+        .and_then(|()| return writer.write_all(b"\n"))
+        .map_err(|error| return Error::filesystem(recovered, error))?;
+    let mut line_number = 2_u64;
+    let issue = loop {
+        let line = match read_line(&mut reader, source, line_number) {
+            Ok(Some(line)) => line,
+            Ok(None) => break None,
+            Err(error) => break Some(recovery_issue(&error, line_number)),
+        };
+        if let Err(error) = validation.validate_record(source, line_number, &line) {
+            break Some(recovery_issue(&error, line_number));
         }
-        writer.write_all(&bytes).map_err(|source| {
-            return Error::Filesystem {
-                path: recovered.to_path_buf(),
-                source,
-            };
-        })?;
-    }
-    return writer
+        writer
+            .write_all(&line)
+            .and_then(|()| return writer.write_all(b"\n"))
+            .map_err(|error| return Error::filesystem(recovered, error))?;
+        line_number = line_number
+            .checked_add(1)
+            .ok_or_else(|| return invalid_log(source, line_number, "line number overflow"))?;
+    };
+    writer
         .flush()
         .and_then(|()| return writer.get_ref().sync_data())
-        .map_err(|source| {
-            return Error::Filesystem {
-                path: recovered.to_path_buf(),
-                source,
-            };
-        });
+        .map_err(|error| return Error::filesystem(recovered, error))?;
+    sync_parent_directory(recovered)?;
+    return Ok(issue);
 }

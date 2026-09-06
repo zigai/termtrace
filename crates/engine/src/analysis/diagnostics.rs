@@ -1,12 +1,16 @@
 //! Deterministic evidence-backed explanations and conservative diagnostics.
 
+mod stream;
+pub use stream::{diagnose_session, diagnose_snapshot};
+
 use std::{
     collections::BTreeMap,
     iter,
-    path::{Component, PathBuf},
+    path::{Component, Path, PathBuf},
+    sync::atomic::AtomicBool,
 };
 
-use termtrace_evidence::event_log::EventLog;
+use termtrace_evidence::{event_log::EventLog, session::validate_completed_session};
 use termtrace_model::{
     artifact::visual::{VideoMapEntry, VisualManifest},
     execution::event::Event,
@@ -15,8 +19,9 @@ use termtrace_model::{
         FindingConfidence, NativeCorrelation, NativeEvidenceLevel,
     },
     terminal::observation::StatePoint,
-    terminal::replay::StateRecord,
+    terminal::replay::{ReplayEndpoint, StateRecord},
     terminal::state::{CursorState, DirtyState},
+    terminal::timeline::TimelineItem,
     terminal::vt::VtToken,
 };
 use termtrace_terminal::frame_event_records;
@@ -24,7 +29,12 @@ use uuid::Uuid;
 
 use crate::{
     Error, Result,
-    replay::{replay, visit_states},
+    observation::state_selector_for_session,
+    replay::{
+        inspect_completed_session, replay, trust::SourceIdentity, visit_session_states_while,
+        visit_states,
+    },
+    timeline::stream::TokenCursor,
 };
 
 fn analysis_error(reason: impl Into<String>) -> Error {
@@ -39,6 +49,7 @@ pub struct ValidatedVisualManifest {
     manifest_path: PathBuf,
     manifest: VisualManifest,
     video_map: Vec<VideoMapEntry>,
+    screenshot_state_id: Option<u64>,
 }
 
 impl ValidatedVisualManifest {
@@ -62,9 +73,33 @@ impl ValidatedVisualManifest {
         validate(&manifest)?;
         return Ok(Self {
             manifest_path,
+            screenshot_state_id: manifest.selected_state_id,
             manifest,
             video_map,
         });
+    }
+
+    /// Bind a screenshot without a capture-time dense ID to a verified canonical state.
+    ///
+    /// The media owner verifies the stored source prefix before supplying the resolved
+    /// endpoint. This records a derived correlation without changing the source manifest.
+    pub fn bind_screenshot_state(
+        &mut self,
+        state_id: u64,
+        canonical: &ReplayEndpoint,
+    ) -> Result<()> {
+        if self.manifest.capture_kind != "screenshot"
+            || self.manifest.session_id != canonical.session_id
+            || self.manifest.selected_state_hash.as_deref() != Some(canonical.state_hash.as_str())
+            || self.manifest.endpoint_event_seq != canonical.event_seq
+            || self.manifest.endpoint_event_byte_offset != canonical.event_byte_offset
+        {
+            return Err(analysis_error(
+                "native screenshot does not match the selected canonical endpoint",
+            ));
+        }
+        self.screenshot_state_id = Some(state_id);
+        return Ok(());
     }
 }
 
@@ -98,7 +133,7 @@ pub fn native_correlations_for_state(
     return correlations;
 }
 
-fn visit_native_correlations(
+pub(super) fn visit_native_correlations(
     session_id: Uuid,
     selected: Option<u64>,
     evidence: &[ValidatedVisualManifest],
@@ -108,7 +143,7 @@ fn visit_native_correlations(
         if evidence.manifest.session_id != session_id {
             continue;
         }
-        if let Some(state_id) = evidence.manifest.selected_state_id
+        if let Some(state_id) = evidence.screenshot_state_id
             && selected.is_none_or(|selected| return selected == state_id)
         {
             let level = if evidence.manifest.presentation_evidence == "presentation_proven" {
@@ -254,6 +289,65 @@ pub(super) fn diagnose_states(
         findings: detected,
         output_page: None,
     };
+}
+
+/// Explain a completed session while retaining only the requested event context.
+///
+/// # Errors
+/// Rejects incomplete or changing sources, unresolved targets, and invalid replay.
+pub fn explain_session(
+    session: &Path,
+    target: StatePoint,
+    context_events: u64,
+) -> Result<ExplainReport> {
+    let source = SourceIdentity::capture(session)?;
+    let completion = validate_completed_session(session)?;
+    let selector = state_selector_for_session(session, &target, None)?;
+    let target_state = inspect_completed_session(session, selector)?.record;
+    let target_event = target_state.event_seq.unwrap_or(0);
+    let start_event = target_event.saturating_sub(context_events);
+    let end_event = target_event.saturating_add(context_events);
+    let mut cursor = TokenCursor::new(session, None)?;
+    let mut tokens = Vec::new();
+    while let Some(entry) = cursor.next()? {
+        if let TimelineItem::VtToken { token } = entry.item
+            && token.source.iter().any(|segment| {
+                return segment.event_seq >= start_event && segment.event_seq <= end_event;
+            })
+        {
+            tokens.push(token);
+        }
+    }
+    let mut states = Vec::new();
+    visit_session_states_while(session, &AtomicBool::new(false), |record, _| {
+        if record
+            .event_seq
+            .is_some_and(|sequence| return sequence > end_event)
+        {
+            return Ok(false);
+        }
+        if record
+            .event_seq
+            .is_none_or(|sequence| return sequence >= start_event)
+        {
+            states.push(record.clone());
+        }
+        return Ok(true);
+    })?;
+    source.check(session)?;
+    let findings = findings(&tokens, &states);
+    return Ok(ExplainReport {
+        session_id: completion.session_id,
+        source_final_event_hash: completion.final_event_hash,
+        source_event_count: completion.event_count,
+        target,
+        target_state,
+        context_events,
+        tokens,
+        states,
+        findings,
+        output_page: None,
+    });
 }
 
 /// Explain exact VT frames and semantic transitions around one state point.

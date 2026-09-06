@@ -18,20 +18,27 @@ mod index;
 pub(crate) mod trust;
 
 use delta::state_delta;
+use engine::replay_for_index;
+#[cfg(test)]
+use engine::validate_replay_seed;
 #[cfg(test)]
 use engine::{
     DEFAULT_REPLAY_LIMITS, ReplayLimits, replay_with, replay_with_limits,
     replay_with_seed_and_limits,
 };
 pub use engine::{
-    RenderedStateFormats, StateInspectionWithFormats, format_state, inspect, inspect_many,
-    inspect_with_formats, replay, semantic_state_hash, visit_session_states_while, visit_states,
+    RenderedStateFormats, StateInspectionWithFormats, format_state, inspect,
+    inspect_completed_many, inspect_completed_session, inspect_completed_session_with_formats,
+    inspect_many, inspect_with_formats, replay, semantic_state_hash,
+    visit_session_states_range_while, visit_session_states_while, visit_snapshot_states_while,
+    visit_states,
 };
 pub(crate) use engine::{
-    ReplaySeed, inspect_latest_presented_stream, inspect_session_stream, visit_states_range,
-    visit_states_range_while, visit_states_seeded_while,
+    ReplaySeed, inspect_latest_presented_prefix, inspect_latest_presented_stream,
+    inspect_prefix_stream, inspect_session_stream, inspect_session_stream_with_formats,
+    visit_recording_states_range_while, visit_states_range, visit_states_range_while,
+    visit_states_seeded_while,
 };
-use engine::{replay_for_index, validate_replay_seed};
 #[cfg(test)]
 pub(crate) use engine::{reset_test_replay_output_bytes, test_replay_output_bytes};
 pub(crate) use index::load_nearest_replay_seed;

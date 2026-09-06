@@ -9,6 +9,7 @@ use nix::fcntl::{Flock, FlockArg, OFlag};
 use nix::sys::stat::Mode;
 use serde::Serialize;
 use termtrace_model::artifact::metadata::{ArtifactRootRecord, ArtifactSourceRange};
+use termtrace_model::execution::event_log::CanonicalBoundary;
 use uuid::Uuid;
 
 use crate::storage::{Error, Result};
@@ -35,6 +36,14 @@ struct ArtifactRootBody<'record> {
     session_manifest_hash: &'record str,
     source_event_hash: Option<&'record str>,
     source_range: Option<ArtifactSourceRange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_prefix: Option<&'record CanonicalBoundary>,
+}
+
+struct RootSource<'source> {
+    hash: Option<&'source str>,
+    range: Option<ArtifactSourceRange>,
+    prefix: Option<&'source CanonicalBoundary>,
 }
 
 /// Append a derivation root to a session's locked, hash-chained artifact catalog.
@@ -51,6 +60,54 @@ pub fn append_artifact_root(
     session_manifest_hash: &str,
     source_event_hash: Option<&str>,
     source_range: Option<ArtifactSourceRange>,
+) -> Result<ArtifactRootRecord> {
+    return append_root(
+        session,
+        artifact_directory,
+        derivation_type,
+        manifest_bytes,
+        session_manifest_hash,
+        RootSource {
+            hash: source_event_hash,
+            range: source_range,
+            prefix: None,
+        },
+    );
+}
+
+/// Catalog an artifact against an explicit canonical prefix, including live sources.
+///
+/// # Errors
+/// Returns path, catalog integrity, or durable publication failures.
+pub fn append_artifact_prefix_root(
+    session: &Path,
+    artifact_directory: &Path,
+    derivation_type: &str,
+    manifest_bytes: &[u8],
+    session_manifest_hash: &str,
+    boundary: &CanonicalBoundary,
+) -> Result<ArtifactRootRecord> {
+    return append_root(
+        session,
+        artifact_directory,
+        derivation_type,
+        manifest_bytes,
+        session_manifest_hash,
+        RootSource {
+            hash: Some(&boundary.event_hash),
+            range: None,
+            prefix: Some(boundary),
+        },
+    );
+}
+
+fn append_root(
+    session: &Path,
+    artifact_directory: &Path,
+    derivation_type: &str,
+    manifest_bytes: &[u8],
+    session_manifest_hash: &str,
+    source: RootSource<'_>,
 ) -> Result<ArtifactRootRecord> {
     let directory_name = artifact_directory
         .strip_prefix(session)
@@ -112,8 +169,9 @@ pub fn append_artifact_root(
         artifact_directory: &directory_name,
         manifest_hash: &manifest_hash,
         session_manifest_hash,
-        source_event_hash,
-        source_range,
+        source_event_hash: source.hash,
+        source_range: source.range,
+        source_prefix: source.prefix,
     };
     let hash = hash_artifact_root(&body, &catalog_path)?;
     let record = ArtifactRootRecord {
@@ -127,8 +185,9 @@ pub fn append_artifact_root(
         artifact_directory: directory_name,
         manifest_hash,
         session_manifest_hash: session_manifest_hash.to_owned(),
-        source_event_hash: source_event_hash.map(str::to_owned),
-        source_range,
+        source_event_hash: source.hash.map(str::to_owned),
+        source_range: source.range,
+        source_prefix: source.prefix.cloned(),
     };
     let mut encoded = serde_json::to_vec(&record)
         .map_err(|source| return json_error(catalog_path.clone(), source))?;
@@ -209,6 +268,7 @@ fn read_artifact_roots_from(file: &mut File, path: &Path) -> Result<Vec<Artifact
             session_manifest_hash: &record.session_manifest_hash,
             source_event_hash: record.source_event_hash.as_deref(),
             source_range: record.source_range,
+            source_prefix: record.source_prefix.as_ref(),
         };
         if record.hash != hash_artifact_root(&body, path)? {
             return Err(Error::invalid(
