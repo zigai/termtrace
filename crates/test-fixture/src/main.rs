@@ -87,11 +87,6 @@ fn generate(arguments: LargeArgs) -> Result<()> {
             "--output-bytes must provide at least one byte per output event"
         ));
     }
-    if arguments.events > 2_000_000 || arguments.output_bytes > 2 * 1024 * 1024 * 1024 {
-        return Err(miette::miette!(
-            "fixture exceeds the streaming event or payload budget"
-        ));
-    }
     if arguments.output_bytes.div_ceil(arguments.events - 1) > 32 * 1024 * 1024 {
         return Err(miette::miette!(
             "fixture output chunks must not exceed 32 MiB; increase --events"
@@ -130,6 +125,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         pixel_height: arguments.rows.saturating_mul(20),
     };
     let manifest = SessionManifest {
+        failure_policy: Default::default(),
         format: SESSION_MANIFEST_FORMAT.to_owned(),
         version: SESSION_MANIFEST_VERSION,
         session_id,
