@@ -119,6 +119,8 @@ jobs:
         run: scripts/ci-run.sh native-capability bash scripts/native-capability-test.sh
       - name: Exercise retained native export
         run: scripts/ci-run.sh native-retained cargo test --locked --test cli retained_native_video_exports_without_native_capture_tools -- --ignored
+      - name: Exercise original capture and cancellation
+        run: scripts/ci-run.sh native-original cargo test --locked --test cli original_native -- --ignored
       - name: Upload native smoke failure evidence
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
