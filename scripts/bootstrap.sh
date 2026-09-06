@@ -12,7 +12,6 @@ done
 
 if ((${#missing[@]})); then
     printf 'missing bootstrap command(s): %s\n' "${missing[*]}" >&2
-    printf 'see docs/installation.md for host requirements\n' >&2
     exit 2
 fi
 
