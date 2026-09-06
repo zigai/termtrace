@@ -1,3 +1,4 @@
+export { Instrumentation } from "./session/instrumentation.js";
 export {
     TermtraceOperationError,
     TermtraceProtocolError,

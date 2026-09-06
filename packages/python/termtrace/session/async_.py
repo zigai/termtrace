@@ -16,6 +16,7 @@ from termtrace.errors import (
     StaleStateError,
     TermtraceOperationError,
 )
+from termtrace.instrumentation import AsyncInstrumentation
 from termtrace.screen.frame import FrameRequest, Region, ScreenFrame
 from termtrace.screen.locators import AsyncLocator
 from termtrace.screen.queries import LocatorSpec, StyleFilter, TextSpec
@@ -112,6 +113,7 @@ class AsyncSession:
         self.keyboard = AsyncKeyboard(self)
         self.output = AsyncOutput(self)
         self.pointer = AsyncPointer(self)
+        self.application = AsyncInstrumentation(self)
         self.semantic = AsyncSemantic(self)
         self.events = AsyncEvents(self)
         self.native = AsyncNative(self)

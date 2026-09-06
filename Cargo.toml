@@ -15,6 +15,9 @@ members = [
 ]
 exclude = ["fuzz"]
 
+[workspace.package]
+license-file = "LICENSE"
+
 [package]
 name = "termtrace"
 default-run = "termtrace"
@@ -23,7 +26,7 @@ edition = "2024"
 rust-version = "1.97.1"
 description = "Native-Ghostty terminal recording and semantic debugging for humans and agents"
 repository = "https://github.com/zigai/termtrace"
-license = "MIT"
+license-file.workspace = true
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/termtrace-{ target }.tar.gz"
@@ -52,7 +55,7 @@ termtrace-model = { path = "crates/model" }
 termtrace-render = { path = "crates/render" }
 termtrace-scenario = { path = "crates/scenario" }
 termtrace-schema = { path = "crates/schema" }
-termtrace-sdk = { path = "crates/sdk" }
+termtrace-sdk = { path = "crates/sdk", features = ["in-process"] }
 termtrace-terminal = { path = "crates/terminal" }
 tracing = "0.1.41"
 tracing-error = "0.2.1"

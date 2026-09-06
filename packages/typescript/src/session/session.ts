@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Instrumentation } from "./instrumentation.js";
 import { rm } from "node:fs/promises";
 
 import type { DriverRequestOptions } from "../transport/driver-client.js";
@@ -99,6 +100,7 @@ type SequenceActionOptionsBuilder = {
 
 /** Process-local handle with explicit canonical evidence identity. */
 export class Session implements AsyncDisposable {
+    readonly application: Instrumentation;
     readonly screen: Screen;
     readonly keyboard: Keyboard;
     readonly output: Output;
@@ -134,6 +136,7 @@ export class Session implements AsyncDisposable {
         this.keyboard = new Keyboard(this);
         this.output = new Output(this);
         this.pointer = new Pointer(this);
+        this.application = new Instrumentation(this);
         this.semantic = new Semantic(this);
         this.events = new Events(this);
         this.native = new Native(this);

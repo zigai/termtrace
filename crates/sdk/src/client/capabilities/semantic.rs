@@ -13,18 +13,24 @@ impl Semantic<'_> {
 
     /// Build the ordered semantic/canonical timeline.
     pub fn timeline(&self, all_states: bool, controls: bool) -> Result<Vec<TimelineEntry>> {
-        let log = self.completed_log()?;
-        return Ok(build_timeline(&log, all_states, controls, None)?);
+        let mut entries = Vec::new();
+        visit_session_timeline_while(&self.session.path, all_states, controls, None, |entry| {
+            entries.push(entry);
+            return Ok(true);
+        })?;
+        return Ok(entries);
     }
 
     /// Compare two complete semantic endpoints.
     pub fn diff(&self, from: StatePoint, to: StatePoint) -> Result<SemanticDiff> {
-        return Ok(diff_states(&self.completed_log()?, from, to)?);
+        let (difference, _, _) =
+            diff_session_states_with_semantic_states(&self.session.path, from, to)?;
+        return Ok(difference);
     }
 
     /// Explain exact VT frames and transitions around one point.
     pub fn explain(&self, point: StatePoint, context_events: u64) -> Result<ExplainReport> {
-        return Ok(explain(&self.completed_log()?, point, context_events)?);
+        return Ok(explain_session(&self.session.path, point, context_events)?);
     }
 
     /// Run conservative source-bound detectors.
@@ -33,19 +39,12 @@ impl Semantic<'_> {
         checks: Vec<DiagnosticCheck>,
         broad_change_percent: u8,
     ) -> Result<DiagnoseReport> {
-        let log = self.completed_log()?;
         let visual_evidence = validated_visual_manifests(&self.session.path)?;
-        return Ok(diagnose(
-            &log,
+        return Ok(diagnose_session(
+            &self.session.path,
             checks,
             broad_change_percent,
             &visual_evidence,
         )?);
-    }
-
-    fn completed_log(&self) -> Result<EventLog> {
-        let log = EventLog::read(self.session.path.join("events.jsonl"))?;
-        validate_completed_log(&self.session.path, &log)?;
-        return Ok(log);
     }
 }

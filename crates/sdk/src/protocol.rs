@@ -1,6 +1,7 @@
 //! Blocking client transport for the versioned live-session control protocol.
 
 use std::{
+    fs::File,
     io::{BufRead as _, BufReader, Error as IoError, ErrorKind, Read as _, Write as _},
     net::Shutdown,
     os::{
@@ -16,6 +17,7 @@ use nix::{
     unistd::getuid,
 };
 
+#[cfg(feature = "in-process")]
 use termtrace_engine::{
     inspection::wait_for_completion,
     observation::{
@@ -24,23 +26,53 @@ use termtrace_engine::{
     },
     recording::control::{compile_screen_predicate, evaluate_screen_predicate},
 };
-use termtrace_evidence::session::read_manifest;
+#[cfg(feature = "in-process")]
+use termtrace_model::protocol::control::ScreenWaitQuality;
+#[cfg(feature = "in-process")]
+use termtrace_model::terminal::screen::ScreenFrameSource;
 use termtrace_model::{
+    execution::session::SessionManifest,
     protocol::control::{
         ActionPostcondition, CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest,
         ControlResponse, ControlResult, InputSequenceAtom, MAX_CONTROL_MESSAGE_BYTES,
-        ScreenPredicate, ScreenWaitQuality,
+        ScreenPredicate,
     },
-    terminal::{
-        inspection::ScreenWaitOutcome,
-        screen::{ScreenFrameSource, ScreenProjectionRequest},
-    },
+    terminal::{inspection::ScreenWaitOutcome, screen::ScreenProjectionRequest},
 };
 
 use crate::{Error, Result};
 
 const DEFAULT_CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_INPUT_SEQUENCE_PACING: Duration = Duration::from_secs(60);
+
+fn read_control_manifest(session_directory: &Path) -> Result<SessionManifest> {
+    let path = session_directory.join("session.json");
+    let mut bytes = Vec::new();
+    File::open(&path)
+        .and_then(|file| {
+            return file
+                .take(MAX_CONTROL_MESSAGE_BYTES + 1)
+                .read_to_end(&mut bytes);
+        })
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_CONTROL_MESSAGE_BYTES {
+        return Err(Error::InvalidControlProtocol {
+            reason: "session manifest exceeds the client transport limit".to_owned(),
+        });
+    }
+    return serde_json::from_slice(&bytes).map_err(|source| {
+        return Error::InvalidJson {
+            path,
+            json_path: "$".to_owned(),
+            source,
+        };
+    });
+}
 
 pub(crate) fn control_socket_address(name: &str) -> Result<SocketAddr> {
     return SocketAddr::from_abstract_name(name.as_bytes()).map_err(|error| {
@@ -58,7 +90,7 @@ pub(crate) fn connect_session_control(session_directory: &Path) -> Result<UnixSt
             source: IoError::new(ErrorKind::NotFound, "session manifest is unavailable"),
         });
     }
-    let manifest = read_manifest(session_directory)?;
+    let manifest = read_control_manifest(session_directory)?;
     let address = control_socket_address(&manifest.control_socket)?;
     let stream = UnixStream::connect_addr(&address).map_err(|source| {
         return Error::ControlUnavailable {
@@ -112,6 +144,7 @@ pub fn wait_for_screen(
     timeout: Duration,
 ) -> Result<ScreenWaitOutcome> {
     let session_directory = session_directory.as_ref();
+    #[cfg(feature = "in-process")]
     let started_at = Instant::now();
     let stable_for_ns = u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX);
     let timeout_ns = u64::try_from(timeout.as_nanos()).unwrap_or(u64::MAX);
@@ -125,6 +158,7 @@ pub fn wait_for_screen(
         },
     ) {
         Ok(result) => result,
+        #[cfg(feature = "in-process")]
         Err(error)
             if matches!(
                 &error,
@@ -171,6 +205,7 @@ pub fn wait_for_screen(
     });
 }
 
+#[cfg(feature = "in-process")]
 fn completed_screen_wait(
     session: &Path,
     predicate: ScreenPredicate,

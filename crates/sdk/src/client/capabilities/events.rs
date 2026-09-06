@@ -17,12 +17,13 @@ impl Events<'_> {
         if limit == 0 || limit > 4096 {
             return Err(client_error("event limit must be from 1 through 4096"));
         }
-        let log = EventLog::read(self.session.path.join("events.jsonl"))?;
-        let events = log
-            .events
+        let records = EventLog::read_page(
+            self.session.path.join("events.jsonl"),
+            from_event_seq,
+            limit,
+        )?;
+        let events = records
             .iter()
-            .filter(|record| return record.seq >= from_event_seq)
-            .take(usize::from(limit))
             .map(|record| return EventProjection::from_record(record, metadata_only))
             .collect::<Vec<_>>();
         let next = events

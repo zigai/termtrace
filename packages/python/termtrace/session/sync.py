@@ -16,6 +16,7 @@ from termtrace.errors import (
     StaleStateError,
     TermtraceOperationError,
 )
+from termtrace.instrumentation import Instrumentation
 from termtrace.screen.frame import FrameRequest, Region, ScreenFrame
 from termtrace.screen.locators import Locator
 from termtrace.screen.queries import LocatorSpec, StyleFilter, TextSpec
@@ -111,6 +112,7 @@ class Session:
         self.keyboard = Keyboard(self)
         self.output = Output(self)
         self.pointer = Pointer(self)
+        self.application = Instrumentation(self)
         self.semantic = Semantic(self)
         self.events = Events(self)
         self.native = Native(self)

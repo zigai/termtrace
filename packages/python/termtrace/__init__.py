@@ -36,6 +36,7 @@ from termtrace.errors import (
     TransportError,
     ValidationError,
 )
+from termtrace.instrumentation import AsyncInstrumentation, Instrumentation
 from termtrace.screen.frame import (
     ActorBoundaries,
     Appearance,
@@ -161,6 +162,8 @@ from termtrace.transport.protocol import (
 from termtrace.transport.sync import DriverTransport, Terminal
 
 __all__ = [
+    "AsyncInstrumentation",
+    "Instrumentation",
     "ActionBusyError",
     "ActionCompletion",
     "ActionOptions",

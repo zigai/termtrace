@@ -18,7 +18,7 @@ termtrace-model = { path = "../model" }
 termtrace-evidence = { path = "../evidence" }
 termtrace-engine = { path = "../engine" }
 termtrace-render = { path = "../render" }
-termtrace-sdk = { path = "../sdk" }
+termtrace-sdk = { path = "../sdk", features = ["in-process"] }
 
 [dev-dependencies]
 tempfile = "3.23.0"

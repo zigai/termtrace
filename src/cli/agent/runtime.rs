@@ -91,6 +91,7 @@ pub(super) struct AttachedSession {
 
 #[derive(Default)]
 pub(super) struct Driver {
+    pub(super) native: Option<super::native::DriverNativeWorker>,
     pub(super) sessions: HashMap<Uuid, AttachedSession>,
     pub(super) cached: HashMap<Uuid, CachedDriverResponse>,
     order: VecDeque<Uuid>,

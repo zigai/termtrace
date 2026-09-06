@@ -20,8 +20,8 @@ use uuid::Uuid;
 
 use termtrace_engine::observation::{project_screen_frame, resolved_screen_state_for_session};
 use termtrace_engine::{
-    analysis::diagnostics::{diagnose, explain},
-    diff::diff_states,
+    analysis::diagnostics::{diagnose_session, explain_session},
+    diff::diff_session_states_with_semantic_states,
     inspection::{wait_for_completion, wait_for_output},
     observation::{
         observation_from_live_snapshot,
@@ -29,12 +29,12 @@ use termtrace_engine::{
         semantic_state_from_live_snapshot,
         semantic_state_with_hash_for_session as completed_semantic_state_with_hash_for_session,
     },
-    timeline::build_timeline,
+    timeline::visit_session_timeline_while,
 };
 use termtrace_evidence::{
     artifact::sync_directory,
     event_log::EventLog,
-    session::{read_manifest, validate_completed_log, verify_session},
+    session::{read_manifest, validate_completed_session, verify_session},
 };
 use termtrace_export::bundle::{create as create_bundle, verify_profile as verify_bundle};
 use termtrace_media::{

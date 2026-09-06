@@ -9,6 +9,7 @@ use termtrace_model::{
     terminal::state::MouseButton,
 };
 use termtrace_sdk::locator::LocatorError;
+mod application;
 mod capture;
 mod concurrency;
 mod environment;

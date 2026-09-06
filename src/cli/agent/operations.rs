@@ -9,23 +9,21 @@ use std::{
 };
 
 use termtrace_engine::{
-    analysis::diagnostics::diagnose,
-    diff::{diff_states, inspect_point},
+    analysis::diagnostics::diagnose_session,
+    diff::diff_session_states_with_semantic_states,
     inspection::{wait_for_completion, wait_for_output},
     observation::{CaptureQuality, resolved_screen_state_for_session},
     registry::SessionRegistry,
-    timeline::build_timeline_page,
+    timeline::build_session_timeline_page,
 };
 use termtrace_evidence::{
     artifact::sync_directory,
     event_log::EventLog,
-    session::{read_completion, read_manifest, validate_completed_log, verify_session},
+    session::{read_completion, read_manifest, validate_completed_session, verify_session},
 };
 use termtrace_export::bundle::{create as create_bundle, verify_profile as verify_bundle};
 use termtrace_media::{
-    native_capture::{
-        CaptureKind, CaptureOptions, capture, native_capture_target, validated_visual_manifests,
-    },
+    native_capture::validated_visual_manifests,
     save::{save, verify_saved_artifact},
 };
 use termtrace_model::{
@@ -40,7 +38,7 @@ use termtrace_model::{
         ControlResponse, ControlResult,
     },
     terminal::observation::StatePoint,
-    terminal::replay::{STATE_FORMAT_VERSION, StateSelection},
+    terminal::replay::STATE_FORMAT_VERSION,
     terminal::screen::ScreenFrameError,
     value::ByteString,
 };
@@ -190,7 +188,9 @@ impl Driver {
                         ));
                     }
                     let path = session.path.clone();
-                    let _log = completed_driver_log(&path)?;
+                    validate_completed_session(&path).map_err(|error| {
+                        return driver_failure_from_error(error, Some(path.clone()));
+                    })?;
                     self.reap_recorder(handle, &path)?;
                     fs_err::remove_dir_all(&path).map_err(|error| {
                         return driver_failure(
@@ -204,6 +204,7 @@ impl Driver {
                             return driver_failure_from_error(error, Some(path.clone()));
                         })?;
                     }
+                    self.close_native(handle);
                     self.sessions.remove(handle);
                     Ok(DriverData::Discarded {
                         evidence_removed: true,
@@ -327,8 +328,7 @@ impl Driver {
                             Some(path.clone()),
                         ));
                     }
-                    let log = completed_driver_log(path)?;
-                    build_timeline_page(&log, *all_states, *controls, None, *offset, *limit)
+                    build_session_timeline_page(path, *all_states, *controls, None, *offset, *limit)
                         .map(|page| {
                             return DriverData::Timeline {
                                 entries: page.entries,
@@ -341,9 +341,8 @@ impl Driver {
                 }
                 DriverMethod::Diff { handle, from, to } => {
                     let path = self.session_path(handle)?;
-                    let log = completed_driver_log(path)?;
-                    diff_states(&log, from.clone(), to.clone())
-                        .map(|difference| {
+                    diff_session_states_with_semantic_states(path, from.clone(), to.clone())
+                        .map(|(difference, _, _)| {
                             return DriverData::Diff {
                                 difference: Box::new(difference),
                             };
@@ -365,12 +364,11 @@ impl Driver {
                             Some(path.clone()),
                         ));
                     }
-                    let log = completed_driver_log(path)?;
                     let visual_evidence = validated_visual_manifests(path).map_err(|error| {
                         return driver_failure_from_error(error, Some(path.clone()));
                     })?;
-                    diagnose(
-                        &log,
+                    diagnose_session(
+                        path,
                         checks.clone(),
                         *broad_change_percent,
                         &visual_evidence,
@@ -394,14 +392,13 @@ impl Driver {
                             Some(path.clone()),
                         ));
                     }
-                    let log = EventLog::read(path.join("events.jsonl")).map_err(|error| {
-                        return driver_failure_from_error(error, Some(path.clone()));
-                    })?;
-                    let events = log
-                        .events
+                    let records =
+                        EventLog::read_page(path.join("events.jsonl"), *from_event_seq, *limit)
+                            .map_err(|error| {
+                                return driver_failure_from_error(error, Some(path.clone()));
+                            })?;
+                    let events = records
                         .iter()
-                        .filter(|record| return record.seq >= *from_event_seq)
-                        .take(usize::from(*limit))
                         .map(|record| return EventProjection::from_record(record, *metadata_only))
                         .collect::<Vec<_>>();
                     let next_event_seq = events
@@ -420,10 +417,10 @@ impl Driver {
                     viewport,
                     max_bytes,
                 } => {
-                    let path = self.session_path(handle)?;
+                    let path = self.session_path(handle)?.clone();
                     match renderer {
                         DriverScreenshotRenderer::Semantic => save(
-                            path,
+                            &path,
                             destination,
                             point.clone(),
                             &[SaveFormat::Png],
@@ -448,77 +445,25 @@ impl Driver {
                                 return Err(driver_failure(
                                     "unsupported_artifact_budget",
                                     "generation byte budgets are supported for semantic screenshots only",
-                                    Some(path.clone()),
+                                    Some(path),
                                 ));
                             }
-                            let log = completed_driver_log(path)?;
-                            let inspection = inspect_point(&log, point).map_err(|error| {
-                                return driver_failure_from_error(error, Some(path.clone()));
-                            })?;
-                            if !inspection.record.presented {
-                                return Err(driver_failure(
-                                    "hidden_native_state",
-                                    "native screenshots require a presentation-eligible state",
-                                    Some(path.clone()),
-                                ));
-                            }
-                            let event_seq = inspection.record.event_seq.ok_or_else(|| {
-                                return driver_failure(
-                                    "missing_native_endpoint",
-                                    "the initial state has no native replay endpoint",
-                                    Some(path.clone()),
-                                );
-                            })?;
                             require_capability(NATIVE_SCREENSHOT_CAPABILITY).map_err(|error| {
                                 return driver_failure_from_error(error, Some(path.clone()));
                             })?;
-                            let helper = env::current_exe().map_err(|source| {
-                                return driver_failure_from_error(
-                                    termtrace_media::Error::Filesystem {
-                                        path: PathBuf::from("<current-executable>"),
-                                        source,
-                                    },
-                                    Some(path.clone()),
-                                );
-                            })?;
-                            let (target, geometry_solver) = native_capture_target(
-                                &helper, path, *viewport,
-                            )
-                            .map_err(|error| {
-                                return driver_failure_from_error(error, Some(path.clone()));
-                            })?;
-                            capture(
-                                &helper,
-                                &CaptureOptions {
-                                    session_directory: path.clone(),
-                                    width: target.width,
-                                    height: target.height,
-                                    fps: 24,
-                                    start_monotonic_ns: None,
-                                    end_monotonic_ns: None,
-                                    state_selection: StateSelection::Presented,
-                                    geometry_solver,
-                                    kind: CaptureKind::Screenshot {
-                                        state_id: inspection.record.state_id,
-                                        state_hash: inspection.record.state_hash,
-                                        event_seq,
-                                        event_byte_offset: inspection.record.event_byte_offset,
-                                    },
-                                    destination: Some(destination.clone()),
-                                },
-                            )
-                            .map(|outcome| {
-                                return DriverData::Artifact {
-                                    artifact_type: "native_screenshot".to_owned(),
-                                    directory: outcome.directory.clone(),
-                                    primary: outcome.screenshot,
-                                    manifest: outcome.directory.join("manifest.json"),
-                                    truth_layer: "native".to_owned(),
-                                };
-                            })
-                            .map_err(|error| {
-                                return driver_failure_from_error(error, Some(path.clone()));
-                            })
+                            self.native_screenshot(*handle, &path, point, destination, *viewport)
+                                .map(|outcome| {
+                                    return DriverData::Artifact {
+                                        artifact_type: "native_screenshot".to_owned(),
+                                        directory: outcome.directory.clone(),
+                                        primary: outcome.screenshot,
+                                        manifest: outcome.directory.join("manifest.json"),
+                                        truth_layer: "native".to_owned(),
+                                    };
+                                })
+                                .map_err(|error| {
+                                    return driver_failure_from_error(error, Some(path.clone()));
+                                })
                         }
                     }
                 }
@@ -557,6 +502,7 @@ impl Driver {
                     })
                 }
                 DriverMethod::Detach { handle } => {
+                    self.close_native(handle);
                     self.detach_recorder(handle);
                     if self.sessions.remove(handle).is_none() {
                         return Err(driver_failure(
@@ -710,14 +656,6 @@ impl Driver {
             }
         });
     }
-}
-
-pub(super) fn completed_driver_log(path: &Path) -> StdResult<EventLog, Box<DriverResult>> {
-    let log = EventLog::read(path.join("events.jsonl"))
-        .map_err(|error| return driver_failure_from_error(error, Some(path.to_path_buf())))?;
-    validate_completed_log(path, &log)
-        .map_err(|error| return driver_failure_from_error(error, Some(path.to_path_buf())))?;
-    return Ok(log);
 }
 
 pub(super) fn resolve_reference(reference: &Path) -> Result<PathBuf> {

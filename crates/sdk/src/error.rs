@@ -10,6 +10,7 @@ use termtrace_model::{
     terminal::{observation::ActorBoundaries, screen::ScreenFrameError},
 };
 
+#[cfg(feature = "in-process")]
 use crate::{actions::ActionResult, client::StableScreenCapture};
 
 /// Bounded retry fact attached to typed public actor failures.
@@ -26,17 +27,38 @@ pub enum RetrySafety {
 /// Failures translated at the SDK boundary.
 #[derive(Debug, Error)]
 pub enum Error {
+    /// The installed process driver violated its framing or correlation contract.
+    #[error("invalid driver protocol message: {reason}")]
+    InvalidDriverProtocol {
+        /// Bounded diagnostic without raw response contents.
+        reason: String,
+    },
+    /// Process-driver I/O failed or exceeded its deadline.
+    #[error("driver transport failed during `{phase}`: {source}")]
+    DriverTransport {
+        /// Transport operation that failed.
+        phase: &'static str,
+        /// Whether any request bytes may have reached the driver.
+        request_dispatched: bool,
+        /// Underlying transport error, including `TimedOut` deadlines.
+        #[source]
+        source: IoError,
+    },
     /// Canonical evidence access or verification failed.
     #[error(transparent)]
+    #[cfg(feature = "in-process")]
     Evidence(#[from] termtrace_evidence::Error),
     /// Replay, observation, analysis, or recording coordination failed.
     #[error(transparent)]
+    #[cfg(feature = "in-process")]
     Engine(#[from] termtrace_engine::Error),
     /// Evidence export failed.
     #[error(transparent)]
+    #[cfg(feature = "in-process")]
     Export(#[from] termtrace_export::Error),
     /// Media production failed.
     #[error(transparent)]
+    #[cfg(feature = "in-process")]
     Media(#[from] termtrace_media::Error),
     /// A filesystem operation failed.
     #[error("filesystem operation failed for `{path}`")]
@@ -179,12 +201,14 @@ pub enum Error {
     },
     /// A strict action postcondition returned incomplete evidence.
     #[error("action postcondition did not complete successfully")]
+    #[cfg(feature = "in-process")]
     PostconditionIncomplete {
         /// Complete incomplete action result retained for inspection.
         result: Box<ActionResult>,
     },
     /// A strict stable capture returned incomplete evidence.
     #[error("stable capture did not reach the requested stable interval")]
+    #[cfg(feature = "in-process")]
     StableCaptureIncomplete {
         /// Complete incomplete capture retained for inspection.
         result: Box<StableScreenCapture>,

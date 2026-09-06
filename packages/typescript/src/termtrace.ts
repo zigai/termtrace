@@ -1,4 +1,5 @@
 import { DriverClient } from "./transport/driver-client.js";
+import { resolveBinary } from "./transport/binary.js";
 import type { DriverMethodOf } from "./transport/protocol.js";
 import { Session } from "./session/session.js";
 
@@ -41,9 +42,7 @@ export class Termtrace implements AsyncDisposable {
 
     static async create(options: TermtraceOptions = {}): Promise<Termtrace> {
         options.signal?.throwIfAborted();
-        const driver = new DriverClient(
-            options.binaryPath ?? process.env.TERMTRACE_BINARY ?? "termtrace",
-        );
+        const driver = new DriverClient(resolveBinary(options.binaryPath));
         try {
             const requestOptions =
                 options.signal === undefined

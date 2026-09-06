@@ -243,8 +243,7 @@ impl Session {
     /// Returns an error when completion is missing or invalid, the recorder cannot be
     /// reaped, or the canonical session tree cannot be removed durably.
     pub fn discard_completed(mut self) -> Result<()> {
-        let log = EventLog::read(self.path.join("events.jsonl"))?;
-        validate_completed_log(&self.path, &log)?;
+        validate_completed_session(&self.path)?;
         if let Some(mut child) = self.recorder.take() {
             child.wait().map_err(|source| {
                 return Error::Filesystem {
