@@ -1,4 +1,6 @@
-use super::*;
+use super::{
+    Duration, EnvironmentSpec, Error, OsString, Path, PathBuf, Result, Session, SessionBuilder,
+};
 
 /// Process launcher and canonical evidence root.
 #[derive(Clone, Debug)]

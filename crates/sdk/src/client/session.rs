@@ -2,7 +2,14 @@ use super::control::{
     action_atom, client_error, exact_duration_ns, public_control_error, validate_action_options,
     wire_postcondition,
 };
-use super::*;
+use super::{
+    ActionCompletion, ActionOptions, ActionPostconditionResult, ActionResult, Child,
+    ControlCommand, ControlData, ControlRequest, ControlResult, Duration, Errno, Error, Events,
+    Evidence, InputAtom, IoError, Keyboard, Native, Output, Path, PathBuf, Pid, Pointer, Result,
+    Screen, Semantic, SessionCompletion, Signal, StableCaptureQuality, Uuid,
+    derive_input_operation_id, killpg, read_manifest, send_request, send_request_response,
+    sync_directory, thread, validate_completed_session, wait_for_completion,
+};
 
 /// High-level live/completed session handle.
 pub struct Session {
@@ -120,7 +127,9 @@ impl Session {
             projection: options.projection,
         });
         request.request_id = request_id;
-        request.expected_presented_state_hash = options.if_state.clone();
+        request
+            .expected_presented_state_hash
+            .clone_from(&options.if_state);
         let response = send_request_response(&self.path, &request)?;
         let data = match response.result {
             ControlResult::Ok { data } => data,
@@ -290,6 +299,7 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{process::Command, time::Instant};
 
     #[test]
     fn detach_reaps_the_recorder_after_it_exits() {

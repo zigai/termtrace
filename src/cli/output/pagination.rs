@@ -1,4 +1,4 @@
-use super::*;
+use super::{OutputPage, PageArgs};
 
 pub(super) fn pagination_projection(value: &serde_json::Value) -> Option<serde_json::Value> {
     let source = value.as_object()?;

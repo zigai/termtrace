@@ -12,6 +12,7 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
+
     /// A strict scenario or snapshot JSON document was invalid.
     #[error("invalid JSON in `{}` at `{json_path}`: {source}", path.display())]
     InvalidJson {
@@ -23,12 +24,14 @@ pub enum Error {
         #[source]
         source: serde_json::Error,
     },
+
     /// A scenario contract invariant was violated.
     #[error("invalid scenario: {reason}")]
     InvalidScenario {
         /// Scenario contract violation.
         reason: String,
     },
+
     /// A lower-layer operation failed.
     #[error("scenario {operation} failed: {message}")]
     Operation {

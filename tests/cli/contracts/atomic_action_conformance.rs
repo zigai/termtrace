@@ -47,6 +47,10 @@ struct FixtureRegion {
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "This shared SDK conformance response has separate protocol fields for each verified action property"
+)]
 struct SdkSummary {
     state_hash_valid: bool,
     atom_count: u32,

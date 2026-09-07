@@ -1,4 +1,7 @@
-use super::super::*;
+use super::super::{
+    ByteString, ControlCommand, ControlData, ControlRequest, InputKind, KeyModifiers, MouseButton,
+    NamedKey, PointerOperation, Result, Session,
+};
 
 /// Typed keyboard and byte input operations.
 pub struct Keyboard<'session> {

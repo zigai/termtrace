@@ -63,6 +63,10 @@ pub enum NamedKey {
 
 /// Typed modifier state for one semantic key event.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Keyboard modifiers are independently combinable input protocol bits"
+)]
 pub struct KeyModifiers {
     /// Shift modifier.
     pub shift: bool,
@@ -135,6 +139,10 @@ pub enum ColorSpec {
 
 /// Complete style attached to one terminal cell.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "SGR attributes are independently combinable terminal style bits"
+)]
 pub struct CellStyle {
     /// Foreground color source.
     pub foreground: ColorSpec,
@@ -256,6 +264,10 @@ pub struct CursorState {
 
 /// Terminal modes relevant to presentation and input.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "ANSI and DEC modes are independently toggled terminal protocol bits"
+)]
 pub struct ModeState {
     /// DEC synchronized-output mode 2026.
     pub synchronized_output: bool,

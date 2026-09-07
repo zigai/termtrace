@@ -135,9 +135,8 @@ fn terminal_pid(root: Option<u32>) -> StdResult<Option<(u32, PathBuf)>, String> 
             return Ok(Some((pid, executable)));
         }
         let path = PathBuf::from(format!("/proc/{pid}/task/{pid}/children"));
-        let children = match read_bounded(&path, 64 * 1024) {
-            Ok(children) => children,
-            Err(_) => continue,
+        let Ok(children) = read_bounded(&path, 64 * 1024) else {
+            continue;
         };
         for child in String::from_utf8_lossy(&children).split_whitespace() {
             if let Ok(pid) = child.parse() {

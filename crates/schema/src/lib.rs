@@ -111,6 +111,10 @@ macro_rules! registry {
     };
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "SCHEMA_REGISTRY requires the public fallible SchemaGenerator function pointer signature"
+)]
 fn generate_acceptance_benchmark_schema(filename: &'static str) -> Result<GeneratedSchema> {
     return Ok(GeneratedSchema {
         filename,

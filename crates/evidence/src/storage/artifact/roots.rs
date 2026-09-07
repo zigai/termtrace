@@ -275,7 +275,7 @@ fn read_artifact_roots_from(file: &mut File, path: &Path) -> Result<Vec<Artifact
                 "artifact-root catalog record hash does not match",
             ));
         }
-        previous_hash = record.hash.clone();
+        previous_hash.clone_from(&record.hash);
         records.push(record);
     }
     return Ok(records);

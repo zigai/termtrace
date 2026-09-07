@@ -256,7 +256,7 @@ impl MutationJournal {
             .next_seq
             .checked_add(1)
             .ok_or_else(|| return Error::invalid("mutation journal sequence overflow"))?;
-        self.previous_hash = record.hash.clone();
+        self.previous_hash.clone_from(&record.hash);
         return Ok(record);
     }
 }
@@ -320,7 +320,7 @@ pub fn read_mutation_journal(path: &Path) -> Result<Vec<MutationJournalRecord>> 
             ));
         }
         let record = decode_record(&line, index, &previous_hash, path)?;
-        previous_hash = record.hash.clone();
+        previous_hash.clone_from(&record.hash);
         records.push(record);
     }
     return Ok(records);
@@ -387,7 +387,7 @@ impl MutationJournalCursor {
             .sequence
             .checked_add(1)
             .ok_or_else(|| return Error::invalid("mutation journal sequence overflow"))?;
-        self.previous_hash = record.hash.clone();
+        self.previous_hash.clone_from(&record.hash);
         return Ok(Some(record));
     }
 }

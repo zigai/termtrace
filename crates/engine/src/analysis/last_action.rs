@@ -325,7 +325,7 @@ fn action_boundary(
         if *atom_status == OperationStatus::Failed {
             status = OperationStatus::Failed;
             if error_code.is_none() {
-                error_code = atom_error_code.clone();
+                error_code.clone_from(atom_error_code);
             }
         }
     }

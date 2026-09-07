@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    ActionCondition, ActionOptions, ActionPostcondition, ByteString, ControlErrorDetails, Duration,
+    Error, FrameDetail, InputAtom, InputKind, InputSequenceAtom, InvalidRegionReason, Result,
+    RetrySafety, ScreenFrameError, ScreenFrameLimitKind, StableCaptureOptions, Uuid,
+};
 
 pub(super) fn validate_action_options(atoms: &[InputAtom], options: &ActionOptions) -> Result<()> {
     if atoms.is_empty() || atoms.len() > 4096 {
@@ -291,6 +295,7 @@ pub(super) fn client_error(reason: impl Into<String>) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use termtrace_model::terminal::screen::ScreenRegion;
 
     #[test]
     fn action_projection_failure_retains_generated_request_id() {

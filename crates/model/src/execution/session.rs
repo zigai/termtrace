@@ -110,6 +110,10 @@ pub struct VerificationFinding {
 /// Machine-readable result from offline session verification.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "The versioned verification report exposes separate validity, authenticity, receipt, and trust results"
+)]
 pub struct VerificationReport {
     /// Stable report format identifier.
     pub format: String,

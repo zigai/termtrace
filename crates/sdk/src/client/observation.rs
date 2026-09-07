@@ -1,5 +1,10 @@
 use super::control::client_error;
-use super::*;
+use super::{
+    ControlCommand, ControlData, ControlRequest, Duration, Error, Instant, Observation, Path,
+    Result, StatePoint, completed_semantic_state_with_hash_for_session,
+    observation_from_live_snapshot, observe_completed_session_with_options,
+    semantic_state_from_live_snapshot, send_request, thread,
+};
 use termtrace_model::terminal::state::SemanticState;
 
 const COMPLETION_TRANSITION_TIMEOUT: Duration = Duration::from_secs(2);

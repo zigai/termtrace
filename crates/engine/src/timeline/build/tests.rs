@@ -92,7 +92,7 @@ fn indexed_control_log(temporary: &tempfile::TempDir) -> EventLog {
             observed_monotonic_ns: None,
             seq,
             monotonic_ns: seq.saturating_add(1),
-            prev_hash: format!("{:064x}", seq),
+            prev_hash: format!("{seq:064x}"),
             hash: format!("{:064x}", seq.saturating_add(1)),
             event: Event::Output {
                 data: ByteString::from(format!("{seq:04}\x1b[H").into_bytes()),

@@ -119,7 +119,7 @@ impl VtFramer {
             } else {
                 VtTokenKind::Incomplete
             };
-            emitted.push(self.emit(kind)?);
+            emitted.push(self.emit(kind));
         }
         return Ok(emitted);
     }
@@ -136,7 +136,7 @@ impl VtFramer {
                 let value = byte.value;
                 self.push(byte)?;
                 if value == b'\\' {
-                    emitted.push(self.emit(kind)?);
+                    emitted.push(self.emit(kind));
                     self.state = FramerState::Ground;
                 } else {
                     self.state = FramerState::String { kind, osc };
@@ -153,12 +153,12 @@ impl VtFramer {
                 return self.push(byte);
             }
             self.printable_utf8_remaining = 0;
-            self.flush_printable(emitted)?;
+            self.flush_printable(emitted);
             return self.consume_ground(byte, emitted);
         }
         match byte.value {
             0x1b => {
-                self.flush_printable(emitted)?;
+                self.flush_printable(emitted);
                 self.push(byte)?;
                 self.state = FramerState::Escape;
             }
@@ -167,14 +167,14 @@ impl VtFramer {
             0x90 => self.begin_string(byte, VtTokenKind::Dcs, false, emitted)?,
             0x9f => self.begin_string(byte, VtTokenKind::Apc, false, emitted)?,
             0x00..=0x1f | 0x7f => {
-                self.flush_printable(emitted)?;
+                self.flush_printable(emitted);
                 self.push(byte)?;
-                emitted.push(self.emit(VtTokenKind::C0)?);
+                emitted.push(self.emit(VtTokenKind::C0));
             }
             0x80..=0x9f => {
-                self.flush_printable(emitted)?;
+                self.flush_printable(emitted);
                 self.push(byte)?;
-                emitted.push(self.emit(VtTokenKind::C1)?);
+                emitted.push(self.emit(VtTokenKind::C1));
             }
             value => {
                 self.printable_utf8_remaining = match value {
@@ -213,12 +213,12 @@ impl VtFramer {
                 };
             }
             0x30..=0x7e => {
-                emitted.push(self.emit(VtTokenKind::Esc)?);
+                emitted.push(self.emit(VtTokenKind::Esc));
                 self.state = FramerState::Ground;
             }
             0x20..=0x2f => {}
             _ => {
-                emitted.push(self.emit(VtTokenKind::Unknown)?);
+                emitted.push(self.emit(VtTokenKind::Unknown));
                 self.state = FramerState::Ground;
             }
         }
@@ -229,10 +229,10 @@ impl VtFramer {
         let value = byte.value;
         self.push(byte)?;
         if (0x40..=0x7e).contains(&value) {
-            emitted.push(self.emit(VtTokenKind::Csi)?);
+            emitted.push(self.emit(VtTokenKind::Csi));
             self.state = FramerState::Ground;
         } else if !(0x20..=0x3f).contains(&value) {
-            emitted.push(self.emit(VtTokenKind::Unknown)?);
+            emitted.push(self.emit(VtTokenKind::Unknown));
             self.state = FramerState::Ground;
         }
         return Ok(());
@@ -248,7 +248,7 @@ impl VtFramer {
         let value = byte.value;
         self.push(byte)?;
         if value == 0x9c || (osc && value == 0x07) {
-            emitted.push(self.emit(kind)?);
+            emitted.push(self.emit(kind));
             self.state = FramerState::Ground;
         } else if value == 0x1b {
             self.state = FramerState::StringEscape { kind, osc };
@@ -262,7 +262,7 @@ impl VtFramer {
         kind: VtTokenKind,
         emitted: &mut Vec<VtToken>,
     ) -> Result<()> {
-        self.flush_printable(emitted)?;
+        self.flush_printable(emitted);
         self.push(byte)?;
         self.state = match kind {
             VtTokenKind::Csi => FramerState::Csi,
@@ -278,7 +278,7 @@ impl VtFramer {
         osc: bool,
         emitted: &mut Vec<VtToken>,
     ) -> Result<()> {
-        self.flush_printable(emitted)?;
+        self.flush_printable(emitted);
         self.push(byte)?;
         self.state = FramerState::String { kind, osc };
         return Ok(());
@@ -307,15 +307,14 @@ impl VtFramer {
         return Ok(());
     }
 
-    fn flush_printable(&mut self, emitted: &mut Vec<VtToken>) -> Result<()> {
+    fn flush_printable(&mut self, emitted: &mut Vec<VtToken>) {
         if !self.token.is_empty() {
-            emitted.push(self.emit(VtTokenKind::Printable)?);
+            emitted.push(self.emit(VtTokenKind::Printable));
         }
         self.printable_utf8_remaining = 0;
-        return Ok(());
     }
 
-    fn emit(&mut self, kind: VtTokenKind) -> Result<VtToken> {
+    fn emit(&mut self, kind: VtTokenKind) -> VtToken {
         let raw = mem::take(&mut self.token);
         let source = mem::take(&mut self.source);
         let description = describe(kind, &raw);
@@ -328,7 +327,7 @@ impl VtFramer {
             timing_resolution: "event".to_owned(),
         };
         self.next_token_id = self.next_token_id.saturating_add(1);
-        return Ok(token);
+        return token;
     }
 }
 

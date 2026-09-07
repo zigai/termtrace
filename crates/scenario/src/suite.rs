@@ -50,6 +50,7 @@ pub fn run_suite(
     let mut paths: Vec<PathBuf> = scenario_paths.into_iter().collect();
     paths.sort();
     paths.dedup();
+
     let mut expanded: Vec<(PathBuf, Scenario)> = Vec::new();
     for path in paths {
         let scenario = read(&path)?;
@@ -62,6 +63,7 @@ pub fn run_suite(
             expanded.push((identity, scenario));
         }
     }
+
     let tasks: Vec<(PathBuf, Scenario)> = expanded
         .into_iter()
         .enumerate()
@@ -75,15 +77,18 @@ pub fn run_suite(
     if tasks.is_empty() {
         return Err(invalid("scenario selection produced an empty shard"));
     }
+
     let task_count = tasks.len();
     let queue = Arc::new(Mutex::new(VecDeque::from(tasks)));
     let (sender, receiver) = mpsc::channel::<StdResult<ScenarioCaseReport, String>>();
     let mut cases: Vec<Option<ScenarioCaseReport>> = (0..task_count).map(|_| return None).collect();
+
     thread::scope(|scope| {
         for _worker in 0..options.jobs.min(task_count) {
             let queue = Arc::clone(&queue);
             let sender = sender.clone();
             let options = options.clone();
+
             scope.spawn(move || {
                 loop {
                     let task = {
@@ -96,6 +101,7 @@ pub fn run_suite(
                     let Some((path, scenario)) = task else {
                         return;
                     };
+
                     let result = run_case(path, scenario, &options)
                         .map_err(|error| return error.to_string());
                     if sender.send(result).is_err() {
@@ -104,7 +110,9 @@ pub fn run_suite(
                 }
             });
         }
+
         drop(sender);
+
         for slot in &mut cases {
             let case = receiver
                 .recv()
@@ -119,8 +127,10 @@ pub fn run_suite(
         }
         return Ok::<(), Error>(());
     })?;
+
     let mut cases: Vec<ScenarioCaseReport> = cases.into_iter().flatten().collect();
     cases.sort_by(|left, right| return left.scenario.cmp(&right.scenario));
+
     let status = if cases.iter().all(|case| {
         return case
             .attempts
@@ -131,6 +141,7 @@ pub fn run_suite(
     } else {
         ScenarioSuiteStatus::Failed
     };
+
     return Ok(ScenarioSuiteReport {
         version: 1,
         status,
@@ -145,6 +156,7 @@ fn validate_suite_options(options: &ScenarioSuiteOptions) -> Result<Option<(usiz
     if options.jobs == 0 {
         return Err(invalid("scenario jobs must be greater than zero"));
     }
+
     match (options.shard_index, options.shard_count) {
         (Some(index), Some(count)) if count > 0 && index < count => {
             return Ok(Some((index, count)));
@@ -167,6 +179,7 @@ fn run_case(
     options: &ScenarioSuiteOptions,
 ) -> Result<ScenarioCaseReport> {
     let mut attempts: Vec<ScenarioAttemptReport> = Vec::new();
+
     for attempt in 1..=u32::from(options.reruns).saturating_add(1) {
         let report = run_validated(
             &scenario,
@@ -177,6 +190,7 @@ fn run_case(
         )?;
         let passed = report.status == ScenarioStatus::Passed;
         attempts.push(ScenarioAttemptReport { attempt, report });
+
         if passed {
             break;
         }
@@ -200,19 +214,23 @@ pub fn scenario_junit(report: &ScenarioSuiteReport) -> String {
                 .is_none_or(|attempt| return attempt.report.status == ScenarioStatus::Failed);
         })
         .count();
+
     let mut w = xmlwriter::XmlWriter::new(xmlwriter::Options::default());
     w.start_element("testsuite");
     w.write_attribute("name", "termtrace");
     w.write_attribute("tests", &report.cases.len());
     w.write_attribute("failures", &failure_count);
+
     for case in &report.cases {
         let final_attempt = case.attempts.last();
         let name = final_attempt.map_or_else(
             || return case.scenario.display().to_string(),
             |attempt| return attempt.report.name.clone(),
         );
+
         w.start_element("testcase");
         w.write_attribute("name", &name);
+
         if let Some(failure) =
             final_attempt.and_then(|attempt| return attempt.report.failure.as_ref())
         {
@@ -234,5 +252,6 @@ pub fn scenario_junit(report: &ScenarioSuiteReport) -> String {
 pub fn write_scenario_junit(path: impl AsRef<Path>, report: &ScenarioSuiteReport) -> Result<()> {
     write_secure(path.as_ref(), scenario_junit(report).as_bytes())
         .map_err(|error| return operation("write JUnit report", error))?;
+
     return Ok(());
 }

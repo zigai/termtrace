@@ -131,6 +131,10 @@ pub(in crate::cli) struct StartArgs {
 }
 
 #[derive(Debug, Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Environment-change permission and clearing each resource limit are independent CLI options"
+)]
 pub(in crate::cli) struct RestartArgs {
     /// Existing friendly session name.
     pub(in crate::cli) name: String,
@@ -205,6 +209,10 @@ pub(in crate::cli) struct RestartArgs {
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Serialized restart overrides preserve independent environment permission and resource-limit clearing options"
+)]
 pub(in crate::cli) struct RestartOverrides {
     pub(in crate::cli) cwd: Option<ByteString>,
     pub(in crate::cli) cols: Option<u16>,

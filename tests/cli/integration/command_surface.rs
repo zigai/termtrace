@@ -451,8 +451,7 @@ fn help_and_version_are_top_level_only() {
             env!("CARGO_PKG_VERSION")
         )))
         .stdout(predicate::str::contains(format!(
-            "libghostty-vt {}",
-            GHOSTTY_REVISION
+            "libghostty-vt {GHOSTTY_REVISION}"
         )))
         .stdout(predicate::str::contains(format!(
             "event-log v{EVENT_LOG_VERSION}"

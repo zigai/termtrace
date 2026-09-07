@@ -164,7 +164,7 @@ impl TmuxCatalog {
             })?;
             head.bytes = boundary.bytes;
             head.sequence = boundary.sequence;
-            head.hash = boundary.hash.clone();
+            head.hash.clone_from(&boundary.hash);
         }
         if manifest
             .catalog

@@ -873,7 +873,7 @@ fn normalize_cursor_masks(
                 .is_some_and(|(frame, _)| return **frame < source_frame)
             {
                 if let Some((_, value)) = pending.next() {
-                    *value = presented.clone();
+                    value.clone_from(&presented);
                 }
             }
             if let Some(cursor) = &cursor {
@@ -883,7 +883,7 @@ fn normalize_cursor_masks(
         return Ok(true);
     })?;
     for (_, value) in pending {
-        *value = presented.clone();
+        value.clone_from(&presented);
     }
     let x_origin = source_width.saturating_sub(geometry.text_width) / 2;
     let y_origin = source_height.saturating_sub(geometry.text_height) / 2;

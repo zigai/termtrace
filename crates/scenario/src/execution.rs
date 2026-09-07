@@ -48,6 +48,7 @@ pub fn run(
     update_snapshots: bool,
 ) -> Result<ScenarioReport> {
     validate(scenario)?;
+
     return run_validated(
         scenario,
         binary,
@@ -65,6 +66,7 @@ pub(crate) fn run_validated(
     update_snapshots: bool,
 ) -> Result<ScenarioReport> {
     let failure_root = failure_root.into();
+
     let terminal = Terminal::new(binary, evidence_root);
     let command = scenario.launch.command.iter().map(OsString::from);
     let mut builder = terminal
@@ -78,11 +80,14 @@ pub(crate) fn run_validated(
     if let Some(directory) = &scenario.launch.working_directory {
         builder = builder.working_directory(directory);
     }
+
     let mut session = builder
         .start()
         .map_err(|error| return operation("launch", error))?;
+
     let mut steps: Vec<ScenarioStepResult> = Vec::new();
     let mut stopped = false;
+
     for (index, step) in scenario.steps.iter().enumerate() {
         match execute_step(
             &mut session,
@@ -102,9 +107,12 @@ pub(crate) fn run_validated(
                     &ControlRequest::new(ControlCommand::Snapshot),
                 )
                 .ok();
+
                 let _stop_result =
                     session.stop(Some(Duration::from_millis(scenario.launch.timeout_ms)));
+
                 let failure_artifacts = failure_root.join(session.session_id().to_string());
+
                 let report = ScenarioReport {
                     version: SCENARIO_VERSION,
                     name: scenario.name.clone(),
@@ -115,6 +123,7 @@ pub(crate) fn run_validated(
                     failure: Some(failure),
                     failure_artifacts: Some(failure_artifacts.clone()),
                 };
+
                 publish_failure(
                     &failure_artifacts,
                     scenario,
@@ -125,13 +134,16 @@ pub(crate) fn run_validated(
             }
         }
     }
+
     if !stopped {
         session
             .stop(Some(Duration::from_millis(scenario.launch.timeout_ms)))
             .map_err(|error| return operation("stop", error))?;
     }
+
     if let Err(error) = validate_replay_closure(session.path(), &steps) {
         let failure_artifacts = failure_root.join(session.session_id().to_string());
+
         let report = ScenarioReport {
             version: SCENARIO_VERSION,
             name: scenario.name.clone(),
@@ -147,9 +159,12 @@ pub(crate) fn run_validated(
             }),
             failure_artifacts: Some(failure_artifacts.clone()),
         };
+
         publish_failure(&failure_artifacts, scenario, &report, None)?;
+
         return Ok(report);
     }
+
     return Ok(ScenarioReport {
         version: SCENARIO_VERSION,
         name: scenario.name.clone(),
@@ -165,10 +180,12 @@ pub(crate) fn run_validated(
 fn validate_replay_closure(session: &Path, steps: &[ScenarioStepResult]) -> Result<()> {
     let completion = validate_completed_session(session)
         .map_err(|error| return operation("validate replay closure", error))?;
+
     let asserted_hashes: BTreeSet<&String> = steps
         .iter()
         .filter_map(|step| return step.state_hash.as_ref())
         .collect();
+
     for state_hash in asserted_hashes {
         let observation = observe_session_with_options(
             session,
@@ -185,19 +202,24 @@ fn validate_replay_closure(session: &Path, steps: &[ScenarioStepResult]) -> Resu
             )));
         }
     }
+
     let final_point = completion.event_count.checked_sub(1).map_or(
         StatePoint::StateId { state_id: 0 },
         |event_seq| {
             return StatePoint::EventSeq { event_seq };
         },
     );
+
     observe_session_with_options(session, final_point, true)
         .map_err(|error| return operation("observe final replay state", error))?;
+
     let page = build_session_timeline_page(session, true, true, None, 0, 64)
         .map_err(|error| return operation("build replay closure timeline", error))?;
+
     if page.entries.is_empty() {
         return Err(invalid("replay closure produced an empty timeline page"));
     }
+
     return Ok(());
 }
 
@@ -210,6 +232,7 @@ fn execute_step(
     update_snapshots: bool,
 ) -> StdResult<ScenarioStepResult, ScenarioFailure> {
     let mut request_ids: Vec<Uuid> = Vec::new();
+
     let state_hash = match step {
         ScenarioStep::WaitScreen(wait) => {
             let predicate = match (&wait.contains, &wait.absent) {
@@ -256,6 +279,7 @@ fn execute_step(
                 state_hash: Some(matched.frame.state_hash),
             });
         }
+
         ScenarioStep::Send(inputs) => {
             for input in inputs {
                 let command = match input {
@@ -277,6 +301,7 @@ fn execute_step(
             }
             None
         }
+
         ScenarioStep::Mark(label) => {
             let request = ControlRequest::new(ControlCommand::Mark {
                 label: label.clone(),
@@ -287,6 +312,7 @@ fn execute_step(
             })?;
             None
         }
+
         ScenarioStep::MatchScreenSnapshot(snapshot) => {
             let capture = session
                 .screen()
@@ -299,10 +325,12 @@ fn execute_step(
                     allow_incomplete: false,
                 })
                 .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
+
             let state_hash = capture.frame.state_hash.clone();
             let baseline = rich_frame_snapshot(&capture.frame);
             let path = snapshot_path(failure_root, &snapshot.name)
                 .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
+
             if update_snapshots {
                 if let Some(parent) = path.parent() {
                     fs_err::create_dir_all(parent).map_err(|error| {
@@ -350,11 +378,13 @@ fn execute_step(
                 state_hash: Some(state_hash),
             });
         }
+
         ScenarioStep::AssertTimeline(assertion) => {
             assert_timeline(session.path(), assertion)
                 .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
             None
         }
+
         ScenarioStep::Stop {} => {
             let request = ControlRequest::new(ControlCommand::Stop);
             request_ids.push(request.request_id);
@@ -369,6 +399,7 @@ fn execute_step(
             None
         }
     };
+
     return Ok(ScenarioStepResult {
         index,
         kind: step.kind().to_owned(),
@@ -407,6 +438,7 @@ fn rich_frame_snapshot(frame: &ScreenFrame) -> ScenarioFrameSnapshot {
             .collect::<Vec<&str>>(),
     }
     .join("\n");
+
     return ScenarioFrameSnapshot {
         version: 1,
         viewport_text,
@@ -428,13 +460,17 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
             ));
         }
     };
+
     let snapshot = SessionSnapshot::capture(session, None)
         .map_err(|error| return operation("snapshot timeline assertion", error))?;
+
     let marker_time = |label: &str| -> Result<u64> {
         let mut cursor = EventLogCursor::open(snapshot.path().join("events.jsonl"))
             .map_err(|error| return operation("read timeline assertion", error))?;
+
         let mut count = 0_u64;
         let mut time = 0;
+
         while let Some(record) = cursor
             .next_record()
             .map_err(|error| return operation("read timeline assertion", error))?
@@ -444,20 +480,26 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
                 time = record.monotonic_ns;
             }
         }
+
         if count != 1 {
             return Err(invalid(format!(
                 "timeline marker `{label}` must occur exactly once, found {count}"
             )));
         }
+
         return Ok(time);
     };
+
     let start = marker_time(start_label)?;
     let end = marker_time(end_label)?;
+
     if end < start {
         return Err(invalid("timeline markers are in reverse order"));
     }
+
     let mut state_bounds = None::<(u64, u64)>;
     let mut forbidden = false;
+
     visit_snapshot_states_while(&snapshot, None, &AtomicBool::new(false), |record, state| {
         if record.monotonic_ns >= start && record.monotonic_ns <= end {
             if let Some((_, last)) = &mut state_bounds {
@@ -477,14 +519,17 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
         return Ok(true);
     })
     .map_err(|error| return operation("replay timeline assertion", error))?;
+
     if forbidden {
         return Err(invalid(format!(
             "a presented state between `{start_label}` and `{end_label}` contained forbidden text"
         )));
     }
+
     if let Some(code) = &assertion.no_finding {
         let report = diagnose_snapshot(&snapshot, DiagnosticCheck::all(), 50)
             .map_err(|error| return operation("diagnose timeline assertion", error))?;
+
         if report.findings.iter().any(|finding| {
             return finding.code == *code
                 && (finding.state_ids.is_empty()

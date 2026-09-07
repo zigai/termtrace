@@ -1,4 +1,9 @@
-use super::super::*;
+use super::super::{
+    DiagnoseReport, DiagnosticCheck, ExplainReport, Observation, Result, SemanticDiff, Session,
+    StatePoint, TimelineEntry, diagnose_session, diff_session_states_with_semantic_states,
+    explain_session, observe_session_with_options, validated_visual_manifests,
+    visit_session_timeline_while,
+};
 
 /// Completed semantic inspection and diagnosis operations.
 pub struct Semantic<'session> {

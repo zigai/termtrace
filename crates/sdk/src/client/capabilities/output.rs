@@ -1,4 +1,4 @@
-use super::super::*;
+use super::super::{Duration, Result, Session, WaitOutcome, wait_for_output};
 
 /// Canonical child-output history operations.
 pub struct Output<'session> {

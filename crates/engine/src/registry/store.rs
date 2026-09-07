@@ -377,7 +377,8 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         }
     };
     row.command = Some(manifest.command.clone());
-    row.working_directory = manifest.working_directory.clone();
+    row.working_directory
+        .clone_from(&manifest.working_directory);
     row.geometry = Some(manifest.geometry.clone());
     row.started_unix_ns = Some(manifest.started_unix_ns);
     if manifest.session_id != entry.session_id {

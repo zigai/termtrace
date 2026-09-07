@@ -43,8 +43,7 @@ enum PresentationParseState {
 struct CsiModeParser {
     private: bool,
     valid: bool,
-    has_parameter: bool,
-    parameter: u32,
+    parameter: Option<u32>,
     includes_synchronized_output: bool,
 }
 
@@ -175,15 +174,14 @@ impl CsiModeParser {
 
     fn push(&mut self, byte: u8) {
         match byte {
-            b'?' if !self.private && !self.has_parameter && self.parameter == 0 => {
-                self.private = true
-            }
+            b'?' if !self.private && self.parameter.is_none() => self.private = true,
             b'0'..=b'9' if self.private && self.valid => {
-                self.has_parameter = true;
-                self.parameter = self
-                    .parameter
-                    .saturating_mul(10)
-                    .saturating_add(u32::from(byte - b'0'));
+                self.parameter = Some(
+                    self.parameter
+                        .unwrap_or(0)
+                        .saturating_mul(10)
+                        .saturating_add(u32::from(byte - b'0')),
+                );
             }
             b';' if self.private && self.valid => self.finish_parameter(),
             _ => self.valid = false,
@@ -203,11 +201,10 @@ impl CsiModeParser {
     }
 
     fn finish_parameter(&mut self) {
-        if self.has_parameter && self.parameter == 2026 {
+        if self.parameter == Some(2026) {
             self.includes_synchronized_output = true;
         }
-        self.has_parameter = false;
-        self.parameter = 0;
+        self.parameter = None;
     }
 }
 
@@ -331,6 +328,12 @@ mod tests {
                 vec![true, false],
             ),
             (b"\x1b[?25;2026h".as_slice(), vec![true]),
+            (b"\x1b[?;2026;h".as_slice(), vec![true]),
+            (b"\x1b[?0;2026h".as_slice(), vec![true]),
+            (b"\x1b[?2026;0h".as_slice(), vec![true]),
+            (b"\x1b[?h".as_slice(), Vec::new()),
+            (b"\x1b[?0h".as_slice(), Vec::new()),
+            (b"\x1b[?999999999999999999999h".as_slice(), Vec::new()),
             (b"\x9b?2026l".as_slice(), vec![false]),
             (b"\x1b[2026h".as_slice(), Vec::new()),
             (b"\x1b[?20260h".as_slice(), Vec::new()),

@@ -395,7 +395,7 @@ pub(super) fn append_pixel_transforms(
         filters.push(format!(
             "[{prior}]drawtext=fontfile='fonts/JetBrainsMono-Regular.ttf':textfile='branding.txt':fontcolor=white@0.8:fontsize=16:box=1:boxcolor=black@0.55:x=w-tw-12:y=12[branded]"
         ));
-        prior = "branded".to_owned();
+        "branded".clone_into(&mut prior);
     }
     return Ok(prior);
 }

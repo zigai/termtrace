@@ -1,5 +1,5 @@
 use super::super::control::client_error;
-use super::super::*;
+use super::super::{EventLog, EventProjection, Result, Session};
 
 /// Bounded typed canonical event reads.
 pub struct Events<'session> {

@@ -115,7 +115,9 @@ impl Driver {
                     let path = self.session_path(handle)?;
                     let mut control = ControlRequest::new(command.clone());
                     control.request_id = request.request_id;
-                    control.expected_presented_state_hash = expected_presented_state_hash.clone();
+                    control
+                        .expected_presented_state_hash
+                        .clone_from(expected_presented_state_hash);
                     match send_request_response(path, &control) {
                         Ok(response) => match response.result {
                             ControlResult::Ok { data } => Ok(DriverData::Control { data }),

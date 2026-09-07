@@ -32,6 +32,7 @@ pub(crate) fn snapshot_path(failure_root: &Path, name: &str) -> Result<PathBuf> 
     let artifact_root = failure_root
         .parent()
         .ok_or_else(|| return invalid("scenario failure root has no artifact parent"))?;
+
     return Ok(artifact_root
         .join("snapshots")
         .join(format!("{name}.frame.json")));
@@ -46,12 +47,14 @@ pub(crate) fn publish_failure(
     let parent = destination.parent().ok_or_else(|| {
         return invalid("scenario failure destination must have a parent directory");
     })?;
+
     fs_err::create_dir_all(parent).map_err(|source| {
         return Error::Filesystem {
             path: parent.to_path_buf(),
             source,
         };
     })?;
+
     let temporary = parent.join(format!(".{}.tmp", report.session_id));
     fs_err::create_dir(&temporary).map_err(|source| {
         return Error::Filesystem {
@@ -65,17 +68,20 @@ pub(crate) fn publish_failure(
             source,
         };
     })?;
+
     let publish_result = populate_failure(&temporary, scenario, report, final_snapshot);
     if let Err(error) = publish_result {
         let _remove = fs_err::remove_dir_all(&temporary);
         return Err(error);
     }
+
     fs_err::rename(&temporary, destination).map_err(|source| {
         return Error::Filesystem {
             path: destination.to_path_buf(),
             source,
         };
     })?;
+
     return Ok(());
 }
 
@@ -87,14 +93,17 @@ fn populate_failure(
 ) -> Result<()> {
     let mut redacted_scenario = scenario.clone();
     for value in redacted_scenario.launch.environment.set.values_mut() {
-        *value = "<redacted>".to_owned();
+        "<redacted>".clone_into(value);
     }
     for value in redacted_scenario.launch.environment.set_bytes.values_mut() {
         value.base64 = ByteString::from(b"<redacted>".as_slice());
     }
+
     write_json(temporary.join("scenario.json"), &redacted_scenario)?;
     write_json(temporary.join("result.json"), report)?;
+
     let mut derivation_errors: Vec<String> = Vec::new();
+
     if let Some(snapshot) = final_snapshot {
         write_json(temporary.join("final-screen.json"), snapshot)?;
         if let ControlData::Snapshot {
@@ -104,6 +113,7 @@ fn populate_failure(
         } = snapshot
         {
             write_bytes(temporary.join("final-screen.txt"), viewport_text.as_bytes())?;
+
             match decode_all(semantic_state_zstd.as_bytes())
                 .map_err(|error| return error.to_string())
                 .and_then(|json| {
@@ -119,11 +129,13 @@ fn populate_failure(
             }
         }
     }
+
     match SessionSnapshot::capture(&report.canonical_session, None) {
         Ok(snapshot) => {
             if let Err(error) = write_timeline(&snapshot, &temporary.join("timeline.json")) {
                 derivation_errors.push(format!("timeline: {error}"));
             }
+
             match diagnose_snapshot(&snapshot, DiagnosticCheck::all(), 50) {
                 Ok(diagnosis) => write_json(temporary.join("diagnose.json"), &diagnosis)?,
                 Err(error) => derivation_errors.push(format!("diagnose: {error}")),
@@ -131,9 +143,11 @@ fn populate_failure(
         }
         Err(error) => derivation_errors.push(format!("event log: {error}")),
     }
+
     if !derivation_errors.is_empty() {
         write_json(temporary.join("derivation-errors.json"), &derivation_errors)?;
     }
+
     return Ok(());
 }
 
@@ -141,9 +155,11 @@ fn write_timeline(snapshot: &SessionSnapshot, path: &Path) -> Result<()> {
     let write = (|| -> Result<()> {
         let mut output =
             secure_writer(path).map_err(|error| return operation("create timeline", error))?;
+
         output
             .write_all(b"[\n")
             .map_err(|error| return operation("write timeline", error))?;
+
         let mut first = true;
         visit_snapshot_timeline_while(snapshot, true, true, None, |entry| {
             if !first {
@@ -154,15 +170,20 @@ fn write_timeline(snapshot: &SessionSnapshot, path: &Path) -> Result<()> {
             return Ok(true);
         })
         .map_err(|error| return operation("derive timeline", error))?;
+
         output
             .write_all(b"\n]\n")
             .map_err(|error| return operation("write timeline", error))?;
+
         finish_writer(output, path).map_err(|error| return operation("finish timeline", error))?;
+
         return Ok(());
     })();
+
     if write.is_err() {
         let _cleanup = fs_err::remove_file(path);
     }
+
     return write;
 }
 
@@ -186,5 +207,6 @@ pub(crate) fn write_json(path: PathBuf, value: &impl Serialize) -> Result<()> {
         };
     })?;
     encoded.push(b'\n');
+
     return write_bytes(path, &encoded);
 }

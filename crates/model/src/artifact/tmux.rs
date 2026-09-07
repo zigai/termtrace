@@ -56,6 +56,10 @@ pub struct TmuxCompositeTrack {
 
 /// Latest supervisor observation for one tmux pane.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "tmux exposes window activity, zoom, pane activity, and copy mode as independent protocol flags"
+)]
 pub struct TmuxPaneSnapshot {
     /// Stable tmux session ID.
     pub session_id: String,

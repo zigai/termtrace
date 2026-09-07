@@ -2,9 +2,10 @@ use super::{
     ACTION_RESPONSE_BYTES, MAX_AGENT_RESPONSE_BYTES, MAX_CAPTURE_BYTES, ResolvedResponseMode,
     ResponseField, ResponseState, ResponseWriter, START_RESPONSE_BYTES, STOP_RESPONSE_BYTES,
     WAIT_STATUS_RESPONSE_BYTES, bounded_agent_response, bounded_capture_projection, capture_raw,
-    compact_success, compact_task_value, compact_value_with_paths, enforce_success_budget,
-    human_screen_summary, human_summary, pagination_projection, retry_for_applied,
+    compact_success, compact_task_value, enforce_success_budget, human_summary,
+    pagination_projection, retry_for_applied,
 };
+use super::{human::human_screen_summary, projection::compact_value_with_paths};
 
 #[test]
 fn compact_fields_hide_forensic_tables_by_default() {

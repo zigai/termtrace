@@ -179,18 +179,15 @@ impl Driver {
 }
 
 pub(super) fn bounded_response_with_bytes(response: DriverResponse) -> (DriverResponse, Vec<u8>) {
-    let bytes = match serde_json::to_vec(&response) {
-        Ok(bytes) => bytes,
-        Err(_) => {
-            let err = driver_error(
-                response.request_id,
-                "response_encoding_failed",
-                "driver response could not be encoded",
-                None,
-            );
-            let err_bytes = serde_json::to_vec(&err).unwrap_or_default();
-            return (err, err_bytes);
-        }
+    let Ok(bytes) = serde_json::to_vec(&response) else {
+        let err = driver_error(
+            response.request_id,
+            "response_encoding_failed",
+            "driver response could not be encoded",
+            None,
+        );
+        let err_bytes = serde_json::to_vec(&err).unwrap_or_default();
+        return (err, err_bytes);
     };
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) <= DRIVER_MAX_RESPONSE_BYTES {
         return (response, bytes);

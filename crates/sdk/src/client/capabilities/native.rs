@@ -1,4 +1,7 @@
-use super::super::*;
+use super::super::{
+    CaptureOptions, CaptureOutcome, Duration, Error, PlaybackOptions, Result, Session,
+    capture_native, playback,
+};
 use std::sync::{Arc, atomic::AtomicBool};
 use termtrace_media::native_capture::{NativeReplayWorker, native_capture_target};
 use termtrace_model::execution::session::CaptureTarget;
@@ -34,14 +37,14 @@ impl Native<'_> {
     /// Capture native pixels for this canonical session.
     pub fn capture(&self, options: &CaptureOptions) -> Result<CaptureOutcome> {
         let mut options = options.clone();
-        options.session_directory = self.session.path.clone();
+        options.session_directory.clone_from(&self.session.path);
         return capture_native(&self.session.helper, &options).map_err(Error::from);
     }
 
     /// Play this canonical session through the native playback runtime.
     pub fn playback(&self, options: &PlaybackOptions) -> Result<()> {
         let mut options = options.clone();
-        options.session_directory = self.session.path.clone();
+        options.session_directory.clone_from(&self.session.path);
         return playback(&options).map_err(Error::from);
     }
 }

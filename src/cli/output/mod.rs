@@ -131,11 +131,19 @@ mod pagination;
 mod projection;
 mod sink;
 
-use envelope::*;
-use human::*;
+use envelope::{
+    applied_from_str, compact_failure, compact_success, response_encoding_failure,
+    response_string_value, retry_for_applied, retry_from_str, session_state_from_str,
+    typed_envelope,
+};
+use human::{human_failure_summary, human_summary};
 use io_core::{capture_json, capture_raw, direct_stderr, direct_stdout, report_message};
 use pagination::{pagination_projection, raw_pagination_projection};
-use projection::*;
+use projection::{
+    bounded_agent_response, bounded_capture_projection, compact_task_value, copy_value,
+    enforce_success_budget, failure_string, nested_string, response_type, session_state,
+    value_string,
+};
 
 pub(super) use helpers::{
     id_list, optional_display, projection_warning, quoted_text, row_text, stable_enum_label,

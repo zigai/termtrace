@@ -242,7 +242,7 @@ pub(crate) fn visit_records(
             return Err(Error::invalid("tmux lifecycle journal chain differs"));
         }
         sequence = record.event.sequence;
-        hash = record.hash.clone();
+        hash.clone_from(&record.hash);
         let count = u64::try_from(count)
             .map_err(|_| return Error::invalid("tmux record length overflow"))?;
         visitor(&record, offset, count)?;

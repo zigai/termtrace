@@ -140,9 +140,8 @@ pub(in crate::cli) fn run_tmux_guard(arguments: TmuxGuardArgs) -> Result<ExitCod
         return Ok(ExitCode::SUCCESS);
     }
     let policy = scope_from_options(&client)?;
-    let pane_pid = match query_number::<u32>(&client, &arguments.pane, "#{pane_pid}") {
-        Ok(pid) => pid,
-        Err(_) => return Ok(ExitCode::SUCCESS),
+    let Ok(pane_pid) = query_number::<u32>(&client, &arguments.pane, "#{pane_pid}") else {
+        return Ok(ExitCode::SUCCESS);
     };
     if !pane_scope_decision(&client, &arguments.pane, pane_pid, &policy)? {
         mark_pane_scope_decision(&client, &arguments.pane, false)?;
@@ -218,9 +217,8 @@ pub(super) fn release_supervisor(client: &TmuxClient) -> Result<()> {
 pub(super) fn supervise_tmux_panes(client: &TmuxClient, expected: &Path) -> Result<()> {
     let mut suspects = BTreeMap::<String, Instant>::new();
     loop {
-        let version = match option_text(client, OPTION_VERSION) {
-            Ok(version) => version,
-            Err(_) => return Ok(()),
+        let Ok(version) = option_text(client, OPTION_VERSION) else {
+            return Ok(());
         };
         if version != TMUX_INTEGRATION_VERSION {
             return Ok(());
@@ -230,9 +228,8 @@ pub(super) fn supervise_tmux_panes(client: &TmuxClient, expected: &Path) -> Resu
             tracing::warn!(%error, "could not refresh aggregate tmux manifest");
         }
         let policy = scope_from_options(client)?;
-        let panes = match pane_process_rows(client) {
-            Ok(panes) => panes,
-            Err(_) => return Ok(()),
+        let Ok(panes) = pane_process_rows(client) else {
+            return Ok(());
         };
         let present = panes
             .iter()
@@ -400,9 +397,8 @@ pub(super) fn pane_process_is_wrapper(
     pane: &str,
     expected_executable: &Path,
 ) -> Result<Option<bool>> {
-    let pid = match query_number::<u32>(client, pane, "#{pane_pid}") {
-        Ok(pid) => pid,
-        Err(_) => return Ok(None),
+    let Ok(pid) = query_number::<u32>(client, pane, "#{pane_pid}") else {
+        return Ok(None);
     };
     return process_id_has_role(pid, expected_executable, b"run");
 }

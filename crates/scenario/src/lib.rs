@@ -1,4 +1,5 @@
 //! Scenario document validation and execution.
+
 #![deny(unsafe_code)]
 
 mod artifact;

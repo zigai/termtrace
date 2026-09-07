@@ -213,7 +213,7 @@ fn run_python_client(assets: &Path, arguments: ClientRunArgs) -> Result<ExitCode
                 .env("TERMTRACE_BINARY", &binary)
                 .status()
                 .into_diagnostic()?;
-            return process_exit_code(status);
+            return Ok(process_exit_code(status));
         }
         let python_root = assets.join("python");
         let python_path = match env::var_os("PYTHONPATH") {
@@ -232,7 +232,7 @@ fn run_python_client(assets: &Path, arguments: ClientRunArgs) -> Result<ExitCode
                     "Python client execution requires `uv` or Python 3 with `msgspec`: {error}"
                 );
             })?;
-        return process_exit_code(status);
+        return Ok(process_exit_code(status));
     })();
     if let Some(temporary) = temporary {
         temporary.close().into_diagnostic()?;
@@ -294,7 +294,7 @@ fn run_typescript_client(assets: &Path, arguments: ClientRunArgs) -> Result<Exit
             .env("TERMTRACE_BINARY", binary)
             .status()
             .into_diagnostic()?;
-        return process_exit_code(status);
+        return Ok(process_exit_code(status));
     })();
     temporary.close().into_diagnostic()?;
     return result;
@@ -384,15 +384,15 @@ fn executable_on_path(program: &str) -> bool {
     });
 }
 
-fn process_exit_code(status: ExitStatus) -> Result<ExitCode> {
+fn process_exit_code(status: ExitStatus) -> ExitCode {
     if status.success() {
-        return Ok(ExitCode::SUCCESS);
+        return ExitCode::SUCCESS;
     }
     let code = status
         .code()
         .and_then(|code| return u8::try_from(code).ok())
         .unwrap_or(1);
-    return Ok(ExitCode::from(code));
+    return ExitCode::from(code);
 }
 
 pub(super) fn run_completions(

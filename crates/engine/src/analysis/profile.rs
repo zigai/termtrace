@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn replays_valid_config_without_reusing_non_idempotent_output_as_input() {
-        fn escape_backslashes(config: &[u8]) -> Result<Vec<u8>> {
+        fn escape_backslashes(config: &[u8]) -> Vec<u8> {
             let mut output = Vec::with_capacity(config.len().saturating_mul(2));
             for byte in config {
                 output.push(*byte);
@@ -307,7 +307,7 @@ mod tests {
                     output.push(*byte);
                 }
             }
-            return Ok(output);
+            return output;
         }
 
         let replay_config = b"background = #000000\nkeybind = alt+f24=text:\\x1b\\x1b[24;2~\n";
@@ -315,11 +315,10 @@ mod tests {
             replay_config,
             None,
             GhosttyVisualOverrides::default(),
-            escape_backslashes,
+            |config| return Ok(escape_backslashes(config)),
         )
         .expect("valid replay profile");
-        let second_generation =
-            escape_backslashes(&profile.effective_config).expect("second serialized generation");
+        let second_generation = escape_backslashes(&profile.effective_config);
 
         assert_eq!(profile.replay_config, replay_config);
         assert_ne!(profile.effective_config, profile.replay_config);
@@ -340,7 +339,7 @@ mod tests {
         let restored = restore_profile(
             profile.replay_config.clone(),
             profile.provenance.clone(),
-            escape_backslashes,
+            |config| return Ok(escape_backslashes(config)),
         )
         .expect("restored replay profile");
         assert_eq!(restored, profile);

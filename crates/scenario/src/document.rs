@@ -17,6 +17,7 @@ pub(super) fn read(path: impl AsRef<Path>) -> Result<Scenario> {
             source,
         };
     })?;
+
     let mut deserializer = serde_json::Deserializer::from_slice(&encoded);
     let scenario: Scenario =
         serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
@@ -28,6 +29,7 @@ pub(super) fn read(path: impl AsRef<Path>) -> Result<Scenario> {
                 source,
             };
         })?;
+
     validate(&scenario)?;
     return Ok(scenario);
 }
@@ -40,6 +42,7 @@ pub(super) fn validate(scenario: &Scenario) -> Result<()> {
             scenario.version
         )));
     }
+
     if scenario.name.trim().is_empty()
         || scenario.launch.command.is_empty()
         || scenario.steps.is_empty()
@@ -48,17 +51,21 @@ pub(super) fn validate(scenario: &Scenario) -> Result<()> {
             "scenario name, launch command, and steps must not be empty",
         ));
     }
+
     if scenario.launch.geometry.cols == 0 || scenario.launch.geometry.rows == 0 {
         return Err(invalid("scenario geometry must be greater than zero"));
     }
+
     if scenario.launch.timeout_ms == 0 || scenario.launch.output_byte_budget == Some(0) {
         return Err(invalid(
             "scenario timeout and configured resource budgets must be greater than zero",
         ));
     }
+
     to_environment_spec(&scenario.launch.environment)?
         .validate()
         .map_err(|error| return invalid(error.to_string()))?;
+
     for step in &scenario.steps {
         match step {
             ScenarioStep::WaitScreen(wait) => {
@@ -73,23 +80,28 @@ pub(super) fn validate(scenario: &Scenario) -> Result<()> {
                     ));
                 }
             }
+
             ScenarioStep::Send(inputs) if inputs.is_empty() => {
                 return Err(invalid("send step must contain at least one input"));
             }
+
             ScenarioStep::MatchScreenSnapshot(snapshot) => {
                 validate_snapshot_name(&snapshot.name)?;
             }
+
             ScenarioStep::AssertTimeline(assertion) if assertion.between_markers.len() != 2 => {
                 return Err(invalid(
                     "timeline assertion requires exactly two marker labels",
                 ));
             }
+
             ScenarioStep::Send(_)
             | ScenarioStep::AssertTimeline(_)
             | ScenarioStep::Mark(_)
             | ScenarioStep::Stop {} => {}
         }
     }
+
     let mut combinations = 1_usize;
     for (key, values) in &scenario.matrix {
         if key.is_empty()
@@ -116,6 +128,7 @@ pub(super) fn expand_matrix(document: Scenario) -> Result<Vec<(String, Scenario)
     if document.matrix.is_empty() {
         return Ok(vec![(String::new(), document)]);
     }
+
     let mut variants: Vec<BTreeMap<String, String>> = vec![BTreeMap::new()];
     for (key, values) in &document.matrix {
         let mut expanded: Vec<BTreeMap<String, String>> = Vec::new();
@@ -128,6 +141,7 @@ pub(super) fn expand_matrix(document: Scenario) -> Result<Vec<(String, Scenario)
         }
         variants = expanded;
     }
+
     return variants
         .into_iter()
         .map(|values| {
@@ -136,12 +150,15 @@ pub(super) fn expand_matrix(document: Scenario) -> Result<Vec<(String, Scenario)
                 .map(|(key, value)| format!("{key}={value}"))
                 .collect::<Vec<String>>()
                 .join(",");
+
             let mut scenario = document.clone();
             scenario.matrix.clear();
             scenario.name = format!("{} [{label}]", scenario.name);
+
             for argument in &mut scenario.launch.command {
                 *argument = substitute_matrix(argument, &values)?;
             }
+
             for step in &mut scenario.steps {
                 if let ScenarioStep::MatchScreenSnapshot(snapshot) = step {
                     let suffix = blake3::hash(label.as_bytes())
@@ -152,6 +169,7 @@ pub(super) fn expand_matrix(document: Scenario) -> Result<Vec<(String, Scenario)
                     snapshot.name = format!("{}-{suffix}", snapshot.name);
                 }
             }
+
             return Ok((label, scenario));
         })
         .collect();
@@ -162,11 +180,13 @@ fn substitute_matrix(value: &str, matrix: &BTreeMap<String, String>) -> Result<S
     for (key, replacement) in matrix {
         substituted = substituted.replace(&format!("{{{{{key}}}}}"), replacement);
     }
+
     if substituted.contains("{{") || substituted.contains("}}") {
         return Err(invalid(format!(
             "unresolved matrix token in command argument `{value}`"
         )));
     }
+
     return Ok(substituted);
 }
 
@@ -176,6 +196,7 @@ pub(crate) fn to_environment_spec(environment: &ScenarioEnvironment) -> Result<E
         .iter()
         .map(|(name, value)| return (name.clone(), ByteString::new(value.as_bytes().to_vec())))
         .collect();
+
     for (name, value) in &environment.set_bytes {
         if set.insert(name.clone(), value.base64.clone()).is_some() {
             return Err(invalid(format!(
@@ -183,6 +204,7 @@ pub(crate) fn to_environment_spec(environment: &ScenarioEnvironment) -> Result<E
             )));
         }
     }
+
     return Ok(EnvironmentSpec {
         base: environment.base,
         set,
@@ -264,11 +286,13 @@ mod tests {
             "steps": [{ "matchScreenSnapshot": { "name": "matrix-final" } }]
         }))
         .expect("scenario JSON");
+
         let expanded = expand_matrix(scenario).expect("matrix expansion");
         assert_eq!(expanded.len(), 4);
         let first = expanded.first().expect("first matrix variant");
         assert_eq!(first.1.launch.command.get(1).expect("theme"), "dark");
         assert_eq!(first.1.launch.command.get(2).expect("width"), "80");
+
         let names = expanded
             .iter()
             .filter_map(|(_label, scenario)| {
@@ -282,6 +306,7 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert_eq!(names.len(), 4);
     }
+
     #[test]
     fn scenario_environment_distinguishes_text_and_explicit_bytes() {
         let temporary = tempfile::tempdir().expect("temporary directory");
@@ -300,9 +325,11 @@ mod tests {
         });
         fs_err::write(&path, serde_json::to_vec(&json).expect("scenario JSON"))
             .expect("write scenario");
+
         let scenario = read(&path).expect("read scenario document");
         let spec =
             to_environment_spec(&scenario.launch.environment).expect("convert to environment spec");
+
         assert_eq!(
             spec.set
                 .get("PI_SKIP_VERSION_CHECK")
@@ -336,12 +363,14 @@ mod tests {
             serde_json::to_vec(&duplicate_json).expect("dup JSON"),
         )
         .expect("write dup");
+
         let err = read(&dup_path).expect_err("duplicate key must fail");
         assert!(
             err.to_string()
                 .contains("duplicates launch.environment.set.COLLISION")
         );
     }
+
     #[test]
     fn scenario_read_reports_environment_value_path() {
         let temporary = tempfile::tempdir().expect("temporary directory");
@@ -362,6 +391,7 @@ mod tests {
 
         let error = read(&path).expect_err("invalid environment value");
         let diagnostic = error.to_string();
+
         assert!(matches!(
             error,
             Error::InvalidJson { json_path, .. }

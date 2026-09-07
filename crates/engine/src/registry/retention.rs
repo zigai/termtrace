@@ -1,4 +1,10 @@
-use super::*;
+use super::{
+    DetachedSessionPaths, Duration, Error, ErrorKind, GarbageCollectionCandidate,
+    GarbageCollectionReport, HashSet, OsStr, Path, PathBuf, RegistryRecord, Result,
+    SessionRegistry, SystemTime, UNIX_EPOCH, Uuid, ensure_owner_directory, fs, read_manifest,
+    read_registry_record_nofollow, recorder_identity, registry_error, sync_directory,
+    validate_owner_directory,
+};
 use std::cmp::Reverse;
 use termtrace_evidence::session::validate_completed_session;
 
@@ -252,12 +258,9 @@ impl SessionRegistry {
             if path.extension() != Some(OsStr::new("json")) {
                 continue;
             }
-            let record = match read_registry_record_nofollow(&path) {
-                Ok(record) => record,
-                Err(_) => {
-                    corrupt_entries = corrupt_entries.saturating_add(1);
-                    continue;
-                }
+            let Ok(record) = read_registry_record_nofollow(&path) else {
+                corrupt_entries = corrupt_entries.saturating_add(1);
+                continue;
             };
             match record {
                 RegistryRecord::Reservation(reservation) => {
