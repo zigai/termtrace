@@ -49,7 +49,7 @@
     "json-schema-to-typescript": "15.0.4",
     "oxfmt": "^0.59.0",
     "oxlint": "1.79.0",
-    "oxlint-rules": "latest",
+    "oxlint-rules": "0.4.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.3"
   },
