@@ -7,7 +7,7 @@ use std::{
     process::Command,
 };
 
-use termtrace_engine::recording::{RecordOptions, record_with_output};
+use termtrace_engine::recording::{record_with_output, RecordOptions};
 use termtrace_evidence::event_log::EventLog;
 use termtrace_model::{
     artifact::save::SemanticRasterProfile, terminal::replay::SourceRange,
@@ -32,6 +32,7 @@ fn missing_native_capture_guides_capture_or_semantic_fallback() {
         Path::new("/evidence/session"),
         Path::new("/evidence/session/visual/manifest.json"),
     );
+
     let message = error.to_string();
     assert!(message.contains("/evidence/session/visual/manifest.json"));
     assert!(message.contains("termtrace artifact capture --session SESSION"));
@@ -133,6 +134,7 @@ fn presentation_map_distinguishes_retimed_and_hold_frames() {
         output_frame_count: 8,
         ..PresentationPlan::default()
     };
+
     write_presentation_map(&path, &plan, &[]).expect("write frame map");
     let entries = fs_err::read_to_string(path)
         .expect("read map")
@@ -177,6 +179,7 @@ fn failed_export_removes_its_staging_directory() {
         output_frame_count: 1,
         ..PresentationPlan::default()
     };
+
     let destination = temporary.path().join("presentation");
     pipeline::export_with_capability_check(&plan, &destination, false)
         .expect_err("invalid source video should fail export");
@@ -275,6 +278,7 @@ fn exports_multi_clip_h264_presentation_atomically() {
         }],
         ..PresentationPlan::default()
     };
+
     let destination = temporary.path().join("presentation");
     let outcome = export(&plan, &destination).expect("export presentation");
     assert!(outcome.video.is_file());
@@ -291,6 +295,7 @@ fn exports_multi_clip_h264_presentation_atomically() {
     assert_eq!(probed["streams"][0]["height"].as_u64(), Some(64));
     let manifest_bytes =
         fs_err::read(outcome.directory.join("manifest.json")).expect("read manifest");
+
     let manifest: PresentationManifest =
         serde_json::from_slice(&manifest_bytes).expect("parse manifest");
     assert_eq!(manifest.plan.output_frame_count, plan.output_frame_count);
@@ -312,6 +317,7 @@ fn exports_multi_clip_h264_presentation_atomically() {
     ] {
         assert!(!outcome.directory.join("fonts").join(unexpected).exists());
     }
+
     assert!(
         fs_err::read_to_string(outcome.directory.join("source-frame-hashes.framemd5"))
             .expect("read decoded source hashes")
@@ -371,19 +377,18 @@ fn semantic_change_filters_retain_state_provenance_and_hold() {
         }],
         ..PresentationPlan::default()
     };
+
     let mut filters = Vec::new();
     let output =
         append_change_visualization(&mut filters, &plan, "input").expect("build semantic overlay");
+
     for frame in 0..6 {
         assert_eq!(
             semantic_change_states_at(&plan, frame),
-            if (2..=4).contains(&frame) {
-                vec![7]
-            } else {
-                Vec::new()
-            }
+            if (2..=4).contains(&frame) { vec![7] } else { Vec::new() }
         );
     }
+
     let rendered = Command::new("ffmpeg")
         .args([
             "-v",
@@ -411,6 +416,7 @@ fn semantic_change_filters_retain_state_provenance_and_hold() {
         .chunks_exact(80 * 40 * 3)
         .collect::<Vec<_>>();
     assert_eq!(frames.len(), 6);
+
     for (index, frame) in frames.iter().enumerate() {
         let outline = &frame[(8 * 3)..(9 * 3)];
         assert_eq!(
@@ -493,7 +499,9 @@ fn facade_render_configuration_survives_normalization() {
         provenance_policy: Default::default(),
         resource_limits: Default::default(),
     };
+
     record_with_output(&options, &mut io::sink()).expect("record completed evidence");
+
     let log = EventLog::read(session.join("events.jsonl")).expect("read completed evidence");
     let end = log.events.last().expect("terminal event").monotonic_ns;
     let edit = EditPlan {
@@ -537,6 +545,7 @@ fn facade_render_configuration_survives_normalization() {
         }),
         ..EditPlan::default()
     };
+
     validate_edit_plan(&edit).expect("facade edit plan should validate");
     assert_eq!(
         validate_transform_geometry(&edit, 800, 600, false).expect("resize should be exact"),
@@ -551,9 +560,11 @@ fn facade_render_configuration_survives_normalization() {
         },
     )
     .expect("normalize completed semantic evidence");
+
     let expected_source =
         semantic_video::plan(&session, &log, 60, 0, end, SemanticRasterProfile::Direct)
             .expect("legacy semantic source plan");
+
     let PresentationSource::Semantic {
         plan: actual_source,
     } = &normalized.source
@@ -649,6 +660,7 @@ fn preview_selection_is_bounded_deterministic_and_change_aware() {
         output_frame_count: u64::MAX,
         ..PresentationPlan::default()
     };
+
     let options = PreviewOptions {
         max_frames: 3,
         ..PreviewOptions::default()

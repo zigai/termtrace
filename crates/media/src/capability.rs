@@ -26,12 +26,14 @@ pub fn semantic_video_capability() -> Capability {
     let semantic_ready = GhosttyVt::new(2, 2, 0)
         .and_then(|mut terminal| return terminal.snapshot())
         .is_ok();
+
     let missing = missing(&["ffmpeg", "ffprobe"]);
     let encode_probe = if missing.is_empty() {
         probe_semantic_video_encode()
     } else {
         Err("probe was not run because FFmpeg or FFprobe is missing".to_owned())
     };
+
     if semantic_ready && encode_probe.is_ok() {
         return ready(
             SEMANTIC_VIDEO_CAPABILITY,
@@ -39,6 +41,7 @@ pub fn semantic_video_capability() -> Capability {
             "the semantic engine and a bounded libx264rgb encode probe completed; native display tools are not required",
         );
     }
+
     return blocked(
         SEMANTIC_VIDEO_CAPABILITY,
         "semantic_video_dependency_missing",
@@ -60,6 +63,7 @@ pub fn presentation_capability() -> Capability {
     let missing = missing(&["ffmpeg", "ffprobe"]);
     let encoder = missing.is_empty() && ffmpeg_has_entry("-encoders", "libx264");
     let ass_filter = encoder && ffmpeg_has_entry("-filters", "ass");
+
     if missing.is_empty() && encoder && ass_filter {
         return ready(
             PRESENTATION_CAPABILITY,
@@ -67,6 +71,7 @@ pub fn presentation_capability() -> Capability {
             "FFmpeg/FFprobe, H.264 delivery encoding, and the ASS/libass filter were found",
         );
     }
+
     return blocked(
         PRESENTATION_CAPABILITY,
         "presentation_dependency_missing",
@@ -116,6 +121,7 @@ fn missing(commands: &[&str]) -> Vec<String> {
 fn executable(command: impl AsRef<OsStr>) -> Option<PathBuf> {
     let command = command.as_ref();
     let path = env::var_os("PATH")?;
+
     return env::split_paths(&path)
         .map(|directory| return directory.join(command))
         .find(|candidate| {
@@ -129,6 +135,7 @@ fn ffmpeg_has_entry(argument: &str, entry: &str) -> bool {
     let Some(ffmpeg) = executable("ffmpeg") else {
         return false;
     };
+
     return probe_output(
         "ffmpeg",
         Command::new(ffmpeg).args(["-hide_banner", argument]),
@@ -149,6 +156,7 @@ pub(crate) fn probe_semantic_video_encode() -> StdResult<(), String> {
         DEPENDENCY_PROBE_TIMEOUT,
     )
     .map_err(|error| return error.to_string())?;
+
     return probe_output(
         "ffmpeg",
         Command::new(ffmpeg).args([
@@ -184,5 +192,6 @@ fn availability(value: bool) -> &'static str {
     if value {
         return "available";
     }
+
     return "unavailable";
 }

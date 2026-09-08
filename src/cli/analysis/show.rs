@@ -5,7 +5,7 @@ use std::{
 
 use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::observation::{
-    CaptureQuality, Observation, observe_completed_with_formats, observe_validated_prefix,
+    observe_completed_with_formats, observe_validated_prefix, CaptureQuality, Observation,
 };
 use termtrace_model::{
     protocol::control::{ScreenPredicate, ScreenWaitQuality, StateHashComparison},
@@ -16,7 +16,7 @@ use termtrace_terminal::Format as GhosttyFormat;
 
 use crate::cli::{
     analysis::args::{ShowArgs, ShowFormat},
-    output::{ResponseWriter, stable_enum_label, write_json_line, write_stdout},
+    output::{stable_enum_label, write_json_line, write_stdout, ResponseWriter},
     session_helpers::{resolve_session_path, resolve_state_point},
 };
 
@@ -33,6 +33,7 @@ pub(in crate::cli) fn run_show(
         Some(StatePoint::LatestPresented),
         "show",
     )?;
+
     let session = resolve_session_path(arguments.session)?;
 
     if arguments.recover_prefix {
@@ -43,11 +44,14 @@ pub(in crate::cli) fn run_show(
                 "prefix recovery supports text and JSON formats without live stability"
             ));
         }
+
         let observation = observe_validated_prefix(&session, point, arguments.include_hidden)
             .into_diagnostic()?;
+
         if arguments.metadata {
             write_observation_metadata(&observation)?;
         }
+
         return write_observation(response, &observation, None, arguments.format);
     }
 
@@ -58,6 +62,7 @@ pub(in crate::cli) fn run_show(
                 "live stability is valid only for latest-presented observations"
             ));
         }
+
         let stable_wait = wait_for_screen(
             &session,
             ScreenPredicate::StateHash {
@@ -68,12 +73,14 @@ pub(in crate::cli) fn run_show(
             arguments.timeout,
         )
         .into_diagnostic()?;
+
         if !stable_wait.matched || stable_wait.quality != ScreenWaitQuality::Matched {
             return Err(miette::miette!(
                 "live stability was not established before {:?}",
                 stable_wait.quality
             ));
         }
+
         stable_hash = Some(stable_wait.frame.state_hash);
     }
 
@@ -82,6 +89,7 @@ pub(in crate::cli) fn run_show(
         ShowFormat::Html => Some(GhosttyFormat::Html),
         _ => None,
     };
+
     let (mut observation, formatted) = match engine_format {
         Some(format) => {
             let (observation, rendered) = observe_completed_with_formats(
@@ -91,11 +99,13 @@ pub(in crate::cli) fn run_show(
                 &[format],
             )
             .into_diagnostic()?;
+
             let formatted = rendered
                 .into_iter()
                 .next()
                 .map(|(_, bytes)| return bytes)
                 .ok_or_else(|| miette::miette!("selected formatter produced no output"))?;
+
             (observation, Some(formatted))
         }
         None => (
@@ -110,11 +120,14 @@ pub(in crate::cli) fn run_show(
                 "presented state changed between stability proof and observation; retry show"
             ));
         }
+
         observation.capture_quality = CaptureQuality::Stable;
     }
+
     if arguments.metadata {
         write_observation_metadata(&observation)?;
     }
+
     return write_observation(response, &observation, formatted, arguments.format);
 }
 
@@ -156,5 +169,6 @@ fn write_observation_metadata(observation: &Observation) -> Result<()> {
         stable_enum_label(&observation.truth_layer)?,
     )
     .into_diagnostic()?;
+
     return Ok(());
 }

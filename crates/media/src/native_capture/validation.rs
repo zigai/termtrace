@@ -16,7 +16,7 @@ use termtrace_evidence::{event_log::EventLogSummary, session::read_manifest};
 use termtrace_model::artifact::visual::VideoMapEntry;
 
 use termtrace_model::artifact::visual::{
-    GHOSTTY_EFFECTIVE_CONFIG_NAME, VISUAL_MANIFEST_VERSION, VisualManifest,
+    VisualManifest, GHOSTTY_EFFECTIVE_CONFIG_NAME, VISUAL_MANIFEST_VERSION,
 };
 
 use super::{Error, Result};
@@ -39,6 +39,7 @@ pub fn validate_replay_screenshot(
     use termtrace_model::terminal::observation::StatePoint;
 
     check_review_cancelled(cancelled)?;
+
     let manifest: VisualManifest = bounded_json(&directory.join("manifest.json"))?;
     let endpoint: ReplayEndpoint = bounded_json(&directory.join("replay-endpoint.json"))?;
     if !manifest
@@ -50,8 +51,11 @@ pub fn validate_replay_screenshot(
             "native screenshot has no committed replay endpoint",
         ));
     }
+
     verify_artifact_members(directory, &manifest.members)?;
+
     check_review_cancelled(cancelled)?;
+
     let canonical = read_manifest(session)?;
     let header = EventLogCursor::open(session.join(&canonical.event_log))?;
     validate_visual_manifest_binding(
@@ -62,16 +66,19 @@ pub fn validate_replay_screenshot(
             .map(|profile| return profile.effective_config_hash.as_str()),
         &header.header().colors.source,
     )?;
+
     let actual = if endpoint.source_complete {
         let point = endpoint
             .state_id
             .map_or(StatePoint::LatestPresented, |state_id| {
                 return StatePoint::StateId { state_id };
             });
+
         replay_endpoint_for_session(session, &point, cancelled)?
     } else {
         replay_endpoint_for_prefix(session, &endpoint.boundary, cancelled)?
     };
+
     if endpoint != actual
         || manifest.capture_kind != "screenshot"
         || manifest.session_id != endpoint.session_id
@@ -87,6 +94,7 @@ pub fn validate_replay_screenshot(
             "native screenshot does not match its canonical replay endpoint",
         ));
     }
+
     return Ok(endpoint);
 }
 
@@ -103,6 +111,7 @@ fn bounded_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
     if bytes.len() > 1024 * 1024 {
         return Err(invalid("native artifact JSON exceeds 1 MiB"));
     }
+
     return serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
@@ -123,6 +132,7 @@ pub fn validate_visual_manifest(manifest: &VisualManifest) -> Result<()> {
             manifest.version
         )));
     }
+
     if manifest.effective_config_hash.len() != 64
         || !manifest
             .effective_config_hash
@@ -133,6 +143,7 @@ pub fn validate_visual_manifest(manifest: &VisualManifest) -> Result<()> {
             "native visual effective configuration hash must be 64 lowercase hexadecimal characters",
         ));
     }
+
     let mut members = manifest
         .members
         .iter()
@@ -142,16 +153,19 @@ pub fn validate_visual_manifest(manifest: &VisualManifest) -> Result<()> {
             "native visual manifest is missing `{GHOSTTY_EFFECTIVE_CONFIG_NAME}`"
         ));
     })?;
+
     if members.next().is_some() {
         return Err(invalid(format!(
             "native visual manifest contains duplicate `{GHOSTTY_EFFECTIVE_CONFIG_NAME}` members"
         )));
     }
+
     if member.blake3 != manifest.effective_config_hash {
         return Err(invalid(format!(
             "native visual effective configuration hash does not match the `{GHOSTTY_EFFECTIVE_CONFIG_NAME}` member"
         )));
     }
+
     return Ok(());
 }
 
@@ -170,6 +184,7 @@ pub(crate) fn validate_visual_manifest_binding(
             manifest.effective_config_hash
         )));
     }
+
     return Ok(());
 }
 
@@ -190,6 +205,7 @@ pub fn validated_visual_manifests(
         .ghostty_visual
         .as_ref()
         .map(|profile| return profile.effective_config_hash.as_str());
+
     let mut entries: Vec<_> = fs_err::read_dir(session)
         .map_err(|source| {
             return Error::Filesystem {
@@ -205,6 +221,7 @@ pub fn validated_visual_manifests(
             };
         })?;
     entries.sort_unstable_by_key(|entry| return entry.file_name());
+
     let mut validated: Vec<ValidatedVisualManifest> = Vec::new();
     for entry in entries {
         let file_type = entry.file_type().map_err(|source| {
@@ -216,19 +233,23 @@ pub fn validated_visual_manifests(
         if !file_type.is_dir() {
             continue;
         }
+
         let manifest_path = entry.path().join("manifest.json");
         if !manifest_path.is_file() {
             continue;
         }
+
         let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
             return Error::Filesystem {
                 path: manifest_path.clone(),
                 source,
             };
         })?;
+
         let Ok(manifest) = serde_json::from_slice::<VisualManifest>(&manifest_bytes) else {
             continue;
         };
+
         if manifest.session_id != session_manifest.session_id
             || validate_visual_manifest_binding(
                 &manifest,
@@ -239,6 +260,7 @@ pub fn validated_visual_manifests(
         {
             continue;
         }
+
         let map_path = entry.path().join("video-map.jsonl");
         let mut video_map: Vec<VideoMapEntry> = Vec::new();
         if map_path.is_file() {
@@ -248,6 +270,7 @@ pub fn validated_visual_manifests(
                     source,
                 };
             })?);
+
             for line in reader.lines() {
                 let line = line.map_err(|source| {
                     return Error::Filesystem {
@@ -255,20 +278,24 @@ pub fn validated_visual_manifests(
                         source,
                     };
                 })?;
+
                 if let Ok(entry) = serde_json::from_str::<VideoMapEntry>(&line) {
                     video_map.push(entry);
                 }
             }
         }
+
         let relative_manifest = manifest_path
             .strip_prefix(session)
             .unwrap_or(&manifest_path)
             .to_path_buf();
+
         let visual =
             ValidatedVisualManifest::new(relative_manifest, manifest, video_map, |_| return Ok(()))
                 .map_err(Error::from)?;
         validated.push(visual);
     }
+
     return Ok(validated);
 }
 
@@ -283,8 +310,8 @@ pub fn validated_visual_manifests_for_state(
     cancelled: &AtomicBool,
 ) -> Result<Vec<ValidatedVisualManifest>> {
     use termtrace_engine::observation::{
-        StatePoint, presented_replay_endpoint_for_session,
-        semantic_state_with_hash_for_session_cancellable,
+        presented_replay_endpoint_for_session, semantic_state_with_hash_for_session_cancellable,
+        StatePoint,
     };
     use termtrace_evidence::{event_log::EventLogCursor, session::read_completion};
 
@@ -294,6 +321,7 @@ pub fn validated_visual_manifests_for_state(
         false,
         cancelled,
     )?;
+
     let session_manifest = read_manifest(session)?;
     let completion = read_completion(session)?;
     let Some(selected_endpoint) = presented_replay_endpoint_for_session(
@@ -309,16 +337,20 @@ pub fn validated_visual_manifests_for_state(
         .ghostty_visual
         .as_ref()
         .map(|profile| return profile.effective_config_hash.as_str());
+
     let directory = VisualDirectories::open(session).map_err(|source| {
         return Error::Filesystem {
             path: session.to_path_buf(),
             source,
         };
     })?;
+
     let mut validated = Vec::new();
+
     let mut retained_bytes = 0_usize;
     for entry in directory {
         check_review_cancelled(cancelled)?;
+
         let entry = entry.map_err(|source| {
             return Error::Filesystem {
                 path: session.to_path_buf(),
@@ -337,6 +369,7 @@ pub fn validated_visual_manifests_for_state(
         {
             continue;
         }
+
         let manifest_path = entry.path().join("manifest.json");
         let mut file = match open_review_file(&manifest_path) {
             Ok(file) => file,
@@ -348,6 +381,7 @@ pub fn validated_visual_manifests_for_state(
                 });
             }
         };
+
         let mut bytes = Vec::new();
         file.by_ref()
             .take(1024 * 1024 + 1)
@@ -358,9 +392,11 @@ pub fn validated_visual_manifests_for_state(
                     source,
                 };
             })?;
+
         if bytes.len() > 1024 * 1024 {
             return Err(invalid("reviewer native manifest exceeds 1 MiB limit"));
         }
+
         let Ok(manifest) = serde_json::from_slice::<VisualManifest>(&bytes) else {
             continue;
         };
@@ -381,14 +417,17 @@ pub fn validated_visual_manifests_for_state(
         {
             continue;
         }
+
         let resolved_screenshot = if replay_screenshot {
             let endpoint = validate_replay_screenshot(session, &entry.path(), cancelled)?;
+
             endpoint.state_hash == selected_endpoint.state_hash
                 && endpoint.event_seq == selected_endpoint.event_seq
                 && endpoint.event_byte_offset == selected_endpoint.event_byte_offset
         } else {
             false
         };
+
         let map_path = entry.path().join("video-map.jsonl");
         let mut video_map = Vec::new();
         match open_review_file(&map_path) {
@@ -400,12 +439,15 @@ pub fn validated_visual_manifests_for_state(
                     .ok_or_else(|| {
                         return invalid("native video map is absent from its manifest");
                     })?;
+
                 let mut reader = BufReader::new(file);
                 let mut hash = blake3::Hasher::new();
                 let mut total_bytes = 0_u64;
                 let mut line = Vec::new();
+
                 loop {
                     check_review_cancelled(cancelled)?;
+
                     line.clear();
                     let count = reader
                         .by_ref()
@@ -420,24 +462,30 @@ pub fn validated_visual_manifests_for_state(
                     if count == 0 {
                         break;
                     }
+
                     if count > 64 * 1024 {
                         return Err(invalid("native video-map line exceeds 64 KiB limit"));
                     }
+
                     hash.update(&line);
                     total_bytes =
                         total_bytes.saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
+
                     let mapped: VideoMapEntry = serde_json::from_slice(&line).map_err(|error| {
                         return invalid(format!("invalid native video-map entry: {error}"));
                     })?;
+
                     if mapped.state_id == state_id {
                         if video_map.len() >= 4096 {
                             return Err(invalid(
                                 "selected state exceeds 4096 native frame correlations",
                             ));
                         }
+
                         video_map.push(mapped);
                     }
                 }
+
                 if total_bytes != member.byte_length
                     || hash.finalize().to_hex().as_str() != member.blake3
                 {
@@ -454,12 +502,14 @@ pub fn validated_visual_manifests_for_state(
                 });
             }
         }
+
         if manifest.selected_state_id != Some(state_id)
             && !resolved_screenshot
             && video_map.is_empty()
         {
             continue;
         }
+
         retained_bytes = retained_bytes
             .saturating_add(bytes.len())
             .saturating_add(video_map.len().saturating_mul(size_of::<VideoMapEntry>()));
@@ -468,18 +518,22 @@ pub fn validated_visual_manifests_for_state(
                 "selected native evidence exceeds reviewer retention budget",
             ));
         }
+
         let relative = manifest_path
             .strip_prefix(session)
             .unwrap_or(&manifest_path)
             .to_path_buf();
+
         let mut visual =
             ValidatedVisualManifest::new(relative.clone(), manifest, video_map, |_| return Ok(()))
                 .map_err(Error::from)?;
         if resolved_screenshot {
             visual.bind_screenshot_state(state_id, &selected_endpoint)?;
         }
+
         validated.push((relative, visual));
     }
+
     check_review_cancelled(cancelled)?;
     semantic_state_with_hash_for_session_cancellable(
         session,
@@ -487,12 +541,15 @@ pub fn validated_visual_manifests_for_state(
         false,
         cancelled,
     )?;
+
     if read_completion(session)?.final_event_hash != completion.final_event_hash {
         return Err(invalid(
             "canonical source changed during native reviewer query",
         ));
     }
+
     validated.sort_unstable_by(|(left, _), (right, _)| return left.cmp(right));
+
     return Ok(validated
         .into_iter()
         .map(|(_, visual)| return visual)
@@ -503,6 +560,7 @@ fn check_review_cancelled(cancelled: &AtomicBool) -> Result<()> {
     if cancelled.load(Ordering::Relaxed) {
         return Err(invalid("native reviewer query cancelled"));
     }
+
     return Ok(());
 }
 
@@ -529,8 +587,10 @@ impl Iterator for VisualDirectories {
             if let Some(entry) = batch.next() {
                 return Some(entry);
             }
+
             self.batch = None;
         }
+
         let entry = match self.root.next()? {
             Ok(entry) => entry,
             Err(error) => return Some(Err(error)),
@@ -545,6 +605,7 @@ impl Iterator for VisualDirectories {
             Ok(_) => {}
             Err(error) => return Some(Err(error)),
         }
+
         return Some(Ok(entry));
     }
 }
@@ -554,11 +615,13 @@ fn open_review_file(path: &Path) -> io::Result<File> {
         .read(true)
         .custom_flags(O_NOFOLLOW | O_NONBLOCK)
         .open(path)?;
+
     if !file.metadata()?.is_file() {
         return Err(io::Error::other(
             "review evidence member must be a regular file",
         ));
     }
+
     return Ok(file);
 }
 
@@ -596,14 +659,17 @@ mod tests {
         assert!(serde_json::from_value::<VisualManifest>(obsolete).is_err());
 
         manifest.version = VISUAL_MANIFEST_VERSION - 1;
+
         assert!(validate_visual_manifest(&manifest).is_err());
         manifest.version = VISUAL_MANIFEST_VERSION;
 
         manifest.effective_config_hash = "A".repeat(64);
+
         assert!(validate_visual_manifest(&manifest).is_err());
         manifest.effective_config_hash = "a".repeat(64);
 
         manifest.members[0].blake3 = "b".repeat(64);
+
         assert!(validate_visual_manifest(&manifest).is_err());
     }
 
@@ -617,18 +683,17 @@ mod tests {
         )
         .expect("recorded profile hash is the sole authority when present");
 
-        assert!(
-            validate_visual_manifest_binding(
-                &manifest,
-                None,
-                &format!("ghostty_show_config_blake3:{}", "b".repeat(64)),
-            )
-            .is_err()
-        );
+        assert!(validate_visual_manifest_binding(
+            &manifest,
+            None,
+            &format!("ghostty_show_config_blake3:{}", "b".repeat(64)),
+        )
+        .is_err());
     }
 
     fn valid_manifest() -> VisualManifest {
         let effective_config_hash = "a".repeat(64);
+
         return VisualManifest {
             version: VISUAL_MANIFEST_VERSION,
             session_id: Uuid::nil(),

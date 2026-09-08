@@ -6,7 +6,7 @@ use termtrace_model::execution::{
     application::{ApplicationEvent, ApplicationEventKind},
     event::EventProjection,
 };
-use termtrace_sdk::{Client, instrumentation::Instrumentation};
+use termtrace_sdk::{instrumentation::Instrumentation, Client};
 
 use super::*;
 
@@ -27,6 +27,7 @@ fn application_events_are_deduplicated_bounded_and_separate_from_terminal_bytes(
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn instrumented fixture");
+
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("ready output");
 
@@ -65,9 +66,11 @@ fn application_events_are_deduplicated_bounded_and_separate_from_terminal_bytes(
     let span = application
         .start_span("work", None, BTreeMap::new())
         .expect("span start");
+
     application
         .end_span("work", span, BTreeMap::new())
         .expect("span end");
+
     send_request(
         &session,
         &ControlRequest::new(ControlCommand::Input {
@@ -77,13 +80,11 @@ fn application_events_are_deduplicated_bounded_and_separate_from_terminal_bytes(
         }),
     )
     .expect("release fixture");
-    assert!(
-        child
-            .wait_with_output()
-            .expect("fixture completion")
-            .status
-            .success()
-    );
+    assert!(child
+        .wait_with_output()
+        .expect("fixture completion")
+        .status
+        .success());
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical evidence");
     let application_records = log
         .events

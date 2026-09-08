@@ -6,7 +6,7 @@ use std::{
 
 use termtrace_sdk::{Error, Result};
 
-use termtrace_model::protocol::driver::{DRIVER_MAX_REQUEST_BYTES, DriverRequest};
+use termtrace_model::protocol::driver::{DriverRequest, DRIVER_MAX_REQUEST_BYTES};
 
 pub(super) enum DriverFrame {
     Request(Box<DriverRequest>),
@@ -21,9 +21,11 @@ pub(super) fn read_frame(input: &mut impl BufRead) -> Result<Option<DriverFrame>
         if available.is_empty() {
             return Ok(None);
         }
+
         if available.first() != Some(&b'\n') {
             break;
         }
+
         input.consume(1);
     }
 
@@ -31,19 +33,24 @@ pub(super) fn read_frame(input: &mut impl BufRead) -> Result<Option<DriverFrame>
     let parsed = {
         let mut buffered = BufReader::new(&mut frame);
         let mut deserializer = serde_json::Deserializer::from_reader(&mut buffered);
+
         DriverRequest::deserialize(&mut deserializer)
             .and_then(|request| return deserializer.end().map(|()| return request))
     };
+
     if let Some(source) = frame.take_input_error() {
         return Err(driver_input_error(source));
     }
+
     frame.drain().map_err(driver_input_error)?;
     if frame.exceeded() {
         return Ok(Some(DriverFrame::TooLarge));
     }
+
     if !frame.terminated() {
         return Ok(Some(DriverFrame::Unterminated));
     }
+
     return Ok(Some(match parsed {
         Ok(request) => DriverFrame::Request(Box::new(request)),
         Err(error) => DriverFrame::Invalid {
@@ -88,6 +95,7 @@ impl<'input, R> NewlineFrameReader<'input, R> {
             if available.is_empty() {
                 break;
             }
+
             let newline = available.iter().position(|byte| return *byte == b'\n');
             let (consumed, content_bytes, terminated) =
                 newline.map_or((available.len(), available.len(), false), |index| {
@@ -96,9 +104,11 @@ impl<'input, R> NewlineFrameReader<'input, R> {
             self.content_bytes = self.content_bytes.saturating_add(content_bytes);
             self.exceeded = self.exceeded
                 || u64::try_from(self.content_bytes).unwrap_or(u64::MAX) > DRIVER_MAX_REQUEST_BYTES;
+
             self.input.consume(consumed);
             self.terminated = terminated;
         }
+
         return Ok(());
     }
 
@@ -120,16 +130,20 @@ impl<R: BufRead> Read for NewlineFrameReader<'_, R> {
         if self.terminated || self.exceeded || buf.is_empty() {
             return Ok(0);
         }
+
         let available = match self.input.fill_buf() {
             Ok(available) => available,
             Err(source) => {
                 self.input_error = Some(IoError::new(source.kind(), source.to_string()));
+
                 return Err(source);
             }
         };
+
         if available.is_empty() {
             return Ok(0);
         }
+
         let maximum = usize::try_from(DRIVER_MAX_REQUEST_BYTES).unwrap_or(usize::MAX);
         let newline = available.iter().position(|byte| return *byte == b'\n');
         let frame_bytes = match newline {
@@ -141,6 +155,7 @@ impl<R: BufRead> Read for NewlineFrameReader<'_, R> {
                 .saturating_sub(self.content_bytes)
                 .min(available.len()),
         };
+
         let consumed = frame_bytes.min(buf.len());
         let (Some(destination), Some(source)) =
             (buf.get_mut(..consumed), available.get(..consumed))
@@ -151,10 +166,12 @@ impl<R: BufRead> Read for NewlineFrameReader<'_, R> {
         };
         destination.copy_from_slice(source);
         self.input.consume(consumed);
+
         let content_consumed = newline.map_or(consumed, |index| return index.min(consumed));
         self.content_bytes = self.content_bytes.saturating_add(content_consumed);
         self.exceeded = self.content_bytes > maximum;
         self.terminated = newline.is_some_and(|index| return consumed > index);
+
         return Ok(consumed);
     }
 }

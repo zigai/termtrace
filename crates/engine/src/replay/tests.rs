@@ -50,6 +50,7 @@ fn output_log_with_geometry(data: &[u8], cols: u16, rows: u16) -> EventLog {
     log.header.rows = rows;
     log.header.pixel_width = cols.saturating_mul(8);
     log.header.pixel_height = rows.saturating_mul(16);
+
     return log;
 }
 
@@ -74,8 +75,10 @@ fn explicit_live_prefix_excludes_later_output_and_hidden_sync_bytes() {
             data: ByteString::from(b"\x1b[?2026lNEW".as_slice()),
         })
         .expect("later output");
+
     let (_, endpoint) = inspect_latest_presented_prefix(&path, &boundary, &AtomicBool::new(false))
         .expect("frozen prefix");
+
     let expected =
         inspect_latest_presented_fast(&output_log(b"OLD")).expect("expected visible state");
     assert_eq!(endpoint.state_hash, expected.state_hash);
@@ -83,9 +86,11 @@ fn explicit_live_prefix_excludes_later_output_and_hidden_sync_bytes() {
     assert_eq!(endpoint.event_byte_offset, Some(2));
     let mut wrong_bytes = boundary.clone();
     wrong_bytes.output_bytes += 1;
+
     assert!(inspect_latest_presented_prefix(&path, &wrong_bytes, &AtomicBool::new(false)).is_err());
     let mut wrong_hash = boundary.clone();
     wrong_hash.event_hash = "0".repeat(64);
+
     assert!(inspect_latest_presented_prefix(&path, &wrong_hash, &AtomicBool::new(false)).is_err());
     assert!(inspect_latest_presented_prefix(&path, &boundary, &AtomicBool::new(true)).is_err());
 }
@@ -93,6 +98,7 @@ fn explicit_live_prefix_excludes_later_output_and_hidden_sync_bytes() {
 #[test]
 fn fast_endpoint_replay_charges_only_input_output_bytes() {
     let log = output_log_with_geometry(b"x", 200, 100);
+
     reset_test_replay_output_bytes();
 
     let inspection = inspect_latest_presented_fast(&log).expect("fast endpoint replay");
@@ -123,6 +129,7 @@ fn fast_endpoint_budgets_deferred_snapshots_across_many_output_records() {
             };
         })
         .collect();
+
     let limits = ReplayLimits {
         output_bytes: 256,
         capture_attempts: 2,
@@ -239,13 +246,16 @@ fn validated_checkpoint_seed_skips_long_session_canonical_output_prefix() {
                     .expect("serializable primary-screen checkpoint"),
             });
         }
+
         return Ok(());
     })
     .expect("checkpoint source replay");
+
     let seed = seed.expect("periodic checkpoint state");
     let remaining = u64::try_from(data.len())
         .expect("output length")
         .saturating_sub(checkpoint_offset.saturating_add(1));
+
     let mut final_hash = None;
     let artifacts = replay_with_seed_and_limits(
         &log,
@@ -257,10 +267,12 @@ fn validated_checkpoint_seed_skips_long_session_canonical_output_prefix() {
         },
         |record, _, _| {
             final_hash = Some(record.state_hash);
+
             return Ok(());
         },
     )
     .expect("checkpoint replay within suffix-only output budget");
+
     let canonical = replay(&log).expect("canonical replay");
     assert_eq!(
         artifacts.final_state_hash,
@@ -281,6 +293,7 @@ fn alternate_screen_checkpoint_seed_is_rejected_before_replay() {
     .expect("checkpoint offset")
     .saturating_add(u64::try_from(b"alternate".len()).expect("payload length"))
     .saturating_sub(1);
+
     let mut seed = None;
     replay_with(&log, None, |record, state, engine| {
         if record.event_byte_offset == Some(checkpoint_offset) {
@@ -294,9 +307,11 @@ fn alternate_screen_checkpoint_seed_is_rejected_before_replay() {
                     .expect("serializable alternate-screen checkpoint"),
             });
         }
+
         return Ok(());
     })
     .expect("alternate-screen checkpoint source replay");
+
     let error = replay_with_seed_and_limits(
         &log,
         None,
@@ -319,11 +334,13 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
     create_private_directory(&directory).expect("private derived directory");
     index::write_index(&directory, &log, None, true, StateSelection::All)
         .expect("periodic checkpoint index");
+
     let entries: Vec<StateIndexEntry> = fs_err::read_to_string(directory.join("state-index.jsonl"))
         .expect("state index")
         .lines()
         .map(|line| return serde_json::from_str(line).expect("state index entry"))
         .collect();
+
     let checkpoint_ids: Vec<u64> = entries
         .iter()
         .filter(|entry| return entry.checkpoint)
@@ -354,6 +371,7 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
             entry.state_id
         );
     }
+
     assert!(directory.join("control-index.jsonl").is_file());
     assert!(directory.join("control-source-index.jsonl").is_file());
     let seed = load_nearest_replay_seed(&directory, &log, &StateSelector::StateId(1_099))
@@ -368,6 +386,7 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
         .record
         .event_byte_offset
         .expect("output checkpoint offset");
+
     let remaining_output_bytes = output_bytes.saturating_sub(seed_offset.saturating_add(1));
     let seeded = replay_with_seed_and_limits(
         &log,
@@ -395,6 +414,7 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
         .lines()
         .map(|line| return serde_json::from_str(line).expect("semantic checkpoint"))
         .collect();
+
     for checkpoint in checkpoints {
         validate_replay_seed(
             &log,
@@ -413,12 +433,14 @@ fn periodic_checkpoint_reconstructs_scrolling_grid() {
     for line in 0..400 {
         data.extend(format!("scrolling-line-{line:04}\r\n").as_bytes());
     }
+
     let log = output_log(&data);
     let temporary = tempfile::TempDir::new().expect("temporary directory");
     let directory = temporary.path().join("derived");
     create_private_directory(&directory).expect("private derived directory");
     index::write_index(&directory, &log, None, true, StateSelection::All)
         .expect("scrolling grids must produce validated periodic checkpoints");
+
     let checkpoint_count = fs_err::read_to_string(directory.join("state-index.jsonl"))
         .expect("state index")
         .lines()
@@ -440,6 +462,7 @@ fn semantic_hash_v2_binds_wrap_and_wide_but_not_dirtiness() {
 
     let mut wrap_changed = state.clone();
     wrap_changed.grid[0].soft_wrapped = !wrap_changed.grid[0].soft_wrapped;
+
     assert_ne!(
         baseline,
         semantic_state_hash(&wrap_changed).expect("wrap hash")
@@ -447,6 +470,7 @@ fn semantic_hash_v2_binds_wrap_and_wide_but_not_dirtiness() {
 
     let mut wide_changed = state.clone();
     wide_changed.grid[0].cells[0].wide_kind = WideKind::SpacerHead;
+
     assert_ne!(
         baseline,
         semantic_state_hash(&wide_changed).expect("wide hash")
@@ -456,6 +480,7 @@ fn semantic_hash_v2_binds_wrap_and_wide_but_not_dirtiness() {
     dirty_changed.dirty = DirtyState::Full;
     dirty_changed.dirty_rows = vec![0];
     dirty_changed.grid[0].dirty = !dirty_changed.grid[0].dirty;
+
     assert_eq!(
         baseline,
         semantic_state_hash(&dirty_changed).expect("dirty hash")
@@ -483,11 +508,13 @@ fn row_delta_emits_and_reconstructs_wrap_facts_without_cell_changes() {
         let row = &mut reconstructed.grid[usize::from(row_diff.row)];
         row.soft_wrapped = row_diff.soft_wrapped;
         row.wrap_continuation = row_diff.wrap_continuation;
+
         for cell in row_diff.cells {
             let column = usize::from(cell.column);
             row.cells[column] = cell;
         }
     }
+
     assert_eq!(
         semantic_state_hash(&reconstructed).expect("reconstructed hash"),
         semantic_state_hash(&current).expect("current hash")

@@ -18,16 +18,16 @@ use std::{
 use tempfile::TempDir;
 
 use super::super::{
-    control::{MutationHistory, spawn_control_server},
+    control::{spawn_control_server, MutationHistory},
     input::encode_paste,
     model::RuntimeMessage,
 };
 use super::*;
 use termtrace_evidence::{
-    Error as EvidenceError,
     event_log::{CanonicalBoundary, DurabilityPolicy, EventLog},
-    request_journal::{MUTATION_JOURNAL_NAME, guarded_command_hash},
+    request_journal::{guarded_command_hash, MUTATION_JOURNAL_NAME},
     session::{read_completion, validate_completed_log},
+    Error as EvidenceError,
 };
 use termtrace_model::{
     execution::environment::{EnvironmentBase, EnvironmentSpec},
@@ -37,8 +37,8 @@ use termtrace_model::{
         GeometryProvenance, ResourceLimitKind, ResourceLimits, SessionCompletion, SessionManifest,
     },
     protocol::control::{
-        CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest, ControlResponse,
-        ControlResult,
+        ControlCommand, ControlData, ControlRequest, ControlResponse, ControlResult,
+        CONTROL_PROTOCOL_VERSION,
     },
     terminal::observation::ActorBoundaries,
 };
@@ -55,6 +55,7 @@ fn cached_test_response(request_id: Uuid, next_event_seq: u64) -> ControlRespons
         event_hash: format!("{next_event_seq:064x}"),
         output_bytes: 0,
     };
+
     return ControlResponse {
         version: CONTROL_PROTOCOL_VERSION,
         request_id,
@@ -114,6 +115,7 @@ fn preserve_policy_keeps_the_application_alive_after_a_mirror_failure() {
         ],
     );
     options.failure_policy = RecordingFailurePolicy::Preserve;
+
     assert!(record_to(&options, &mut FailingOutput).is_err());
     assert_eq!(
         fs_err::read(&survived).expect("application survived"),
@@ -137,12 +139,10 @@ fn preserve_policy_keeps_the_application_alive_after_a_mirror_failure() {
         .copied()
         .collect();
     assert_eq!(output, b"triggerlater");
-    assert!(
-        read_completion(&session)
-            .expect("failure completion")
-            .failure
-            .is_some()
-    );
+    assert!(read_completion(&session)
+        .expect("failure completion")
+        .failure
+        .is_some());
 }
 
 impl Write for FailingOutput {
@@ -207,6 +207,7 @@ fn fatal_actor_exit_writes_durable_failure_completion() {
     )));
     validate_completed_log(&session, &log).expect("valid durable failure completion");
 }
+
 #[test]
 fn poisoned_terminal_exit_append_preserves_incomplete_failure_without_completion() {
     let temporary = TempDir::new().expect("temporary directory");
@@ -219,6 +220,7 @@ fn poisoned_terminal_exit_append_preserves_incomplete_failure_without_completion
             OsString::from("printf fatal-output"),
         ],
     );
+
     POISON_FATAL_APPEND.with(|poison| poison.set(true));
 
     let result = record_to(&options, &mut FailingOutput);
@@ -330,8 +332,10 @@ fn clear_environment_is_exact_and_secret_values_do_not_enter_evidence() {
         manifest.child_environment.explicit_names,
         BTreeSet::from(["TERMTRACE_PRIVATE_TOKEN".to_owned()])
     );
+
     for entry in fs_err::read_dir(&session).expect("session entries") {
         let path = entry.expect("entry").path();
+
         if path.is_file() {
             let bytes = fs_err::read(&path).expect("artifact bytes");
             assert!(
@@ -366,6 +370,7 @@ fn output_budget_retains_observed_bytes_and_records_termination() {
     let completion: SessionCompletion =
         serde_json::from_slice(&fs_err::read(session.join("completion.json")).expect("completion"))
             .expect("completion JSON");
+
     let limit = completion.resource_limit.expect("resource outcome");
     assert_eq!(limit.kind, ResourceLimitKind::OutputBytes);
     assert_eq!(limit.limit, 1024);
@@ -425,6 +430,7 @@ fn max_duration_limit_terminates_session() {
     let completion: SessionCompletion =
         serde_json::from_slice(&fs_err::read(session.join("completion.json")).expect("completion"))
             .expect("completion JSON");
+
     let limit = completion.resource_limit.expect("resource outcome");
     assert_eq!(limit.kind, ResourceLimitKind::MaxDuration);
     assert_eq!(limit.limit, 100);
@@ -459,6 +465,7 @@ fn idle_timeout_limit_terminates_session() {
     let completion: SessionCompletion =
         serde_json::from_slice(&fs_err::read(session.join("completion.json")).expect("completion"))
             .expect("completion JSON");
+
     let limit = completion.resource_limit.expect("resource outcome");
     assert_eq!(limit.kind, ResourceLimitKind::IdleTimeout);
     assert_eq!(limit.limit, 100);
@@ -506,6 +513,7 @@ fn spawn_and_provenance_share_the_effective_child_path() {
     let executable = temporary.path().join("child-path-command");
     fs_err::write(&executable, b"#!/bin/sh\nprintf CHILD_PATH\n").expect("fixture");
     fs_err::set_permissions(&executable, Permissions::from_mode(0o700)).expect("mode");
+
     let session = temporary.path().join("child-path");
     let mut options = isolated_options(session.clone(), vec![OsString::from("child-path-command")]);
     options.environment = EnvironmentSpec {
@@ -516,6 +524,7 @@ fn spawn_and_provenance_share_the_effective_child_path() {
         )]),
         ..EnvironmentSpec::default()
     };
+
     let mut output = Vec::new();
     let outcome = record_to(&options, &mut output).expect("record child PATH command");
     assert_eq!(outcome.exit_code, Some(0));
@@ -543,6 +552,7 @@ fn evicted_mutation_outcomes_are_loaded_from_the_persistent_journal() {
     let first_command = ControlCommand::Mark {
         label: "first".to_owned(),
     };
+
     let first_response = cached_test_response(first_id, 1);
     history
         .remember(
@@ -555,6 +565,7 @@ fn evicted_mutation_outcomes_are_loaded_from_the_persistent_journal() {
             first_response.clone(),
         )
         .expect("remember first mutation");
+
     let second_id = Uuid::now_v7();
     let second_command = ControlCommand::Mark {
         label: "second".to_owned(),
@@ -570,9 +581,11 @@ fn evicted_mutation_outcomes_are_loaded_from_the_persistent_journal() {
             cached_test_response(second_id, 2),
         )
         .expect("remember second mutation");
+
     let journal_path = temporary.path().join(MUTATION_JOURNAL_NAME);
     let moved_journal_path = temporary.path().join("temporarily-moved-requests.jsonl");
     fs_err::rename(&journal_path, &moved_journal_path).expect("move mutation journal");
+
     let (_, cached_retry) = history
         .lookup(second_id, &second_command, None)
         .expect("load cached mutation");
@@ -598,6 +611,7 @@ fn records_exact_output_and_exit_after_output_close() {
         OsString::from("-c"),
         OsString::from(r"printf '\033[31mhello\033[0m\377'"),
     ];
+
     let options = isolated_options(session.clone(), command);
 
     let mut mirrored_output = Vec::new();
@@ -647,10 +661,12 @@ fn records_exact_output_and_exit_after_output_close() {
         &fs_err::read(session.join("session.json")).expect("session manifest"),
     )
     .expect("valid session manifest");
+
     let completion: SessionCompletion = serde_json::from_slice(
         &fs_err::read(session.join("completion.json")).expect("completion manifest"),
     )
     .expect("valid completion manifest");
+
     assert_eq!(manifest.session_id, recording.header.session_id);
     assert_eq!(completion.session_id, recording.header.session_id);
     assert_eq!(
@@ -691,6 +707,7 @@ fn terminates_descendants_that_retain_the_slave_pty() {
         OsString::from("-c"),
         OsString::from("(trap '' HUP; exec sleep 30) & printf done"),
     ];
+
     let options = isolated_options(temporary.path().join("recording"), command);
     let started = Instant::now();
     let mut output = Vec::new();
@@ -715,10 +732,12 @@ fn attached_mirror_suppresses_answered_split_queries_and_preserves_display_seque
             "import os,tty,time,select; tty.setraw(0); os.write(1,b'\\x1b[31mvisible\\x1b[0m'); os.write(1,b'\\x1b['); time.sleep(.02); os.write(1,b'6n'); r=os.read(0,32); extra=select.select([0],[],[],.05)[0]; os.write(1,b'GOT:'+r.hex().encode()+b':'+str(bool(extra)).encode())",
         ),
     ];
+
     let mut options = isolated_options(temporary.path().join("attached-query"), command);
     options.forward_stdin = true;
     let mut mirrored = Vec::new();
     let outcome = record_to(&options, &mut mirrored).expect("attached recording");
+
     assert!(mirrored.starts_with(b"\x1b[31mvisible\x1b[0m"));
     assert!(!mirrored.windows(4).any(|bytes| return bytes == b"\x1b[6n"));
     assert!(
@@ -756,6 +775,7 @@ fn answers_and_audits_terminal_queries() {
             "import os,tty; tty.setraw(0); os.write(1,b'\\x1b[6n'); r=os.read(0,32); os.write(1,b'GOT:'+r.hex().encode())",
         ),
     ];
+
     let options = isolated_options(temporary.path().join("query"), command);
     let mut output = Vec::new();
 
@@ -778,9 +798,11 @@ fn answers_and_audits_terminal_queries() {
                     source_byte_offset.expect("query byte offset"),
                 ));
             }
+
             return None;
         })
         .expect("query reply");
+
     let query_record = log
         .events
         .iter()
@@ -790,11 +812,9 @@ fn answers_and_audits_terminal_queries() {
         query_record.seq < log.events[reply_index].seq,
         "observed query precedes its reply"
     );
-    assert!(
-        query_record
-            .observed_monotonic_ns
-            .is_some_and(|time| return time <= query_record.monotonic_ns)
-    );
+    assert!(query_record
+        .observed_monotonic_ns
+        .is_some_and(|time| return time <= query_record.monotonic_ns));
     let Event::Output { data } = &query_record.event else {
         panic!("query must reference output")
     };
@@ -825,6 +845,7 @@ fn preserves_complete_osc_query_when_response_precedes_st() {
             "import os,tty; tty.setraw(0); q=b'\\x1b]11;?\\x1b\\\\'; os.write(1,q); r=b'';\nwhile not r.endswith(b'\\x1b\\\\'): r+=os.read(0,99)\nos.write(1,b'GOT:'+r.hex().encode())",
         ),
     ];
+
     let options = isolated_options(temporary.path().join("osc-query"), command);
     let mut output = Vec::new();
 
@@ -852,18 +873,23 @@ fn graceful_control_shutdown_drains_an_inflight_request() {
         stream.write_all(b"\n").expect("terminate request");
         let mut response = Vec::new();
         stream.read_to_end(&mut response).expect("read response");
+
         return response;
     });
+
     let pending = receiver
         .recv_timeout(Duration::from_secs(1))
         .expect("inflight request");
+
     worker.begin_shutdown().expect("begin graceful shutdown");
+
     let RuntimeMessage::Control { request, response } = pending else {
         panic!("unexpected runtime message");
     };
     response
         .send(cached_test_response(request.request_id, 1))
         .expect("serve inflight response");
+
     let encoded = client.join().expect("join control client");
     let served: ControlResponse =
         serde_json::from_slice(&encoded).expect("decode drained response");
@@ -888,6 +914,7 @@ fn control_server_accepts_a_second_request_while_the_first_is_pending() {
             .read_to_end(&mut response)
             .expect("read first shutdown");
     });
+
     let first = receiver
         .recv_timeout(Duration::from_secs(1))
         .expect("first inflight request");
@@ -902,13 +929,17 @@ fn control_server_accepts_a_second_request_while_the_first_is_pending() {
             .read_to_end(&mut response)
             .expect("read second shutdown");
     });
+
     let second = receiver
         .recv_timeout(Duration::from_secs(1))
         .expect("second concurrent request");
 
     worker.stop().expect("cancel control server");
+
     drop(first);
     drop(second);
+
     first_client.join().expect("join first client");
+
     second_client.join().expect("join second client");
 }

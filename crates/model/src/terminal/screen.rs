@@ -318,11 +318,13 @@ impl ScreenFrame {
                         wrap_continuation: row.wrap_continuation,
                         text: &row.text,
                     };
+
                     for span in &row.spans {
                         for (offset, cell) in span.cells.iter().enumerate() {
                             let column = span
                                 .start_column
                                 .saturating_add(u16::try_from(offset).unwrap_or(u16::MAX));
+
                             visit(
                                 metadata,
                                 column,
@@ -342,6 +344,7 @@ impl ScreenFrame {
                         wrap_continuation: row.wrap_continuation,
                         text: &row.text,
                     };
+
                     for cell in &row.cells {
                         visit(
                             metadata,

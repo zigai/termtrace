@@ -26,10 +26,12 @@ pub(in crate::cli) fn finish_response(
                         .iter()
                         .map(|value| return human_summary(value, &state.command_type))
                         .collect::<String>();
+
                     direct_stdout(summary.as_bytes())
                 }
             } else {
                 direct_stderr(&human_failure_summary(&state, error.as_ref()));
+
                 Ok(ExitCode::SUCCESS)
             }
         }
@@ -39,11 +41,13 @@ pub(in crate::cli) fn finish_response(
             } else {
                 Ok(compact_failure(&state, error.as_ref()))
             };
+
             response
                 .and_then(bounded_agent_response)
                 .and_then(|output| return direct_stdout(&output))
         }
     };
+
     if let Some(error) = error
         && !matches!(
             state.mode,
@@ -52,10 +56,13 @@ pub(in crate::cli) fn finish_response(
     {
         direct_stderr(&report_message(&error));
     }
+
     if let Err(error) = write_result {
         direct_stderr(&error.to_string());
+
         return ExitCode::FAILURE;
     }
+
     return code;
 }
 
@@ -64,16 +71,19 @@ pub(in crate::cli) fn write_clap_error(error: clap::Error, mode: ResponseMode) -
         error.kind(),
         ClapErrorKind::DisplayHelp | ClapErrorKind::DisplayVersion
     );
+
     let code = if success {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(u8::try_from(error.exit_code()).unwrap_or(2))
     };
+
     let resolved_mode = if success && mode == ResponseMode::Auto {
         ResolvedResponseMode::Human
     } else {
         mode.resolve()
     };
+
     match resolved_mode {
         ResolvedResponseMode::Full | ResolvedResponseMode::Human => {
             let _ = error.print();
@@ -114,16 +124,20 @@ pub(in crate::cli) fn write_clap_error(error: clap::Error, mode: ResponseMode) -
                     fields: BTreeMap::new(),
                 })
             };
+
             if let Ok(output) = bounded_agent_response(response) {
                 let _ = direct_stdout(&output);
             }
+
             if !success {
                 direct_stderr(error.to_string().trim());
             }
         }
     }
+
     return code;
 }
+
 pub(in crate::cli) struct ResponseOutput<'response> {
     response: &'response mut ResponseWriter,
 }
@@ -135,6 +149,7 @@ impl io::Write for ResponseOutput<'_> {
             ResolvedResponseMode::Quiet => Ok(buf.len()),
             ResolvedResponseMode::Human | ResolvedResponseMode::Agent => {
                 capture_raw(self.response, buf);
+
                 Ok(buf.len())
             }
         };
@@ -144,6 +159,7 @@ impl io::Write for ResponseOutput<'_> {
         if self.response.mode() == ResolvedResponseMode::Full {
             return io::stdout().lock().flush();
         }
+
         return Ok(());
     }
 }
@@ -160,6 +176,7 @@ pub(in crate::cli) fn write_follow_stdout(
         ResolvedResponseMode::Full => {
             let stdout = io::stdout();
             let mut stdout = stdout.lock();
+
             match stdout
                 .write_all(output)
                 .and_then(|()| return stdout.flush())
@@ -172,6 +189,7 @@ pub(in crate::cli) fn write_follow_stdout(
         ResolvedResponseMode::Quiet => Ok(true),
         ResolvedResponseMode::Human | ResolvedResponseMode::Agent => {
             capture_raw(response, output);
+
             Ok(true)
         }
     };
@@ -184,11 +202,14 @@ pub(in crate::cli) fn write_follow_json_line(
     if response.mode() == ResolvedResponseMode::Full {
         let mut encoded = serde_json::to_vec(value).into_diagnostic()?;
         encoded.push(b'\n');
+
         return write_follow_stdout(response, &encoded);
     }
+
     if response.mode() != ResolvedResponseMode::Quiet {
         capture_json(response, value)?;
     }
+
     return Ok(true);
 }
 
@@ -200,11 +221,13 @@ pub(in crate::cli) fn write_json_line(
         ResolvedResponseMode::Full => {
             let mut encoded = serde_json::to_vec(value).into_diagnostic()?;
             encoded.push(b'\n');
+
             direct_stdout(&encoded)
         }
         ResolvedResponseMode::Quiet => Ok(ExitCode::SUCCESS),
         ResolvedResponseMode::Human | ResolvedResponseMode::Agent => {
             capture_json(response, value)?;
+
             Ok(ExitCode::SUCCESS)
         }
     };
@@ -219,6 +242,7 @@ pub(in crate::cli) fn write_stdout(
         ResolvedResponseMode::Quiet => Ok(ExitCode::SUCCESS),
         ResolvedResponseMode::Human | ResolvedResponseMode::Agent => {
             capture_raw(response, output.as_ref());
+
             Ok(ExitCode::SUCCESS)
         }
     };

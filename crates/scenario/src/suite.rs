@@ -2,7 +2,7 @@ use std::{
     collections::VecDeque,
     path::{Path, PathBuf},
     result::Result as StdResult,
-    sync::{Arc, Mutex, mpsc},
+    sync::{mpsc, Arc, Mutex},
     thread,
 };
 
@@ -14,10 +14,10 @@ use termtrace_model::scenario::{
 };
 
 use crate::{
-    Error, Result,
     document::{expand_matrix, read},
     error::{invalid, operation},
     execution::run_validated,
+    Error, Result,
 };
 
 /// Execution and selection settings for a deterministic scenario suite.
@@ -54,6 +54,7 @@ pub fn run_suite(
     let mut expanded: Vec<(PathBuf, Scenario)> = Vec::new();
     for path in paths {
         let scenario = read(&path)?;
+
         for (label, scenario) in expand_matrix(scenario)? {
             let identity = if label.is_empty() {
                 path.clone()
@@ -74,6 +75,7 @@ pub fn run_suite(
         })
         .map(|(_, task)| return task)
         .collect();
+
     if tasks.is_empty() {
         return Err(invalid("scenario selection produced an empty shard"));
     }
@@ -89,24 +91,24 @@ pub fn run_suite(
             let sender = sender.clone();
             let options = options.clone();
 
-            scope.spawn(move || {
-                loop {
-                    let task = {
-                        let mut guard = match queue.lock() {
-                            Ok(guard) => guard,
-                            Err(poisoned) => poisoned.into_inner(),
-                        };
-                        guard.pop_front()
-                    };
-                    let Some((path, scenario)) = task else {
-                        return;
+            scope.spawn(move || loop {
+                let task = {
+                    let mut guard = match queue.lock() {
+                        Ok(guard) => guard,
+                        Err(poisoned) => poisoned.into_inner(),
                     };
 
-                    let result = run_case(path, scenario, &options)
-                        .map_err(|error| return error.to_string());
-                    if sender.send(result).is_err() {
-                        return;
-                    }
+                    guard.pop_front()
+                };
+                let Some((path, scenario)) = task else {
+                    return;
+                };
+
+                let result =
+                    run_case(path, scenario, &options).map_err(|error| return error.to_string());
+
+                if sender.send(result).is_err() {
+                    return;
                 }
             });
         }
@@ -125,6 +127,7 @@ pub fn run_suite(
                 })?;
             *slot = Some(case);
         }
+
         return Ok::<(), Error>(());
     })?;
 
@@ -188,13 +191,16 @@ fn run_case(
             &options.failure_root,
             options.update_snapshots,
         )?;
+
         let passed = report.status == ScenarioStatus::Passed;
+
         attempts.push(ScenarioAttemptReport { attempt, report });
 
         if passed {
             break;
         }
     }
+
     return Ok(ScenarioCaseReport {
         scenario: path,
         attempts,
@@ -242,9 +248,12 @@ pub fn scenario_junit(report: &ScenarioSuiteReport) -> String {
             ));
             w.end_element();
         }
+
         w.end_element();
     }
+
     w.end_element();
+
     return w.end_document();
 }
 

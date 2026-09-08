@@ -13,18 +13,22 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
         .args(["/bin/sh", "-c", "printf DRIVER"])
         .assert()
         .success();
+
     let hello_id = "019f0000-0000-7000-8000-000000000001";
     let attach_id = "019f0000-0000-7000-8000-000000000002";
+
     let hello = serde_json::json!({
         "version": 5,
         "request_id": hello_id,
         "method": { "method": "hello" }
     });
+
     let attach = serde_json::json!({
         "version": 5,
         "request_id": attach_id,
         "method": { "method": "attach", "session": session }
     });
+
     let input = format!("{hello}\n{hello}\n{attach}\n");
     let mut driver = Command::cargo_bin("termtrace").expect("binary should build");
     let output = driver
@@ -35,11 +39,13 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
         .get_output()
         .stdout
         .clone();
+
     let responses = output
         .split(|byte| return *byte == b'\n')
         .filter(|line| return !line.is_empty())
         .map(|line| return serde_json::from_slice::<serde_json::Value>(line).expect("driver JSON"))
         .collect::<Vec<_>>();
+
     let [first, second, third] = responses.as_slice() else {
         panic!("expected three driver responses");
     };
@@ -62,6 +68,7 @@ fn python_sync_and_async_clients_parse_driver_completion_contract() {
         .args(["--", "/bin/sh", "-c", "printf PYTHON"])
         .assert()
         .success();
+
     let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/python");
     let binary = env!("CARGO_BIN_EXE_termtrace");
     let sync_code = r#"import json, sys
@@ -130,6 +137,7 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
         pass
     assert retained_path.joinpath("completion.json").is_file()
 "#;
+
     let sync = StdCommand::new("uv")
         .args(["run", "--isolated", "--project"])
         .arg(&package)
@@ -201,6 +209,7 @@ async def main():
         assert not disposable_path.exists()
 asyncio.run(main())
 "#;
+
     let asynchronous = StdCommand::new("uv")
         .args(["run", "--isolated", "--project"])
         .arg(package)
@@ -226,6 +235,7 @@ fn typescript_client_attaches_and_reads_completion_contract() {
         .args(["--", "/bin/sh", "-c", "printf TYPESCRIPT"])
         .assert()
         .success();
+
     let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/typescript/src/index.ts");
     let code = r#"const { existsSync, mkdirSync } = await import("node:fs")
 const { Termtrace, StaleStateError, assertScreenText, stableTerminalSnapshot } = await import(process.argv[1])
@@ -296,6 +306,7 @@ await terminal.close()
 if (existsSync(disposablePath)) throw new Error("successful disposable evidence remained after driver close")
 if (!existsSync(`${retainedPath}/completion.json`)) throw new Error("driver close discarded failed evidence")
 "#;
+
     let output = StdCommand::new("bun")
         .arg("-e")
         .arg(code)
@@ -324,16 +335,19 @@ fn managed_client_runners_leave_the_callers_worktree_untouched() {
         assets.join("python"),
     )
     .expect("Python fixture asset link");
+
     fs_err::write(
         typescript.join("package.json"),
         br#"{"name":"@termtrace/test","type":"module","exports":{".":"./lib/index.js"}}"#,
     )
     .expect("TypeScript fixture package");
+
     fs_err::write(
         typescript.join("lib/index.js"),
         b"export const managedRunnerMarker = 'typescript-managed';\n",
     )
     .expect("TypeScript fixture module");
+
     let worktree = temporary.path().join("worktree");
     fs_err::create_dir(&worktree).expect("empty caller worktree");
 
@@ -366,6 +380,7 @@ fn managed_client_runners_leave_the_callers_worktree_untouched() {
         "export const localMarker = 'local-import';\n",
     )
     .expect("TypeScript helper");
+
     fs_err::write(
         source.join("client.ts"),
         "import { managedRunnerMarker } from '@termtrace/test';\nimport { localMarker } from './helper.ts';\nconsole.log(`${managedRunnerMarker}:${localMarker}`);\n",

@@ -40,6 +40,7 @@ impl<'source> TimelineRanks<'source> {
                 source,
             };
         })?;
+
         let mut ranks = Self {
             canonical,
             canonical_next: None,
@@ -53,6 +54,7 @@ impl<'source> TimelineRanks<'source> {
         };
         ranks.advance_canonical()?;
         ranks.advance_control()?;
+
         return Ok(ranks);
     }
 
@@ -60,6 +62,7 @@ impl<'source> TimelineRanks<'source> {
         self.canonical_next = None;
         for record in self.canonical.by_ref() {
             let record = record?;
+
             if self
                 .source_range
                 .is_none_or(|range| return range.contains(record.monotonic_ns))
@@ -69,6 +72,7 @@ impl<'source> TimelineRanks<'source> {
                 break;
             }
         }
+
         return Ok(());
     }
 
@@ -80,12 +84,16 @@ impl<'source> TimelineRanks<'source> {
                 source,
             };
         })?;
+
         self.control_next = None;
+
         if bytes == 0 {
             return Ok(());
         }
+
         let token: VtToken = serde_json::from_str(&line)
             .map_err(|source| return json_error(self.controls_path.clone(), source))?;
+
         let first = token
             .source
             .first()
@@ -94,10 +102,12 @@ impl<'source> TimelineRanks<'source> {
             (first.monotonic_ns, first.event_seq, 1, token.token_id),
             self.control_offset,
         ));
+
         self.control_offset = self
             .control_offset
             .checked_add(u64::try_from(bytes).unwrap_or(u64::MAX))
             .ok_or_else(|| return invalid_replay("control index byte offset overflow"))?;
+
         return Ok(());
     }
 
@@ -109,6 +119,7 @@ impl<'source> TimelineRanks<'source> {
                 .ok_or_else(|| return invalid_replay("canonical timeline rank overflow"))?;
             self.advance_canonical()?;
         }
+
         while self.control_next.is_some_and(|(next, _)| return next < key) {
             self.control_count = self
                 .control_count
@@ -116,10 +127,12 @@ impl<'source> TimelineRanks<'source> {
                 .ok_or_else(|| return invalid_replay("control timeline rank overflow"))?;
             self.advance_control()?;
         }
+
         let rank = state_id
             .checked_add(self.canonical_count)
             .and_then(|rank| return rank.checked_add(self.control_count))
             .ok_or_else(|| return invalid_replay("checkpoint timeline rank overflow"))?;
+
         return Ok((
             rank,
             self.control_next

@@ -1,10 +1,9 @@
 use super::{
-    ActionInputResult, AdmittedAction, AdmittedPostcondition, CONTROL_PROTOCOL_VERSION,
-    ControlCommand, ControlData, ControlErrorDetails, ControlRequest, ControlResponse,
-    ControlResult, Duration, Error, EventLogWriter, InputSequenceExecution,
-    InputSequenceFailureDetails, Instant, Result, SessionActor, Uuid, actor_boundaries,
-    control_error_code, control_error_response, evaluate_action_postcondition, mpsc,
-    presented_state_hash, screen_frame_error_response,
+    actor_boundaries, control_error_code, control_error_response, evaluate_action_postcondition,
+    mpsc, presented_state_hash, screen_frame_error_response, ActionInputResult, AdmittedAction,
+    AdmittedPostcondition, ControlCommand, ControlData, ControlErrorDetails, ControlRequest,
+    ControlResponse, ControlResult, Duration, Error, EventLogWriter, InputSequenceExecution,
+    InputSequenceFailureDetails, Instant, Result, SessionActor, Uuid, CONTROL_PROTOCOL_VERSION,
 };
 
 pub(in crate::recording) struct PendingInputSequence {
@@ -41,6 +40,7 @@ impl PendingInputSequence {
                     timeout_ns,
                 } => {
                     let deadline = waiting.started_at + Duration::from_nanos(*timeout_ns);
+
                     waiting
                         .matching_state
                         .as_ref()
@@ -63,6 +63,7 @@ impl PendingInputSequence {
         );
     }
 }
+
 impl SessionActor<'_> {
     pub(in crate::recording) fn advance_input_sequence(
         &mut self,
@@ -85,8 +86,10 @@ impl SessionActor<'_> {
         if !screen_postcondition_ready && !output_closed && Instant::now() < pending.next_deadline()
         {
             self.pending_input_sequence = Some(pending);
+
             return Ok(());
         }
+
         let terminal_outcome = loop {
             match pending.phase {
                 InputSequencePhase::Applying {
@@ -101,6 +104,7 @@ impl SessionActor<'_> {
                         Ok(None) => {
                             pending.phase = InputSequencePhase::Applying { execution, action };
                             self.pending_input_sequence = Some(pending);
+
                             return Ok(());
                         }
                         Ok(Some(input)) => {
@@ -146,6 +150,7 @@ impl SessionActor<'_> {
                         Ok(None) => {
                             pending.phase = InputSequencePhase::Waiting(waiting);
                             self.pending_input_sequence = Some(pending);
+
                             return Ok(());
                         }
                         Err(error) => break Err(error),
@@ -160,6 +165,7 @@ impl SessionActor<'_> {
             }
             _ => 0,
         };
+
         let (response, terminal_error) = match terminal_outcome {
             Ok(data) => (
                 ControlResponse {
@@ -177,6 +183,7 @@ impl SessionActor<'_> {
                     current_state_hash,
                     &self.event_log,
                 );
+
                 (response, Some(error))
             }
         };
@@ -189,12 +196,14 @@ impl SessionActor<'_> {
             self.event_log.current_hash(),
             response.clone(),
         )?;
+
         if pending.response_sender.send(response).is_err() {
             tracing::warn!(
                 request_id = %pending.request.request_id,
                 "input sequence response receiver disconnected"
             );
         }
+
         return match terminal_error {
             None
             | Some(
@@ -207,6 +216,7 @@ impl SessionActor<'_> {
         };
     }
 }
+
 pub(super) fn input_sequence_error_response(
     request_id: Uuid,
     atom_count: u32,

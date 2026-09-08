@@ -33,13 +33,16 @@ impl ControlStripper {
         self.source_byte_count = self
             .source_byte_count
             .saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+
         let mut output = Vec::with_capacity(bytes.len());
         for byte in bytes.iter().copied() {
             self.consume(byte, &mut output);
         }
+
         self.output_byte_count = self
             .output_byte_count
             .saturating_add(u64::try_from(output.len()).unwrap_or(u64::MAX));
+
         return output;
     }
 
@@ -80,10 +83,12 @@ impl ControlStripper {
                     b'P' | b'_' | b'^' | b'X' => StripState::String,
                     0x18 | 0x1a => {
                         self.finish_control();
+
                         StripState::Ground
                     }
                     0x30..=0x7e => {
                         self.finish_control();
+
                         StripState::Ground
                     }
                     _ => StripState::Escape,
@@ -91,6 +96,7 @@ impl ControlStripper {
             }
             StripState::Csi => {
                 self.push_control(byte);
+
                 if byte == 0x18 || byte == 0x1a || (0x40..=0x7e).contains(&byte) {
                     self.finish_control();
                     self.state = StripState::Ground;
@@ -98,6 +104,7 @@ impl ControlStripper {
             }
             StripState::Osc => {
                 self.push_control(byte);
+
                 match byte {
                     0x07 | 0x9c => {
                         self.finish_control();
@@ -113,6 +120,7 @@ impl ControlStripper {
             }
             StripState::String => {
                 self.push_control(byte);
+
                 match byte {
                     0x07 | 0x9c => {
                         self.finish_control();
@@ -128,6 +136,7 @@ impl ControlStripper {
             }
             StripState::OscEscape | StripState::StringEscape => {
                 self.push_control(byte);
+
                 if byte == b'\\' || byte == 0x18 || byte == 0x1a {
                     self.finish_control();
                     self.state = StripState::Ground;
@@ -161,6 +170,7 @@ impl ControlStripper {
         {
             self.alternate_screen_observed = true;
         }
+
         self.control.clear();
     }
 }
@@ -219,6 +229,7 @@ mod tests {
         let mut sequence = b"\x1b[".to_vec();
         sequence.extend(iter::repeat_n(b'0', 4_091));
         sequence.extend_from_slice(b"?47h");
+
         let mut stripper = ControlStripper::default();
 
         assert!(stripper.feed(&sequence).is_empty());

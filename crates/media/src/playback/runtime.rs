@@ -19,8 +19,8 @@ use termtrace_model::{
     terminal::replay::SourceRange,
 };
 
-use super::terminal::{RawTerminalGuard, TerminalInputDrain, query_terminal, resize_and_query};
-use crate::{Error, Result, error::finish_with_cleanup};
+use super::terminal::{query_terminal, resize_and_query, RawTerminalGuard, TerminalInputDrain};
+use crate::{error::finish_with_cleanup, Error, Result};
 
 /// Configuration for replaying canonical events into a native terminal.
 #[derive(Clone, Debug)]
@@ -62,12 +62,14 @@ pub fn playback(options: &PlaybackOptions) -> Result<()> {
             let failure = PlaybackFailure {
                 message: error.to_string(),
             };
+
             if let Err(cleanup) = write_create_new_json(&options.error_file, &failure) {
                 return Err(Error::CleanupFailed {
                     primary: Box::new(error),
                     cleanup: Box::new(cleanup),
                 });
             }
+
             return Err(error);
         }
     }
@@ -75,6 +77,7 @@ pub fn playback(options: &PlaybackOptions) -> Result<()> {
 
 fn playback_inner(options: &PlaybackOptions) -> Result<()> {
     validate_options(options)?;
+
     let mut raw = RawTerminalGuard::enter(true)?;
     let result = (|| {
         let manifest = read_manifest(&options.session_directory)?;
@@ -88,6 +91,7 @@ fn playback_inner(options: &PlaybackOptions) -> Result<()> {
                 ),
             });
         }
+
         if manifest.geometry_provenance.source == GeometrySource::GhosttyFit
             && (reported.text_width, reported.text_height)
                 != (expected.pixel_width, expected.pixel_height)
@@ -102,9 +106,12 @@ fn playback_inner(options: &PlaybackOptions) -> Result<()> {
                 ),
             });
         }
+
         write_create_new_json(&options.geometry_file, &reported)?;
+
         return playback_events(options, raw.is_active());
     })();
+
     return finish_with_cleanup(result, raw.restore());
 }
 
@@ -114,6 +121,7 @@ fn validate_options(options: &PlaybackOptions) -> Result<()> {
             reason: "playback byte endpoint requires an event endpoint".to_owned(),
         });
     }
+
     if options.endpoint_event_seq.is_some()
         && (options.start_monotonic_ns.is_some() || options.end_monotonic_ns.is_some())
     {
@@ -121,6 +129,7 @@ fn validate_options(options: &PlaybackOptions) -> Result<()> {
             reason: "exact playback endpoints cannot be combined with time ranges".to_owned(),
         });
     }
+
     return Ok(());
 }
 
@@ -130,11 +139,13 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
         .terminal
         .as_ref()
         .map_or(0, |record| return record.monotonic_ns);
+
     let source_range = resolve_source_range(
         options.start_monotonic_ns,
         options.end_monotonic_ns,
         final_ns,
     )?;
+
     let mut resize_intents: HashMap<uuid::Uuid, (u16, u16)> = HashMap::new();
     if let Some(range) = source_range {
         let manifest = read_manifest(&options.session_directory)?;
@@ -142,13 +153,16 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
         let mut output = io::stdout().lock();
         let mut cursor = EventLogCursor::open(options.session_directory.join("events.jsonl"))?;
         validate_playback_header(&cursor, &log)?;
+
         while let Some(record) = cursor.next_record()? {
             if record.seq >= log.event_count {
                 return Err(changed_source());
             }
+
             if record.monotonic_ns >= range.start_monotonic_ns {
                 continue;
             }
+
             emit_event(
                 &mut output,
                 &mut resize_intents,
@@ -156,8 +170,11 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
                 Some(&mut grid),
             )?;
         }
+
         validate_playback_boundary(&cursor, &log)?;
+
         let reported = query_terminal()?;
+
         if (reported.cols, reported.rows) != grid {
             return Err(Error::InvalidReplay {
                 reason: format!(
@@ -167,12 +184,16 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
             });
         }
     }
+
     let mut drain = TerminalInputDrain::start(input_is_terminal)?;
     let result = timed_playback(options, &log, source_range, &mut resize_intents);
     finish_with_cleanup(result, drain.stop())?;
+
     query_terminal()?;
+
     write_secure(&options.ready_file, b"ready\n")?;
     thread::sleep(options.final_hold);
+
     return Ok(());
 }
 
@@ -190,6 +211,7 @@ fn timed_playback(
                 reason: "playback wall-clock origin overflow".to_owned(),
             };
         })?;
+
     write_create_new_json(
         &options.timing_file,
         &PlaybackTiming {
@@ -206,33 +228,42 @@ fn timed_playback(
             instant: options.instant,
         },
     )?;
+
     sleep_until(monotonic_origin);
+
     let mut output = io::stdout().lock();
     let mut cursor = EventLogCursor::open(options.session_directory.join("events.jsonl"))?;
     validate_playback_header(&cursor, log)?;
+
     let mut endpoint_seen = false;
     while let Some(record) = cursor.next_record()? {
         if record.seq >= log.event_count {
             return Err(changed_source());
         }
+
         if source_range.is_some_and(|range| return record.monotonic_ns < range.start_monotonic_ns) {
             continue;
         }
+
         if source_range.is_some_and(|range| return record.monotonic_ns >= range.end_monotonic_ns) {
             continue;
         }
+
         if options
             .endpoint_event_seq
             .is_some_and(|endpoint| return record.seq > endpoint)
         {
             continue;
         }
+
         let relative_ns = source_range.map_or(record.monotonic_ns, |range| {
             return record.monotonic_ns.saturating_sub(range.start_monotonic_ns);
         });
+
         if !options.instant {
             sleep_until(monotonic_origin + Duration::from_nanos(relative_ns));
         }
+
         if options.endpoint_event_seq == Some(record.seq) {
             emit_endpoint(
                 &mut output,
@@ -240,20 +271,26 @@ fn timed_playback(
                 &record.event,
                 options.endpoint_event_byte_offset,
             )?;
+
             endpoint_seen = true;
             continue;
         }
+
         emit_event(&mut output, resize_intents, &record.event, None)?;
     }
+
     validate_playback_boundary(&cursor, log)?;
+
     if options.endpoint_event_seq.is_some() && !endpoint_seen {
         return Err(Error::InvalidReplay {
             reason: "playback endpoint is absent from the source".to_owned(),
         });
     }
+
     if let Some(range) = source_range {
         sleep_until(monotonic_origin + Duration::from_nanos(range.duration_ns()));
     }
+
     return Ok(());
 }
 
@@ -261,6 +298,7 @@ fn validate_playback_header(cursor: &EventLogCursor, source: &EventLogSummary) -
     if cursor.header() != &source.header {
         return Err(changed_source());
     }
+
     return Ok(());
 }
 
@@ -271,6 +309,7 @@ fn validate_playback_boundary(cursor: &EventLogCursor, source: &EventLogSummary)
     } else if cursor.next_event_seq() != 0 {
         return Err(changed_source());
     }
+
     return Ok(());
 }
 
@@ -309,13 +348,16 @@ pub(super) fn emit_endpoint(
             .write_all(prefix)
             .and_then(|()| return output.flush())
             .map_err(output_error)?;
+
         return Ok(());
     }
+
     if byte_offset.is_some() {
         return Err(Error::InvalidReplay {
             reason: "only output endpoints accept a byte offset".to_owned(),
         });
     }
+
     return emit_event(output, resize_intents, event, None);
 }
 
@@ -347,6 +389,7 @@ pub(super) fn emit_event(
                 write!(output, "\x1b[8;{rows};{cols}t")
                     .and_then(|()| return output.flush())
                     .map_err(output_error)?;
+
                 if let Some(grid) = applied_grid {
                     *grid = (cols, rows);
                 }
@@ -357,6 +400,7 @@ pub(super) fn emit_event(
         }
         _ => {}
     }
+
     return Ok(());
 }
 
@@ -365,12 +409,14 @@ fn sleep_until(target: Instant) {
         thread::sleep(remaining);
     }
 }
+
 fn unix_now_ns() -> Result<u128> {
     return SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| return duration.as_nanos())
         .map_err(|_| return Error::ClockBeforeEpoch);
 }
+
 fn write_create_new_json(path: &Path, value: &impl serde::Serialize) -> Result<()> {
     let encoded = serde_json::to_vec(value).map_err(|source| {
         return Error::InvalidJson {
@@ -379,8 +425,10 @@ fn write_create_new_json(path: &Path, value: &impl serde::Serialize) -> Result<(
             source,
         };
     })?;
+
     return write_secure(path, &encoded).map_err(Error::from);
 }
+
 fn output_error(source: io::Error) -> Error {
     return Error::Filesystem {
         path: PathBuf::from("<playback-stdout>"),

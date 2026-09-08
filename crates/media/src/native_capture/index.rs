@@ -1,9 +1,9 @@
+use super::{Error, Result};
 use std::{
     fs::{self, File},
     io::{self, BufRead as _, BufReader, Read as _, Write as _},
     path::{Path, PathBuf},
 };
-
 use termtrace_engine::replay::derived_directory_name_for;
 use termtrace_evidence::{
     artifact::{finish_writer, secure_writer, verify_artifact_members},
@@ -13,12 +13,10 @@ use termtrace_model::{
     artifact::metadata::ArtifactMember,
     artifact::visual::VideoMapEntry,
     terminal::replay::{
-        GHOSTTY_REVISION, ReplayManifest, STATE_FORMAT_VERSION, SourceRange, StateIndexEntry,
-        StateSelection,
+        ReplayManifest, SourceRange, StateIndexEntry, StateSelection, GHOSTTY_REVISION,
+        STATE_FORMAT_VERSION,
     },
 };
-
-use super::{Error, Result};
 
 #[derive(Clone)]
 pub(super) struct StateIndexSource {
@@ -42,6 +40,7 @@ impl StateIndexSource {
                 source,
             };
         })?;
+
         return Ok(StateIndexCursor {
             source: self.clone(),
             reader: BufReader::new(file),
@@ -66,6 +65,7 @@ impl StateIndexCursor {
                     source,
                 };
             })?;
+
         if count == 0 {
             if self.byte_length != self.source.member.byte_length
                 || self.hash.finalize().to_hex().as_str() != self.source.member.blake3
@@ -74,22 +74,27 @@ impl StateIndexCursor {
                     reason: "state index changed or does not match its manifest".to_owned(),
                 });
             }
+
             return Ok(None);
         }
+
         if count > 64 * 1024 {
             return Err(Error::InvalidReplay {
                 reason: "state-index entry exceeds 64 KiB".to_owned(),
             });
         }
+
         self.hash.update(&self.line);
         self.byte_length = self
             .byte_length
             .saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
+
         if self.byte_length > self.source.member.byte_length {
             return Err(Error::InvalidReplay {
                 reason: "state index exceeds its committed length".to_owned(),
             });
         }
+
         return serde_json::from_slice(&self.line)
             .map(Some)
             .map_err(|source| {
@@ -111,6 +116,7 @@ pub(super) fn validate_replay_manifest(
     let path = session
         .join(derived_directory_name_for(range, selection))
         .join("manifest.json");
+
     let bytes = fs::read(&path).map_err(|source| {
         if source.kind() == io::ErrorKind::NotFound {
             return Error::InvalidReplay {
@@ -122,6 +128,7 @@ pub(super) fn validate_replay_manifest(
             source,
         };
     })?;
+
     let manifest: ReplayManifest = serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path: path.clone(),
@@ -129,6 +136,7 @@ pub(super) fn validate_replay_manifest(
             source,
         };
     })?;
+
     verify_artifact_members(
         path.parent().ok_or_else(|| {
             return Error::InvalidReplay {
@@ -137,6 +145,7 @@ pub(super) fn validate_replay_manifest(
         })?,
         &manifest.members,
     )?;
+
     let source = StateIndexSource {
         path: session
             .join(derived_directory_name_for(range, selection))
@@ -156,11 +165,13 @@ pub(super) fn validate_replay_manifest(
     let mut count = 0_u64;
     let mut final_hash = None;
     let mut hidden = false;
+
     while let Some(state) = states.next_state()? {
         count = count.saturating_add(1);
         final_hash = Some(state.state_hash);
         hidden |= !state.presented;
     }
+
     let expected_hash = log.terminal.as_ref().map(|event| return event.hash.clone());
     if manifest.version != STATE_FORMAT_VERSION
         || manifest.session_id != log.header.session_id
@@ -175,6 +186,7 @@ pub(super) fn validate_replay_manifest(
     {
         return Err(Error::InvalidReplay { reason: "semantic index does not match the capture request; recreate the matching derived index".to_owned() });
     }
+
     return Ok(source);
 }
 
@@ -192,9 +204,11 @@ pub(super) fn write_video_map(
             source,
         };
     })?;
+
     let mut frames = AcquisitionFrames::new(BufReader::new(file).lines());
     let mut frame = frames.next_frame()?;
     let mut states = source.open()?;
+
     while let Some(state) = states.next_state()? {
         let relative_source_ns = match range {
             Some(range) if range.contains(state.monotonic_ns) => {
@@ -213,10 +227,12 @@ pub(super) fn write_video_map(
             }
             None => state.monotonic_ns,
         };
+
         let target = replay_origin.saturating_add(u128::from(relative_source_ns));
         while frame.is_some_and(|(_, acquired)| return acquired < target) {
             frame = frames.next_frame()?;
         }
+
         let correlated = frame.filter(|_| return state.presented);
         serde_json::to_writer(
             &mut writer,
@@ -244,6 +260,7 @@ pub(super) fn write_video_map(
             };
         })?;
     }
+
     return finish_writer(writer, path).map_err(Error::from);
 }
 
@@ -254,13 +271,16 @@ pub(super) fn validate_acquisition_frames(path: &Path, expected_count: u64) -> R
             source,
         };
     })?;
+
     let mut frames = AcquisitionFrames::new(BufReader::new(file).lines());
     let mut first = None;
+
     let mut count = 0;
     while let Some((_, acquired)) = frames.next_frame()? {
         first.get_or_insert(acquired);
         count += 1;
     }
+
     if count != expected_count {
         return Err(Error::InvalidReplay {
             reason: format!(
@@ -268,6 +288,7 @@ pub(super) fn validate_acquisition_frames(path: &Path, expected_count: u64) -> R
             ),
         });
     }
+
     return first.ok_or_else(|| {
         return Error::InvalidReplay {
             reason: "native acquisition has no first frame".to_owned(),
@@ -286,8 +307,10 @@ pub(super) fn write_original_acquisition_map(
             source,
         };
     })?;
+
     let mut frames = AcquisitionFrames::new(BufReader::new(file).lines());
     let mut writer = secure_writer(path)?;
+
     while let Some((frame, acquisition_unix_ns)) = frames.next_frame()? {
         let elapsed_since_execution_start_ns =
             acquisition_unix_ns.checked_sub(execution_origin_unix_ns);
@@ -314,6 +337,7 @@ pub(super) fn write_original_acquisition_map(
             };
         })?;
     }
+
     return finish_writer(writer, path).map_err(Error::from);
 }
 
@@ -343,12 +367,15 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
             if !line.contains("Parsed_showinfo_") {
                 continue;
             }
+
             if let Some((_, rest)) = line.split_once("config in time_base: ") {
                 self.time_base = rest.split(',').next().and_then(|value| {
                     let (numerator, denominator) = value.trim().split_once('/')?;
+
                     return Some((numerator.parse().ok()?, denominator.parse().ok()?));
                 });
             }
+
             let Some((_, rest)) = line.split_once(" n:") else {
                 continue;
             };
@@ -376,14 +403,18 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
             }) {
                 return Err(invalid());
             }
+
             self.previous = Some((number, acquired));
+
             return Ok(self.previous);
         }
+
         if self.previous.is_none() {
             return Err(Error::InvalidReplay {
                 reason: "native video has no acquisition timestamps".to_owned(),
             });
         }
+
         return Ok(None);
     }
 }
@@ -426,6 +457,7 @@ mod state_cursor_tests {
             .into_iter()
             .find(|member| return member.path == "state-index.jsonl")
             .expect("state index member");
+
         return StateIndexSource { path, member };
     }
 

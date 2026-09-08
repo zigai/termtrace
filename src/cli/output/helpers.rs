@@ -7,6 +7,7 @@ pub(in crate::cli) fn stable_enum_label(value: &impl serde::Serialize) -> Result
             "human output label did not serialize as a string"
         ));
     };
+
     return Ok(label.to_owned());
 }
 
@@ -18,13 +19,16 @@ pub(in crate::cli) fn id_list(values: &[u64]) -> String {
     if values.is_empty() {
         return "-".to_owned();
     }
+
     let mut output = String::new();
     for (index, value) in values.iter().enumerate() {
         if index != 0 {
             output.push(',');
         }
+
         let _ = write!(output, "{value}");
     }
+
     return output;
 }
 
@@ -51,9 +55,11 @@ pub(in crate::cli) fn write_projection_warning(
     if response.mode() == ResolvedResponseMode::Quiet {
         return Ok(());
     }
+
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
     writeln!(stderr, "termtrace: {message}").into_diagnostic()?;
+
     return Ok(());
 }
 
@@ -66,5 +72,6 @@ pub(in crate::cli) fn row_text(row: &RowState) -> String {
             text.push_str(&cell.grapheme);
         }
     }
+
     return text.trim_end().to_owned();
 }

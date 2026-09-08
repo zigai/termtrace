@@ -7,6 +7,7 @@ pub use termtrace_model::terminal::vt::{VtSourceSegment, VtToken, VtTokenKind};
 use termtrace_model::value::ByteString;
 
 use crate::{Error, Result};
+
 const DEFAULT_MAX_TOKEN_BYTES: usize = 1_048_576;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -78,6 +79,7 @@ impl VtFramer {
             };
             self.consume(tagged, &mut emitted)?;
         }
+
         return Ok(emitted);
     }
 
@@ -103,6 +105,7 @@ impl VtFramer {
             },
             &mut emitted,
         )?;
+
         return Ok(emitted);
     }
 
@@ -121,6 +124,7 @@ impl VtFramer {
             };
             emitted.push(self.emit(kind));
         }
+
         return Ok(emitted);
     }
 
@@ -135,12 +139,14 @@ impl VtFramer {
             FramerState::StringEscape { kind, osc } => {
                 let value = byte.value;
                 self.push(byte)?;
+
                 if value == b'\\' {
                     emitted.push(self.emit(kind));
                     self.state = FramerState::Ground;
                 } else {
                     self.state = FramerState::String { kind, osc };
                 }
+
                 return Ok(());
             }
         }
@@ -150,12 +156,16 @@ impl VtFramer {
         if self.printable_utf8_remaining > 0 {
             if (0x80..=0xbf).contains(&byte.value) {
                 self.printable_utf8_remaining -= 1;
+
                 return self.push(byte);
             }
+
             self.printable_utf8_remaining = 0;
             self.flush_printable(emitted);
+
             return self.consume_ground(byte, emitted);
         }
+
         match byte.value {
             0x1b => {
                 self.flush_printable(emitted);
@@ -186,12 +196,14 @@ impl VtFramer {
                 self.push(byte)?;
             }
         }
+
         return Ok(());
     }
 
     fn consume_escape(&mut self, byte: TaggedByte, emitted: &mut Vec<VtToken>) -> Result<()> {
         let value = byte.value;
         self.push(byte)?;
+
         match value {
             b'[' if self.token.len() == 2 => self.state = FramerState::Csi,
             b']' if self.token.len() == 2 => {
@@ -222,12 +234,14 @@ impl VtFramer {
                 self.state = FramerState::Ground;
             }
         }
+
         return Ok(());
     }
 
     fn consume_csi(&mut self, byte: TaggedByte, emitted: &mut Vec<VtToken>) -> Result<()> {
         let value = byte.value;
         self.push(byte)?;
+
         if (0x40..=0x7e).contains(&value) {
             emitted.push(self.emit(VtTokenKind::Csi));
             self.state = FramerState::Ground;
@@ -235,6 +249,7 @@ impl VtFramer {
             emitted.push(self.emit(VtTokenKind::Unknown));
             self.state = FramerState::Ground;
         }
+
         return Ok(());
     }
 
@@ -247,12 +262,14 @@ impl VtFramer {
     ) -> Result<()> {
         let value = byte.value;
         self.push(byte)?;
+
         if value == 0x9c || (osc && value == 0x07) {
             emitted.push(self.emit(kind));
             self.state = FramerState::Ground;
         } else if value == 0x1b {
             self.state = FramerState::StringEscape { kind, osc };
         }
+
         return Ok(());
     }
 
@@ -268,6 +285,7 @@ impl VtFramer {
             VtTokenKind::Csi => FramerState::Csi,
             _ => FramerState::Ground,
         };
+
         return Ok(());
     }
 
@@ -281,6 +299,7 @@ impl VtFramer {
         self.flush_printable(emitted);
         self.push(byte)?;
         self.state = FramerState::String { kind, osc };
+
         return Ok(());
     }
 
@@ -290,7 +309,9 @@ impl VtFramer {
                 reason: "VT token exceeds configured byte bound".to_owned(),
             });
         }
+
         self.token.push(byte.value);
+
         if let Some(last) = self.source.last_mut()
             && last.event_seq == byte.event_seq
             && last.end_byte_offset == byte.byte_offset
@@ -304,6 +325,7 @@ impl VtFramer {
                 monotonic_ns: byte.monotonic_ns,
             });
         }
+
         return Ok(());
     }
 
@@ -311,6 +333,7 @@ impl VtFramer {
         if !self.token.is_empty() {
             emitted.push(self.emit(VtTokenKind::Printable));
         }
+
         self.printable_utf8_remaining = 0;
     }
 
@@ -326,7 +349,9 @@ impl VtFramer {
             description,
             timing_resolution: "event".to_owned(),
         };
+
         self.next_token_id = self.next_token_id.saturating_add(1);
+
         return token;
     }
 }
@@ -338,13 +363,16 @@ impl VtFramer {
 /// Returns an error when a token exceeds the one-MiB default bound.
 pub fn frame_event_records(records: &[EventRecord]) -> Result<Vec<VtToken>> {
     let mut framer = VtFramer::default();
+
     let mut tokens = Vec::new();
     for record in records {
         if let Event::Output { data } = &record.event {
             tokens.extend(framer.feed(record.seq, record.monotonic_ns, data.as_bytes())?);
         }
     }
+
     tokens.extend(framer.finish()?);
+
     return Ok(tokens);
 }
 
@@ -355,6 +383,7 @@ fn describe(kind: VtTokenKind, raw: &[u8]) -> String {
         } else {
             raw.get(1..).unwrap_or_default()
         };
+
         if let Some((&final_byte, parameters)) = body.split_last() {
             return match (parameters, final_byte) {
                 (b"2", b'J') => "erase display (all)".to_owned(),
@@ -370,6 +399,7 @@ fn describe(kind: VtTokenKind, raw: &[u8]) -> String {
             };
         }
     }
+
     return match kind {
         VtTokenKind::Printable => "printable bytes".to_owned(),
         VtTokenKind::C0 => format!("C0 0x{:02x}", raw.first().copied().unwrap_or(0)),
@@ -431,13 +461,12 @@ mod tests {
             (7, 40, 0, b'D'),
             (4, 50, 13, b'E'),
         ] {
-            assert!(
-                framer
-                    .feed_byte_at(event_seq, monotonic_ns, offset, byte)
-                    .expect("feed positioned byte")
-                    .is_empty()
-            );
+            assert!(framer
+                .feed_byte_at(event_seq, monotonic_ns, offset, byte)
+                .expect("feed positioned byte")
+                .is_empty());
         }
+
         let tokens = framer.finish().expect("finish positioned bytes");
         let [token] = tokens.as_slice() else {
             panic!("printable stream must emit one token");
@@ -477,12 +506,10 @@ mod tests {
     #[test]
     fn labels_incomplete_and_bounds_large_strings() {
         let mut incomplete = VtFramer::default();
-        assert!(
-            incomplete
-                .feed(1, 0, b"\x1b]unterminated")
-                .expect("feed")
-                .is_empty()
-        );
+        assert!(incomplete
+            .feed(1, 0, b"\x1b]unterminated")
+            .expect("feed")
+            .is_empty());
         let token = incomplete.finish().expect("finish").remove(0);
         assert_eq!(token.kind, VtTokenKind::Incomplete);
 

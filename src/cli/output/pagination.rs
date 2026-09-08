@@ -2,6 +2,7 @@ use super::{OutputPage, PageArgs};
 
 pub(super) fn pagination_projection(value: &serde_json::Value) -> Option<serde_json::Value> {
     let source = value.as_object()?;
+
     let mut projection = serde_json::Map::new();
     for key in [
         "kind",
@@ -15,6 +16,7 @@ pub(super) fn pagination_projection(value: &serde_json::Value) -> Option<serde_j
             projection.insert(key.to_owned(), value);
         }
     }
+
     if !projection.contains_key("page")
         && !projection.contains_key("output_page")
         && let Some(results) = source.get("results").and_then(serde_json::Value::as_array)
@@ -30,6 +32,7 @@ pub(super) fn pagination_projection(value: &serde_json::Value) -> Option<serde_j
             }
         }
     }
+
     if !projection.contains_key("page")
         && !projection.contains_key("output_page")
         && !projection.contains_key("next_offset")
@@ -37,26 +40,26 @@ pub(super) fn pagination_projection(value: &serde_json::Value) -> Option<serde_j
     {
         return None;
     }
+
     return Some(serde_json::Value::Object(projection));
 }
+
 pub(super) fn raw_pagination_projection(output: &[u8]) -> Option<serde_json::Value> {
     let line = str::from_utf8(output)
         .ok()?
         .lines()
         .rev()
         .find_map(|line| return line.strip_prefix("page: "))?;
+
     let page = serde_json::from_str::<serde_json::Value>(line).ok()?;
+
     return Some(serde_json::json!({ "page": page }));
 }
 
 pub(in crate::cli) fn paginate<T>(items: Vec<T>, page: &PageArgs) -> (Vec<T>, OutputPage, bool) {
     let total = items.len();
     let start = page.offset.min(total);
-    let end = if page.all {
-        total
-    } else {
-        start.saturating_add(page.limit).min(total)
-    };
+    let end = if page.all { total } else { start.saturating_add(page.limit).min(total) };
     let returned = end.saturating_sub(start);
     let partial = start != 0 || end < total;
     let next_offset = (end < total).then_some(end);
@@ -65,6 +68,7 @@ pub(in crate::cli) fn paginate<T>(items: Vec<T>, page: &PageArgs) -> (Vec<T>, Ou
         .skip(start)
         .take(returned)
         .collect::<Vec<_>>();
+
     return (
         selected,
         OutputPage {

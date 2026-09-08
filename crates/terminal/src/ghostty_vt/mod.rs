@@ -17,4 +17,4 @@ mod types;
 
 pub use input::encode_focus;
 pub use terminal::GhosttyVt;
-pub use types::{Format, supported_geometry_cell_count};
+pub use types::{supported_geometry_cell_count, Format};

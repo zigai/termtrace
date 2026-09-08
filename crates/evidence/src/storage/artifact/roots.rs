@@ -15,12 +15,13 @@ use uuid::Uuid;
 use crate::storage::{Error, Result};
 
 use super::{
-    ARTIFACT_ROOT_FORMAT, ARTIFACT_ROOT_LOCK, ARTIFACT_ROOT_LOG, ARTIFACT_ROOT_VERSION, json_error,
+    json_error,
     secure_fs::{
         open_directory_path, open_file_at, open_parent_directory, safe_file_name, sync_fd,
         validate_private_directory_fd, validate_private_regular_file_fd,
     },
     verification::normalized_relative_path,
+    ARTIFACT_ROOT_FORMAT, ARTIFACT_ROOT_LOCK, ARTIFACT_ROOT_LOG, ARTIFACT_ROOT_VERSION,
 };
 
 #[derive(Serialize)]
@@ -112,6 +113,7 @@ fn append_root(
     let directory_name = artifact_directory
         .strip_prefix(session)
         .map_err(|_| return Error::invalid("artifact directory is outside its source session"))?;
+
     let directory_name = normalized_relative_path(directory_name)?;
     let session_fd = open_directory_path(session, false)?;
     validate_private_directory_fd(&session_fd, session)?;
@@ -123,8 +125,11 @@ fn append_root(
         Mode::from_bits_truncate(0o600),
         &lock_path,
     )?;
+
     validate_private_regular_file_fd(&lock_fd, &lock_path)?;
+
     sync_fd(&session_fd, session)?;
+
     let lock =
         Flock::lock(File::from(lock_fd), FlockArg::LockExclusive).map_err(|(_, error)| {
             return Error::Filesystem {
@@ -132,6 +137,7 @@ fn append_root(
                 source: IoError::from_raw_os_error(error as i32),
             };
         })?;
+
     let catalog_path = session.join(ARTIFACT_ROOT_LOG);
     let catalog_fd = open_file_at(
         &session_fd,
@@ -140,8 +146,11 @@ fn append_root(
         Mode::from_bits_truncate(0o600),
         &catalog_path,
     )?;
+
     validate_private_regular_file_fd(&catalog_fd, &catalog_path)?;
+
     sync_fd(&session_fd, session)?;
+
     let mut catalog = File::from(catalog_fd);
     let records = read_artifact_roots_from(&mut catalog, &catalog_path)?;
     if records
@@ -152,11 +161,13 @@ fn append_root(
             "artifact directory already has a catalog root",
         ));
     }
+
     let seq = u64::try_from(records.len()).unwrap_or(u64::MAX);
     let prev_hash = records.last().map_or_else(
         || return "0".repeat(64),
         |record| return record.hash.clone(),
     );
+
     let derivation_id = Uuid::now_v7();
     let manifest_hash = blake3::hash(manifest_bytes).to_hex().to_string();
     let body = ArtifactRootBody {
@@ -201,8 +212,11 @@ fn append_root(
                 source,
             };
         })?;
+
     sync_fd(&session_fd, session)?;
+
     drop(lock);
+
     return Ok(record);
 }
 
@@ -229,7 +243,9 @@ pub fn read_artifact_roots(path: &Path) -> Result<Vec<ArtifactRootRecord>> {
         }
         Err(error) => return Err(error),
     };
+
     validate_private_regular_file_fd(&fd, path)?;
+
     return read_artifact_roots_from(&mut File::from(fd), path);
 }
 
@@ -237,6 +253,7 @@ fn read_artifact_roots_from(file: &mut File, path: &Path) -> Result<Vec<Artifact
     let reader = BufReader::new(file);
     let mut records: Vec<ArtifactRootRecord> = Vec::new();
     let mut previous_hash = "0".repeat(64);
+
     for (index, line) in reader.lines().enumerate() {
         let line = line.map_err(|source| {
             return Error::Filesystem {
@@ -246,7 +263,9 @@ fn read_artifact_roots_from(file: &mut File, path: &Path) -> Result<Vec<Artifact
         })?;
         let record: ArtifactRootRecord = serde_json::from_str(&line)
             .map_err(|source| return json_error(path.to_path_buf(), source))?;
+
         let seq = u64::try_from(index).unwrap_or(u64::MAX);
+
         if record.format != ARTIFACT_ROOT_FORMAT
             || record.version != ARTIFACT_ROOT_VERSION
             || record.seq != seq
@@ -256,6 +275,7 @@ fn read_artifact_roots_from(file: &mut File, path: &Path) -> Result<Vec<Artifact
                 "artifact-root catalog format, sequence, or prior hash is invalid",
             ));
         }
+
         let body = ArtifactRootBody {
             format: &record.format,
             version: record.version,
@@ -275,14 +295,17 @@ fn read_artifact_roots_from(file: &mut File, path: &Path) -> Result<Vec<Artifact
                 "artifact-root catalog record hash does not match",
             ));
         }
+
         previous_hash.clone_from(&record.hash);
         records.push(record);
     }
+
     return Ok(records);
 }
 
 fn hash_artifact_root(body: &ArtifactRootBody<'_>, path: &Path) -> Result<String> {
     let bytes =
         serde_json::to_vec(body).map_err(|source| return json_error(path.to_path_buf(), source))?;
+
     return Ok(blake3::hash(&bytes).to_hex().to_string());
 }

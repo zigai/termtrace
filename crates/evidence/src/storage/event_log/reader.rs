@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fs::{Metadata, OpenOptions, symlink_metadata},
+    fs::{symlink_metadata, Metadata, OpenOptions},
     io::{BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write},
     os::unix::fs::{MetadataExt as _, OpenOptionsExt as _},
     path::{Path, PathBuf},
@@ -17,16 +17,16 @@ use termtrace_model::{
 use uuid::Uuid;
 
 use crate::storage::{
-    Error, Result, artifact::sync_parent_directory, identifier_index::IdentifierSet,
+    artifact::sync_parent_directory, identifier_index::IdentifierSet, Error, Result,
 };
 
 use super::{
     operations::validate_operation_transition,
-    segments::{CanonicalLogFile, SegmentWriter, canonical_source_fingerprint},
+    segments::{canonical_source_fingerprint, CanonicalLogFile, SegmentWriter},
     types::{EventLog, EventLogSummary},
     validation::{
-        MAX_LINE_BYTES, OWNER_FILE_MODE, chained_hash, invalid_log, parse_json_line, read_line,
-        validate_event_geometry, validate_header, validate_parent_directory,
+        chained_hash, invalid_log, parse_json_line, read_line, validate_event_geometry,
+        validate_header, validate_parent_directory, MAX_LINE_BYTES, OWNER_FILE_MODE,
     },
 };
 
@@ -40,6 +40,7 @@ pub(super) struct EventLogLimits {
     pub(super) encoded_bytes: u64,
     pub(super) decoded_payload_bytes: u64,
 }
+
 pub(super) const DEFAULT_EVENT_LOG_LIMITS: EventLogLimits = EventLogLimits {
     event_count: MAX_EVENT_COUNT,
     encoded_bytes: MAX_EVENT_LOG_ENCODED_BYTES,
@@ -93,17 +94,21 @@ impl EventLog {
                 "event page limit must be from 1 through 4096",
             ));
         }
+
         let mut cursor = EventLogCursor::open_snapshot(path)?;
         let mut records = Vec::new();
         let mut bytes = 0_u64;
         let mut previous_position = cursor.position_offset();
+
         let mut full = false;
         while let Some(record) = cursor.next_record()? {
             let position = cursor.position_offset();
             let record_bytes = position.saturating_sub(previous_position);
             previous_position = position;
+
             if record.seq >= from_event_seq && records.len() < usize::from(limit) && !full {
                 let next_bytes = bytes.saturating_add(record_bytes);
+
                 if !records.is_empty() && next_bytes > 8 * 1024 * 1024 {
                     full = true;
                 } else {
@@ -112,7 +117,9 @@ impl EventLog {
                 }
             }
         }
+
         let _pending = cursor.finish_snapshot()?;
+
         return Ok(records);
     }
 
@@ -124,6 +131,7 @@ impl EventLog {
     pub fn read(path: impl AsRef<Path>) -> Result<Self> {
         return parse_event_log(path.as_ref(), None);
     }
+
     /// Read and validate exactly the requested event prefix.
     ///
     /// # Errors
@@ -132,6 +140,7 @@ impl EventLog {
     pub fn read_prefix(path: impl AsRef<Path>, event_count: u64) -> Result<Self> {
         return parse_event_log(path.as_ref(), Some(event_count));
     }
+
     /// Copy the longest valid event prefix into a new owner-only event log.
     ///
     /// # Errors
@@ -163,6 +172,7 @@ impl EventLog {
                 };
             })
             .collect();
+
         return Ok(RecoveryReport {
             source: source.to_path_buf(),
             recovered: recovered.to_path_buf(),
@@ -191,6 +201,7 @@ impl LogValidation {
         {
             return Err(invalid_log(path, line, "observation is after append time"));
         }
+
         validate_event_geometry(path, line, &record.event)?;
         if record.seq != self.expected_seq {
             return Err(invalid_log(
@@ -202,6 +213,7 @@ impl LogValidation {
                 ),
             ));
         }
+
         if record.monotonic_ns < self.previous_time {
             return Err(invalid_log(
                 path,
@@ -209,9 +221,11 @@ impl LogValidation {
                 "monotonic timestamp moved backwards",
             ));
         }
+
         if record.prev_hash != self.previous_hash.to_hex().as_str() {
             return Err(invalid_log(path, line, "previous hash does not match"));
         }
+
         let body = EventBody {
             seq: record.seq,
             monotonic_ns: record.monotonic_ns,
@@ -225,10 +239,13 @@ impl LogValidation {
                 source,
             };
         })?;
+
         let expected_hash = chained_hash(self.previous_hash, &body_bytes);
+
         if record.hash != expected_hash.to_hex().as_str() {
             return Err(invalid_log(path, line, "event hash does not match"));
         }
+
         if self.validate_operations {
             validate_operation_transition(
                 path,
@@ -238,12 +255,14 @@ impl LogValidation {
                 &mut self.pending_operations,
             )?;
         }
+
         self.previous_hash = expected_hash;
         self.previous_time = record.monotonic_ns;
         self.expected_seq = self
             .expected_seq
             .checked_add(1)
             .ok_or_else(|| return invalid_log(path, line, "event sequence overflow"))?;
+
         return Ok(record);
     }
 }
@@ -274,17 +293,22 @@ impl EventLogCursor {
                 source,
             };
         })?;
+
         if !opened_metadata.is_file() {
             return Err(invalid_log(&path, 1, "event log must be a regular file"));
         }
+
         let mut reader = BufReader::new(file);
         let header_bytes = read_line(&mut reader, &path, 1)?
             .ok_or_else(|| return invalid_log(&path, 1, "missing header"))?;
+
         let encoded_bytes = u64::try_from(header_bytes.len())
             .unwrap_or(u64::MAX)
             .saturating_add(1);
+
         let header: EventLogHeader = parse_json_line(&path, 1, &header_bytes)?;
         validate_header(&path, &header)?;
+
         let position = reader.stream_position().map_err(|source| {
             return Error::Filesystem {
                 path: path.clone(),
@@ -298,7 +322,9 @@ impl EventLogCursor {
                 source,
             };
         })?;
+
         let header_hash = blake3::hash(&header_bytes);
+
         return Ok(Self {
             path,
             header,
@@ -338,8 +364,10 @@ impl EventLogCursor {
                 source,
             };
         })?);
+
         return Ok(cursor);
     }
+
     /// Seek to a position supplied by the live actor after checking its source identity.
     ///
     /// This validates only a suffix: it can never finish as full-log operation verification.
@@ -360,9 +388,11 @@ impl EventLogCursor {
                 "invalid live resume position",
             ));
         }
+
         let hash = Hash::from_hex(&position.event_hash).map_err(|_| {
             return invalid_log(&self.path, self.line_number, "invalid live cursor hash");
         })?;
+
         self.file
             .seek(SeekFrom::Start(position.file_offset))
             .map_err(|source| {
@@ -371,6 +401,7 @@ impl EventLogCursor {
                     source,
                 };
             })?;
+
         self.validation.previous_hash = hash;
         self.validation.previous_time = position.monotonic_ns;
         self.validation.expected_seq = position.next_event_seq;
@@ -379,6 +410,7 @@ impl EventLogCursor {
         self.encoded_bytes = position.file_offset;
         self.buffer.clear();
         self.buffer_start = 0;
+
         return Ok(());
     }
 
@@ -394,6 +426,7 @@ impl EventLogCursor {
                 "live event source identity does not match actor",
             ));
         }
+
         return self.validate_source_identity();
     }
 
@@ -411,6 +444,7 @@ impl EventLogCursor {
                 source,
             };
         })?;
+
         if !current.is_file()
             || current.dev() != self.opened_metadata.dev()
             || current.ino() != self.opened_metadata.ino()
@@ -422,6 +456,7 @@ impl EventLogCursor {
                 "event source was replaced or truncated",
             ));
         }
+
         return Ok(());
     }
 
@@ -448,6 +483,7 @@ impl EventLogCursor {
                 "live event cursor offset or timestamp differs from actor",
             ));
         }
+
         return Ok(());
     }
 
@@ -463,6 +499,7 @@ impl EventLogCursor {
                 "event suffix does not match trusted boundary",
             ));
         }
+
         return Ok(());
     }
 
@@ -478,6 +515,7 @@ impl EventLogCursor {
             })?;
             if let Some(relative_end) = buffered.iter().position(|byte| return *byte == b'\n') {
                 let line_end = self.buffer_start.saturating_add(relative_end);
+
                 if u64::try_from(relative_end).unwrap_or(u64::MAX) > MAX_LINE_BYTES {
                     return Err(invalid_log(
                         &self.path,
@@ -485,6 +523,7 @@ impl EventLogCursor {
                         "line exceeds 64 MiB limit",
                     ));
                 }
+
                 if self.validation.expected_seq == STREAM_EVENT_LOG_LIMITS.event_count {
                     return Err(invalid_log(
                         &self.path,
@@ -495,6 +534,7 @@ impl EventLogCursor {
                         ),
                     ));
                 }
+
                 let record = self.validation.validate_record(
                     &self.path,
                     self.line_number,
@@ -508,18 +548,22 @@ impl EventLogCursor {
                             );
                         })?,
                 )?;
+
                 let decoded_payload_bytes = self
                     .decoded_payload_bytes
                     .saturating_add(record.event.decoded_payload_bytes());
                 self.decoded_payload_bytes = decoded_payload_bytes;
                 self.buffer_start = line_end.saturating_add(1);
                 self.line_number = self.line_number.saturating_add(1);
+
                 if self.buffer_start == self.buffer.len() {
                     self.buffer.clear();
                     self.buffer_start = 0;
                 }
+
                 return Ok(Some(record));
             }
+
             if u64::try_from(buffered.len()).unwrap_or(u64::MAX) > MAX_LINE_BYTES {
                 return Err(invalid_log(
                     &self.path,
@@ -527,10 +571,12 @@ impl EventLogCursor {
                     "line exceeds 64 MiB limit",
                 ));
             }
+
             if self.buffer_start > 0 {
                 self.buffer.drain(..self.buffer_start);
                 self.buffer_start = 0;
             }
+
             let mut chunk = [0_u8; 8192];
             let capacity = self.snapshot_end.map_or(chunk.len(), |end| {
                 return usize::try_from(end.saturating_sub(self.encoded_bytes))
@@ -554,12 +600,15 @@ impl EventLogCursor {
                     });
                 }
             };
+
             if count == 0 {
                 return Ok(None);
             }
+
             self.encoded_bytes = self
                 .encoded_bytes
                 .saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
+
             self.buffer
                 .extend_from_slice(chunk.get(..count).ok_or_else(|| {
                     return invalid_log(&self.path, self.line_number, "invalid read length");
@@ -586,9 +635,11 @@ impl EventLogCursor {
                 "cursor is not a full-prefix snapshot",
             ));
         }
+
         self.validate_source_identity()?;
         let mut pending: Vec<_> = self.validation.pending_operations.into_values().collect();
         pending.sort_by_key(|operation| return operation.intent_seq);
+
         return Ok(pending);
     }
 
@@ -601,6 +652,7 @@ impl EventLogCursor {
                 "a live suffix cursor cannot verify full-log operations",
             ));
         }
+
         if let Some(line) = self.incomplete_line() {
             return Err(invalid_log(
                 &self.path,
@@ -608,6 +660,7 @@ impl EventLogCursor {
                 "unterminated trailing record",
             ));
         }
+
         let finished = self.file.metadata().map_err(|source| {
             return Error::Filesystem {
                 path: self.path.clone(),
@@ -620,6 +673,7 @@ impl EventLogCursor {
                 source,
             };
         })?;
+
         let identity = |metadata: &Metadata| {
             return (
                 metadata.dev(),
@@ -647,8 +701,10 @@ impl EventLogCursor {
                 "event log changed during content validation",
             ));
         }
+
         let mut pending: Vec<_> = self.validation.pending_operations.into_values().collect();
         pending.sort_by_key(|operation| return operation.intent_seq);
+
         return Ok(pending);
     }
 
@@ -706,10 +762,12 @@ impl EventLogSummary {
         };
         loop {
             check()?;
+
             let Some(record) = cursor.next_record()? else {
                 break;
             };
             summary.event_count += 1;
+
             match &record.event {
                 Event::Output { data } => {
                     summary.output_bytes +=
@@ -723,13 +781,13 @@ impl EventLogSummary {
                 },
                 _ => {}
             }
+
             summary.terminal = Some(record);
         }
-        summary.pending_operations = if snapshot {
-            cursor.finish_snapshot()?
-        } else {
-            cursor.finish()?
-        };
+
+        summary.pending_operations =
+            if snapshot { cursor.finish_snapshot()? } else { cursor.finish()? };
+
         return Ok(summary);
     }
 }
@@ -753,18 +811,22 @@ pub(super) fn parse_event_log_with_limits(
             ),
         ));
     }
+
     let file = CanonicalLogFile::open(path).map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),
             source,
         };
     })?;
+
     let mut reader = BufReader::new(file);
     let header_bytes = read_line(&mut reader, path, 1)?
         .ok_or_else(|| return invalid_log(path, 1, "missing header"))?;
+
     let mut encoded_bytes = u64::try_from(header_bytes.len())
         .unwrap_or(u64::MAX)
         .saturating_add(1);
+
     if encoded_bytes > limits.encoded_bytes {
         return Err(invalid_log(
             path,
@@ -775,8 +837,10 @@ pub(super) fn parse_event_log_with_limits(
             ),
         ));
     }
+
     let header: EventLogHeader = parse_json_line(path, 1, &header_bytes)?;
     validate_header(path, &header)?;
+
     let mut validation = LogValidation {
         previous_hash: blake3::hash(&header_bytes),
         previous_time: 0,
@@ -785,13 +849,16 @@ pub(super) fn parse_event_log_with_limits(
         pending_operations: HashMap::new(),
         validate_operations: true,
     };
+
     let mut events: Vec<EventRecord> = Vec::new();
     let mut decoded_payload_bytes = 0_u64;
     let mut line_number = 2_u64;
+
     loop {
         if event_limit == Some(u64::try_from(events.len()).unwrap_or(u64::MAX)) {
             break;
         }
+
         let line = match read_line(&mut reader, path, line_number) {
             Ok(Some(line)) => line,
             Ok(None) => {
@@ -805,6 +872,7 @@ pub(super) fn parse_event_log_with_limits(
                         ),
                     ));
                 }
+
                 break;
             }
             Err(error) => return Err(error),
@@ -823,16 +891,20 @@ pub(super) fn parse_event_log_with_limits(
                     limits.encoded_bytes
                 ),
             );
+
             return Err(error);
         }
+
         if u64::try_from(events.len()).unwrap_or(u64::MAX) >= limits.event_count {
             let error = invalid_log(
                 path,
                 line_number,
                 format!("event log exceeds {} event limit", limits.event_count),
             );
+
             return Err(error);
         }
+
         {
             let record = validation.validate_record(path, line_number, &line)?;
             decoded_payload_bytes =
@@ -846,15 +918,20 @@ pub(super) fn parse_event_log_with_limits(
                         limits.decoded_payload_bytes
                     ),
                 );
+
                 return Err(error);
             }
+
             events.push(record);
         }
+
         line_number = line_number.saturating_add(1);
     }
+
     let mut pending_operations: Vec<PendingOperation> =
         validation.pending_operations.into_values().collect();
     pending_operations.sort_by_key(|operation| return operation.intent_seq);
+
     return Ok(EventLog {
         header,
         events,
@@ -882,6 +959,7 @@ fn recovery_issue(error: &Error, fallback_line: u64) -> RecoveryIssue {
 
 fn recover_stream(source: &Path, recovered: &Path) -> Result<Option<RecoveryIssue>> {
     validate_parent_directory(recovered)?;
+
     let input =
         CanonicalLogFile::open(source).map_err(|error| return Error::filesystem(source, error))?;
     let mut reader = BufReader::new(input);
@@ -889,6 +967,7 @@ fn recover_stream(source: &Path, recovered: &Path) -> Result<Option<RecoveryIssu
         .ok_or_else(|| return invalid_log(source, 1, "missing header"))?;
     let header: EventLogHeader = parse_json_line(source, 1, &header_bytes)?;
     validate_header(source, &header)?;
+
     let mut validation = LogValidation {
         previous_hash: blake3::hash(&header_bytes),
         previous_time: 0,
@@ -897,6 +976,7 @@ fn recover_stream(source: &Path, recovered: &Path) -> Result<Option<RecoveryIssu
         pending_operations: HashMap::new(),
         validate_operations: true,
     };
+
     let output = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -910,6 +990,7 @@ fn recover_stream(source: &Path, recovered: &Path) -> Result<Option<RecoveryIssu
         .write_all(&header_bytes)
         .and_then(|()| return writer.write_all(b"\n"))
         .map_err(|error| return Error::filesystem(recovered, error))?;
+
     let mut line_number = 2_u64;
     let issue = loop {
         let line = match read_line(&mut reader, source, line_number) {
@@ -920,10 +1001,12 @@ fn recover_stream(source: &Path, recovered: &Path) -> Result<Option<RecoveryIssu
         if let Err(error) = validation.validate_record(source, line_number, &line) {
             break Some(recovery_issue(&error, line_number));
         }
+
         writer
             .write_all(&line)
             .and_then(|()| return writer.write_all(b"\n"))
             .map_err(|error| return Error::filesystem(recovered, error))?;
+
         line_number = line_number
             .checked_add(1)
             .ok_or_else(|| return invalid_log(source, line_number, "line number overflow"))?;
@@ -932,6 +1015,8 @@ fn recover_stream(source: &Path, recovered: &Path) -> Result<Option<RecoveryIssu
         .flush()
         .and_then(|()| return writer.get_ref().sync_data())
         .map_err(|error| return Error::filesystem(recovered, error))?;
+
     sync_parent_directory(recovered)?;
+
     return Ok(issue);
 }

@@ -1,7 +1,7 @@
 use nix::poll::{PollFd, PollFlags};
 use termtrace_evidence::event_log::EventLogWriter;
 use termtrace_model::{
-    protocol::control::{CONTROL_PROTOCOL_VERSION, ControlResponse, ControlResult},
+    protocol::control::{ControlResponse, ControlResult, CONTROL_PROTOCOL_VERSION},
     terminal::observation::ActorBoundaries,
 };
 use uuid::Uuid;
@@ -34,12 +34,14 @@ pub(in crate::recording) fn validate_control_input(
             "input must contain 1 to 65536 bytes",
         ));
     }
+
     if intent.is_some_and(|value| return value.len() > 1024) {
         return Err(control_rejected(
             "invalid_intent",
             "input intent must not exceed 1024 UTF-8 bytes",
         ));
     }
+
     return Ok(());
 }
 

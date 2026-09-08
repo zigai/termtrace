@@ -1,8 +1,8 @@
 use super::super::{
+    diagnose_session, diff_session_states_with_semantic_states, explain_session,
+    observe_session_with_options, validated_visual_manifests, visit_session_timeline_while,
     DiagnoseReport, DiagnosticCheck, ExplainReport, Observation, Result, SemanticDiff, Session,
-    StatePoint, TimelineEntry, diagnose_session, diff_session_states_with_semantic_states,
-    explain_session, observe_session_with_options, validated_visual_manifests,
-    visit_session_timeline_while,
+    StatePoint, TimelineEntry,
 };
 
 /// Completed semantic inspection and diagnosis operations.
@@ -21,8 +21,10 @@ impl Semantic<'_> {
         let mut entries = Vec::new();
         visit_session_timeline_while(&self.session.path, all_states, controls, None, |entry| {
             entries.push(entry);
+
             return Ok(true);
         })?;
+
         return Ok(entries);
     }
 
@@ -30,6 +32,7 @@ impl Semantic<'_> {
     pub fn diff(&self, from: StatePoint, to: StatePoint) -> Result<SemanticDiff> {
         let (difference, _, _) =
             diff_session_states_with_semantic_states(&self.session.path, from, to)?;
+
         return Ok(difference);
     }
 
@@ -45,6 +48,7 @@ impl Semantic<'_> {
         broad_change_percent: u8,
     ) -> Result<DiagnoseReport> {
         let visual_evidence = validated_visual_manifests(&self.session.path)?;
+
         return Ok(diagnose_session(
             &self.session.path,
             checks,

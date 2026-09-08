@@ -18,11 +18,13 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn guarded fixture");
+
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("ready output");
 
     let snapshot = send_request(&session, &ControlRequest::new(ControlCommand::Snapshot))
         .expect("presented snapshot");
+
     let ControlData::Snapshot { state_hash, .. } = snapshot else {
         panic!("expected snapshot response");
     };
@@ -32,8 +34,10 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
         caller_intent: Some("must not apply".to_owned()),
     })
     .with_expected_presented_state_hash("0".repeat(64));
+
     let stale_response =
         send_request_response(&session, &stale_request).expect("structured stale response");
+
     let ControlResult::Error {
         code,
         details: Some(details),
@@ -58,6 +62,7 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
                 .arg("0".repeat(64))
                 .arg(&session)
                 .arg("text:blocked");
+
             command
         },
         {
@@ -67,6 +72,7 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
                 .arg("0".repeat(64))
                 .arg(&session)
                 .args(["--cols", "81", "--rows", "25"]);
+
             command
         },
     ] {
@@ -89,7 +95,9 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
         caller_intent: Some("fresh observation".to_owned()),
     })
     .with_expected_presented_state_hash(state_hash);
+
     send_request(&session, &guarded_input).expect("fresh guarded input");
+
     let output = child
         .wait_with_output()
         .expect("guarded fixture completion");
@@ -128,6 +136,7 @@ fn rejected_control_requests_do_not_terminate_the_recorder_actor() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn request rejection fixture");
+
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("ready output");
 
@@ -162,6 +171,7 @@ fn rejected_control_requests_do_not_terminate_the_recorder_actor() {
             "invalid_screen_wait",
         ),
     ];
+
     for (index, (command, expected_code)) in requests.into_iter().enumerate() {
         let response = send_request_response(&session, &ControlRequest::new(command))
             .expect("structured request rejection");

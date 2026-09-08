@@ -6,6 +6,7 @@ fn fixture_frame() -> ScreenFrame {
         "../../../../../fixtures/conformance/locators/locator.json"
     ))
     .expect("locator fixture");
+
     return serde_json::from_value(value.get("frame").cloned().expect("frame"))
         .expect("screen frame");
 }
@@ -25,6 +26,7 @@ fn empty_and_zero_width_text_queries_are_rejected() {
             "{pattern}"
         );
     }
+
     assert!(LocatorSpec::native_regex("a+").is_ok());
 }
 
@@ -149,6 +151,7 @@ fn overlapping_matches_stop_at_aggregate_work_budget() {
             };
         })
         .collect();
+
     rows[0].spans.truncate(1);
 
     let error = frame
@@ -184,6 +187,7 @@ fn grapheme_boundaries_retain_terminal_columns_for_combining_and_wide_cells() {
         }]
     );
 }
+
 #[test]
 fn composed_regions_intersect_and_partial_graphemes_are_rejected() {
     let outer = LocatorSpec::default()
@@ -194,6 +198,7 @@ fn composed_regions_intersect_and_partial_graphemes_are_rejected() {
             right: 8,
         })
         .unwrap_or_default();
+
     let inner = LocatorSpec::default()
         .in_region(ScreenRegion {
             top: 1,
@@ -202,6 +207,7 @@ fn composed_regions_intersect_and_partial_graphemes_are_rejected() {
             right: 6,
         })
         .unwrap_or_default();
+
     let combined = outer.and(inner).unwrap_or_default();
     assert_eq!(
         combined.region,
@@ -219,6 +225,7 @@ fn composed_regions_intersect_and_partial_graphemes_are_rejected() {
         Err(QueryError::InvalidQuery { .. })
     ));
 }
+
 #[derive(serde::Deserialize)]
 struct ConformanceCorpus {
     version: u32,
@@ -286,11 +293,9 @@ impl TryFrom<ConformanceQuery> for LocatorSpec {
                 exact,
                 cross_soft_wraps,
             } => {
-                let spec = if exact {
-                    LocatorSpec::exact(value)?
-                } else {
-                    LocatorSpec::text(value)?
-                };
+                let spec =
+                    if exact { LocatorSpec::exact(value)? } else { LocatorSpec::text(value)? };
+
                 return Ok(spec.across_soft_wraps(cross_soft_wraps));
             }
             ConformanceQuery::Regex { pattern } => return LocatorSpec::native_regex(pattern),
@@ -309,6 +314,7 @@ impl TryFrom<ConformanceQuery> for LocatorSpec {
                         return None;
                     }
                 });
+
                 return Ok(LocatorSpec::default().with_style(StyleFilter {
                     bold,
                     resolved_background: bg.map(Some),
@@ -334,6 +340,7 @@ impl TryFrom<ConformanceQuery> for LocatorSpec {
                 for spec in specs {
                     combined = combined.and(LocatorSpec::try_from(spec)?)?;
                 }
+
                 return Ok(combined);
             }
         }
@@ -346,6 +353,7 @@ fn conformance_spec(value: &serde_json::Value) -> Result<LocatorSpec, QueryError
             reason: e.to_string(),
         };
     })?;
+
     return LocatorSpec::try_from(query);
 }
 
@@ -371,6 +379,7 @@ fn shared_locator_conformance_corpus_matches_public_contract() {
                         assert_eq!(screen_match.frame.frame_hash, "fixture-frame-v1");
                         assert!(!screen_match.frame.presented);
                         assert!(screen_match.query.text.len() <= MAX_DIAGNOSTIC_CHARS);
+
                         return ExpectedMatch {
                             text: screen_match.text.to_string(),
                             ranges: screen_match
@@ -391,12 +400,15 @@ fn shared_locator_conformance_corpus_matches_public_contract() {
                 "{}",
                 test_case.name
             );
+
             continue;
         }
+
         let actual = result.unwrap_or_else(|error| {
             panic!("{} failed: {error}", test_case.name);
         });
         assert_eq!(actual.len(), test_case.matches.len(), "{}", test_case.name);
+
         for (actual_match, expected_match) in actual.iter().zip(&test_case.matches) {
             assert_eq!(actual_match.text, expected_match.text, "{}", test_case.name);
             assert_eq!(

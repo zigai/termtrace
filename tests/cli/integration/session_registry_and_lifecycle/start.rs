@@ -22,6 +22,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         ])
         .assert()
         .success();
+
     let response: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("start response");
     assert_eq!(
@@ -30,12 +31,10 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
             .and_then(serde_json::Value::as_bool),
         Some(true)
     );
-    assert!(
-        response
-            .pointer("/recorder_process_start_ticks")
-            .and_then(serde_json::Value::as_u64)
-            .is_some()
-    );
+    assert!(response
+        .pointer("/recorder_process_start_ticks")
+        .and_then(serde_json::Value::as_u64)
+        .is_some());
     let canonical: ByteString = serde_json::from_value(
         response
             .pointer("/canonical_session")
@@ -43,6 +42,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
             .clone(),
     )
     .expect("canonical path bytes");
+
     let session = PathBuf::from(OsString::from_vec(canonical.as_bytes().to_vec()));
     assert_eq!(
         response["canonical_session_display"],
@@ -58,6 +58,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         .args(["status", "demo"])
         .assert()
         .success();
+
     let status = compact_json_line(&status.get_output().stdout);
     assert_eq!(status["type"], "status");
     assert_eq!(status["session"], "demo");
@@ -67,6 +68,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
     let session_count = fs_err::read_dir(state.join("sessions"))
         .expect("sessions")
         .count();
+
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
         .env("TERMTRACE_STATE_DIR", &state)
@@ -98,6 +100,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
             0o600
         );
     }
+
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
     stop.env("TERMTRACE_STATE_DIR", &state)
         .args(["stop", "demo", "--wait"])
@@ -119,6 +122,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         .get_output()
         .stdout
         .clone();
+
     let failed = compact_json_line(&failed);
     assert_eq!(failed["startup_state"], "completed_failure");
     assert_eq!(failed["code"], "spawn_failed");
@@ -145,6 +149,7 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
         .get_output()
         .stdout
         .clone();
+
     let successful = compact_json_line(&successful);
     assert_eq!(successful["startup_state"], "completed_success");
     assert!(successful.get("ready").is_none());
@@ -193,6 +198,7 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
         .get_output()
         .stdout
         .clone();
+
     let unsuccessful = compact_json_line(&unsuccessful);
     assert_eq!(unsuccessful["startup_state"], "completed_failure");
     assert!(unsuccessful.get("ready").is_none());
@@ -227,6 +233,7 @@ fn concurrent_start_reservation_launches_only_one_recorder() {
             ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
         return command;
     };
     let first = command().spawn().expect("first concurrent start");
@@ -234,16 +241,8 @@ fn concurrent_start_reservation_launches_only_one_recorder() {
     let first = first.wait_with_output().expect("first start output");
     let second = second.wait_with_output().expect("second start output");
     assert_ne!(first.status.success(), second.status.success());
-    let winner = if first.status.success() {
-        &first
-    } else {
-        &second
-    };
-    let loser = if first.status.success() {
-        &second
-    } else {
-        &first
-    };
+    let winner = if first.status.success() { &first } else { &second };
+    let loser = if first.status.success() { &second } else { &first };
     let started = compact_json_line(&winner.stdout);
     assert_eq!(started["session"], "contended");
     assert!(

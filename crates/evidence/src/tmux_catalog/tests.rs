@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, fs};
 use tempfile::TempDir;
 use termtrace_model::{
     artifact::tmux::{
-        TMUX_RECORDING_FORMAT, TMUX_RECORDING_VERSION, TmuxCompositeTrack, TmuxLifecycleEvent,
-        TmuxRecordingCoverage, TmuxRecordingLifecycle,
+        TmuxCompositeTrack, TmuxLifecycleEvent, TmuxRecordingCoverage, TmuxRecordingLifecycle,
+        TMUX_RECORDING_FORMAT, TMUX_RECORDING_VERSION,
     },
     value::ByteString,
 };
@@ -50,8 +50,10 @@ fn thousands_of_incarnations_have_bounded_snapshots_and_rebuildable_pages() {
     let temporary = TempDir::new().expect("temporary directory");
     let directory = temporary.path().join("aggregate");
     create_private_directory(&directory).expect("private aggregate");
+
     let mut snapshot = manifest();
     let first = Uuid::now_v7();
+
     for index in 0..2500 {
         let id = if index == 0 { first } else { Uuid::now_v7() };
         snapshot.track_history.insert(
@@ -64,6 +66,7 @@ fn thousands_of_incarnations_have_bounded_snapshots_and_rebuildable_pages() {
             },
         );
     }
+
     tmux_journal::append(&directory, &mut snapshot).expect("durable inventory");
     assert_eq!(snapshot.track_history.len(), 128);
     assert_eq!(snapshot.events.len(), 128);
@@ -82,6 +85,7 @@ fn thousands_of_incarnations_have_bounded_snapshots_and_rebuildable_pages() {
     assert_eq!(page.len(), 3);
     assert_eq!(page.first().expect("first").sequence, 2498);
     drop(catalog);
+
     let old = snapshot.clone();
     snapshot.events.push(TmuxLifecycleEvent {
         sequence: 2501,
@@ -106,6 +110,7 @@ fn thousands_of_incarnations_have_bounded_snapshots_and_rebuildable_pages() {
             .completed
     );
     drop(older);
+
     let newer = TmuxCatalog::read(&directory, &snapshot).expect("newer shared index unchanged");
     assert!(
         newer
@@ -115,6 +120,7 @@ fn thousands_of_incarnations_have_bounded_snapshots_and_rebuildable_pages() {
             .completed
     );
     drop(newer);
+
     fs::remove_file(directory.join(CATALOG_NAME)).expect("remove acceleration index");
     let rebuilt = TmuxCatalog::read(&directory, &snapshot).expect("private rebuild from journal");
     assert_eq!(rebuilt.summary().tracks, 2500);
@@ -126,6 +132,7 @@ fn thousands_of_incarnations_have_bounded_snapshots_and_rebuildable_pages() {
             .completed
     );
     drop(rebuilt);
+
     tmux_journal::append(&directory, &mut snapshot).expect("writer rebuilds missing index");
     assert!(directory.join(CATALOG_NAME).is_file());
 }
@@ -135,6 +142,7 @@ fn resolved_coverage_intervals_leave_snapshot_but_remain_queryable() {
     let temporary = TempDir::new().expect("temporary directory");
     let directory = temporary.path().join("aggregate");
     create_private_directory(&directory).expect("private aggregate");
+
     let mut snapshot = manifest();
     for index in 0..300_u128 {
         snapshot.coverage_gaps.push(TmuxCoverageGap {
@@ -146,6 +154,7 @@ fn resolved_coverage_intervals_leave_snapshot_but_remain_queryable() {
             resolved_unix_ns: Some(index * 2 + 2),
         });
     }
+
     tmux_journal::append(&directory, &mut snapshot).expect("coverage history");
     assert!(snapshot.coverage_gaps.is_empty());
     assert_eq!(snapshot.events.len(), 128);

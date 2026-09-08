@@ -14,12 +14,12 @@ use std::{
 
 use nix::{
     errno::Errno,
-    poll::{PollFd, PollFlags, PollTimeout, poll},
-    sys::signal::{Signal, killpg},
-    unistd::{Pid, isatty, pipe, read as fd_read, write as fd_write},
+    poll::{poll, PollFd, PollFlags, PollTimeout},
+    sys::signal::{killpg, Signal},
+    unistd::{isatty, pipe, read as fd_read, write as fd_write, Pid},
 };
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use rustix::termios::{Winsize, tcgetwinsize};
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use rustix::termios::{tcgetwinsize, Winsize};
 use signal_hook::{
     consts::signal::{SIGHUP, SIGINT, SIGTERM, SIGWINCH},
     iterator::{Handle, Signals},
@@ -29,7 +29,7 @@ use termtrace_model::protocol::control::ProcessSignal;
 use termtrace_terminal::supported_geometry_cell_count;
 
 use super::{
-    control::{ControlWorker, spawn_control_server},
+    control::{spawn_control_server, ControlWorker},
     environment::EffectiveEnvironment,
     model::{RecordOptions, RuntimeMessage, SpawnedCommand, TerminalGeometry},
     support::{finish_with_cleanup, poll_ready, terminal_error},
@@ -48,10 +48,12 @@ fn spawn_reader(
         .name("termtrace-pty-reader".to_owned())
         .spawn(move || {
             let mut buffer = [0_u8; READ_BUFFER_BYTES];
+
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) => {
                         let _ = sender.send(RuntimeMessage::OutputClosed);
+
                         return;
                     }
                     Ok(length) => {
@@ -59,6 +61,7 @@ fn spawn_reader(
                         let Some(slice) = buffer.get(..length) else {
                             continue;
                         };
+
                         if sender
                             .send(RuntimeMessage::Output {
                                 data: slice.to_vec(),
@@ -75,13 +78,16 @@ fn spawn_reader(
                         } else {
                             RuntimeMessage::ReadFailed(error.to_string())
                         };
+
                         let _ = sender.send(message);
+
                         return;
                     }
                 }
             }
         })
         .map_err(|error| return terminal_error("spawn PTY reader", error.to_string()))?;
+
     return Ok(thread);
 }
 
@@ -93,6 +99,7 @@ fn spawn_input(sender: mpsc::SyncSender<RuntimeMessage>) -> Result<InputWorker> 
         .name("termtrace-stdin-reader".to_owned())
         .spawn(move || input_loop(&cancel_read, &sender))
         .map_err(|error| return terminal_error("spawn standard-input reader", error.to_string()))?;
+
     return Ok(InputWorker { cancel, thread });
 }
 
@@ -106,6 +113,7 @@ fn spawn_resize(
     {
         return Ok(None);
     }
+
     let mut signals = Signals::new([SIGWINCH])
         .map_err(|error| return terminal_error("listen for terminal resize", error.to_string()))?;
     let handle = signals.handle();
@@ -113,15 +121,19 @@ fn spawn_resize(
         .name("termtrace-resize-listener".to_owned())
         .spawn(move || {
             let stdin = io::stdin();
+
             let mut previous = initial;
+
             for _ in signals.forever() {
                 match tcgetwinsize(&stdin) {
                     Ok(size) => {
                         let Some(geometry) = geometry_from_winsize(size, initial) else {
                             continue;
                         };
+
                         if geometry != previous {
                             previous = geometry;
+
                             if sender.send(RuntimeMessage::Resize(geometry)).is_err() {
                                 return;
                             }
@@ -129,6 +141,7 @@ fn spawn_resize(
                     }
                     Err(error) => {
                         let _ = sender.send(RuntimeMessage::ResizeFailed(error.to_string()));
+
                         return;
                     }
                 }
@@ -137,6 +150,7 @@ fn spawn_resize(
         .map_err(|error| {
             return terminal_error("spawn terminal-resize listener", error.to_string());
         })?;
+
     return Ok(Some(ResizeWorker { handle, thread }));
 }
 
@@ -160,6 +174,7 @@ fn spawn_host_signals(
                     SIGTERM => ProcessSignal::Terminate,
                     _ => continue,
                 };
+
                 if sender.send(RuntimeMessage::HostSignal(signal)).is_err() {
                     return;
                 }
@@ -168,13 +183,16 @@ fn spawn_host_signals(
         .map_err(|error| {
             return terminal_error("spawn recorder-signal listener", error.to_string());
         })?;
+
     return Ok(SignalWorker { handle, thread });
 }
 
 fn geometry_from_winsize(size: Winsize, fallback: TerminalGeometry) -> Option<TerminalGeometry> {
     supported_geometry_cell_count(size.ws_col, size.ws_row)?;
+
     let cell_width = fallback.pixel_width.checked_div(fallback.cols)?.max(1);
     let cell_height = fallback.pixel_height.checked_div(fallback.rows)?.max(1);
+
     return Some(TerminalGeometry {
         cols: size.ws_col,
         rows: size.ws_row,
@@ -197,14 +215,18 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
         Ok(terminal) => terminal,
         Err(Errno::EIO) => {
             let _ = sender.send(RuntimeMessage::TerminalInputClosed);
+
             return;
         }
         Err(error) => {
             let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
+
             return;
         }
     };
+
     let mut buffer = [0_u8; READ_BUFFER_BYTES];
+
     loop {
         let mut descriptors = [
             PollFd::new(stdin.as_fd(), PollFlags::POLLIN),
@@ -215,26 +237,32 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
             Err(Errno::EINTR) => continue,
             Err(error) => {
                 let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
+
                 return;
             }
         }
+
         if poll_ready(&descriptors[1]) {
             return;
         }
+
         if !poll_ready(&descriptors[0]) {
             continue;
         }
+
         match fd_read(&stdin, &mut buffer) {
             Ok(0) => {
                 if terminal {
                     let _ = sender.send(RuntimeMessage::TerminalInputClosed);
                 }
+
                 return;
             }
             Ok(length) => {
                 let Some(slice) = buffer.get(..length) else {
                     continue;
                 };
+
                 if sender.send(RuntimeMessage::Input(slice.to_vec())).is_err() {
                     return;
                 }
@@ -242,10 +270,12 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
             Err(Errno::EINTR) => {}
             Err(Errno::EIO) if terminal => {
                 let _ = sender.send(RuntimeMessage::TerminalInputClosed);
+
                 return;
             }
             Err(error) => {
                 let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
+
                 return;
             }
         }
@@ -291,9 +321,11 @@ pub(super) fn spawn_command(
     let mut command = CommandBuilder::new(program);
     command.args(arguments);
     command.env_clear();
+
     for (name, value) in effective_environment.variables() {
         command.env(name, value);
     }
+
     command.cwd(working_directory);
 
     let reader = pair
@@ -308,8 +340,11 @@ pub(super) fn spawn_command(
         .slave
         .spawn_command(command)
         .map_err(|error| return terminal_error("spawn terminal command", error.to_string()))?;
+
     drop(pair.slave);
+
     let pid = child.process_id();
+
     return Ok(SpawnedCommand {
         master: pair.master,
         reader,
@@ -329,24 +364,28 @@ pub(super) fn resolve_working_directory(requested: Option<&Path>) -> Result<Path
                     source,
                 };
             })?;
+
             match requested {
                 Some(path) => current.join(path),
                 None => current,
             }
         }
     };
+
     let resolved = fs_err::canonicalize(&candidate).map_err(|source| {
         return Error::Filesystem {
             path: candidate,
             source,
         };
     })?;
+
     if !resolved.is_dir() {
         return Err(terminal_error(
             "resolve child working directory",
             format!("`{}` is not a directory", resolved.display()),
         ));
     }
+
     return Ok(resolved);
 }
 
@@ -359,9 +398,11 @@ impl InputWorker {
                 error.to_string(),
             )),
         };
+
         let join_result = self.thread.join().map_err(|_| {
             return terminal_error("join standard-input reader", "input thread panicked");
         });
+
         return finish_with_cleanup(cancel_result, join_result);
     }
 }
@@ -369,6 +410,7 @@ impl InputWorker {
 impl ResizeWorker {
     fn stop(self) -> Result<()> {
         self.handle.close();
+
         return self.thread.join().map_err(|_| {
             return terminal_error("join terminal-resize listener", "resize thread panicked");
         });
@@ -378,6 +420,7 @@ impl ResizeWorker {
 impl SignalWorker {
     fn stop(self) -> Result<()> {
         self.handle.close();
+
         return self.thread.join().map_err(|_| {
             return terminal_error("join recorder-signal listener", "signal thread panicked");
         });
@@ -399,17 +442,22 @@ impl RuntimeWorkers {
             Ok(worker) => worker,
             Err(error) => {
                 drop(receiver);
+
                 return finish_with_cleanup(Err(error), signals.stop());
             }
         };
+
         let resize = match spawn_resize(sender.clone(), initial_geometry) {
             Ok(worker) => worker,
             Err(error) => {
                 drop(receiver);
+
                 let cleanup = finish_with_cleanup(signals.stop(), control.stop());
+
                 return finish_with_cleanup(Err(error), cleanup);
             }
         };
+
         let input = match forward_stdin
             .then(|| return spawn_input(sender.clone()))
             .transpose()
@@ -417,25 +465,32 @@ impl RuntimeWorkers {
             Ok(worker) => worker,
             Err(error) => {
                 drop(receiver);
+
                 let cleanup =
                     finish_with_cleanup(resize.map_or(Ok(()), ResizeWorker::stop), control.stop());
                 let cleanup = finish_with_cleanup(cleanup, signals.stop());
+
                 return finish_with_cleanup(Err(error), cleanup);
             }
         };
+
         let reader = match spawn_reader(reader, sender.clone()) {
             Ok(worker) => worker,
             Err(error) => {
                 drop(receiver);
+
                 let cleanup = finish_with_cleanup(
                     input.map_or(Ok(()), InputWorker::stop),
                     resize.map_or(Ok(()), ResizeWorker::stop),
                 );
+
                 let cleanup = finish_with_cleanup(cleanup, control.stop());
                 let cleanup = finish_with_cleanup(cleanup, signals.stop());
+
                 return finish_with_cleanup(Err(error), cleanup);
             }
         };
+
         return Ok((
             Self {
                 reader,
@@ -462,6 +517,7 @@ impl RuntimeWorkers {
         primary: Result<T>,
     ) -> Result<T> {
         drop(receiver);
+
         let control_stop = self.control.stop();
         let input_stop = self.input.map_or(Ok(()), InputWorker::stop);
         let resize_stop = self.resize.map_or(Ok(()), ResizeWorker::stop);
@@ -470,10 +526,12 @@ impl RuntimeWorkers {
             .reader
             .join()
             .map_err(|_| return terminal_error("join PTY reader", "reader thread panicked"));
+
         let result = finish_with_cleanup(primary, control_stop);
         let result = finish_with_cleanup(result, input_stop);
         let result = finish_with_cleanup(result, resize_stop);
         let result = finish_with_cleanup(result, signals_stop);
+
         return finish_with_cleanup(result, reader_join);
     }
 }
@@ -481,6 +539,7 @@ impl RuntimeWorkers {
 pub(super) fn create_session_directory(path: &Path) -> Result<()> {
     let mut builder = DirBuilder::new();
     builder.mode(SESSION_DIRECTORY_MODE);
+
     match builder.create(path) {
         Ok(()) => {
             fs_err::set_permissions(path, Permissions::from_mode(SESSION_DIRECTORY_MODE)).map_err(
@@ -491,6 +550,7 @@ pub(super) fn create_session_directory(path: &Path) -> Result<()> {
                     };
                 },
             )?;
+
             sync_parent_directory(path)?;
 
             return Ok(());
@@ -508,6 +568,7 @@ pub(super) fn create_session_directory(path: &Path) -> Result<()> {
         }
     }
 }
+
 fn sync_parent_directory(path: &Path) -> Result<()> {
     let parent = path.parent().unwrap_or_else(|| return Path::new("."));
     let directory = File::open(parent).map_err(|source| {
@@ -516,6 +577,7 @@ fn sync_parent_directory(path: &Path) -> Result<()> {
             source,
         };
     })?;
+
     return directory.sync_all().map_err(|source| {
         return Error::Filesystem {
             path: parent.to_path_buf(),
@@ -550,7 +612,9 @@ mod tests {
     impl Read for NotifyingReader {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             self.0.send(()).map_err(io::Error::other)?;
+
             buf[0] = b'x';
+
             return Ok(1);
         }
     }
@@ -566,6 +630,7 @@ mod tests {
                     observed: Instant::now(),
                 })
                 .expect("fill inbox");
+
             let (reading_sender, reading) = mpsc::sync_channel(1);
             let (workers, receiver) = RuntimeWorkers::start(
                 Box::new(NotifyingReader(reading_sender)),
@@ -582,9 +647,11 @@ mod tests {
                 register_host_signals().expect("register host signals"),
             )
             .expect("start real runtime workers");
+
             reading
                 .recv_timeout(Duration::from_secs(5))
                 .expect("reader reached full inbox");
+
             let result: Result<()> = workers.finish(
                 receiver,
                 Err(terminal_error("test actor failure", "stop consuming")),
@@ -599,9 +666,11 @@ mod tests {
             assert!(sender.send(RuntimeMessage::OutputClosed).is_err());
             completed_sender.send(()).expect("report completed cleanup");
         });
+
         completed
             .recv_timeout(Duration::from_secs(10))
             .expect("runtime cleanup must release the blocked reader");
+
         thread.join().expect("runtime cleanup thread");
     }
 
@@ -614,6 +683,7 @@ mod tests {
                 observed: Instant::now(),
             })
             .expect("fill inbox");
+
         let (completed_sender, completed) = mpsc::sync_channel(1);
         let blocked_sender = sender.clone();
         let producer = thread::spawn(move || {
@@ -622,6 +692,7 @@ mod tests {
                 .send(())
                 .expect("report disconnected producer");
         });
+
         let started = RuntimeWorkers::start(
             Box::new(io::empty()),
             &sender,
@@ -640,6 +711,7 @@ mod tests {
         completed
             .recv_timeout(Duration::from_secs(5))
             .expect("partial startup must release the blocked producer");
+
         producer.join().expect("producer thread");
     }
 }

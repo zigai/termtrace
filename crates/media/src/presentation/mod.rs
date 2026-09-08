@@ -11,18 +11,18 @@ mod tests;
 
 pub use pipeline::{export, preview};
 pub use planning::{
-    VideoIdlePolicy, markers, plan, plan_with_source, video_clip_ranges, video_clip_ranges_session,
-    video_clips,
+    markers, plan, plan_with_source, video_clip_ranges, video_clip_ranges_session, video_clips,
+    VideoIdlePolicy,
 };
 pub use termtrace_model::artifact::presentation::{
     AnnotationAnchor, AnnotationPosition, AnnotationScope, AnnotationStyle, CaptionLayout,
-    ChangeMode, ChangeRegion, ChangeSource, ChangeVisualization, CursorMaskFrame,
-    EDIT_PLAN_VERSION, EditClip, EditPlan, EditSelector, MarkerRecord, NormalizedAnnotation,
-    NormalizedChangeFrame, NormalizedClip, NormalizedSubtitle, PRESENTATION_FORMAT_VERSION,
-    PixelTransform, PresentationDelivery, PresentationLayout, PresentationManifest,
-    PresentationMapEntry, PresentationOutcome, PresentationPlan, PresentationPreviewManifest,
-    PresentationPreviewOutcome, PresentationSource, PresentationSourceRequest, PreviewOptions,
-    RationalSpeed, SubtitleTrack, TextAnnotation, VideoRenderConfig,
+    ChangeMode, ChangeRegion, ChangeSource, ChangeVisualization, CursorMaskFrame, EditClip,
+    EditPlan, EditSelector, MarkerRecord, NormalizedAnnotation, NormalizedChangeFrame,
+    NormalizedClip, NormalizedSubtitle, PixelTransform, PresentationDelivery, PresentationLayout,
+    PresentationManifest, PresentationMapEntry, PresentationOutcome, PresentationPlan,
+    PresentationPreviewManifest, PresentationPreviewOutcome, PresentationSource,
+    PresentationSourceRequest, PreviewOptions, RationalSpeed, SubtitleTrack, TextAnnotation,
+    VideoRenderConfig, EDIT_PLAN_VERSION, PRESENTATION_FORMAT_VERSION,
 };
 pub use validation::read_edit_plan;
 
@@ -37,10 +37,12 @@ fn plan_error(reason: impl Into<String>) -> Error {
         reason: reason.into(),
     };
 }
+
 fn filter_path_value(path: &Path) -> Result<String> {
     let value = path
         .to_str()
         .ok_or_else(|| return plan_error("FFmpeg filter resource path is not UTF-8"))?;
+
     return Ok(value
         .replace('\\', "\\\\")
         .replace(':', "\\:")

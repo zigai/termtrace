@@ -1,7 +1,7 @@
 use termtrace_model::execution::session::RecordingFailurePolicy;
 
 use super::*;
-use crate::recording::{RecordOptions, record};
+use crate::recording::{record, RecordOptions};
 use std::{ffi::OsString, os::unix::fs::symlink};
 use tempfile::TempDir;
 use termtrace_evidence::event_log::DurabilityPolicy;
@@ -42,18 +42,23 @@ fn reservation_excludes_concurrent_owners_and_promotes_only_the_winner() {
         Arc::new(SessionRegistry::open(temporary.path().join("state")).expect("registry"));
     let sessions = registry.state_root().join("sessions");
     fs_err::create_dir(&sessions).expect("sessions directory");
+
     let barrier = Arc::new(Barrier::new(3));
     let mut contenders = Vec::new();
+
     for name in ["first", "second"] {
         let registry = Arc::clone(&registry);
         let barrier = Arc::clone(&barrier);
         let pending = sessions.join(format!("{name}.termtrace"));
         contenders.push(thread::spawn(move || {
             barrier.wait();
+
             return registry.reserve("demo", &pending, Duration::from_secs(30));
         }));
     }
+
     barrier.wait();
+
     let results = contenders
         .into_iter()
         .map(|contender| return contender.join().expect("reservation contender"))
@@ -77,6 +82,7 @@ fn reservation_excludes_concurrent_owners_and_promotes_only_the_winner() {
         .into_iter()
         .find_map(Result::ok)
         .expect("winning reservation");
+
     let reservation_record: AliasReservation = serde_json::from_slice(
         &fs_err::read(registry.entry_path("demo")).expect("reservation record"),
     )
@@ -90,6 +96,7 @@ fn reservation_excludes_concurrent_owners_and_promotes_only_the_winner() {
     assert!(reservation_record.lease_expires_unix_ns > 0);
     let mut wrong_owner = reservation.clone();
     wrong_owner.owner_token = Uuid::now_v7();
+
     assert!(registry.release(&wrong_owner).is_err());
 
     record_fixture(reservation.session_path());
@@ -105,6 +112,7 @@ fn expired_reservation_is_reclaimed_without_accepting_the_old_owner() {
     let first = registry
         .reserve("demo", &first_path, Duration::from_secs(30))
         .expect("first reservation");
+
     let mut expired = first.clone();
     expired.created_unix_ns = 0;
     expired.lease_expires_unix_ns = 1;
@@ -178,5 +186,6 @@ fn record_fixture(output_directory: PathBuf) -> PathBuf {
         resource_limits: ResourceLimits::default(),
     })
     .expect("record fixture");
+
     return output_directory;
 }

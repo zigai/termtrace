@@ -24,19 +24,19 @@ use std::{
 use miette::{IntoDiagnostic as _, Result};
 use nix::{
     errno::Errno,
-    poll::{PollFd, PollFlags, PollTimeout, poll},
-    sys::termios::{SetArg, cfmakeraw, tcgetattr, tcsetattr},
+    poll::{poll, PollFd, PollFlags, PollTimeout},
+    sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg},
     unistd::read,
 };
 use termtrace_engine::{
     analysis::profile::{builtin_terminal_colors, terminal_colors_for_profile},
     inspection::wait_for_completion,
     recording::{
-        EffectiveEnvironment, RecordOptions, RecordOutcome, ResolvedGhosttyProfile,
         inherited_geometry, parse_environment_spec, read_environment_spec, record_with_output,
-        resolve_ghostty_profile, restore_ghostty_profile,
+        resolve_ghostty_profile, restore_ghostty_profile, EffectiveEnvironment, RecordOptions,
+        RecordOutcome, ResolvedGhosttyProfile,
     },
-    registry::{SessionRegistry, recorder_identity},
+    registry::{recorder_identity, SessionRegistry},
 };
 use termtrace_evidence::{
     event_log::{DurabilityPolicy, EventLogSummary},
@@ -48,9 +48,9 @@ use termtrace_model::{
     execution::event_log::DurabilityMode,
     execution::provenance::{ProvenanceCapture, ProvenancePolicy},
     execution::session::{
-        GHOSTTY_REPLAY_PROFILE_NAME, GeometryProvenance, GeometrySource, GhosttyVisualOverrides,
-        ImportProvenance, ResourceLimits, SessionCompletion, SessionGeometry, SessionLineage,
-        SessionManifest,
+        GeometryProvenance, GeometrySource, GhosttyVisualOverrides, ImportProvenance,
+        ResourceLimits, SessionCompletion, SessionGeometry, SessionLineage, SessionManifest,
+        GHOSTTY_REPLAY_PROFILE_NAME,
     },
     protocol::control::{
         ControlCommand, ControlData, ControlRequest, ScreenPredicate, ScreenWaitQuality,
@@ -58,8 +58,8 @@ use termtrace_model::{
     },
     registry::{AliasReservation, DetachedSessionPaths, RegistryEntry},
     terminal::screen::ScreenProjectionRequest,
-    value::ByteString,
     value::geometry::TerminalGeometryReport,
+    value::ByteString,
 };
 use termtrace_sdk::{request, send_request, wait_for_screen};
 

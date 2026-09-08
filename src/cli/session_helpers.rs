@@ -35,32 +35,41 @@ pub(super) fn resolve_session(target: PathBuf) -> Result<ResolvedSessionRef> {
         if path.is_empty() {
             return Err(miette::miette!("path: session reference is empty"));
         }
+
         let path = PathBuf::from(OsString::from_vec(path.to_vec()));
+
         return Ok(resolve_path_lifecycle(path));
     }
+
     if let Some(name) = bytes.strip_prefix(b"name:") {
         let name = str::from_utf8(name)
             .map_err(|_| miette::miette!("name: session reference must be valid UTF-8"))?;
+
         let resolved = SessionRegistry::open_default()
             .into_diagnostic()?
             .resolve_lifecycle(name)
             .into_diagnostic()?;
+
         return Ok(ResolvedSessionRef {
             path: resolved.session,
             lifecycle: resolved.lifecycle,
             diagnostic: resolved.diagnostic,
         });
     }
+
     if bytes.contains(&b'/') || bytes.starts_with(b".") {
         return Ok(resolve_path_lifecycle(target));
     }
+
     let name = target
         .to_str()
         .ok_or_else(|| miette::miette!("non-UTF-8 session paths require the path: prefix"))?;
+
     let resolved = SessionRegistry::open_default()
         .into_diagnostic()?
         .resolve_lifecycle(name)
         .into_diagnostic()?;
+
     return Ok(ResolvedSessionRef {
         path: resolved.session,
         lifecycle: resolved.lifecycle,
@@ -74,27 +83,35 @@ pub(super) fn resolve_session_path(target: PathBuf) -> Result<PathBuf> {
         if path.is_empty() {
             return Err(miette::miette!("path: session reference is empty"));
         }
+
         return Ok(PathBuf::from(OsString::from_vec(path.to_vec())));
     }
+
     if let Some(name) = bytes.strip_prefix(b"name:") {
         let name = str::from_utf8(name)
             .map_err(|_| miette::miette!("name: session reference must be valid UTF-8"))?;
+
         let entry = SessionRegistry::open_default()
             .into_diagnostic()?
             .resolve(name)
             .into_diagnostic()?;
+
         return Ok(entry.session_path());
     }
+
     if bytes.contains(&b'/') || bytes.starts_with(b".") {
         return Ok(target);
     }
+
     let name = target
         .to_str()
         .ok_or_else(|| miette::miette!("non-UTF-8 session paths require the path: prefix"))?;
+
     let entry = SessionRegistry::open_default()
         .into_diagnostic()?
         .resolve(name)
         .into_diagnostic()?;
+
     return Ok(entry.session_path());
 }
 
@@ -115,6 +132,7 @@ pub(super) fn write_session_lifecycle(
             "diagnostic": resolved.diagnostic,
         }),
     )?;
+
     return Ok(exit_code);
 }
 
@@ -126,6 +144,7 @@ fn resolve_path_lifecycle(path: PathBuf) -> ResolvedSessionRef {
             diagnostic: Some("session directory is missing or unreadable".to_owned()),
         };
     }
+
     if path.join("completion.json").is_file() {
         return ResolvedSessionRef {
             path,
@@ -133,6 +152,7 @@ fn resolve_path_lifecycle(path: PathBuf) -> ResolvedSessionRef {
             diagnostic: None,
         };
     }
+
     if !path.join("session.json").is_file() {
         return ResolvedSessionRef {
             path,
@@ -140,6 +160,7 @@ fn resolve_path_lifecycle(path: PathBuf) -> ResolvedSessionRef {
             diagnostic: Some("session manifest has not been published".to_owned()),
         };
     }
+
     if control_endpoint_is_reachable(&path) {
         return ResolvedSessionRef {
             path,
@@ -147,6 +168,7 @@ fn resolve_path_lifecycle(path: PathBuf) -> ResolvedSessionRef {
             diagnostic: None,
         };
     }
+
     return ResolvedSessionRef {
         path,
         lifecycle: RegistryLifecycle::Stale,
@@ -164,6 +186,7 @@ pub(super) fn resolve_cli_range(
     if range.from_marker.is_none() && range.to_marker.is_none() {
         return Ok((range.start_monotonic_ns, range.end_monotonic_ns));
     }
+
     let live_event_count = if !session.join("completion.json").is_file() {
         match request(session, ControlCommand::Status).into_diagnostic() {
             Ok(ControlData::Status { boundaries, .. }) => Some(boundaries.durable.next_event_seq),
@@ -174,12 +197,14 @@ pub(super) fn resolve_cli_range(
             }
             Err(error) => {
                 tracing::debug!(%error, "marker selection has no responsive control boundary");
+
                 None
             }
         }
     } else {
         None
     };
+
     let resolved = if session.join("completion.json").is_file() {
         resolve_session_source_selection(
             session,
@@ -199,6 +224,7 @@ pub(super) fn resolve_cli_range(
         )
     }
     .into_diagnostic()?;
+
     return Ok(resolved.map_or((None, None), |value| {
         return (Some(value.start_monotonic_ns), Some(value.end_monotonic_ns));
     }));

@@ -8,18 +8,18 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 use termtrace_engine::observation::observe_session;
 use termtrace_evidence::{
     artifact::hash_regular_file,
-    bundle::{BundleDraft, BundleIdentity, BundleMemberMetadata, verify as verify_bundle},
+    bundle::{verify as verify_bundle, BundleDraft, BundleIdentity, BundleMemberMetadata},
     event_log::{CanonicalLogFile, EventLogCursor},
     session::{read_manifest, validate_completed_session, verify_session},
 };
 use termtrace_model::{
     artifact::bundle::{
-        BUNDLE_FORMAT, BUNDLE_VERSION, BundleManifest, BundlePlan, BundlePlanMember, BundleProfile,
-        BundleVerificationPolicy,
+        BundleManifest, BundlePlan, BundlePlanMember, BundleProfile, BundleVerificationPolicy,
+        BUNDLE_FORMAT, BUNDLE_VERSION,
     },
     artifact::metadata::{ArtifactMember, ArtifactSensitivity},
     execution::event::EventProjection,
@@ -57,6 +57,7 @@ pub fn plan(profile: BundleProfile) -> BundlePlan {
             "source_verification",
         ));
     }
+
     if profile == BundleProfile::Debug {
         members.push(planned(
             "events-metadata.jsonl",
@@ -64,6 +65,7 @@ pub fn plan(profile: BundleProfile) -> BundlePlan {
             "metadata_only_event_projection",
         ));
     }
+
     if profile == BundleProfile::Forensic {
         members.push(planned(
             "canonical/",
@@ -71,6 +73,7 @@ pub fn plan(profile: BundleProfile) -> BundlePlan {
             "complete_top_level_canonical_payload",
         ));
     }
+
     return BundlePlan {
         format: "termtrace-bundle-plan".to_owned(),
         version: 1,
@@ -93,6 +96,7 @@ pub fn create(
             "evidence export destination must be outside the canonical session",
         ));
     }
+
     let identity = trusted.identity(profile);
     let mut draft = BundleDraft::create(destination, identity, max_bytes)?;
     let observation = observe_session(&trusted.canonical, StatePoint::LatestPresented)?;
@@ -107,6 +111,7 @@ pub fn create(
         member_metadata(profile, "observation.json")?,
         &observation,
     )?;
+
     if matches!(profile, BundleProfile::Debug | BundleProfile::Forensic) {
         let verification = verify_session(&trusted.canonical, VerificationLevel::Content);
         if !verification.valid {
@@ -114,6 +119,7 @@ pub fn create(
                 "canonical source failed content verification",
             ));
         }
+
         add_json_member(
             &mut draft,
             "verification.json",
@@ -121,12 +127,14 @@ pub fn create(
             &verification,
         )?;
     }
+
     if profile == BundleProfile::Debug {
         let metadata = member_metadata(profile, "events-metadata.jsonl")?;
         let mut writer = draft.start_member("events-metadata.jsonl", metadata)?;
         trusted.write_event_projection(&mut writer)?;
         writer.finish()?;
     }
+
     if profile == BundleProfile::Forensic {
         for name in top_level_regular_file_names(&trusted.canonical)? {
             let source = trusted.canonical.join(&name);
@@ -141,6 +149,7 @@ pub fn create(
                         .map_err(|error| return Error::filesystem(&source, error))?,
                 )
             };
+
             let relative = format!("canonical/{name}");
             draft.add_member_from_reader(
                 &relative,
@@ -149,6 +158,7 @@ pub fn create(
             )?;
         }
     }
+
     return Ok(draft.commit()?);
 }
 
@@ -166,12 +176,15 @@ pub fn verify_profile(
         {
             return Error::invalid(reason.clone());
         }
+
         return Error::invalid(format!(
             "bundle payload members or semantic metadata failed validation: {error}"
         ));
     })?;
+
     verify_member_policy(policy.profile, &manifest.members)?;
     verify_bound_payloads(directory, &manifest, &trusted)?;
+
     if policy.profile == BundleProfile::Forensic {
         let report = verify_session(directory.join("canonical"), VerificationLevel::Content);
         if !report.valid
@@ -182,8 +195,10 @@ pub fn verify_profile(
                 "included canonical evidence failed validation",
             ));
         }
+
         verify_canonical_payload(directory, &manifest.members, &trusted.canonical)?;
     }
+
     return Ok(manifest);
 }
 
@@ -202,8 +217,10 @@ impl TrustedSource {
         let canonical = session
             .canonicalize()
             .map_err(|source| return Error::filesystem(session, source))?;
+
         let completion = validate_completed_session(&canonical)?;
         let manifest = read_manifest(&canonical)?;
+
         return Ok(Self {
             canonical,
             manifest,
@@ -216,15 +233,19 @@ impl TrustedSource {
         while let Some(record) = cursor.next_record()? {
             serde_json::to_writer(&mut *writer, &EventProjection::from_record(&record, true))
                 .map_err(|source| return Error::json("events-metadata.jsonl", source))?;
+
             writer
                 .write_all(b"\n")
                 .map_err(|source| return Error::filesystem("events-metadata.jsonl", source))?;
         }
+
         cursor.validate_boundary(
             self.completion.event_count,
             &self.completion.final_event_hash,
         )?;
+
         let _pending = cursor.finish()?;
+
         return Ok(());
     }
 
@@ -248,6 +269,7 @@ fn verify_bound_payloads(
         &directory.join("observation.json"),
         MAX_STRUCTURED_MEMBER_BYTES,
     )?;
+
     if !matches!(
         observation.resolution,
         ObservationResolution::CanonicalReplay | ObservationResolution::ValidatedCheckpoint
@@ -256,19 +278,23 @@ fn verify_bound_payloads(
             "bundle observation has an invalid source resolution",
         ));
     }
+
     let mut expected = observe_session(&trusted.canonical, StatePoint::LatestPresented)?;
     expected.resolution = observation.resolution;
+
     if observation != expected {
         return Err(Error::invalid(
             "bundle observation does not derive from the expected canonical source",
         ));
     }
+
     let screen = read_bounded(&directory.join("screen.txt"), MAX_STRUCTURED_MEMBER_BYTES)?;
     if screen != observation.frame.viewport_text.as_bytes() {
         return Err(Error::invalid(
             "bundle screen text does not match its source-bound observation",
         ));
     }
+
     if matches!(
         manifest.profile,
         BundleProfile::Debug | BundleProfile::Forensic
@@ -277,17 +303,21 @@ fn verify_bound_payloads(
             &directory.join("verification.json"),
             MAX_STRUCTURED_MEMBER_BYTES,
         )?;
+
         let expected_verification = verify_session(&trusted.canonical, VerificationLevel::Content);
+
         if !expected_verification.valid || verification != expected_verification {
             return Err(Error::invalid(
                 "bundle verification report does not bind the expected canonical source",
             ));
         }
     }
+
     if manifest.profile == BundleProfile::Debug {
         let member = manifest_member(manifest, "events-metadata.jsonl")?;
         let mut expected = HashingWriter::default();
         trusted.write_event_projection(&mut expected)?;
+
         if member.byte_length != expected.bytes
             || member.blake3 != expected.hasher.finalize().to_hex().as_str()
         {
@@ -296,6 +326,7 @@ fn verify_bound_payloads(
             ));
         }
     }
+
     return Ok(());
 }
 
@@ -304,13 +335,16 @@ fn verify_member_policy(profile: BundleProfile, members: &[ArtifactMember]) -> R
         .iter()
         .map(|member| return member.path.as_str())
         .collect();
+
     if paths.len() != members.len() {
         return Err(Error::invalid(
             "bundle manifest contains duplicate member paths",
         ));
     }
+
     for member in members {
         let expected = member_metadata(profile, &member.path)?;
+
         if member.media_type != expected.media_type
             || member.schema_type != expected.schema_type
             || member.sensitivity != expected.sensitivity
@@ -322,15 +356,19 @@ fn verify_member_policy(profile: BundleProfile, members: &[ArtifactMember]) -> R
             )));
         }
     }
+
     for required in ["screen.txt", "observation.json"] {
         require_member(&paths, required)?;
     }
+
     if matches!(profile, BundleProfile::Debug | BundleProfile::Forensic) {
         require_member(&paths, "verification.json")?;
     }
+
     if profile == BundleProfile::Debug {
         require_member(&paths, "events-metadata.jsonl")?;
     }
+
     if profile == BundleProfile::Forensic {
         for required in [
             "canonical/session.json",
@@ -340,6 +378,7 @@ fn verify_member_policy(profile: BundleProfile, members: &[ArtifactMember]) -> R
             require_member(&paths, required)?;
         }
     }
+
     return Ok(());
 }
 
@@ -349,6 +388,7 @@ pub(super) fn verify_archived_manifest(
 ) -> Result<()> {
     let trusted = TrustedSource::resolve(&policy.source_session)?;
     let identity = trusted.identity(policy.profile);
+
     if manifest.format != BUNDLE_FORMAT
         || manifest.version != BUNDLE_VERSION
         || manifest.profile != identity.profile
@@ -361,10 +401,13 @@ pub(super) fn verify_archived_manifest(
             "archive manifest does not match the requested source and profile",
         ));
     }
+
     verify_member_policy(policy.profile, &manifest.members)?;
+
     let mut observation = observe_session(&trusted.canonical, StatePoint::LatestPresented)?;
     let screen = observation.frame.viewport_text.as_bytes();
     verify_member_bytes(manifest, "screen.txt", screen)?;
+
     let mut observation_matches = false;
     for resolution in [
         ObservationResolution::CanonicalReplay,
@@ -372,16 +415,19 @@ pub(super) fn verify_archived_manifest(
     ] {
         observation.resolution = resolution;
         let bytes = encoded_json_member(&observation, "observation.json")?;
+
         if member_matches_bytes(manifest_member(manifest, "observation.json")?, &bytes) {
             observation_matches = true;
             break;
         }
     }
+
     if !observation_matches {
         return Err(Error::invalid(
             "archived observation does not derive from the expected canonical source",
         ));
     }
+
     if matches!(
         policy.profile,
         BundleProfile::Debug | BundleProfile::Forensic
@@ -392,13 +438,17 @@ pub(super) fn verify_archived_manifest(
                 "canonical source failed content verification",
             ));
         }
+
         let bytes = encoded_json_member(&verification, "verification.json")?;
         verify_member_bytes(manifest, "verification.json", &bytes)?;
     }
+
     if policy.profile == BundleProfile::Debug {
         let mut expected = HashingWriter::default();
         trusted.write_event_projection(&mut expected)?;
+
         let member = manifest_member(manifest, "events-metadata.jsonl")?;
+
         if member.byte_length != expected.bytes
             || member.blake3 != expected.hasher.finalize().to_hex().as_str()
         {
@@ -407,27 +457,32 @@ pub(super) fn verify_archived_manifest(
             ));
         }
     }
+
     if policy.profile == BundleProfile::Forensic {
         let names = top_level_regular_file_names(&trusted.canonical)?;
         let expected: BTreeSet<String> = names
             .iter()
             .map(|name| format!("canonical/{name}"))
             .collect();
+
         let included: BTreeSet<String> = manifest
             .members
             .iter()
             .filter(|member| return canonical_member_name(&member.path).is_some())
             .map(|member| return member.path.clone())
             .collect();
+
         if included != expected {
             return Err(Error::invalid(
                 "archived canonical payload does not match the expected source inventory",
             ));
         }
+
         for name in names {
             let source = trusted.canonical.join(&name);
             let member = manifest_member(manifest, &format!("canonical/{name}"))?;
             let (byte_length, blake3) = hash_regular_file(&source)?;
+
             if member.byte_length != byte_length || member.blake3 != blake3 {
                 return Err(Error::invalid(format!(
                     "archived canonical member `{name}` does not match the trusted source"
@@ -435,6 +490,7 @@ pub(super) fn verify_archived_manifest(
             }
         }
     }
+
     return Ok(());
 }
 
@@ -442,6 +498,7 @@ fn encoded_json_member(value: &impl Serialize, path: &str) -> Result<Vec<u8>> {
     let mut bytes =
         serde_json::to_vec_pretty(value).map_err(|source| return Error::json(path, source))?;
     bytes.push(b'\n');
+
     return Ok(bytes);
 }
 
@@ -456,6 +513,7 @@ fn verify_member_bytes(manifest: &BundleManifest, path: &str, bytes: &[u8]) -> R
             "archived member `{path}` does not match the expected canonical source"
         )));
     }
+
     return Ok(());
 }
 
@@ -465,6 +523,7 @@ fn require_member(paths: &BTreeSet<&str>, path: &str) -> Result<()> {
             "bundle is missing required member `{path}`"
         )));
     }
+
     return Ok(());
 }
 
@@ -478,35 +537,43 @@ fn verify_canonical_payload(
         .iter()
         .map(|name| format!("canonical/{name}"))
         .collect();
+
     let included: BTreeSet<String> = members
         .iter()
         .filter(|member| return canonical_member_name(&member.path).is_some())
         .map(|member| return member.path.clone())
         .collect();
+
     if included != expected {
         return Err(Error::invalid(
             "included canonical payload does not match the expected source inventory",
         ));
     }
+
     for name in source_names {
         let expected_hash = if name == "events.jsonl" {
             let path = source.join(&name);
             let mut file = CanonicalLogFile::open(&path)
                 .map_err(|error| return Error::filesystem(&path, error))?;
+
             let mut hash = blake3::Hasher::new();
             let bytes = io::copy(&mut file, &mut hash)
                 .map_err(|error| return Error::filesystem(&path, error))?;
+
             (bytes, hash.finalize().to_hex().to_string())
         } else {
             hash_regular_file(&source.join(&name))?
         };
+
         let actual_hash = hash_regular_file(&directory.join("canonical").join(&name))?;
+
         if actual_hash != expected_hash {
             return Err(Error::invalid(format!(
                 "included canonical `{name}` does not match the expected source"
             )));
         }
     }
+
     return Ok(());
 }
 
@@ -524,9 +591,11 @@ fn top_level_regular_file_names(directory: &Path) -> Result<Vec<String>> {
                 "canonical session contains a top-level symlink",
             ));
         }
+
         if file_type.is_dir() {
             continue;
         }
+
         if file_type.is_block_device()
             || file_type.is_char_device()
             || file_type.is_fifo()
@@ -536,17 +605,21 @@ fn top_level_regular_file_names(directory: &Path) -> Result<Vec<String>> {
                 "canonical session contains a top-level special file",
             ));
         }
+
         let name = entry.file_name().into_string().map_err(|_| {
             return Error::invalid("canonical top-level file names must be valid UTF-8");
         })?;
         names.push(name);
+
         if names.len() > MAX_CANONICAL_MEMBERS {
             return Err(Error::invalid(format!(
                 "canonical source exceeds {MAX_CANONICAL_MEMBERS} top-level files"
             )));
         }
     }
+
     names.sort();
+
     return Ok(names);
 }
 
@@ -585,6 +658,7 @@ fn member_metadata(profile: BundleProfile, path: &str) -> Result<BundleMemberMet
             )));
         }
     };
+
     return Ok(BundleMemberMetadata {
         media_type: media_type(path).to_owned(),
         schema_type: schema_type.map(str::to_owned),
@@ -603,6 +677,7 @@ fn planned(path: &str, sensitivity: ArtifactSensitivity, relationship: &str) -> 
 
 fn canonical_member_name(path: &str) -> Option<&str> {
     let name = path.strip_prefix("canonical/")?;
+
     return (!name.is_empty() && !name.contains('/')).then_some(name);
 }
 
@@ -619,12 +694,15 @@ fn media_type(path: &str) -> &'static str {
     if path.ends_with(".jsonl") {
         return "application/x-ndjson";
     }
+
     if path.ends_with(".json") {
         return "application/json";
     }
+
     if path.ends_with(".zst") {
         return "application/zstd";
     }
+
     return "text/plain";
 }
 
@@ -641,11 +719,13 @@ fn add_json_member(
         .write_all(b"\n")
         .map_err(|source| return Error::filesystem(path, source))?;
     writer.finish()?;
+
     return Ok(());
 }
 
 fn read_json_bounded<T: DeserializeOwned>(path: &Path, maximum: u64) -> Result<T> {
     let bytes = read_bounded(path, maximum)?;
+
     return serde_json::from_slice(&bytes).map_err(|source| return Error::json(path, source));
 }
 
@@ -655,23 +735,27 @@ fn read_bounded(path: &Path, maximum: u64) -> Result<Vec<u8>> {
         .metadata()
         .map_err(|source| return Error::filesystem(path, source))?
         .len();
+
     if size > maximum {
         return Err(Error::invalid(format!(
             "bundle member `{}` exceeds {maximum} bytes",
             path.display()
         )));
     }
+
     let mut bytes: Vec<u8> = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
     Read::by_ref(&mut file)
         .take(maximum.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|source| return Error::filesystem(path, source))?;
+
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > maximum {
         return Err(Error::invalid(format!(
             "bundle member `{}` exceeds {maximum} bytes",
             path.display()
         )));
     }
+
     return Ok(bytes);
 }
 
@@ -700,6 +784,7 @@ impl Write for HashingWriter {
         self.bytes = self
             .bytes
             .saturating_add(u64::try_from(buf.len()).unwrap_or(u64::MAX));
+
         return Ok(buf.len());
     }
 
@@ -720,9 +805,13 @@ mod tests {
         let source = temporary.path().join("source");
         let bundle = temporary.path().join("bundle");
         let canonical = bundle.join("canonical");
+
         fs_err::create_dir(&source).expect("source directory");
+
         fs_err::create_dir(&bundle).expect("bundle directory");
+
         fs_err::create_dir(&canonical).expect("canonical directory");
+
         for (name, bytes) in [
             ("session.json", b"session".as_slice()),
             ("events.jsonl", b"events".as_slice()),
@@ -730,6 +819,7 @@ mod tests {
             fs_err::write(source.join(name), bytes).expect("source member");
             fs_err::write(canonical.join(name), bytes).expect("included member");
         }
+
         let members = ["canonical/events.jsonl", "canonical/session.json"]
             .into_iter()
             .map(|path| {
@@ -744,14 +834,17 @@ mod tests {
                 };
             })
             .collect::<Vec<_>>();
+
         verify_canonical_payload(&bundle, &members, &source).expect("exact canonical inventory");
 
         fs_err::write(canonical.join("events.jsonl"), b"changed").expect("tamper member");
+
         let content_error = verify_canonical_payload(&bundle, &members, &source)
             .expect_err("canonical content must match");
         assert!(content_error.to_string().contains("does not match"));
 
         fs_err::write(canonical.join("events.jsonl"), b"events").expect("restore member");
+
         let mut injected_members = members;
         injected_members.push(ArtifactMember {
             path: "canonical/injected.txt".to_owned(),

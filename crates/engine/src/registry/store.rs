@@ -13,6 +13,7 @@ impl SessionRegistry {
     /// is not an owner-only real directory.
     pub fn open_default() -> Result<Self> {
         let root = default_state_root()?;
+
         return Self::open(root);
     }
 
@@ -27,6 +28,7 @@ impl SessionRegistry {
         ensure_owner_directory(state_root)?;
         let directory = state_root.join(REGISTRY_DIRECTORY);
         ensure_owner_directory(&directory)?;
+
         return Ok(Self {
             state_root: state_root.to_path_buf(),
             directory,
@@ -49,26 +51,34 @@ impl SessionRegistry {
         successor: &Path,
     ) -> Result<RegistryEntry> {
         validate_alias(alias)?;
+
         let _lock = self.lock()?;
         let path = self.entry_path(alias);
         let current = read_entry_nofollow(&path)?;
+
         if current.alias != alias || current.session_id != expected_session_id {
             return Err(registry_error(
                 "retarget session alias",
                 "alias owner changed before successor publication",
             ));
         }
+
         let entry = self.entry_for(alias, successor)?;
         let encoded = self.encode_entry(&entry)?;
         let temporary = self
             .directory
             .join(format!(".{alias}.{}.tmp", Uuid::now_v7()));
+
         write_secure(&temporary, &encoded)?;
+
         if let Err(source) = fs::rename(&temporary, &path) {
             let _cleanup = fs::remove_file(&temporary);
+
             return Err(Error::Filesystem { path, source });
         }
+
         sync_parent_directory(&path)?;
+
         return Ok(entry);
     }
 
@@ -79,14 +89,17 @@ impl SessionRegistry {
     /// Returns an error for invalid or already-published aliases.
     pub fn ensure_available(&self, alias: &str) -> Result<()> {
         validate_alias(alias)?;
+
         let _lock = self.lock()?;
         let path = self.entry_path(alias);
+
         if path.exists() {
             return Err(registry_error(
                 "reserve session alias",
                 "alias is already reserved or registered",
             ));
         }
+
         return Ok(());
     }
 
@@ -108,6 +121,7 @@ impl SessionRegistry {
                 ));
             }
         };
+
         if entry.format != REGISTRY_ENTRY_FORMAT
             || entry.version != REGISTRY_ENTRY_VERSION
             || entry.alias != alias
@@ -119,6 +133,7 @@ impl SessionRegistry {
                 "entry format, alias, protocol, or process identity is incompatible",
             ));
         }
+
         let session = entry.session_path();
         validate_owner_directory(&session)?;
         let canonical = session.canonicalize().map_err(|source| {
@@ -127,12 +142,14 @@ impl SessionRegistry {
                 source,
             };
         })?;
+
         if canonical.as_os_str().as_bytes() != entry.canonical_session.as_bytes() {
             return Err(registry_error(
                 "resolve registry entry",
                 "canonical session path changed after registration",
             ));
         }
+
         let manifest = read_manifest(&canonical)?;
         if manifest.session_id != entry.session_id {
             return Err(registry_error(
@@ -140,6 +157,7 @@ impl SessionRegistry {
                 "session manifest identity no longer matches the registry binding",
             ));
         }
+
         return Ok(entry);
     }
 
@@ -151,9 +169,11 @@ impl SessionRegistry {
     pub fn resolve_lifecycle(&self, alias: &str) -> Result<RegistrySessionResolution> {
         validate_alias(alias)?;
         let record = read_registry_record_nofollow(&self.entry_path(alias))?;
+
         return match record {
             RegistryRecord::Entry(entry) => {
                 let row = inspect_entry(&entry);
+
                 Ok(RegistrySessionResolution {
                     session: entry.session_path(),
                     lifecycle: row.lifecycle,
@@ -168,7 +188,9 @@ impl SessionRegistry {
                         diagnostic: Some("alias startup reservation is incompatible".to_owned()),
                     });
                 }
+
                 let expired = reservation.lease_expires_unix_ns <= system_time_unix_ns()?;
+
                 Ok(RegistrySessionResolution {
                     session: reservation.session_path(),
                     lifecycle: if expired {
@@ -206,21 +228,28 @@ impl SessionRegistry {
                     source,
                 };
             })?;
+
             let path = item.path();
+
             if path.extension() != Some(OsStr::new("json")) {
                 continue;
             }
+
             let entry = match read_registry_record_nofollow(&path) {
                 Ok(RegistryRecord::Entry(entry)) => entry,
                 Ok(RegistryRecord::Reservation(_)) => continue,
                 Err(_) => continue,
             };
+
             let row = inspect_entry(&entry);
+
             if include_all || row.lifecycle == RegistryLifecycle::Live {
                 rows.push(row);
             }
         }
+
         rows.sort_by(|left, right| return left.alias.cmp(&right.alias));
+
         return Ok(rows);
     }
 
@@ -232,28 +261,34 @@ impl SessionRegistry {
     /// durably published.
     pub fn remove(&self, alias: &str) -> Result<RegistryEntry> {
         validate_alias(alias)?;
+
         let _lock = self.lock()?;
         let path = self.entry_path(alias);
         let entry = read_entry_nofollow(&path)?;
+
         if entry.alias != alias {
             return Err(registry_error(
                 "remove registry entry",
                 "entry alias does not match its filename",
             ));
         }
+
         fs::remove_file(&path).map_err(|source| {
             return Error::Filesystem {
                 path: path.clone(),
                 source,
             };
         })?;
+
         sync_parent_directory(&path)?;
+
         return Ok(entry);
     }
 
     pub(super) fn entry_path(&self, alias: &str) -> PathBuf {
         return self.directory.join(format!("{alias}.json"));
     }
+
     pub(super) fn entry_for(&self, alias: &str, session: &Path) -> Result<RegistryEntry> {
         validate_owner_directory(session)?;
         let canonical = session.canonicalize().map_err(|source| {
@@ -262,8 +297,10 @@ impl SessionRegistry {
                 source,
             };
         })?;
+
         validate_owner_directory(&canonical)?;
         let manifest = read_manifest(&canonical)?;
+
         if manifest.format != SESSION_MANIFEST_FORMAT
             || manifest.version != SESSION_MANIFEST_VERSION
         {
@@ -272,11 +309,14 @@ impl SessionRegistry {
                 "session manifest format is unsupported by this registry build",
             ));
         }
+
         let registered_unix_ns = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|_| return Error::ClockBeforeEpoch)?
             .as_nanos();
+
         let process_identity = recorder_identity(&canonical);
+
         return Ok(RegistryEntry {
             format: REGISTRY_ENTRY_FORMAT.to_owned(),
             version: REGISTRY_ENTRY_VERSION,
@@ -323,7 +363,9 @@ impl SessionRegistry {
                     source,
                 };
             })?;
+
         validate_entry_file(&path, &file)?;
+
         return Flock::lock(file, FlockArg::LockExclusive).map_err(|(_, error)| {
             return registry_error("lock session registry", error.to_string());
         });
@@ -351,21 +393,27 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         row.lifecycle = RegistryLifecycle::Incompatible;
         row.diagnostic =
             Some("registry format, protocol, or process identity is incompatible".to_owned());
+
         return row;
     }
+
     let session = entry.session_path();
     if let Err(error) = validate_owner_directory(&session) {
         row.diagnostic = Some(error.to_string());
+
         return row;
     }
+
     let canonical = match session.canonicalize() {
         Ok(path) if path.as_os_str().as_bytes() == entry.canonical_session.as_bytes() => path,
         Ok(_) => {
             row.diagnostic = Some("canonical session path changed after registration".to_owned());
+
             return row;
         }
         Err(error) => {
             row.diagnostic = Some(error.to_string());
+
             return row;
         }
     };
@@ -373,39 +421,49 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         Ok(manifest) => manifest,
         Err(error) => {
             row.diagnostic = Some(error.to_string());
+
             return row;
         }
     };
     row.command = Some(manifest.command.clone());
+
     row.working_directory
         .clone_from(&manifest.working_directory);
+
     row.geometry = Some(manifest.geometry.clone());
     row.started_unix_ns = Some(manifest.started_unix_ns);
+
     if manifest.session_id != entry.session_id {
         row.lifecycle = RegistryLifecycle::IdentityMismatch;
         row.diagnostic = Some("manifest session ID differs from registry binding".to_owned());
+
         return row;
     }
+
     let completion_path = canonical.join("completion.json");
     if completion_path.exists() {
         match read_completion(&canonical) {
             Ok(completion) if completion.session_id == entry.session_id => {
                 row.lifecycle = RegistryLifecycle::Completed;
+
                 return row;
             }
             Ok(_) => {
                 row.lifecycle = RegistryLifecycle::IdentityMismatch;
                 row.diagnostic =
                     Some("completion session ID differs from registry binding".to_owned());
+
                 return row;
             }
             Err(error) => {
                 row.lifecycle = RegistryLifecycle::MissingEvidence;
                 row.diagnostic = Some(error.to_string());
+
                 return row;
             }
         }
     }
+
     let responsive_identity = recorder_identity(&canonical);
     if let Some(identity) = entry.recorder_pid.zip(entry.recorder_process_start_ticks) {
         if responsive_identity == Some(identity) {
@@ -420,6 +478,7 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
     } else {
         row.lifecycle = RegistryLifecycle::Incomplete;
     }
+
     return row;
 }
 
@@ -427,6 +486,7 @@ pub(super) fn default_state_root() -> Result<PathBuf> {
     if let Some(path) = env::var_os("TERMTRACE_STATE_DIR") {
         return Ok(PathBuf::from(path));
     }
+
     let state_home = BaseDirs::new()
         .and_then(|dirs| {
             return dirs.state_dir().map(Path::to_path_buf);
@@ -437,6 +497,7 @@ pub(super) fn default_state_root() -> Result<PathBuf> {
                 "platform user state directory is unavailable",
             );
         })?;
+
     return Ok(state_home.join("termtrace"));
 }
 
@@ -444,6 +505,7 @@ pub(super) fn ensure_owner_directory(path: &Path) -> Result<()> {
     if path.exists() {
         return validate_owner_directory(path);
     }
+
     fs::create_dir_all(path).map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),
@@ -456,7 +518,9 @@ pub(super) fn ensure_owner_directory(path: &Path) -> Result<()> {
             source,
         };
     })?;
+
     sync_parent_directory(path)?;
+
     return validate_owner_directory(path);
 }
 
@@ -467,7 +531,9 @@ pub(super) fn validate_owner_directory(path: &Path) -> Result<()> {
             source,
         };
     })?;
+
     let mode = metadata.mode() & 0o777;
+
     if metadata.file_type().is_symlink()
         || !metadata.file_type().is_dir()
         || metadata.uid() != getuid().as_raw()
@@ -479,6 +545,7 @@ pub(super) fn validate_owner_directory(path: &Path) -> Result<()> {
             mode,
         });
     }
+
     return Ok(());
 }
 
@@ -493,7 +560,9 @@ pub(super) fn read_registry_record_nofollow(path: &Path) -> Result<RegistryRecor
                 source,
             };
         })?;
+
     validate_entry_file(path, &file)?;
+
     return serde_json::from_reader(file).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
@@ -520,6 +589,7 @@ pub(super) fn validate_entry_file(path: &Path, file: &File) -> Result<()> {
             source,
         };
     })?;
+
     if !metadata.is_file()
         || metadata.uid() != getuid().as_raw()
         || metadata.mode() & 0o777 != 0o600
@@ -529,6 +599,7 @@ pub(super) fn validate_entry_file(path: &Path, file: &File) -> Result<()> {
             "entry must be an owner-owned regular file with mode 0600",
         ));
     }
+
     return Ok(());
 }
 
@@ -539,6 +610,7 @@ pub(super) fn sync_directory(path: &Path) -> Result<()> {
             source,
         };
     })?;
+
     return directory.sync_all().map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),
@@ -551,6 +623,7 @@ pub(super) fn sync_parent_directory(path: &Path) -> Result<()> {
     let parent = path.parent().ok_or_else(|| {
         return registry_error("sync registry parent", "path has no parent directory");
     })?;
+
     return sync_directory(parent);
 }
 

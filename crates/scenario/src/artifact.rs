@@ -8,8 +8,8 @@ use std::{
 
 use serde::Serialize;
 use termtrace_engine::{
-    Error as EngineError, analysis::diagnostics::diagnose_snapshot,
-    timeline::visit_snapshot_timeline_while,
+    analysis::diagnostics::diagnose_snapshot, timeline::visit_snapshot_timeline_while,
+    Error as EngineError,
 };
 use termtrace_evidence::{
     artifact::{finish_writer, secure_writer},
@@ -24,8 +24,8 @@ use zstd::stream::decode_all;
 use termtrace_model::scenario::{Scenario, ScenarioReport};
 
 use crate::{
-    Error, Result,
     error::{invalid, operation},
+    Error, Result,
 };
 
 pub(crate) fn snapshot_path(failure_root: &Path, name: &str) -> Result<PathBuf> {
@@ -72,6 +72,7 @@ pub(crate) fn publish_failure(
     let publish_result = populate_failure(&temporary, scenario, report, final_snapshot);
     if let Err(error) = publish_result {
         let _remove = fs_err::remove_dir_all(&temporary);
+
         return Err(error);
     }
 
@@ -95,6 +96,7 @@ fn populate_failure(
     for value in redacted_scenario.launch.environment.set.values_mut() {
         "<redacted>".clone_into(value);
     }
+
     for value in redacted_scenario.launch.environment.set_bytes.values_mut() {
         value.base64 = ByteString::from(b"<redacted>".as_slice());
     }
@@ -106,6 +108,7 @@ fn populate_failure(
 
     if let Some(snapshot) = final_snapshot {
         write_json(temporary.join("final-screen.json"), snapshot)?;
+
         if let ControlData::Snapshot {
             semantic_state_zstd,
             viewport_text,
@@ -165,8 +168,10 @@ fn write_timeline(snapshot: &SessionSnapshot, path: &Path) -> Result<()> {
             if !first {
                 output.write_all(b",\n").map_err(timeline_error)?;
             }
+
             first = false;
             serde_json::to_writer(&mut output, &entry).map_err(timeline_error)?;
+
             return Ok(true);
         })
         .map_err(|error| return operation("derive timeline", error))?;
@@ -195,6 +200,7 @@ fn timeline_error(error: impl Display) -> EngineError {
 
 pub(crate) fn write_bytes(path: PathBuf, bytes: &[u8]) -> Result<()> {
     fs_err::write(&path, bytes).map_err(|source| return Error::Filesystem { path, source })?;
+
     return Ok(());
 }
 

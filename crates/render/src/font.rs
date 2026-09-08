@@ -7,10 +7,10 @@ use std::sync::{Arc, LazyLock};
 
 use resvg::usvg::fontdb::{Database, Source};
 use termtrace_model::artifact::save::{SemanticFontResource, SemanticFontRole};
-use ttf_parser::{Face, name_id};
+use ttf_parser::{name_id, Face};
 use zstd::stream::decode_all;
 
-use crate::error::{Result, render_error};
+use crate::error::{render_error, Result};
 
 /// Termtrace-scoped family for all JetBrains Mono text faces.
 pub const SEMANTIC_TEXT_FONT_FAMILY: &str = "Termtrace JetBrains Mono";
@@ -96,6 +96,7 @@ impl SemanticFontSet {
     #[must_use]
     pub fn regular_face_bytes(&self) -> &[u8] {
         let [regular, ..] = &self.faces;
+
         return regular.bytes.bytes();
     }
 
@@ -113,6 +114,7 @@ impl SemanticFontSet {
 
     fn face(&self, role: SemanticFontRole) -> &SemanticFontFace {
         let [regular, bold, italic, bold_italic, symbols] = &self.faces;
+
         match role {
             SemanticFontRole::Regular => return regular,
             SemanticFontRole::Bold => return bold,
@@ -145,13 +147,9 @@ fn load_font_set() -> Result<SemanticFontSet> {
         bytes: bundle,
         ranges,
     } = decompress_font_bundle()?;
-    let [
-        regular_range,
-        bold_range,
-        italic_range,
-        bold_italic_range,
-        symbols_range,
-    ] = ranges.as_slice()
+
+    let [regular_range, bold_range, italic_range, bold_italic_range, symbols_range] =
+        ranges.as_slice()
     else {
         return Err(invalid_font_bundle());
     };
@@ -212,8 +210,10 @@ fn load_font_set() -> Result<SemanticFontSet> {
             symbols_range.clone(),
         )?,
     ];
+
     let mut hasher = blake3::Hasher::new();
     hasher.update(FONT_SET_HASH_DOMAIN);
+
     let mut database = Database::new();
     for face in &faces {
         let role = face.resource.role.as_str().as_bytes();
@@ -221,14 +221,17 @@ fn load_font_set() -> Result<SemanticFontSet> {
             .map_err(|error| return render_error(format!("hash semantic font role: {error}")))?;
         let font_length = u64::try_from(face.bytes.bytes().len())
             .map_err(|error| return render_error(format!("hash semantic font size: {error}")))?;
+
         hasher.update(&role_length.to_le_bytes());
         hasher.update(role);
         hasher.update(&font_length.to_le_bytes());
         hasher.update(face.bytes.bytes());
+
         let font_data = Arc::<FontBytes>::clone(&face.bytes);
         let font_data: Arc<dyn AsRef<[u8]> + Send + Sync> = font_data;
         database.load_font_source(Source::Binary(font_data));
     }
+
     return Ok(SemanticFontSet {
         faces,
         font_set_blake3: hasher.finalize().to_hex().to_string(),
@@ -248,6 +251,7 @@ fn load_font(
             spec.role.as_str()
         ));
     })?;
+
     if !has_name(&face, name_id::FAMILY, spec.expected_family)
         || !has_name(&face, name_id::SUBFAMILY, spec.expected_style)
     {
@@ -256,13 +260,17 @@ fn load_font(
             spec.role.as_str()
         )));
     }
+
     validate_layout_metrics(spec.role, &face)?;
+
     let mut coverage = HashSet::new();
+
     if let Some(cmap) = face.tables().cmap {
         for subtable in cmap.subtables {
             if !subtable.is_unicode() {
                 continue;
             }
+
             subtable.codepoints(|codepoint| {
                 if let Some(character) = char::from_u32(codepoint)
                     && face.glyph_index(character).is_some()
@@ -272,8 +280,10 @@ fn load_font(
             });
         }
     }
+
     let decompressed_size = u64::try_from(bytes.bytes().len())
         .map_err(|error| return render_error(format!("measure semantic font: {error}")))?;
+
     let resource = SemanticFontResource {
         role: spec.role,
         family: spec.family.to_owned(),
@@ -281,6 +291,7 @@ fn load_font(
         decompressed_size,
         decompressed_blake3: blake3::hash(bytes.bytes()).to_hex().to_string(),
     };
+
     return Ok(SemanticFontFace {
         resource,
         bytes,
@@ -292,6 +303,7 @@ fn decompress_font_bundle() -> Result<DecompressedFontBundle> {
     let bundle = decode_all(Cursor::new(FONT_BUNDLE_COMPRESSED)).map_err(|error| {
         return render_error(format!("decompress bundled semantic font set: {error}"));
     })?;
+
     let mut cursor = 0;
     if take_bundle_bytes(&bundle, &mut cursor, FONT_BUNDLE_MAGIC.len())
         != Some(FONT_BUNDLE_MAGIC.as_slice())
@@ -299,6 +311,7 @@ fn decompress_font_bundle() -> Result<DecompressedFontBundle> {
     {
         return Err(invalid_font_bundle());
     }
+
     let mut lengths: Vec<usize> = Vec::with_capacity(usize::from(FONT_COUNT));
     for _ in 0..FONT_COUNT {
         let length = read_bundle_u64(&bundle, &mut cursor)
@@ -306,19 +319,24 @@ fn decompress_font_bundle() -> Result<DecompressedFontBundle> {
             .ok_or_else(invalid_font_bundle)?;
         lengths.push(length);
     }
+
     let mut ranges: Vec<Range<usize>> = Vec::with_capacity(lengths.len());
+
     let mut offset = cursor;
     for length in lengths {
         let end = offset.checked_add(length).ok_or_else(invalid_font_bundle)?;
         if end > bundle.len() {
             return Err(invalid_font_bundle());
         }
+
         ranges.push(offset..end);
         offset = end;
     }
+
     if offset != bundle.len() {
         return Err(invalid_font_bundle());
     }
+
     return Ok(DecompressedFontBundle {
         bytes: Arc::new(bundle),
         ranges,
@@ -333,16 +351,19 @@ fn take_bundle_bytes<'bundle>(
     let end = cursor.checked_add(length)?;
     let bytes = bundle.get(*cursor..end)?;
     *cursor = end;
+
     return Some(bytes);
 }
 
 fn read_bundle_u16(bundle: &[u8], cursor: &mut usize) -> Option<u16> {
     let bytes: [u8; 2] = take_bundle_bytes(bundle, cursor, 2)?.try_into().ok()?;
+
     return Some(u16::from_le_bytes(bytes));
 }
 
 fn read_bundle_u64(bundle: &[u8], cursor: &mut usize) -> Option<u64> {
     let bytes: [u8; 8] = take_bundle_bytes(bundle, cursor, 8)?.try_into().ok()?;
+
     return Some(u64::from_le_bytes(bytes));
 }
 
@@ -364,6 +385,7 @@ fn validate_layout_metrics(role: SemanticFontRole, face: &Face<'_>) -> Result<()
             let advance = face
                 .glyph_index('A')
                 .and_then(|glyph| return face.glyph_hor_advance(glyph));
+
             face.units_per_em() == 1_000 && advance == Some(600)
         }
         SemanticFontRole::SymbolsFallback => {
@@ -371,12 +393,14 @@ fn validate_layout_metrics(role: SemanticFontRole, face: &Face<'_>) -> Result<()
         }
         SemanticFontRole::Bold | SemanticFontRole::Italic | SemanticFontRole::BoldItalic => true,
     };
+
     if !is_valid {
         return Err(render_error(format!(
             "bundled semantic font {} has unexpected layout metrics",
             role.as_str()
         )));
     }
+
     return Ok(());
 }
 
@@ -430,6 +454,7 @@ mod tests {
             assert_eq!(resource.decompressed_size, size);
             assert_eq!(resource.decompressed_blake3.len(), 64);
         }
+
         assert_eq!(
             font_set.font_set_blake3(),
             "013d52d10b90498adec2d19598f4040731dc00cf1539e748f05d86d355f919ec"
@@ -452,6 +477,7 @@ mod tests {
         let regular = Face::parse(font_set.face_bytes(SemanticFontRole::Regular), 0)
             .expect("parse regular bundled face");
         let regular_a = regular.glyph_index('A').expect("regular face contains A");
+
         assert_eq!(regular.units_per_em(), 1_000);
         assert_eq!(regular.glyph_hor_advance(regular_a), Some(600));
 

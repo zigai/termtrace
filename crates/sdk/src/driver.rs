@@ -11,16 +11,16 @@ use std::{
 
 use nix::{
     errno::Errno,
-    fcntl::{FcntlArg, OFlag, fcntl},
-    poll::{PollFd, PollFlags, PollTimeout, poll},
-    sys::signal::{Signal, killpg},
+    fcntl::{fcntl, FcntlArg, OFlag},
+    poll::{poll, PollFd, PollFlags, PollTimeout},
+    sys::signal::{killpg, Signal},
     unistd::Pid,
 };
 use termtrace_model::protocol::{
     control::CONTROL_PROTOCOL_VERSION,
     driver::{
-        DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION, DriverData,
-        DriverMethod, DriverRequest, DriverResponse, DriverResult,
+        DriverData, DriverMethod, DriverRequest, DriverResponse, DriverResult,
+        DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
     },
 };
 use uuid::Uuid;
@@ -50,6 +50,7 @@ impl Driver {
             .process_group(0)
             .spawn()
             .map_err(|source| return transport("spawn", false, source))?;
+
         let mut driver = Self {
             child,
             input: None,
@@ -64,12 +65,14 @@ impl Driver {
                 .as_ref()
                 .ok_or_else(|| return protocol("missing driver input pipe"))?,
         )?;
+
         nonblocking(
             driver
                 .output
                 .as_ref()
                 .ok_or_else(|| return protocol("missing driver output pipe"))?,
         )?;
+
         let response = driver.request(DriverMethod::Hello, Duration::from_secs(10))?;
         if !matches!(
             response.result,
@@ -83,6 +86,7 @@ impl Driver {
         ) {
             return Err(protocol("installed driver handshake is incompatible"));
         }
+
         return Ok(driver);
     }
 
@@ -108,29 +112,35 @@ impl Driver {
                 "driver is closed or request version is incompatible",
             ));
         }
+
         let deadline = Instant::now()
             .checked_add(timeout)
             .ok_or_else(|| return protocol("driver timeout exceeds clock range"))?;
         let mut encoded = serde_json::to_vec(request)
             .map_err(|_| return protocol("could not encode driver request"))?;
         encoded.push(b'\n');
+
         if u64::try_from(encoded.len()).unwrap_or(u64::MAX) > DRIVER_MAX_REQUEST_BYTES {
             return Err(protocol("driver request exceeds frame limit"));
         }
+
         let result = self.exchange(&encoded, deadline).and_then(|bytes| {
             let response: DriverResponse = serde_json::from_slice(&bytes)
                 .map_err(|_| return protocol("driver response failed schema validation"))?;
+
             if response.version != DRIVER_PROTOCOL_VERSION
                 || response.request_id != request.request_id
             {
                 return Err(protocol("driver response version or request ID differs"));
             }
+
             return Ok(response);
         });
         if result.is_err() {
             // A late response must not be mistaken for the next request's result.
             let _cleanup = self.close(Duration::from_secs(5));
         }
+
         return result;
     }
 
@@ -139,6 +149,7 @@ impl Driver {
             .input
             .as_mut()
             .ok_or_else(|| return protocol("driver input is closed"))?;
+
         let mut sent = 0;
         while let Some(remaining) = encoded
             .get(sent..)
@@ -151,6 +162,7 @@ impl Driver {
                 "write request",
                 sent > 0,
             )?;
+
             match input.write(remaining) {
                 Ok(0) => {
                     return Err(transport(
@@ -168,14 +180,19 @@ impl Driver {
                 Err(source) => return Err(transport("write request", sent > 0, source)),
             }
         }
+
         let output = self
             .output
             .as_mut()
             .ok_or_else(|| return protocol("driver output is closed"))?;
+
         let mut response = Vec::new();
+
         loop {
             ready(output, PollFlags::POLLIN, deadline, "read response", true)?;
+
             let mut chunk = [0_u8; 8192];
+
             match output.read(&mut chunk) {
                 Ok(0) => {
                     return Err(transport(
@@ -189,14 +206,17 @@ impl Driver {
                         .get(..count)
                         .ok_or_else(|| return protocol("invalid driver read count"))?;
                     response.extend_from_slice(bytes);
+
                     if u64::try_from(response.len()).unwrap_or(u64::MAX) > DRIVER_MAX_RESPONSE_BYTES
                     {
                         return Err(protocol("driver response exceeds frame limit"));
                     }
+
                     if let Some(newline) = response.iter().position(|byte| return *byte == b'\n') {
                         if newline + 1 != response.len() {
                             return Err(protocol("driver sent unsolicited trailing response data"));
                         }
+
                         return Ok(response);
                     }
                 }
@@ -215,8 +235,11 @@ impl Driver {
         if self.closed {
             return Ok(());
         }
+
         self.input.take();
+
         let started = Instant::now();
+
         loop {
             if let Some(status) = self
                 .child
@@ -225,25 +248,31 @@ impl Driver {
             {
                 self.closed = true;
                 self.output.take();
+
                 if !status.success() {
                     return Err(protocol("driver exited unsuccessfully during cleanup"));
                 }
+
                 return Ok(());
             }
+
             if started.elapsed() >= timeout {
                 if let Ok(pid) = i32::try_from(self.child.id()) {
                     let _signal = killpg(Pid::from_raw(pid), Signal::SIGKILL);
                 }
+
                 let _kill = self.child.kill();
                 let _wait = self.child.wait();
                 self.closed = true;
                 self.output.take();
+
                 return Err(transport(
                     "close",
                     false,
                     io::Error::from(io::ErrorKind::TimedOut),
                 ));
             }
+
             thread::sleep(Duration::from_millis(5));
         }
     }
@@ -274,6 +303,7 @@ fn nonblocking(file: &impl AsFd) -> Result<()> {
             io::Error::from_raw_os_error(error as i32),
         );
     })?;
+
     return Ok(());
 }
 
@@ -293,7 +323,9 @@ fn ready(
             })?;
         let timeout = PollTimeout::try_from(remaining.min(Duration::from_secs(60)))
             .map_err(|_| return protocol("invalid driver poll duration"))?;
+
         let mut descriptors = [PollFd::new(file.as_fd(), flags)];
+
         match poll(&mut descriptors, timeout) {
             Ok(0) | Err(Errno::EINTR) => {}
             Ok(_) => return Ok(()),

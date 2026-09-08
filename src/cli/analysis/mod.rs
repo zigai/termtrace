@@ -5,6 +5,7 @@ use miette::Result;
 use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
+
 use args::AnalyzeSubcommand;
 
 mod replay;

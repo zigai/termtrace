@@ -3,8 +3,8 @@
 use std::fmt::{self, Display, Formatter, Write};
 use std::mem;
 
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use termtrace_model::artifact::save::SemanticFontRole;
 use termtrace_model::terminal::state::{
     CellState, CellStyle, ColorSpec, CursorStyle, Rgb, SemanticState, WideKind,
@@ -12,8 +12,8 @@ use termtrace_model::terminal::state::{
 
 use crate::error::Result;
 use crate::font::{
-    SEMANTIC_RASTER_SYMBOLS_FONT_FAMILY, SEMANTIC_RASTER_TEXT_FONT_FAMILY,
-    SEMANTIC_SYMBOLS_FONT_FAMILY, SEMANTIC_TEXT_FONT_FAMILY, SemanticFontSet, semantic_font_set,
+    semantic_font_set, SemanticFontSet, SEMANTIC_RASTER_SYMBOLS_FONT_FAMILY,
+    SEMANTIC_RASTER_TEXT_FONT_FAMILY, SEMANTIC_SYMBOLS_FONT_FAMILY, SEMANTIC_TEXT_FONT_FAMILY,
 };
 
 /// Stable semantic SVG renderer identity.
@@ -53,12 +53,16 @@ pub(super) fn render_svg_scene(
     let mut svg = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" role=\"img\" data-truth-layer=\"semantic_rendering\" data-renderer=\"{SEMANTIC_SVG_RENDERER}\">\n"
     );
+
     let font_set = semantic_font_set()?;
+
     if embed_font {
         write_font_faces(&mut svg, font_set);
     }
+
     write_scene_content(&mut svg, state, font_set, embed_font);
     svg.push_str("</svg>\n");
+
     return Ok(svg.into_bytes());
 }
 
@@ -73,6 +77,7 @@ pub(super) fn write_scene_content(
         "<rect width=\"100%\" height=\"100%\" fill=\"{}\"/>",
         HexColor(state.colors.background)
     );
+
     for row in &state.grid {
         for cell in &row.cells {
             let Some(resolved) = resolve_cell(state, font_set, row.row, cell, embed_font) else {
@@ -81,6 +86,7 @@ pub(super) fn write_scene_content(
             write_cell(svg, state.colors.background, &resolved);
         }
     }
+
     write_cursor(svg, state, font_set, embed_font);
 }
 
@@ -113,11 +119,13 @@ fn resolve_cell<'cell>(
         WideKind::Wide => u32::from(SEMANTIC_CELL_WIDTH).saturating_mul(2),
         WideKind::SpacerTail | WideKind::SpacerHead => return None,
     };
+
     let mut foreground = resolve_color(
         cell.style.foreground,
         state.colors.foreground,
         &state.colors.palette,
     );
+
     let mut background = resolve_color(
         cell.style.background,
         state.colors.background,
@@ -126,14 +134,17 @@ fn resolve_cell<'cell>(
     if cell.style.inverse {
         mem::swap(&mut foreground, &mut background);
     }
+
     let underline_color = resolve_color(
         cell.style.underline_color,
         foreground,
         &state.colors.palette,
     );
+
     let role = select_font_role(font_set, &cell.style, &cell.grapheme);
     let (font_size, baseline) = font_geometry(role);
     let (font_family, weight, font_style) = font_attributes(role, embed_font);
+
     return Some(ResolvedCell {
         cell,
         x: u32::from(cell.column).saturating_mul(u32::from(SEMANTIC_CELL_WIDTH)),
@@ -168,12 +179,15 @@ fn write_cell(svg: &mut String, canvas_background: Rgb, resolved: &ResolvedCell<
             HexColor(resolved.background)
         );
     }
+
     if resolved.cell.style.invisible {
         return;
     }
+
     if !resolved.cell.grapheme.is_empty() {
         write_glyph(svg, resolved, resolved.foreground);
     }
+
     write_decorations(svg, resolved);
 }
 
@@ -218,9 +232,11 @@ fn write_decorations(svg: &mut String, resolved: &ResolvedCell<'_>) {
         ),
         _ => {}
     }
+
     if resolved.cell.style.strikethrough {
         write_decoration_line(svg, resolved, 14, resolved.foreground, "");
     }
+
     if resolved.cell.style.overline {
         write_decoration_line(svg, resolved, 1, resolved.foreground, "");
     }
@@ -248,6 +264,7 @@ fn write_curly_underline(svg: &mut String, resolved: &ResolvedCell<'_>) {
     let y = resolved.y.saturating_add(22);
     let upper_y = y.saturating_sub(1);
     let lower_y = y.saturating_add(1);
+
     let mut path = format!("M {} {y}", resolved.x);
     for start in (resolved.x..resolved.x.saturating_add(resolved.span)).step_by(3) {
         let _ = write!(
@@ -258,6 +275,7 @@ fn write_curly_underline(svg: &mut String, resolved: &ResolvedCell<'_>) {
             start.saturating_add(3)
         );
     }
+
     let _ = writeln!(
         svg,
         "<path d=\"{path}\" fill=\"none\" stroke=\"{}\" stroke-width=\"1\" opacity=\"{}\"/>",
@@ -275,6 +293,7 @@ fn write_cursor(
     if !state.cursor.visible || !state.cursor.in_viewport {
         return;
     }
+
     let (Some(column), Some(row)) = (state.cursor.column, state.cursor.row) else {
         return;
     };
@@ -283,10 +302,12 @@ fn write_cursor(
         let Some(lead_column) = column.checked_sub(1) else {
             return;
         };
+
         lead_column
     } else {
         column
     };
+
     let Some(row_state) = state
         .grid
         .iter()
@@ -305,6 +326,7 @@ fn write_cursor(
         return;
     };
     let cursor_color = state.colors.cursor.unwrap_or(state.colors.foreground);
+
     match state.cursor.style {
         CursorStyle::Bar => {
             let _ = writeln!(
@@ -342,6 +364,7 @@ fn write_cursor(
                 SEMANTIC_CELL_HEIGHT,
                 HexColor(cursor_color)
             );
+
             if !cell.grapheme.is_empty() && !cell.style.invisible {
                 write_glyph(svg, &resolved, resolved.background);
             }
@@ -365,9 +388,11 @@ fn is_terminal_graphic(grapheme: &str) -> bool {
     let Some(character) = characters.next() else {
         return false;
     };
+
     if characters.next().is_some() {
         return false;
     }
+
     return ('\u{2500}'..='\u{257f}').contains(&character)
         || ('\u{2580}'..='\u{259f}').contains(&character);
 }
@@ -387,6 +412,7 @@ pub(super) fn write_font_faces(svg: &mut String, font_set: &SemanticFontSet) {
             ") format('truetype');font-weight:{weight};font-style:{style}}}"
         );
     }
+
     svg.push_str("</style>\n");
 }
 
@@ -401,12 +427,15 @@ pub(super) fn select_font_role(
         (false, true) => SemanticFontRole::Italic,
         (true, true) => SemanticFontRole::BoldItalic,
     };
+
     if font_set.supports_grapheme(primary, grapheme) {
         return primary;
     }
+
     if font_set.supports_grapheme(SemanticFontRole::SymbolsFallback, grapheme) {
         return SemanticFontRole::SymbolsFallback;
     }
+
     return primary;
 }
 
@@ -414,6 +443,7 @@ fn font_geometry(role: SemanticFontRole) -> (u16, u16) {
     if role == SemanticFontRole::SymbolsFallback {
         return (SEMANTIC_SYMBOLS_FONT_SIZE, SEMANTIC_SYMBOLS_BASELINE);
     }
+
     return (SEMANTIC_FONT_SIZE, SEMANTIC_TEXT_BASELINE);
 }
 
@@ -488,6 +518,7 @@ impl Display for EscapedXml<'_> {
                 _ => f.write_char(ch)?,
             }
         }
+
         return Ok(());
     }
 }
@@ -541,6 +572,7 @@ mod tests {
                 SemanticFontRole::SymbolsFallback
             );
         }
+
         assert_eq!(
             select_font_role(font_set, &regular, "\u{30000}"),
             SemanticFontRole::Regular
@@ -571,15 +603,18 @@ mod tests {
         let second_png = render_png(&state).expect("render second PNG");
         assert_eq!(first_png, second_png);
     }
+
     #[test]
     fn semantic_layout_constants_match_bundled_font_metrics() {
         let font_set = semantic_font_set().expect("load font set");
         let regular =
             ttf_parser::Face::parse(font_set.regular_face_bytes(), 0).expect("parse regular font");
+
         let advance = regular
             .glyph_index('A')
             .and_then(|g| return regular.glyph_hor_advance(g))
             .expect("glyph advance");
+
         let scaled_advance = (f32::from(advance) * (SEMANTIC_FONT_SIZE as f32)
             / f32::from(regular.units_per_em()))
         .round() as u16;
@@ -588,17 +623,20 @@ mod tests {
         let symbols =
             ttf_parser::Face::parse(font_set.face_bytes(SemanticFontRole::SymbolsFallback), 0)
                 .expect("parse symbols font");
+
         let symbols_height = (f32::from(symbols.ascender() - symbols.descender())
             * (SEMANTIC_SYMBOLS_FONT_SIZE as f32)
             / f32::from(symbols.units_per_em()))
         .round() as u16;
         assert!(symbols_height <= SEMANTIC_CELL_HEIGHT);
     }
+
     #[test]
     fn terminal_graphics_require_one_scalar_in_a_terminal_graphics_range() {
         for grapheme in ["─", "╿", "▀", "▟"] {
             assert!(is_terminal_graphic(grapheme));
         }
+
         for grapheme in ["A", "──", "▀\u{fe0f}", ""] {
             assert!(!is_terminal_graphic(grapheme));
         }

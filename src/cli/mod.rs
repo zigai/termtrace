@@ -4,7 +4,7 @@ use std::{io, process::ExitCode};
 
 use clap::FromArgMatches as _;
 use tracing_subscriber::{
-    EnvFilter, fmt, layer::SubscriberExt, registry as tracing_registry, util::SubscriberInitExt,
+    fmt, layer::SubscriberExt, registry as tracing_registry, util::SubscriberInitExt, EnvFilter,
 };
 
 mod agent;
@@ -25,10 +25,10 @@ mod tmux;
 mod tooling;
 
 use command::{
-    Cli, command_contract, preserves_requested_output, requested_response_mode, root_command,
+    command_contract, preserves_requested_output, requested_response_mode, root_command, Cli,
 };
 use output::{
-    ResolvedResponseMode, ResponseMode, ResponseWriter, finish_response, write_clap_error,
+    finish_response, write_clap_error, ResolvedResponseMode, ResponseMode, ResponseWriter,
 };
 
 fn init_diagnostics(level: tracing::Level) {
@@ -49,21 +49,27 @@ pub(crate) fn run() -> ExitCode {
         Ok(matches) => matches,
         Err(error) => return write_clap_error(error, requested_mode),
     };
+
     let (command_type, mutating) = command_contract(&matches);
     let cli = match Cli::from_arg_matches(&matches) {
         Ok(cli) => cli,
         Err(error) => return write_clap_error(error, requested_mode),
     };
+
     let response_mode =
         if cli.response == ResponseMode::Auto && preserves_requested_output(&cli.command) {
             ResolvedResponseMode::Full
         } else {
             cli.response.resolve()
         };
+
     let mut response = ResponseWriter::new(response_mode, cli.fields, command_type, mutating);
+
     if response_mode != ResolvedResponseMode::Quiet {
         init_diagnostics(cli.log);
     }
+
     let result = dispatch::dispatch(&mut response, cli.command);
+
     return finish_response(response, result);
 }

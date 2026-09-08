@@ -7,18 +7,22 @@ pub(in crate::cli) fn run_restart(
     if arguments.timeout_ms == 0 {
         return Err(miette::miette!("--timeout-ms must be greater than zero"));
     }
+
     let registry = SessionRegistry::open_default().into_diagnostic()?;
     let overrides = restart_overrides_from_args(&arguments)?;
     let encoded_overrides = serde_json::to_string(&overrides).into_diagnostic()?;
     let predecessor_entry = registry.resolve(&arguments.name).into_diagnostic()?;
     let predecessor = predecessor_entry.session_path();
     let timeout = Duration::from_millis(arguments.timeout_ms);
+
     if !predecessor.join("completion.json").is_file() {
         request(&predecessor, ControlCommand::Stop).into_diagnostic()?;
     }
+
     let completion = wait_for_completion(&predecessor, timeout).into_diagnostic()?;
     let predecessor_manifest_bytes =
         fs_err::read(predecessor.join("session.json")).into_diagnostic()?;
+
     let expected_lineage = SessionLineage {
         predecessor_session_id: predecessor_entry.session_id,
         predecessor_manifest_hash: manifest_hash(&predecessor_manifest_bytes),
@@ -45,7 +49,9 @@ pub(in crate::cli) fn run_restart(
         .stderr(Stdio::from(stderr))
         .spawn()
         .into_diagnostic()?;
+
     let deadline = Instant::now() + timeout;
+
     loop {
         if paths.session.join("session.json").is_file()
             && recorder_identity(&paths.session).is_some()
@@ -57,6 +63,7 @@ pub(in crate::cli) fn run_restart(
                     paths.session.display()
                 ));
             }
+
             let successor = registry
                 .retarget(
                     &arguments.name,
@@ -71,8 +78,10 @@ pub(in crate::cli) fn run_restart(
                         paths.stderr_log.display(),
                     );
                 })?;
+
             let predecessor_display = predecessor.display().to_string();
             let successor_display = successor.session_path().display().to_string();
+
             return write_json_line(
                 response,
                 &serde_json::json!({
@@ -95,6 +104,7 @@ pub(in crate::cli) fn run_restart(
                 }),
             );
         }
+
         if let Some(status) = recorder.try_wait().into_diagnostic()? {
             return Err(miette::miette!(
                 "restart successor exited before readiness with {status}; alias remains bound to predecessor; recoverable session candidate: {}; stdout log: {}; stderr log: {}",
@@ -103,6 +113,7 @@ pub(in crate::cli) fn run_restart(
                 paths.stderr_log.display()
             ));
         }
+
         if Instant::now() >= deadline {
             return Err(miette::miette!(
                 "restart successor did not become ready within {} ms; alias remains bound to predecessor; recoverable orphan: {}; stdout log: {}; stderr log: {}",
@@ -112,6 +123,7 @@ pub(in crate::cli) fn run_restart(
                 paths.stderr_log.display()
             ));
         }
+
         thread::sleep(Duration::from_millis(10));
     }
 }
@@ -139,8 +151,10 @@ pub(super) fn restart_record_arguments(
         arguments.push(OsString::from("--environment-spec"));
         arguments.push(path.as_os_str().to_os_string());
     }
+
     arguments.push(OsString::from("--"));
     arguments.push(OsString::from("/bin/true"));
+
     return arguments;
 }
 
@@ -156,11 +170,13 @@ pub(super) fn restarted_record_options(
     let completion = wait_for_completion(predecessor, Duration::ZERO).into_diagnostic()?;
     let event_log =
         EventLogSummary::read(predecessor.join(&manifest.event_log)).into_diagnostic()?;
+
     let working_directory = manifest
         .working_directory
         .as_ref()
         .map(|value| return PathBuf::from(OsString::from_vec(value.as_bytes().to_vec())))
         .ok_or_else(|| miette::miette!("predecessor has no effective working directory"))?;
+
     if manifest.geometry.cols == 0
         || manifest.geometry.rows == 0
         || manifest.geometry.pixel_width % manifest.geometry.cols != 0
@@ -170,6 +186,7 @@ pub(super) fn restarted_record_options(
             "predecessor pixel geometry is not an integral cell grid"
         ));
     }
+
     let ghostty_profile = manifest
         .ghostty_visual
         .as_ref()
@@ -180,6 +197,7 @@ pub(super) fn restarted_record_options(
                     provenance.replay_profile
                 ));
             }
+
             return fs_err::read(predecessor.join(GHOSTTY_REPLAY_PROFILE_NAME))
                 .map(|replay_profile| {
                     return restore_ghostty_profile(replay_profile, provenance.clone());
@@ -188,6 +206,7 @@ pub(super) fn restarted_record_options(
                 .into_diagnostic();
         })
         .transpose()?;
+
     let term = event_log.header.term.clone();
     let environment = if let Some(environment) = environment_override {
         let effective = EffectiveEnvironment::resolve(&environment, &term).into_diagnostic()?;
@@ -198,10 +217,12 @@ pub(super) fn restarted_record_options(
                 "supplied environment does not match the predecessor commitment; pass --allow-environment-change for an intentional successor override"
             ));
         }
+
         environment
     } else {
         restart_environment(&manifest, &term, predecessor)?
     };
+
     let mut options = RecordOptions {
         failure_policy: manifest.failure_policy,
         output_directory,
@@ -260,6 +281,7 @@ pub(super) fn restarted_record_options(
         },
     };
     apply_restart_overrides(&mut options, overrides)?;
+
     return Ok(options);
 }
 
@@ -276,6 +298,7 @@ pub(super) fn restart_environment(
         color: policy.color,
         ..EnvironmentSpec::default()
     };
+
     for name in &policy.explicit_names {
         let value = env::var_os(name).ok_or_else(|| {
             return miette::miette!(
@@ -286,12 +309,14 @@ pub(super) fn restart_environment(
             .set
             .insert(name.clone(), ByteString::from(value.as_os_str().as_bytes()));
     }
+
     let effective = EffectiveEnvironment::resolve(&environment, term).into_diagnostic()?;
     if !matches_predecessor_environment(effective, manifest, predecessor)? {
         return Err(miette::miette!(
             "current environment does not match the predecessor's committed effective environment; exact restart refused"
         ));
     }
+
     return Ok(environment);
 }
 
@@ -304,9 +329,11 @@ fn matches_predecessor_environment(
     if effective.policy().effective_digest == manifest.child_environment.effective_digest {
         return Ok(true);
     }
+
     effective
         .set_recording_session(predecessor)
         .into_diagnostic()?;
+
     return Ok(effective.policy().effective_digest == manifest.child_environment.effective_digest);
 }
 
@@ -318,6 +345,7 @@ pub(super) fn restart_overrides_from_args(arguments: &RestartArgs) -> Result<Res
     {
         return Err(miette::miette!("restart command must not be empty"));
     }
+
     return Ok(RestartOverrides {
         cwd: arguments
             .cwd
@@ -362,12 +390,14 @@ pub(super) fn apply_restart_overrides(
         options.working_directory =
             Some(PathBuf::from(OsString::from_vec(cwd.as_bytes().to_vec())));
     }
+
     if let Some(command) = &overrides.command {
         options.command = command
             .iter()
             .map(|value| return OsString::from_vec(value.as_bytes().to_vec()))
             .collect();
     }
+
     options.cols = overrides.cols.unwrap_or(options.cols);
     options.rows = overrides.rows.unwrap_or(options.rows);
     options.cell_width_px = overrides.cell_width.unwrap_or(options.cell_width_px);
@@ -381,6 +411,7 @@ pub(super) fn apply_restart_overrides(
             "restart geometry values must be greater than zero"
         ));
     }
+
     if overrides.cols.is_some()
         || overrides.rows.is_some()
         || overrides.cell_width.is_some()
@@ -388,9 +419,11 @@ pub(super) fn apply_restart_overrides(
     {
         options.geometry_provenance = GeometryProvenance::default();
     }
+
     if let Some(term) = &overrides.term {
         options.term.clone_from(term);
     }
+
     if overrides.durability_max_interval_ms == Some(0)
         || overrides.durability_max_uncommitted_bytes == Some(0)
     {
@@ -398,6 +431,7 @@ pub(super) fn apply_restart_overrides(
             "bounded durability thresholds must be greater than zero"
         ));
     }
+
     if let Some(mode) = overrides.durability {
         if !matches!(mode, DurabilityModeArg::Bounded)
             && (overrides.durability_max_interval_ms.is_some()
@@ -407,10 +441,12 @@ pub(super) fn apply_restart_overrides(
                 "durability thresholds require --durability bounded"
             ));
         }
+
         let interval = overrides
             .durability_max_interval_ms
             .or(options.durability_policy.maximum_interval_ms)
             .unwrap_or(50);
+
         let bytes = overrides
             .durability_max_uncommitted_bytes
             .or(options.durability_policy.maximum_uncommitted_bytes)
@@ -424,13 +460,16 @@ pub(super) fn apply_restart_overrides(
                 "durability thresholds require bounded predecessor policy or --durability bounded"
             ));
         }
+
         if let Some(value) = overrides.durability_max_interval_ms {
             options.durability_policy.maximum_interval_ms = Some(value);
         }
+
         if let Some(value) = overrides.durability_max_uncommitted_bytes {
             options.durability_policy.maximum_uncommitted_bytes = Some(value);
         }
     }
+
     if !overrides.provenance_environment.is_empty()
         && !matches!(overrides.provenance, Some(ProvenancePolicyArg::Custom))
     {
@@ -438,11 +477,13 @@ pub(super) fn apply_restart_overrides(
             "--provenance-env requires --provenance custom"
         ));
     }
+
     if let Some(kind) = overrides.provenance {
         options.provenance_policy = ProvenancePolicy {
             kind: kind.into(),
             environment: overrides.provenance_environment.iter().cloned().collect(),
         };
     }
+
     return Ok(());
 }

@@ -23,6 +23,7 @@ use crate::{Error, Result};
 /// Returns an error when either selector is missing/ambiguous or replay fails.
 pub fn diff_states(log: &EventLog, from: StatePoint, to: StatePoint) -> Result<SemanticDiff> {
     let (difference, _, _) = diff_states_with_semantic_states(log, from, to)?;
+
     return Ok(difference);
 }
 
@@ -46,6 +47,7 @@ pub fn diff_session_states_with_semantic_states(
     let from_inspection = inspections
         .pop()
         .ok_or_else(|| return diff_error("missing earlier diff endpoint"))?;
+
     return Ok(diff_inspections_with_semantic_states(
         from,
         to,
@@ -71,6 +73,7 @@ pub fn diff_states_with_semantic_states(
     let from_inspection = inspections
         .pop()
         .ok_or_else(|| return diff_error("missing earlier diff endpoint"))?;
+
     return Ok(diff_inspections_with_semantic_states(
         from,
         to,
@@ -91,30 +94,37 @@ pub fn diff_inspections_with_semantic_states(
         (from_inspection.state.cols, from_inspection.state.rows),
         (to_inspection.state.cols, to_inspection.state.rows),
     );
+
     let cursor = changed(
         from_inspection.state.cursor.clone(),
         to_inspection.state.cursor.clone(),
     );
+
     let modes = changed(
         from_inspection.state.modes.clone(),
         to_inspection.state.modes.clone(),
     );
+
     let colors = changed(
         from_inspection.state.colors.clone(),
         to_inspection.state.colors.clone(),
     );
+
     let active_style = changed(
         from_inspection.state.active_style.clone(),
         to_inspection.state.active_style.clone(),
     );
+
     let metadata = changed(
         from_inspection.state.metadata.clone(),
         to_inspection.state.metadata.clone(),
     );
+
     let presented = changed(
         from_inspection.record.presented,
         to_inspection.record.presented,
     );
+
     let any_changed = geometry.is_some()
         || cursor.is_some()
         || modes.is_some()
@@ -123,6 +133,7 @@ pub fn diff_inspections_with_semantic_states(
         || metadata.is_some()
         || presented.is_some()
         || !rows.is_empty();
+
     let difference = SemanticDiff {
         from: endpoint(from, &from_inspection),
         to: endpoint(to, &to_inspection),
@@ -136,6 +147,7 @@ pub fn diff_inspections_with_semantic_states(
         presented,
         rows,
     };
+
     return (difference, from_inspection.state, to_inspection.state);
 }
 
@@ -146,6 +158,7 @@ pub fn diff_inspections_with_semantic_states(
 /// Returns an error when replay fails or a marker is missing/ambiguous.
 pub fn inspect_point(log: &EventLog, point: &StatePoint) -> Result<StateInspection> {
     let selector = state_selector(log, point)?;
+
     return inspect(log, selector);
 }
 
@@ -154,6 +167,7 @@ fn inspect_points(log: &EventLog, points: &[StatePoint]) -> Result<Vec<StateInsp
         .iter()
         .map(|point| return state_selector(log, point))
         .collect::<Result<Vec<_>>>()?;
+
     return inspect_many(log, &selectors);
 }
 
@@ -176,9 +190,11 @@ fn unique_marker(log: &EventLog, label: &str) -> Result<u64> {
         .next()
         .map(|record| return record.seq)
         .ok_or_else(|| return diff_error("marker does not exist"))?;
+
     if matches.next().is_some() {
         return Err(diff_error("marker label is ambiguous"));
     }
+
     return Ok(sequence);
 }
 
@@ -203,6 +219,7 @@ fn changed_rows(before: &SemanticState, after: &SemanticState) -> Vec<RowChange>
     let rows = before.rows.max(after.rows);
     let columns = before.cols.max(after.cols);
     let mut row_changes = Vec::new();
+
     for row in 0..rows {
         let before_row = before.grid.get(usize::from(row));
         let after_row = after.grid.get(usize::from(row));
@@ -210,16 +227,20 @@ fn changed_rows(before: &SemanticState, after: &SemanticState) -> Vec<RowChange>
             before_row.map(|value| return value.soft_wrapped),
             after_row.map(|value| return value.soft_wrapped),
         );
+
         let wrap_continuation = changed(
             before_row.map(|value| return value.wrap_continuation),
             after_row.map(|value| return value.wrap_continuation),
         );
+
         let mut cells = Vec::new();
         for column in 0..columns {
             let before_cell =
                 before_row.and_then(|value| return value.cells.get(usize::from(column)));
+
             let after_cell =
                 after_row.and_then(|value| return value.cells.get(usize::from(column)));
+
             if before_cell != after_cell {
                 cells.push(CellChange {
                     column,
@@ -228,6 +249,7 @@ fn changed_rows(before: &SemanticState, after: &SemanticState) -> Vec<RowChange>
                 });
             }
         }
+
         if !cells.is_empty() || soft_wrapped.is_some() || wrap_continuation.is_some() {
             row_changes.push(RowChange {
                 row,
@@ -237,6 +259,7 @@ fn changed_rows(before: &SemanticState, after: &SemanticState) -> Vec<RowChange>
             });
         }
     }
+
     return row_changes;
 }
 

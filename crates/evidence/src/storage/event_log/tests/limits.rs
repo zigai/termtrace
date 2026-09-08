@@ -7,7 +7,7 @@ use crate::event_log::{EventLogSummary, EventLogWriter, SessionClock};
 use crate::storage::Error;
 
 use super::{
-    super::reader::{DEFAULT_EVENT_LOG_LIMITS, EventLogLimits, parse_event_log_with_limits},
+    super::reader::{parse_event_log_with_limits, EventLogLimits, DEFAULT_EVENT_LOG_LIMITS},
     support::{header, secure_directory},
 };
 
@@ -71,6 +71,7 @@ fn enforces_aggregate_event_log_limits_before_retention() {
                 reason: "cancelled".to_owned(),
             });
         }
+
         return Ok(());
     })
     .expect_err("streaming validation must observe cancellation between records");

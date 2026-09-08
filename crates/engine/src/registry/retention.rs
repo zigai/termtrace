@@ -1,9 +1,8 @@
 use super::{
-    DetachedSessionPaths, Duration, Error, ErrorKind, GarbageCollectionCandidate,
-    GarbageCollectionReport, HashSet, OsStr, Path, PathBuf, RegistryRecord, Result,
-    SessionRegistry, SystemTime, UNIX_EPOCH, Uuid, ensure_owner_directory, fs, read_manifest,
-    read_registry_record_nofollow, recorder_identity, registry_error, sync_directory,
-    validate_owner_directory,
+    ensure_owner_directory, fs, read_manifest, read_registry_record_nofollow, recorder_identity,
+    registry_error, sync_directory, validate_owner_directory, DetachedSessionPaths, Duration,
+    Error, ErrorKind, GarbageCollectionCandidate, GarbageCollectionReport, HashSet, OsStr, Path,
+    PathBuf, RegistryRecord, Result, SessionRegistry, SystemTime, Uuid, UNIX_EPOCH,
 };
 use std::cmp::Reverse;
 use termtrace_evidence::session::validate_completed_session;
@@ -20,13 +19,16 @@ impl SessionRegistry {
     pub fn allocate_detached_paths(&self) -> Result<DetachedSessionPaths> {
         let sessions = self.state_root.join("sessions");
         let diagnostics = self.state_root.join("supervisor");
+
         ensure_owner_directory(&sessions)?;
         ensure_owner_directory(&diagnostics)?;
+
         loop {
             let identity = Uuid::now_v7();
             let session = sessions.join(format!("{identity}.termtrace"));
             let stdout_log = diagnostics.join(format!("{identity}.stdout"));
             let stderr_log = diagnostics.join(format!("{identity}.stderr"));
+
             if !session.exists() && !stdout_log.exists() && !stderr_log.exists() {
                 return Ok(DetachedSessionPaths {
                     session,
@@ -93,17 +95,22 @@ impl SessionRegistry {
             removed_stale_aliases: 0,
             reclaimed_bytes: 0,
         };
+
         if !sessions.exists() {
             return Ok(report);
         }
+
         validate_owner_directory(&sessions)?;
+
         let (registered, corrupt_entries, removed_stale_aliases) =
             self.reap_and_resolve_protected_paths(apply)?;
         report.skipped_corrupt_registry_entries = corrupt_entries;
         report.removed_stale_aliases = removed_stale_aliases;
+
         if corrupt_entries != 0 {
             return Ok(report);
         }
+
         let mut completed_sessions = Vec::new();
         for item in fs::read_dir(&sessions).map_err(|source| {
             return Error::Filesystem {
@@ -117,6 +124,7 @@ impl SessionRegistry {
                     source,
                 };
             })?;
+
             let session = item.path();
             let metadata = fs::symlink_metadata(&session).map_err(|source| {
                 return Error::Filesystem {
@@ -128,16 +136,20 @@ impl SessionRegistry {
                 report.skipped_non_completed = report.skipped_non_completed.saturating_add(1);
                 continue;
             }
+
             let canonical = session.canonicalize().map_err(|source| {
                 return Error::Filesystem {
                     path: session.clone(),
                     source,
                 };
             })?;
+
             let protected = registered.contains(&canonical) || registered.contains(&session);
+
             if protected {
                 report.protected_registered = report.protected_registered.saturating_add(1);
             }
+
             let completion_path = session.join("completion.json");
             let Ok(completion) = validate_completed_session(&session) else {
                 report.skipped_non_completed = report.skipped_non_completed.saturating_add(1);
@@ -147,15 +159,19 @@ impl SessionRegistry {
                 report.skipped_non_completed = report.skipped_non_completed.saturating_add(1);
                 continue;
             };
+
             if completion.session_id != manifest.session_id {
                 report.skipped_non_completed = report.skipped_non_completed.saturating_add(1);
                 continue;
             }
+
             let bytes = directory_bytes_nofollow(&session)?;
             report.completed_bytes_before = report.completed_bytes_before.saturating_add(bytes);
+
             if protected {
                 continue;
             }
+
             let completed_at = fs::symlink_metadata(&completion_path)
                 .and_then(|metadata| return metadata.modified())
                 .map_err(|source| {
@@ -166,11 +182,14 @@ impl SessionRegistry {
                 })?;
             completed_sessions.push((session, completion.session_id, completed_at, bytes));
         }
+
         completed_sessions.sort_by_key(|entry| return Reverse(entry.2));
+
         let retention = Duration::from_secs(older_than_days.saturating_mul(86_400));
         let cutoff = SystemTime::now()
             .checked_sub(retention)
             .unwrap_or(SystemTime::UNIX_EPOCH);
+
         report.completed_bytes_after_plan = report.completed_bytes_before;
         for (index, (session, session_id, completed, bytes)) in
             completed_sessions.into_iter().enumerate().rev()
@@ -182,8 +201,10 @@ impl SessionRegistry {
             {
                 continue;
             }
+
             report.completed_bytes_after_plan =
                 report.completed_bytes_after_plan.saturating_sub(bytes);
+
             let completed_unix_ns = completed
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -195,12 +216,14 @@ impl SessionRegistry {
                 bytes,
             });
         }
+
         report.quota_excess_bytes = max_completed_bytes.map_or(0, |limit| {
             return report.completed_bytes_after_plan.saturating_sub(limit);
         });
         if !apply {
             return Ok(report);
         }
+
         let supervisor = self.state_root.join("supervisor");
         for candidate in &report.candidates {
             validate_gc_candidate(candidate)?;
@@ -210,10 +233,13 @@ impl SessionRegistry {
                     source,
                 };
             })?;
+
             report.removed_sessions = report.removed_sessions.saturating_add(1);
             report.reclaimed_bytes = report.reclaimed_bytes.saturating_add(candidate.bytes);
+
             for extension in ["stdout", "stderr"] {
                 let log = supervisor.join(format!("{}.{extension}", candidate.session_id));
+
                 match fs::remove_file(&log) {
                     Ok(()) => {
                         report.removed_supervisor_files =
@@ -224,10 +250,13 @@ impl SessionRegistry {
                 }
             }
         }
+
         sync_directory(&sessions)?;
+
         if supervisor.is_dir() {
             sync_directory(&supervisor)?;
         }
+
         return Ok(report);
     }
 
@@ -242,6 +271,7 @@ impl SessionRegistry {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
+
         for item in fs::read_dir(&self.directory).map_err(|source| {
             return Error::Filesystem {
                 path: self.directory.clone(),
@@ -254,20 +284,25 @@ impl SessionRegistry {
                     source,
                 };
             })?;
+
             let path = item.path();
+
             if path.extension() != Some(OsStr::new("json")) {
                 continue;
             }
+
             let Ok(record) = read_registry_record_nofollow(&path) else {
                 corrupt_entries = corrupt_entries.saturating_add(1);
                 continue;
             };
+
             match record {
                 RegistryRecord::Reservation(reservation) => {
                     if reservation.lease_expires_unix_ns < now_unix_ns {
                         if apply {
                             let _ = fs::remove_file(&path);
                         }
+
                         removed_stale_aliases = removed_stale_aliases.saturating_add(1);
                     } else {
                         paths.insert(reservation.session_path());
@@ -293,19 +328,23 @@ impl SessionRegistry {
                         if apply {
                             let _ = fs::remove_file(&path);
                         }
+
                         removed_stale_aliases = removed_stale_aliases.saturating_add(1);
                     } else {
                         if let Ok(canonical) = session.canonicalize() {
                             paths.insert(canonical);
                         }
+
                         paths.insert(session);
                     }
                 }
             }
         }
+
         if apply && removed_stale_aliases > 0 {
             sync_directory(&self.directory)?;
         }
+
         return Ok((paths, corrupt_entries, removed_stale_aliases));
     }
 }
@@ -324,6 +363,7 @@ pub(super) fn directory_bytes_nofollow(directory: &Path) -> Result<u64> {
                 source,
             };
         })?;
+
         let path = item.path();
         let metadata = fs::symlink_metadata(&path).map_err(|source| {
             return Error::Filesystem {
@@ -331,13 +371,16 @@ pub(super) fn directory_bytes_nofollow(directory: &Path) -> Result<u64> {
                 source,
             };
         })?;
+
         let file_type = metadata.file_type();
+
         if file_type.is_symlink() {
             return Err(registry_error(
                 "measure managed session",
                 "managed session contains a symbolic link",
             ));
         }
+
         if file_type.is_dir() {
             total = total.saturating_add(directory_bytes_nofollow(&path)?);
         } else if metadata.is_file() {
@@ -349,6 +392,7 @@ pub(super) fn directory_bytes_nofollow(directory: &Path) -> Result<u64> {
             ));
         }
     }
+
     return Ok(total);
 }
 
@@ -359,14 +403,17 @@ pub(super) fn validate_gc_candidate(candidate: &GarbageCollectionCandidate) -> R
             source,
         };
     })?;
+
     if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
         return Err(registry_error(
             "apply managed-session retention",
             "garbage-collection candidate is no longer a real directory",
         ));
     }
+
     let completion = validate_completed_session(&candidate.session)?;
     let manifest = read_manifest(&candidate.session)?;
+
     if completion.session_id != candidate.session_id || manifest.session_id != candidate.session_id
     {
         return Err(registry_error(
@@ -374,5 +421,6 @@ pub(super) fn validate_gc_candidate(candidate: &GarbageCollectionCandidate) -> R
             "garbage-collection candidate identity changed after planning",
         ));
     }
+
     return Ok(());
 }

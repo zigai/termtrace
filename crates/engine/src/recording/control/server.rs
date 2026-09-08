@@ -15,16 +15,16 @@ use std::{
 
 use nix::{
     errno::Errno,
-    poll::{PollFd, PollFlags, PollTimeout, poll},
+    poll::{poll, PollFd, PollFlags, PollTimeout},
     sys::socket::{getsockopt, sockopt::PeerCredentials},
-    unistd::{Uid, pipe, write as fd_write},
+    unistd::{pipe, write as fd_write, Uid},
 };
 
 use termtrace_model::{
     protocol::control::{
-        ActionPostconditionResult, CONTROL_PROTOCOL_VERSION, ControlData, ControlErrorDetails,
-        ControlRequest, ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES,
-        ScreenFrameFailureDetails,
+        ActionPostconditionResult, ControlData, ControlErrorDetails, ControlRequest,
+        ControlResponse, ControlResult, ScreenFrameFailureDetails, CONTROL_PROTOCOL_VERSION,
+        MAX_CONTROL_MESSAGE_BYTES,
     },
     terminal::observation::ActorBoundaries,
     terminal::screen::{FrameDetail, ScreenFrame, ScreenFrameData, ScreenFrameSource},
@@ -99,7 +99,9 @@ pub(in crate::recording) fn spawn_control_server(
             }
         })
         .map_err(|error| return terminal_error("spawn control server", error.to_string()))?;
+
     tracing::debug!(socket = socket_name, "abstract control socket ready");
+
     return Ok(ControlWorker {
         stop_accepting,
         cancel,
@@ -114,54 +116,57 @@ fn control_server_loop(
     sender: &mpsc::SyncSender<RuntimeMessage>,
 ) -> Result<()> {
     let active = AtomicUsize::new(0);
-    return thread::scope(|scope| {
+
+    return thread::scope(|scope| loop {
+        let (listener_ready, stop_accepting_ready) = {
+            let mut descriptors = [
+                PollFd::new(listener.as_fd(), PollFlags::POLLIN),
+                PollFd::new(stop_accepting.as_fd(), PollFlags::POLLIN),
+            ];
+
+            match poll(&mut descriptors, PollTimeout::NONE) {
+                Ok(_) => (poll_ready(&descriptors[0]), poll_ready(&descriptors[1])),
+                Err(Errno::EINTR) => continue,
+                Err(error) => {
+                    return Err(terminal_error("poll control socket", error.to_string()));
+                }
+            }
+        };
+        if !listener_ready && stop_accepting_ready {
+            return Ok(());
+        }
+
+        if !listener_ready {
+            continue;
+        }
+
         loop {
-            let (listener_ready, stop_accepting_ready) = {
-                let mut descriptors = [
-                    PollFd::new(listener.as_fd(), PollFlags::POLLIN),
-                    PollFd::new(stop_accepting.as_fd(), PollFlags::POLLIN),
-                ];
-                match poll(&mut descriptors, PollTimeout::NONE) {
-                    Ok(_) => (poll_ready(&descriptors[0]), poll_ready(&descriptors[1])),
-                    Err(Errno::EINTR) => continue,
-                    Err(error) => {
-                        return Err(terminal_error("poll control socket", error.to_string()));
-                    }
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    let Some(permit) = ConnectionPermit::acquire(&active, MAX_CONTROL_CONNECTIONS)
+                    else {
+                        continue;
+                    };
+                    scope.spawn(move || {
+                        let _permit = permit;
+
+                        if let Err(error) = handle_control_connection(stream, sender, cancel) {
+                            tracing::warn!(%error, "control connection failed");
+                        }
+                    });
                 }
-            };
-            if !listener_ready && stop_accepting_ready {
-                return Ok(());
-            }
-            if !listener_ready {
-                continue;
-            }
-            loop {
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        let Some(permit) =
-                            ConnectionPermit::acquire(&active, MAX_CONTROL_CONNECTIONS)
-                        else {
-                            continue;
-                        };
-                        scope.spawn(move || {
-                            let _permit = permit;
-                            if let Err(error) = handle_control_connection(stream, sender, cancel) {
-                                tracing::warn!(%error, "control connection failed");
-                            }
-                        });
-                    }
-                    Err(error) if error.kind() == ErrorKind::WouldBlock => break,
-                    Err(error) => {
-                        return Err(terminal_error(
-                            "accept control connection",
-                            error.to_string(),
-                        ));
-                    }
+                Err(error) if error.kind() == ErrorKind::WouldBlock => break,
+                Err(error) => {
+                    return Err(terminal_error(
+                        "accept control connection",
+                        error.to_string(),
+                    ));
                 }
             }
-            if stop_accepting_ready {
-                return Ok(());
-            }
+        }
+
+        if stop_accepting_ready {
+            return Ok(());
         }
     });
 }
@@ -173,12 +178,14 @@ fn handle_control_connection(
 ) -> Result<()> {
     let credentials = getsockopt(&stream, PeerCredentials)
         .map_err(|error| return terminal_error("authenticate control peer", error.to_string()))?;
+
     if credentials.uid() != Uid::effective().as_raw() {
         return Err(Error::ControlRejected {
             code: "unauthorized_peer".to_owned(),
             message: "control peer uid does not own this session".to_owned(),
         });
     }
+
     let timeout = Some(Duration::from_secs(10));
     stream
         .set_read_timeout(timeout)
@@ -193,10 +200,12 @@ fn handle_control_connection(
     .take(MAX_CONTROL_MESSAGE_BYTES + 1)
     .read_until(b'\n', &mut encoded)
     .map_err(|error| return terminal_error("read control request", error.to_string()))?;
+
     // Reachability checks connect and close without submitting a request.
     if encoded.is_empty() {
         return Ok(());
     }
+
     validate_frame(&encoded)?;
     let request: ControlRequest = serde_json::from_slice(&encoded).map_err(|source| {
         return Error::InvalidJson {
@@ -219,16 +228,20 @@ fn handle_control_connection(
             },
         );
     }
+
     let response_timeout = control_response_timeout(&request.command, Duration::from_secs(1));
     stream
         .set_write_timeout(Some(response_timeout))
         .map_err(|error| return terminal_error("configure wait response", error.to_string()))?;
+
     let (response_sender, response_receiver) = mpsc::sync_channel(1);
     let mut message = RuntimeMessage::Control {
         request,
         response: response_sender,
     };
+
     let deadline = Instant::now() + response_timeout;
+
     loop {
         match sender.try_send(message) {
             Ok(()) => break,
@@ -236,13 +249,16 @@ fn handle_control_connection(
                 if cancellation_requested(cancel)? {
                     return Ok(());
                 }
+
                 if Instant::now() >= deadline {
                     return Err(terminal_error(
                         "dispatch control request",
                         "recording actor is unresponsive",
                     ));
                 }
+
                 message = returned;
+
                 thread::sleep(Duration::from_millis(10));
             }
             Err(mpsc::TrySendError::Disconnected(_)) => {
@@ -253,6 +269,7 @@ fn handle_control_connection(
             }
         }
     }
+
     let response = loop {
         match response_receiver.recv_timeout(Duration::from_millis(50)) {
             Ok(response) => break response,
@@ -260,6 +277,7 @@ fn handle_control_connection(
                 if cancellation_requested(cancel)? {
                     return Ok(());
                 }
+
                 if Instant::now() >= deadline {
                     return Err(terminal_error(
                         "wait for control response",
@@ -275,11 +293,13 @@ fn handle_control_connection(
             }
         }
     };
+
     return write_control_response(&mut stream, &response);
 }
 
 fn cancellation_requested(cancel: &OwnedFd) -> Result<bool> {
     let mut descriptors = [PollFd::new(cancel.as_fd(), PollFlags::POLLIN)];
+
     match poll(&mut descriptors, PollTimeout::ZERO) {
         Ok(_) => return Ok(poll_ready(&descriptors[0])),
         Err(Errno::EINTR) => return Ok(false),
@@ -300,9 +320,11 @@ fn write_control_response(stream: &mut UnixStream, response: &ControlResponse) -
             source,
         };
     })?;
+
     let response_bytes = u64::try_from(encoded.len().saturating_add(1)).unwrap_or(u64::MAX);
     let encoded = if response_bytes > MAX_CONTROL_MESSAGE_BYTES {
         let (code, message, details) = oversized_response_error(response, response_bytes);
+
         serde_json::to_vec(&ControlResponse {
             version: CONTROL_PROTOCOL_VERSION,
             request_id: response.request_id,
@@ -322,6 +344,7 @@ fn write_control_response(stream: &mut UnixStream, response: &ControlResponse) -
     } else {
         encoded
     };
+
     return stream
         .write_all(&encoded)
         .and_then(|()| return stream.write_all(b"\n"))
@@ -352,6 +375,7 @@ fn oversized_response_error(
         ScreenFrameData::Spans { .. } => FrameDetail::Spans,
         ScreenFrameData::Cells { .. } => FrameDetail::Cells,
     };
+
     return (
         "screen_frame_resource_limit".to_owned(),
         format!("complete control response exceeds the {MAX_CONTROL_MESSAGE_BYTES}-byte limit"),
@@ -403,10 +427,12 @@ fn rich_response_context(
                 | ActionPostconditionResult::Idle { frame, .. }
                 | ActionPostconditionResult::Screen { frame, .. } => frame,
             };
+
             (frame, boundaries.clone(), "action_response")
         }
         _ => return None,
     };
+
     return Some((frame, boundaries, scope));
 }
 
@@ -414,6 +440,7 @@ fn actor_frame_boundaries(frame: &ScreenFrame) -> Option<ActorBoundaries> {
     let ScreenFrameSource::Actor { boundaries, .. } = &frame.source else {
         return None;
     };
+
     return Some(boundaries.clone());
 }
 
@@ -438,11 +465,14 @@ impl ControlWorker {
             Ok(_) | Err(Errno::EPIPE) => Ok(()),
             Err(error) => Err(terminal_error("cancel control server", error.to_string())),
         };
+
         let join_result = self
             .thread
             .join()
             .map_err(|_| return terminal_error("join control server", "control thread panicked"));
+
         let result = finish_with_cleanup(stop_accepting_result, cancel_result);
+
         return finish_with_cleanup(result, join_result);
     }
 }
@@ -456,7 +486,7 @@ mod tests {
         terminal::observation::ActorBoundaries, terminal::observation::CaptureQuality,
         terminal::screen::ScreenProjectionRequest,
     };
-    use termtrace_terminal::{GhosttyVt, project_screen_frame};
+    use termtrace_terminal::{project_screen_frame, GhosttyVt};
     use uuid::Uuid;
 
     fn boundaries() -> ActorBoundaries {
@@ -465,6 +495,7 @@ mod tests {
             event_hash: "a".repeat(64),
             output_bytes: 11,
         };
+
         return ActorBoundaries {
             durable: boundary.clone(),
             observed: boundary,
@@ -475,6 +506,7 @@ mod tests {
         let mut terminal = GhosttyVt::new(8, 2, 0).expect("terminal");
         terminal.write(b"READY");
         let state = terminal.snapshot().expect("semantic state");
+
         return project_screen_frame(
             &state,
             &ScreenProjectionRequest::default(),
@@ -538,14 +570,21 @@ mod tests {
                 assert!(ConnectionPermit::acquire(&active, 1).is_none());
                 barrier.wait();
                 barrier.wait();
+
                 let _permit = ConnectionPermit::acquire(&active, 1).expect("released capacity");
+
                 assert!(ConnectionPermit::acquire(&active, 1).is_none());
             });
+
             barrier.wait();
+
             drop(permit);
+
             barrier.wait();
         });
+
         let _permit = ConnectionPermit::acquire(&active, 1).expect("worker released capacity");
+
         assert!(ConnectionPermit::acquire(&active, 1).is_none());
     }
 }

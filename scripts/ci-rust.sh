@@ -4,6 +4,8 @@ set -euo pipefail
 readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
+export TERMTRACE_GHOSTTY_PREFIX="${TERMTRACE_GHOSTTY_PREFIX:-$root/vendor/ghostty/zig-out}"
+
 for file in install.sh benchmarks/*.sh scripts/*.sh examples/*.sh; do
     bash -n "$file"
 done
@@ -17,6 +19,7 @@ bash scripts/check-github-action-pins.sh
 
 cargo machete
 cargo fmt --all -- --check
+cargo statement-spacing check
 cargo fmt --manifest-path tests/consumers/rust/Cargo.toml -- --check
 cargo test --locked -p termtrace-sdk --no-default-features
 cargo clippy --locked -p termtrace-sdk --no-default-features --all-targets -- -D warnings

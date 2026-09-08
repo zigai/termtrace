@@ -8,7 +8,7 @@ use std::{
     io::{self, Read as _, Write as _},
     mem::replace,
     os::unix::fs::OpenOptionsExt as _,
-    panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
+    panic::{catch_unwind, resume_unwind, AssertUnwindSafe},
     path::{Path, PathBuf},
     result::Result as StdResult,
     thread::panicking,
@@ -30,14 +30,14 @@ use termtrace_model::{
 };
 
 use crate::{
-    Error, Result,
     assertions::{
-        AssertionError, AssertionFrameIdentity, ExpectationMismatch, SnapshotProfile,
-        assert_cursor, assert_screen_text, normalized_snapshot,
+        assert_cursor, assert_screen_text, normalized_snapshot, AssertionError,
+        AssertionFrameIdentity, ExpectationMismatch, SnapshotProfile,
     },
     client::{Screen, Session, Terminal},
     locator::{Locator, LocatorSpec},
-    protocol::{ExchangeTiming, exchange},
+    protocol::{exchange, ExchangeTiming},
+    Error, Result,
 };
 
 const MAX_SECONDARY_FAILURE_CHARS: usize = 512;
@@ -47,7 +47,7 @@ mod lifecycle;
 mod snapshot;
 
 pub use lifecycle::{
-    EvidencePolicy, FinalizationReport, SecondaryFailure, TerminalTest, TerminalTestConfig,
-    TestFailure, TestOutcome, run_terminal_test,
+    run_terminal_test, EvidencePolicy, FinalizationReport, SecondaryFailure, TerminalTest,
+    TerminalTestConfig, TestFailure, TestOutcome,
 };
-pub use snapshot::{TerminalAssertionError, assert_snapshot_file};
+pub use snapshot::{assert_snapshot_file, TerminalAssertionError};

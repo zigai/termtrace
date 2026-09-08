@@ -57,6 +57,7 @@ impl Instrumentation {
             parent_span_id,
             attributes,
         )?;
+
         return Ok(span_id);
     }
 
@@ -98,12 +99,15 @@ impl Instrumentation {
             parent_span_id,
             attributes,
         };
+
         data.validate().map_err(|reason| {
             return Error::InvalidOperation {
                 reason: reason.to_owned(),
             };
         })?;
+
         self.client.request(ControlCommand::Application { data })?;
+
         return Ok(());
     }
 }

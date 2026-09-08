@@ -14,11 +14,9 @@ fn tmux_explicit_scope_records_only_forced_or_explicit_panes() {
         server.pane_exists(&ordinary),
         "strict enforcement closed an intentionally excluded pane"
     );
-    assert!(
-        server
-            .pane_option(&ordinary, "@termtrace-session")
-            .is_empty()
-    );
+    assert!(server
+        .pane_option(&ordinary, "@termtrace-session")
+        .is_empty());
 
     let executable = server.configured_executable();
     let forced = tmux_new_window(&server, &[executable.as_str(), "tmux", "run", "--force"]);
@@ -57,6 +55,7 @@ fn tmux_session_scope_records_only_the_selected_session() {
         .get_output()
         .stdout
         .clone();
+
     let changed = compact_json_line(&changed);
     assert_eq!(changed["changed"], true);
     assert_eq!(changed["future_processes_only"], true);
@@ -69,11 +68,9 @@ fn tmux_session_scope_records_only_the_selected_session() {
     let excluded = tmux_new_session(&server, "excluded", &[]);
     server.wait_for_process_marker(&excluded, "@termtrace-excluded-pid");
     assert!(server.pane_exists(&excluded));
-    assert!(
-        server
-            .pane_option(&excluded, "@termtrace-session")
-            .is_empty()
-    );
+    assert!(server
+        .pane_option(&excluded, "@termtrace-session")
+        .is_empty());
 
     let sent = server
         .command()
@@ -103,6 +100,7 @@ fn tmux_pane_scope_records_that_pane_after_its_process_restarts() {
         .get_output()
         .stdout
         .clone();
+
     let changed = compact_json_line(&changed);
     assert_eq!(changed["scope"]["mode"], "selected");
     assert_eq!(changed["scope"]["pane_ids"][0], "%0");
@@ -152,6 +150,7 @@ fn tmux_window_scope_records_new_panes_only_in_that_window() {
         .get_output()
         .stdout
         .clone();
+
     let changed = compact_json_line(&changed);
     assert_eq!(changed["scope"]["mode"], "selected");
     assert_eq!(changed["scope"]["window_ids"][0], "@0");

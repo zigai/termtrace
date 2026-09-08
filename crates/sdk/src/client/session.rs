@@ -3,12 +3,12 @@ use super::control::{
     wire_postcondition,
 };
 use super::{
-    ActionCompletion, ActionOptions, ActionPostconditionResult, ActionResult, Child,
-    ControlCommand, ControlData, ControlRequest, ControlResult, Duration, Errno, Error, Events,
-    Evidence, InputAtom, IoError, Keyboard, Native, Output, Path, PathBuf, Pid, Pointer, Result,
-    Screen, Semantic, SessionCompletion, Signal, StableCaptureQuality, Uuid,
     derive_input_operation_id, killpg, read_manifest, send_request, send_request_response,
-    sync_directory, thread, validate_completed_session, wait_for_completion,
+    sync_directory, thread, validate_completed_session, wait_for_completion, ActionCompletion,
+    ActionOptions, ActionPostconditionResult, ActionResult, Child, ControlCommand, ControlData,
+    ControlRequest, ControlResult, Duration, Errno, Error, Events, Evidence, InputAtom, IoError,
+    Keyboard, Native, Output, Path, PathBuf, Pid, Pointer, Result, Screen, Semantic,
+    SessionCompletion, Signal, StableCaptureQuality, Uuid,
 };
 
 /// High-level live/completed session handle.
@@ -31,6 +31,7 @@ impl Session {
         } else {
             None
         };
+
         return Ok(Self {
             path,
             helper,
@@ -104,6 +105,7 @@ impl Session {
     pub fn send(&self, request: &ControlRequest) -> Result<ControlData> {
         return send_request(&self.path, request);
     }
+
     /// Apply input and evaluate its postcondition under one actor ordering point.
     pub fn act(&self, atoms: &[InputAtom], options: ActionOptions) -> Result<ActionResult> {
         validate_action_options(atoms, &options)?;
@@ -119,6 +121,7 @@ impl Session {
                 );
             })
             .collect();
+
         let mut request = ControlRequest::new(ControlCommand::Act {
             atoms: wire_atoms,
             pace_ns: exact_duration_ns("pace", options.pace)?,
@@ -127,6 +130,7 @@ impl Session {
             projection: options.projection,
         });
         request.request_id = request_id;
+
         request
             .expected_presented_state_hash
             .clone_from(&options.if_state);
@@ -147,6 +151,7 @@ impl Session {
                 ));
             }
         };
+
         let ControlData::ActionApplied {
             input,
             postcondition,
@@ -176,6 +181,7 @@ impl Session {
                 matched,
             ),
         };
+
         let result = ActionResult {
             request_id,
             input,
@@ -183,29 +189,35 @@ impl Session {
             frame,
             boundaries,
         };
+
         if !complete && !options.allow_incomplete {
             return Err(Error::PostconditionIncomplete {
                 result: Box::new(result),
             });
         }
+
         return Ok(result);
     }
 
     /// Request graceful stop and optionally wait for immutable completion.
     pub fn stop(&mut self, timeout: Option<Duration>) -> Result<Option<SessionCompletion>> {
         send_request(&self.path, &ControlRequest::new(ControlCommand::Stop))?;
+
         if let Some(timeout) = timeout {
             return self.complete(timeout).map(Some);
         }
+
         return Ok(None);
     }
 
     /// Wait for and validate immutable completion evidence.
     pub fn complete(&mut self, timeout: Duration) -> Result<SessionCompletion> {
         let completion = wait_for_completion(&self.path, timeout)?;
+
         if let Some(mut child) = self.recorder.take() {
             let _status = child.wait();
         }
+
         return Ok(completion);
     }
 
@@ -228,6 +240,7 @@ impl Session {
                     }),
                 };
             });
+
         let recorder_kill_result = child.kill().map_err(|source| {
             return Error::Filesystem {
                 path: self.path.clone(),
@@ -240,8 +253,11 @@ impl Session {
                 source,
             };
         });
+
         process_group_result?;
+
         recorder_kill_result?;
+
         return recorder_wait_result;
     }
 
@@ -261,6 +277,7 @@ impl Session {
                 };
             })?;
         }
+
         let parent = self.path.parent().map(Path::to_path_buf);
         fs_err::remove_dir_all(&self.path).map_err(|source| {
             return Error::Filesystem {
@@ -268,9 +285,11 @@ impl Session {
                 source,
             };
         })?;
+
         if let Some(parent) = parent {
             sync_directory(&parent)?;
         }
+
         return Ok(());
     }
 
@@ -284,6 +303,7 @@ impl Session {
                 }
             });
         }
+
         return path;
     }
 
@@ -307,6 +327,7 @@ mod tests {
             .args(["-c", "exit 0"])
             .spawn()
             .expect("spawn recorder stand-in");
+
         let process_path = PathBuf::from(format!("/proc/{}", child.id()));
         let session = Session {
             path: PathBuf::from("/unused"),
@@ -318,6 +339,7 @@ mod tests {
 
         let _path = session.detach();
         let deadline = Instant::now() + Duration::from_secs(1);
+
         while process_path.exists() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }

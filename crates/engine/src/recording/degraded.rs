@@ -8,12 +8,12 @@ use std::{
 };
 
 use nix::{
-    sys::signal::{Signal, killpg},
+    sys::signal::{killpg, Signal},
     unistd::Pid,
 };
 use termtrace_evidence::{artifact::write_secure, event_log::CanonicalBoundary};
 use termtrace_model::protocol::control::{
-    CONTROL_PROTOCOL_VERSION, ControlResponse, ControlResult, ProcessSignal,
+    ControlResponse, ControlResult, ProcessSignal, CONTROL_PROTOCOL_VERSION,
 };
 use termtrace_model::{execution::event::Event, value::ByteString};
 
@@ -57,14 +57,17 @@ pub(super) fn preserve_terminal(
         .event_log
         .path()
         .with_file_name("recording-health.json");
+
     let mut unrecorded_output_bytes =
         u64::try_from(actor.progress.unrecorded_output.len()).unwrap_or(u64::MAX);
+
     let mut unrecorded_input_bytes = 0_u64;
     let unrecorded = take(&mut actor.progress.unrecorded_output);
     let _mirror = actor
         .output
         .write_all(&unrecorded)
         .and_then(|()| return actor.output.flush());
+
     let mut health = RecordingHealth {
         version: 1,
         state: "degraded",
@@ -77,12 +80,15 @@ pub(super) fn preserve_terminal(
         unrecorded_input_bytes,
         reason: "recording degraded; output capture continues when storage remains writable, but input and semantic auditing are incomplete",
     };
+
     if let Ok(bytes) = serde_json::to_vec(&health) {
         let _health = write_secure(&path, &bytes);
     }
+
     let mut output_closed = actor.progress.output_closed;
     let mut exited_at = None;
     let mut signal_deadline = actor.host_signal_kill_deadline;
+
     loop {
         let message = match receiver.recv_timeout(Duration::from_millis(20)) {
             Ok(RuntimeMessage::TerminalInputClosed) => {
@@ -105,6 +111,7 @@ pub(super) fn preserve_terminal(
                     unrecorded_output_bytes = unrecorded_output_bytes
                         .saturating_add(u64::try_from(data.len()).unwrap_or(u64::MAX));
                 }
+
                 let _mirror = actor
                     .output
                     .write_all(&data)
@@ -113,6 +120,7 @@ pub(super) fn preserve_terminal(
             Ok(RuntimeMessage::Input(data)) => {
                 unrecorded_input_bytes = unrecorded_input_bytes
                     .saturating_add(u64::try_from(data.len()).unwrap_or(u64::MAX));
+
                 let _input = actor
                     .spawned
                     .writer
@@ -126,6 +134,7 @@ pub(super) fn preserve_terminal(
                 signal_deadline.get_or_insert_with(|| {
                     return Instant::now() + super::runtime::HOST_SIGNAL_GRACE_PERIOD;
                 });
+
                 // This is an external user/lifecycle signal, not recorder-error cleanup.
                 if let Some(pid) = actor
                     .spawned
@@ -139,6 +148,7 @@ pub(super) fn preserve_terminal(
                         ProcessSignal::User1 => Signal::SIGUSR1,
                         ProcessSignal::User2 => Signal::SIGUSR2,
                     };
+
                     let _signal = killpg(Pid::from_raw(pid), signal);
                 }
             }
@@ -165,32 +175,40 @@ pub(super) fn preserve_terminal(
             )
             | Err(RecvTimeoutError::Timeout) => {}
         }
+
         if actor.exit_status.is_none()
             && let Ok(status) = actor.spawned.child.try_wait()
         {
             actor.exit_status = status;
         }
+
         if actor.exit_status.is_none()
             && signal_deadline.is_some_and(|deadline| return Instant::now() >= deadline)
         {
             super::process::terminate_process_group(actor.spawned.pid);
+
             signal_deadline = None;
         }
+
         if actor.exit_status.is_some() {
             let exited = exited_at.get_or_insert_with(Instant::now);
+
             if output_closed || exited.elapsed() >= Duration::from_secs(2) {
                 // Descendants retaining the PTY after the root exits follow normal lifecycle cleanup.
                 if !output_closed {
                     super::process::terminate_process_group(actor.spawned.pid);
                 }
+
                 health.unrecorded_output_bytes = unrecorded_output_bytes;
                 health.unrecorded_input_bytes = unrecorded_input_bytes;
                 health.degraded_ended_monotonic_ns = Some(actor.event_log.elapsed_ns());
                 health.durable_boundary = actor.event_log.durable_boundary();
                 health.observed_boundary = actor.event_log.observed_boundary();
+
                 if let Ok(bytes) = serde_json::to_vec(&health) {
                     let _health = write_secure(&path, &bytes);
                 }
+
                 return;
             }
         }

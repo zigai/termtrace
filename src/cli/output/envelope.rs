@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use serde::{
-    Deserialize as _,
     de::value::{self, StrDeserializer},
+    Deserialize as _,
 };
 
 use super::*;
@@ -40,6 +40,7 @@ pub(super) fn session_state_from_str(value: &str) -> Result<SessionState, String
     return SessionState::deserialize(StrDeserializer::<value::Error>::new(value))
         .map_err(|error| return format!("invalid session state value `{value}`: {error}"));
 }
+
 pub(super) fn response_string_value(
     value: Option<&serde_json::Value>,
     key: &str,
@@ -50,11 +51,14 @@ pub(super) fn response_string_value(
     if value.is_null() {
         return Ok(None);
     }
+
     let serde_json::Value::String(value) = value else {
         return Err(format!("response field `{key}` must be a string"));
     };
+
     return Ok(Some(value.clone()));
 }
+
 fn take_string(
     fields: &mut BTreeMap<String, serde_json::Value>,
     key: &str,
@@ -65,9 +69,11 @@ fn take_string(
     if value.is_null() {
         return Ok(None);
     }
+
     let serde_json::Value::String(value) = value else {
         return Err(format!("response field `{key}` must be a string"));
     };
+
     return Ok(Some(value));
 }
 
@@ -81,9 +87,11 @@ fn take_bool(
     if value.is_null() {
         return Ok(None);
     }
+
     let serde_json::Value::Bool(value) = value else {
         return Err(format!("response field `{key}` must be a boolean"));
     };
+
     return Ok(Some(value));
 }
 
@@ -97,11 +105,13 @@ fn take_u64(
     if value.is_null() {
         return Ok(None);
     }
+
     let Some(value) = value.as_u64() else {
         return Err(format!(
             "response field `{key}` must be an unsigned integer"
         ));
     };
+
     return Ok(Some(value));
 }
 
@@ -129,6 +139,7 @@ fn envelope_from_fields(
     let message = take_string(&mut fields, "message")?;
     let truncated = take_bool(&mut fields, "truncated")?;
     let response_bytes = take_u64(&mut fields, "response_bytes")?;
+
     return Ok(CliResponseEnvelope {
         version: CLI_RESPONSE_VERSION,
         ok,
@@ -201,6 +212,7 @@ pub(super) fn compact_success(state: &ResponseState) -> serde_json::Value {
             );
         }
     }
+
     if state.omitted_items != 0 {
         response.insert("truncated".to_owned(), serde_json::Value::Bool(true));
         response.insert(
@@ -208,6 +220,7 @@ pub(super) fn compact_success(state: &ResponseState) -> serde_json::Value {
             serde_json::json!(state.omitted_items),
         );
     }
+
     if state.mutating {
         if state.command_type != "act" {
             let applied = nested_string(last, "applied").unwrap_or_else(|| return "all".to_owned());
@@ -221,6 +234,7 @@ pub(super) fn compact_success(state: &ResponseState) -> serde_json::Value {
                 serde_json::Value::String(session_state(last, &state.command_type, true)),
             );
         }
+
         if let Some(request_id) = last
             .and_then(|value| return value.get("request_id"))
             .or_else(|| return last.and_then(|value| return value.get("sequence_id")))
@@ -229,6 +243,7 @@ pub(super) fn compact_success(state: &ResponseState) -> serde_json::Value {
             response.insert("request_id".to_owned(), request_id);
         }
     }
+
     if matches!(state.command_type.as_str(), "wait" | "status")
         && !response.contains_key("session_state")
     {
@@ -237,6 +252,7 @@ pub(super) fn compact_success(state: &ResponseState) -> serde_json::Value {
             serde_json::Value::String(session_state(last, &state.command_type, true)),
         );
     }
+
     return typed_envelope_from_fields(true, kind, response);
 }
 
@@ -248,6 +264,7 @@ pub(super) fn retry_for_applied(applied: &str) -> &'static str {
         _ => "safe_new_request",
     };
 }
+
 pub(super) fn compact_failure(
     state: &ResponseState,
     error: Option<&miette::Report>,
@@ -261,6 +278,7 @@ pub(super) fn compact_failure(
             failure_string(last, "code").unwrap_or_else(|| return "operation_failed".to_owned()),
         ),
     );
+
     if let Some(serde_json::Value::Object(value)) = last.cloned().and_then(|value| {
         return compact_task_value(value, &state.fields, &state.command_type);
     }) {
@@ -268,6 +286,7 @@ pub(super) fn compact_failure(
             response.entry(key).or_insert(value);
         }
     }
+
     if let Some(details) = last
         .and_then(|value| return value.get("details"))
         .and_then(serde_json::Value::as_object)
@@ -280,6 +299,7 @@ pub(super) fn compact_failure(
             .entry("observation".to_owned())
             .or_insert_with(|| return serde_json::Value::Object(observation));
     }
+
     let applied = nested_string(last, "applied").unwrap_or_else(|| {
         return if state.mutating && last.is_some() {
             "unknown".to_owned()
@@ -290,12 +310,14 @@ pub(super) fn compact_failure(
 
     let retry = nested_string(last, "retry")
         .unwrap_or_else(|| return retry_for_applied(&applied).to_owned());
+
     response.insert("applied".to_owned(), serde_json::Value::String(applied));
     response.insert("retry".to_owned(), serde_json::Value::String(retry));
     response.insert(
         "session_state".to_owned(),
         serde_json::Value::String(session_state(last, &state.command_type, false)),
     );
+
     if let Some(request_id) = last
         .and_then(|value| return value.get("request_id"))
         .or_else(|| return last.and_then(|value| return value.get("sequence_id")))
@@ -303,6 +325,7 @@ pub(super) fn compact_failure(
     {
         response.insert("request_id".to_owned(), request_id);
     }
+
     if let Some(error) = error {
         response.insert(
             "message".to_owned(),
@@ -314,5 +337,6 @@ pub(super) fn compact_failure(
     {
         response.insert("message".to_owned(), serde_json::Value::String(message));
     }
+
     return typed_envelope_from_fields(false, response_type, response);
 }

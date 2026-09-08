@@ -159,6 +159,7 @@ pub(super) enum Command {
 pub(super) fn completion_command() -> clap::Command {
     return Cli::command();
 }
+
 fn bound_help_width(command: clap::Command) -> clap::Command {
     return command
         .max_term_width(100)
@@ -180,6 +181,7 @@ pub(super) fn root_command() -> clap::Command {
             );
         })
         .collect::<Vec<_>>();
+
     let grouped_names = ROOT_COMMAND_GROUPS
         .iter()
         .flat_map(|(_, names)| return names.iter().copied())
@@ -191,6 +193,7 @@ pub(super) fn root_command() -> clap::Command {
             "visible command `{name}` is missing from ROOT_COMMAND_GROUPS"
         );
     }
+
     for name in &grouped_names {
         assert!(
             visible_commands
@@ -208,6 +211,7 @@ pub(super) fn root_command() -> clap::Command {
             .max()
             .unwrap_or_default()
             .max(9);
+
         let _ = writeln!(grouped_help, "  {heading}:");
         for name in *names {
             let Some(about) = visible_commands.iter().find_map(|(visible, about)| {
@@ -217,8 +221,10 @@ pub(super) fn root_command() -> clap::Command {
             };
             let _ = writeln!(grouped_help, "    {name:<command_width$}  {about}");
         }
+
         grouped_help.push('\n');
     }
+
     grouped_help.push_str(
         "A presented screen is a state snapshot; canonical output is the byte history.\n\
          \n\
@@ -235,6 +241,7 @@ pub(super) fn requested_response_mode() -> ResponseMode {
         .ok()
         .and_then(|value| return response_mode_name(&value))
         .unwrap_or(ResponseMode::Auto);
+
     let mut arguments = env::args_os().skip(1);
     while let Some(argument) = arguments.next() {
         let Some(argument) = argument.to_str() else {
@@ -244,11 +251,14 @@ pub(super) fn requested_response_mode() -> ResponseMode {
             if let Some(selected) = response_mode_name(value) {
                 mode = selected;
             }
+
             continue;
         }
+
         if argument != "--response" {
             continue;
         }
+
         if let Some(value) = arguments
             .next()
             .and_then(|value| return value.into_string().ok())
@@ -257,6 +267,7 @@ pub(super) fn requested_response_mode() -> ResponseMode {
             mode = selected;
         }
     }
+
     return mode;
 }
 
@@ -266,11 +277,13 @@ fn response_mode_name(value: &str) -> Option<ResponseMode> {
 
 pub(super) fn command_contract(matches: &clap::ArgMatches) -> (String, bool) {
     let mut command_type = "termtrace";
+
     let mut current = matches;
     while let Some((name, subcommand)) = current.subcommand() {
         command_type = name;
         current = subcommand;
     }
+
     let mutating = matches!(
         command_type,
         "act"
@@ -289,6 +302,7 @@ pub(super) fn command_contract(matches: &clap::ArgMatches) -> (String, bool) {
             | "set-scope"
             | "remove"
     );
+
     return (command_type.to_owned(), mutating);
 }
 

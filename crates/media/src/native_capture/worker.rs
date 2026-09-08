@@ -8,8 +8,8 @@ use std::{
     process::Stdio,
     result::Result as StdResult,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
     thread,
     time::{Duration, Instant},
@@ -28,7 +28,7 @@ use termtrace_evidence::{
 };
 use termtrace_model::{
     artifact::visual::{
-        CaptureOutcome, GHOSTTY_EFFECTIVE_CONFIG_NAME, VISUAL_MANIFEST_VERSION, VisualManifest,
+        CaptureOutcome, VisualManifest, GHOSTTY_EFFECTIVE_CONFIG_NAME, VISUAL_MANIFEST_VERSION,
     },
     execution::session::{CaptureTarget, GHOSTTY_REPLAY_PROFILE_NAME},
     terminal::{
@@ -39,22 +39,22 @@ use termtrace_model::{
 };
 
 use super::{
-    Error, Result,
     capture::preserve_failed,
     media::{capture_stable_x11_frame_with_check, probe_screenshot},
     process::{
-        DisplayLease, ManagedChild, ghostty_overrides, owned_command, spawn_xvfb, wait_for_x_socket,
+        ghostty_overrides, owned_command, spawn_xvfb, wait_for_x_socket, DisplayLease, ManagedChild,
     },
     profile::materialize_profile,
     util::{
         command_output, command_output_in_profile, external_error, read_json, secure_permissions,
         unix_now_ns,
     },
-    validate_visual_manifest,
+    validate_visual_manifest, Error, Result,
 };
 use crate::playback::worker::{WorkerRequest, WorkerResponse};
 
 struct WorkDirectory(PathBuf);
+
 impl Drop for WorkDirectory {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
@@ -101,28 +101,35 @@ impl NativeReplayWorker {
         {
             return Err(failure("invalid replay worker timeout or viewport"));
         }
+
         check_cancelled(&cancelled)?;
+
         let session =
             fs::canonicalize(session).map_err(|source| return filesystem(session, source))?;
         let manifest = read_manifest(&session)?;
         let work =
             WorkDirectory(temp_dir().join(format!("termtrace-worker-{}", uuid::Uuid::now_v7())));
+
         create_private_directory(&work.0)?;
         let profile = if let Some(provenance) = &manifest.ghostty_visual {
             if provenance.replay_profile != GHOSTTY_REPLAY_PROFILE_NAME {
                 return Err(failure("unsupported recorded replay profile path"));
             }
+
             let path = session.join(GHOSTTY_REPLAY_PROFILE_NAME);
             let bytes = fs::read(&path).map_err(|source| return filesystem(&path, source))?;
             if blake3::hash(&bytes).to_hex().as_str() != provenance.replay_profile_hash {
                 return Err(failure("recorded replay profile hash differs"));
             }
+
             Some(materialize_profile(&work.0.join("profile"), &bytes)?)
         } else {
             None
         };
+
         let effective =
             command_output_in_profile("ghostty", &["+show-config"], profile.as_deref())?;
+
         let canonical = EventLogCursor::open(session.join("events.jsonl"))?;
         let expected = manifest
             .ghostty_visual
@@ -135,15 +142,19 @@ impl NativeReplayWorker {
                     .source
                     .strip_prefix("ghostty_show_config_blake3:");
             });
+
         if expected.is_some_and(|hash| return hash != blake3::hash(&effective).to_hex().as_str()) {
             return Err(failure("recorded effective Ghostty configuration changed"));
         }
+
         let version =
             String::from_utf8_lossy(&command_output("ghostty", &["+version"])?).into_owned();
+
         let lease = DisplayLease::acquire()?;
         let display = format!(":{}", lease.number);
         let mut xvfb = spawn_xvfb(Some(helper), &lease, target.width, target.height, &work.0)?;
         wait_for_x_socket(&lease, &mut xvfb, timeout.min(Duration::from_secs(5)))?;
+
         let socket = work.0.join("control.sock");
         let geometry = work.0.join("geometry.json");
         let mut command = owned_command(helper, "dbus-run-session")?;
@@ -170,25 +181,32 @@ impl NativeReplayWorker {
             .stderr(Stdio::from(secure_file(
                 &work.0.join("ghostty.stderr.log"),
             )?));
+
         if let Some(profile) = profile {
             command.env("XDG_CONFIG_HOME", profile);
         }
+
         let mut ghostty = ManagedChild::spawn_logged("ghostty replay worker", &mut command)?;
         let deadline = Instant::now() + timeout;
         let report: TerminalGeometryReport = loop {
             check_cancelled(&cancelled)?;
+
             ghostty.check_running()?;
             xvfb.check_running()?;
+
             if geometry.is_file()
                 && let Ok(report) = read_json(&geometry)
             {
                 break report;
             }
+
             if Instant::now() >= deadline {
                 return Err(failure("worker startup timed out"));
             }
+
             thread::sleep(Duration::from_millis(20));
         };
+
         super::geometry::validate_capture_geometry(
             manifest.geometry,
             manifest.geometry_provenance.source,
@@ -196,6 +214,7 @@ impl NativeReplayWorker {
             target.width,
             target.height,
         )?;
+
         let stream =
             UnixStream::connect(&socket).map_err(|source| return filesystem(&socket, source))?;
         stream
@@ -204,6 +223,7 @@ impl NativeReplayWorker {
         stream
             .set_write_timeout(Some(timeout))
             .map_err(|source| return filesystem(&socket, source))?;
+
         return Ok(Self {
             stream,
             ghostty,
@@ -226,6 +246,7 @@ impl NativeReplayWorker {
     /// Returns selection, replay, acquisition, cancellation, or publication failures.
     pub fn capture(&mut self, point: &StatePoint, destination: &Path) -> Result<CaptureOutcome> {
         let endpoint = replay_endpoint_for_session(&self.session, point, &self.cancelled)?;
+
         return self.capture_endpoint(&endpoint, destination);
     }
 
@@ -239,6 +260,7 @@ impl NativeReplayWorker {
         destination: &Path,
     ) -> Result<CaptureOutcome> {
         let endpoint = replay_endpoint_for_prefix(&self.session, boundary, &self.cancelled)?;
+
         return self.capture_endpoint(&endpoint, destination);
     }
 
@@ -257,11 +279,13 @@ impl NativeReplayWorker {
         if points.is_empty() || points.len() > 256 {
             return Err(failure("native batches require 1 to 256 selections"));
         }
+
         if destination.exists() {
             return Err(Error::ArtifactExists {
                 path: destination.to_path_buf(),
             });
         }
+
         let mut endpoints = points
             .iter()
             .enumerate()
@@ -276,18 +300,22 @@ impl NativeReplayWorker {
             .first()
             .map(|(_, endpoint)| return endpoint.clone())
             .ok_or_else(|| return failure("batch source is missing"))?;
+
         if endpoints.iter().any(|(_, endpoint)| {
             return endpoint.boundary != source.boundary
                 || endpoint.session_manifest_hash != source.session_manifest_hash;
         }) {
             return Err(failure("batch source changed during selection"));
         }
+
         let parent = destination
             .parent()
             .filter(|path| return path.is_dir())
             .ok_or_else(|| return failure("batch destination parent does not exist"))?;
+
         let staging = parent.join(format!(".visual-batch.{}.tmp", uuid::Uuid::now_v7()));
         create_private_directory(&staging)?;
+
         let result = (|| {
             let mut entries = Vec::new();
             for (index, endpoint) in endpoints {
@@ -297,6 +325,7 @@ impl NativeReplayWorker {
                 self.capture_staged(&endpoint, &artifact)?;
                 entries.push(serde_json::json!({"request_index": index, "directory": name, "endpoint": endpoint}));
             }
+
             entries.sort_by_key(|entry| {
                 return entry
                     .get("request_index")
@@ -309,6 +338,7 @@ impl NativeReplayWorker {
                     "members": collect_artifact_members(&staging)?,
                 }),
             )?;
+
             write_json(
                 &staging.join("manifest.json"),
                 &serde_json::json!({
@@ -317,21 +347,29 @@ impl NativeReplayWorker {
                     "members": collect_artifact_members(&staging)?,
                 }),
             )?;
+
             sync_directory(&staging)?;
+
             return Ok(());
         })();
         if let Err(error) = result {
             self.close();
+
             return Err(preserve_failed(parent, &staging, error));
         }
+
         if let Err(error) = commit_directory(parent, &staging, destination) {
             return Err(preserve_failed(parent, &staging, error.into()));
         }
+
         sync_directory(parent)?;
+
         self.catalog(destination, "native_screenshot_batch", &source)?;
+
         return Ok((0..points.len())
             .map(|index| {
                 let directory = destination.join(format!("capture-{index:04}"));
+
                 return CaptureOutcome {
                     screenshot: directory.join("final.png"),
                     directory,
@@ -355,7 +393,9 @@ impl NativeReplayWorker {
         if self.closed {
             return Err(failure("worker is closed"));
         }
+
         check_cancelled(&self.cancelled)?;
+
         let mut request = serde_json::to_vec(&WorkerRequest::Advance {
             endpoint: endpoint.clone(),
         })
@@ -364,15 +404,20 @@ impl NativeReplayWorker {
         self.stream
             .write_all(&request)
             .map_err(|error| return failure(&error.to_string()))?;
+
         let deadline = Instant::now() + self.timeout;
         let mut response = Vec::new();
+
         loop {
             check_cancelled(&self.cancelled)?;
+
             if Instant::now() >= deadline {
                 return Err(failure("worker request timed out"));
             }
+
             self.ghostty.check_running()?;
             self.xvfb.check_running()?;
+
             let mut buffer = [0_u8; 4096];
             match self.stream.read(&mut buffer) {
                 Ok(0) => return Err(failure("worker closed without acknowledging endpoint")),
@@ -391,13 +436,16 @@ impl NativeReplayWorker {
                 }
                 Err(error) => return Err(failure(&error.to_string())),
             }
+
             if response.len() > 65536 {
                 return Err(failure("worker response exceeds framing limit"));
             }
+
             if response.contains(&b'\n') {
                 break;
             }
         }
+
         match serde_json::from_slice(&response)
             .map_err(|error| return failure(&error.to_string()))?
         {
@@ -420,24 +468,32 @@ impl NativeReplayWorker {
                 path: destination.to_path_buf(),
             });
         }
+
         let parent = destination
             .parent()
             .filter(|path| return path.is_dir())
             .ok_or_else(|| return failure("capture destination parent does not exist"))?;
+
         let staging = parent.join(format!(".visual.{}.tmp", uuid::Uuid::now_v7()));
         create_private_directory(&staging)?;
+
         if let Err(error) = self.capture_staged(endpoint, &staging) {
             self.close();
             for name in ["ghostty.stdout.log", "ghostty.stderr.log"] {
                 let _ = fs::copy(self.work.0.join(name), staging.join(name));
             }
+
             return Err(preserve_failed(parent, &staging, error));
         }
+
         if let Err(error) = commit_directory(parent, &staging, destination) {
             return Err(preserve_failed(parent, &staging, error.into()));
         }
+
         sync_directory(parent)?;
+
         self.catalog(destination, "native_screenshot", endpoint)?;
+
         return Ok(CaptureOutcome {
             directory: destination.to_path_buf(),
             video: None,
@@ -448,6 +504,7 @@ impl NativeReplayWorker {
     fn catalog(&self, destination: &Path, kind: &str, endpoint: &ReplayEndpoint) -> Result<()> {
         let canonical_destination = fs::canonicalize(destination)
             .map_err(|source| return filesystem(destination, source))?;
+
         if canonical_destination.starts_with(&self.session) {
             let path = destination.join("manifest.json");
             append_artifact_prefix_root(
@@ -459,6 +516,7 @@ impl NativeReplayWorker {
                 &endpoint.boundary,
             )?;
         }
+
         return Ok(());
     }
 
@@ -473,12 +531,16 @@ impl NativeReplayWorker {
             self.timeout,
             || return check_cancelled(&self.cancelled),
         )?;
+
         check_cancelled(&self.cancelled)?;
+
         secure_permissions(&screenshot)?;
+
         write_secure(
             &staging.join(GHOSTTY_EFFECTIVE_CONFIG_NAME),
             &self.effective,
         )?;
+
         write_json(&staging.join("replay-endpoint.json"), endpoint)?;
         super::resources::capture_resources(
             &self.ghostty,
@@ -517,6 +579,7 @@ impl NativeReplayWorker {
         validate_visual_manifest(&visual)?;
         write_json(&staging.join("manifest.json"), &visual)?;
         verify_artifact_members(staging, &visual.members)?;
+
         return sync_directory(staging).map_err(Error::from);
     }
 }
@@ -535,20 +598,25 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
             source,
         };
     })?;
+
     return write_secure(path, &bytes).map_err(Error::from);
 }
+
 fn failure(reason: &str) -> Error {
     return external_error("native replay worker", reason);
 }
+
 fn filesystem(path: &Path, source: io::Error) -> Error {
     return Error::Filesystem {
         path: path.to_path_buf(),
         source,
     };
 }
+
 fn check_cancelled(cancelled: &AtomicBool) -> Result<()> {
     if cancelled.load(Ordering::Relaxed) {
         return Err(failure("capture cancelled"));
     }
+
     return Ok(());
 }

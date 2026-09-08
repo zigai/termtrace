@@ -28,7 +28,7 @@ use super::{
     input::{apply_input, apply_resize},
     model::{RuntimeMessage, TerminalGeometry},
     presentation::{process_semantic_bytes, process_semantic_output, resize_semantic},
-    process::{RuntimeWorkers, terminate_process_group},
+    process::{terminate_process_group, RuntimeWorkers},
     support::terminal_error,
 };
 use crate::{Error, Result};
@@ -75,18 +75,22 @@ pub(super) fn consume_runtime(
             terminate_process_group(actor.spawned.pid);
             let _ = actor.spawned.child.kill();
             let _ = actor.spawned.child.wait();
+
             return Err(error);
         }
     };
+
     drop(sender);
 
     let result = (|| {
         if let Some(error) = startup_error {
             return Err(error);
         }
+
         let mut control_shutdown_started = false;
         let started_at = Instant::now();
         let mut last_activity_at = Instant::now();
+
         loop {
             let receive_timeout = actor.pending_input_sequence.as_ref().map_or(
                 Duration::from_millis(10),
@@ -97,6 +101,7 @@ pub(super) fn consume_runtime(
                         .min(Duration::from_millis(10));
                 },
             );
+
             let mut received_output = false;
             match receiver.recv_timeout(receive_timeout) {
                 Ok(message) => {
@@ -110,6 +115,7 @@ pub(super) fn consume_runtime(
                     ) {
                         last_activity_at = Instant::now();
                     }
+
                     actor.process_runtime_message(message)?;
                 }
                 Err(RecvTimeoutError::Disconnected) if !actor.progress.output_closed => {
@@ -120,16 +126,19 @@ pub(super) fn consume_runtime(
                 }
                 Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => {}
             }
+
             if actor.exit_status.is_none() {
                 actor.exit_status = actor
                     .spawned
                     .child
                     .try_wait()
                     .map_err(|error| return terminal_error("poll child", error.to_string()))?;
+
                 if actor.exit_status.is_some() && !actor.progress.output_closed {
                     actor.drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
                 }
             }
+
             let child_exited = actor.exit_status.is_some();
             actor.advance_input_sequence(child_exited, actor.progress.output_closed)?;
             actor.event_log.flush_due()?;
@@ -140,6 +149,7 @@ pub(super) fn consume_runtime(
             if received_output && actor.exit_status.is_some() && !actor.progress.output_closed {
                 actor.drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
             }
+
             if actor.exit_status.is_none()
                 && actor
                     .resource_kill_deadline
@@ -169,9 +179,11 @@ pub(super) fn consume_runtime(
                     code: code.to_owned(),
                     message: message.to_owned(),
                 })?;
+
                 terminate_process_group(actor.spawned.pid);
                 actor.process_group_killed = true;
             }
+
             if actor.exit_status.is_none()
                 && actor
                     .host_signal_kill_deadline
@@ -183,9 +195,11 @@ pub(super) fn consume_runtime(
                     message: "child did not exit after a signal delivered to the recorder; process group was killed"
                         .to_owned(),
                 })?;
+
                 terminate_process_group(actor.spawned.pid);
                 actor.process_group_killed = true;
             }
+
             if actor
                 .drain_deadline
                 .is_some_and(|deadline| return Instant::now() >= deadline)
@@ -197,28 +211,34 @@ pub(super) fn consume_runtime(
                         "PTY remained open after terminating retained process-group descendants",
                     ));
                 }
+
                 terminate_process_group(actor.spawned.pid);
                 actor.process_group_killed = true;
                 actor.drain_deadline = Some(Instant::now() + DESCENDANT_DRAIN_TIMEOUT);
             }
+
             if actor.progress.output_closed
                 && actor.exit_status.is_some()
                 && actor.pending_input_sequence.is_none()
             {
                 if !control_shutdown_started {
                     workers.begin_control_shutdown()?;
+
                     control_shutdown_started = true;
                 }
+
                 if workers.control_shutdown_finished() {
                     break;
                 }
             }
         }
+
         actor.evaluate_screen_waiters(true, actor.progress.output_closed)?;
         actor.fail_screen_waiters(
             "child_completed",
             "child completed before screen predicate matched",
         );
+
         return actor
             .exit_status
             .clone()
@@ -234,6 +254,7 @@ pub(super) fn consume_runtime(
         let _ = actor.spawned.child.kill();
         let _ = actor.spawned.child.wait();
     }
+
     let status = workers.finish(receiver, result)?;
 
     return Ok(RuntimeOutcome {
@@ -253,12 +274,15 @@ impl SessionActor<'_> {
     ) -> Result<()> {
         self.host_signal_kill_deadline
             .get_or_insert_with(|| return Instant::now() + HOST_SIGNAL_GRACE_PERIOD);
+
         self.event_log.append(Event::HostError {
             code: code.to_owned(),
             message: message.to_owned(),
         })?;
+
         let operation_id = Uuid::now_v7();
         self.mutation_history.reserve_operation(operation_id)?;
+
         return apply_signal(
             self.spawned.pid,
             &mut self.event_log,
@@ -276,6 +300,7 @@ impl SessionActor<'_> {
         if self.progress.resource_limit.is_some() {
             return Ok(());
         }
+
         let detected = (|| {
             if let Some(limit) = self.resource_limits.output_bytes
                 && self.progress.output_bytes > limit
@@ -293,9 +318,11 @@ impl SessionActor<'_> {
                     ),
                 ));
             }
+
             if let Some(limit_ms) = self.resource_limits.max_duration_ms {
                 let elapsed_ms =
                     u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+
                 if elapsed_ms >= limit_ms {
                     return Some((
                         ResourceLimitOutcome {
@@ -310,9 +337,11 @@ impl SessionActor<'_> {
                     ));
                 }
             }
+
             if let Some(limit_ms) = self.resource_limits.idle_timeout_ms {
                 let idle_ms =
                     u64::try_from(last_activity_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+
                 if idle_ms >= limit_ms {
                     return Some((
                         ResourceLimitOutcome {
@@ -327,6 +356,7 @@ impl SessionActor<'_> {
                     ));
                 }
             }
+
             return None;
         })();
         let Some((outcome, code, message)) = detected else {
@@ -336,6 +366,7 @@ impl SessionActor<'_> {
             code: code.to_owned(),
             message,
         })?;
+
         let operation_id = Uuid::now_v7();
         self.mutation_history.reserve_operation(operation_id)?;
         apply_signal(
@@ -345,8 +376,10 @@ impl SessionActor<'_> {
             ProcessSignal::Terminate,
             true,
         )?;
+
         self.progress.resource_limit = Some(outcome);
         self.resource_kill_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
+
         return Ok(());
     }
 
@@ -363,6 +396,7 @@ impl SessionActor<'_> {
                     source,
                 });
             }
+
             self.progress.mirror_open = false;
             self.event_log.append(Event::HostError {
                 code: "output_mirror_closed".to_owned(),
@@ -371,6 +405,7 @@ impl SessionActor<'_> {
                 ),
             })?;
         }
+
         return Ok(());
     }
 
@@ -387,6 +422,7 @@ impl SessionActor<'_> {
                     Ok(sequence) => sequence,
                     Err(error) => {
                         self.progress.unrecorded_output = data;
+
                         return Err(error.into());
                     }
                 };
@@ -395,6 +431,7 @@ impl SessionActor<'_> {
                     .progress
                     .output_bytes
                     .saturating_add(u64::try_from(data.len()).unwrap_or(u64::MAX));
+
                 process_semantic_output(
                     &mut self.live,
                     self.spawned.writer.as_mut(),
@@ -409,6 +446,7 @@ impl SessionActor<'_> {
                 };
                 self.mirror_bytes(&mirrored)?;
                 let latest = self.live.semantic.snapshot()?;
+
                 if !latest.modes.synchronized_output {
                     self.live.presented = latest;
                 }
@@ -424,10 +462,12 @@ impl SessionActor<'_> {
                         &pending,
                     )?;
                     let latest = self.live.semantic.snapshot()?;
+
                     if !latest.modes.synchronized_output {
                         self.live.presented = latest;
                     }
                 }
+
                 if self.live.suppress_mirrored_queries {
                     self.live
                         .mirror_output
@@ -435,6 +475,7 @@ impl SessionActor<'_> {
                     let mirrored = take(&mut self.live.mirror_output);
                     self.mirror_bytes(&mirrored)?;
                 }
+
                 self.progress.output_closed = true;
                 self.event_log.append(Event::Lifecycle {
                     lifecycle_kind: LifecycleKind::OutputClosed,
@@ -472,9 +513,11 @@ impl SessionActor<'_> {
                     operation_id,
                     geometry,
                 )?;
+
                 resize_semantic(&mut self.live.semantic, geometry)?;
                 self.live.geometry = geometry;
                 let latest = self.live.semantic.snapshot()?;
+
                 if !latest.modes.synchronized_output {
                     self.live.presented = latest;
                 }
@@ -505,6 +548,7 @@ impl SessionActor<'_> {
                 return Err(terminal_error("serve control socket", reason));
             }
         }
+
         return Ok(());
     }
 }

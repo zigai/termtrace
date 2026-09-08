@@ -1,6 +1,7 @@
 //! Deterministic evidence-backed explanations and conservative diagnostics.
 
 mod stream;
+
 pub use stream::{diagnose_session, diagnose_snapshot};
 
 use std::{
@@ -28,13 +29,13 @@ use termtrace_terminal::frame_event_records;
 use uuid::Uuid;
 
 use crate::{
-    Error, Result,
     observation::state_selector_for_session,
     replay::{
         inspect_completed_session, replay, trust::SourceIdentity, visit_session_states_while,
         visit_states,
     },
     timeline::stream::TokenCursor,
+    Error, Result,
 };
 
 fn analysis_error(reason: impl Into<String>) -> Error {
@@ -70,7 +71,9 @@ impl ValidatedVisualManifest {
                 "native correlation manifest path must be a non-empty relative path",
             ));
         }
+
         validate(&manifest)?;
+
         return Ok(Self {
             manifest_path,
             screenshot_state_id: manifest.selected_state_id,
@@ -98,7 +101,9 @@ impl ValidatedVisualManifest {
                 "native screenshot does not match the selected canonical endpoint",
             ));
         }
+
         self.screenshot_state_id = Some(state_id);
+
         return Ok(());
     }
 }
@@ -116,6 +121,7 @@ pub fn native_correlations(
             .or_default()
             .push(correlation);
     });
+
     return correlations;
 }
 
@@ -130,6 +136,7 @@ pub fn native_correlations_for_state(
     visit_native_correlations(session_id, Some(state_id), evidence, |correlation| {
         correlations.push(correlation);
     });
+
     return correlations;
 }
 
@@ -143,6 +150,7 @@ pub(super) fn visit_native_correlations(
         if evidence.manifest.session_id != session_id {
             continue;
         }
+
         if let Some(state_id) = evidence.screenshot_state_id
             && selected.is_none_or(|selected| return selected == state_id)
         {
@@ -151,6 +159,7 @@ pub(super) fn visit_native_correlations(
             } else {
                 NativeEvidenceLevel::PostEndpointStableCapture
             };
+
             visit(NativeCorrelation {
                 level,
                 manifest: evidence.manifest_path.clone(),
@@ -163,6 +172,7 @@ pub(super) fn visit_native_correlations(
                 },
             });
         }
+
         for mapped in &evidence.video_map {
             if selected.is_none_or(|selected| return selected == mapped.state_id)
                 && let Some(frame) = mapped.frame
@@ -197,9 +207,12 @@ pub fn diagnose(
     let mut states = Vec::new();
     visit_states(log, |record, _| {
         states.push(record.clone());
+
         return Ok(());
     })?;
+
     let tokens = frame_event_records(&log.events)?;
+
     return Ok(diagnose_states(
         log,
         checks,
@@ -220,9 +233,11 @@ pub(super) fn diagnose_states(
 ) -> DiagnoseReport {
     checks.sort_unstable();
     checks.dedup();
+
     if checks.is_empty() {
         checks = DiagnosticCheck::all();
     }
+
     let mut detected = Vec::new();
     if checks.contains(&DiagnosticCheck::FullRedraw) {
         detect_full_redraw(
@@ -235,19 +250,24 @@ pub(super) fn diagnose_states(
         );
         detect_redundant_full_redraw(states, &mut detected);
     }
+
     if checks.contains(&DiagnosticCheck::Transient) {
         detect_transients(states, &mut detected);
     }
+
     if checks.contains(&DiagnosticCheck::Dirty) {
         detect_dirty_discrepancies(states, &mut detected);
     }
+
     if checks.contains(&DiagnosticCheck::Cursor) {
         detect_cursor_jumps(states, &mut detected);
     }
+
     detect_churn(&checks, states, &mut detected);
     if checks.contains(&DiagnosticCheck::QueryLoop) {
         detect_query_loops(log, &mut detected);
     }
+
     let native = native_correlations(log, visual_evidence);
     for finding in &mut detected {
         for state_id in &finding.state_ids {
@@ -268,6 +288,7 @@ pub(super) fn diagnose_states(
             }
         }
     }
+
     detected.sort_by(|left, right| {
         return left
             .state_ids
@@ -275,6 +296,7 @@ pub(super) fn diagnose_states(
             .cmp(&right.state_ids.first())
             .then_with(|| return left.code.cmp(&right.code));
     });
+
     return DiagnoseReport {
         format: "termtrace-diagnose".to_owned(),
         version: 1,
@@ -309,6 +331,7 @@ pub fn explain_session(
     let end_event = target_event.saturating_add(context_events);
     let mut cursor = TokenCursor::new(session, None)?;
     let mut tokens = Vec::new();
+
     while let Some(entry) = cursor.next()? {
         if let TimelineItem::VtToken { token } = entry.item
             && token.source.iter().any(|segment| {
@@ -318,6 +341,7 @@ pub fn explain_session(
             tokens.push(token);
         }
     }
+
     let mut states = Vec::new();
     visit_session_states_while(session, &AtomicBool::new(false), |record, _| {
         if record
@@ -326,16 +350,21 @@ pub fn explain_session(
         {
             return Ok(false);
         }
+
         if record
             .event_seq
             .is_none_or(|sequence| return sequence >= start_event)
         {
             states.push(record.clone());
         }
+
         return Ok(true);
     })?;
+
     source.check(session)?;
+
     let findings = findings(&tokens, &states);
+
     return Ok(ExplainReport {
         session_id: completion.session_id,
         source_final_event_hash: completion.final_event_hash,
@@ -369,6 +398,7 @@ pub fn explain(log: &EventLog, target: StatePoint, context_events: u64) -> Resul
             });
         })
         .collect::<Vec<_>>();
+
     let states = replayed
         .states
         .into_iter()
@@ -378,6 +408,7 @@ pub fn explain(log: &EventLog, target: StatePoint, context_events: u64) -> Resul
                 .is_none_or(|sequence| return sequence >= start_event && sequence <= end_event);
         })
         .collect::<Vec<_>>();
+
     let findings = findings(&tokens, &states);
     let source_event_count = u64::try_from(log.events.len()).unwrap_or(u64::MAX);
     let source_final_event_hash = match log.events.last() {
@@ -390,9 +421,11 @@ pub fn explain(log: &EventLog, target: StatePoint, context_events: u64) -> Resul
                     source,
                 };
             })?;
+
             blake3::hash(&header).to_hex().to_string()
         }
     };
+
     return Ok(ExplainReport {
         session_id: log.header.session_id,
         source_final_event_hash,
@@ -420,13 +453,16 @@ fn resolve_target_record<'states>(
             .next()
             .map(|record| return record.seq)
             .ok_or_else(|| return analysis_error("marker does not exist"))?;
+
         if matches.next().is_some() {
             return Err(analysis_error("marker label is ambiguous"));
         }
+
         Some(event_seq)
     } else {
         None
     };
+
     return states
         .iter()
         .rev()
@@ -456,10 +492,12 @@ fn detect_redundant_full_redraw(states: &[StateRecord], findings: &mut Vec<Diagn
         .iter()
         .filter(|state| return state.presented)
         .collect::<Vec<_>>();
+
     for (index, state) in presented.iter().enumerate() {
         if state.ghostty_dirty != DirtyState::Full {
             continue;
         }
+
         let start = index.saturating_sub(8);
         let Some(prior_states) = presented.get(start..index) else {
             continue;
@@ -468,6 +506,7 @@ fn detect_redundant_full_redraw(states: &[StateRecord], findings: &mut Vec<Diagn
             .iter()
             .rev()
             .find(|candidate| return candidate.state_hash == state.state_hash);
+
         if let Some(prior) = prior {
             findings.push(DiagnosticFinding {
                 code: "redundant_full_redraw".to_owned(),
@@ -522,6 +561,7 @@ fn detect_full_redraw(
             ],
             native_correlations: Vec::new(),
         });
+
         let Some(clear_event) = event else {
             continue;
         };
@@ -529,6 +569,7 @@ fn detect_full_redraw(
         let mut rows = initial_rows;
         let mut changed = 0_u64;
         let mut repaint_states = Vec::new();
+
         for candidate in states.iter().filter(|candidate| {
             return candidate.event_seq.is_some_and(|sequence| {
                 return sequence >= clear_event && sequence <= clear_event.saturating_add(2);
@@ -538,15 +579,19 @@ fn detect_full_redraw(
                 cols = new_cols;
                 rows = new_rows;
             }
+
             let candidate_changed = candidate.delta.rows.iter().fold(0_u64, |count, row| {
                 return count.saturating_add(u64::try_from(row.cells.len()).unwrap_or(u64::MAX));
             });
+
             if candidate_changed > 0 {
                 changed = changed.saturating_add(candidate_changed);
                 repaint_states.push(candidate.state_id);
             }
         }
+
         let cells = u64::from(cols).saturating_mul(u64::from(rows)).max(1);
+
         if changed.saturating_mul(100) >= cells.saturating_mul(u64::from(broad_change_percent)) {
             findings.push(DiagnosticFinding {
                 code: "clear_then_repaint".to_owned(),
@@ -572,11 +617,13 @@ fn detect_full_redraw(
             });
         }
     }
+
     let scrollback = tokens
         .iter()
         .filter(|token| return token.description == "erase saved lines")
         .map(|token| return token.token_id)
         .collect::<Vec<_>>();
+
     if !scrollback.is_empty() {
         findings.push(DiagnosticFinding {
             code: "clear_scrollback".to_owned(),
@@ -608,10 +655,12 @@ fn detect_transients(states: &[StateRecord], findings: &mut Vec<DiagnosticFindin
             native_correlations: Vec::new(),
         });
     }
+
     let presented = states
         .iter()
         .filter(|state| return state.presented)
         .collect::<Vec<_>>();
+
     for [before, transient, after] in presented.array_windows() {
         if before.state_hash == after.state_hash && transient.state_hash != before.state_hash {
             let duration_fact = if transient.monotonic_ns < after.monotonic_ns {
@@ -654,6 +703,7 @@ fn detect_dirty_discrepancies(states: &[StateRecord], findings: &mut Vec<Diagnos
                 native_correlations: Vec::new(),
             });
         }
+
         if state.ghostty_dirty == DirtyState::Clean && cell_changes {
             findings.push(DiagnosticFinding {
                 code: "cell_change_without_expected_dirty".to_owned(),
@@ -672,6 +722,7 @@ fn detect_dirty_discrepancies(states: &[StateRecord], findings: &mut Vec<Diagnos
 
 fn detect_cursor_jumps(states: &[StateRecord], findings: &mut Vec<DiagnosticFinding>) {
     let mut previous: Option<&CursorState> = None;
+
     for state in states {
         let Some(cursor) = state.delta.cursor.as_ref() else {
             continue;
@@ -698,8 +749,10 @@ fn detect_cursor_jumps(states: &[StateRecord], findings: &mut Vec<DiagnosticFind
                     native_correlations: Vec::new(),
                 });
             }
+
             let _ = old;
         }
+
         previous = Some(cursor);
     }
 }
@@ -754,6 +807,7 @@ fn detect_query_loops(log: &EventLog, findings: &mut Vec<DiagnosticFinding>) {
                 .or_default() += 1;
         }
     }
+
     for ((_query, _response), count) in counts {
         if count >= 3 {
             findings.push(DiagnosticFinding {
@@ -789,6 +843,7 @@ fn findings(tokens: &[VtToken], states: &[StateRecord]) -> Vec<ExplainFinding> {
             .filter(|token| return token.description == description)
             .map(|token| return token.token_id)
             .collect::<Vec<_>>();
+
         if !token_ids.is_empty() {
             findings.push(ExplainFinding {
                 code: code.to_owned(),
@@ -798,6 +853,7 @@ fn findings(tokens: &[VtToken], states: &[StateRecord]) -> Vec<ExplainFinding> {
             });
         }
     }
+
     let hidden = states
         .iter()
         .filter(|state| return !state.presented && !state.delta.rows.is_empty())
@@ -813,11 +869,14 @@ fn findings(tokens: &[VtToken], states: &[StateRecord]) -> Vec<ExplainFinding> {
             )],
         });
     }
+
     let clear = findings
         .iter()
         .find(|finding| return finding.code == "full_viewport_clear");
+
     let printable_after_clear = clear.is_some_and(|finding| {
         let last_clear = finding.token_ids.iter().copied().max().unwrap_or(0);
+
         return tokens.iter().any(|token| {
             return token.token_id > last_clear
                 && token.description == "printable bytes"
@@ -842,5 +901,6 @@ fn findings(tokens: &[VtToken], states: &[StateRecord]) -> Vec<ExplainFinding> {
             ],
         });
     }
+
     return findings;
 }

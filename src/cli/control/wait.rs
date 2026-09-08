@@ -5,13 +5,16 @@ pub(in crate::cli) fn run_wait(
     arguments: WaitArgs,
 ) -> Result<ExitCode> {
     let timeout = arguments.timeout;
+
     if let Some(stable_for) = arguments.idle {
         return run_idle_wait(response, arguments, stable_for);
     }
+
     let resolved = resolve_session(arguments.session.clone())?;
     if resolved.lifecycle != RegistryLifecycle::Live {
         return write_session_lifecycle(response, &resolved, "wait", ExitCode::FAILURE);
     }
+
     let session = resolved.path;
     if let Some(output) = arguments.output {
         if !arguments.stable_for.is_zero() {
@@ -19,26 +22,27 @@ pub(in crate::cli) fn run_wait(
                 "--stable-for applies only to screen predicates"
             ));
         }
+
         return write_json_line(
             response,
             &wait_for_output(session, output.as_bytes(), timeout).into_diagnostic()?,
         );
     }
+
     let predicate = parse_screen_predicate(&arguments)?;
     let outcome =
         wait_for_screen(session, predicate, arguments.stable_for, timeout).into_diagnostic()?;
+
     let matched = outcome.matched
         && if arguments.stable_for.is_zero() {
             outcome.quality == ScreenWaitQuality::MatchedUnsettled
         } else {
             outcome.quality == ScreenWaitQuality::Matched
         };
+
     write_json_line(response, &outcome)?;
-    return Ok(if matched {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::FAILURE
-    });
+
+    return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
 }
 
 fn run_idle_wait(
@@ -51,11 +55,14 @@ fn run_idle_wait(
         if arguments.require_live_stability {
             return write_session_lifecycle(response, &resolved, "wait", ExitCode::FAILURE);
         }
+
         return write_completed_stable_snapshot(response, &resolved, arguments.full_state);
     }
+
     if resolved.lifecycle != RegistryLifecycle::Live {
         return write_session_lifecycle(response, &resolved, "wait", ExitCode::FAILURE);
     }
+
     let data = send_request(
         resolved.path,
         &ControlRequest::new(ControlCommand::CaptureStable {
@@ -65,6 +72,7 @@ fn run_idle_wait(
         }),
     )
     .into_diagnostic()?;
+
     let ControlData::StableSnapshot {
         frame,
         first_observed_monotonic_ns,
@@ -84,9 +92,11 @@ fn run_idle_wait(
             quality.as_str()
         ));
     }
+
     if arguments.full_state {
         return write_json_line(response, &data);
     }
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -112,6 +122,7 @@ pub(super) fn compact_boundaries(boundaries: &ActorBoundaries) -> serde_json::Va
             "output_bytes": boundaries.observed.output_bytes,
         });
     }
+
     return serde_json::json!({
         "durable": false,
         "durable_boundary": boundaries.durable,
@@ -127,6 +138,7 @@ pub(super) fn write_completed_stable_snapshot(
     let observation =
         observe_session_with_options(&resolved.path, StatePoint::LatestPresented, false)
             .into_diagnostic()?;
+
     if full_state {
         return write_json_line(
             response,
@@ -137,6 +149,7 @@ pub(super) fn write_completed_stable_snapshot(
             }),
         );
     }
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -165,29 +178,36 @@ fn parse_screen_predicate(arguments: &WaitArgs) -> Result<ScreenPredicate> {
         if predicate.is_some() {
             return Err(miette::miette!("exactly one wait predicate is required"));
         }
+
         predicate = Some(pred?);
+
         return Ok(());
     };
 
     if let Some(text) = &arguments.screen {
         set(Ok(ScreenPredicate::Contains { text: text.clone() }))?;
     }
+
     if let Some(text) = &arguments.screen_absent {
         set(Ok(ScreenPredicate::Absent { text: text.clone() }))?;
     }
+
     if let Some(pattern) = &arguments.screen_regex {
         set(Ok(ScreenPredicate::MatchesRegex {
             pattern: pattern.clone(),
         }))?;
     }
+
     if let Some(value) = &arguments.row_contains {
         let (row, text) = parse_row_predicate(value)?;
         set(Ok(ScreenPredicate::RowContains { row, text }))?;
     }
+
     if let Some(value) = &arguments.region_contains {
         let (region, text) = parse_region_predicate(value)?;
         set(Ok(ScreenPredicate::RegionContains { region, text }))?;
     }
+
     if let Some(value) = &arguments.cursor_at {
         let (column, row) = parse_cursor_position(value)?;
         set(Ok(ScreenPredicate::Cursor {
@@ -197,6 +217,7 @@ fn parse_screen_predicate(arguments: &WaitArgs) -> Result<ScreenPredicate> {
             shape: None,
         }))?;
     }
+
     if let Some(visible) = arguments.cursor_visible {
         set(Ok(ScreenPredicate::Cursor {
             column: None,
@@ -205,6 +226,7 @@ fn parse_screen_predicate(arguments: &WaitArgs) -> Result<ScreenPredicate> {
             shape: None,
         }))?;
     }
+
     if let Some(shape) = arguments.cursor_shape {
         set(Ok(ScreenPredicate::Cursor {
             column: None,
@@ -213,24 +235,28 @@ fn parse_screen_predicate(arguments: &WaitArgs) -> Result<ScreenPredicate> {
             shape: Some(shape.into()),
         }))?;
     }
+
     if let Some(mode) = arguments.mode {
         set(Ok(ScreenPredicate::Mode {
             mode: mode.into(),
             enabled: true,
         }))?;
     }
+
     if let Some(mode) = arguments.mode_disabled {
         set(Ok(ScreenPredicate::Mode {
             mode: mode.into(),
             enabled: false,
         }))?;
     }
+
     if let Some(hash) = &arguments.state_changed {
         set(Ok(ScreenPredicate::StateHash {
             hash: hash.clone(),
             comparison: StateHashComparison::Changed,
         }))?;
     }
+
     if let Some(hash) = &arguments.state_unchanged {
         set(Ok(ScreenPredicate::StateHash {
             hash: hash.clone(),

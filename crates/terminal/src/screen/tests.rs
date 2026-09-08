@@ -11,6 +11,7 @@ fn source(boundary: u64) -> ScreenFrameSource {
         event_hash: format!("hash-{boundary}"),
         output_bytes: boundary,
     };
+
     return ScreenFrameSource::Actor {
         session_id: Default::default(),
         boundaries: ActorBoundaries {
@@ -25,6 +26,7 @@ fn semantic_fixture() -> SemanticState {
     let mut terminal = GhosttyVt::new(6, 2, 0).expect("create terminal");
     terminal.write(b"\x1b[38;2;1;2;3mA");
     terminal.write("界".as_bytes());
+
     return terminal.snapshot().expect("semantic snapshot");
 }
 
@@ -104,6 +106,7 @@ fn spans_expand_losslessly_and_keep_trailing_blank_cells() {
     let request = ScreenProjectionRequest::default();
     let frame = project_screen_frame(&state, &request, source(1), true, CaptureQuality::Live)
         .expect("project spans");
+
     let ScreenFrameData::Spans { rows } = &frame.data else {
         panic!("span detail");
     };
@@ -141,6 +144,7 @@ fn projection_hash_binds_detail_region_and_source_occurrence() {
         CaptureQuality::Live,
     )
     .expect("span frame");
+
     let cells = project_screen_frame(
         &state,
         &ScreenProjectionRequest {
@@ -157,6 +161,7 @@ fn projection_hash_binds_detail_region_and_source_occurrence() {
         CaptureQuality::Live,
     )
     .expect("cell frame");
+
     let moved = project_screen_frame(
         &state,
         &ScreenProjectionRequest::default(),
@@ -165,6 +170,7 @@ fn projection_hash_binds_detail_region_and_source_occurrence() {
         CaptureQuality::Live,
     )
     .expect("different occurrence");
+
     assert_eq!(spans.state_hash, cells.state_hash);
     assert_ne!(spans.frame_hash, cells.frame_hash);
     assert_ne!(spans.frame_hash, moved.frame_hash);
@@ -181,6 +187,7 @@ fn snapshot_normalization_omits_volatile_source_identity() {
         CaptureQuality::Live,
     )
     .expect("first");
+
     let second = project_screen_frame(
         &state,
         &ScreenProjectionRequest::default(),
@@ -252,6 +259,7 @@ fn span_boundaries_preserve_complete_selection_appearance() {
         CaptureQuality::Live,
     )
     .expect("span frame");
+
     let ScreenFrameData::Spans { rows } = frame.data else {
         panic!("span detail");
     };
@@ -259,12 +267,14 @@ fn span_boundaries_preserve_complete_selection_appearance() {
         return span.start_column == 1 && span.end_column == 2 && span.appearance.selected;
     }));
 }
+
 #[test]
 #[ignore = "manual rich-frame payload and projection benchmark"]
 fn common_viewport_projection_metrics() {
     for (cols, rows) in [(80, 24), (160, 45)] {
         let mut terminal = GhosttyVt::new(cols, rows, 0).expect("create benchmark terminal");
         let state = terminal.snapshot().expect("benchmark semantic snapshot");
+
         for detail in [FrameDetail::Spans, FrameDetail::Cells] {
             let request = ScreenProjectionRequest {
                 detail,
@@ -275,10 +285,13 @@ fn common_viewport_projection_metrics() {
                     bottom: rows,
                 }),
             };
+
             let started = Instant::now();
             let result =
                 project_screen_frame(&state, &request, source(1), true, CaptureQuality::Live);
+
             let elapsed = started.elapsed();
+
             match result {
                 Ok(frame) => {
                     let bytes = serde_json::to_vec(&frame)

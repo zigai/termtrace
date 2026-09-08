@@ -36,6 +36,7 @@ pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 1024 * 1024;
 /// Derive an input atom's operation identity from its request and zero-based index.
 pub fn derive_input_operation_id(request_id: Uuid, index: usize) -> Uuid {
     let name = format!("termtrace/input-atom/v1/{request_id}/{index}");
+
     return Uuid::new_v5(&Uuid::NAMESPACE_URL, name.as_bytes());
 }
 
@@ -441,6 +442,7 @@ impl ControlRequest {
     #[must_use]
     pub fn with_expected_presented_state_hash(mut self, hash: impl Into<String>) -> Self {
         self.expected_presented_state_hash = Some(hash.into());
+
         return self;
     }
 }

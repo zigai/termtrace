@@ -7,7 +7,7 @@ use std::{
 };
 
 use nix::{libc::O_NOFOLLOW, unistd::geteuid};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use termtrace_evidence::{
     artifact::{secure_file, sync_directory},
     event_log::canonical_source_fingerprint,
@@ -15,14 +15,16 @@ use termtrace_evidence::{
 };
 
 use super::{invalid_replay, json_error};
-use crate::{Error, Result, registry::SessionRegistry};
+use crate::{registry::SessionRegistry, Error, Result};
 
 pub(crate) fn check_cancelled(cancelled: Option<&AtomicBool>) -> Result<()> {
     if cancelled.is_some_and(|flag| return flag.load(Ordering::Relaxed)) {
         return Err(invalid_replay("semantic source query cancelled"));
     }
+
     return Ok(());
 }
+
 /// Local-kernel identities are meaningful only under the local verifier's secret MAC.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct SourceIdentity(Vec<FileIdentity>, String);
@@ -42,6 +44,7 @@ impl SourceIdentity {
         source
             .0
             .push(file_identity(&session.join("completion.json"))?);
+
         return Ok(source);
     }
 
@@ -50,6 +53,7 @@ impl SourceIdentity {
         if let Some(profile) = read_manifest(session)?.ghostty_visual {
             paths.push(session.join(profile.replay_profile));
         }
+
         return Ok(Self(
             paths
                 .iter()
@@ -70,12 +74,14 @@ impl SourceIdentity {
                 "canonical source changed during completion validation",
             ));
         }
+
         let completed = Self::capture(session)?;
         if !completed.0.starts_with(&self.0) {
             return Err(invalid_replay(
                 "canonical source changed while publishing completion",
             ));
         }
+
         return Ok(completed);
     }
 
@@ -85,6 +91,7 @@ impl SourceIdentity {
                 "canonical source changed during verification or replay",
             ));
         }
+
         return Ok(());
     }
 }
@@ -106,11 +113,13 @@ fn file_identity(path: &Path) -> Result<FileIdentity> {
             source,
         };
     })?;
+
     if !metadata.is_file() {
         return Err(invalid_replay(
             "canonical cache source must be a regular file",
         ));
     }
+
     return Ok(FileIdentity {
         device: metadata.dev(),
         inode: metadata.ino(),
@@ -137,6 +146,7 @@ pub(crate) fn encode<T: Serialize>(
     let body = serde_json::to_vec(&(source, &payload))
         .map_err(|error| return json_error(PathBuf::from("<verified-cache>"), error))?;
     let mac = blake3::keyed_hash(&key, &body).to_hex().to_string();
+
     return serde_json::to_vec(&Authenticated {
         source: source.clone(),
         payload,
@@ -148,18 +158,22 @@ pub(crate) fn encode<T: Serialize>(
 pub(crate) fn decode<T: Serialize + DeserializeOwned>(session: &Path, bytes: &[u8]) -> Result<T> {
     let authenticated: Authenticated<T> = serde_json::from_slice(bytes)
         .map_err(|error| return json_error(PathBuf::from("<verified-cache>"), error))?;
+
     let key = verification_key(session)?;
     let body = serde_json::to_vec(&(&authenticated.source, &authenticated.payload))
         .map_err(|error| return json_error(PathBuf::from("<verified-cache>"), error))?;
     let expected = blake3::keyed_hash(&key, &body);
     let supplied = blake3::Hash::from_hex(&authenticated.mac)
         .map_err(|_| return invalid_replay("invalid local verification-cache MAC"))?;
+
     if expected != supplied {
         return Err(invalid_replay(
             "local verification-cache authentication failed",
         ));
     }
+
     authenticated.source.check(session)?;
+
     return Ok(authenticated.payload);
 }
 
@@ -178,11 +192,13 @@ fn verification_key(session: &Path) -> Result<[u8; 32]> {
             source,
         };
     })?;
+
     if canonical_root.starts_with(&canonical_session) {
         return Err(invalid_replay(
             "local verification-cache key must be outside canonical session evidence",
         ));
     }
+
     let path = root.join("verification-cache.key");
     if !path.try_exists().map_err(|source| {
         return Error::Filesystem {
@@ -200,6 +216,7 @@ fn verification_key(session: &Path) -> Result<[u8; 32]> {
                     source,
                 };
             })?;
+
         let mut file = secure_file(&temporary)?;
         let result = (|| {
             file.write_all(&random)
@@ -220,16 +237,20 @@ fn verification_key(session: &Path) -> Result<[u8; 32]> {
                     });
                 }
             }
+
             return Ok(());
         })();
+
         fs::remove_file(&temporary).map_err(|source| {
             return Error::Filesystem {
                 path: temporary,
                 source,
             };
         })?;
+
         result?;
     }
+
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(O_NOFOLLOW)
@@ -246,6 +267,7 @@ fn verification_key(session: &Path) -> Result<[u8; 32]> {
             source,
         };
     })?;
+
     if !before.is_file()
         || before.mode() & 0o777 != 0o600
         || before.uid() != geteuid().as_raw()
@@ -255,6 +277,7 @@ fn verification_key(session: &Path) -> Result<[u8; 32]> {
             "local verification-cache key must be an owner-owned 0600 regular 32-byte file",
         ));
     }
+
     let mut key = [0; 32];
     file.read_exact(&mut key).map_err(|source| {
         return Error::Filesystem {
@@ -265,6 +288,7 @@ fn verification_key(session: &Path) -> Result<[u8; 32]> {
     let after = file
         .metadata()
         .map_err(|source| return Error::Filesystem { path, source })?;
+
     if before.ctime() != after.ctime()
         || before.ctime_nsec() != after.ctime_nsec()
         || after.len() != 32
@@ -273,5 +297,6 @@ fn verification_key(session: &Path) -> Result<[u8; 32]> {
             "local verification-cache key changed while reading",
         ));
     }
+
     return Ok(key);
 }

@@ -1,7 +1,7 @@
 use std::{borrow::Cow, fmt, result::Result as StdResult};
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Raw bytes serialized as standard padded Base64.
 #[derive(Clone, Default, Eq, PartialEq)]
@@ -60,6 +60,7 @@ impl<'de> Deserialize<'de> for ByteString {
         D: Deserializer<'de>,
     {
         let encoded = String::deserialize(deserializer)?;
+
         return STANDARD
             .decode(encoded)
             .map(Self)

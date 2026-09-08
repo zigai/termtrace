@@ -10,4 +10,4 @@ mod suite;
 
 pub use error::{Error, Result};
 pub use execution::run;
-pub use suite::{ScenarioSuiteOptions, run_suite, scenario_junit, write_scenario_junit};
+pub use suite::{run_suite, scenario_junit, write_scenario_junit, ScenarioSuiteOptions};

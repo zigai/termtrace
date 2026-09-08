@@ -17,24 +17,24 @@ use uuid::Uuid;
 use termtrace_evidence::{
     artifact::write_secure,
     event_log::{CanonicalBoundary, EventLogSummary, EventLogWriter, SessionClock},
-    provenance::{RecorderBuildIdentity, collect_execution_provenance},
-    request_journal::{MUTATION_JOURNAL_NAME, MutationJournal},
+    provenance::{collect_execution_provenance, RecorderBuildIdentity},
+    request_journal::{MutationJournal, MUTATION_JOURNAL_NAME},
     session::{canonical_manifest_bytes, manifest_hash, validate_completion_summary_candidate},
 };
 use termtrace_model::{
     execution::event::{Event, EventLogHeader, LifecycleKind, TerminalColors},
     execution::session::{
+        SessionCompletion, SessionFailure, SessionGeometry, SessionManifest,
         COMPLETION_VALIDATION_VERSION, GHOSTTY_REPLAY_PROFILE_NAME, SESSION_COMPLETION_FORMAT,
         SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
-        SessionCompletion, SessionFailure, SessionGeometry, SessionManifest,
     },
     terminal::observation::StatePoint,
     terminal::replay::GHOSTTY_REVISION,
     value::ByteString,
 };
 use termtrace_terminal::{
-    GhosttyVt, PresentationTracker, QueryTracker, semantic_state_hash,
-    supported_geometry_cell_count,
+    semantic_state_hash, supported_geometry_cell_count, GhosttyVt, PresentationTracker,
+    QueryTracker,
 };
 
 use super::{
@@ -42,7 +42,7 @@ use super::{
     control::control_socket_name,
     environment::EffectiveEnvironment,
     model::{RecordOptions, RecordOutcome, TerminalGeometry},
-    presentation::{LiveTerminal, geometry_cell_size},
+    presentation::{geometry_cell_size, LiveTerminal},
     process::{
         create_session_directory, invalid_geometry, register_host_signals,
         resolve_working_directory, spawn_command,
@@ -51,9 +51,9 @@ use super::{
     support::{finish_with_cleanup, terminal_error},
 };
 use crate::{
-    Error, Result,
     observation::publish_endpoint_checkpoint,
-    replay::{EndpointInspection, trust::SourceIdentity},
+    replay::{trust::SourceIdentity, EndpointInspection},
+    Error, Result,
 };
 
 const MUTATION_CACHE_CAPACITY: usize = 256;
@@ -79,6 +79,7 @@ struct IncompleteSessionDiagnostic<'diagnostic> {
     closure_failure: Option<&'diagnostic SessionFailure>,
     durable_boundary: Option<CanonicalBoundary>,
 }
+
 #[cfg(test)]
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub(super) struct IncompleteSessionDiagnosticRecord {
@@ -95,6 +96,7 @@ pub(super) struct IncompleteSessionDiagnosticRecord {
 /// the canonical event log cannot be durably committed.
 pub fn record(options: &RecordOptions) -> Result<RecordOutcome> {
     let mut stdout = io::stdout();
+
     return record_with_output(options, &mut stdout);
 }
 
@@ -109,6 +111,7 @@ pub fn record_with_output(
 ) -> Result<RecordOutcome> {
     let mut terminal_mode = RawTerminalGuard::enter(options.forward_stdin)?;
     let result = record_to(options, output);
+
     return finish_with_cleanup(result, terminal_mode.restore());
 }
 
@@ -116,24 +119,30 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     let pty_size = validate_options(options)?;
     let mut effective_environment =
         EffectiveEnvironment::resolve_validated(&options.environment, &options.term)?;
+
     // Resolve this once and pass the same owned path to provenance and spawn.
     // Leaving cwd unset is not equivalent: portable-pty falls back to $HOME,
     // which would make a wrapper command silently leave the caller's project.
     let working_directory = resolve_working_directory(options.working_directory.as_deref())?;
+
     if let Some(profile) = &options.ghostty_profile {
         profile.validate()?;
     }
+
     // Install handlers before the child exists so cancellation during startup
     // is buffered until the actor can audit it and reap the owned process group.
     let host_signals = register_host_signals()?;
+
     create_session_directory(&options.output_directory)?;
     effective_environment.set_recording_session(&options.output_directory)?;
+
     if let Some(profile) = &options.ghostty_profile {
         write_secure(
             &options.output_directory.join(GHOSTTY_REPLAY_PROFILE_NAME),
             &profile.replay_config,
         )?;
     }
+
     let clock = SessionClock::now()?;
     let session_id = Uuid::now_v7();
     let control_socket = control_socket_name(session_id);
@@ -145,6 +154,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         clock.started_unix_ns(),
         &effective_environment,
     )?;
+
     let header = EventLogHeader::new(
         session_id,
         &session_manifest_hash,
@@ -156,6 +166,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         &options.term,
     )
     .with_colors(options.colors.clone());
+
     let header_bytes = serde_json::to_vec(&header).map_err(|source| {
         return Error::InvalidJson {
             path: options.output_directory.join("events.jsonl"),
@@ -163,6 +174,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
             source,
         };
     })?;
+
     let event_header_hash = blake3::hash(&header_bytes).to_hex().to_string();
     let event_log_path = options.output_directory.join("events.jsonl");
     let mut event_log = EventLogWriter::create_with_policy(
@@ -175,6 +187,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     let actor_state: Result<(LiveTerminal, MutationJournal)> = (|| {
         let live = initialize_live_terminal(TerminalGeometry::from(pty_size), &options.colors)?;
         let journal = MutationJournal::create(&options.output_directory)?;
+
         return Ok((live, journal));
     })();
     let (live, journal) = match actor_state {
@@ -192,6 +205,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
                 &event_header_hash,
                 &failure,
             );
+
             return finish_with_cleanup(Err(error), closure_result);
         }
     };
@@ -215,6 +229,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
                 &event_header_hash,
                 &failure,
             );
+
             return finish_with_cleanup(Err(error), closure_result);
         }
     };
@@ -260,6 +275,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
                 &event_header_hash,
                 &failure,
             );
+
             return finish_with_cleanup(Err(error), closure_result);
         }
     };
@@ -268,7 +284,9 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         mut event_log,
         ..
     } = actor;
+
     drop(spawned);
+
     let exit_code = i32::try_from(runtime.status.exit_code()).ok();
     let signal_name = runtime.status.signal().map(str::to_owned);
     let terminal_event_seq = match event_log.append(Event::Exit {
@@ -288,6 +306,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
                 None,
                 Some(event_log.durable_boundary()),
             );
+
             return finish_with_cleanup(Err(error), diagnostic_result);
         }
     };
@@ -309,6 +328,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         resource_limit: runtime.resource_limit.clone(),
         failure: None,
     };
+
     let source = SourceIdentity::capture_candidate(&options.output_directory)?;
     publish_session_completion(options, &completion)?;
     let source = source.completed(&options.output_directory)?;
@@ -322,6 +342,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
                 monotonic_ns: None,
                 presented: true,
             };
+
             if let Err(error) = publish_endpoint_checkpoint(
                 &options.output_directory,
                 &StatePoint::LatestPresented,
@@ -407,6 +428,7 @@ fn write_session_manifest(
     let encoded = canonical_manifest_bytes(&manifest)?;
     let hash = manifest_hash(&encoded);
     write_secure(&options.output_directory.join("session.json"), &encoded)?;
+
     return Ok(hash);
 }
 
@@ -416,8 +438,10 @@ fn publish_session_completion(
 ) -> Result<()> {
     let validation_result = (|| {
         let log = EventLogSummary::read(options.output_directory.join("events.jsonl"))?;
+
         return validate_completion_summary_candidate(&options.output_directory, &log, completion);
     })();
+
     if let Err(error) = validation_result {
         let error = Error::from(error);
         let validation_failure = SessionFailure {
@@ -429,6 +453,7 @@ fn publish_session_completion(
             .failure
             .as_ref()
             .map(|_| return &validation_failure);
+
         let diagnostic_result = write_incomplete_session_diagnostic(
             options,
             completion.session_id,
@@ -437,8 +462,10 @@ fn publish_session_completion(
             closure_failure,
             None,
         );
+
         return finish_with_cleanup(Err(error), diagnostic_result);
     }
+
     return write_json_secure(
         &options.output_directory.join("completion.json"),
         completion,
@@ -466,8 +493,10 @@ fn close_failed_recording(
                         path: options.output_directory.join("events.jsonl"),
                     });
                 }
+
                 return Ok(());
             })?;
+
             return event_log.append(Event::Exit {
                 code: None,
                 signal: None,
@@ -486,6 +515,7 @@ fn close_failed_recording(
                 Some(&closure_failure),
                 Some(event_log.durable_boundary()),
             );
+
             return finish_with_cleanup(Err(error), diagnostic_result);
         }
     };
@@ -506,6 +536,7 @@ fn close_failed_recording(
         resource_limit: None,
         failure: Some(failure.clone()),
     };
+
     return publish_session_completion(options, &completion);
 }
 
@@ -547,7 +578,9 @@ fn write_json_secure(path: &Path, value: &impl serde::Serialize) -> Result<()> {
             source,
         };
     })?;
+
     write_secure(path, &encoded).map_err(Error::from)?;
+
     return Ok(());
 }
 
@@ -574,13 +607,16 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
     if options.command.is_empty() {
         return Err(terminal_error("validate command", "command is empty"));
     }
+
     if options.resource_limits.output_bytes == Some(0) {
         return Err(terminal_error(
             "validate resource limits",
             "resource budgets must be greater than zero",
         ));
     }
+
     options.environment.validate()?;
+
     let pixel_width = options
         .cols
         .checked_mul(options.cell_width_px)
@@ -589,12 +625,14 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
         .rows
         .checked_mul(options.cell_height_px)
         .ok_or_else(|| return invalid_geometry(options))?;
+
     if supported_geometry_cell_count(options.cols, options.rows).is_none()
         || options.cell_width_px == 0
         || options.cell_height_px == 0
     {
         return Err(invalid_geometry(options));
     }
+
     return Ok(PtySize {
         rows: options.rows,
         cols: options.cols,
@@ -616,6 +654,7 @@ fn initialize_live_terminal(
         geometry_cell_size(geometry.pixel_height, geometry.rows),
     )?;
     let presented = semantic.snapshot()?;
+
     return Ok(LiveTerminal {
         semantic,
         presentation_tracker: PresentationTracker::new(presented.modes.synchronized_output),

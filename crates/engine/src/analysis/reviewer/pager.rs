@@ -14,9 +14,9 @@ use termtrace_model::{
 
 use super::review_error;
 use crate::{
-    Result,
     observation::{semantic_state_with_hash_for_session_cancellable, state_text},
     replay::{trust::SourceIdentity, visit_session_states_while},
+    Result,
 };
 
 /// Maximum distinct semantic entries retained by a reviewer page.
@@ -150,6 +150,7 @@ pub fn load_review_page(
         false,
         cancelled,
     )?;
+
     let target = match query {
         ReviewQuery::Final => None,
         ReviewQuery::State(id) => Some(*id),
@@ -163,9 +164,11 @@ pub fn load_review_page(
                 if cancelled.load(Ordering::Relaxed) {
                     return Ok(false);
                 }
+
                 if *forward {
                     if record.state_id > *from && (!presented_only || record.presented) {
                         target = Some(record.state_id);
+
                         return Ok(false);
                     }
                 } else if record.state_id >= *from {
@@ -173,12 +176,15 @@ pub fn load_review_page(
                 } else if !presented_only || record.presented {
                     target = Some(record.state_id);
                 }
+
                 return Ok(true);
             })?;
             if target.is_none() {
                 source.check(session)?;
+
                 return Ok(None);
             }
+
             target
         }
         ReviewQuery::Search {
@@ -187,46 +193,58 @@ pub fn load_review_page(
             query,
         } => {
             super::validate_query(query)?;
+
             let mut target = None;
             let mut wrap = None;
             visit_session_states_while(session, cancelled, |record, state| {
                 if cancelled.load(Ordering::Relaxed) {
                     return Ok(false);
                 }
+
                 if !*forward
                     && from.is_some_and(|id| return record.state_id >= id)
                     && target.is_some()
                 {
                     return Ok(false);
                 }
+
                 if state_text(state).contains(query) {
                     if *forward {
                         if wrap.is_none() {
                             wrap = Some(record.state_id);
                         }
+
                         if from.is_none_or(|id| return record.state_id > id) {
                             target = Some(record.state_id);
+
                             return Ok(false);
                         }
                     } else {
                         wrap = Some(record.state_id);
+
                         if from.is_none_or(|id| return record.state_id < id) {
                             target = Some(record.state_id);
                         }
                     }
                 }
+
                 return Ok(true);
             })?;
+
             let target = target.or(wrap);
+
             if target.is_none() {
                 source.check(session)?;
+
                 return Ok(None);
             }
+
             target
         }
         ReviewQuery::Marker(_) | ReviewQuery::Event { .. } => {
             let Some(time) = event_target(session, query, cancelled)? else {
                 source.check(session)?;
+
                 return Ok(None);
             };
             let mut target = None;
@@ -234,12 +252,16 @@ pub fn load_review_page(
                 if cancelled.load(Ordering::Relaxed) {
                     return Ok(false);
                 }
+
                 target = Some(record.state_id);
+
                 return Ok(record.monotonic_ns < time);
             })?;
+
             target
         }
     };
+
     let start = target.map(|id| return id.saturating_sub(31));
     let end = target.map(|id| return id.saturating_add(32));
     let mut entries = VecDeque::<ReviewEntry>::new();
@@ -248,23 +270,28 @@ pub fn load_review_page(
         if cancelled.load(Ordering::Relaxed) {
             return Ok(false);
         }
+
         if start.is_some_and(|start| return record.state_id < start) {
             return Ok(true);
         }
+
         if end.is_some_and(|end| return record.state_id > end) {
             return Ok(false);
         }
+
         let entry = ReviewEntry::new(record, state);
         let bytes = entry
             .viewport
             .text
             .len()
             .saturating_add(entry.dirty_rows.len().saturating_mul(2));
+
         if bytes > MAX_PAGE_TEXT_BYTES {
             return Err(review_error(
                 "one semantic reviewer viewport exceeds the 16 MiB page budget",
             ));
         }
+
         while entries.len() >= REVIEW_PAGE_STATES
             || retained_bytes.saturating_add(bytes) > MAX_PAGE_TEXT_BYTES
         {
@@ -275,6 +302,7 @@ pub fn load_review_page(
             }) {
                 return Ok(false);
             }
+
             if let Some(evicted) = entries.pop_front() {
                 retained_bytes = retained_bytes.saturating_sub(
                     evicted
@@ -285,10 +313,13 @@ pub fn load_review_page(
                 );
             }
         }
+
         retained_bytes = retained_bytes.saturating_add(bytes);
         entries.push_back(entry);
+
         return Ok(true);
     })?;
+
     source.check(session)?;
     let selected = target.or_else(|| return entries.back().map(|entry| return entry.state_id));
     let Some(selected) = selected else {
@@ -304,6 +335,7 @@ pub fn load_review_page(
             "review state {selected} does not exist"
         )));
     }
+
     return Ok(Some(ReviewPage { entries, selected }));
 }
 
@@ -314,11 +346,13 @@ fn event_target(
 ) -> Result<Option<u64>> {
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
     let mut selected = None;
+
     let mut matches = 0_u64;
     while let Some(record) = cursor.next_record()? {
         if cancelled.load(Ordering::Relaxed) {
             return Err(review_error("review event query cancelled"));
         }
+
         match query {
             ReviewQuery::Marker(label) => {
                 if matches!(&record.event, Event::Marker { label: value, .. } if value == label) {
@@ -336,6 +370,7 @@ fn event_target(
                 } else {
                     matches!(record.event, Event::InputIntent { .. })
                 };
+
                 if eligible
                     && if *forward {
                         record.monotonic_ns > *from_ns
@@ -344,6 +379,7 @@ fn event_target(
                     }
                 {
                     selected = Some(record.monotonic_ns);
+
                     if *forward {
                         break;
                     }
@@ -356,6 +392,7 @@ fn event_target(
             }
         }
     }
+
     if let ReviewQuery::Marker(label) = query
         && matches != 1
     {
@@ -363,5 +400,6 @@ fn event_target(
             "review marker `{label}` must occur exactly once, found {matches}"
         )));
     }
+
     return Ok(selected);
 }

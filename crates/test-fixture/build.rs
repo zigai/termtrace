@@ -20,9 +20,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .current_dir(&manifest_dir)
                 .output()
                 .ok()?;
+
             if !output.status.success() {
                 return None;
             }
+
             return String::from_utf8(output.stdout).ok();
         })
         .map_or_else(
@@ -30,5 +32,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             |value| return value.trim().to_owned(),
         );
     println!("cargo:rustc-env=TERMTRACE_BUILD_REVISION={build_revision}");
+
     return Ok(());
 }

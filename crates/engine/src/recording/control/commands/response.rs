@@ -1,7 +1,7 @@
 use super::{
-    CONTROL_PROTOCOL_VERSION, ControlErrorDetails, ControlResponse, ControlResult, Error,
-    EventLogWriter, ScreenFrameError, ScreenFrameFailureDetails, ScreenFrameLimitKind, Uuid,
-    actor_boundaries,
+    actor_boundaries, ControlErrorDetails, ControlResponse, ControlResult, Error, EventLogWriter,
+    ScreenFrameError, ScreenFrameFailureDetails, ScreenFrameLimitKind, Uuid,
+    CONTROL_PROTOCOL_VERSION,
 };
 
 pub(in crate::recording::control) fn screen_frame_error_code(
@@ -96,6 +96,7 @@ pub(in crate::recording::control) fn screen_frame_failure_details(
         }
     };
 }
+
 pub(super) fn control_error_code(error: &Error) -> &str {
     match error {
         Error::ControlRejected { code, .. } => return code,
@@ -115,7 +116,9 @@ pub(super) fn control_error_code(error: &Error) -> &str {
             return "pointer_encoding_failed";
         }
         Error::GhosttyVt { .. } => return "terminal_encoding_failed",
-        Error::EventLogPoisoned { .. } | Error::InvalidEventLog { .. } => return "event_log_failed",
+        Error::EventLogPoisoned { .. } | Error::InvalidEventLog { .. } => {
+            return "event_log_failed"
+        }
         Error::Filesystem { .. } => return "io_failed",
         Error::TerminalOperation { .. } => return "terminal_operation_failed",
         _ => return "internal_error",

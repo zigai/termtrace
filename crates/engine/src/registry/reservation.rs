@@ -9,16 +9,20 @@ impl SessionRegistry {
     /// schema/identity mismatch, or existing alias reservation/binding.
     pub fn register(&self, alias: &str, session: &Path) -> Result<RegistryEntry> {
         let _lock = self.lock()?;
+
         validate_alias(alias)?;
+
         if self.entry_path(alias).exists() {
             return Err(registry_error(
                 "register session alias",
                 "alias is already reserved or registered",
             ));
         }
+
         let entry = self.entry_for(alias, session)?;
         let encoded = self.encode_entry(&entry)?;
         write_secure(&self.entry_path(alias), &encoded)?;
+
         return Ok(entry);
     }
 
@@ -36,12 +40,14 @@ impl SessionRegistry {
         lease: Duration,
     ) -> Result<AliasReservation> {
         validate_alias(alias)?;
+
         if lease.is_zero() {
             return Err(registry_error(
                 "reserve session alias",
                 "reservation lease must be greater than zero",
             ));
         }
+
         let _lock = self.lock()?;
         let now = system_time_unix_ns()?;
         let path = self.entry_path(alias);
@@ -57,6 +63,7 @@ impl SessionRegistry {
                             source,
                         };
                     })?;
+
                     sync_parent_directory(&path)?;
                 }
                 RegistryRecord::Reservation(reservation)
@@ -75,6 +82,7 @@ impl SessionRegistry {
                 }
             }
         }
+
         let lease_expires_unix_ns = now.saturating_add(lease.as_nanos());
         let reservation = AliasReservation {
             format: REGISTRY_RESERVATION_FORMAT.to_owned(),
@@ -87,6 +95,7 @@ impl SessionRegistry {
         };
         let encoded = self.encode_reservation(&reservation)?;
         write_secure(&path, &encoded)?;
+
         return Ok(reservation);
     }
 
@@ -105,6 +114,7 @@ impl SessionRegistry {
                 "alias is no longer reserved",
             ));
         };
+
         if !valid_reservation(&reservation.alias, &current)
             || current.owner_token != reservation.owner_token
             || current.created_unix_ns != reservation.created_unix_ns
@@ -116,23 +126,30 @@ impl SessionRegistry {
                 "alias reservation owner changed before promotion",
             ));
         }
+
         if current.lease_expires_unix_ns <= system_time_unix_ns()? {
             return Err(registry_error(
                 "promote session alias",
                 "alias reservation lease expired before promotion",
             ));
         }
+
         let entry = self.entry_for(&reservation.alias, &reservation.session_path())?;
         let encoded = self.encode_entry(&entry)?;
         let temporary =
             self.directory
                 .join(format!(".{}.{}.tmp", reservation.alias, Uuid::now_v7()));
+
         write_secure(&temporary, &encoded)?;
+
         if let Err(source) = fs::rename(&temporary, &path) {
             let _cleanup = fs::remove_file(&temporary);
+
             return Err(Error::Filesystem { path, source });
         }
+
         sync_parent_directory(&path)?;
+
         return Ok(entry);
     }
 
@@ -150,6 +167,7 @@ impl SessionRegistry {
                 "alias is no longer reserved",
             ));
         };
+
         if !valid_reservation(&reservation.alias, &current)
             || current.owner_token != reservation.owner_token
         {
@@ -158,13 +176,16 @@ impl SessionRegistry {
                 "alias reservation owner changed before release",
             ));
         }
+
         fs::remove_file(&path).map_err(|source| {
             return Error::Filesystem {
                 path: path.clone(),
                 source,
             };
         })?;
+
         sync_parent_directory(&path)?;
+
         return Ok(());
     }
 }
@@ -185,6 +206,7 @@ pub(super) fn validate_alias(alias: &str) -> Result<()> {
             "alias must be 1-64 ASCII letters, digits, '-' or '_', beginning with a letter or digit",
         ));
     }
+
     return Ok(());
 }
 

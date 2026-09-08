@@ -9,6 +9,7 @@ use termtrace_model::{
     terminal::state::MouseButton,
 };
 use termtrace_sdk::locator::LocatorError;
+
 mod application;
 mod capture;
 mod concurrency;
@@ -68,6 +69,7 @@ fn assert_control_events(recording: &EventLog, session: &Path) {
             _ => return None,
         })
         .expect("resize intent");
+
     let resize_result_time = recording
         .events
         .iter()
@@ -80,6 +82,7 @@ fn assert_control_events(recording: &EventLog, session: &Path) {
             _ => return None,
         })
         .expect("resize result");
+
     let ranged = index_session_range(session, Some(resize_result_time), None)
         .expect("range crossing resize intent/result");
     let ranged_states = read_zstd_text(&ranged.directory.join("states.jsonl.zst"));
@@ -87,11 +90,9 @@ fn assert_control_events(recording: &EventLog, session: &Path) {
         .lines()
         .map(|line| return serde_json::from_str::<StateRecord>(line).expect("state JSON"))
         .collect::<Vec<_>>();
-    assert!(
-        ranged_states
-            .iter()
-            .any(|state| return state.delta.geometry == Some((100, 30)))
-    );
+    assert!(ranged_states
+        .iter()
+        .any(|state| return state.delta.geometry == Some((100, 30))));
     assert!(ranged_states.iter().all(|state| {
         let Some(event_sequence) = state.event_seq else {
             return true;

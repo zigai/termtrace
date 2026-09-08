@@ -19,7 +19,9 @@ fn live_control_drives_and_audits_a_detached_session() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn recorder");
+
     wait_for_control(&session);
+
     let registry_state = temporary.path().join("registry-state");
     let mut register = Command::cargo_bin("termtrace").expect("binary should build");
     register
@@ -28,28 +30,26 @@ fn live_control_drives_and_audits_a_detached_session() {
         .arg(&session)
         .assert()
         .success();
+
     let mut named_status = Command::cargo_bin("termtrace").expect("binary should build");
     named_status
         .env("TERMTRACE_STATE_DIR", &registry_state)
         .args(["status", "live-demo"])
         .assert()
         .success();
+
     let entry: serde_json::Value = serde_json::from_slice(
         &fs_err::read(registry_state.join("registry/live-demo.json")).expect("registry entry"),
     )
     .expect("registry JSON");
-    assert!(
-        entry
-            .pointer("/recorder_pid")
-            .and_then(serde_json::Value::as_u64)
-            .is_some()
-    );
-    assert!(
-        entry
-            .pointer("/recorder_process_start_ticks")
-            .and_then(serde_json::Value::as_u64)
-            .is_some()
-    );
+    assert!(entry
+        .pointer("/recorder_pid")
+        .and_then(serde_json::Value::as_u64)
+        .is_some());
+    assert!(entry
+        .pointer("/recorder_process_start_ticks")
+        .and_then(serde_json::Value::as_u64)
+        .is_some());
     let mut named_list = Command::cargo_bin("termtrace").expect("binary should build");
     named_list
         .env("TERMTRACE_STATE_DIR", &registry_state)
@@ -66,6 +66,7 @@ fn live_control_drives_and_audits_a_detached_session() {
         _ => None,
     }
     .expect("status response data");
+
     send_request(&session, &ControlRequest::new(ControlCommand::Ping)).expect("observer-free ping");
     let second_boundary =
         match send_request(&session, &ControlRequest::new(ControlCommand::Status))
@@ -80,6 +81,7 @@ fn live_control_drives_and_audits_a_detached_session() {
     let duplicate_request = ControlRequest::new(ControlCommand::Mark {
         label: "deduplicated".to_owned(),
     });
+
     send_request(&session, &duplicate_request).expect("first marker request");
     send_request(&session, &duplicate_request).expect("duplicate should return cached response");
     let collision = ControlRequest {
@@ -118,6 +120,7 @@ fn live_control_drives_and_audits_a_detached_session() {
         let mut command = Command::cargo_bin("termtrace").expect("binary should build");
         command.args(arguments).assert().success();
     }
+
     let waiter = StdCommand::new(binary)
         .args([
             "wait",
@@ -131,7 +134,9 @@ fn live_control_drives_and_audits_a_detached_session() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn output waiter");
+
     thread::sleep(Duration::from_millis(50));
+
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
     send.arg("act")
         .arg(&session)
@@ -162,11 +167,13 @@ fn live_control_drives_and_audits_a_detached_session() {
             return matches!(&record.event, Event::Marker { label, .. } if label == "before-input");
         })
         .expect("before-input marker");
+
     let selectors = [
         vec!["--at-marker".to_owned(), "before-input".to_owned()],
         vec!["--event-seq".to_owned(), marker.seq.to_string()],
         vec!["--at".to_owned(), format!("{}ns", marker.monotonic_ns)],
     ];
+
     let mut selected_hashes = Vec::new();
     for selector in selectors {
         let mut show = Command::cargo_bin("termtrace").expect("binary should build");
@@ -177,6 +184,7 @@ fn live_control_drives_and_audits_a_detached_session() {
             .args(["--format", "json-compact"])
             .assert()
             .success();
+
         let observation: serde_json::Value =
             serde_json::from_slice(&shown.get_output().stdout).expect("selected observation");
         selected_hashes.push(
@@ -187,6 +195,7 @@ fn live_control_drives_and_audits_a_detached_session() {
                 .to_owned(),
         );
     }
+
     assert!(selected_hashes.windows(2).all(|pair| {
         return matches!(pair, [left, right] if left == right);
     }));
@@ -236,6 +245,7 @@ fn live_control_uses_a_bounded_endpoint_for_long_evidence_paths() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn recorder in long evidence root");
+
     wait_for_control(&session);
     assert!(matches!(
         send_request(&session, &ControlRequest::new(ControlCommand::Ping)),
@@ -243,6 +253,7 @@ fn live_control_uses_a_bounded_endpoint_for_long_evidence_paths() {
     ));
     send_request(&session, &ControlRequest::new(ControlCommand::Stop))
         .expect("stop long-path child");
+
     let output = recorder
         .wait_with_output()
         .expect("wait for long-path recorder");

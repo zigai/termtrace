@@ -1,6 +1,7 @@
 use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
+
 use args::{ControlSubcommand, FocusDirection};
 
 use std::{
@@ -18,10 +19,10 @@ use termtrace_engine::{
 use termtrace_model::{
     execution::event::InputKind,
     protocol::control::{
-        ActionPostcondition, ActionPostconditionResult, ControlCommand, ControlData,
-        ControlErrorDetails, ControlRequest, ControlResult, InputSequenceAtom,
+        derive_input_operation_id, ActionPostcondition, ActionPostconditionResult, ControlCommand,
+        ControlData, ControlErrorDetails, ControlRequest, ControlResult, InputSequenceAtom,
         InputSequenceAtomOutcome, PointerOperation, ScreenPostconditionQuality, ScreenPredicate,
-        ScreenWaitQuality, StableCaptureQuality, StateHashComparison, derive_input_operation_id,
+        ScreenWaitQuality, StableCaptureQuality, StateHashComparison,
     },
     registry::RegistryLifecycle,
     terminal::observation::{ActorBoundaries, CaptureQuality, StatePoint},
@@ -40,7 +41,7 @@ use crate::cli::{
     },
     output::write_json_line,
     parsers::{parse_cursor_position, parse_region_predicate, parse_row_predicate},
-    session_helpers::{ResolvedSessionRef, resolve_session, write_session_lifecycle},
+    session_helpers::{resolve_session, write_session_lifecycle, ResolvedSessionRef},
 };
 
 mod action;
@@ -50,7 +51,7 @@ mod transport;
 mod wait;
 
 use action::{input_failure_application, input_retry};
-use transport::{CliControlOutcome, send_cli_control};
+use transport::{send_cli_control, CliControlOutcome};
 use wait::compact_boundaries;
 
 pub(super) use action::run_act;

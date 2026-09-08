@@ -9,5 +9,6 @@ pub(super) fn materialize_profile(root: &Path, config: &[u8]) -> Result<PathBuf>
     let ghostty = root.join("ghostty");
     create_private_directory(&ghostty)?;
     write_secure(&ghostty.join("config.ghostty"), config)?;
+
     return Ok(root.to_path_buf());
 }

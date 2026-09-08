@@ -18,6 +18,11 @@ exclude = ["fuzz"]
 [workspace.package]
 license-file = "LICENSE"
 
+[workspace.metadata.dylint]
+libraries = [
+    { git = "https://github.com/zigai/rust-statement-spacing", pattern = "lint" },
+]
+
 [package]
 name = "termtrace"
 default-run = "termtrace"
@@ -103,6 +108,7 @@ fn_to_numeric_cast_any = "deny"
 useless_format = "deny"
 get_unwrap = "deny"
 host_endian_bytes = "deny"
+if_then_some_else_none = "warn"
 ignore_without_reason = "deny"
 implicit_return = "deny"
 indexing_slicing = "deny"

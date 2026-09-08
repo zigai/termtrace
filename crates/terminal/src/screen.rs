@@ -41,6 +41,7 @@ pub fn semantic_state_hash(state: &SemanticState) -> Result<String, ScreenFrameE
     for row in &state.grid {
         hash.update(hash_semantic_row(row)?.as_bytes());
     }
+
     return Ok(hash.finalize().to_hex().to_string());
 }
 
@@ -52,9 +53,11 @@ pub fn hash_semantic_row(row: &RowState) -> Result<blake3::Hash, ScreenFrameErro
         wrap_continuation: row.wrap_continuation,
         cells: &row.cells,
     };
+
     let mut hash = blake3::Hasher::new();
     serde_json::to_writer(&mut hash, &normalized)
         .map_err(|_| return ScreenFrameError::Serialization)?;
+
     return Ok(hash.finalize());
 }
 
@@ -69,6 +72,7 @@ pub fn semantic_state_hash_from_row_hashes(
     for row_hash in row_hashes {
         hash.update(row_hash.as_bytes());
     }
+
     return Ok(hash.finalize().to_hex().to_string());
 }
 
@@ -84,10 +88,12 @@ fn semantic_state_metadata_hasher(
         active_style: &state.active_style,
         metadata: &state.metadata,
     };
+
     let mut hash = blake3::Hasher::new();
     hash.update(SEMANTIC_STATE_HASH_DOMAIN);
     serde_json::to_writer(&mut hash, &metadata)
         .map_err(|_| return ScreenFrameError::Serialization)?;
+
     return Ok(hash);
 }
 
@@ -104,13 +110,16 @@ pub fn semantic_viewport_text(state: &SemanticState) -> String {
                 output.push_str(&cell.grapheme);
             }
         }
+
         while output.ends_with(' ') {
             output.pop();
         }
+
         if index + 1 < state.grid.len() {
             output.push('\n');
         }
     }
+
     return output;
 }
 
@@ -128,12 +137,14 @@ pub fn validate_screen_region(
             reason: InvalidRegionReason::CellsRequireExplicitRegion,
         });
     }
+
     let region = request.region.unwrap_or(ScreenRegion {
         top: 0,
         left: 0,
         right: cols,
         bottom: rows,
     });
+
     if region.right < region.left || region.bottom < region.top {
         return Err(invalid_region(
             Some(region),
@@ -142,6 +153,7 @@ pub fn validate_screen_region(
             InvalidRegionReason::Reversed,
         ));
     }
+
     if region.right == region.left || region.bottom == region.top {
         return Err(invalid_region(
             Some(region),
@@ -150,6 +162,7 @@ pub fn validate_screen_region(
             InvalidRegionReason::Empty,
         ));
     }
+
     if region.right > cols || region.bottom > rows {
         return Err(invalid_region(
             Some(region),
@@ -158,6 +171,7 @@ pub fn validate_screen_region(
             InvalidRegionReason::OutOfBounds,
         ));
     }
+
     let cell_count = u32::from(region.width()) * u32::from(region.height());
     if cell_count > MAX_SCREEN_FRAME_CELLS {
         return Err(ScreenFrameError::ResourceLimit {
@@ -168,6 +182,7 @@ pub fn validate_screen_region(
             region,
         });
     }
+
     return Ok(region);
 }
 
@@ -185,6 +200,7 @@ pub fn project_screen_frame(
     let data = project_data(state, region, request.detail);
     let state_hash =
         semantic_state_hash(state).map_err(|_| return ScreenFrameError::Serialization)?;
+
     let mut frame = ScreenFrame {
         version: SCREEN_FRAME_VERSION,
         state_hash,
@@ -205,6 +221,7 @@ pub fn project_screen_frame(
     };
     let (frame_hash, serialized_bytes) = screen_frame_hash_and_bytes(&frame)?;
     frame.frame_hash = frame_hash;
+
     if serialized_bytes > MAX_SCREEN_FRAME_JSON_BYTES {
         return Err(ScreenFrameError::ResourceLimit {
             limit: ScreenFrameLimitKind::SerializedBytes,
@@ -214,6 +231,7 @@ pub fn project_screen_frame(
             region,
         });
     }
+
     return Ok(frame);
 }
 
@@ -237,22 +255,26 @@ fn validate_semantic_state(state: &SemanticState) -> Result<(), ScreenFrameError
             reason: SemanticStateFailure::RowCount,
         });
     }
+
     if state.colors.palette.len() != 256 {
         return Err(ScreenFrameError::InconsistentSemanticState {
             reason: SemanticStateFailure::PaletteSize,
         });
     }
+
     for (row_index, row) in state.grid.iter().enumerate() {
         if usize::from(row.row) != row_index {
             return Err(ScreenFrameError::InconsistentSemanticState {
                 reason: SemanticStateFailure::RowCoordinate,
             });
         }
+
         if row.cells.len() != usize::from(state.cols) {
             return Err(ScreenFrameError::InconsistentSemanticState {
                 reason: SemanticStateFailure::CellCount,
             });
         }
+
         if row
             .cells
             .iter()
@@ -264,6 +286,7 @@ fn validate_semantic_state(state: &SemanticState) -> Result<(), ScreenFrameError
             });
         }
     }
+
     return Ok(());
 }
 
@@ -282,6 +305,7 @@ fn validate_projection_clone_bytes(
                 } else {
                     grapheme_bytes
                 };
+
             let cloned_bytes = match detail {
                 FrameDetail::Text => convenience_bytes,
                 FrameDetail::Spans => convenience_bytes
@@ -290,6 +314,7 @@ fn validate_projection_clone_bytes(
                 FrameDetail::Cells => convenience_bytes.saturating_add(grapheme_bytes),
             };
             requested = requested.saturating_add(cloned_bytes);
+
             if requested > MAX_SCREEN_FRAME_JSON_BYTES {
                 return Err(ScreenFrameError::ResourceLimit {
                     limit: ScreenFrameLimitKind::SerializedBytes,
@@ -301,6 +326,7 @@ fn validate_projection_clone_bytes(
             }
         }
     }
+
     return Ok(());
 }
 
@@ -316,8 +342,10 @@ fn json_string_content_bytes(value: &str) -> Result<u64, ScreenFrameError> {
             .checked_add(len)
             .ok_or(ScreenFrameError::Serialization)?;
     }
+
     return Ok(count);
 }
+
 fn project_data(
     state: &SemanticState,
     region: ScreenRegion,
@@ -335,12 +363,14 @@ fn project_data(
                     };
                 })
                 .collect();
+
             return ScreenFrameData::Text { rows };
         }
         FrameDetail::Spans => {
             let rows: Vec<ScreenSpanRow> = selected_rows(state, region)
                 .map(|row| {
                     let cells = selected_cells(row.cells.as_slice(), region);
+
                     return ScreenSpanRow {
                         row: row.row,
                         soft_wrapped: row.soft_wrapped,
@@ -350,12 +380,14 @@ fn project_data(
                     };
                 })
                 .collect();
+
             return ScreenFrameData::Spans { rows };
         }
         FrameDetail::Cells => {
             let rows: Vec<ScreenCellRow> = selected_rows(state, region)
                 .map(|row| {
                     let cells = selected_cells(row.cells.as_slice(), region);
+
                     return ScreenCellRow {
                         row: row.row,
                         soft_wrapped: row.soft_wrapped,
@@ -368,6 +400,7 @@ fn project_data(
                     };
                 })
                 .collect();
+
             return ScreenFrameData::Cells { rows };
         }
     }
@@ -379,6 +412,7 @@ fn project_data(
 )]
 fn selected_rows(state: &SemanticState, region: ScreenRegion) -> impl Iterator<Item = &RowState> {
     let rows = &state.grid[usize::from(region.top)..usize::from(region.bottom)];
+
     return rows.iter();
 }
 
@@ -418,6 +452,7 @@ fn convenience_text(cells: &[CellState]) -> String {
             text.push(' ');
         }
     }
+
     return text;
 }
 
@@ -438,6 +473,7 @@ fn project_spans(cells: &[CellState]) -> Vec<ScreenSpan> {
             });
             continue;
         }
+
         let mut text = String::new();
         append_convenience_cell(&mut text, cell);
         spans.push(ScreenSpan {
@@ -452,6 +488,7 @@ fn project_spans(cells: &[CellState]) -> Vec<ScreenSpan> {
             }],
         });
     }
+
     return spans;
 }
 
@@ -490,7 +527,9 @@ impl Write for CountingHashWriter {
             .count
             .checked_add(u64::try_from(buf.len()).unwrap_or(u64::MAX))
             .ok_or_else(|| return io::Error::other("screen frame byte count overflow"))?;
+
         self.hasher.update(buf);
+
         return Ok(buf.len());
     }
 
@@ -516,6 +555,7 @@ pub fn screen_frame_hash_and_bytes(frame: &ScreenFrame) -> Result<(String, u64),
         colors: &frame.colors,
         data: &frame.data,
     };
+
     let mut writer = CountingHashWriter {
         count: 0,
         hasher: blake3::Hasher::new(),
@@ -525,6 +565,7 @@ pub fn screen_frame_hash_and_bytes(frame: &ScreenFrame) -> Result<(String, u64),
         .map_err(|_| return ScreenFrameError::Serialization)?;
     let hash = writer.hasher.finalize().to_hex().to_string();
     let total_bytes = writer.count.saturating_add(80);
+
     return Ok((hash, total_bytes));
 }
 
@@ -541,6 +582,7 @@ pub fn normalize_screen_frame_text(
     let ScreenFrameData::Text { rows } = &frame.data else {
         return Err(ScreenFrameError::Serialization);
     };
+
     return normalized_value(frame, FrameDetail::Text, rows, options);
 }
 
@@ -552,6 +594,7 @@ pub fn normalize_screen_frame_spans(
     let ScreenFrameData::Spans { rows } = &frame.data else {
         return Err(ScreenFrameError::Serialization);
     };
+
     return normalized_value(frame, FrameDetail::Spans, rows, options);
 }
 
@@ -563,6 +606,7 @@ pub fn normalize_screen_frame_cells(
     let ScreenFrameData::Cells { rows } = &frame.data else {
         return Err(ScreenFrameError::Serialization);
     };
+
     return normalized_value(frame, FrameDetail::Cells, rows, options);
 }
 
@@ -589,12 +633,15 @@ fn normalized_value<T: Serialize>(
         "rows".to_owned(),
         serde_json::to_value(rows).map_err(|_| return ScreenFrameError::Serialization)?,
     );
+
     if options.include_cursor {
         normalized.insert("cursor".to_owned(), serde_json::json!(frame.cursor));
     }
+
     if options.include_modes {
         normalized.insert("modes".to_owned(), serde_json::json!(frame.modes));
     }
+
     return Ok(serde_json::Value::Object(normalized));
 }
 

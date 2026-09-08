@@ -61,9 +61,11 @@ impl DurabilityPolicy {
                         .is_some_and(|value| return value > 0)
             }
         };
+
         if !valid {
             return Err(ModelValidationError::InvalidDurabilityPolicy);
         }
+
         return Ok(());
     }
 }

@@ -11,10 +11,12 @@ pub(in crate::cli) fn run_screen(
     ) {
         return write_session_lifecycle(response, &resolved, "screen", ExitCode::FAILURE);
     }
+
     let lifecycle = resolved.lifecycle;
     let session = resolved.path;
     let observation = observe_session_with_options(&session, StatePoint::LatestPresented, false)
         .into_diagnostic()?;
+
     if arguments.since.as_deref() == Some(observation.state_hash.as_str()) {
         let output = ScreenResponse {
             v: 1,
@@ -29,8 +31,10 @@ pub(in crate::cli) fn run_screen(
             unchanged: Some(true),
             screen: None,
         };
+
         return write_json_line(response, &output);
     }
+
     let screen = match arguments.screen {
         ScreenEncoding::Exact => Some(serde_json::Value::String(observation.frame.viewport_text)),
         ScreenEncoding::Text => Some(serde_json::Value::String(
@@ -47,6 +51,7 @@ pub(in crate::cli) fn run_screen(
             let since = arguments
                 .since
                 .ok_or_else(|| miette::miette!("--screen diff requires --since STATE_HASH"))?;
+
             let point = StatePoint::StateHash {
                 state_hash: since.clone(),
             };
@@ -54,8 +59,10 @@ pub(in crate::cli) fn run_screen(
                 observe_session_with_options(&session, point, false).into_diagnostic()?
             } else {
                 let _ = request(&session, ControlCommand::Status).into_diagnostic()?;
+
                 observe_validated_prefix(&session, point, false).into_diagnostic()?
             };
+
             Some(diff_screen(
                 &prior.frame.viewport_text,
                 &observation.frame.viewport_text,
@@ -64,6 +71,7 @@ pub(in crate::cli) fn run_screen(
         }
         ScreenEncoding::None => None,
     };
+
     let output = ScreenResponse {
         v: 1,
         ok: true,
@@ -77,6 +85,7 @@ pub(in crate::cli) fn run_screen(
         unchanged: None,
         screen,
     };
+
     return write_json_line(response, &output);
 }
 
@@ -118,15 +127,18 @@ pub(super) fn sparse_screen(viewport_text: &str) -> serde_json::Value {
         .enumerate()
         .filter_map(|(row, text)| {
             let text = text.trim_end();
+
             return (!text.is_empty()).then(|| return (row, text));
         })
         .collect();
+
     let total_rows = viewport_text.lines().count();
     let response = SparseScreenResponse {
         encoding: "rows",
         blank_rows_omitted: total_rows.saturating_sub(rows.len()),
         rows,
     };
+
     #[expect(
         clippy::expect_used,
         reason = "SparseScreenResponse contains only primitive usize and string slices which cannot fail JSON serialization"
@@ -142,14 +154,17 @@ pub(super) fn diff_screen(before: &str, after: &str, since: String) -> serde_jso
         .filter_map(|row| {
             let old = before_rows.get(row).copied().unwrap_or_default();
             let new = after_rows.get(row).copied().unwrap_or_default();
+
             return (old != new).then(|| return (row, new.trim_end()));
         })
         .collect();
+
     let response = DiffScreenResponse {
         encoding: "diff_rows",
         since,
         rows,
     };
+
     #[expect(
         clippy::expect_used,
         reason = "DiffScreenResponse contains only String and string slices which cannot fail JSON serialization"

@@ -11,9 +11,9 @@ use termtrace_evidence::artifact::{secure_file, write_secure};
 use termtrace_model::artifact::visual::CaptureOptions;
 
 use super::{
-    Error, Result,
-    process::{ManagedChild, owned_command, probe_output},
+    process::{owned_command, probe_output, ManagedChild},
     util::external_error,
+    Error, Result,
 };
 
 pub(super) fn require_tools() -> Result<()> {
@@ -23,6 +23,7 @@ pub(super) fn require_tools() -> Result<()> {
             "WAYLAND_DISPLAY is not set",
         ));
     }
+
     probe_output(
         "Wayland capture dependencies",
         Command::new("/usr/bin/python3").args([
@@ -31,6 +32,7 @@ pub(super) fn require_tools() -> Result<()> {
         ]),
         Duration::from_secs(10),
     )?;
+
     return Ok(());
 }
 
@@ -42,6 +44,7 @@ pub(super) fn spawn(
     let script = staging.join("portal.py");
     write_secure(&script, include_bytes!("portal.py"))?;
     let log = secure_file(&staging.join("portal.log"))?;
+
     return ManagedChild::spawn_logged(
         "Wayland portal capture",
         owned_command(helper, "/usr/bin/python3")?
@@ -62,20 +65,25 @@ pub(super) fn wait_for_acquisition(
     cancelled: &AtomicBool,
 ) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(130);
+
     while !staging.join("acquisition-ready.json").is_file() {
         if cancelled.load(Ordering::Relaxed) {
             return Err(external_error("Wayland capture", "capture cancelled"));
         }
+
         capture.check_running()?;
         ghostty.check_running()?;
+
         if Instant::now() >= deadline {
             return Err(external_error(
                 "Wayland capture",
                 "timed out waiting for portal selection and first frame",
             ));
         }
+
         thread::sleep(Duration::from_millis(20));
     }
+
     return Ok(());
 }
 
@@ -93,6 +101,7 @@ pub(super) fn validate_completion(staging: &Path, packets: u64) -> Result<u128> 
             source,
         };
     })?;
+
     let completion: AcquisitionCompletion = serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path,
@@ -100,11 +109,13 @@ pub(super) fn validate_completion(staging: &Path, packets: u64) -> Result<u128> 
             source,
         };
     })?;
+
     if packets == 0 || packets != completion.frames {
         return Err(external_error(
             "Wayland capture",
             "acquired frame count differs from encoded packet count",
         ));
     }
+
     return Ok(completion.first_received_unix_ns);
 }

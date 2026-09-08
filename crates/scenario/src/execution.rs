@@ -9,13 +9,13 @@ use std::{
 
 use termtrace_engine::{
     analysis::diagnostics::diagnose_snapshot,
-    observation::{StatePoint, observe_session_with_options, state_text},
+    observation::{observe_session_with_options, state_text, StatePoint},
     replay::visit_snapshot_states_while,
     timeline::build_session_timeline_page,
 };
 use termtrace_evidence::{
     event_log::EventLogCursor,
-    session::{SessionSnapshot, validate_completed_session},
+    session::{validate_completed_session, SessionSnapshot},
 };
 use termtrace_model::{
     execution::event::{Event, InputKind},
@@ -25,18 +25,18 @@ use termtrace_model::{
     terminal::state::KeyModifiers,
     value::ByteString,
 };
-use termtrace_sdk::{Session, StableCaptureOptions, Terminal, send_request};
+use termtrace_sdk::{send_request, Session, StableCaptureOptions, Terminal};
 use uuid::Uuid;
 
 use crate::{
-    Result,
     artifact::{publish_failure, snapshot_path, write_json},
     document::{to_environment_spec, validate},
     error::{invalid, operation},
+    Result,
 };
 use termtrace_model::scenario::{
-    SCENARIO_VERSION, Scenario, ScenarioFailure, ScenarioFrameSnapshot, ScenarioInput,
-    ScenarioReport, ScenarioStatus, ScenarioStep, ScenarioStepResult, ScenarioTimelineAssertion,
+    Scenario, ScenarioFailure, ScenarioFrameSnapshot, ScenarioInput, ScenarioReport,
+    ScenarioStatus, ScenarioStep, ScenarioStepResult, ScenarioTimelineAssertion, SCENARIO_VERSION,
 };
 
 /// Execute a scenario in a fresh canonical session.
@@ -69,6 +69,7 @@ pub(crate) fn run_validated(
 
     let terminal = Terminal::new(binary, evidence_root);
     let command = scenario.launch.command.iter().map(OsString::from);
+
     let mut builder = terminal
         .launch(command)
         .geometry(scenario.launch.geometry.cols, scenario.launch.geometry.rows)
@@ -77,6 +78,7 @@ pub(crate) fn run_validated(
     if let Some(limit) = scenario.launch.output_byte_budget {
         builder = builder.output_byte_budget(limit);
     }
+
     if let Some(directory) = &scenario.launch.working_directory {
         builder = builder.working_directory(directory);
     }
@@ -130,6 +132,7 @@ pub(crate) fn run_validated(
                     &report,
                     final_snapshot.as_ref(),
                 )?;
+
                 return Ok(report);
             }
         }
@@ -195,6 +198,7 @@ fn validate_replay_closure(session: &Path, steps: &[ScenarioStepResult]) -> Resu
             true,
         )
         .map_err(|error| return operation("observe asserted replay state", error))?;
+
         if observation.state_hash != *state_hash {
             return Err(invalid(format!(
                 "replay closure resolved asserted state hash `{state_hash}` as `{}`",
@@ -247,6 +251,7 @@ fn execute_step(
                     ));
                 }
             };
+
             let matched = session
                 .screen()
                 .wait(
@@ -255,12 +260,14 @@ fn execute_step(
                     Duration::from_millis(wait.timeout_ms.unwrap_or(scenario.launch.timeout_ms)),
                 )
                 .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
+
             let wait_satisfied = matched.matched
                 && if wait.stable_for_ms == 0 {
                     matched.quality == ScreenWaitQuality::MatchedUnsettled
                 } else {
                     matched.quality == ScreenWaitQuality::Matched
                 };
+
             if !wait_satisfied {
                 return Err(step_failure(
                     index,
@@ -272,6 +279,7 @@ fn execute_step(
                     ),
                 ));
             }
+
             return Ok(ScenarioStepResult {
                 index,
                 kind: step.kind().to_owned(),
@@ -293,12 +301,15 @@ fn execute_step(
                         modifiers: KeyModifiers::default(),
                     },
                 };
+
                 let request = ControlRequest::new(command);
                 request_ids.push(request.request_id);
+
                 if let Err(error) = session.send(&request) {
                     return Err(step_failure(index, step, request_ids, error.to_string()));
                 }
             }
+
             None
         }
 
@@ -310,6 +321,7 @@ fn execute_step(
             session.send(&request).map_err(|error| {
                 return step_failure(index, step, request_ids.clone(), error.to_string());
             })?;
+
             None
         }
 
@@ -337,6 +349,7 @@ fn execute_step(
                         return step_failure(index, step, Vec::new(), error.to_string());
                     })?;
                 }
+
                 write_json(path, &baseline).map_err(|error| {
                     return step_failure(index, step, Vec::new(), error.to_string());
                 })?;
@@ -358,6 +371,7 @@ fn execute_step(
                             format!("decode snapshot {}: {error}", path.display()),
                         );
                     })?;
+
                 if expected != baseline {
                     return Err(step_failure(
                         index,
@@ -371,6 +385,7 @@ fn execute_step(
                     ));
                 }
             }
+
             return Ok(ScenarioStepResult {
                 index,
                 kind: step.kind().to_owned(),
@@ -382,6 +397,7 @@ fn execute_step(
         ScenarioStep::AssertTimeline(assertion) => {
             assert_timeline(session.path(), assertion)
                 .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
+
             None
         }
 
@@ -396,6 +412,7 @@ fn execute_step(
                 .map_err(|error| {
                     return step_failure(index, step, request_ids.clone(), error.to_string());
                 })?;
+
             None
         }
     };
@@ -507,6 +524,7 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
             } else {
                 state_bounds = Some((record.state_id, record.state_id));
             }
+
             if record.presented
                 && assertion
                     .no_presented_screen_contains
@@ -516,6 +534,7 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
                 forbidden = true;
             }
         }
+
         return Ok(true);
     })
     .map_err(|error| return operation("replay timeline assertion", error))?;
@@ -544,5 +563,6 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
             )));
         }
     }
+
     return Ok(());
 }

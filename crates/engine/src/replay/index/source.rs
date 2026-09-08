@@ -53,12 +53,15 @@ impl IndexSource<'_> {
                 if cursor.header() != &summary.header {
                     return Err(invalid_replay("index source header changed"));
                 }
+
                 let mut read = 0_u64;
                 let mut finished = false;
+
                 return Ok(Box::new(from_fn(move || {
                     if finished {
                         return None;
                     }
+
                     if read == summary.event_count {
                         finished = true;
                         let validation = summary.terminal.as_ref().map_or_else(
@@ -68,21 +71,26 @@ impl IndexSource<'_> {
                                     .validate_boundary(summary.event_count, &terminal.hash);
                             },
                         );
+
                         return validation.err().map(|error| return Err(Error::from(error)));
                     }
+
                     match cursor.next_record() {
                         Ok(Some(record)) => {
                             read += 1;
+
                             return Some(Ok(Cow::Owned(record)));
                         }
                         Ok(None) => {
                             finished = true;
+
                             return Some(Err(invalid_replay(
                                 "index source ended before its validated boundary",
                             )));
                         }
                         Err(error) => {
                             finished = true;
+
                             return Some(Err(Error::from(error)));
                         }
                     }

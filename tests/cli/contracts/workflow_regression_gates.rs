@@ -35,6 +35,7 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
 
     let mut full_bytes = 0_usize;
     let mut agent_bytes = 0_usize;
+
     for fixture in &fixtures {
         assert_eq!(fixture.format, "termtrace-executable-regression-workflow");
         assert_eq!(fixture.version, 1);
@@ -47,6 +48,7 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
             .stderr(Stdio::piped())
             .spawn()
             .expect("spawn executable regression workflow");
+
         wait_for_control(&session);
         wait_for_output(&session, fixture.ready.as_bytes(), Duration::from_secs(15))
             .expect("workflow ready output");
@@ -106,6 +108,7 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
         assert!(output.status.success(), "workflow child failed: {output:?}");
         wait_for_output(&session, fixture.done.as_bytes(), Duration::from_secs(5))
             .expect("workflow completion output");
+
         wait_for_path(&session.join("completion.json"));
         let log = EventLog::read(session.join("events.jsonl")).expect("completed event log");
         validate_completed_log(&session, &log).expect("completion evidence");
@@ -114,8 +117,10 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
             .as_str()
             .expect("agent selected state hash")
             .to_owned();
+
         inspect_session(&session, StateSelector::StateHash(selected_hash))
             .expect("selected state inspection");
+
         inspect_session(&session, StateSelector::Final).expect("final state inspection");
 
         let mut timeline = Command::cargo_bin("termtrace").expect("binary should build");
@@ -125,6 +130,7 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
             .args(["--limit", "1", "--jsonl"])
             .assert()
             .success();
+
         if fixture.generate_index {
             assert_late_checkpoint_inspection(&session);
         }
@@ -162,6 +168,7 @@ fn wait_idle_output(session: &Path, response: &str) -> Output {
 fn assert_scenario_replayability(temporary: &TempDir, fixture: &WorkflowFixture) {
     let scenario = temporary.path().join("converted-pi-audit.termtrace.json");
     let artifacts = temporary.path().join("scenario-artifacts");
+
     let launch_program = format!("{}; import time; time.sleep(30)", fixture.program);
     fs_err::write(
         &scenario,
@@ -182,6 +189,7 @@ fn assert_scenario_replayability(temporary: &TempDir, fixture: &WorkflowFixture)
         .expect("scenario fixture JSON"),
     )
     .expect("write converted scenario");
+
     let mut test = Command::cargo_bin("termtrace").expect("binary should build");
     let output = test
         .args(["--response", "full", "test"])
@@ -203,9 +211,11 @@ fn assert_scenario_replayability(temporary: &TempDir, fixture: &WorkflowFixture)
             .as_str()
             .expect("scenario canonical path"),
     );
+
     let log = EventLog::read(canonical.join("events.jsonl")).expect("scenario event log");
     validate_completed_log(&canonical, &log).expect("scenario replay closure");
     inspect_session(&canonical, StateSelector::Final).expect("scenario final state");
+
     for step in attempt["steps"].as_array().expect("scenario steps") {
         let Some(state_hash) = step["state_hash"].as_str() else {
             continue;

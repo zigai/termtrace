@@ -32,6 +32,7 @@ fn quality_corpus() -> SemanticState {
     state.cursor.column = Some(7);
     state.cursor.row = Some(5);
     state.cursor.wide_tail = Some(false);
+
     return state;
 }
 
@@ -45,8 +46,10 @@ fn assert_decoration_geometry(svg: &str, pixmap: &Pixmap) {
         let pixel = pixmap
             .pixel(style * 24 + x, 2 * 24 + y)
             .expect("decoration cell is inside the rendered viewport");
+
         return f64::from(pixel.red().min(pixel.blue()).saturating_sub(pixel.green()));
     };
+
     let columns: Vec<Vec<f64>> = (0..5)
         .map(|style| {
             return (1..11)
@@ -54,10 +57,12 @@ fn assert_decoration_geometry(svg: &str, pixmap: &Pixmap) {
                 .collect();
         })
         .collect();
+
     let single = &columns[0];
     let double = &columns[1];
     let dotted = &columns[3];
     let dashed = &columns[4];
+
     assert!(single.iter().all(|coverage| return *coverage > 100.0));
     assert!(
         double.iter().sum::<f64>() > single.iter().sum::<f64>() * 1.5,
@@ -76,12 +81,14 @@ fn assert_decoration_geometry(svg: &str, pixmap: &Pixmap) {
         .map(|x| {
             let weight: f64 = (19..24).map(|y| return ink(2, x, y)).sum();
             assert!(weight > 50.0, "curly underline must remain continuous");
+
             return (19..24)
                 .map(|y| return f64::from(y) * ink(2, x, y))
                 .sum::<f64>()
                 / weight;
         })
         .collect();
+
     let low = curly_centers.iter().copied().fold(f64::INFINITY, f64::min);
     let high = curly_centers
         .iter()
@@ -101,6 +108,7 @@ fn assert_decoration_geometry(svg: &str, pixmap: &Pixmap) {
             .iter()
             .map(|value| return *value > threshold)
             .collect();
+
         return painted
             .windows(2)
             .filter(|pair| return pair[0] != pair[1])
@@ -115,6 +123,7 @@ fn assert_decoration_geometry(svg: &str, pixmap: &Pixmap) {
 fn assert_cursor_geometry(pixmap: &Pixmap, hidden_pixmap: &Pixmap, style: CursorStyle) {
     let cell_x = 7 * 12;
     let cell_y = 5 * 24;
+
     match style {
         CursorStyle::Bar => {
             assert_ne!(
@@ -184,9 +193,11 @@ fn quality_corpus_renders_every_cursor_style() {
         let pixmap = Pixmap::decode_png(&png).expect("decode quality corpus PNG");
         assert_decoration_geometry(svg_text, &pixmap);
         assert_cursor_geometry(&pixmap, &hidden_pixmap, style);
+
         if let Some(directory) = output.as_deref() {
             fs::write(Path::new(directory).join(format!("{name}.svg")), svg)
                 .expect("write quality corpus SVG reference");
+
             fs::write(Path::new(directory).join(format!("{name}.png")), &png)
                 .expect("write quality corpus PNG reference");
         }
@@ -216,6 +227,7 @@ fn cursor_visibility_and_wide_tail_are_composed_from_terminal_state() {
             return (cell.grapheme == "界").then_some((row, cell.column));
         })
         .expect("quality corpus contains wide grapheme");
+
     wide_tail.cursor.style = CursorStyle::Block;
     wide_tail.cursor.row = Some(row);
     wide_tail.cursor.column = lead_column.checked_add(1);
@@ -253,14 +265,17 @@ fn quality_corpus_is_deterministic_under_each_raster_profile() {
     let expected_height = u32::from(state.rows) * 24;
     let expected_rgba_len =
         usize::try_from(expected_width * expected_height * 4).expect("RGBA size fits usize");
+
     let mut direct_hash = None;
     let mut supersampled_hash = None;
+
     for profile in [
         SemanticRasterProfile::Direct,
         SemanticRasterProfile::Supersampled2x,
     ] {
         let first_png =
             render_png_with_profile(&state, profile).expect("render first profiled PNG");
+
         let second_png =
             render_png_with_profile(&state, profile).expect("render second profiled PNG");
         assert_eq!(first_png, second_png);
@@ -270,15 +285,15 @@ fn quality_corpus_is_deterministic_under_each_raster_profile() {
 
         let first_rgba = render_video_rgba(&state, state.cols, state.rows, profile)
             .expect("render first profiled RGBA frame");
+
         let second_rgba = render_video_rgba(&state, state.cols, state.rows, profile)
             .expect("render second profiled RGBA frame");
         assert_eq!(first_rgba, second_rgba);
         assert_eq!(first_rgba.len(), expected_rgba_len);
-        assert!(
-            first_rgba
-                .chunks_exact(4)
-                .all(|pixel| return pixel[3] == u8::MAX)
-        );
+        assert!(first_rgba
+            .chunks_exact(4)
+            .all(|pixel| return pixel[3] == u8::MAX));
+
         match profile {
             SemanticRasterProfile::Direct => direct_hash = Some(blake3::hash(&first_rgba)),
             SemanticRasterProfile::Supersampled2x => {
@@ -286,6 +301,7 @@ fn quality_corpus_is_deterministic_under_each_raster_profile() {
             }
         }
     }
+
     assert_ne!(
         direct_hash.expect("direct hash recorded"),
         supersampled_hash.expect("supersampled hash recorded")

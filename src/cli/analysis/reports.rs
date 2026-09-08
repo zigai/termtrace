@@ -10,16 +10,16 @@ use std::{
 
 use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::{
-    Error as EngineError,
     analysis::{
         diagnostics::{diagnose_session, explain_session},
         last_action::analyze_last_action_session,
     },
     diff::diff_session_states_with_semantic_states,
     timeline::{
-        SourceRange, build_session_timeline_page, resolve_session_source_selection,
-        visit_session_timeline_while,
+        build_session_timeline_page, resolve_session_source_selection,
+        visit_session_timeline_while, SourceRange,
     },
+    Error as EngineError,
 };
 use termtrace_media::native_capture::validated_visual_manifests;
 use termtrace_model::{
@@ -60,12 +60,15 @@ pub(in crate::cli) fn run_timeline(
         arguments.range.to_marker.as_deref(),
     )
     .into_diagnostic()?;
+
     if arguments.page.all {
         return run_all_timeline(response, &session, &arguments, range);
     }
+
     let (entries, page, partial) = {
         let limit = u16::try_from(arguments.page.limit)
             .map_err(|_| return miette::miette!("timeline page limit exceeds 65535"))?;
+
         let timeline_page = build_session_timeline_page(
             &session,
             arguments.all_states,
@@ -75,13 +78,16 @@ pub(in crate::cli) fn run_timeline(
             limit,
         )
         .into_diagnostic()?;
+
         let next_offset = timeline_page
             .next_offset
             .and_then(|offset| return usize::try_from(offset).ok());
+
         let truncated = next_offset.is_some();
         let returned = timeline_page.entries.len();
         let total = (!truncated && (arguments.page.offset == 0 || returned > 0))
             .then(|| return arguments.page.offset.saturating_add(returned));
+
         let page = OutputPage {
             offset: arguments.page.offset,
             limit: Some(arguments.page.limit),
@@ -90,16 +96,19 @@ pub(in crate::cli) fn run_timeline(
             truncated,
             next_offset,
         };
+
         (
             timeline_page.entries,
             page,
             arguments.page.offset != 0 || truncated,
         )
     };
+
     if arguments.jsonl {
         for entry in entries {
             write_json_line(response, &entry)?;
         }
+
         if partial {
             write_json_line(
                 response,
@@ -109,12 +118,15 @@ pub(in crate::cli) fn run_timeline(
                 }),
             )?;
         }
+
         return Ok(ExitCode::SUCCESS);
     }
+
     let mut output = String::new();
     for entry in entries {
         writeln!(output, "{}", timeline_text(&entry)?).into_diagnostic()?;
     }
+
     if partial {
         writeln!(
             output,
@@ -123,6 +135,7 @@ pub(in crate::cli) fn run_timeline(
         )
         .into_diagnostic()?;
     }
+
     return write_stdout(response, output);
 }
 
@@ -157,23 +170,29 @@ fn run_all_timeline(
                         };
                     })?;
                 }
+
                 total = total.saturating_add(1);
+
                 return Ok(true);
             },
         )
         .into_diagnostic()?;
+
         writer.flush().into_diagnostic()?;
     }
+
     staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
     for line in BufReader::new(&mut staged).lines() {
         let entry: TimelineEntry =
             serde_json::from_str(&line.into_diagnostic()?).into_diagnostic()?;
+
         if arguments.jsonl {
             write_json_line(response, &entry)?;
         } else {
             write_stdout(response, format!("{}\n", timeline_text(&entry)?))?;
         }
     }
+
     let offset = arguments.page.offset.min(total);
     if offset != 0 {
         let page = OutputPage {
@@ -184,6 +203,7 @@ fn run_all_timeline(
             truncated: false,
             next_offset: None,
         };
+
         if arguments.jsonl {
             write_json_line(
                 response,
@@ -199,6 +219,7 @@ fn run_all_timeline(
             )?;
         }
     }
+
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -214,6 +235,7 @@ pub(in crate::cli) fn run_diff(
         arguments.from_at,
         arguments.from_marker,
     )?;
+
     let to = diff_point(
         arguments.to_state,
         arguments.to_state_hash,
@@ -221,6 +243,7 @@ pub(in crate::cli) fn run_diff(
         arguments.to_at,
         arguments.to_marker,
     )?;
+
     let (difference, before_state, after_state) =
         diff_session_states_with_semantic_states(&session, from, to).into_diagnostic()?;
     let changed = difference.changed;
@@ -243,9 +266,11 @@ pub(in crate::cli) fn run_diff(
             render_diff_png(&before_state, &after_state, &difference).into_diagnostic()?,
         )?,
     };
+
     if arguments.expect_no_change && changed {
         return Ok(ExitCode::FAILURE);
     }
+
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -261,11 +286,13 @@ pub(in crate::cli) fn run_explain(
         arguments.at,
         arguments.marker,
     )?;
+
     let mut report = explain_session(&session, target, arguments.context).into_diagnostic()?;
     let (tokens, tokens_page, tokens_partial) = paginate(take(&mut report.tokens), &arguments.page);
     let (states, states_page, states_partial) = paginate(take(&mut report.states), &arguments.page);
     let (findings, findings_page, findings_partial) =
         paginate(take(&mut report.findings), &arguments.page);
+
     report.tokens = tokens;
     report.states = states;
     report.findings = findings;
@@ -276,6 +303,7 @@ pub(in crate::cli) fn run_explain(
         findings: findings_page,
     };
     report.output_page = partial.then_some(page.clone());
+
     return match arguments.format {
         ExplainFormat::Text => {
             let mut output = explain_text(&report)?;
@@ -287,6 +315,7 @@ pub(in crate::cli) fn run_explain(
                 )
                 .into_diagnostic()?;
             }
+
             write_stdout(response, output)
         }
         ExplainFormat::Json | ExplainFormat::JsonCompact => {
@@ -318,6 +347,7 @@ pub(in crate::cli) fn run_diagnose(
         &visual_evidence,
     )
     .into_diagnostic()?;
+
     let has_findings = !report.findings.is_empty();
     let (findings, page, partial) = paginate(take(&mut report.findings), &arguments.page);
     report.findings = findings;
@@ -334,11 +364,14 @@ pub(in crate::cli) fn run_diagnose(
             )
             .into_diagnostic()?;
         }
+
         write_stdout(response, output)?;
     }
+
     if arguments.fail_on_finding && has_findings {
         return Ok(ExitCode::FAILURE);
     }
+
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -353,8 +386,10 @@ fn run_last_action_facade<T: serde::Serialize>(
     if resolved.lifecycle != RegistryLifecycle::Completed {
         return write_session_lifecycle(response, &resolved, operation, ExitCode::FAILURE);
     }
+
     let analysis =
         analyze_last_action_session(&resolved.path, broad_change_percent).into_diagnostic()?;
+
     return write_json_line(response, select(&analysis));
 }
 
@@ -412,6 +447,7 @@ fn explain_text(report: &ExplainReport) -> Result<String> {
         )
         .into_diagnostic()?;
     }
+
     for finding in &report.findings {
         writeln!(
             output,
@@ -422,6 +458,7 @@ fn explain_text(report: &ExplainReport) -> Result<String> {
         )
         .into_diagnostic()?;
     }
+
     return Ok(output);
 }
 
@@ -443,9 +480,11 @@ fn diagnose_text(report: &DiagnoseReport) -> Result<String> {
             id_list(&finding.token_ids),
         )
         .into_diagnostic()?;
+
         for fact in &finding.facts {
             writeln!(output, "  fact: {fact}").into_diagnostic()?;
         }
+
         for correlation in &finding.native_correlations {
             writeln!(
                 output,
@@ -458,6 +497,7 @@ fn diagnose_text(report: &DiagnoseReport) -> Result<String> {
             .into_diagnostic()?;
         }
     }
+
     return Ok(output);
 }
 
@@ -483,6 +523,7 @@ fn diff_text(difference: &SemanticDiff) -> Result<String> {
     let changed_cells = difference.rows.iter().fold(0_usize, |count, row| {
         return count.saturating_add(row.cells.len());
     });
+
     let mut output = format!(
         "states {} -> {}  changed={}  rows={}  cells={}\n",
         difference.from.state_id,
@@ -497,6 +538,7 @@ fn diff_text(difference: &SemanticDiff) -> Result<String> {
                 .before
                 .as_ref()
                 .map_or("∅", |value| return value.grapheme.as_str());
+
             let after = cell
                 .after
                 .as_ref()
@@ -512,6 +554,7 @@ fn diff_text(difference: &SemanticDiff) -> Result<String> {
             .into_diagnostic()?;
         }
     }
+
     return Ok(output);
 }
 
@@ -521,6 +564,7 @@ fn timeline_text(entry: &TimelineEntry) -> Result<String> {
     let event = entry
         .event_seq
         .map_or_else(|| return "-".to_owned(), |seq| return seq.to_string());
+
     let detail = match &entry.item {
         TimelineItem::SemanticState {
             state_id,
@@ -551,6 +595,7 @@ fn timeline_text(entry: &TimelineEntry) -> Result<String> {
                     return format!("{}..{}", segment.start_byte_offset, segment.end_byte_offset);
                 },
             );
+
             format!(
                 "token {} {} bytes={} range={} {}",
                 token.token_id,
@@ -561,6 +606,7 @@ fn timeline_text(entry: &TimelineEntry) -> Result<String> {
             )
         }
     };
+
     return Ok(format!(
         "{seconds}.{fractional:09}s  event {event}  {detail}"
     ));
@@ -580,10 +626,12 @@ fn canonical_event_text(event: &Event) -> Result<String> {
                 Some(value) => format!(" semantic_input={}", quoted_text(value)?),
                 None => String::new(),
             };
+
             let intent = match caller_intent {
                 Some(value) => format!(" caller_intent={}", quoted_text(value)?),
                 None => String::new(),
             };
+
             format!(
                 "input {}/{} bytes={}{}{}",
                 stable_enum_label(source)?,
@@ -624,5 +672,6 @@ fn canonical_event_text(event: &Event) -> Result<String> {
         }
         _ => "canonical operation result".to_owned(),
     };
+
     return Ok(text);
 }

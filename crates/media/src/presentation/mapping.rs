@@ -18,6 +18,7 @@ pub(super) fn write_presentation_map(
     let mut writer = secure_writer(path)?;
     let mut span_cursor = 0usize;
     let mut mask_cursor = 0usize;
+
     for (clip_index, clip) in plan.clips.iter().enumerate() {
         for output_frame in clip.output_start_frame..clip.output_end_frame {
             let (source_frame, operation) = mapped_source_frame(clip, output_frame);
@@ -27,6 +28,7 @@ pub(super) fn write_presentation_map(
             {
                 span_cursor += 1;
             }
+
             if semantic_spans
                 .get(span_cursor)
                 .is_some_and(|span| return span.start_frame > source_frame)
@@ -34,6 +36,7 @@ pub(super) fn write_presentation_map(
                 span_cursor =
                     semantic_spans.partition_point(|span| return span.end_frame <= source_frame);
             }
+
             let semantic_state = semantic_spans.get(span_cursor).filter(|span| {
                 return span.start_frame <= source_frame && source_frame < span.end_frame;
             });
@@ -45,6 +48,7 @@ pub(super) fn write_presentation_map(
             {
                 mask_cursor += 1;
             }
+
             let cursor_mask = plan
                 .cursor_masks
                 .get(mask_cursor)
@@ -91,6 +95,7 @@ pub(super) fn write_presentation_map(
             })?;
         }
     }
+
     return Ok(finish_writer(writer, path)?);
 }
 
@@ -101,6 +106,7 @@ pub(super) fn read_semantic_frame_spans(path: &Path) -> Result<Vec<SemanticFrame
             source,
         };
     })?;
+
     return contents
         .lines()
         .enumerate()
@@ -121,6 +127,7 @@ pub(super) fn semantic_change_states_at(plan: &PresentationPlan, output_frame: u
         .change_visualization
         .as_ref()
         .map_or(0, |change| return u64::from(change.hold_frames));
+
     return plan
         .change_frames
         .iter()
@@ -138,6 +145,7 @@ pub(super) fn mapped_source_frame(clip: &NormalizedClip, output_frame: u64) -> (
     if offset < clip.retimed_frame_count {
         let source_offset = offset.saturating_mul(u64::from(clip.speed.numerator))
             / u64::from(clip.speed.denominator);
+
         return (
             clip.source_start_frame
                 .saturating_add(source_offset)
@@ -145,6 +153,7 @@ pub(super) fn mapped_source_frame(clip: &NormalizedClip, output_frame: u64) -> (
             "source",
         );
     }
+
     return (clip.source_end_frame.saturating_sub(1), "hold");
 }
 
@@ -175,6 +184,7 @@ fn frame_transform_names(
     if plan.layout.branding.is_some() {
         names.push("branding".to_owned());
     }
+
     let semantic_states = semantic_change_states_at(plan, output_frame);
     if !semantic_states.is_empty()
         || plan.change_visualization.as_ref().is_some_and(|change| {
@@ -183,5 +193,6 @@ fn frame_transform_names(
     {
         names.push("change_visualization".to_owned());
     }
+
     return names;
 }

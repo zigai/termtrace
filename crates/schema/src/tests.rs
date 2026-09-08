@@ -14,24 +14,29 @@ fn checked_in_schemas_match_catalog() {
         .iter()
         .map(|schema| return schema.filename.to_owned())
         .collect();
+
     let mut checked_in: BTreeSet<String> = BTreeSet::new();
     for entry in fs_err::read_dir(&directory).expect("read schema directory") {
         let entry = entry.expect("read schema directory entry");
         if entry.file_type().expect("read schema file type").is_dir() {
             continue;
         }
+
         let filename = entry
             .file_name()
             .into_string()
             .expect("schema filename must be UTF-8");
+
         if filename.ends_with(".schema.json") {
             checked_in.insert(filename);
         }
     }
+
     assert_eq!(
         checked_in, registered,
         "every checked-in schema must have exactly one catalog entry"
     );
+
     for generated in generated {
         let path = directory.join(generated.filename);
         let schema: serde_json::Value =
@@ -61,6 +66,7 @@ fn acceptance_benchmark_instance_matches_schema() {
             .expect("acceptance benchmark json");
     assert!(validator.is_valid(&instance));
 }
+
 #[test]
 fn shared_driver_response_fixtures_match_the_rust_contract() {
     let schema = serde_json::to_value(schema_for!(DriverResponse)).expect("driver schema");
@@ -69,14 +75,17 @@ fn shared_driver_response_fixtures_match_the_rust_contract() {
         "../../../fixtures/conformance/protocol/driver-responses.json"
     ))
     .expect("shared protocol fixtures");
+
     let valid = fixtures
         .get("valid")
         .and_then(serde_json::Value::as_array)
         .expect("valid fixture array");
+
     let invalid = fixtures
         .get("invalid")
         .and_then(serde_json::Value::as_array)
         .expect("invalid fixture array");
+
     for case in valid {
         let response = case.get("response").expect("valid fixture response");
         assert!(
@@ -87,6 +96,7 @@ fn shared_driver_response_fixtures_match_the_rust_contract() {
                 .unwrap_or("unnamed")
         );
     }
+
     for case in invalid {
         let response = case.get("response").expect("invalid fixture response");
         assert!(

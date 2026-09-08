@@ -2,7 +2,7 @@
 
 use std::{collections::HashSet, io, path::Path};
 
-use rusqlite::{Connection, OptionalExtension as _, params};
+use rusqlite::{params, Connection, OptionalExtension as _};
 use uuid::Uuid;
 
 use super::{Error, Result};
@@ -23,6 +23,7 @@ impl IdentifierSet {
         if self.disk.is_none() && self.memory.len() < 4096 {
             return Ok(self.memory.insert(id));
         }
+
         if self.disk.is_none() {
             // SQLite's empty filename creates a private temporary on-disk database,
             // removed when this connection closes. Validation needs no durable index.
@@ -38,16 +39,20 @@ impl IdentifierSet {
                         )
                         .map_err(index_error)?;
                 }
+
                 transaction.commit().map_err(index_error)?;
             }
+
             self.memory.clear();
             self.memory.shrink_to_fit();
             self.disk = Some(disk);
         }
+
         let disk = self
             .disk
             .as_ref()
             .ok_or_else(|| return Error::invalid("identifier spill did not create its index"))?;
+
         return disk
             .execute(
                 "INSERT OR IGNORE INTO ids VALUES (?1)",
@@ -78,6 +83,7 @@ impl RequestIndex {
         connection.execute_batch("PRAGMA cache_size=-1024; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;
             CREATE TABLE operations (id BLOB PRIMARY KEY) WITHOUT ROWID;
             CREATE TABLE requests (id BLOB PRIMARY KEY, offset INTEGER NOT NULL, length INTEGER NOT NULL, sequence INTEGER NOT NULL, previous_hash TEXT NOT NULL, hash TEXT NOT NULL) WITHOUT ROWID;").map_err(index_error)?;
+
         return Ok(Self { connection });
     }
 
@@ -90,12 +96,15 @@ impl RequestIndex {
                     [id.as_bytes().as_slice()],
                 )
                 .map_err(index_error)?;
+
             if count == 0 {
                 // Dropping this uncommitted transaction rolls back the entire batch.
                 return Ok(false);
             }
         }
+
         transaction.commit().map_err(index_error)?;
+
         return Ok(true);
     }
 
@@ -113,6 +122,7 @@ impl RequestIndex {
                 ],
             )
             .map_err(index_error)?;
+
         return Ok(());
     }
 
@@ -147,6 +157,7 @@ mod tests {
         for id in 0..8192 {
             assert!(ids.insert(Uuid::from_u128(id)).expect("insert"));
         }
+
         assert!(!ids.insert(Uuid::nil()).expect("duplicate"));
         assert!(ids.memory.is_empty());
         assert!(ids.disk.is_some());

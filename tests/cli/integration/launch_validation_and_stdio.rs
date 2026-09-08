@@ -84,6 +84,7 @@ fn record_forwards_and_audits_standard_input() {
             } => return Some((*operation_id, data.as_bytes())),
             _ => return None,
         });
+
     let (operation_id, bytes) = input_intent.expect("input intent");
     assert_eq!(bytes, b"hello\n");
     assert!(recording.events.iter().any(|record| matches!(

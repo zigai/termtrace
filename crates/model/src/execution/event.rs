@@ -99,6 +99,7 @@ impl EventLogHeader {
     #[must_use]
     pub fn with_colors(mut self, colors: TerminalColors) -> Self {
         self.colors = colors;
+
         return self;
     }
 }
@@ -398,6 +399,7 @@ impl Event {
                 .saturating_add(response.as_bytes().len()),
             _ => 0,
         };
+
         return u64::try_from(length).unwrap_or(u64::MAX);
     }
 }
@@ -460,11 +462,8 @@ impl EventProjection {
     /// Project one canonical record, optionally eliding exact byte payloads.
     #[must_use]
     pub fn from_record(record: &EventRecord, metadata_only: bool) -> Self {
-        let byte_payloads = if metadata_only {
-            byte_summaries(&record.event)
-        } else {
-            Vec::new()
-        };
+        let byte_payloads = if metadata_only { byte_summaries(&record.event) } else { Vec::new() };
+
         return Self {
             seq: record.seq,
             monotonic_ns: record.monotonic_ns,

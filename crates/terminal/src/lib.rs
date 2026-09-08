@@ -15,11 +15,11 @@ pub mod tracking;
 pub mod vt_framer;
 
 pub use error::{Error, Result};
-pub use ghostty_vt::{Format, GhosttyVt, encode_focus, supported_geometry_cell_count};
+pub use ghostty_vt::{encode_focus, supported_geometry_cell_count, Format, GhosttyVt};
 pub use output_projection::ControlStripper;
 pub use screen::{
     hash_semantic_row, project_screen_frame, screen_frame_hash, semantic_state_hash,
     semantic_state_hash_from_row_hashes, semantic_viewport_text, validate_screen_region,
 };
 pub use tracking::{PresentationAction, PresentationTracker, PresentationTransition, QueryTracker};
-pub use vt_framer::{VtFramer, frame_event_records};
+pub use vt_framer::{frame_event_records, VtFramer};

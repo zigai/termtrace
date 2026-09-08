@@ -20,6 +20,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         ])
         .assert()
         .success();
+
     let mut save = Command::cargo_bin("termtrace").expect("binary should build");
     save.args(["artifact", "save"])
         .arg(&session)
@@ -81,18 +82,15 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         ]
     );
     for font in fonts {
-        assert!(
-            font["repository_source"]
-                .as_str()
-                .is_some_and(|source| return source.starts_with("crates/render/assets/fonts/"))
-        );
-        assert!(
-            font["decompressed_size"]
-                .as_u64()
-                .is_some_and(|size| return size > 0)
-        );
+        assert!(font["repository_source"]
+            .as_str()
+            .is_some_and(|source| return source.starts_with("crates/render/assets/fonts/")));
+        assert!(font["decompressed_size"]
+            .as_u64()
+            .is_some_and(|size| return size > 0));
         assert_eq!(font["decompressed_blake3"].as_str().map(str::len), Some(64));
     }
+
     assert_eq!(
         image_resource["font_set_blake3"],
         "013d52d10b90498adec2d19598f4040731dc00cf1539e748f05d86d355f919ec"
@@ -127,21 +125,15 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
             "termtrace-semantic-png-resvg-v4".to_owned()
         ))
     );
-    assert!(
-        fs_err::read_to_string(destination.join("screen.txt"))
-            .expect("screen text")
-            .contains("AAAA")
-    );
-    assert!(
-        fs_err::read(destination.join("screen.vt"))
-            .expect("saved VT")
-            .contains(&0x1b)
-    );
-    assert!(
-        fs_err::read_to_string(destination.join("screen.html"))
-            .expect("saved HTML")
-            .contains(">A<")
-    );
+    assert!(fs_err::read_to_string(destination.join("screen.txt"))
+        .expect("screen text")
+        .contains("AAAA"));
+    assert!(fs_err::read(destination.join("screen.vt"))
+        .expect("saved VT")
+        .contains(&0x1b));
+    assert!(fs_err::read_to_string(destination.join("screen.html"))
+        .expect("saved HTML")
+        .contains(">A<"));
     let svg = fs_err::read_to_string(destination.join("screen.svg")).expect("saved SVG");
     let document = roxmltree::Document::parse(&svg).expect("valid saved SVG");
     assert_eq!(
@@ -159,8 +151,10 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
             .to_vec();
     };
     let styles = (0..4).map(cell).collect::<Vec<_>>();
+
     for (index, style) in styles.iter().enumerate() {
         assert_ne!(style, &cell(6), "style {index} must render an A, not blank");
+
         for other in styles.iter().skip(index + 1) {
             assert_ne!(
                 style, other,
@@ -168,6 +162,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
             );
         }
     }
+
     assert_ne!(
         cell(4),
         cell(6),
@@ -193,17 +188,20 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
                         let pixel = image
                             .pixel(style * 24 + x, 24 + y)
                             .expect("underline pixel inside exported image");
+
                         return pixel.red().min(pixel.blue()).saturating_sub(pixel.green());
                     });
                 })
                 .collect::<Vec<_>>();
         })
         .collect::<Vec<_>>();
+
     for (index, mask) in underline_masks.iter().enumerate() {
         assert!(
             mask.iter().any(|ink| return *ink > 100),
             "underline {index} must be magenta"
         );
+
         for other in underline_masks.iter().skip(index + 1) {
             assert_ne!(
                 mask, other,
@@ -211,6 +209,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
             );
         }
     }
+
     for (start, end, y) in [(120, 192, 38), (204, 300, 25)] {
         assert!(
             (start..end).all(|x| {
@@ -222,6 +221,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
             "strike and overline must span their decorated text"
         );
     }
+
     for file in manifest["files"].as_array().expect("manifested files") {
         let path = destination.join(file["path"].as_str().expect("relative path"));
         let bytes = fs_err::read(path).expect("saved member");
@@ -246,6 +246,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         .expect("final screenshot state")
         .record
         .state_id;
+
     let batch = temporary.path().join("semantic-screenshot-batch");
     let mut batch_command = Command::cargo_bin("termtrace").expect("binary should build");
     batch_command
@@ -257,6 +258,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         .assert()
         .success()
         .stdout(predicate::str::contains("semantic_screenshot_batch"));
+
     let batch_manifest: serde_json::Value = serde_json::from_slice(
         &fs_err::read(batch.join("batch-manifest.json")).expect("batch manifest"),
     )
@@ -294,6 +296,7 @@ fn screenshots_serialize_non_utf8_output_paths_without_panicking() {
         .args(["--", "/bin/sh", "-c", "printf SCREENSHOT"])
         .assert()
         .success();
+
     let filename = OsString::from_vec(b"screenshot-\xff.png".to_vec());
     let destination = temporary.path().join(filename);
     let output = Command::cargo_bin("termtrace")
@@ -307,6 +310,7 @@ fn screenshots_serialize_non_utf8_output_paths_without_panicking() {
         .get_output()
         .stdout
         .clone();
+
     let response: serde_json::Value =
         serde_json::from_slice(&output).expect("non-UTF-8 screenshot response JSON");
     assert_eq!(response["kind"], "semantic_screenshot");
@@ -328,6 +332,7 @@ fn state_hash_selectors_reach_every_exact_state_workflow() {
         .args(["--", "/bin/sh", "-c", "printf HASH-SELECTOR"])
         .assert()
         .success();
+
     let initial = inspect_session(&session, StateSelector::StateId(0)).expect("initial state");
     let final_state = inspect_session(&session, StateSelector::Final).expect("final state");
     let final_hash = final_state.record.state_hash;
@@ -486,6 +491,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
         .args(["--", "/bin/sh", "-c", "printf 'OTHER'"])
         .assert()
         .success();
+
     let mut wrong_source = Command::cargo_bin("termtrace").expect("binary should build");
     wrong_source
         .args(["integrity", "verify-bundle"])
@@ -508,6 +514,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
         serde_json::to_vec_pretty(&attacker_manifest).expect("attacker manifest bytes"),
     )
     .expect("write attacker policy metadata");
+
     let mut reject_policy_metadata = Command::cargo_bin("termtrace").expect("binary should build");
     reject_policy_metadata
         .args(["integrity", "verify-bundle"])
@@ -518,6 +525,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("semantic metadata"));
+
     fs_err::write(&manifest_path, &original_manifest).expect("restore bundle manifest");
 
     fs_err::write(&manifest_path, vec![b' '; 1024 * 1024 + 1]).expect("write oversized manifest");
@@ -531,12 +539,14 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("1048576 byte limit"));
+
     fs_err::write(&manifest_path, &original_manifest).expect("restore bounded manifest");
 
     let archive = temporary.path().join("forensic.termtrace-bundle.tar.zst");
     let archive_copy = temporary
         .path()
         .join("forensic-copy.termtrace-bundle.tar.zst");
+
     for destination in [&archive, &archive_copy] {
         let mut create_archive = Command::cargo_bin("termtrace").expect("binary should build");
         create_archive
@@ -548,6 +558,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
             .success()
             .stdout(predicate::str::contains(r#""kind":"bundle_archive""#));
     }
+
     assert_eq!(
         fs_err::read(&archive).expect("archive bytes"),
         fs_err::read(&archive_copy).expect("repeat archive bytes")
@@ -570,12 +581,15 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""valid":true"#));
+
     let mut corrupted = fs_err::read(&archive_copy).expect("corruptible archive");
     let middle = corrupted.len() / 2;
     if let Some(byte) = corrupted.get_mut(middle) {
         *byte ^= 0x80;
     }
+
     fs_err::write(&archive_copy, corrupted).expect("write corrupted archive");
+
     let mut reject_archive = Command::cargo_bin("termtrace").expect("binary should build");
     reject_archive
         .args(["integrity", "verify-bundle"])
@@ -587,6 +601,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
         .failure();
 
     fs_err::write(bundle.join("screen.txt"), b"tampered").expect("tamper bundle");
+
     let mut tampered = Command::cargo_bin("termtrace").expect("binary should build");
     tampered
         .args(["integrity", "verify-bundle"])

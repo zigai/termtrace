@@ -30,6 +30,7 @@ pub(super) fn render_contact_sheet(
         .map(|frame| return format!("eq(n\\,{frame})"))
         .collect::<Vec<_>>()
         .join("+");
+
     let rows = selected_frames.len().div_ceil(usize::from(options.columns));
     let filter = format!(
         "select={selection},scale={}:-2:flags=lanczos,tile={}x{}:nb_frames={}:padding=4:margin=4:color=black",
@@ -38,6 +39,7 @@ pub(super) fn render_contact_sheet(
         rows,
         selected_frames.len(),
     );
+
     let process = Command::new("ffmpeg")
         .args(["-hide_banner", "-nostdin", "-y", "-i"])
         .arg(source)
@@ -52,6 +54,7 @@ pub(super) fn render_contact_sheet(
                 source,
             };
         })?;
+
     write_secure(&staging.join("contact-sheet.log"), &process.stderr)?;
     if !process.status.success() {
         return Err(plan_error(format!(
@@ -59,6 +62,7 @@ pub(super) fn render_contact_sheet(
             process.status
         )));
     }
+
     return Ok(());
 }
 
@@ -99,6 +103,7 @@ pub(super) fn render_low_resolution_preview(
                 source,
             };
         })?;
+
     write_secure(&staging.join("preview.log"), &process.stderr)?;
     if !process.status.success() {
         return Err(plan_error(format!(
@@ -106,6 +111,7 @@ pub(super) fn render_low_resolution_preview(
             process.status
         )));
     }
+
     return Ok(());
 }
 
@@ -124,6 +130,7 @@ pub(super) fn append_change_visualization(
     let Some(change) = &plan.change_visualization else {
         return Ok(input.to_owned());
     };
+
     return match change.source {
         ChangeSource::SemanticCells => {
             append_semantic_change_visualization(filters, plan, change, input)
@@ -144,8 +151,10 @@ fn append_semantic_change_visualization(
             "semantic change visualization exceeds 100000 scheduled regions",
         ));
     }
+
     let (base, mut prior) = if change.mode == ChangeMode::SideDiff {
         filters.push(format!("[{input}]split=2[changebase][changeinput]"));
+
         (Some("changebase"), "changeinput".to_owned())
     } else {
         (None, input.to_owned())
@@ -168,12 +177,16 @@ fn append_semantic_change_visualization(
             box_.start_frame,
             box_.end_frame,
         ));
+
         prior = next;
     }
+
     if let Some(base) = base {
         filters.push(format!("[{base}][{prior}]hstack=inputs=2[changeoutput]"));
+
         return Ok("changeoutput".to_owned());
     }
+
     return Ok(prior);
 }
 
@@ -185,6 +198,7 @@ fn scheduled_semantic_boxes(
     let geometry = plan.source_geometry;
     let x_origin = plan.source_width.saturating_sub(geometry.text_width) / 2;
     let y_origin = plan.source_height.saturating_sub(geometry.text_height) / 2;
+
     for frame in &plan.change_frames {
         let regions = match change.mode {
             ChangeMode::DirtyRows => frame
@@ -204,6 +218,7 @@ fn scheduled_semantic_boxes(
                 .collect(),
             _ => frame.changed_regions.clone(),
         };
+
         for output_frame in &frame.output_frames {
             for region in &regions {
                 boxes.push(ScheduledBox {
@@ -216,6 +231,7 @@ fn scheduled_semantic_boxes(
             }
         }
     }
+
     return boxes;
 }
 
@@ -224,6 +240,7 @@ fn bounding_region(regions: &[ChangeRegion]) -> Option<ChangeRegion> {
     let mut left = first.x;
     let mut top = first.y;
     let mut right = first.x.saturating_add(first.width);
+
     let mut bottom = first.y.saturating_add(first.height);
     for region in regions.iter().skip(1) {
         left = left.min(region.x);
@@ -231,6 +248,7 @@ fn bounding_region(regions: &[ChangeRegion]) -> Option<ChangeRegion> {
         right = right.max(region.x.saturating_add(region.width));
         bottom = bottom.max(region.y.saturating_add(region.height));
     }
+
     return Some(ChangeRegion {
         x: left,
         y: top,
@@ -246,6 +264,7 @@ fn append_encoded_change_visualization(
 ) -> Result<String> {
     let threshold = change.pixel_threshold.unwrap_or(16);
     filters.push(format!("[{input}]split=2[encodedbase][encodedinput]"));
+
     let mut diff_filter = format!(
         "[encodedinput]tblend=all_mode=difference,lutrgb=r='if(gte(val,{threshold}),val,0)':g='if(gte(val,{threshold}),val,0)':b='if(gte(val,{threshold}),val,0)'"
     );
@@ -264,8 +283,10 @@ fn append_encoded_change_visualization(
             return Err(plan_error("unsupported encoded-pixel change mode"));
         }
     }
+
     diff_filter.push_str("[encodeddiff]");
     filters.push(diff_filter);
+
     if change.mode == ChangeMode::SideDiff {
         filters.push("[encodedbase][encodeddiff]hstack=inputs=2[changeoutput]".to_owned());
     } else {
@@ -274,6 +295,7 @@ fn append_encoded_change_visualization(
                 .to_owned(),
         );
     }
+
     return Ok("changeoutput".to_owned());
 }
 
@@ -287,6 +309,7 @@ pub(super) fn append_pixel_transforms(
     let mut width = presentation_canvas_width_before_transforms(plan);
     let mut height =
         u32::from(plan.source_height) + if presentation_has_footer(plan) { 48 } else { 0 };
+
     let mut sequence = 0_usize;
     for transform in &plan.transforms {
         match transform {
@@ -300,8 +323,10 @@ pub(super) fn append_pixel_transforms(
                         region.width,
                         region.height,
                     ));
+
                     prior = next;
                     sequence += 1;
+
                     if plan.change_visualization.as_ref().is_some_and(|change| {
                         return change.mode == ChangeMode::SideDiff;
                     }) {
@@ -313,6 +338,7 @@ pub(super) fn append_pixel_transforms(
                             region.width,
                             region.height,
                         ));
+
                         prior = next;
                         sequence += 1;
                     }
@@ -328,6 +354,7 @@ pub(super) fn append_pixel_transforms(
                 filters.push(format!(
                     "[{prior}]crop={crop_width}:{crop_height}:{x}:{y}[{next}]"
                 ));
+
                 prior = next;
                 width = u32::from(*crop_width);
                 height = u32::from(*crop_height);
@@ -339,10 +366,12 @@ pub(super) fn append_pixel_transforms(
             } => {
                 width = scaled_even_u32(width, *numerator, *denominator);
                 height = scaled_even_u32(height, *numerator, *denominator);
+
                 let next = format!("transform{sequence}");
                 filters.push(format!(
                     "[{prior}]scale={width}:{height}:flags=lanczos[{next}]"
                 ));
+
                 prior = next;
                 sequence += 1;
             }
@@ -352,10 +381,12 @@ pub(super) fn append_pixel_transforms(
             } => {
                 width = u32::from(*resize_width);
                 height = u32::from(*resize_height);
+
                 let next = format!("transform{sequence}");
                 filters.push(format!(
                     "[{prior}]scale={width}:{height}:flags=lanczos[{next}]"
                 ));
+
                 prior = next;
                 sequence += 1;
             }
@@ -370,8 +401,10 @@ pub(super) fn append_pixel_transforms(
                 filters.push(format!(
                     "[{prior}]drawbox=x={x}:y={y}:w={callout_width}:h={callout_height}:color=cyan@0.95:t=3[{next}]"
                 ));
+
                 prior = next;
                 sequence += 1;
+
                 if let Some(label) = label {
                     ensure_presentation_font(staging)?;
                     let name = format!("callout-{sequence}.txt");
@@ -383,20 +416,24 @@ pub(super) fn append_pixel_transforms(
                         x.saturating_add(4),
                         y.saturating_sub(24),
                     ));
+
                     prior = next;
                     sequence += 1;
                 }
             }
         }
     }
+
     if let Some(branding) = &plan.layout.branding {
         ensure_presentation_font(staging)?;
         write_secure(&staging.join("branding.txt"), branding.as_bytes())?;
         filters.push(format!(
             "[{prior}]drawtext=fontfile='fonts/JetBrainsMono-Regular.ttf':textfile='branding.txt':fontcolor=white@0.8:fontsize=16:box=1:boxcolor=black@0.55:x=w-tw-12:y=12[branded]"
         ));
+
         "branded".clone_into(&mut prior);
     }
+
     return Ok(prior);
 }
 
@@ -406,6 +443,7 @@ fn presentation_canvas_width_before_transforms(plan: &PresentationPlan) -> u32 {
     }) {
         return u32::from(plan.source_width) * 2;
     }
+
     return u32::from(plan.source_width);
 }
 
@@ -425,6 +463,7 @@ pub(super) fn cursor_mask_ranges(masks: &[CursorMaskFrame]) -> Vec<(ChangeRegion
             _ => ranges.push((mask.region, mask.output_frame, mask.output_frame)),
         }
     }
+
     return ranges;
 }
 
@@ -436,10 +475,12 @@ fn ensure_presentation_font(staging: &Path) -> Result<()> {
             source,
         };
     })?;
+
     let font = fonts.join("JetBrainsMono-Regular.ttf");
     let font_bytes = semantic_font_set()
         .map_err(|error| return plan_error(format!("load presentation font: {error}")))?
         .regular_face_bytes();
+
     if font.exists() {
         let bytes = fs_err::read(&font).map_err(|source| {
             return Error::Filesystem {
@@ -447,12 +488,14 @@ fn ensure_presentation_font(staging: &Path) -> Result<()> {
                 source,
             };
         })?;
+
         if bytes != font_bytes {
             return Err(plan_error("staged presentation font changed unexpectedly"));
         }
     } else {
         write_secure(&font, font_bytes)?;
     }
+
     return Ok(());
 }
 
@@ -463,14 +506,18 @@ pub(super) fn prepare_subtitle_resources(
     if plan.annotations.is_empty() && plan.subtitles.is_empty() {
         return Ok(Vec::new());
     }
+
     require_ass_filter()?;
+
     ensure_presentation_font(staging)?;
+
     let mut resources = Vec::new();
     if !plan.annotations.is_empty() {
         let generated = staging.join("annotations.ass");
         write_secure(&generated, generated_ass(plan)?.as_bytes())?;
         resources.push(generated);
     }
+
     for (index, subtitle) in plan.subtitles.iter().enumerate() {
         validate_ass_resource(&subtitle.source_path)?;
         let destination = staging.join(format!("subtitle-{index}.ass"));
@@ -486,9 +533,11 @@ pub(super) fn prepare_subtitle_resources(
                 subtitle.source_path.display()
             )));
         }
+
         write_secure(&destination, &bytes)?;
         resources.push(destination);
     }
+
     return Ok(resources);
 }
 
@@ -502,6 +551,7 @@ fn require_ass_filter() -> Result<()> {
                 source,
             };
         })?;
+
     if !output.status.success()
         || !String::from_utf8_lossy(&output.stdout)
             .lines()
@@ -511,6 +561,7 @@ fn require_ass_filter() -> Result<()> {
             "FFmpeg ASS/libass filter is required for annotations or subtitle tracks",
         ));
     }
+
     return Ok(());
 }
 
@@ -520,6 +571,7 @@ fn generated_ass(plan: &PresentationPlan) -> Result<String> {
     } else {
         u64::from(plan.source_height) + if presentation_has_footer(plan) { 48 } else { 0 }
     };
+
     let mut ass = format!(
         "[Script Info]\nScriptType: v4.00+\nWrapStyle: 2\nScaledBorderAndShadow: yes\nPlayResX: {}\nPlayResY: {}\nYCbCr Matrix: None\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n",
         presentation_canvas_width(plan),
@@ -534,6 +586,7 @@ fn generated_ass(plan: &PresentationPlan) -> Result<String> {
         {
             continue;
         }
+
         let foreground = ass_color(&annotation.style.foreground, 255)?;
         let background = ass_color(
             &annotation.style.background,
@@ -546,18 +599,22 @@ fn generated_ass(plan: &PresentationPlan) -> Result<String> {
         )
         .map_err(|_error| return plan_error("could not generate ASS style"))?;
     }
+
     ass.push_str("\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n");
+
     let dynamic_event_count: u64 = plan
         .annotations
         .iter()
         .filter(|annotation| return annotation.template.is_some())
         .map(|annotation| return annotation.output_end_frame - annotation.output_start_frame)
         .sum();
+
     if dynamic_event_count > 1_000_000 {
         return Err(plan_error(
             "dynamic annotation expansion exceeds one million ASS events",
         ));
     }
+
     for annotation in &plan.annotations {
         if let Some(text) = &annotation.text {
             write_ass_dialogue(
@@ -570,6 +627,7 @@ fn generated_ass(plan: &PresentationPlan) -> Result<String> {
             )?;
             continue;
         }
+
         for output_frame in annotation.output_start_frame..annotation.output_end_frame {
             let template = annotation.template.as_deref().unwrap_or_default();
             let text = expand_annotation_template(plan, output_frame, template)?;
@@ -583,6 +641,7 @@ fn generated_ass(plan: &PresentationPlan) -> Result<String> {
             )?;
         }
     }
+
     return Ok(ass);
 }
 
@@ -610,6 +669,7 @@ fn write_ass_dialogue(
         escape_ass_text(text),
     )
     .map_err(|_error| return plan_error("could not generate ASS dialogue"))?;
+
     return Ok(());
 }
 
@@ -622,17 +682,20 @@ fn presentation_canvas_width(plan: &PresentationPlan) -> u16 {
     if plan.output_width > 0 {
         return plan.output_width;
     }
+
     if plan.change_visualization.as_ref().is_some_and(|change| {
         return change.mode == ChangeMode::SideDiff;
     }) {
         return plan.source_width.saturating_mul(2);
     }
+
     return plan.source_width;
 }
 
 fn annotation_position(position: &AnnotationPosition, width: i64, height: i64) -> (u8, i64, i64) {
     let x = i64::from(position.x);
     let y = i64::from(position.y);
+
     return match position.anchor {
         AnnotationAnchor::TopLeft => (7, x, y),
         AnnotationAnchor::TopRight => (9, width + x, y),
@@ -648,6 +711,7 @@ fn ass_color(rgb: &str, opacity: u8) -> Result<String> {
     let red = value >> 16;
     let green = value >> 8 & 0xff;
     let blue = value & 0xff;
+
     return Ok(format!(
         "&H{:02X}{blue:02X}{green:02X}{red:02X}",
         255 - opacity
@@ -656,11 +720,9 @@ fn ass_color(rgb: &str, opacity: u8) -> Result<String> {
 
 fn ass_time(frame: u64, fps: u16, end: bool) -> String {
     let numerator = frame.saturating_mul(100);
-    let centiseconds = if end {
-        numerator.div_ceil(u64::from(fps))
-    } else {
-        numerator / u64::from(fps)
-    };
+    let centiseconds =
+        if end { numerator.div_ceil(u64::from(fps)) } else { numerator / u64::from(fps) };
+
     return format!(
         "{}:{:02}:{:02}.{:02}",
         centiseconds / 360_000,
@@ -691,6 +753,7 @@ fn expand_annotation_template(
             return clip.output_start_frame <= output_frame && output_frame < clip.output_end_frame;
         })
         .ok_or_else(|| return plan_error("annotation frame has no source mapping"))?;
+
     let (source_frame, _) = mapped_source_frame(clip, output_frame);
     let marker = plan
         .markers
@@ -699,6 +762,7 @@ fn expand_annotation_template(
         .map(|marker| return marker.label.as_str())
         .collect::<Vec<_>>()
         .join(",");
+
     let source_millis = source_frame.saturating_mul(1000) / u64::from(plan.fps);
     let source_time = format!("{}.{:03}s", source_millis / 1000, source_millis % 1000);
     let output_millis = output_frame.saturating_mul(1000) / u64::from(plan.fps);
@@ -709,6 +773,7 @@ fn expand_annotation_template(
         output_millis / 1000 % 60,
         output_millis % 1000,
     );
+
     return Ok(template
         .replace("{output_frame}", &output_frame.to_string())
         .replace("{source_frame}", &source_frame.to_string())
@@ -727,9 +792,11 @@ pub(super) fn command_version(command: &str) -> Result<String> {
                 source,
             };
         })?;
+
     if !output.status.success() {
         return Err(plan_error(format!("{command} -version failed")));
     }
+
     return String::from_utf8_lossy(&output.stdout)
         .lines()
         .next()
@@ -758,10 +825,13 @@ pub(super) fn probe_delivery_video(staging: &Path) -> Result<serde_json::Value> 
                 source,
             };
         })?;
+
     if !output.status.success() {
         write_secure(&staging.join("ffprobe.log"), &output.stderr)?;
+
         return Err(plan_error("FFprobe rejected the presentation output"));
     }
+
     let value = serde_json::from_slice(&output.stdout).map_err(|source| {
         return Error::InvalidJson {
             path: staging.join("output-probe.json"),
@@ -769,6 +839,7 @@ pub(super) fn probe_delivery_video(staging: &Path) -> Result<serde_json::Value> 
             source,
         };
     })?;
+
     return Ok(value);
 }
 
@@ -790,19 +861,23 @@ pub(super) fn write_source_frame_hashes(source_video: &Path, staging: &Path) -> 
                 source,
             };
         })?;
+
     if !status.success() {
         return Err(plan_error(format!(
             "FFmpeg source-frame hashing failed with {status}"
         )));
     }
+
     let metadata = fs_err::metadata(&hashes_path).map_err(|source| {
         return Error::Filesystem {
             path: hashes_path,
             source,
         };
     })?;
+
     if metadata.len() == 0 {
         return Err(plan_error("FFmpeg source-frame hash output was empty"));
     }
+
     return Ok(());
 }

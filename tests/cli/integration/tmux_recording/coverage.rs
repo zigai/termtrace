@@ -99,6 +99,7 @@ fn tmux_strict_mode_blocks_creation_and_respawn_bypasses() {
         .iter()
         .map(String::as_str)
         .collect::<Vec<_>>();
+
     let server = PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &setup_args);
 
     let bypass = tmux_new_window(&server, &["/bin/sleep", "30"]);
@@ -112,6 +113,7 @@ fn tmux_strict_mode_blocks_creation_and_respawn_bypasses() {
     assert!(configured_executable.status.success());
     let configured_executable =
         String::from_utf8(trim_newline(configured_executable.stdout)).expect("UTF-8 executable");
+
     let explicit = tmux_new_window(
         &server,
         &[
@@ -122,6 +124,7 @@ fn tmux_strict_mode_blocks_creation_and_respawn_bypasses() {
             "/bin/sh",
         ],
     );
+
     let explicit_recording = server.pane_session(&explicit);
     let sent = server
         .command()
@@ -161,6 +164,7 @@ fn tmux_strict_mode_blocks_creation_and_respawn_bypasses() {
         .expect("respawn pane");
     assert!(respawned.success(), "tmux did not respawn the pane");
     server.wait_for_pane_absent(&wrapped);
+
     wait_for_path(&recording.join("completion.json"));
     let log = EventLog::read(recording.join("events.jsonl")).expect("interrupted pane log");
     validate_completed_log(&recording, &log).expect("respawn closed canonical evidence");
@@ -182,6 +186,7 @@ fn tmux_default_warn_coverage_never_terminates_uncovered_panes() {
         .iter()
         .map(String::as_str)
         .collect::<Vec<_>>();
+
     let server = PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &setup_args);
 
     let bypass = tmux_new_window(&server, &["/bin/sleep", "30"]);
@@ -189,6 +194,7 @@ fn tmux_default_warn_coverage_never_terminates_uncovered_panes() {
         return status["strict"] == false
             && status["unrecorded_panes"].as_u64().unwrap_or_default() >= 1;
     });
+
     assert!(
         server.pane_exists(&bypass),
         "default warn coverage terminated an uncovered pane"
@@ -202,6 +208,7 @@ fn tmux_default_warn_coverage_never_terminates_uncovered_panes() {
 
     let recorded = tmux_new_window(&server, &[]);
     let recording = server.pane_session(&recorded);
+
     let launch = format!("exec /usr/bin/python3 -c \"{}\"", workflow.program);
     let typed = server
         .command()
@@ -221,6 +228,7 @@ fn tmux_default_warn_coverage_never_terminates_uncovered_panes() {
         Duration::from_secs(15),
     )
     .expect("long tmux pane ready output");
+
     let killed = server
         .command()
         .args(["kill-pane", "-t", recorded.as_str()])

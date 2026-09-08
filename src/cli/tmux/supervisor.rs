@@ -18,19 +18,19 @@ use termtrace_model::value::ByteString;
 use crate::cli::output::{optional_display, write_json_line, write_stdout};
 
 use super::{
-    OPTION_EXCLUDED_PID, OPTION_GRANDFATHERED_PID, OPTION_OUTPUT_ROOT, OPTION_PANE_SESSION,
-    OPTION_SELECTED_PID, OPTION_SUPERVISOR_PID, OPTION_TERMTRACE, OPTION_TMUX, OPTION_VERSION,
-    SUPERVISOR_INTERVAL, TMUX_INTEGRATION_VERSION, UNRECORDED_GRACE,
     aggregate::{
         coverage_from_options, refresh_configured_aggregate_manifest, run_tmux_recording_status,
     },
     args::{TmuxCoverageMode, TmuxGuardArgs, TmuxStatusArgs},
-    client::{TmuxClient, option_text, query_number, same_executable, valid_tmux_identifier},
+    client::{option_text, query_number, same_executable, valid_tmux_identifier, TmuxClient},
     scope::{
-        TmuxScopeMode, TmuxScopePolicy, mark_pane_scope_decision, pane_matches_scope,
-        pane_scope_decision, parse_scope_identifier, scope_from_options,
+        mark_pane_scope_decision, pane_matches_scope, pane_scope_decision, parse_scope_identifier,
+        scope_from_options, TmuxScopeMode, TmuxScopePolicy,
     },
     setup::{launch_option, setup_from_options, tmux_wrapper_command},
+    OPTION_EXCLUDED_PID, OPTION_GRANDFATHERED_PID, OPTION_OUTPUT_ROOT, OPTION_PANE_SESSION,
+    OPTION_SELECTED_PID, OPTION_SUPERVISOR_PID, OPTION_TERMTRACE, OPTION_TMUX, OPTION_VERSION,
+    SUPERVISOR_INTERVAL, TMUX_INTEGRATION_VERSION, UNRECORDED_GRACE,
 };
 
 #[derive(serde::Serialize)]
@@ -79,15 +79,19 @@ pub(in crate::cli) fn run_tmux_status(
     if let Some(recording) = arguments.recording.as_deref() {
         return run_tmux_recording_status(response, arguments.output_root.as_deref(), recording);
     }
+
     let client = TmuxClient::from_connection(arguments.connection);
     let report = tmux_status_report(&client)?;
+
     if arguments.json {
         return write_json_line(response, &report);
     }
+
     let scope = report
         .scope
         .as_ref()
         .map_or("disabled", TmuxScopePolicy::mode_name);
+
     let mut output = format!(
         "enabled={} strict={} scope={} default-command={} panes={} selected={} excluded={} recorded={} unrecorded={}\n",
         report.enabled,
@@ -126,6 +130,7 @@ pub(in crate::cli) fn run_tmux_status(
         )
         .into_diagnostic()?;
     }
+
     return write_stdout(response, output);
 }
 
@@ -135,20 +140,26 @@ pub(in crate::cli) fn run_tmux_guard(arguments: TmuxGuardArgs) -> Result<ExitCod
             "tmux guard received an invalid pane identifier"
         ));
     }
+
     let client = TmuxClient::inherited();
     if option_text(&client, OPTION_VERSION)? != TMUX_INTEGRATION_VERSION {
         return Ok(ExitCode::SUCCESS);
     }
+
     let policy = scope_from_options(&client)?;
     let Ok(pane_pid) = query_number::<u32>(&client, &arguments.pane, "#{pane_pid}") else {
         return Ok(ExitCode::SUCCESS);
     };
+
     if !pane_scope_decision(&client, &arguments.pane, pane_pid, &policy)? {
         mark_pane_scope_decision(&client, &arguments.pane, false)?;
+
         return Ok(ExitCode::SUCCESS);
     }
+
     let expected = PathBuf::from(OsString::from_vec(client.option(OPTION_TERMTRACE)?));
     let deadline = Instant::now() + UNRECORDED_GRACE;
+
     loop {
         match pane_process_is_wrapper(&client, &arguments.pane, &expected) {
             Ok(Some(true)) => return Ok(ExitCode::SUCCESS),
@@ -164,18 +175,21 @@ pub(in crate::cli) fn run_tmux_guard(arguments: TmuxGuardArgs) -> Result<ExitCod
             Err(error) => return Err(error),
         }
     }
+
     let coverage = coverage_from_options(&client)?;
     let message = format!(
         "Termtrace found unrecorded pane {} (coverage={})",
         arguments.pane,
         coverage.as_str(),
     );
+
     if coverage == TmuxCoverageMode::Strict {
         let _display = client.run(["display-message", "-d", "5000", message.as_str()]);
         client.run(["kill-pane", "-t", arguments.pane.as_str()])?;
     } else {
         tracing::warn!(pane = %arguments.pane, "{message}");
     }
+
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -184,6 +198,7 @@ pub(in crate::cli) fn run_tmux_supervisor() -> Result<ExitCode> {
     if option_text(&client, OPTION_VERSION)? != TMUX_INTEGRATION_VERSION {
         return Ok(ExitCode::SUCCESS);
     }
+
     let expected = PathBuf::from(OsString::from_vec(client.option(OPTION_TERMTRACE)?));
     let Some(_lock) = super::watchdog::claim(&client, "supervisor")? else {
         return Ok(ExitCode::SUCCESS);
@@ -192,9 +207,12 @@ pub(in crate::cli) fn run_tmux_supervisor() -> Result<ExitCode> {
         OPTION_SUPERVISOR_PID,
         OsStr::new(&process::id().to_string()),
     )?;
+
     let result = super::aggregate::record_observer_start(&client)
         .and_then(|()| return supervise_tmux_panes(&client, &expected));
+
     let cleanup = release_supervisor(&client);
+
     match (result, cleanup) {
         (Ok(()), Ok(())) => return Ok(ExitCode::SUCCESS),
         (Err(error), Ok(())) | (Ok(()), Err(error)) => return Err(error),
@@ -211,11 +229,13 @@ pub(super) fn release_supervisor(client: &TmuxClient) -> Result<()> {
     if option_text(client, OPTION_SUPERVISOR_PID).ok().as_deref() == Some(current.as_str()) {
         client.unset_option(OPTION_SUPERVISOR_PID)?;
     }
+
     return Ok(());
 }
 
 pub(super) fn supervise_tmux_panes(client: &TmuxClient, expected: &Path) -> Result<()> {
     let mut suspects = BTreeMap::<String, Instant>::new();
+
     loop {
         let Ok(version) = option_text(client, OPTION_VERSION) else {
             return Ok(());
@@ -223,10 +243,13 @@ pub(super) fn supervise_tmux_panes(client: &TmuxClient, expected: &Path) -> Resu
         if version != TMUX_INTEGRATION_VERSION {
             return Ok(());
         }
+
         let coverage = coverage_from_options(client)?;
+
         if let Err(error) = refresh_configured_aggregate_manifest(client) {
             tracing::warn!(%error, "could not refresh aggregate tmux manifest");
         }
+
         let policy = scope_from_options(client)?;
         let Ok(panes) = pane_process_rows(client) else {
             return Ok(());
@@ -235,12 +258,14 @@ pub(super) fn supervise_tmux_panes(client: &TmuxClient, expected: &Path) -> Resu
             .iter()
             .map(|pane| return pane.pane_id.clone())
             .collect::<BTreeSet<_>>();
+
         suspects.retain(|pane, _| return present.contains(pane));
         for pane in panes {
             if pane.grandfathered_pid == Some(pane.pid) {
                 suspects.remove(&pane.pane_id);
                 continue;
             }
+
             let selected = match pane_row_is_selected(client, &pane, &policy) {
                 Ok(selected) => selected,
                 Err(error) => {
@@ -255,32 +280,39 @@ pub(super) fn supervise_tmux_panes(client: &TmuxClient, expected: &Path) -> Resu
                 {
                     tracing::debug!(%error, pane = %pane.pane_id, "could not cache excluded tmux pane process");
                 }
+
                 suspects.remove(&pane.pane_id);
                 continue;
             }
+
             if process_id_has_role(pane.pid, expected, b"run")?.unwrap_or(false) {
                 suspects.remove(&pane.pane_id);
                 continue;
             }
+
             let first_seen = suspects
                 .entry(pane.pane_id.clone())
                 .or_insert_with(Instant::now);
             if first_seen.elapsed() < UNRECORDED_GRACE {
                 continue;
             }
+
             let message = format!(
                 "Termtrace found unrecorded pane {} after its process changed (coverage={})",
                 pane.pane_id,
                 coverage.as_str(),
             );
+
             if coverage == TmuxCoverageMode::Strict {
                 let _display = client.run(["display-message", "-d", "5000", message.as_str()]);
                 let _kill = client.run(["kill-pane", "-t", pane.pane_id.as_str()]);
             } else {
                 tracing::warn!(pane = %pane.pane_id, "{message}");
             }
+
             suspects.remove(&pane.pane_id);
         }
+
         thread::sleep(SUPERVISOR_INTERVAL);
     }
 }
@@ -293,9 +325,11 @@ pub(super) fn pane_row_is_selected(
     if pane.selected_pid == Some(pane.pid) {
         return Ok(true);
     }
+
     if pane.excluded_pid == Some(pane.pid) {
         return Ok(false);
     }
+
     return match policy.mode {
         TmuxScopeMode::All => Ok(true),
         TmuxScopeMode::Explicit => Ok(false),
@@ -306,9 +340,11 @@ pub(super) fn pane_row_is_selected(
             {
                 return Ok(true);
             }
+
             if policy.session_names.is_empty() && policy.window_names.is_empty() {
                 return Ok(false);
             }
+
             pane_matches_scope(client, &pane.pane_id, policy)
         }
     };
@@ -319,27 +355,34 @@ pub(super) fn tmux_status_report(client: &TmuxClient) -> Result<TmuxStatusReport
     let scope = enabled
         .then(|| return scope_from_options(client))
         .transpose()?;
+
     let configured_executable = enabled
         .then(|| return client.option(OPTION_TERMTRACE))
         .transpose()?;
+
     let expected = configured_executable
         .as_ref()
         .map(|bytes| return PathBuf::from(OsString::from_vec(bytes.clone())));
+
     let expected_wrapper = if enabled {
         let setup = setup_from_options(
             client,
             configured_executable.clone().unwrap_or_default(),
             client.option(OPTION_TMUX)?,
         )?;
+
         Some((launch_option(&setup), tmux_wrapper_command(&setup)))
     } else {
         None
     };
+
     let default_command_matches = expected_wrapper.as_ref().is_some_and(|(option, wrapper)| {
         return client.option(option).ok().as_deref() == Some(wrapper.as_bytes());
     });
+
     let pane_rows = pane_process_rows(client)?;
     let mut panes = Vec::with_capacity(pane_rows.len());
+
     for pane in pane_rows {
         // Commands and recording paths can contain tabs or newlines, so keep
         // these arbitrary-byte fields out of the framed identity rows.
@@ -349,6 +392,7 @@ pub(super) fn tmux_status_report(client: &TmuxClient) -> Result<TmuxStatusReport
             Some(policy) => pane_row_is_selected(client, &pane, policy)?,
             None => false,
         };
+
         let recorded = match &expected {
             Some(executable) => process_id_has_role(pane.pid, executable, b"run")?.unwrap_or(false),
             None => false,
@@ -365,12 +409,14 @@ pub(super) fn tmux_status_report(client: &TmuxClient) -> Result<TmuxStatusReport
                 .then(|| return ByteString::from(recording_session.as_slice())),
         });
     }
+
     let selected_panes = panes.iter().filter(|pane| return pane.selected).count();
     let recorded_panes = panes.iter().filter(|pane| return pane.recorded).count();
     let unrecorded_panes = panes
         .iter()
         .filter(|pane| return pane.selected && !pane.recorded)
         .count();
+
     return Ok(TmuxStatusReport {
         integration_version: 1,
         enabled,
@@ -400,6 +446,7 @@ pub(super) fn pane_process_is_wrapper(
     let Ok(pid) = query_number::<u32>(client, pane, "#{pane_pid}") else {
         return Ok(None);
     };
+
     return process_id_has_role(pid, expected_executable, b"run");
 }
 
@@ -419,9 +466,11 @@ pub(super) fn process_id_has_role(
             ));
         }
     };
+
     if !same_executable(&actual_executable, expected_executable) {
         return Ok(Some(false));
     }
+
     let command_line = match fs_err::read(process.join("cmdline")) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -432,16 +481,21 @@ pub(super) fn process_id_has_role(
             ));
         }
     };
+
     let mut arguments = command_line.split(|byte| return *byte == 0);
     let _program = arguments.next();
+
     let mut group = arguments.next();
     while let Some(arg) = group {
         if arg == b"tmux" {
             break;
         }
+
         group = arguments.next();
     }
+
     let action = arguments.next();
+
     return Ok(Some(group == Some(b"tmux") && action == Some(role)));
 }
 
@@ -449,16 +503,20 @@ pub(super) fn pane_process_rows(client: &TmuxClient) -> Result<Vec<PaneProcessRo
     let format = format!(
         "#{{pane_dead}}\t#{{pane_id}}\t#{{pane_pid}}\t#{{{OPTION_GRANDFATHERED_PID}}}\t#{{{OPTION_SELECTED_PID}}}\t#{{{OPTION_EXCLUDED_PID}}}\t#{{session_id}}\t#{{window_id}}"
     );
+
     let output = client.output(["list-panes", "-a", "-F", format.as_str()])?;
     let mut panes = BTreeMap::<String, PaneProcessRow>::new();
+
     for line in output.split(|byte| return *byte == b'\n') {
         if line.is_empty() {
             continue;
         }
+
         let mut fields = line.splitn(8, |byte| return *byte == b'\t');
         if fields.next() == Some(b"1") {
             continue;
         }
+
         let pane_id = parse_scope_identifier(fields.next(), b'%', "pane")?;
         let pid = fields
             .next()
@@ -492,6 +550,7 @@ pub(super) fn pane_process_rows(client: &TmuxClient) -> Result<Vec<PaneProcessRo
             },
         );
     }
+
     return Ok(panes.into_values().collect());
 }
 
@@ -503,6 +562,7 @@ pub(super) fn grandfather_current_panes(client: &TmuxClient) -> Result<()> {
             OsStr::new(&pane.pid.to_string()),
         )?;
     }
+
     return Ok(());
 }
 
@@ -513,6 +573,7 @@ pub(super) fn clear_managed_pane_options(client: &TmuxClient) -> Result<()> {
         .filter(|line| return !line.is_empty())
     {
         let pane_id = parse_scope_identifier(Some(line), b'%', "pane")?;
+
         for option in [
             OPTION_GRANDFATHERED_PID,
             OPTION_SELECTED_PID,
@@ -521,5 +582,6 @@ pub(super) fn clear_managed_pane_options(client: &TmuxClient) -> Result<()> {
             client.unset_pane_option(&pane_id, option)?;
         }
     }
+
     return Ok(());
 }

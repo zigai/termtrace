@@ -1,9 +1,9 @@
 use std::{fmt::Display, path::Path, sync::atomic::AtomicBool};
 
-use rusqlite::{Connection, OptionalExtension as _, params};
+use rusqlite::{params, Connection, OptionalExtension as _};
 use termtrace_evidence::{
     event_log::EventLogCursor,
-    request_journal::{MUTATION_JOURNAL_NAME, MutationJournalCursor},
+    request_journal::{MutationJournalCursor, MUTATION_JOURNAL_NAME},
     session::validate_completed_session,
 };
 use termtrace_model::{
@@ -16,13 +16,13 @@ use termtrace_model::{
 };
 use uuid::Uuid;
 
-use super::{ActionAnalysisInputs, bounded_action_findings, finish_analysis, task_error};
+use super::{bounded_action_findings, finish_analysis, task_error, ActionAnalysisInputs};
 use crate::{
-    Result,
     analysis::diagnostics::diagnose_session,
     diff::diff_inspections_with_semantic_states,
-    replay::{StateInspection, trust::SourceIdentity, visit_session_states_while},
+    replay::{trust::SourceIdentity, visit_session_states_while, StateInspection},
     timeline::stream::TokenCursor,
+    Result,
 };
 
 /// Analyze the latest input request without retaining canonical event or state history.
@@ -39,6 +39,7 @@ pub fn analyze_last_action_session(
             "broad-change percentage must be between 1 and 100",
         ));
     }
+
     let source = SourceIdentity::capture(session)?;
     let completion = validate_completed_session(session)?;
     let action = last_input_action(session)?;
@@ -57,12 +58,15 @@ pub fn analyze_last_action_session(
         } else if record.presented {
             presentation_eligible_states = presentation_eligible_states.saturating_add(1);
         }
+
         after = Some(StateInspection {
             record: record.clone(),
             state: state.clone(),
         });
+
         return Ok(true);
     })?;
+
     let before =
         before.ok_or_else(|| return task_error("no state matches action start sequence"))?;
     let after = after.ok_or_else(|| return task_error("no state matches final sequence"))?;
@@ -76,10 +80,12 @@ pub fn analyze_last_action_session(
         before,
         after,
     );
+
     let mut output_generated = ActionOutputSummary {
         event_count: 0,
         byte_count: 0,
     };
+
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
     while let Some(record) = cursor.next_record()? {
         if record.seq > action.intent_event_seq
@@ -91,8 +97,10 @@ pub fn analyze_last_action_session(
                 .saturating_add(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX));
         }
     }
+
     let mut tokens = TokenCursor::new(session, None)?;
     let mut first_action_token_id = None;
+
     while let Some(entry) = tokens.next()? {
         if let TimelineItem::VtToken { token } = entry.item
             && token
@@ -104,6 +112,7 @@ pub fn analyze_last_action_session(
             break;
         }
     }
+
     let report = diagnose_session(session, DiagnosticCheck::all(), broad_change_percent, &[])?;
     let (findings, findings_truncated) = bounded_action_findings(
         report.findings,
@@ -111,7 +120,9 @@ pub fn analyze_last_action_session(
         difference.to.state_id,
         first_action_token_id,
     );
+
     source.check(session)?;
+
     return Ok(finish_analysis(ActionAnalysisInputs {
         session_id: completion.session_id,
         source_final_event_hash: completion.final_event_hash,
@@ -144,6 +155,7 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
         BEGIN;",
         )
         .map_err(index_error)?;
+
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
     let mut last_intent_seq = None;
     {
@@ -153,6 +165,7 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
         let mut result_insert = connection
             .prepare("INSERT INTO results VALUES (?1, ?2, ?3)")
             .map_err(index_error)?;
+
         while let Some(record) = cursor.next_record()? {
             match record.event {
                 Event::InputIntent {
@@ -166,6 +179,7 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
                             bytes.to_be_bytes()
                         ])
                         .map_err(index_error)?;
+
                     last_intent_seq = Some(record.seq);
                 }
                 Event::InputResult {
@@ -189,14 +203,18 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
             }
         }
     }
+
     connection.execute_batch("COMMIT").map_err(index_error)?;
+
     let last_intent_seq = last_intent_seq
         .ok_or_else(|| return task_error("session contains no canonical input action"))?;
+
     let mut journal = MutationJournalCursor::open(&session.join(MUTATION_JOURNAL_NAME))?;
     let mut selected = None;
     let mut contains_input = connection
         .prepare("SELECT 1 FROM intents WHERE seq >= ?1 AND seq < ?2 LIMIT 1")
         .map_err(index_error)?;
+
     while let Some(request) = journal.next_record()? {
         let present = contains_input
             .query_row(
@@ -209,10 +227,12 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
             .optional()
             .map_err(index_error)?
             .is_some();
+
         if present {
             selected = Some(request);
         }
     }
+
     let (request_id, start, end) = selected.map_or_else(
         || return (None, last_intent_seq, last_intent_seq.saturating_add(2)),
         |request| {
@@ -223,6 +243,7 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
             );
         },
     );
+
     let mut statement = connection
         .prepare(
             "SELECT i.seq, i.operation, i.bytes, r.seq, r.result
@@ -233,6 +254,7 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
     let mut rows = statement
         .query(params![start.to_be_bytes(), end.to_be_bytes()])
         .map_err(index_error)?;
+
     let mut action = LastActionBoundary {
         request_id,
         operation_ids: Vec::new(),
@@ -256,25 +278,33 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
             .map(u64::from_be_bytes)
             .filter(|result| return *result > seq)
             .ok_or_else(|| return task_error("input intent has no canonical input result"))?;
+
         let result: Vec<u8> = row.get(4).map_err(index_error)?;
         let (status, written, error): (OperationStatus, u64, Option<String>) =
             serde_json::from_slice(&result).map_err(index_error)?;
+
         if action.operation_ids.is_empty() {
             action.intent_event_seq = seq;
         }
+
         action
             .operation_ids
             .push(Uuid::parse_str(&operation).map_err(index_error)?);
+
         action.intended_bytes = action.intended_bytes.saturating_add(bytes);
         action.bytes_written = action.bytes_written.saturating_add(written);
         action.result_event_seq = result_seq;
+
         if status == OperationStatus::Failed {
             action.status = status;
+
             if action.error_code.is_none() {
                 action.error_code = error;
             }
         }
     }
+
     action.atom_count = u32::try_from(action.operation_ids.len()).unwrap_or(u32::MAX);
+
     return Ok(action);
 }

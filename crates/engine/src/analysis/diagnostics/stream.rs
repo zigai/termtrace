@@ -5,11 +5,11 @@ use std::{
     sync::atomic::AtomicBool,
 };
 
-use rusqlite::{Connection, OptionalExtension as _, Statement, params};
+use rusqlite::{params, Connection, OptionalExtension as _, Statement};
 use tempfile::TempDir;
 use termtrace_evidence::{
     event_log::{EventLogCursor, EventLogSummary},
-    session::{SessionSnapshot, validate_completed_session},
+    session::{validate_completed_session, SessionSnapshot},
 };
 use termtrace_model::{
     execution::event::Event,
@@ -24,13 +24,13 @@ use termtrace_model::{
 };
 
 use super::{
-    ValidatedVisualManifest, analysis_error, detect_cursor_jumps, detect_dirty_discrepancies,
-    detect_redundant_full_redraw, detect_transients, native_correlations_for_state,
+    analysis_error, detect_cursor_jumps, detect_dirty_discrepancies, detect_redundant_full_redraw,
+    detect_transients, native_correlations_for_state, ValidatedVisualManifest,
 };
 use crate::{
-    Result,
     replay::{trust::SourceIdentity, visit_recording_states_range_while},
     timeline::stream::TokenCursor,
+    Result,
 };
 
 /// Diagnose a completed source with a disk-backed intermediate index.
@@ -47,6 +47,7 @@ pub fn diagnose_session(
     visual_evidence: &[ValidatedVisualManifest],
 ) -> Result<DiagnoseReport> {
     validate_completed_session(session)?;
+
     return diagnose_recording(session, true, checks, broad_change_percent, visual_evidence);
 }
 
@@ -71,14 +72,19 @@ fn diagnose_recording(
 ) -> Result<DiagnoseReport> {
     let source = SourceIdentity::capture_candidate(session)?;
     let summary = EventLogSummary::read(session.join("events.jsonl"))?;
+
     checks.sort_unstable();
     checks.dedup();
+
     if checks.is_empty() {
         checks = DiagnosticCheck::all();
     }
+
     let store = DiagnosticStore::new()?;
     let mut findings = Vec::new();
+
     store.connection.execute_batch("BEGIN").map_err(sql_error)?;
+
     let mut presented = VecDeque::<StateRecord>::new();
     let mut previous_cursor = None;
     let mut hidden = Vec::new();
@@ -88,6 +94,7 @@ fn diagnose_recording(
         .connection
         .prepare("INSERT INTO states VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)")
         .map_err(sql_error)?;
+
     visit_recording_states_range_while(
         session,
         completed,
@@ -95,27 +102,34 @@ fn diagnose_recording(
         &AtomicBool::new(false),
         |record, _| {
             DiagnosticStore::insert_state(&mut state_insert, record)?;
+
             if checks.contains(&DiagnosticCheck::Dirty) {
                 detect_dirty_discrepancies(slice::from_ref(record), &mut findings);
             }
+
             if checks.contains(&DiagnosticCheck::Cursor) && record.delta.cursor.is_some() {
                 if let Some(previous) = previous_cursor.take() {
                     detect_cursor_jumps(&[previous, record.clone()], &mut findings);
                 }
+
                 previous_cursor = Some(record.clone());
             }
+
             if checks.contains(&DiagnosticCheck::Transient)
                 && !record.presented
                 && !record.delta.rows.is_empty()
             {
                 hidden.push(record.state_id);
             }
+
             if checks.contains(&DiagnosticCheck::Modes) && record.delta.modes.is_some() {
                 modes.push(record.state_id);
             }
+
             if checks.contains(&DiagnosticCheck::Palette) && record.delta.colors.is_some() {
                 palette.push(record.state_id);
             }
+
             if record.presented {
                 presented.push_back(record.clone());
                 let recent = presented.make_contiguous();
@@ -126,19 +140,23 @@ fn diagnose_recording(
                         return finding.state_ids.last() == Some(&record.state_id);
                     }));
                 }
+
                 if checks.contains(&DiagnosticCheck::Transient)
                     && recent.len() >= 3
                     && let Some(last_three) = recent.get(recent.len().saturating_sub(3)..)
                 {
                     detect_transients(last_three, &mut findings);
                 }
+
                 if presented.len() > 8 {
                     presented.pop_front();
                 }
             }
+
             return Ok(true);
         },
     )?;
+
     drop(state_insert);
     if !hidden.is_empty() {
         let count = hidden.len();
@@ -152,6 +170,7 @@ fn diagnose_recording(
             )],
         ));
     }
+
     for (code, ids) in [("mode_churn", modes), ("palette_churn", palette)] {
         if ids.len() >= 3 {
             let count = ids.len();
@@ -164,9 +183,11 @@ fn diagnose_recording(
             ));
         }
     }
+
     let mut canonical = EventLogCursor::open(session.join("events.jsonl"))?;
     let initial_cols = canonical.header().cols;
     let initial_rows = canonical.header().rows;
+
     if checks.contains(&DiagnosticCheck::QueryLoop) {
         while let Some(record) = canonical.next_record()? {
             if let Event::QueryResponse {
@@ -176,6 +197,7 @@ fn diagnose_recording(
                 store.connection.execute("INSERT INTO queries VALUES (?1, ?2, 1) ON CONFLICT(query, response) DO UPDATE SET count=count+1", params![query.as_bytes(), response.as_bytes()]).map_err(sql_error)?;
             }
         }
+
         let mut statement = store
             .connection
             .prepare("SELECT count FROM queries WHERE count >= 3 ORDER BY query, response")
@@ -183,6 +205,7 @@ fn diagnose_recording(
         let counts = statement
             .query_map([], |row| return row.get::<_, u64>(0))
             .map_err(sql_error)?;
+
         for count in counts {
             let count = count.map_err(sql_error)?;
             findings.push(finding(
@@ -196,6 +219,7 @@ fn diagnose_recording(
             ));
         }
     }
+
     if checks.contains(&DiagnosticCheck::FullRedraw) {
         let mut tokens = TokenCursor::new(session, None)?;
         while let Some(entry) = tokens.next()? {
@@ -206,12 +230,14 @@ fn diagnose_recording(
                     "erase saved lines" => 3,
                     _ => continue,
                 };
+
                 let event = token.source.first().map(|segment| return segment.event_seq);
                 let offset = token
                     .source
                     .iter()
                     .map(|segment| return segment.start_byte_offset)
                     .min();
+
                 store
                     .connection
                     .execute(
@@ -221,6 +247,7 @@ fn diagnose_recording(
                     .map_err(sql_error)?;
             }
         }
+
         store.full_redraw(
             initial_cols,
             initial_rows,
@@ -228,10 +255,12 @@ fn diagnose_recording(
             &mut findings,
         )?;
     }
+
     store
         .connection
         .execute_batch("COMMIT")
         .map_err(sql_error)?;
+
     for finding in &mut findings {
         for state_id in &finding.state_ids {
             let correlations = native_correlations_for_state(
@@ -239,6 +268,7 @@ fn diagnose_recording(
                 *state_id,
                 visual_evidence,
             );
+
             if !correlations.is_empty() {
                 finding.native_correlations.extend(correlations);
             } else if store
@@ -263,6 +293,7 @@ fn diagnose_recording(
             }
         }
     }
+
     findings.sort_by(|left, right| {
         return left
             .state_ids
@@ -270,9 +301,11 @@ fn diagnose_recording(
             .cmp(&right.state_ids.first())
             .then_with(|| return left.code.cmp(&right.code));
     });
+
     if source != SourceIdentity::capture_candidate(session)? {
         return Err(analysis_error("canonical source changed during diagnosis"));
     }
+
     return Ok(DiagnoseReport {
         format: "termtrace-diagnose".to_owned(),
         version: 1,
@@ -307,6 +340,7 @@ impl DiagnosticStore {
             CREATE TABLE tokens (id INTEGER PRIMARY KEY, kind INTEGER NOT NULL, event INTEGER, offset INTEGER);
             CREATE INDEX tokens_kind ON tokens(kind, id);
             CREATE TABLE queries (query BLOB NOT NULL, response BLOB NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(query,response)) WITHOUT ROWID;").map_err(sql_error)?;
+
         return Ok(Self {
             connection,
             _directory: directory,
@@ -317,6 +351,7 @@ impl DiagnosticStore {
         let changed = state.delta.rows.iter().fold(0_u64, |count, row| {
             return count.saturating_add(u64::try_from(row.cells.len()).unwrap_or(u64::MAX));
         });
+
         let cols = state.delta.geometry.map(|geometry| return geometry.0);
         let rows = state.delta.geometry.map(|geometry| return geometry.1);
         statement
@@ -330,6 +365,7 @@ impl DiagnosticStore {
                 rows
             ])
             .map_err(sql_error)?;
+
         return Ok(());
     }
 
@@ -345,6 +381,7 @@ impl DiagnosticStore {
             .prepare("SELECT id, event, offset FROM tokens WHERE kind=1 ORDER BY id")
             .map_err(sql_error)?;
         let mut clears = statement.query([]).map_err(sql_error)?;
+
         while let Some(clear) = clears.next().map_err(sql_error)? {
             let token_id: u64 = clear.get(0).map_err(sql_error)?;
             let event: Option<u64> = clear.get(1).map_err(sql_error)?;
@@ -368,6 +405,7 @@ impl DiagnosticStore {
                     "semantic evidence does not by itself prove a visible pixel clear".to_owned(),
                 ],
             ));
+
             let Some(event) = event else {
                 continue;
             };
@@ -379,6 +417,7 @@ impl DiagnosticStore {
             let mut repaint = repaint_statement
                 .query(params![event, event.saturating_add(2)])
                 .map_err(sql_error)?;
+
             while let Some(state) = repaint.next().map_err(sql_error)? {
                 if let (Some(new_cols), Some(new_rows)) = (
                     state.get::<_, Option<u16>>(2).map_err(sql_error)?,
@@ -387,13 +426,17 @@ impl DiagnosticStore {
                     cols = new_cols;
                     rows = new_rows;
                 }
+
                 let candidate: u64 = state.get(1).map_err(sql_error)?;
+
                 if candidate > 0 {
                     changed = changed.saturating_add(candidate);
                     ids.push(state.get(0).map_err(sql_error)?);
                 }
             }
+
             let cells = u64::from(cols).saturating_mul(u64::from(rows)).max(1);
+
             if changed.saturating_mul(100) >= cells.saturating_mul(u64::from(percent)) {
                 let mut printable = self
                     .connection
@@ -419,6 +462,7 @@ impl DiagnosticStore {
                 ));
             }
         }
+
         let mut scrollback = self
             .connection
             .prepare("SELECT id FROM tokens WHERE kind=3 ORDER BY id")
@@ -437,6 +481,7 @@ impl DiagnosticStore {
                 vec!["ED 3 occurred in canonical output".to_owned()],
             ));
         }
+
         return Ok(());
     }
 }

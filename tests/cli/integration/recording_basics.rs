@@ -66,6 +66,7 @@ fn durability_thresholds_are_only_accepted_in_bounded_mode() {
         .args(["--durability", "bounded", "--", "/bin/true"])
         .assert()
         .success();
+
     let manifest = read_manifest(&session).expect("bounded manifest");
     assert_eq!(manifest.durability_policy.maximum_interval_ms, Some(50));
     assert_eq!(
@@ -96,16 +97,15 @@ fn output_budget_exhaustion_returns_failure_after_fast_child_exit() {
         ])
         .assert()
         .failure();
+
     let completion: serde_json::Value =
         serde_json::from_slice(&fs_err::read(session.join("completion.json")).expect("completion"))
             .expect("completion JSON");
     assert_eq!(completion["resource_limit"]["kind"], "output_bytes");
     assert_eq!(completion["resource_limit"]["limit"], 4095);
-    assert!(
-        completion["resource_limit"]["observed"]
-            .as_u64()
-            .is_some_and(|observed| return observed >= 4096)
-    );
+    assert!(completion["resource_limit"]["observed"]
+        .as_u64()
+        .is_some_and(|observed| return observed >= 4096));
 }
 
 #[test]
@@ -122,6 +122,7 @@ fn agent_record_stdout_is_one_json_response() {
         .get_output()
         .stdout
         .clone();
+
     let response = compact_json_line(&output);
     assert_eq!(response["ok"], true);
     assert_eq!(response["type"], "record");
@@ -140,6 +141,7 @@ fn semantic_record_without_ghostty_has_stable_nonwarning_stderr() {
         .args(["--", "/bin/sh", "-c", "printf SEMANTIC_ONLY"])
         .assert()
         .success();
+
     let stderr = String::from_utf8_lossy(&recorded.get_output().stderr);
     assert!(
         stderr.contains("recording:"),
@@ -215,6 +217,7 @@ fn record_inherits_and_persists_effective_working_directory() {
     let temporary = TempDir::new().expect("temporary directory");
     let workspace = temporary.path().join("workspace");
     fs_err::create_dir_all(&workspace).expect("workspace directory");
+
     let inherited_session = temporary.path().join("inherited-session");
     let mut inherited = Command::cargo_bin("termtrace").expect("binary should build");
 
@@ -238,6 +241,7 @@ fn record_inherits_and_persists_effective_working_directory() {
 
     let override_directory = temporary.path().join("override");
     fs_err::create_dir_all(&override_directory).expect("override directory");
+
     let override_session = temporary.path().join("override-session");
     let mut overridden = Command::cargo_bin("termtrace").expect("binary should build");
     overridden
@@ -266,6 +270,7 @@ fn has_rfc3339_log_prefix(line: &str) -> bool {
     let Some(prefix) = bytes.get(..19) else {
         return false;
     };
+
     return prefix.iter().enumerate().all(|(index, byte)| match index {
         4 | 7 => return *byte == b'-',
         10 => return *byte == b'T',

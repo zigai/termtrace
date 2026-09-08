@@ -10,7 +10,7 @@ use std::{
 
 use miette::Result;
 
-use super::{TMUX_HOOK_INDEX, TMUX_WRAPPER_BINARY_ENV, args::TmuxConnectionArgs};
+use super::{args::TmuxConnectionArgs, TMUX_HOOK_INDEX, TMUX_WRAPPER_BINARY_ENV};
 
 #[derive(Clone)]
 pub(super) struct TmuxClient {
@@ -44,6 +44,7 @@ impl TmuxClient {
         } else if let Some(socket_path) = &self.socket_path {
             process.arg("-S").arg(socket_path);
         }
+
         return process;
     }
 
@@ -58,6 +59,7 @@ impl TmuxClient {
                 self.executable.display()
             );
         })?;
+
         if !output.status.success() {
             return Err(miette::miette!(
                 "tmux command failed with {}: {}",
@@ -65,6 +67,7 @@ impl TmuxClient {
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
         }
+
         return Ok(trim_one_newline(output.stdout));
     }
 
@@ -74,6 +77,7 @@ impl TmuxClient {
         S: AsRef<OsStr>,
     {
         let _ = self.output(arguments)?;
+
         return Ok(());
     }
 
@@ -103,6 +107,7 @@ impl TmuxClient {
                 self.executable.display()
             );
         })?;
+
         if !output.status.success() {
             return Err(miette::miette!(
                 "tmux target {} is unavailable: {}",
@@ -110,12 +115,14 @@ impl TmuxClient {
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
         }
+
         return Ok(trim_one_newline(output.stdout));
     }
 
     pub(super) fn set_option(&self, name: &str, value: &OsStr) -> Result<()> {
         let mut process = self.process();
         process.arg("set-option").arg("-gq").arg(name).arg(value);
+
         return checked_status(process, &self.executable);
     }
 
@@ -132,6 +139,7 @@ impl TmuxClient {
             .arg(pane)
             .arg(name)
             .arg(value);
+
         return checked_status(process, &self.executable);
     }
 
@@ -144,6 +152,7 @@ impl TmuxClient {
         let output = self.output(["show-hooks", "-g", hook.as_str()])?;
         let mut prefix = hook.into_bytes();
         prefix.push(b' ');
+
         return Ok(output
             .strip_prefix(prefix.as_slice())
             .map_or_else(Vec::new, <[u8]>::to_vec));
@@ -156,6 +165,7 @@ impl TmuxClient {
             .arg("-g")
             .arg(hook_name(name))
             .arg(command);
+
         return checked_status(process, &self.executable);
     }
 
@@ -166,6 +176,7 @@ impl TmuxClient {
     pub(super) fn run_shell_background(&self, command: &OsStr) -> Result<()> {
         let mut process = self.process();
         process.arg("run-shell").arg("-b").arg(command);
+
         return checked_status(process, &self.executable);
     }
 }
@@ -173,11 +184,13 @@ impl TmuxClient {
 pub(super) fn same_executable(left: &Path, right: &Path) -> bool {
     let left = fs_err::canonicalize(left).unwrap_or_else(|_| return left.to_path_buf());
     let right = fs_err::canonicalize(right).unwrap_or_else(|_| return right.to_path_buf());
+
     return left == right;
 }
 
 pub(super) fn option_text(client: &TmuxClient, name: &str) -> Result<String> {
     let bytes = client.option(name)?;
+
     return str::from_utf8(&bytes)
         .map(str::to_owned)
         .map_err(|error| return miette::miette!("tmux option {name} is not UTF-8: {error}"));
@@ -185,6 +198,7 @@ pub(super) fn option_text(client: &TmuxClient, name: &str) -> Result<String> {
 
 pub(super) fn option_path(client: &TmuxClient, name: &str) -> Result<Option<PathBuf>> {
     let bytes = client.option(name)?;
+
     return Ok((!bytes.is_empty()).then(|| return PathBuf::from(OsString::from_vec(bytes))));
 }
 
@@ -194,6 +208,7 @@ where
     T::Err: Display,
 {
     let value = option_text(client, name)?;
+
     return value
         .parse()
         .map_err(|error| return miette::miette!("invalid tmux option {name}: {error}"));
@@ -201,6 +216,7 @@ where
 
 pub(super) fn query_text(client: &TmuxClient, pane: &str, format: &str) -> Result<String> {
     let bytes = client.pane_format(pane, format)?;
+
     return str::from_utf8(&bytes)
         .map(str::to_owned)
         .map_err(|error| return miette::miette!("tmux format {format} is not UTF-8: {error}"));
@@ -212,6 +228,7 @@ where
     T::Err: Display,
 {
     let value = query_text(client, pane, format)?;
+
     return value
         .parse()
         .map_err(|error| return miette::miette!("invalid tmux format {format}: {error}"));
@@ -219,6 +236,7 @@ where
 
 pub(super) fn valid_tmux_identifier(value: &str, prefix: u8) -> bool {
     let bytes = value.as_bytes();
+
     return bytes.first() == Some(&prefix)
         && bytes.len() > 1
         && bytes
@@ -234,12 +252,14 @@ pub(super) fn trim_one_newline(mut bytes: Vec<u8>) -> Vec<u8> {
     if bytes.last() == Some(&b'\n') {
         bytes.pop();
     }
+
     return bytes;
 }
 
 pub(super) fn shell_quote(bytes: &[u8]) -> Vec<u8> {
     let mut quoted = Vec::with_capacity(bytes.len().saturating_add(2));
     quoted.push(b'\'');
+
     for byte in bytes {
         if *byte == b'\'' {
             quoted.extend_from_slice(b"'\\''");
@@ -247,7 +267,9 @@ pub(super) fn shell_quote(bytes: &[u8]) -> Vec<u8> {
             quoted.push(*byte);
         }
     }
+
     quoted.push(b'\'');
+
     return quoted;
 }
 
@@ -256,7 +278,9 @@ pub(super) fn tmux_config_quote(bytes: &[u8]) -> String {
     for byte in bytes {
         let _ = write!(quoted, "\\{byte:03o}");
     }
+
     quoted.push('"');
+
     return quoted;
 }
 
@@ -267,6 +291,7 @@ pub(super) fn checked_status(mut process: ProcessCommand, executable: &Path) -> 
             executable.display()
         );
     })?;
+
     if !output.status.success() {
         return Err(miette::miette!(
             "tmux command failed with {}: {}",
@@ -274,5 +299,6 @@ pub(super) fn checked_status(mut process: ProcessCommand, executable: &Path) -> 
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
+
     return Ok(());
 }

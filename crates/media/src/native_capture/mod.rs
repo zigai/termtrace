@@ -16,16 +16,16 @@ mod worker;
 
 #[cfg(test)]
 mod tests;
-pub use capability::native_capabilities;
 
 pub use crate::{Error, Result};
+pub use capability::native_capabilities;
 pub use capture::capture;
 pub use geometry::{native_capture_target, probe_ghostty_geometry, solve_ghostty_geometry};
-pub use original::{OriginalCaptureBackend, capture_original, capture_original_with_backend};
+pub use original::{capture_original, capture_original_with_backend, OriginalCaptureBackend};
 pub use termtrace_model::artifact::visual::{
-    CaptureKind, CaptureOptions, CaptureOutcome, GHOSTTY_EFFECTIVE_CONFIG_NAME,
-    GeometryProbeAttempt, GeometrySolveReport, NativeFrameSample, VISUAL_DIRECTORY,
-    VISUAL_MANIFEST_VERSION, VideoMapEntry, VisualManifest, visual_directory_name_for,
+    visual_directory_name_for, CaptureKind, CaptureOptions, CaptureOutcome, GeometryProbeAttempt,
+    GeometrySolveReport, NativeFrameSample, VideoMapEntry, VisualManifest,
+    GHOSTTY_EFFECTIVE_CONFIG_NAME, VISUAL_DIRECTORY, VISUAL_MANIFEST_VERSION,
 };
 pub(crate) use validation::validate_visual_manifest_binding;
 pub use validation::{

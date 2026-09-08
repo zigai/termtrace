@@ -3,7 +3,7 @@
 use termtrace_model::{
     execution::event::TerminalColors,
     execution::session::{
-        GHOSTTY_REPLAY_PROFILE_NAME, GhosttyVisualOverrides, GhosttyVisualProvenance,
+        GhosttyVisualOverrides, GhosttyVisualProvenance, GHOSTTY_REPLAY_PROFILE_NAME,
     },
     terminal::state::Rgb,
     value::ByteString,
@@ -37,16 +37,19 @@ impl ResolvedGhosttyProfile {
                 "recorded Ghostty replay profile must be the canonical root artifact `{GHOSTTY_REPLAY_PROFILE_NAME}`"
             )));
         }
+
         if hash(&self.replay_config) != self.provenance.replay_profile_hash {
             return Err(profile_error(
                 "recorded Ghostty replay profile hash does not match provenance",
             ));
         }
+
         if self.effective_config_hash() != self.provenance.effective_config_hash {
             return Err(profile_error(
                 "recorded Ghostty effective configuration hash does not match provenance",
             ));
         }
+
         return Ok(());
     }
 }
@@ -64,6 +67,7 @@ pub fn resolve_profile(
     let mut replay_config = flatten_config(base_effective_config);
     append_overrides(&mut replay_config, &overrides);
     let effective_config = resolve_effective(&replay_config)?;
+
     return Ok(ResolvedGhosttyProfile {
         provenance: GhosttyVisualProvenance {
             source_config,
@@ -88,24 +92,29 @@ pub fn restore_profile(
             "recorded Ghostty replay profile must be the canonical root artifact `{GHOSTTY_REPLAY_PROFILE_NAME}`"
         )));
     }
+
     if hash(&replay_config) != provenance.replay_profile_hash {
         return Err(profile_error(
             "recorded Ghostty replay profile hash does not match provenance",
         ));
     }
+
     let effective_config = resolve_effective(&replay_config)?;
     let profile = ResolvedGhosttyProfile {
         replay_config,
         effective_config,
         provenance,
     };
+
     profile.validate()?;
+
     return Ok(profile);
 }
 
 /// Resolve terminal colors from a validated canonical Ghostty profile.
 pub fn terminal_colors_for_profile(profile: &ResolvedGhosttyProfile) -> Result<TerminalColors> {
     profile.validate()?;
+
     return terminal_colors_from_config(&profile.effective_config);
 }
 
@@ -113,6 +122,7 @@ pub(crate) fn terminal_colors_from_config(config: &[u8]) -> Result<TerminalColor
     let mut colors = builtin_terminal_colors()?;
     apply_config(&mut colors, config)?;
     colors.source = format!("ghostty_show_config_blake3:{}", hash(config));
+
     return Ok(colors);
 }
 
@@ -126,6 +136,7 @@ pub fn builtin_terminal_colors() -> Result<TerminalColors> {
             state.colors.palette.len()
         )));
     }
+
     return Ok(TerminalColors {
         source: "libghostty_builtin".to_owned(),
         foreground: rgb_array(state.colors.foreground),
@@ -143,6 +154,7 @@ fn flatten_config(config: &[u8]) -> Vec<u8> {
             let name = line
                 .split_once('=')
                 .map_or_else(|| return line.trim(), |(name, _)| return name.trim());
+
             return name != "config-file" && name != "config-default-files";
         })
         .collect::<Vec<_>>()
@@ -151,6 +163,7 @@ fn flatten_config(config: &[u8]) -> Vec<u8> {
     if !flattened.is_empty() {
         flattened.push(b'\n');
     }
+
     return flattened;
 }
 
@@ -160,24 +173,31 @@ fn append_overrides(config: &mut Vec<u8>, overrides: &GhosttyVisualOverrides) {
         lines.push("font-family = \"\"".to_owned());
         lines.push(format!("font-family = \"{}\"", escape_config_string(value)));
     }
+
     if let Some(value) = &overrides.font_size {
         lines.push(format!("font-size = {value}"));
     }
+
     if let Some(value) = overrides.padding_x {
         lines.push(format!("window-padding-x = {value}"));
     }
+
     if let Some(value) = overrides.padding_y {
         lines.push(format!("window-padding-y = {value}"));
     }
+
     if let Some(value) = &overrides.foreground {
         lines.push(format!("foreground = {value}"));
     }
+
     if let Some(value) = &overrides.background {
         lines.push(format!("background = {value}"));
     }
+
     if lines.is_empty() {
         return;
     }
+
     config.extend_from_slice(lines.join("\n").as_bytes());
     config.push(b'\n');
 }
@@ -192,6 +212,7 @@ fn apply_config(colors: &mut TerminalColors, config: &[u8]) -> Result<()> {
         let Some((name, value)) = line.split_once(" = ") else {
             continue;
         };
+
         match name {
             "foreground" => colors.foreground = parse_rgb(value, "foreground")?,
             "background" => colors.background = parse_rgb(value, "background")?,
@@ -205,6 +226,7 @@ fn apply_config(colors: &mut TerminalColors, config: &[u8]) -> Result<()> {
                 let index = index.parse::<u8>().map_err(|error| {
                     return profile_error(format!("invalid palette index: {error}"));
                 })?;
+
                 let parsed = parse_rgb(color, "palette")?;
                 let slot = colors.palette.get_mut(usize::from(index)).ok_or_else(|| {
                     return profile_error("terminal profile has an incomplete palette");
@@ -214,6 +236,7 @@ fn apply_config(colors: &mut TerminalColors, config: &[u8]) -> Result<()> {
             _ => {}
         }
     }
+
     return Ok(());
 }
 
@@ -227,9 +250,11 @@ fn parse_rgb(value: &str, field: &str) -> Result<[u8; 3]> {
         let digits = hex
             .get(range)
             .ok_or_else(|| return profile_error(format!("invalid {field} color width")))?;
+
         return u8::from_str_radix(digits, 16)
             .map_err(|error| return profile_error(format!("invalid {field} color: {error}")));
     };
+
     return Ok([component(0..2)?, component(2..4)?, component(4..6)?]);
 }
 
@@ -303,10 +328,12 @@ mod tests {
             let mut output = Vec::with_capacity(config.len().saturating_mul(2));
             for byte in config {
                 output.push(*byte);
+
                 if *byte == b'\\' {
                     output.push(*byte);
                 }
             }
+
             return output;
         }
 
@@ -318,6 +345,7 @@ mod tests {
             |config| return Ok(escape_backslashes(config)),
         )
         .expect("valid replay profile");
+
         let second_generation = escape_backslashes(&profile.effective_config);
 
         assert_eq!(profile.replay_config, replay_config);
@@ -351,6 +379,7 @@ mod tests {
         let effective_config =
             b"config-file = /isolated/config\nconfig-default-files = false\nbackground = #000000"
                 .to_vec();
+
         let profile = resolve_profile(
             &replay_config,
             None,
@@ -375,10 +404,12 @@ mod tests {
             |config| {
                 let mut effective = config.to_vec();
                 effective.extend_from_slice(b"foreground = #ffffff\n");
+
                 return Ok(effective);
             },
         )
         .expect("valid replay profile");
+
         profile.validate().expect("valid byte commitments");
 
         let mut tampered_replay = profile.clone();
@@ -391,6 +422,7 @@ mod tests {
 
         let mut relocated = profile;
         relocated.provenance.replay_profile = "nested/profile.ghostty".to_owned();
+
         assert!(relocated.validate().is_err());
     }
 
@@ -403,6 +435,7 @@ mod tests {
             |config| return Ok(config.to_vec()),
         )
         .expect("valid replay profile");
+
         let mut tampered = profile.replay_config;
         tampered.extend_from_slice(b"foreground = #ffffff\n");
 

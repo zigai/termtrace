@@ -37,26 +37,31 @@ pub fn read_environment_spec(path: &Path) -> Result<EnvironmentSpec> {
             source,
         };
     })?;
+
     if !metadata.is_file() {
         return Err(environment_error(
             "specification must be a regular non-symlink file",
         ));
     }
+
     if metadata.uid() != geteuid().as_raw() {
         return Err(environment_error(
             "specification must be owned by the current user",
         ));
     }
+
     if metadata.permissions().mode() & 0o077 != 0 {
         return Err(environment_error(
             "specification must be owner-only (mode 0600 or stricter)",
         ));
     }
+
     if metadata.len() > MAX_SPEC_BYTES {
         return Err(environment_error(
             "specification exceeds the 4 MiB safety limit",
         ));
     }
+
     let mut bytes: Vec<u8> = Vec::new();
     file.take(MAX_SPEC_BYTES + 1)
         .read_to_end(&mut bytes)
@@ -66,6 +71,7 @@ pub fn read_environment_spec(path: &Path) -> Result<EnvironmentSpec> {
                 source,
             };
         })?;
+
     return parse_environment_spec(&bytes, path);
 }
 
@@ -80,6 +86,7 @@ pub fn parse_environment_spec(bytes: &[u8], source_path: &Path) -> Result<Enviro
             "specification exceeds the 4 MiB safety limit",
         ));
     }
+
     let spec: EnvironmentSpec = serde_json::from_slice(bytes).map_err(|source| {
         return Error::InvalidJson {
             path: source_path.to_path_buf(),
@@ -87,8 +94,10 @@ pub fn parse_environment_spec(bytes: &[u8], source_path: &Path) -> Result<Enviro
             source,
         };
     })?;
+
     spec.validate()
         .map_err(|error| return terminal_error("validate environment", error.to_string()))?;
+
     return Ok(spec);
 }
 
@@ -103,7 +112,7 @@ fn environment_error(reason: impl Into<String>) -> Error {
 mod tests {
     use std::{
         fs::Permissions,
-        os::unix::fs::{PermissionsExt as _, symlink},
+        os::unix::fs::{symlink, PermissionsExt as _},
     };
 
     use super::*;
@@ -117,6 +126,7 @@ mod tests {
             serde_json::to_vec(&EnvironmentSpec::default()).expect("spec JSON"),
         )
         .expect("write spec");
+
         fs_err::set_permissions(&path, Permissions::from_mode(0o644)).expect("public mode");
         assert!(read_environment_spec(&path).is_err());
         fs_err::set_permissions(&path, Permissions::from_mode(0o600)).expect("private mode");

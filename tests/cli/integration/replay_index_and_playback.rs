@@ -41,6 +41,7 @@ fn index_replays_every_distinct_state_deterministically() {
         .arg(&cast)
         .assert()
         .success();
+
     let cast_text = fs_err::read_to_string(&cast).expect("asciicast");
     let mut cast_lines = cast_text.lines();
     let cast_header: serde_json::Value =
@@ -68,6 +69,7 @@ fn index_replays_every_distinct_state_deterministically() {
         .arg(&session)
         .assert()
         .success();
+
     assert_replay_artifacts(&session, first.artifacts.state_count);
 
     let mut presented = Command::cargo_bin("termtrace").expect("binary should build");
@@ -76,6 +78,7 @@ fn index_replays_every_distinct_state_deterministically() {
         .arg(&session)
         .assert()
         .success();
+
     let presented_directory = session.join("derived-presented");
     let presented_manifest: ReplayManifest = serde_json::from_slice(
         &fs_err::read(presented_directory.join("manifest.json")).expect("presented manifest"),
@@ -113,6 +116,7 @@ fn index_replays_every_distinct_state_deterministically() {
         .assert()
         .success()
         .stdout(predicate::str::contains("AB界"));
+
     let mut inspect_initial = Command::cargo_bin("termtrace").expect("binary should build");
     inspect_initial
         .args(["analyze", "inspect", "--session"])
@@ -135,6 +139,7 @@ fn index_replays_every_distinct_state_deterministically() {
         "artifact-root-record.schema.json",
         &session.join("artifact-roots.jsonl"),
     );
+
     let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
     verify
         .args(["integrity", "verify"])
@@ -151,6 +156,7 @@ fn index_replays_every_distinct_state_deterministically() {
     let mut contents = fs_err::read(&tampered_member).expect("derived member");
     contents.extend_from_slice(b"tampered");
     fs_err::write(&tampered_member, contents).expect("tamper derived member");
+
     let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
     verify
         .args(["integrity", "verify"])
@@ -234,14 +240,17 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
         "replay-manifest.schema.json",
         &derived.join("manifest.json"),
     );
+
     validate_json_lines_text(
         "state-record.schema.json",
         &read_zstd_text(&derived.join("states.jsonl.zst")),
     );
+
     validate_json_lines(
         "state-index-entry.schema.json",
         &derived.join("state-index.jsonl"),
     );
+
     let states = read_zstd_text(&derived.join("states.jsonl.zst"))
         .lines()
         .map(|line| return serde_json::from_str::<StateRecord>(line).expect("state JSON"))
@@ -328,6 +337,7 @@ fn inspect_exits_cleanly_when_downstream_closes_the_pipe() {
     reader.read_line(&mut first_line).expect("first JSON line");
     assert_eq!(first_line, "{\n");
     drop(reader);
+
     let output = inspect.wait_with_output().expect("wait for inspection");
     assert!(
         output.status.success(),
@@ -395,16 +405,15 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
             0o600
         );
     }
+
     let states = read_zstd_text(&derived.join("states.jsonl.zst"));
     let lines = states.lines().count();
     assert_eq!(u64::try_from(lines).unwrap(), expected_states);
     let text = fs_err::read_to_string(derived.join("final.txt")).expect("final text");
     assert!(text.contains("AB界"));
-    assert!(
-        !fs_err::read(derived.join("final.vt"))
-            .expect("final VT")
-            .is_empty()
-    );
+    assert!(!fs_err::read(derived.join("final.vt"))
+        .expect("final VT")
+        .is_empty());
     let html = fs_err::read_to_string(derived.join("final.html")).expect("final HTML");
     assert!(html.contains('A') && html.contains('B'));
 
@@ -414,22 +423,28 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
         "replay-manifest.schema.json",
         &derived.join("manifest.json"),
     );
+
     validate_json_lines_text("state-record.schema.json", &states);
+
     validate_json_lines(
         "state-index-entry.schema.json",
         &derived.join("state-index.jsonl"),
     );
+
     validate_json_lines_text(
         "semantic-replay-checkpoint.schema.json",
         &read_zstd_text(&derived.join("checkpoints.jsonl.zst")),
     );
+
     let event_log = fs_err::read_to_string(session.join("events.jsonl")).expect("event log");
     let mut event_lines = event_log.lines();
     validate_json_value(
         "event-log-header.schema.json",
         &serde_json::from_str(event_lines.next().expect("event header")).expect("header JSON"),
     );
+
     let event_schema = compile_schema("event-record.schema.json");
+
     for line in event_lines {
         validate_compiled_json_value(
             &event_schema,
@@ -441,7 +456,7 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
 
 #[test]
 fn playback_does_not_echo_terminal_query_responses() {
-    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
     use termtrace_engine::recording::EffectiveEnvironment;
     use termtrace_evidence::event_log::{DurabilityPolicy, EventLogWriter, SessionClock};
     use termtrace_evidence::provenance::RecorderBuildIdentity;
@@ -449,8 +464,8 @@ fn playback_does_not_echo_terminal_query_responses() {
         execution::environment::EnvironmentSpec,
         execution::event::{Event, EventLogHeader},
         execution::session::{
-            GeometryProvenance, ResourceLimits, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
-            SessionGeometry, SessionManifest,
+            GeometryProvenance, ResourceLimits, SessionGeometry, SessionManifest,
+            SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
         },
         value::ByteString,
     };
@@ -460,9 +475,11 @@ fn playback_does_not_echo_terminal_query_responses() {
     let session = temporary.path().join("playback");
     fs_err::create_dir(&session).expect("session directory");
     fs_err::set_permissions(&session, Permissions::from_mode(0o700)).expect("private session");
+
     let clock = SessionClock::now().expect("session clock");
     let environment = EffectiveEnvironment::resolve(&EnvironmentSpec::default(), "xterm-ghostty")
         .expect("environment");
+
     let header = EventLogHeader::new(
         Uuid::now_v7(),
         "0000000000000000000000000000000000000000000000000000000000000000",
@@ -473,8 +490,10 @@ fn playback_does_not_echo_terminal_query_responses() {
         432,
         "xterm-ghostty",
     );
+
     let mut event_log =
         EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
+
     let query = b"\x1b]11;?\x1b\\";
     event_log
         .append(Event::Output {
@@ -489,6 +508,7 @@ fn playback_does_not_echo_terminal_query_responses() {
         })
         .expect("exit event");
     drop(event_log);
+
     let manifest = SessionManifest {
         failure_policy: Default::default(),
         format: SESSION_MANIFEST_FORMAT.to_owned(),
@@ -531,6 +551,7 @@ fn playback_does_not_echo_terminal_query_responses() {
         durability_policy: DurabilityPolicy::default(),
         resource_limits: ResourceLimits::default(),
     };
+
     fs_err::write(
         session.join("session.json"),
         serde_json::to_vec(&manifest).expect("session manifest JSON"),
@@ -545,6 +566,7 @@ fn playback_does_not_echo_terminal_query_responses() {
             pixel_height: 432,
         })
         .expect("playback PTY");
+
     let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_termtrace"));
     let timing_file = temporary.path().join("timing.json");
     let error_file = temporary.path().join("playback-error.json");
@@ -574,12 +596,14 @@ fn playback_does_not_echo_terminal_query_responses() {
     let reader_thread = thread::spawn(move || {
         let mut output = Vec::new();
         let mut buffer = [0_u8; 128];
+
         let mut observed_query = false;
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(n) => {
                     output.extend_from_slice(&buffer[..n]);
+
                     if !observed_query && output.windows(query.len()).any(|w| return w == query) {
                         let _ = query_tx.send(());
                         observed_query = true;
@@ -588,29 +612,34 @@ fn playback_does_not_echo_terminal_query_responses() {
                 Err(_) => break,
             }
         }
+
         return output;
     });
+
     let mut writer = pty.master.take_writer().expect("take PTY writer");
     writer
         .write_all(b"\x1b[4;432;720t\x1b[6;18;9t\x1b[8;24;80t")
         .expect("write geometry responses");
+
     query_rx
         .recv_timeout(Duration::from_secs(5))
         .expect("wait for query to be emitted on PTY");
+
     writer
         .write_all(b"HOST-RESPONSE\n")
         .expect("write simulated host response");
+
     child.wait().expect("wait for playback");
+
     drop(writer);
     drop(pty.master);
+
     let output = reader_thread.join().expect("join PTY reader");
 
     assert!(geometry_file.is_file());
-    assert!(
-        output
-            .windows(query.len())
-            .any(|window| return window == query)
-    );
+    assert!(output
+        .windows(query.len())
+        .any(|window| return window == query));
     assert!(
         !output
             .windows(b"HOST-RESPONSE".len())

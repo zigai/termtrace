@@ -52,7 +52,7 @@ pub mod input {
 #[cfg(feature = "in-process")]
 pub mod evidence {
     pub use crate::client::{Evidence, Native, Output};
-    pub use termtrace_media::native_capture::{NativeReplayWorker, validate_replay_screenshot};
+    pub use termtrace_media::native_capture::{validate_replay_screenshot, NativeReplayWorker};
 }
 
 /// Completed semantic analysis and bounded canonical event reads.
@@ -69,9 +69,9 @@ pub mod inspection {
 pub use actions::{ActionCompletion, ActionCondition, ActionOptions, ActionResult, InputAtom};
 #[cfg(feature = "in-process")]
 pub use client::{
-    Events, Evidence, Keyboard, Native, Output, Pointer, Semantic, Session, SessionBuilder,
-    Terminal, observe_session, observe_session_with_options, semantic_state_for_session,
-    semantic_state_with_hash_for_session,
+    observe_session, observe_session_with_options, semantic_state_for_session,
+    semantic_state_with_hash_for_session, Events, Evidence, Keyboard, Native, Output, Pointer,
+    Semantic, Session, SessionBuilder, Terminal,
 };
 pub use error::{Error, Result, RetrySafety};
 #[cfg(feature = "in-process")]

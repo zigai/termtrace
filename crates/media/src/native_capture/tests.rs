@@ -2,7 +2,7 @@ use std::{process::Command, time::Duration};
 
 use super::{
     geometry::{solve_geometry_with, validate_capture_geometry},
-    process::{ManagedChild, wait_for_playback_handshake},
+    process::{wait_for_playback_handshake, ManagedChild},
 };
 use termtrace_evidence::artifact::write_secure;
 use termtrace_model::{
@@ -33,6 +33,7 @@ fn capture_geometry_error_reports_actual_and_recorded_grids() {
         900,
     )
     .expect_err("mismatched grid must fail");
+
     let message = error.to_string();
     assert!(message.contains("renders 230x56 cells"));
     assert!(message.contains("requires 180x50 cells"));
@@ -51,6 +52,7 @@ fn geometry_solver_converges_and_independently_verifies_exact_grid() {
         |target| {
             let text_width = target.width.saturating_sub(20);
             let text_height = target.height.saturating_sub(40);
+
             return Ok(TerminalGeometryReport {
                 cols: text_width / 8,
                 rows: text_height / 16,
@@ -85,6 +87,7 @@ fn geometry_solver_reports_cycles_with_measured_candidates() {
         |target| {
             let text_width = target.width.saturating_sub(20);
             let text_height = target.height.saturating_sub(20);
+
             return Ok(TerminalGeometryReport {
                 cols: 99,
                 rows: 24,
@@ -113,10 +116,12 @@ fn playback_failure_handshake_preempts_timeout() {
         .expect("failure JSON"),
     )
     .expect("failure handshake");
+
     let child = Command::new("/bin/sleep")
         .arg("5")
         .spawn()
         .expect("sleep process");
+
     let mut child = ManagedChild::new("playback-test", child);
     let error = wait_for_playback_handshake(
         &timing_path,

@@ -15,8 +15,8 @@ use termtrace_engine::{
 };
 use termtrace_evidence::{
     artifact::{
-        BudgetWriter, commit_directory, create_private_directory, hash_regular_file, secure_file,
-        sync_directory, write_secure,
+        commit_directory, create_private_directory, hash_regular_file, secure_file, sync_directory,
+        write_secure, BudgetWriter,
     },
     event_log::CanonicalBoundary,
     session::{read_manifest, validate_completed_session},
@@ -35,10 +35,10 @@ use termtrace_model::{
     value::ByteString,
 };
 use termtrace_render::{
-    Error as RenderError, SEMANTIC_CELL_HEIGHT, SEMANTIC_CELL_WIDTH, SEMANTIC_FONT_SIZE,
-    SEMANTIC_PNG_RENDERER, SEMANTIC_SVG_RENDERER, SEMANTIC_SYMBOLS_BASELINE,
-    SEMANTIC_SYMBOLS_FONT_SIZE, SEMANTIC_TEXT_BASELINE, raster::write_png, render_png, render_svg,
-    semantic_font_set,
+    raster::write_png, render_png, render_svg, semantic_font_set, Error as RenderError,
+    SEMANTIC_CELL_HEIGHT, SEMANTIC_CELL_WIDTH, SEMANTIC_FONT_SIZE, SEMANTIC_PNG_RENDERER,
+    SEMANTIC_SVG_RENDERER, SEMANTIC_SYMBOLS_BASELINE, SEMANTIC_SYMBOLS_FONT_SIZE,
+    SEMANTIC_TEXT_BASELINE,
 };
 use termtrace_terminal::Format;
 
@@ -54,22 +54,28 @@ pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Resul
     let manifest_path = directory.join("save-manifest.json");
     let metadata = fs::symlink_metadata(&manifest_path)
         .map_err(|source| return filesystem_error(&manifest_path, source))?;
+
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return Err(save_error("saved artifact manifest is not a regular file"));
     }
+
     if metadata.len() > MAX_MANIFEST_BYTES {
         return Err(save_error("saved artifact manifest exceeds 1 MiB"));
     }
+
     let manifest_file = fs::File::open(&manifest_path)
         .map_err(|source| return filesystem_error(&manifest_path, source))?;
+
     let mut manifest_bytes: Vec<u8> = Vec::new();
     manifest_file
         .take(MAX_MANIFEST_BYTES.saturating_add(1))
         .read_to_end(&mut manifest_bytes)
         .map_err(|source| return filesystem_error(&manifest_path, source))?;
+
     if u64::try_from(manifest_bytes.len()).unwrap_or(u64::MAX) > MAX_MANIFEST_BYTES {
         return Err(save_error("saved artifact manifest exceeds 1 MiB"));
     }
+
     let manifest: SaveManifest = serde_json::from_slice(&manifest_bytes).map_err(|source| {
         return Error::InvalidJson {
             path: manifest_path.clone(),
@@ -77,6 +83,7 @@ pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Resul
             source,
         };
     })?;
+
     if &manifest != expected {
         return Err(save_error(
             "saved artifact manifest does not match its trusted creation result",
@@ -92,7 +99,9 @@ pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Resul
         {
             return Err(save_error("saved artifact contains an unsafe member path"));
         }
+
         let (byte_count, digest) = hash_regular_file(&directory.join(path))?;
+
         if byte_count != member.byte_count || digest != member.blake3 {
             return Err(save_error(format!(
                 "saved artifact member {} failed integrity verification",
@@ -118,19 +127,23 @@ pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Resul
         {
             return Err(save_error("saved artifact contains a non-regular member"));
         }
+
         let name = entry
             .file_name()
             .into_string()
             .map_err(|_| return save_error("saved artifact contains a non-UTF-8 member name"))?;
+
         if name != "save-manifest.json" {
             observed_members.insert(name);
         }
     }
+
     if observed_members != expected_members {
         return Err(save_error(
             "saved artifact member inventory does not match its manifest",
         ));
     }
+
     return Ok(manifest);
 }
 
@@ -149,9 +162,11 @@ pub fn save(
     max_bytes: Option<u64>,
 ) -> Result<SaveOutcome> {
     validate_formats(formats)?;
+
     let canonical = session
         .canonicalize()
         .map_err(|source| return filesystem_error(session, source))?;
+
     let completion = validate_completed_session(&canonical)?;
     let source_manifest = read_manifest(&canonical)?;
     let selector = state_selector_for_session(&canonical, &point, None)?;
@@ -163,13 +178,16 @@ pub fn save(
             _ => return None,
         })
         .collect();
+
     let (inspection, rendered) =
         inspect_completed_session_with_formats(&canonical, selector, &engine_formats)?;
+
     if !inspection.record.presented && !include_hidden {
         return Err(save_error(
             "selected semantic state is hidden; pass explicit hidden-state permission",
         ));
     }
+
     let observation = observation_from_inspection(
         &canonical,
         &source_manifest,
@@ -181,10 +199,13 @@ pub fn save(
     let parent = destination
         .parent()
         .ok_or_else(|| return save_error("save path has no parent"))?;
+
     let staging = staging_path(destination, "save")?;
     create_private_directory(&staging)?;
+
     let publish = (|| -> Result<SaveManifest> {
         let mut files: Vec<SavedFile> = Vec::with_capacity(formats.len());
+
         let mut remaining_bytes = max_bytes.unwrap_or(u64::MAX);
         for format in formats {
             files.push(save_rendered_file(
@@ -196,6 +217,7 @@ pub fn save(
                 &mut remaining_bytes,
             )?);
         }
+
         let save_manifest = SaveManifest {
             format: "termtrace-save".to_owned(),
             version: 4,
@@ -216,6 +238,7 @@ pub fn save(
                 Vec::new()
             },
         };
+
         let manifest_path = staging.join("save-manifest.json");
         let mut output = secure_file(&manifest_path)?;
         {
@@ -231,23 +254,31 @@ pub fn save(
                 .write_all(b"\n")
                 .map_err(|source| return filesystem_error(&manifest_path, source))?;
         }
+
         output
             .sync_all()
             .map_err(|source| return filesystem_error(&manifest_path, source))?;
+
         sync_directory(&staging)?;
+
         return Ok(save_manifest);
     })();
+
     let save_manifest = match publish {
         Ok(value) => value,
         Err(error) => {
             let _ = fs::remove_dir_all(&staging);
+
             return Err(error);
         }
     };
+
     if let Err(error) = commit_directory(parent, &staging, destination) {
         let _ = fs::remove_dir_all(&staging);
+
         return Err(error.into());
     }
+
     return Ok(SaveOutcome {
         directory: destination.to_path_buf(),
         manifest: save_manifest,
@@ -271,9 +302,11 @@ pub fn save_screenshot_batch(
             "screenshot batches require at least one point and an SVG or PNG format",
         ));
     }
+
     let canonical = session
         .canonicalize()
         .map_err(|source| return filesystem_error(session, source))?;
+
     let completion = validate_completed_session(&canonical)?;
     let source_manifest = read_manifest(&canonical)?;
     let selectors: Vec<StateSelector> = points
@@ -282,6 +315,7 @@ pub fn save_screenshot_batch(
             return state_selector_for_session(&canonical, point, None).map_err(Error::from);
         })
         .collect::<Result<Vec<_>>>()?;
+
     let inspections = inspect_completed_many(&canonical, &selectors)?;
     if !include_hidden
         && inspections
@@ -296,24 +330,29 @@ pub fn save_screenshot_batch(
     let parent = destination
         .parent()
         .ok_or_else(|| return save_error("batch path has no parent"))?;
+
     let staging = staging_path(destination, "batch")?;
     create_private_directory(&staging)?;
+
     let publish = (|| -> Result<ScreenshotBatchManifest> {
         let (filename, media_type, renderer) = match format {
             SaveFormat::Svg => ("screen.svg", "image/svg+xml", SEMANTIC_SVG_RENDERER),
             SaveFormat::Png => ("screen.png", "image/png", SEMANTIC_PNG_RENDERER),
             _ => return Err(save_error("batch format must be SVG or PNG")),
         };
+
         let mut entries: Vec<ScreenshotBatchEntry> = Vec::with_capacity(points.len());
         for (index, (point, inspection)) in points.iter().zip(inspections).enumerate() {
             let directory = format!("state-{index:04}");
             let entry_directory = staging.join(&directory);
             create_private_directory(&entry_directory)?;
+
             let bytes = match format {
                 SaveFormat::Svg => render_svg(&inspection.state).map_err(render_error)?,
                 SaveFormat::Png => render_png(&inspection.state).map_err(render_error)?,
                 _ => return Err(save_error("batch format must be SVG or PNG")),
             };
+
             write_secure(&entry_directory.join(filename), &bytes)?;
             let save_manifest = SaveManifest {
                 format: "termtrace-save".to_owned(),
@@ -335,11 +374,13 @@ pub fn save_screenshot_batch(
                 }],
                 semantic_image_resources: semantic_image_resources()?,
             };
+
             let manifest_path = entry_directory.join("save-manifest.json");
             write_secure(
                 &manifest_path,
                 &pretty_json(&save_manifest, &manifest_path)?,
             )?;
+
             sync_directory(&entry_directory)?;
             entries.push(ScreenshotBatchEntry {
                 image: format!("{directory}/{filename}"),
@@ -347,30 +388,40 @@ pub fn save_screenshot_batch(
                 manifest: save_manifest,
             });
         }
+
         let manifest = ScreenshotBatchManifest {
             format: "termtrace-screenshot-batch".to_owned(),
             version: 3,
             image_format: format,
             entries,
         };
+
         let manifest_path = staging.join("batch-manifest.json");
         write_secure(&manifest_path, &pretty_json(&manifest, &manifest_path)?)?;
+
         sync_directory(&staging)?;
+
         return Ok(manifest);
     })();
+
     let manifest = match publish {
         Ok(value) => value,
         Err(error) => {
             let _ = fs::remove_dir_all(&staging);
+
             return Err(error);
         }
     };
+
     if let Err(error) = commit_directory(parent, &staging, destination) {
         let _ = fs::remove_dir_all(&staging);
+
         return Err(error.into());
     }
+
     return Ok(manifest);
 }
+
 fn observation_from_inspection(
     session: &Path,
     source_manifest: &SessionManifest,
@@ -394,6 +445,7 @@ fn observation_from_inspection(
             source,
         };
     })?;
+
     return Ok(Observation {
         source_kind: ObservationSourceKind::CompletedSession,
         session_id: Some(source_manifest.session_id),
@@ -504,12 +556,16 @@ fn save_rendered_file(
             )
             .map_err(render_error)?,
         }
+
         *remaining_bytes = writer.remaining();
     }
+
     output
         .sync_all()
         .map_err(|source| return filesystem_error(&target, source))?;
+
     let (byte_count, blake3) = hash_regular_file(&target)?;
+
     return Ok(SavedFile {
         path: path.to_owned(),
         media_type: media_type.to_owned(),
@@ -524,6 +580,7 @@ fn validate_formats(formats: &[SaveFormat]) -> Result<()> {
     if formats.is_empty() {
         return Err(save_error("at least one save format is required"));
     }
+
     if formats.iter().enumerate().any(|(index, format)| {
         return formats
             .iter()
@@ -532,11 +589,13 @@ fn validate_formats(formats: &[SaveFormat]) -> Result<()> {
     }) {
         return Err(save_error("save formats must not be repeated"));
     }
+
     return Ok(());
 }
 
 fn semantic_image_resources() -> Result<Vec<SemanticImageResource>> {
     let font_set = semantic_font_set().map_err(render_error)?;
+
     return Ok(vec![SemanticImageResource {
         fonts: font_set.resources().cloned().collect(),
         font_set_blake3: font_set.font_set_blake3().to_owned(),
@@ -562,6 +621,7 @@ fn pretty_json(value: &impl serde::Serialize, path: &Path) -> Result<Vec<u8>> {
         };
     })?;
     bytes.push(b'\n');
+
     return Ok(bytes);
 }
 
@@ -580,6 +640,7 @@ fn staging_path(destination: &Path, kind: &str) -> Result<PathBuf> {
     let name = destination
         .file_name()
         .ok_or_else(|| return save_error(format!("{kind} path has no basename")))?;
+
     return Ok(parent.join(format!(
         ".{}.{}.tmp",
         name.to_string_lossy(),

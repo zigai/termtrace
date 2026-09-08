@@ -7,7 +7,7 @@ use termtrace_model::{
     artifact::bundle::BundleManifest, artifact::bundle::BundleVerificationPolicy,
 };
 
-use crate::{Result, bundle};
+use crate::{bundle, Result};
 
 /// Create a deterministic Zstandard-compressed USTAR evidence archive.
 ///
@@ -27,6 +27,7 @@ pub fn create(
     bundle::verify_profile(directory, policy)?;
     let identity = bundle::identity_for_policy(policy)?;
     create_archive(directory, destination.as_ref(), Some(&identity))?;
+
     return Ok(());
 }
 
@@ -47,5 +48,6 @@ pub fn verify(
     let identity = bundle::identity_for_policy(policy)?;
     let manifest = verify_archive(archive.as_ref(), Some(&identity))?;
     bundle::verify_archived_manifest(&manifest, policy)?;
+
     return Ok(manifest);
 }

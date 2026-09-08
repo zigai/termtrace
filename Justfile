@@ -1,3 +1,5 @@
+export TERMTRACE_GHOSTTY_PREFIX := justfile_directory() + "/vendor/ghostty/zig-out"
+
 _:
   @just help
 
@@ -59,6 +61,7 @@ bench:
 
 # Auto-fix linting and formatting issues
 fix: format
+  cargo statement-spacing fix --format-first
   cargo clippy --locked --workspace --all-targets --all-features --fix --allow-dirty --allow-staged
   bun run --cwd packages/typescript lint:fix
   uv run --project packages/python --locked --group dev ruff check --fix packages/python/termtrace packages/python/scripts packages/python/tests
@@ -70,6 +73,7 @@ coverage:
 # Run required local checks for each change (requires bootstrap, Bun, uv, and shfmt)
 check: architecture lint validate test
   cargo fmt --all -- --check
+  cargo statement-spacing check
   bun run --cwd packages/typescript format:check
   uv run --project packages/python --locked --group dev ruff format --check packages/python/termtrace packages/python/scripts packages/python/tests
   shfmt -i 4 -ci -d benchmarks examples fixtures scripts tests install.sh

@@ -39,6 +39,7 @@ pub(super) struct PreparedInput<'data> {
     pub(super) terminal_modes_hash: String,
     pub(super) data: Cow<'data, [u8]>,
 }
+
 pub(super) fn semantic_key_name(key: NamedKey) -> String {
     return match key {
         NamedKey::Enter => "enter".to_owned(),
@@ -65,17 +66,22 @@ pub(super) fn semantic_key_input(key: NamedKey, modifiers: KeyModifiers) -> Stri
     if modifiers.control {
         parts.push("ctrl");
     }
+
     if modifiers.shift {
         parts.push("shift");
     }
+
     if modifiers.alt {
         parts.push("alt");
     }
+
     if modifiers.super_key {
         parts.push("super");
     }
+
     let key = semantic_key_name(key);
     parts.push(&key);
+
     return parts.join("+");
 }
 
@@ -93,6 +99,7 @@ pub(super) fn interpolate_cell(start: u16, end: u16, step: u32, steps: u32) -> u
     let start = i64::from(start);
     let delta = i64::from(end) - start;
     let rounded = start + (delta * i64::from(step) + i64::from(steps) / 2) / i64::from(steps);
+
     return u16::try_from(rounded).unwrap_or(end);
 }
 
@@ -109,13 +116,16 @@ pub(super) fn encode_paste(data: &[u8], bracketed: bool) -> Result<Vec<u8>> {
             "paste contains an escape, delimiter, or unsupported control byte",
         ));
     }
+
     if bracketed {
         let mut encoded = Vec::with_capacity(data.len().saturating_add(12));
         encoded.extend_from_slice(b"\x1b[200~");
         encoded.extend_from_slice(data);
         encoded.extend_from_slice(b"\x1b[201~");
+
         return Ok(encoded);
     }
+
     return Ok(data
         .iter()
         .map(|byte| return if *byte == b'\n' { b'\r' } else { *byte })
@@ -144,12 +154,14 @@ pub(super) fn apply_input(
         semantic_input,
         caller_intent,
     })?;
+
     let (bytes_written, write_error) = write_input(writer, data);
     let status = if write_error.is_some() {
         OperationStatus::Failed
     } else {
         OperationStatus::Applied
     };
+
     let error_code = write_error.as_ref().map(io_error_code);
     let result_write = event_log.append(Event::InputResult {
         operation_id,
@@ -157,8 +169,10 @@ pub(super) fn apply_input(
         bytes_written,
         error_code,
     });
+
     let Some(error) = write_error else {
         let result_event_seq = result_write?;
+
         return Ok(InputApplication {
             bytes_written,
             intent_event_seq,
@@ -174,6 +188,7 @@ pub(super) fn apply_input(
             );
         }
     };
+
     return Err(Error::InputWriteFailed {
         operation_id,
         bytes_written,
@@ -204,6 +219,7 @@ impl InputSequenceExecution {
         include_atom_outcomes: bool,
     ) -> Result<Self> {
         validate_input_sequence(atoms, pace_ns)?;
+
         return Ok(Self {
             sequence_id,
             atoms: atoms.to_vec(),
@@ -211,11 +227,7 @@ impl InputSequenceExecution {
             include_atom_outcomes,
             next_atom_index: 0,
             next_deadline: Instant::now(),
-            outcomes: Vec::with_capacity(if include_atom_outcomes {
-                atoms.len()
-            } else {
-                0
-            }),
+            outcomes: Vec::with_capacity(if include_atom_outcomes { atoms.len() } else { 0 }),
             total_bytes_written: 0,
             first_intent_event_seq: None,
             last_result_event_seq: None,
@@ -238,6 +250,7 @@ impl InputSequenceExecution {
                 "next atom index is outside the validated sequence",
             );
         })?;
+
         let atom = match prepare_input_sequence_atom(source_atom, semantic) {
             Ok(atom) => atom,
             Err(error) if self.next_atom_index > 0 => {
@@ -259,6 +272,7 @@ impl InputSequenceExecution {
             }
             Err(error) => return Err(error),
         };
+
         let applied = match apply_input(
             writer,
             event_log,
@@ -299,10 +313,12 @@ impl InputSequenceExecution {
         };
         self.first_intent_event_seq
             .get_or_insert(applied.intent_event_seq);
+
         self.last_result_event_seq = Some(applied.result_event_seq);
         self.total_bytes_written = self
             .total_bytes_written
             .saturating_add(applied.bytes_written);
+
         if self.include_atom_outcomes {
             self.outcomes.push(InputSequenceAtomOutcome {
                 operation_id: input_sequence_operation_id(source_atom),
@@ -312,11 +328,14 @@ impl InputSequenceExecution {
                 result_event_seq: applied.result_event_seq,
             });
         }
+
         self.next_atom_index = self.next_atom_index.saturating_add(1);
         if self.next_atom_index < self.atoms.len() {
             self.next_deadline = Instant::now() + Duration::from_nanos(self.pace_ns);
+
             return Ok(None);
         }
+
         return Ok(Some(ActionInputResult {
             sequence_id: self.sequence_id,
             atom_count: u32::try_from(self.atoms.len()).unwrap_or(u32::MAX),
@@ -340,6 +359,7 @@ fn validate_input_sequence(atoms: &[InputSequenceAtom], pace_ns: u64) -> Result<
             "input sequence must contain 1 through 4096 atoms",
         ));
     }
+
     let atom_count = u64::try_from(atoms.len()).unwrap_or(u64::MAX);
     let total_pace_ns = pace_ns.checked_mul(atom_count).ok_or_else(|| {
         return control_rejected(
@@ -347,12 +367,14 @@ fn validate_input_sequence(atoms: &[InputSequenceAtom], pace_ns: u64) -> Result<
             "input sequence pacing duration overflowed",
         );
     })?;
+
     if total_pace_ns > 60_000_000_000 {
         return Err(control_rejected(
             "invalid_input_sequence",
             "input sequence pacing may not exceed 60 seconds in total",
         ));
     }
+
     let mut operation_ids = HashSet::with_capacity(atoms.len());
     for atom in atoms {
         if !operation_ids.insert(input_sequence_operation_id(atom)) {
@@ -361,6 +383,7 @@ fn validate_input_sequence(atoms: &[InputSequenceAtom], pace_ns: u64) -> Result<
                 "input sequence operation identifiers must be unique",
             ));
         }
+
         match atom {
             InputSequenceAtom::Bytes {
                 data,
@@ -378,6 +401,7 @@ fn validate_input_sequence(atoms: &[InputSequenceAtom], pace_ns: u64) -> Result<
             InputSequenceAtom::Key { .. } => {}
         }
     }
+
     return Ok(());
 }
 
@@ -404,6 +428,7 @@ pub(super) fn prepare_bytes<'data>(
     semantic: &mut GhosttyVt,
 ) -> Result<PreparedInput<'data>> {
     let modes = semantic.snapshot()?.modes;
+
     return Ok(PreparedInput {
         input_kind,
         descriptor: match input_kind {
@@ -441,12 +466,14 @@ pub(super) fn prepare_key(
     let encoded = semantic
         .encode_key(key, modifiers)
         .map_err(encoding_error)?;
+
     if encoded.data.as_bytes().is_empty() {
         return Err(control_rejected(
             "key_has_no_output",
             "the requested key press produced no terminal bytes",
         ));
     }
+
     return Ok(PreparedInput {
         input_kind: InputKind::Keys,
         descriptor: InputDescriptor::Key {
@@ -470,6 +497,7 @@ pub(super) fn prepare_paste(
 ) -> Result<PreparedInput<'static>> {
     let modes = semantic.snapshot()?.modes;
     let terminal_modes_hash = mode_hash(&modes, "serialize paste modes")?;
+
     return Ok(PreparedInput {
         input_kind: InputKind::Paste,
         descriptor: InputDescriptor::Paste {
@@ -486,6 +514,7 @@ pub(super) fn mode_hash(modes: &ModeState, operation: &'static str) -> Result<St
     let mode_bytes = serde_json::to_vec(modes).map_err(|error| {
         return terminal_error(operation, error.to_string());
     })?;
+
     return Ok(blake3::hash(&mode_bytes).to_hex().to_string());
 }
 
@@ -510,6 +539,7 @@ pub(super) fn apply_resize(
         pixel_width: geometry.pixel_width,
         pixel_height: geometry.pixel_height,
     })?;
+
     let resize_result = master.resize(geometry.into());
     let status = if resize_result.is_ok() {
         OperationStatus::Applied
@@ -527,9 +557,11 @@ pub(super) fn apply_resize(
         })
         .map(|_| ())
         .map_err(Error::from);
+
     let Some(error) = resize_result.err() else {
         return result_write;
     };
+
     return finish_with_cleanup(
         Err(terminal_error("resize child PTY", error.to_string())),
         result_write,
@@ -545,6 +577,7 @@ fn write_input(writer: &mut dyn Write, data: &[u8]) -> (u64, Option<IoError>) {
                 Some(IoError::other("PTY writer reported an invalid byte count")),
             );
         };
+
         match writer.write(remaining) {
             Ok(0) => {
                 return (
@@ -560,6 +593,7 @@ fn write_input(writer: &mut dyn Write, data: &[u8]) -> (u64, Option<IoError>) {
             Err(error) => return (u64::try_from(offset).unwrap_or(u64::MAX), Some(error)),
         }
     }
+
     return (u64::try_from(offset).unwrap_or(u64::MAX), None);
 }
 

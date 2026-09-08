@@ -17,6 +17,7 @@ fn streamed_diagnostic_detectors_match_materialized_reports() {
     record.args(["record", "--no-input", "--out"]).arg(&session)
         .args(["--", "/bin/sh", "-c", "printf '\\033[?2026hhidden\\033[?2026l\\033[2J\\033[HAAA\\033[HBBB\\033[HAAA\\033[20;30Hjump\\033[3J\\033[?25l\\033[?25h\\033[?25l\\033[6n\\033[6n\\033[6n'"])
         .assert().success();
+
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
     let mut selections = vec![Vec::new()];
     selections.extend(DiagnosticCheck::all().into_iter().map(|check| vec![check]));
@@ -28,14 +29,17 @@ fn streamed_diagnostic_detectors_match_materialized_reports() {
             serde_json::to_value(expected).expect("materialized report")
         );
     }
+
     for count in [0, log.events.len() / 2, log.events.len()] {
         let count = u64::try_from(count).expect("fixture count");
         let snapshot = SessionSnapshot::capture(&session, Some(count)).expect("finite snapshot");
         assert!(!snapshot.path().join("completion.json").exists());
         let prefix =
             EventLog::read_prefix(session.join("events.jsonl"), count).expect("legacy prefix");
+
         let expected =
             diagnose(&prefix, DiagnosticCheck::all(), 1, &[]).expect("legacy prefix diagnosis");
+
         let actual =
             diagnose_snapshot(&snapshot, DiagnosticCheck::all(), 1).expect("snapshot diagnosis");
         assert_eq!(
@@ -46,6 +50,7 @@ fn streamed_diagnostic_detectors_match_materialized_reports() {
         let mut actual = Vec::new();
         visit_snapshot_timeline_while(&snapshot, true, true, None, |entry| {
             actual.push(entry);
+
             return Ok(true);
         })
         .expect("snapshot timeline");
@@ -80,6 +85,7 @@ fn timeline_streams_presented_states_and_canonical_operations() {
         .get_output()
         .stdout
         .clone();
+
     let concise_entries = concise_output
         .split(|byte| return *byte == b'\n')
         .filter(|line| return !line.is_empty())
@@ -90,14 +96,12 @@ fn timeline_streams_presented_states_and_canonical_operations() {
     assert!(concise_entries.iter().any(|entry| {
         return entry.pointer("/item/kind") == Some(&serde_json::json!("canonical_event"));
     }));
-    assert!(
-        concise_entries
-            .iter()
-            .filter(|entry| {
-                return entry.pointer("/item/kind") == Some(&serde_json::json!("semantic_state"));
-            })
-            .all(|entry| return entry.pointer("/item/presented") == Some(&serde_json::json!(true)))
-    );
+    assert!(concise_entries
+        .iter()
+        .filter(|entry| {
+            return entry.pointer("/item/kind") == Some(&serde_json::json!("semantic_state"));
+        })
+        .all(|entry| return entry.pointer("/item/presented") == Some(&serde_json::json!(true))));
 
     let mut complete = Command::cargo_bin("termtrace").expect("binary should build");
     complete
@@ -129,6 +133,7 @@ fn timeline_streams_presented_states_and_canonical_operations() {
         .get_output()
         .stdout
         .clone();
+
     let human = String::from_utf8(human).expect("timeline text");
     assert!(human.contains("lifecycle spawned pid="), "{human}");
     assert!(human.contains("exit code=0 signal=-"), "{human}");
@@ -136,20 +141,25 @@ fn timeline_streams_presented_states_and_canonical_operations() {
     for leaked in ["Some(", "None", " Csi ", "Spawned"] {
         assert!(!human.contains(leaked), "leaked `{leaked}` in:\n{human}");
     }
+
     let log = EventLog::read(session.join("events.jsonl")).expect("comparison source");
+
     for (hidden, controls) in [(false, false), (false, true), (true, true)] {
         let expected = build_timeline(&log, hidden, controls, None).expect("reference timeline");
         let mut entries = Vec::new();
+
         let mut offset = 0;
         loop {
             let page = build_session_timeline_page(&session, hidden, controls, None, offset, 3)
                 .expect("streamed page");
             entries.extend(page.entries);
+
             let Some(next) = page.next_offset else {
                 break;
             };
             offset = next;
         }
+
         assert_eq!(entries, expected, "hidden={hidden}, controls={controls}");
     }
 }
@@ -173,6 +183,7 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn recorder");
+
     wait_for_control(&session);
     for index in 0..205 {
         send_request(
@@ -183,7 +194,9 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
         )
         .expect("append page marker");
     }
+
     send_request(&session, &ControlRequest::new(ControlCommand::Stop)).expect("stop paged session");
+
     let recorded = recorder.wait_with_output().expect("wait for recorder");
     assert!(recorded.status.success(), "{recorded:?}");
 
@@ -194,6 +207,7 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
         .arg("--jsonl")
         .assert()
         .success();
+
     let timeline_lines = json_lines(&timeline.get_output().stdout);
     assert_eq!(timeline_lines.len(), 101);
     let timeline_page = timeline_lines.last().expect("timeline page marker");
@@ -208,6 +222,7 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
         .args(["--type", "marker", "--metadata-only"])
         .assert()
         .success();
+
     let event_lines = json_lines(&events.get_output().stdout);
     assert_eq!(event_lines.len(), 101);
     let event_page = event_lines.last().expect("event page marker");
@@ -231,6 +246,7 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
         ])
         .assert()
         .success();
+
     let resumed_lines = json_lines(&resume.get_output().stdout);
     assert_eq!(resumed_lines.len(), 6);
     assert_eq!(
@@ -254,6 +270,7 @@ fn diff_reports_complete_cell_changes_and_enforces_expectations() {
         .args(["--", "/bin/sh", "-c", "printf 'A界'"])
         .assert()
         .success();
+
     let final_state = inspect_session(&session, StateSelector::Final)
         .expect("final state")
         .record
@@ -359,10 +376,12 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         ])
         .assert()
         .success();
+
     let final_state = inspect_session(&session, StateSelector::Final)
         .expect("final state")
         .record
         .state_id;
+
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
     for target in [
         StatePoint::LatestPresented,
@@ -375,6 +394,7 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         for context in [0, 1, 8] {
             let expected =
                 explain(&log, target.clone(), context).expect("materialized explanation");
+
             let actual =
                 explain_session(&session, target.clone(), context).expect("streamed explanation");
             assert_eq!(
@@ -417,6 +437,7 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         .get_output()
         .stdout
         .clone();
+
     let human = String::from_utf8(human).expect("explain text");
     assert!(
         human.contains(&format!("state {final_state} event=")),
@@ -460,6 +481,7 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         ])
         .assert()
         .success();
+
     let diagnostic_log =
         EventLog::read(diagnostic_session.join("events.jsonl")).expect("diagnostic log");
     let expected = diagnose(&diagnostic_log, Vec::new(), 1, &[]).expect("materialized diagnostics");
@@ -504,6 +526,7 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         .get_output()
         .stdout
         .clone();
+
     let human = String::from_utf8(human).expect("diagnose text");
     assert!(human.contains("states="), "{human}");
     assert!(human.contains("tokens="), "{human}");

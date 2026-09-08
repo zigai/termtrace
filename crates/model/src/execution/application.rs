@@ -56,22 +56,27 @@ impl ApplicationEvent {
         if self.name.trim().is_empty() || self.name.len() > 256 {
             return Err("application event name must contain 1 to 256 UTF-8 bytes");
         }
+
         if self.process_id == 0 || self.process_instance_id.is_nil() {
             return Err("application event requires a process identity");
         }
+
         if !matches!(self.kind, ApplicationEventKind::Event) && self.span_id.is_none() {
             return Err("application span transition requires a span ID");
         }
+
         if self.span_id.is_some_and(|id| return id.is_nil())
             || self.parent_span_id.is_some_and(|id| return id.is_nil())
             || (self.span_id.is_some() && self.span_id == self.parent_span_id)
         {
             return Err("application span IDs must be non-nil and distinct");
         }
+
         let bytes = serde_json::to_vec(self).map_err(|_| return "invalid application JSON")?;
         if bytes.len() > MAX_APPLICATION_EVENT_BYTES {
             return Err("application event exceeds 64 KiB");
         }
+
         return Ok(());
     }
 }

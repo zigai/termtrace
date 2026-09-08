@@ -9,7 +9,9 @@ pub(in crate::cli) fn run_act(
     if resolved.lifecycle != RegistryLifecycle::Live {
         return write_session_lifecycle(response, &resolved, "act", ExitCode::FAILURE);
     }
+
     let request_id = arguments.request_id.unwrap_or_else(uuid::Uuid::now_v7);
+
     let mut atoms: Vec<InputSequenceAtom> = Vec::new();
     for atom in &arguments.atoms {
         if arguments.pace.is_zero() || !atom.starts_with("text:") {
@@ -21,7 +23,9 @@ pub(in crate::cli) fn run_act(
             )?);
             continue;
         }
+
         let text = atom.strip_prefix("text:").unwrap_or_default();
+
         for scalar in text.chars() {
             atoms.push(InputSequenceAtom::Bytes {
                 operation_id: derive_input_operation_id(request_id, atoms.len()),
@@ -31,11 +35,13 @@ pub(in crate::cli) fn run_act(
             });
         }
     }
+
     if atoms.is_empty() || atoms.len() > 4096 {
         return Err(miette::miette!(
             "input sequence must contain 1 to 4096 atoms"
         ));
     }
+
     let postcondition = action_postcondition(&arguments);
     let mut request = ControlRequest::new(ControlCommand::Act {
         atoms,
@@ -74,18 +80,17 @@ pub(in crate::cli) fn run_act(
                     "boundaries": serde_json::Value::Null,
                 }),
             )?;
+
             return Ok(ExitCode::FAILURE);
         }
     };
+
     match control_response.result {
         ControlResult::Ok { data } => {
             let (output, matched) = action_applied_response(control_response.request_id, &data)?;
             write_json_line(response, &output)?;
-            return Ok(if matched {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::FAILURE
-            });
+
+            return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
         }
         ControlResult::Error {
             code,
@@ -99,7 +104,9 @@ pub(in crate::cli) fn run_act(
                 details.as_ref(),
                 resolved.path.join("completion.json").is_file(),
             );
+
             write_json_line(response, &output)?;
+
             return Ok(ExitCode::FAILURE);
         }
     }
@@ -112,12 +119,14 @@ pub(super) fn action_postcondition(arguments: &ActArgs) -> ActionPostcondition {
             timeout_ns: u64::try_from(arguments.timeout.as_nanos()).unwrap_or(u64::MAX),
         };
     }
+
     if let Some(text) = &arguments.until_screen {
         return ActionPostcondition::Screen {
             predicate: ScreenPredicate::Contains { text: text.clone() },
             timeout_ns: u64::try_from(arguments.timeout.as_nanos()).unwrap_or(u64::MAX),
         };
     }
+
     if let Some(pattern) = &arguments.until_screen_regex {
         return ActionPostcondition::Screen {
             predicate: ScreenPredicate::MatchesRegex {
@@ -126,6 +135,7 @@ pub(super) fn action_postcondition(arguments: &ActArgs) -> ActionPostcondition {
             timeout_ns: u64::try_from(arguments.timeout.as_nanos()).unwrap_or(u64::MAX),
         };
     }
+
     return ActionPostcondition::None;
 }
 
@@ -207,17 +217,15 @@ pub(super) fn action_applied_response(
             "recording actor returned an action input identifier that does not match the request"
         ));
     }
+
     let input_summary = ActionInputSummary {
         applied: "all",
         atoms: input.atom_count,
         bytes: input.bytes_written,
         pace_ns: input.pace_ns,
-        outcomes: if !input.atoms.is_empty() {
-            Some(&input.atoms)
-        } else {
-            None
-        },
+        outcomes: (!input.atoms.is_empty()).then_some(&input.atoms),
     };
+
     let (postcondition_summary, ended, matched, frame) = match postcondition {
         ActionPostconditionResult::None { matched, frame } => (
             ActionPostconditionSummary::None {
@@ -262,6 +270,7 @@ pub(super) fn action_applied_response(
             frame,
         ),
     };
+
     let output = ActionAppliedOutput {
         v: 1,
         ok: matched,
@@ -275,12 +284,9 @@ pub(super) fn action_applied_response(
         },
         ended,
         boundaries,
-        code: if !matched {
-            Some("postcondition_failed")
-        } else {
-            None
-        },
+        code: (!matched).then_some("postcondition_failed"),
     };
+
     return Ok((serde_json::to_value(&output).into_diagnostic()?, matched));
 }
 
@@ -365,6 +371,7 @@ pub(super) fn action_error_response(
         }
         _ => ("none", 0, 0, None),
     };
+
     let input = ActionFailedInputSummary {
         applied,
         atoms,
@@ -372,12 +379,14 @@ pub(super) fn action_error_response(
         prefix,
         retry: input_retry(applied),
     };
+
     let observation = details.map(|details| {
         return ActionErrorObservation {
             state: &details.current_presented_state_hash,
             scope: &details.scope,
         };
     });
+
     let boundaries = details.map(|details| return &details.boundaries);
     let output = ActionErrorOutput {
         v: 1,
@@ -396,6 +405,7 @@ pub(super) fn action_error_response(
         ended,
         boundaries,
     };
+
     #[expect(
         clippy::expect_used,
         reason = "ActionErrorOutput contains only primitive serializable types and cannot fail JSON serialization"
@@ -418,8 +428,10 @@ pub(super) fn input_failure_application(details: Option<&ControlErrorDetails>) -
     if sequence.atoms_applied == 0 && sequence.failed_atom_bytes_written == 0 {
         return "none";
     }
+
     return "partial";
 }
+
 #[cfg(test)]
 mod action_response_tests {
     use termtrace_model::{
@@ -427,7 +439,7 @@ mod action_response_tests {
         terminal::observation::{ActorBoundaries, CaptureQuality},
         terminal::screen::{ScreenFrameSource, ScreenProjectionRequest},
     };
-    use termtrace_terminal::{GhosttyVt, project_screen_frame};
+    use termtrace_terminal::{project_screen_frame, GhosttyVt};
 
     use super::{action_applied_response, action_error_response, action_observation};
 
@@ -435,6 +447,7 @@ mod action_response_tests {
     fn action_success_retains_input_observation_request_and_boundaries() {
         let request_id =
             uuid::Uuid::parse_str("018f47d2-7ad0-7000-8000-000000000001").expect("request UUID");
+
         let boundaries: ActorBoundaries = serde_json::from_value(serde_json::json!({
             "durable": {
                 "next_event_seq": 4,
@@ -448,6 +461,7 @@ mod action_response_tests {
             }
         }))
         .expect("actor boundaries");
+
         let mut engine = GhosttyVt::new(80, 24, 0).expect("semantic engine");
         engine.write(b"current screen");
         let state = engine.snapshot().expect("semantic state");
@@ -463,6 +477,7 @@ mod action_response_tests {
             CaptureQuality::Live,
         )
         .expect("rich frame");
+
         let data: ControlData = serde_json::from_value(serde_json::json!({
             "kind": "action_applied",
             "input": {
@@ -489,6 +504,7 @@ mod action_response_tests {
             "boundaries": boundaries
         }))
         .expect("action payload");
+
         let (response, matched) =
             action_applied_response(request_id, &data).expect("action response");
         assert!(!matched);
@@ -502,11 +518,9 @@ mod action_response_tests {
         );
         assert_eq!(response["postcondition"]["outcome"], "deadline");
         assert_eq!(response["ended"], false);
-        assert!(
-            response["observation"]["data"]["rows"][0]["text"]
-                .as_str()
-                .is_some_and(|text| return text.starts_with("current screen"))
-        );
+        assert!(response["observation"]["data"]["rows"][0]["text"]
+            .as_str()
+            .is_some_and(|text| return text.starts_with("current screen")));
         assert_eq!(response["boundaries"]["durable"]["next_event_seq"], 4);
         assert_eq!(response["boundaries"]["observed"]["next_event_seq"], 5);
     }
@@ -515,6 +529,7 @@ mod action_response_tests {
     fn action_partial_failure_retains_the_exact_attempted_prefix() {
         let request_id =
             uuid::Uuid::parse_str("018f47d2-7ad0-7000-8000-000000000010").expect("request UUID");
+
         let details: ControlErrorDetails = serde_json::from_value(serde_json::json!({
             "current_presented_state_hash": "d".repeat(64),
             "boundaries": {
@@ -544,6 +559,7 @@ mod action_response_tests {
             }
         }))
         .expect("failure details");
+
         let response = action_error_response(
             request_id,
             "input_sequence_incomplete".to_owned(),
@@ -569,6 +585,7 @@ mod action_response_tests {
     fn action_observation_serializes_state_and_flattened_frame() {
         let request_id =
             uuid::Uuid::parse_str("018f47d2-7ad0-7000-8000-000000000001").expect("request UUID");
+
         let boundaries: ActorBoundaries = serde_json::from_value(serde_json::json!({
             "durable": {
                 "next_event_seq": 1,
@@ -582,6 +599,7 @@ mod action_response_tests {
             }
         }))
         .expect("actor boundaries");
+
         let mut engine = GhosttyVt::new(80, 24, 0).expect("semantic engine");
         engine.write(b"observation test");
         let state = engine.snapshot().expect("semantic state");
@@ -597,6 +615,7 @@ mod action_response_tests {
             CaptureQuality::Live,
         )
         .expect("rich frame");
+
         let value = action_observation(&frame).expect("observation JSON");
         assert_eq!(value["state"], frame.state_hash);
         assert_eq!(value["state_hash"], frame.state_hash);

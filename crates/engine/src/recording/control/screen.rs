@@ -12,8 +12,8 @@ use zstd::stream::encode_all;
 
 use termtrace_model::{
     protocol::control::{
-        CONTROL_PROTOCOL_VERSION, ControlData, ControlResponse, ControlResult, ScreenMode,
-        ScreenPredicate, ScreenWaitQuality, StableCaptureQuality, StateHashComparison,
+        ControlData, ControlResponse, ControlResult, ScreenMode, ScreenPredicate,
+        ScreenWaitQuality, StableCaptureQuality, StateHashComparison, CONTROL_PROTOCOL_VERSION,
     },
     terminal::observation::CaptureQuality,
     terminal::screen::{ScreenFrameSource, ScreenProjectionRequest, ScreenRegion},
@@ -63,11 +63,14 @@ impl SessionActor<'_> {
         if self.screen_waiters.is_empty() {
             return Ok(());
         }
+
         let state_hash =
             semantic_state_hash(&self.live.presented).map_err(crate::Error::ScreenFrame)?;
+
         let viewport_text = semantic_viewport_text(&self.live.presented);
         let observed_monotonic_ns = self.event_log.elapsed_ns();
         let now = Instant::now();
+
         let mut index = 0;
         while index < self.screen_waiters.len() {
             let Some(waiter) = self.screen_waiters.get_mut(index) else {
@@ -92,13 +95,16 @@ impl SessionActor<'_> {
             } else {
                 waiter.matching_state = None;
             }
+
             let stable = waiter
                 .matching_state
                 .as_ref()
                 .is_some_and(|(_, since, _)| return since.elapsed() >= waiter.stable_for);
+
             let child_completed = child_exited && output_closed;
             let deadline = !child_exited && now >= waiter.deadline;
             let finished = stable || child_completed || output_closed || deadline;
+
             if !finished {
                 index += 1;
                 continue;
@@ -113,6 +119,7 @@ impl SessionActor<'_> {
             } else {
                 CaptureQuality::Live
             };
+
             let source = ScreenFrameSource::Actor {
                 session_id: self.session_id,
                 boundaries: boundaries.clone(),
@@ -134,10 +141,13 @@ impl SessionActor<'_> {
                         &self.event_log,
                         "screen_wait_terminating_frame",
                     );
+
                     let _ = waiter.response.send(response);
+
                     continue;
                 }
             };
+
             let data = if let Some(predicate) = waiter.predicate {
                 let quality = if stable && waiter.stable_for.is_zero() {
                     ScreenWaitQuality::MatchedUnsettled
@@ -150,6 +160,7 @@ impl SessionActor<'_> {
                 } else {
                     ScreenWaitQuality::Deadline
                 };
+
                 ControlData::ScreenWait {
                     predicate: predicate.predicate,
                     matched,
@@ -172,12 +183,14 @@ impl SessionActor<'_> {
                 } else {
                     StableCaptureQuality::Deadline
                 };
+
                 let encoded = serde_json::to_vec(&self.live.presented).map_err(|error| {
                     return terminal_error("serialize presented state", error.to_string());
                 })?;
                 let compressed = encode_all(encoded.as_slice(), 3).map_err(|error| {
                     return terminal_error("compress presented state", error.to_string());
                 })?;
+
                 ControlData::StableSnapshot {
                     frame,
                     semantic_state_zstd: ByteString::from(compressed),
@@ -191,6 +204,7 @@ impl SessionActor<'_> {
                     quality,
                 }
             };
+
             let response = ControlResponse {
                 version: CONTROL_PROTOCOL_VERSION,
                 request_id: waiter.request_id,
@@ -198,6 +212,7 @@ impl SessionActor<'_> {
             };
             let _ = waiter.response.send(response);
         }
+
         return Ok(());
     }
 }
@@ -231,6 +246,7 @@ pub fn compile_screen_predicate(
         if depth > 4 || *nodes > 32 {
             return Err("screen predicate composition is too deep or large".to_owned());
         }
+
         match predicate {
             ScreenPredicate::Contains { text }
             | ScreenPredicate::Absent { text }
@@ -245,6 +261,7 @@ pub fn compile_screen_predicate(
                 if pattern.is_empty() || pattern.len() > 1024 {
                     return Err("screen regular expression must contain 1-1024 bytes".to_owned());
                 }
+
                 if !regexes.contains_key(pattern) {
                     let regex = regex::RegexBuilder::new(pattern)
                         .size_limit(1024 * 1024)
@@ -258,6 +275,7 @@ pub fn compile_screen_predicate(
                 if text.is_empty() || text.len() > 16 * 1024 {
                     return Err("screen predicate text must contain 1-16384 bytes".to_owned());
                 }
+
                 if region.left >= region.right || region.top >= region.bottom {
                     return Err("screen region must be non-empty and half-open".to_owned());
                 }
@@ -281,18 +299,21 @@ pub fn compile_screen_predicate(
                 if predicates.is_empty() || predicates.len() > 16 {
                     return Err("predicate composition must contain 1-16 children".to_owned());
                 }
+
                 for child in predicates {
                     visit(child, depth + 1, nodes, regexes)?;
                 }
             }
             ScreenPredicate::Mode { .. } => {}
         }
+
         return Ok(());
     }
 
     let mut nodes = 0;
     let mut regexes = BTreeMap::new();
     visit(predicate, 1, &mut nodes, &mut regexes)?;
+
     return Ok(CompiledScreenPredicate {
         predicate: predicate.clone(),
         regexes,
@@ -371,14 +392,12 @@ fn evaluate(
 
 fn screen_row_text(state: &SemanticState, row: u16) -> Option<String> {
     let row = state.grid.get(usize::from(row))?;
+
     let mut text = String::new();
     for cell in &row.cells {
-        text.push_str(if cell.grapheme.is_empty() {
-            " "
-        } else {
-            &cell.grapheme
-        });
+        text.push_str(if cell.grapheme.is_empty() { " " } else { &cell.grapheme });
     }
+
     return Some(text.trim_end().to_owned());
 }
 
@@ -386,24 +405,24 @@ fn screen_region_text(state: &SemanticState, region: ScreenRegion) -> Option<Str
     if region.right > state.cols || region.bottom > state.rows {
         return None;
     }
+
     let mut text = String::new();
     for row_index in region.top..region.bottom {
         let row = state.grid.get(usize::from(row_index))?;
         for column in region.left..region.right {
             let cell = row.cells.get(usize::from(column))?;
-            text.push_str(if cell.grapheme.is_empty() {
-                " "
-            } else {
-                &cell.grapheme
-            });
+            text.push_str(if cell.grapheme.is_empty() { " " } else { &cell.grapheme });
         }
+
         while text.ends_with(' ') {
             text.pop();
         }
+
         if row_index + 1 < region.bottom {
             text.push('\n');
         }
     }
+
     return Some(text);
 }
 

@@ -2,11 +2,11 @@ use std::{collections::BTreeMap, path::Path};
 
 use termtrace_model::{
     execution::environment::EnvironmentSpec,
-    scenario::{SCENARIO_VERSION, Scenario, ScenarioEnvironment, ScenarioStep},
+    scenario::{Scenario, ScenarioEnvironment, ScenarioStep, SCENARIO_VERSION},
     value::ByteString,
 };
 
-use crate::{Error, Result, error::invalid};
+use crate::{error::invalid, Error, Result};
 
 /// Parse and validate one strict scenario JSON document.
 pub(super) fn read(path: impl AsRef<Path>) -> Result<Scenario> {
@@ -23,6 +23,7 @@ pub(super) fn read(path: impl AsRef<Path>) -> Result<Scenario> {
         serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
             let json_path = error.path().to_string();
             let source = error.into_inner();
+
             return Error::InvalidJson {
                 path: path.to_path_buf(),
                 json_path,
@@ -31,6 +32,7 @@ pub(super) fn read(path: impl AsRef<Path>) -> Result<Scenario> {
         })?;
 
     validate(&scenario)?;
+
     return Ok(scenario);
 }
 
@@ -74,6 +76,7 @@ pub(super) fn validate(scenario: &Scenario) -> Result<()> {
                 {
                     return Err(invalid("screen wait requires contains or absent text"));
                 }
+
                 if wait.contains.is_some() == wait.absent.is_some() {
                     return Err(invalid(
                         "screen wait requires exactly one of contains or absent",
@@ -115,11 +118,14 @@ pub(super) fn validate(scenario: &Scenario) -> Result<()> {
                 "matrix keys must be safe identifiers with 1 through 64 values",
             ));
         }
+
         combinations = combinations.saturating_mul(values.len());
+
         if combinations > 256 {
             return Err(invalid("scenario matrix exceeds 256 variants"));
         }
     }
+
     return Ok(());
 }
 
@@ -139,6 +145,7 @@ pub(super) fn expand_matrix(document: Scenario) -> Result<Vec<(String, Scenario)
                 expanded.push(next);
             }
         }
+
         variants = expanded;
     }
 
@@ -225,6 +232,7 @@ pub(crate) fn validate_snapshot_name(name: &str) -> Result<()> {
             "snapshot names accept 1 through 128 ASCII letters, digits, hyphens, or underscores",
         ));
     }
+
     return Ok(());
 }
 
@@ -248,6 +256,7 @@ mod tests {
             ]
         }))
         .expect("scenario JSON");
+
         validate(&scenario).expect("valid scenario");
         assert_eq!(scenario.steps[1].kind(), "send");
     }
@@ -323,6 +332,7 @@ mod tests {
             },
             "steps": [{ "stop": {} }]
         });
+
         fs_err::write(&path, serde_json::to_vec(&json).expect("scenario JSON"))
             .expect("write scenario");
 
@@ -357,6 +367,7 @@ mod tests {
             },
             "steps": [{ "stop": {} }]
         });
+
         let dup_path = temporary.path().join("dup.json");
         fs_err::write(
             &dup_path,
@@ -365,10 +376,9 @@ mod tests {
         .expect("write dup");
 
         let err = read(&dup_path).expect_err("duplicate key must fail");
-        assert!(
-            err.to_string()
-                .contains("duplicates launch.environment.set.COLLISION")
-        );
+        assert!(err
+            .to_string()
+            .contains("duplicates launch.environment.set.COLLISION"));
     }
 
     #[test]

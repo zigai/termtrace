@@ -29,6 +29,7 @@ pub(super) fn frame_hash(frame: &ObservationFrame) -> Result<String> {
             source,
         };
     })?;
+
     return Ok(blake3::hash(&bytes).to_hex().to_string());
 }
 

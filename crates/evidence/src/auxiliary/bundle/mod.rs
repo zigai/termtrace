@@ -9,7 +9,7 @@ use std::{
 use termtrace_model::{
     artifact::{
         bundle::{
-            BUNDLE_FORMAT, BUNDLE_MANIFEST_NAME, BUNDLE_VERSION, BundleManifest, BundleProfile,
+            BundleManifest, BundleProfile, BUNDLE_FORMAT, BUNDLE_MANIFEST_NAME, BUNDLE_VERSION,
         },
         metadata::{ArtifactMember, ArtifactSensitivity},
     },
@@ -69,12 +69,14 @@ impl BundleIdentity {
         {
             return Some("bundle manifest does not match the caller-owned source identity");
         }
+
         if manifest.session_id != self.session_id
             || manifest.canonical_session != self.canonical_session
             || manifest.source_final_event_hash != self.source_final_event_hash
         {
             return Some("bundle manifest does not match the canonical source identity");
         }
+
         return None;
     }
 }
@@ -100,14 +102,17 @@ pub(crate) fn validate_relative_path(path: &Path) -> Result<String> {
     {
         return Err(Error::invalid("bundle member path is unsafe"));
     }
+
     let path = path
         .to_str()
         .ok_or_else(|| return Error::invalid("bundle member paths must be valid UTF-8"))?;
+
     if path == BUNDLE_MANIFEST_NAME {
         return Err(Error::invalid(
             "manifest.json is reserved for the bundle manifest",
         ));
     }
+
     return Ok(path.to_owned());
 }
 
@@ -115,7 +120,9 @@ pub(crate) fn create_private_directory(path: &Path) -> Result<()> {
     fs_err::create_dir(path).map_err(|source| return Error::filesystem(path, source))?;
     fs_err::set_permissions(path, Permissions::from_mode(0o700))
         .map_err(|source| return Error::filesystem(path, source))?;
+
     sync_parent(path)?;
+
     return Ok(());
 }
 
@@ -124,11 +131,13 @@ pub(crate) fn create_private_parents(root: &Path, relative: &Path) -> Result<()>
         return Ok(());
     };
     let mut current = root.to_path_buf();
+
     for component in parent.components() {
         let Component::Normal(name) = component else {
             return Err(Error::invalid("bundle member path is unsafe"));
         };
         current.push(name);
+
         match fs_err::create_dir(&current) {
             Ok(()) => {
                 fs_err::set_permissions(&current, Permissions::from_mode(0o700))
@@ -137,6 +146,7 @@ pub(crate) fn create_private_parents(root: &Path, relative: &Path) -> Result<()>
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 let metadata = fs_err::symlink_metadata(&current)
                     .map_err(|source| return Error::filesystem(&current, source))?;
+
                 if !metadata.file_type().is_dir() {
                     return Err(Error::invalid("bundle member parent is not a directory"));
                 }
@@ -144,6 +154,7 @@ pub(crate) fn create_private_parents(root: &Path, relative: &Path) -> Result<()>
             Err(source) => return Err(Error::filesystem(&current, source)),
         }
     }
+
     return Ok(());
 }
 
@@ -160,6 +171,7 @@ pub(crate) fn secure_file(path: &Path) -> Result<File> {
                     path: path.to_path_buf(),
                 };
             }
+
             return Error::filesystem(path, source);
         });
 }
@@ -173,12 +185,14 @@ pub(crate) fn open_regular_nofollow(path: &Path) -> Result<(File, u64)> {
     let metadata = file
         .metadata()
         .map_err(|source| return Error::filesystem(path, source))?;
+
     if !metadata.is_file() {
         return Err(Error::invalid(format!(
             "bundle member `{}` is not a regular file",
             path.display()
         )));
     }
+
     return Ok((file, metadata.len()));
 }
 
@@ -195,6 +209,7 @@ pub fn hash_regular_file(path: &Path) -> Result<(u64, String)> {
     hasher
         .update_reader(&mut file)
         .map_err(|source| return Error::filesystem(path, source))?;
+
     return Ok((size, hasher.finalize().to_hex().to_string()));
 }
 
@@ -202,9 +217,11 @@ pub(crate) fn sync_parent(path: &Path) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| return Error::invalid("path has no parent"))?;
+
     File::open(parent)
         .and_then(|directory| return directory.sync_all())
         .map_err(|source| return Error::filesystem(parent, source))?;
+
     return Ok(());
 }
 
@@ -212,6 +229,7 @@ pub(crate) fn sync_directory(path: &Path) -> Result<()> {
     File::open(path)
         .and_then(|directory| return directory.sync_all())
         .map_err(|source| return Error::filesystem(path, source))?;
+
     return Ok(());
 }
 
@@ -229,14 +247,17 @@ pub(crate) fn collect_regular_files(
             .map_err(|source| return Error::filesystem(entry.path(), source))?;
         if file_type.is_dir() {
             collect_regular_files(root, &entry.path(), files)?;
+
             continue;
         }
+
         let entry_metadata = entry
             .metadata()
             .map_err(|source| return Error::filesystem(entry.path(), source))?;
         if !entry_metadata.is_file() {
             return Err(Error::invalid("bundle contains a symlink or special file"));
         }
+
         files.push(
             entry
                 .path()
@@ -244,10 +265,12 @@ pub(crate) fn collect_regular_files(
                 .map_err(|_| return Error::invalid("bundle path escaped its root"))?
                 .to_path_buf(),
         );
+
         if files.len() > MAX_BUNDLE_TREE_ENTRIES {
             return Err(Error::invalid("bundle contains too many members"));
         }
     }
+
     return Ok(());
 }
 

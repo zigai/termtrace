@@ -3,10 +3,10 @@
 use std::path::PathBuf;
 
 pub use termtrace_model::terminal::replay::{
-    CollectedReplay, DERIVED_DIRECTORY, GHOSTTY_REVISION, IndexOptions, IndexOutcome,
-    ReplayArtifacts, ReplayManifest, RowDiff, STATE_FORMAT_VERSION, SemanticReplayCheckpoint,
-    SourceRange, StateDelta, StateIndexEntry, StateInspection, StateRecord, StateSelection,
-    StateSelector,
+    CollectedReplay, IndexOptions, IndexOutcome, ReplayArtifacts, ReplayManifest, RowDiff,
+    SemanticReplayCheckpoint, SourceRange, StateDelta, StateIndexEntry, StateInspection,
+    StateRecord, StateSelection, StateSelector, DERIVED_DIRECTORY, GHOSTTY_REVISION,
+    STATE_FORMAT_VERSION,
 };
 use termtrace_model::{execution::event::Event, terminal::state::SemanticState};
 
@@ -21,23 +21,22 @@ use delta::state_delta;
 use engine::replay_for_index;
 #[cfg(test)]
 use engine::validate_replay_seed;
-#[cfg(test)]
-use engine::{
-    DEFAULT_REPLAY_LIMITS, ReplayLimits, replay_with, replay_with_limits,
-    replay_with_seed_and_limits,
-};
 pub use engine::{
-    RenderedStateFormats, StateInspectionWithFormats, format_state, inspect,
-    inspect_completed_many, inspect_completed_session, inspect_completed_session_with_formats,
-    inspect_many, inspect_with_formats, replay, semantic_state_hash,
-    visit_session_states_range_while, visit_session_states_while, visit_snapshot_states_while,
-    visit_states,
+    format_state, inspect, inspect_completed_many, inspect_completed_session,
+    inspect_completed_session_with_formats, inspect_many, inspect_with_formats, replay,
+    semantic_state_hash, visit_session_states_range_while, visit_session_states_while,
+    visit_snapshot_states_while, visit_states, RenderedStateFormats, StateInspectionWithFormats,
 };
 pub(crate) use engine::{
-    ReplaySeed, inspect_latest_presented_prefix, inspect_latest_presented_stream,
-    inspect_prefix_stream, inspect_session_stream, inspect_session_stream_with_formats,
+    inspect_latest_presented_prefix, inspect_latest_presented_stream, inspect_prefix_stream,
+    inspect_session_stream, inspect_session_stream_with_formats,
     visit_recording_states_range_while, visit_states_range, visit_states_range_while,
-    visit_states_seeded_while,
+    visit_states_seeded_while, ReplaySeed,
+};
+#[cfg(test)]
+use engine::{
+    replay_with, replay_with_limits, replay_with_seed_and_limits, ReplayLimits,
+    DEFAULT_REPLAY_LIMITS,
 };
 #[cfg(test)]
 pub(crate) use engine::{reset_test_replay_output_bytes, test_replay_output_bytes};

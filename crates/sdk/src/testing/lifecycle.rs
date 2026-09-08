@@ -85,6 +85,7 @@ impl TerminalTestConfig {
     /// Construct a conservative configuration around an explicit executable, root, and command.
     pub fn new(terminal: Terminal, command: impl IntoIterator<Item = OsString>) -> Self {
         let snapshot_root = terminal.evidence_root().join("snapshots");
+
         return Self {
             terminal,
             command: command.into_iter().collect(),
@@ -122,6 +123,7 @@ impl TerminalTest {
             .terminal
             .evidence_root()
             .join(format!(".termtrace-test-{}", Uuid::now_v7()));
+
         create_private_directory(&attempt_directory)?;
         let session = config
             .terminal
@@ -130,6 +132,7 @@ impl TerminalTest {
             .geometry(config.columns, config.rows)
             .startup_timeout(config.startup_timeout)
             .start()?;
+
         return Ok(Self {
             state: LifecycleState::Open(session),
             attempt_directory,
@@ -148,6 +151,7 @@ impl TerminalTest {
         let LifecycleState::Open(session) = &self.state else {
             return None;
         };
+
         return Some(session);
     }
 
@@ -157,6 +161,7 @@ impl TerminalTest {
         let LifecycleState::Open(session) = &mut self.state else {
             return None;
         };
+
         return Some(session);
     }
 
@@ -172,6 +177,7 @@ impl TerminalTest {
         ) {
             return None;
         }
+
         return Some(&self.attempt_directory);
     }
 
@@ -197,9 +203,11 @@ impl TerminalTest {
         let screen = self
             .screen()
             .ok_or(TerminalAssertionError::SessionUnavailable)?;
+
         let frame = screen.frame(Default::default())?;
         assert_screen_text(&frame, expected)
             .map_err(|error| return AssertionError::Mismatch(error))?;
+
         return Ok(frame);
     }
 
@@ -211,8 +219,10 @@ impl TerminalTest {
         let screen = self
             .screen()
             .ok_or(TerminalAssertionError::SessionUnavailable)?;
+
         let frame = screen.frame(Default::default())?;
         assert_cursor(&frame, expected).map_err(|error| return AssertionError::Mismatch(error))?;
+
         return Ok(frame);
     }
 
@@ -225,6 +235,7 @@ impl TerminalTest {
         options: ScreenSnapshotOptions,
     ) -> StdResult<(), TerminalAssertionError> {
         let path = snapshot_path(&self.snapshot_root, name)?;
+
         return assert_snapshot_file(frame, &path, profile, options, self.update_snapshots);
     }
 
@@ -233,6 +244,7 @@ impl TerminalTest {
         if let LifecycleState::Finalized(report) = &self.state {
             return report.clone();
         }
+
         let state = replace(&mut self.state, LifecycleState::Finalizing);
         let LifecycleState::Open(mut session) = state else {
             let report = FinalizationReport {
@@ -246,6 +258,7 @@ impl TerminalTest {
                 retained: true,
             };
             self.state = LifecycleState::Finalized(report.clone());
+
             return report;
         };
 
@@ -268,20 +281,24 @@ impl TerminalTest {
                 if let Some(stop_error) = stop_failure {
                     secondary_failures.push(bounded_secondary("session_stop", &stop_error));
                 }
+
                 true
             }
             Err(error) => {
                 if let Some(stop_error) = stop_failure {
                     secondary_failures.push(bounded_secondary("session_stop", &stop_error));
                 }
+
                 secondary_failures
                     .push(bounded_secondary("session_completion", &error.to_string()));
+
                 if let Err(close_error) = session.force_close() {
                     secondary_failures.push(bounded_secondary(
                         "session_force_close",
                         &close_error.to_string(),
                     ));
                 }
+
                 false
             }
         };
@@ -294,10 +311,13 @@ impl TerminalTest {
                 &mut verified_artifacts,
                 &mut secondary_failures,
             );
+
             failure_artifacts_captured = true;
         }
+
         if completed {
             let verification = session.evidence().verify(VerificationLevel::Content);
+
             if verification.valid {
                 verified_artifacts.push(canonical_session.clone());
             } else {
@@ -310,6 +330,7 @@ impl TerminalTest {
                 secondary_failures.push(bounded_secondary("session_verify", &summary));
             }
         }
+
         if completed && !failure_artifacts_captured && !secondary_failures.is_empty() {
             capture_failure_artifacts(
                 &session,
@@ -338,10 +359,13 @@ impl TerminalTest {
                     let Some(parent) = self.attempt_directory.parent() else {
                         return Ok(());
                     };
+
                     return Ok(sync_directory(parent)?);
                 })
                 .err();
+
             verified_artifacts.clear();
+
             if let Some(error) = discard_failure {
                 secondary_failures.push(bounded_secondary("evidence_discard", &error.to_string()));
             }
@@ -367,7 +391,9 @@ impl TerminalTest {
                     .push(bounded_secondary("evidence_manifest", &error.to_string())),
             }
         }
+
         self.state = LifecycleState::Finalized(report.clone());
+
         return report;
     }
 }
@@ -375,11 +401,7 @@ impl TerminalTest {
 impl Drop for TerminalTest {
     fn drop(&mut self) {
         if matches!(self.state, LifecycleState::Open(_)) {
-            let outcome = if panicking() {
-                TestOutcome::Panic
-            } else {
-                TestOutcome::Error
-            };
+            let outcome = if panicking() { TestOutcome::Panic } else { TestOutcome::Error };
             let _report = self.finalize(outcome);
         }
     }
@@ -417,10 +439,12 @@ pub fn run_terminal_test<T, E>(
             if report.secondary_failures.is_empty() {
                 return Ok(value);
             }
+
             return Err(TestFailure::Finalization(report));
         }
         Ok(Err(error)) => {
             let finalization = test.finalize(TestOutcome::Error);
+
             return Err(TestFailure::Body {
                 error,
                 finalization,
@@ -429,6 +453,7 @@ pub fn run_terminal_test<T, E>(
         Err(payload) => {
             let report = test.finalize(TestOutcome::Panic);
             emit_panic_finalization_diagnostics(&report);
+
             resume_unwind(payload);
         }
     }
@@ -437,14 +462,17 @@ pub fn run_terminal_test<T, E>(
 fn remaining_timeout(started: Instant, timeout: Duration) -> Duration {
     return timeout.saturating_sub(started.elapsed());
 }
+
 fn stop_session_with_timeout(session: &Session, timeout: Duration) -> StdResult<(), String> {
     if timeout.is_zero() {
         return Err("finalization deadline expired before the stop request".to_owned());
     }
+
     let request = ControlRequest::new(ControlCommand::Stop);
     let timing = ExchangeTiming::deadline(timeout).map_err(|error| return error.to_string())?;
     let response =
         exchange(session.path(), &request, timing).map_err(|error| return error.to_string())?;
+
     match response.result {
         ControlResult::Ok { .. } => return Ok(()),
         ControlResult::Error { code, message, .. } => {
@@ -457,15 +485,18 @@ fn emit_panic_finalization_diagnostics(report: &FinalizationReport) {
     if report.secondary_failures.is_empty() {
         return;
     }
+
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
     let _ = writeln!(
         stderr,
         "termtrace: secondary failures occurred while finalizing a panicked test"
     );
+
     for failure in &report.secondary_failures {
         let _ = writeln!(stderr, "termtrace: {}: {}", failure.phase, failure.message);
     }
+
     if let Some(path) = &report.evidence_directory {
         let _ = writeln!(
             stderr,
@@ -478,6 +509,7 @@ fn emit_panic_finalization_diagnostics(report: &FinalizationReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn secondary_diagnostics_are_unicode_bounded() {
         let failure = bounded_secondary("cleanup", &"界".repeat(MAX_SECONDARY_FAILURE_CHARS));

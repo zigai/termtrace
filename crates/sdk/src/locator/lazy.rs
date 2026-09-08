@@ -14,7 +14,7 @@ use termtrace_model::terminal::screen::{
 };
 
 use super::query::{
-    LocatorSpec, QueryDescription, QueryError, QueryResult, ScreenMatch, StyleFilter, query_frame,
+    query_frame, LocatorSpec, QueryDescription, QueryError, QueryResult, ScreenMatch, StyleFilter,
 };
 use crate::{
     client::{Screen, Session},
@@ -88,6 +88,7 @@ impl<'session> Locator<'session> {
                 region: self.spec.region(),
             })
             .map_err(LocatorError::Capture)?;
+
         return query_frame(Arc::new(frame), self.spec.clone()).map_err(LocatorError::Query);
     }
 
@@ -149,18 +150,23 @@ impl<'session> Locator<'session> {
                 reason: "locator wait timeout and interval must be greater than zero".to_owned(),
             }));
         }
+
         if stable_for > timeout {
             return Err(LocatorError::Query(QueryError::InvalidQuery {
                 reason: "locator stable interval must not exceed its timeout".to_owned(),
             }));
         }
+
         let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
             return LocatorError::Query(QueryError::InvalidQuery {
                 reason: "locator wait timeout exceeds the monotonic clock range".to_owned(),
             });
         })?;
+
         let mut matching_state: Option<(String, Instant)> = None;
+
         let mut last_frame: Option<Arc<ScreenFrame>> = None;
+
         loop {
             let before_capture = Instant::now();
             let Some(remaining) = deadline.checked_duration_since(before_capture) else {
@@ -180,6 +186,7 @@ impl<'session> Locator<'session> {
                 },
                 allow_incomplete: true,
             });
+
             let observed_at = Instant::now();
             let capture = match capture {
                 Ok(capture) => capture,
@@ -192,8 +199,10 @@ impl<'session> Locator<'session> {
                 }
                 Err(error) => return Err(LocatorError::Capture(error)),
             };
+
             let frame = Arc::new(capture.frame);
             last_frame = Some(Arc::clone(&frame));
+
             if observed_at >= deadline {
                 return Err(LocatorError::Timeout {
                     timeout,
@@ -201,8 +210,10 @@ impl<'session> Locator<'session> {
                     query: self.spec.description(),
                 });
             }
+
             let result = query_frame(frame, self.spec.clone()).map_err(LocatorError::Query)?;
             let evaluated_at = Instant::now();
+
             if evaluated_at >= deadline {
                 return Err(LocatorError::Timeout {
                     timeout,
@@ -210,6 +221,7 @@ impl<'session> Locator<'session> {
                     query: self.spec.description(),
                 });
             }
+
             if !result.matches.is_empty() {
                 if stable_for.is_zero() {
                     return Ok(LocatorWaitResult {
@@ -217,6 +229,7 @@ impl<'session> Locator<'session> {
                         matches: result.matches,
                     });
                 }
+
                 match &matching_state {
                     Some((state_hash, since)) if state_hash == &result.frame.state_hash => {
                         if evaluated_at.saturating_duration_since(*since) >= stable_for {
@@ -231,6 +244,7 @@ impl<'session> Locator<'session> {
             } else {
                 matching_state = None;
             }
+
             thread::sleep(interval.min(deadline.saturating_duration_since(evaluated_at)));
         }
     }

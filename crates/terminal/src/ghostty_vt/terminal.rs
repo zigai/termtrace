@@ -10,8 +10,8 @@ use crate::{Error, Result};
 use super::{
     input, snapshot, sys,
     types::{
-        EncodedKey, Format, KeyModifiers, MouseAction, MouseButton, NamedKey, SemanticState,
-        supported_geometry_cell_count,
+        supported_geometry_cell_count, EncodedKey, Format, KeyModifiers, MouseAction, MouseButton,
+        NamedKey, SemanticState,
     },
 };
 
@@ -80,8 +80,10 @@ impl VtInputLimiter {
                     push_output(byte, &mut output, &mut output_len, &mut emit);
                     continue;
                 }
+
                 self.utf8_continuations = 0;
             }
+
             match self.state {
                 VtInputState::Ground => match byte {
                     0x1b => {
@@ -102,6 +104,7 @@ impl VtInputLimiter {
                             0xf0..=0xf4 => 3,
                             _ => 0,
                         };
+
                         push_output(byte, &mut output, &mut output_len, &mut emit);
                     }
                 },
@@ -114,6 +117,7 @@ impl VtInputLimiter {
                         self.sequence.clear();
                         self.discarding = false;
                         push_output(0x1b, &mut output, &mut output_len, &mut emit);
+
                         let _ = self.push_sequence(byte);
                     }
                     _ => {
@@ -143,9 +147,11 @@ impl VtInputLimiter {
     fn consume_osc(&mut self, byte: u8, emit: &mut impl FnMut(&[u8])) {
         let terminated =
             matches!(byte, 0x07 | 0x9c) || (self.state == VtInputState::OscEscape && byte == b'\\');
+
         let canceled = matches!(byte, 0x18 | 0x1a);
         let was_discarding = self.discarding;
         let overflowed = self.push_sequence(byte);
+
         if overflowed {
             // Ghostty may be inside an earlier partial control. CAN returns its
             // parser to ground without executing the discarded OSC payload.
@@ -156,18 +162,16 @@ impl VtInputLimiter {
             if !self.discarding {
                 emit(&self.sequence);
             }
+
             self.reset();
         } else if canceled {
             if !was_discarding && !overflowed {
                 emit(&[byte]);
             }
+
             self.reset();
         } else {
-            self.state = if byte == 0x1b {
-                VtInputState::OscEscape
-            } else {
-                VtInputState::Osc
-            };
+            self.state = if byte == 0x1b { VtInputState::OscEscape } else { VtInputState::Osc };
         }
     }
 
@@ -175,12 +179,16 @@ impl VtInputLimiter {
         if self.discarding {
             return false;
         }
+
         if self.sequence.len() >= self.max_osc_bytes {
             self.sequence.clear();
             self.discarding = true;
+
             return true;
         }
+
         self.sequence.push(byte);
+
         return false;
     }
 
@@ -205,6 +213,7 @@ fn push_output(
     if *output_len == output.len() {
         flush_output(output, output_len, emit);
     }
+
     output[*output_len] = byte;
     *output_len += 1;
 }
@@ -217,9 +226,11 @@ fn flush_output(
     if *output_len == 0 {
         return;
     }
+
     if let Some(bytes) = output.get(..*output_len) {
         emit(bytes);
     }
+
     *output_len = 0;
 }
 
@@ -236,6 +247,7 @@ impl GhosttyVt {
                 result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
             });
         }
+
         let mut terminal = ptr::null_mut();
         check("create terminal", unsafe {
             sys::ghostty_terminal_new(
@@ -248,12 +260,16 @@ impl GhosttyVt {
                 },
             )
         })?;
+
         if let Err(error) = configure_terminal_resource_policy(terminal) {
             unsafe { sys::ghostty_terminal_free(terminal) };
+
             return Err(error);
         }
+
         let mut responses = Box::<ResponseState>::default();
         let userdata = (&raw mut *responses).cast::<c_void>();
+
         if let Err(error) = check("set terminal callback userdata", unsafe {
             sys::ghostty_terminal_set(
                 terminal,
@@ -262,8 +278,10 @@ impl GhosttyVt {
             )
         }) {
             unsafe { sys::ghostty_terminal_free(terminal) };
+
             return Err(error);
         }
+
         #[allow(
             clippy::fn_to_numeric_cast_any,
             reason = "Ghostty's generic C option setter accepts callback pointers as void pointers"
@@ -277,15 +295,19 @@ impl GhosttyVt {
             )
         }) {
             unsafe { sys::ghostty_terminal_free(terminal) };
+
             return Err(error);
         }
+
         let mut render = ptr::null_mut();
         if let Err(error) = check("create render state", unsafe {
             sys::ghostty_render_state_new(ptr::null(), &raw mut render)
         }) {
             unsafe { sys::ghostty_terminal_free(terminal) };
+
             return Err(error);
         }
+
         return Ok(Self {
             terminal,
             render,
@@ -368,12 +390,14 @@ impl GhosttyVt {
             colors.foreground,
             "set foreground color",
         )?;
+
         set_color_option(
             self.terminal,
             sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND,
             colors.background,
             "set background color",
         )?;
+
         if let Some(cursor) = colors.cursor {
             set_color_option(
                 self.terminal,
@@ -382,6 +406,7 @@ impl GhosttyVt {
                 "set cursor color",
             )?;
         }
+
         if !colors.palette.is_empty() {
             if colors.palette.len() != 256 {
                 return Err(Error::TerminalOperation {
@@ -392,6 +417,7 @@ impl GhosttyVt {
                     ),
                 });
             }
+
             let palette: Vec<_> = colors.palette.iter().copied().map(ffi_rgb).collect();
             check("set terminal palette", unsafe {
                 sys::ghostty_terminal_set(
@@ -401,6 +427,7 @@ impl GhosttyVt {
                 )
             })?;
         }
+
         return Ok(());
     }
 
@@ -422,6 +449,7 @@ impl GhosttyVt {
                 result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
             });
         }
+
         return check("resize terminal", unsafe {
             sys::ghostty_terminal_resize(self.terminal, cols, rows, cell_width_px, cell_height_px)
         });
@@ -435,6 +463,7 @@ impl GhosttyVt {
     pub fn snapshot(&mut self) -> Result<SemanticState> {
         let terminal = self.terminal;
         let render = self.render;
+
         return snapshot::Snapshot::new(terminal, render, &mut self.last_snapshot).snapshot();
     }
 
@@ -449,6 +478,7 @@ impl GhosttyVt {
     pub fn snapshot_if_changed(&mut self) -> Result<Option<SemanticState>> {
         let terminal = self.terminal;
         let render = self.render;
+
         return snapshot::Snapshot::new(terminal, render, &mut self.last_snapshot)
             .snapshot_if_changed();
     }
@@ -481,6 +511,7 @@ impl Drop for GhosttyVt {
     fn drop(&mut self) {
         unsafe {
             sys::ghostty_render_state_free(self.render);
+
             sys::ghostty_terminal_free(self.terminal);
         }
     }
@@ -505,6 +536,7 @@ fn configure_terminal_resource_policy(terminal: sys::GhosttyTerminal) -> Result<
     })?;
 
     let apc_max_bytes = MAX_APC_SEQUENCE_BYTES;
+
     return check("limit APC sequence buffering", unsafe {
         sys::ghostty_terminal_set(
             terminal,
@@ -525,6 +557,7 @@ fn set_color_option(
     operation: &'static str,
 ) -> Result<()> {
     let color = ffi_rgb(color);
+
     return check(operation, unsafe {
         sys::ghostty_terminal_set(terminal, option, (&raw const color).cast::<c_void>())
     });
@@ -539,11 +572,13 @@ unsafe extern "C" fn write_pty_callback(
     if userdata.is_null() || (data.is_null() && len != 0) {
         return;
     }
+
     let bytes = if len == 0 {
         Vec::new()
     } else {
         unsafe { slice::from_raw_parts(data, len) }.to_vec()
     };
+
     let responses = unsafe { &mut *userdata.cast::<ResponseState>() };
     responses.pending.push(bytes);
 }
@@ -561,17 +596,16 @@ mod tests {
         assert!(GhosttyVt::new(MAX_TERMINAL_COLUMNS.saturating_add(1), 1, 0).is_err());
 
         let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
-        assert!(
-            terminal
-                .resize(MAX_TERMINAL_COLUMNS.saturating_add(1), 1, 1, 1)
-                .is_err()
-        );
+        assert!(terminal
+            .resize(MAX_TERMINAL_COLUMNS.saturating_add(1), 1, 1, 1)
+            .is_err());
     }
 
     #[test]
     fn bounds_osc_strings_before_the_ffi_boundary() {
         let mut limiter = VtInputLimiter::new(12);
         let mut forwarded = Vec::new();
+
         for chunk in [
             b"before\x1b]52;0123456789abcdef".as_slice(),
             b"\x07after\x1b".as_slice(),
@@ -579,6 +613,7 @@ mod tests {
         ] {
             limiter.write(chunk, |bytes| forwarded.extend_from_slice(bytes));
         }
+
         assert_eq!(forwarded, b"before\x18after\x1b]2;ok\x07");
     }
 
@@ -586,11 +621,13 @@ mod tests {
     fn preserves_utf8_continuations_that_match_c1_controls() {
         let mut limiter = VtInputLimiter::new(12);
         let mut forwarded = Vec::new();
+
         for byte in "ѝ".as_bytes() {
             limiter.write(slice::from_ref(byte), |bytes| {
                 forwarded.extend_from_slice(bytes);
             });
         }
+
         assert_eq!(forwarded, "ѝ".as_bytes());
     }
 
@@ -624,26 +661,20 @@ mod tests {
     #[test]
     fn replay_seed_refuses_unserialized_pending_wrap_state() {
         let mut terminal = GhosttyVt::new(2, 2, 0).expect("create terminal");
-        assert!(
-            terminal
-                .format_replay_seed()
-                .expect("initial replay seed")
-                .is_some()
-        );
+        assert!(terminal
+            .format_replay_seed()
+            .expect("initial replay seed")
+            .is_some());
         terminal.write(b"ab");
-        assert!(
-            terminal
-                .format_replay_seed()
-                .expect("pending-wrap replay seed")
-                .is_none()
-        );
+        assert!(terminal
+            .format_replay_seed()
+            .expect("pending-wrap replay seed")
+            .is_none());
         terminal.write(b"c");
-        assert!(
-            terminal
-                .format_replay_seed()
-                .expect("post-wrap replay seed")
-                .is_some()
-        );
+        assert!(terminal
+            .format_replay_seed()
+            .expect("post-wrap replay seed")
+            .is_some());
     }
 
     #[test]

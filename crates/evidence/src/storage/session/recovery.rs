@@ -3,17 +3,17 @@ use std::{
     fs,
     io::{self, Read as _, Write as _},
     os::unix::fs::PermissionsExt as _,
-    path::{Path, absolute},
+    path::{absolute, Path},
 };
 
 use termtrace_model::execution::event_log::RecoveryReport;
 
 use crate::storage::{
-    Error, Result,
     artifact::{
         commit_directory, open_regular_file_nofollow, secure_file, sync_directory, write_secure,
     },
     event_log::{EventLog, EventLogCursor, EventLogSummary},
+    Error, Result,
 };
 
 use super::{
@@ -37,23 +37,30 @@ impl SessionSnapshot {
             .permissions(fs::Permissions::from_mode(0o700))
             .tempdir()
             .map_err(|error| return Error::filesystem(temp_dir(), error))?;
+
         copy_context_file(
             &source.join("session.json"),
             &directory.path().join("session.json"),
         )?;
+
         let manifest = read_manifest(directory.path())?;
         validate_manifest(&manifest)?;
+
         if let Some(profile) = &manifest.ghostty_visual {
             copy_context_file(
                 &source.join(&profile.replay_profile),
                 &directory.path().join(&profile.replay_profile),
             )?;
+
             validate_replay_profile_file(directory.path(), &manifest)?;
         }
+
         let manifest_path = directory.path().join("session.json");
         let manifest_bytes = fs::read(&manifest_path)
             .map_err(|error| return Error::filesystem(&manifest_path, error))?;
+
         let mut cursor = EventLogCursor::open_snapshot(source.join("events.jsonl"))?;
+
         if cursor.header().session_id != manifest.session_id
             || cursor.header().session_manifest_hash != manifest_hash(&manifest_bytes)
         {
@@ -61,6 +68,7 @@ impl SessionSnapshot {
                 "snapshot header does not bind the session manifest",
             ));
         }
+
         let path = directory.path().join("events.jsonl");
         let mut output = io::BufWriter::new(secure_file(&path)?);
         write_snapshot_record(&path, &mut output, cursor.header())?;
@@ -70,13 +78,16 @@ impl SessionSnapshot {
             };
             write_snapshot_record(&path, &mut output, &record)?;
         }
+
         if event_count.is_some_and(|count| return cursor.next_event_seq() != count) {
             return Err(Error::invalid("requested snapshot prefix is unavailable"));
         }
+
         let _pending = cursor.finish_snapshot()?;
         output
             .flush()
             .map_err(|error| return Error::filesystem(&path, error))?;
+
         return Ok(Self { directory });
     }
 
@@ -98,9 +109,11 @@ fn write_snapshot_record(
             source,
         };
     })?;
+
     output
         .write_all(b"\n")
         .map_err(|error| return Error::filesystem(path, error))?;
+
     return Ok(());
 }
 
@@ -118,34 +131,43 @@ fn write_snapshot_record(
 pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryReport> {
     let destination =
         absolute(destination).map_err(|error| return Error::filesystem(destination, error))?;
+
     let parent = destination
         .parent()
         .ok_or_else(|| return Error::invalid("recovery destination has no parent"))?;
+
     let staging = tempfile::Builder::new()
         .prefix(".termtrace-recovery-")
         .permissions(fs::Permissions::from_mode(0o700))
         .tempdir_in(parent)
         .map_err(|error| return Error::filesystem(parent, error))?;
+
     copy_context_file(
         &source.join("session.json"),
         &staging.path().join("session.json"),
     )?;
+
     let manifest = read_manifest(staging.path())?;
     validate_manifest(&manifest)?;
+
     if let Some(profile) = &manifest.ghostty_visual {
         copy_context_file(
             &source.join(&profile.replay_profile),
             &staging.path().join(&profile.replay_profile),
         )?;
+
         validate_replay_profile_file(staging.path(), &manifest)?;
     }
+
     let mut report = EventLog::recover_prefix(
         source.join("events.jsonl"),
         staging.path().join("events.jsonl"),
     )?;
+
     let summary = EventLogSummary::read(staging.path().join("events.jsonl"))?;
     let manifest_bytes = fs::read(staging.path().join("session.json"))
         .map_err(|error| return Error::filesystem(staging.path().join("session.json"), error))?;
+
     if summary.header.session_id != manifest.session_id
         || summary.header.session_manifest_hash != manifest_hash(&manifest_bytes)
     {
@@ -153,6 +175,7 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
             "recovered event header does not bind the source session manifest",
         ));
     }
+
     report.recovered = destination.join("events.jsonl");
     let recovery_path = staging.path().join("recovery.json");
     let bytes = serde_json::to_vec(&serde_json::json!({
@@ -171,9 +194,12 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
             source,
         };
     })?;
+
     write_secure(&recovery_path, &bytes)?;
+
     sync_directory(staging.path())?;
     commit_directory(parent, staging.path(), &destination)?;
+
     return Ok(report);
 }
 
@@ -182,14 +208,18 @@ fn copy_context_file(source: &Path, destination: &Path) -> Result<()> {
     if size > 4 * 1024 * 1024 {
         return Err(Error::invalid("recovery context file exceeds 4 MiB"));
     }
+
     let mut output = secure_file(destination)?;
     let copied = io::copy(&mut input.take(4 * 1024 * 1024 + 1), &mut output)
         .map_err(|error| return Error::filesystem(destination, error))?;
+
     if copied > 4 * 1024 * 1024 {
         return Err(Error::invalid("recovery context file grew beyond 4 MiB"));
     }
+
     output
         .sync_all()
         .map_err(|error| return Error::filesystem(destination, error))?;
+
     return Ok(());
 }

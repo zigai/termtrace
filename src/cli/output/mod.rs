@@ -7,7 +7,7 @@ use std::{
 use miette::{IntoDiagnostic as _, Result};
 use termtrace_model::{
     protocol::{
-        cli_response::{Applied, CLI_RESPONSE_VERSION, CliResponseEnvelope, Retry, SessionState},
+        cli_response::{Applied, CliResponseEnvelope, Retry, SessionState, CLI_RESPONSE_VERSION},
         output_projection::OutputProjectionQuality,
     },
     terminal::state::RowState,
@@ -16,8 +16,8 @@ use termtrace_model::{
 
 use crate::cli::analysis::args::PageArgs;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use clap::{ValueEnum, error::ErrorKind as ClapErrorKind};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use clap::{error::ErrorKind as ClapErrorKind, ValueEnum};
 
 const MAX_AGENT_RESPONSE_BYTES: usize = 64 * 1024;
 const MAX_CAPTURE_BYTES: usize = 256 * 1024;

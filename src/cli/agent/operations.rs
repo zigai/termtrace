@@ -12,7 +12,7 @@ use termtrace_engine::{
     analysis::diagnostics::diagnose_session,
     diff::diff_session_states_with_semantic_states,
     inspection::{wait_for_completion, wait_for_output},
-    observation::{CaptureQuality, resolved_screen_state_for_session},
+    observation::{resolved_screen_state_for_session, CaptureQuality},
     registry::SessionRegistry,
     timeline::build_session_timeline_page,
 };
@@ -30,19 +30,19 @@ use termtrace_model::{
     artifact::bundle::BundleVerificationPolicy,
     artifact::save::SaveFormat,
     execution::environment::EnvironmentSpec,
-    execution::event::{EVENT_LOG_VERSION, EventProjection},
+    execution::event::{EventProjection, EVENT_LOG_VERSION},
     execution::session::ResourceLimits,
     protocol::capability::NATIVE_SCREENSHOT_CAPABILITY,
     protocol::control::{
-        CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlErrorDetails, ControlRequest,
-        ControlResponse, ControlResult,
+        ControlCommand, ControlData, ControlErrorDetails, ControlRequest, ControlResponse,
+        ControlResult, CONTROL_PROTOCOL_VERSION,
     },
     terminal::observation::StatePoint,
     terminal::replay::STATE_FORMAT_VERSION,
     terminal::screen::ScreenFrameError,
     value::ByteString,
 };
-use termtrace_sdk::{Error, Result, Terminal, observe_session_with_options, send_request_response};
+use termtrace_sdk::{observe_session_with_options, send_request_response, Error, Result, Terminal};
 use termtrace_terminal::project_screen_frame;
 use uuid::Uuid;
 
@@ -50,8 +50,9 @@ use crate::cli::tooling::require_capability;
 
 use super::runtime::{Driver, SessionOwnership};
 use termtrace_model::protocol::driver::{
-    DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION, DriverData,
-    DriverMethod, DriverRequest, DriverResponse, DriverResult, DriverScreenshotRenderer,
+    DriverData, DriverMethod, DriverRequest, DriverResponse, DriverResult,
+    DriverScreenshotRenderer, DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES,
+    DRIVER_PROTOCOL_VERSION,
 };
 
 impl Driver {
@@ -118,6 +119,7 @@ impl Driver {
                     control
                         .expected_presented_state_hash
                         .clone_from(expected_presented_state_hash);
+
                     match send_request_response(path, &control) {
                         Ok(response) => match response.result {
                             ControlResult::Ok { data } => Ok(DriverData::Control { data }),
@@ -128,6 +130,7 @@ impl Driver {
                             } => {
                                 let (retry_safety, uncertain) =
                                     actor_failure_retry(&code, details.as_ref());
+
                                 Err(driver_failure_with_retry(
                                     &code,
                                     message,
@@ -151,6 +154,7 @@ impl Driver {
                     timeout_ms,
                 } => {
                     let path = self.session_path(handle)?;
+
                     wait_for_output(path, data.as_bytes(), Duration::from_millis(*timeout_ms))
                         .map(|outcome| return DriverData::OutputWait { outcome })
                         .map_err(|error| {
@@ -159,6 +163,7 @@ impl Driver {
                 }
                 DriverMethod::Completion { handle } => {
                     let path = self.session_path(handle)?;
+
                     read_completion(path)
                         .map(|completion| return DriverData::Completion { completion })
                         .map_err(|error| {
@@ -171,7 +176,9 @@ impl Driver {
                         .map_err(|error| {
                             return driver_failure_from_error(error, Some(path.clone()));
                         })?;
+
                     self.reap_recorder(handle, &path)?;
+
                     Ok(DriverData::Completion { completion })
                 }
                 DriverMethod::DiscardCompleted { handle } => {
@@ -182,6 +189,7 @@ impl Driver {
                             None,
                         );
                     })?;
+
                     if !matches!(session.ownership, SessionOwnership::Launched { .. }) {
                         return Err(driver_failure(
                             "evidence_not_driver_owned",
@@ -189,10 +197,12 @@ impl Driver {
                             Some(session.path.clone()),
                         ));
                     }
+
                     let path = session.path.clone();
                     validate_completed_session(&path).map_err(|error| {
                         return driver_failure_from_error(error, Some(path.clone()));
                     })?;
+
                     self.reap_recorder(handle, &path)?;
                     fs_err::remove_dir_all(&path).map_err(|error| {
                         return driver_failure(
@@ -206,8 +216,10 @@ impl Driver {
                             return driver_failure_from_error(error, Some(path.clone()));
                         })?;
                     }
+
                     self.close_native(handle);
                     self.sessions.remove(handle);
+
                     Ok(DriverData::Discarded {
                         evidence_removed: true,
                     })
@@ -218,6 +230,7 @@ impl Driver {
                     include_hidden,
                 } => {
                     let path = self.session_path(handle)?;
+
                     observe_session_with_options(path, point.clone(), *include_hidden)
                         .map(|observation| {
                             return DriverData::Observation {
@@ -235,12 +248,14 @@ impl Driver {
                     projection,
                 } => {
                     let path = self.session_path(handle)?;
+
                     if path.join("completion.json").is_file() {
                         let (state, source, presented) =
                             resolved_screen_state_for_session(path, point.clone(), *include_hidden)
                                 .map_err(|error| {
                                     return driver_failure_from_error(error, Some(path.clone()));
                                 })?;
+
                         project_screen_frame(
                             &state,
                             projection,
@@ -263,6 +278,7 @@ impl Driver {
                                 Some(path.clone()),
                             ));
                         }
+
                         let control = ControlRequest {
                             version: CONTROL_PROTOCOL_VERSION,
                             request_id: request.request_id,
@@ -271,6 +287,7 @@ impl Driver {
                                 projection: *projection,
                             },
                         };
+
                         match send_request_response(path, &control) {
                             Ok(ControlResponse {
                                 result:
@@ -298,6 +315,7 @@ impl Driver {
                             }) => {
                                 let (retry_safety, uncertain) =
                                     actor_failure_retry(&code, details.as_ref());
+
                                 Err(driver_failure_with_retry(
                                     &code,
                                     message,
@@ -330,6 +348,7 @@ impl Driver {
                             Some(path.clone()),
                         ));
                     }
+
                     build_session_timeline_page(path, *all_states, *controls, None, *offset, *limit)
                         .map(|page| {
                             return DriverData::Timeline {
@@ -343,6 +362,7 @@ impl Driver {
                 }
                 DriverMethod::Diff { handle, from, to } => {
                     let path = self.session_path(handle)?;
+
                     diff_session_states_with_semantic_states(path, from.clone(), to.clone())
                         .map(|(difference, _, _)| {
                             return DriverData::Diff {
@@ -366,9 +386,11 @@ impl Driver {
                             Some(path.clone()),
                         ));
                     }
+
                     let visual_evidence = validated_visual_manifests(path).map_err(|error| {
                         return driver_failure_from_error(error, Some(path.clone()));
                     })?;
+
                     diagnose_session(
                         path,
                         checks.clone(),
@@ -394,18 +416,22 @@ impl Driver {
                             Some(path.clone()),
                         ));
                     }
+
                     let records =
                         EventLog::read_page(path.join("events.jsonl"), *from_event_seq, *limit)
                             .map_err(|error| {
                                 return driver_failure_from_error(error, Some(path.clone()));
                             })?;
+
                     let events = records
                         .iter()
                         .map(|record| return EventProjection::from_record(record, *metadata_only))
                         .collect::<Vec<_>>();
+
                     let next_event_seq = events
                         .last()
                         .map_or(*from_event_seq, |event| return event.seq.saturating_add(1));
+
                     Ok(DriverData::Events {
                         events,
                         next_event_seq,
@@ -420,6 +446,7 @@ impl Driver {
                     max_bytes,
                 } => {
                     let path = self.session_path(handle)?.clone();
+
                     match renderer {
                         DriverScreenshotRenderer::Semantic => save(
                             &path,
@@ -431,6 +458,7 @@ impl Driver {
                         )
                         .and_then(|outcome| {
                             verify_saved_artifact(&outcome.directory, &outcome.manifest)?;
+
                             return Ok(DriverData::Artifact {
                                 artifact_type: "semantic_screenshot".to_owned(),
                                 directory: outcome.directory.clone(),
@@ -450,9 +478,11 @@ impl Driver {
                                     Some(path),
                                 ));
                             }
+
                             require_capability(NATIVE_SCREENSHOT_CAPABILITY).map_err(|error| {
                                 return driver_failure_from_error(error, Some(path.clone()));
                             })?;
+
                             self.native_screenshot(*handle, &path, point, destination, *viewport)
                                 .map(|outcome| {
                                     return DriverData::Artifact {
@@ -471,6 +501,7 @@ impl Driver {
                 }
                 DriverMethod::Verify { handle, level } => {
                     let path = self.session_path(handle)?;
+
                     Ok(DriverData::Verification {
                         report: Box::new(verify_session(path, *level)),
                     })
@@ -487,10 +518,12 @@ impl Driver {
                             return driver_failure_from_error(error, Some(path.clone()));
                         },
                     )?;
+
                     let policy = BundleVerificationPolicy::new(path, *profile);
                     let verified = verify_bundle(destination, &policy).map_err(|error| {
                         return driver_failure_from_error(error, Some(path.clone()));
                     })?;
+
                     if verified != manifest {
                         return Err(driver_failure(
                             "bundle_verification_failed",
@@ -498,6 +531,7 @@ impl Driver {
                             Some(path.clone()),
                         ));
                     }
+
                     Ok(DriverData::Bundle {
                         directory: destination.clone(),
                         manifest: verified,
@@ -506,6 +540,7 @@ impl Driver {
                 DriverMethod::Detach { handle } => {
                     self.close_native(handle);
                     self.detach_recorder(handle);
+
                     if self.sessions.remove(handle).is_none() {
                         return Err(driver_failure(
                             "unknown_handle",
@@ -513,10 +548,12 @@ impl Driver {
                             None,
                         ));
                     }
+
                     Ok(DriverData::Detached)
                 }
             };
         })();
+
         return match result {
             Ok(data) => DriverResponse {
                 version: DRIVER_PROTOCOL_VERSION,
@@ -544,11 +581,13 @@ impl Driver {
     fn attach(&mut self, reference: &Path) -> StdResult<DriverData, Box<DriverResult>> {
         let path = resolve_reference(reference)
             .map_err(|error| return driver_failure_from_error(error, None))?;
+
         let canonical = path.canonicalize().map_err(|error| {
             return driver_failure("session_unavailable", error.to_string(), Some(path.clone()));
         })?;
         let manifest = read_manifest(&canonical)
             .map_err(|error| return driver_failure_from_error(error, Some(canonical.clone())))?;
+
         let handle = Uuid::now_v7();
         self.sessions.insert(
             handle,
@@ -557,6 +596,7 @@ impl Driver {
                 ownership: super::runtime::SessionOwnership::External,
             },
         );
+
         return Ok(DriverData::Attached {
             handle,
             session_id: manifest.session_id,
@@ -582,14 +622,17 @@ impl Driver {
                 Some(evidence_root.to_path_buf()),
             ));
         }
+
         let binary = env::current_exe().map_err(|error| {
             return driver_failure("launch_failed", error.to_string(), None);
         })?;
+
         let terminal = Terminal::new(binary, evidence_root);
         let command = command
             .iter()
             .map(|argument| return OsString::from_vec(argument.as_bytes().to_vec()))
             .collect::<Vec<_>>();
+
         let mut builder = terminal
             .launch(command)
             .geometry(cols, rows)
@@ -597,12 +640,15 @@ impl Driver {
         if let Some(limit) = resource_limits.output_bytes {
             builder = builder.output_byte_budget(limit);
         }
+
         if let Some(directory) = working_directory {
             builder = builder.working_directory(directory);
         }
+
         let session = builder.start().map_err(|error| {
             return driver_failure_from_error(error, Some(evidence_root.to_path_buf()));
         })?;
+
         let session_id = session.session_id();
         let completed = session.path().join("completion.json").is_file();
         let (canonical_session, recorder) = session.into_detached_parts();
@@ -614,6 +660,7 @@ impl Driver {
                 ownership: super::runtime::SessionOwnership::Launched { recorder },
             },
         );
+
         return Ok(DriverData::Attached {
             handle,
             session_id,
@@ -639,6 +686,7 @@ impl Driver {
                 Some(path.to_path_buf()),
             );
         })?;
+
         return Ok(());
     }
 
@@ -665,12 +713,14 @@ pub(super) fn resolve_reference(reference: &Path) -> Result<PathBuf> {
     if let Some(path) = text.strip_prefix("path:") {
         return Ok(PathBuf::from(path));
     }
+
     let name = text.strip_prefix("name:").unwrap_or(&text);
     if !name.contains('/') && !name.starts_with('.') {
         return Ok(SessionRegistry::open_default()?
             .resolve(name)?
             .session_path());
     }
+
     return Ok(reference.to_path_buf());
 }
 
@@ -704,6 +754,7 @@ where
         ),
         _ => ("operation_failed".to_owned(), error.to_string()),
     };
+
     return driver_failure(&code, message, evidence);
 }
 
@@ -736,15 +787,12 @@ pub(super) fn driver_control_failure_from_error(
         _ => ("control_failed", true),
     };
     let uncertain = mutation && dispatched;
+
     return driver_failure_with_retry(
         code,
         error.to_string(),
         Some(evidence),
-        if uncertain {
-            "safe_same_request_id"
-        } else {
-            "safe_new_request"
-        },
+        if uncertain { "safe_same_request_id" } else { "safe_new_request" },
         uncertain,
         None,
     );
@@ -757,15 +805,19 @@ pub(super) fn actor_failure_retry(
     if details.is_some_and(|value| return value.scope == "action_terminating_screen_frame") {
         return ("safe_same_request_id", false);
     }
+
     if code == "input_sequence_incomplete" {
         let uncertain = details
             .and_then(|value| return value.input_sequence.as_ref())
             .is_some_and(|sequence| return sequence.failed_atom_bytes_written != 0);
+
         return ("safe_same_request_id", uncertain);
     }
+
     if code == "input_write_failed" {
         return ("safe_same_request_id", true);
     }
+
     return ("safe_new_request", false);
 }
 

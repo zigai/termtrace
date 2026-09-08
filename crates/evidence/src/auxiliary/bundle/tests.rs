@@ -20,12 +20,14 @@ fn generation_budget_is_shared_by_members_and_manifest() {
         source_final_event_hash: "a".repeat(64),
         includes_canonical_evidence: false,
     };
+
     let metadata = BundleMemberMetadata {
         media_type: "text/plain".to_owned(),
         schema_type: None,
         sensitivity: ArtifactSensitivity::SensitiveTerminalData,
         relationship: "selected_screen".to_owned(),
     };
+
     let mut draft = BundleDraft::create(&destination, identity, Some(5)).expect("draft");
     draft
         .add_member_bytes("first.txt", metadata.clone(), b"abc")
@@ -39,6 +41,7 @@ fn generation_budget_is_shared_by_members_and_manifest() {
         writer.write_all(b"de").expect("remaining shared budget");
         writer.finish().expect("finished second member");
     }
+
     assert_eq!(
         fs_err::metadata(staging.join("first.txt"))
             .expect("first metadata")
@@ -68,6 +71,7 @@ fn direct_and_archived_manifests_share_the_byte_limit() {
         vec![b' '; usize::try_from(MAX_BUNDLE_MANIFEST_BYTES + 1).expect("test size")],
     )
     .expect("oversized direct manifest");
+
     let direct_error = read_bounded_regular_file(&direct, MAX_BUNDLE_MANIFEST_BYTES)
         .expect_err("direct manifest must be bounded");
     assert!(direct_error.to_string().contains("exceeds"));
@@ -159,6 +163,7 @@ fn archive_rejects_nonzero_member_padding() {
 
     let archive = temporary.path().join("nonzero-padding.tar.zst");
     write_compressed_tar(&archive, &tar_bytes);
+
     let destination = temporary.path().join("nonzero-padding");
     create_private_directory(&destination).expect("extraction directory");
     let error = extract_archive(&archive, &destination)
@@ -181,6 +186,7 @@ fn identity_mismatch_rejects_before_member_validation() {
         source_final_event_hash: "a".repeat(64),
         includes_canonical_evidence: false,
     };
+
     let invalid_member = ArtifactMember {
         path: "../attacker-controlled".to_owned(),
         byte_length: u64::MAX,
@@ -198,13 +204,12 @@ fn identity_mismatch_rejects_before_member_validation() {
         serde_json::to_vec(&policy_mismatch).expect("policy mismatch manifest"),
     )
     .expect("write policy mismatch manifest");
+
     let policy_error = verify(temporary.path(), Some(&expected))
         .expect_err("profile mismatch must reject before invalid member metadata");
-    assert!(
-        policy_error
-            .to_string()
-            .contains("caller-owned source identity")
-    );
+    assert!(policy_error
+        .to_string()
+        .contains("caller-owned source identity"));
 
     let mut canonical_mismatch = expected.manifest(vec![invalid_member]);
     canonical_mismatch.session_id = Uuid::from_u128(1);
@@ -213,11 +218,10 @@ fn identity_mismatch_rejects_before_member_validation() {
         serde_json::to_vec(&canonical_mismatch).expect("canonical mismatch manifest"),
     )
     .expect("write canonical mismatch manifest");
+
     let canonical_error = verify(temporary.path(), Some(&expected))
         .expect_err("canonical mismatch must reject before invalid member metadata");
-    assert!(
-        canonical_error
-            .to_string()
-            .contains("canonical source identity")
-    );
+    assert!(canonical_error
+        .to_string()
+        .contains("canonical source identity"));
 }

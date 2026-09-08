@@ -4,17 +4,17 @@ use std::{process::ExitCode, time::Duration};
 
 use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::{
-    Error,
     analysis::reviewer::{
         export_state as export_review_state, search as search_review, summarize as summarize_review,
     },
     inspection::inspect_session,
     observation::{prune_replay_cache, replay_cache_status, state_text},
-    replay::{IndexOptions, StateSelector, index_session_with_options},
+    replay::{index_session_with_options, IndexOptions, StateSelector},
+    Error,
 };
 use termtrace_media::{
     native_capture::validated_visual_manifests,
-    playback::{PlaybackOptions, playback, playback_worker},
+    playback::{playback, playback_worker, PlaybackOptions},
     presentation::markers as list_markers,
 };
 use termtrace_model::terminal::{replay::StateSelection, reviewer::ReviewerCapabilities};
@@ -34,6 +34,7 @@ pub(in crate::cli) fn run_markers(
     arguments: MarkersArgs,
 ) -> Result<ExitCode> {
     let session = resolve_session_path(arguments.session)?;
+
     return write_json_line(
         response,
         &list_markers(session, arguments.fps).into_diagnostic()?,
@@ -47,32 +48,40 @@ pub(in crate::cli) fn run_review(
     if arguments.commands {
         return write_json_line(response, &ReviewerCapabilities::default());
     }
+
     let session = arguments.session.ok_or_else(|| {
         return miette::miette!("review requires SESSION unless --commands is used");
     })?;
+
     let session = resolve_session_path(session)?;
+
     if let (Some(destination), Some(state_id)) = (&arguments.export_state, arguments.state) {
         return write_json_line(
             response,
             &export_review_state(session, state_id, destination).into_diagnostic()?,
         );
     }
+
     if arguments.json {
         if let Some(query) = &arguments.search {
             return write_json_line(response, &search_review(session, query).into_diagnostic()?);
         }
+
         let visual_evidence = validated_visual_manifests(&session).into_diagnostic()?;
+
         return write_json_line(
             response,
             &summarize_review(session, &visual_evidence).into_diagnostic()?,
         );
     }
+
     run_reviewer(
         session,
         arguments.around_marker.as_deref(),
         arguments.search.as_deref(),
     )
     .into_diagnostic()?;
+
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -86,13 +95,16 @@ pub(in crate::cli) fn run_index(
         })
         .into_diagnostic();
     }
+
     let (start_monotonic_ns, end_monotonic_ns) =
         resolve_cli_range(&arguments.session, &arguments.range)?;
+
     let state_selection = if arguments.presented_only {
         StateSelection::Presented
     } else {
         StateSelection::All
     };
+
     let outcome = index_session_with_options(
         arguments.session,
         IndexOptions {
@@ -103,6 +115,7 @@ pub(in crate::cli) fn run_index(
         },
     )
     .into_diagnostic()?;
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -132,6 +145,7 @@ pub(in crate::cli) fn run_playback(arguments: PlaybackArgs) -> Result<ExitCode> 
         instant: arguments.instant,
     })
     .into_diagnostic()?;
+
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -142,6 +156,7 @@ pub(in crate::cli) fn run_playback_worker(arguments: PlaybackWorkerArgs) -> Resu
         &arguments.geometry_file,
     )
     .into_diagnostic()?;
+
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -166,6 +181,7 @@ pub(in crate::cli) fn run_inspect(
             ));
         }
     };
+
     let inspection = inspect_session(arguments.session, selector).into_diagnostic()?;
     if let Some(row_number) = arguments.row {
         let row = inspection
@@ -174,6 +190,7 @@ pub(in crate::cli) fn run_inspect(
             .iter()
             .find(|row| return row.row == row_number)
             .ok_or_else(|| miette::miette!("semantic row {row_number} does not exist"))?;
+
         let record = serde_json::json!({
             "state_id": inspection.record.state_id,
             "event_seq": inspection.record.event_seq,
@@ -182,6 +199,7 @@ pub(in crate::cli) fn run_inspect(
             "state_hash": inspection.record.state_hash,
             "presented": inspection.record.presented,
         });
+
         return match arguments.format {
             InspectFormat::Json => write_stdout(
                 response,
@@ -204,6 +222,7 @@ pub(in crate::cli) fn run_inspect(
             InspectFormat::Text => write_stdout(response, format!("{}\n", row_text(row))),
         };
     }
+
     match arguments.format {
         InspectFormat::Json => {
             return write_stdout(
@@ -228,10 +247,12 @@ pub(in crate::cli) fn run_cache(
     return match arguments.command {
         CacheCommand::Status(arguments) => {
             let session = resolve_session_path(arguments.session)?;
+
             write_json_line(response, &replay_cache_status(&session).into_diagnostic()?)
         }
         CacheCommand::Prune(arguments) => {
             let session = resolve_session_path(arguments.session)?;
+
             write_json_line(response, &prune_replay_cache(&session).into_diagnostic()?)
         }
     };

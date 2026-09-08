@@ -11,6 +11,7 @@ fn tmux_video_uses_shared_optional_presentation_frame_rates() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("video FPS must be 24, 30, or 60"));
+
     Command::cargo_bin("termtrace")
         .expect("binary should build")
         .args(["tmux", "video", "--help"])

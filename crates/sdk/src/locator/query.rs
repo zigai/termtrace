@@ -5,8 +5,8 @@ use std::{error::Error as StdError, fmt, ops::RangeInclusive, sync::Arc};
 use regex::Regex;
 use termtrace_model::{
     terminal::screen::{
-        MAX_SCREEN_FRAME_CELLS, MAX_SCREEN_FRAME_JSON_BYTES, ScreenAppearance, ScreenFrame,
-        ScreenFrameData, ScreenRegion,
+        ScreenAppearance, ScreenFrame, ScreenFrameData, ScreenRegion, MAX_SCREEN_FRAME_CELLS,
+        MAX_SCREEN_FRAME_JSON_BYTES,
     },
     terminal::state::{ColorSpec, Rgb, WideKind},
 };
@@ -108,6 +108,7 @@ pub struct StyleFilter {
 impl StyleFilter {
     pub(crate) fn matches(&self, appearance: &ScreenAppearance, wide_kind: WideKind) -> bool {
         let style = &appearance.style;
+
         return option_matches(&self.foreground, &style.foreground)
             && option_matches(&self.background, &style.background)
             && option_matches(&self.underline_color, &style.underline_color)
@@ -161,6 +162,7 @@ impl LocatorSpec {
                 reason: "literal text must not be empty".to_owned(),
             });
         }
+
         return Ok(Self {
             matcher: Some(TextMatcher::Literal {
                 text: Arc::from(text),
@@ -178,11 +180,13 @@ impl LocatorSpec {
                 reason: "regex source must not be empty".to_owned(),
             });
         }
+
         let regex = Regex::new(&source).map_err(|error| {
             return QueryError::InvalidQuery {
                 reason: bounded_text(&error.to_string()).0,
             };
         })?;
+
         return Self::regex(regex);
     }
 
@@ -193,7 +197,9 @@ impl LocatorSpec {
                 reason: "regex can produce a zero-width match".to_owned(),
             });
         }
+
         let source: Arc<str> = Arc::from(regex.as_str());
+
         return Ok(Self {
             matcher: Some(TextMatcher::NativeRegex {
                 source,
@@ -207,6 +213,7 @@ impl LocatorSpec {
     #[must_use]
     pub fn in_row(mut self, row: u16) -> Self {
         self.row = Some(row);
+
         return self;
     }
 
@@ -217,7 +224,9 @@ impl LocatorSpec {
                 reason: "query region must be nonempty".to_owned(),
             });
         }
+
         self.region = Some(region);
+
         return Ok(self);
     }
 
@@ -225,6 +234,7 @@ impl LocatorSpec {
     #[must_use]
     pub fn with_style(mut self, style: StyleFilter) -> Self {
         self.style = Some(style);
+
         return self;
     }
 
@@ -232,6 +242,7 @@ impl LocatorSpec {
     #[must_use]
     pub fn across_soft_wraps(mut self, enabled: bool) -> Self {
         self.cross_soft_wraps = enabled;
+
         return self;
     }
 
@@ -242,11 +253,13 @@ impl LocatorSpec {
                 reason: "a composed locator may contain only one text matcher".to_owned(),
             });
         }
+
         if self.row.is_some() && other.row.is_some() && self.row != other.row {
             return Err(QueryError::InvalidQuery {
                 reason: "composed row scopes conflict".to_owned(),
             });
         }
+
         let region = match (self.region, other.region) {
             (Some(left), Some(right)) => {
                 let intersection = ScreenRegion {
@@ -255,6 +268,7 @@ impl LocatorSpec {
                     bottom: left.bottom.min(right.bottom),
                     right: left.right.min(right.right),
                 };
+
                 if intersection.top >= intersection.bottom
                     || intersection.left >= intersection.right
                 {
@@ -262,16 +276,19 @@ impl LocatorSpec {
                         reason: "composed region scopes do not intersect".to_owned(),
                     });
                 }
+
                 Some(intersection)
             }
             (Some(region), None) | (None, Some(region)) => Some(region),
             (None, None) => None,
         };
+
         if self.style.is_some() && other.style.is_some() {
             return Err(QueryError::InvalidQuery {
                 reason: "a composed locator may contain only one style filter".to_owned(),
             });
         }
+
         let row = self.row.or(other.row);
         if let (Some(row), Some(region)) = (row, region)
             && (row < region.top || row >= region.bottom)
@@ -280,6 +297,7 @@ impl LocatorSpec {
                 reason: "composed row and region scopes do not intersect".to_owned(),
             });
         }
+
         return Ok(Self {
             matcher: self.matcher.or(other.matcher),
             row,
@@ -303,13 +321,16 @@ impl LocatorSpec {
             }
             None => "cells".to_owned(),
         };
+
         let (text, truncated) = bounded_text(&format!(
             "{matcher}; row={:?}; region={:?}; style={:?}; cross_soft_wraps={}",
             self.row, self.region, self.style, self.cross_soft_wraps
         ));
+
         return QueryDescription { text, truncated };
     }
 }
+
 fn regex_can_match_zero_width(regex: &Regex) -> bool {
     const PROBES: [&str; 9] = ["", "a", "α", "_", "!", "\n", "\r\n", "a!", "!a"];
     return PROBES.iter().any(|probe| {
@@ -543,6 +564,7 @@ impl QueryResult {
         return &self.frame;
     }
 }
+
 fn multiple_matches(
     spec: &LocatorSpec,
     frame: &ScreenFrame,
@@ -553,6 +575,7 @@ fn multiple_matches(
         .take(MAX_DIAGNOSTIC_MATCHES)
         .filter_map(|screen_match| return screen_match.ranges.first().copied())
         .collect();
+
     return QueryError::MultipleMatches {
         query: spec.description(),
         count: matches.len(),
@@ -565,6 +588,7 @@ fn multiple_matches(
 
 fn bounded_text(text: &str) -> (String, bool) {
     let end = text.floor_char_boundary(MAX_DIAGNOSTIC_CHARS);
+
     return (
         text.get(..end).unwrap_or_default().to_owned(),
         end != text.len(),
@@ -604,6 +628,7 @@ impl QueryBudget {
                 maximum: MAX_QUERY_CELL_WORK,
             });
         }
+
         return Ok(());
     }
 
@@ -615,6 +640,7 @@ impl QueryBudget {
                 maximum: MAX_QUERY_MATCHED_CELLS,
             });
         }
+
         self.text_bytes = self.text_bytes.saturating_add(text_bytes);
         if self.text_bytes > MAX_QUERY_TEXT_BYTES {
             return Err(QueryError::ResourceLimit {
@@ -622,6 +648,7 @@ impl QueryBudget {
                 maximum: MAX_QUERY_TEXT_BYTES,
             });
         }
+
         return Ok(());
     }
 }
@@ -652,6 +679,7 @@ pub(super) fn query_frame(
             ),
         });
     }
+
     if let Some(row) = spec.row
         && (row < frame.returned_region.top || row >= frame.returned_region.bottom)
     {
@@ -662,6 +690,7 @@ pub(super) fn query_frame(
             ),
         });
     }
+
     if let Some(region) = spec.region {
         if region.top >= region.bottom
             || region.left >= region.right
@@ -675,7 +704,9 @@ pub(super) fn query_frame(
                 ),
             });
         }
+
         let returned = frame.returned_region;
+
         if region.top < returned.top
             || region.left < returned.left
             || region.bottom > returned.bottom
@@ -688,6 +719,7 @@ pub(super) fn query_frame(
             });
         }
     }
+
     if let (Some(row), Some(region)) = (spec.row, spec.region)
         && (row < region.top || row >= region.bottom)
     {
@@ -695,6 +727,7 @@ pub(super) fn query_frame(
             reason: "row and region scopes do not intersect".to_owned(),
         });
     }
+
     let rows = logical_rows(&frame)?;
     let mut matches = evaluate_rows(&frame, rows, &spec)?;
     matches.sort_by_key(|screen_match| {
@@ -704,6 +737,7 @@ pub(super) fn query_frame(
             end_column: u16::MAX,
         });
     });
+
     return Ok(QueryResult {
         frame,
         spec,
@@ -723,6 +757,7 @@ fn evaluate_rows(
     } else {
         rows
     };
+
     for row in &grouped_rows {
         let selected: Vec<usize> = row
             .cells
@@ -737,6 +772,7 @@ fn evaluate_rows(
         if selected.is_empty() {
             continue;
         }
+
         match &spec.matcher {
             Some(TextMatcher::Literal { text, kind }) => {
                 evaluate_literal(
@@ -758,6 +794,7 @@ fn evaluate_rows(
             }
         }
     }
+
     return Ok(output);
 }
 
@@ -772,13 +809,16 @@ fn soft_wrap_groups(rows: Vec<LogicalRow>) -> Vec<LogicalRow> {
             previous.soft_wrapped = row.soft_wrapped;
             continue;
         }
+
         groups.push(row);
     }
+
     return groups;
 }
 
 fn selected_text(row: &LogicalRow, selected: &[usize]) -> (String, Vec<(usize, usize, usize)>) {
     let mut text = String::new();
+
     let mut boundaries: Vec<(usize, usize, usize)> = Vec::with_capacity(selected.len());
     for index in selected {
         if let Some(cell) = row.cells.get(*index) {
@@ -787,6 +827,7 @@ fn selected_text(row: &LogicalRow, selected: &[usize]) -> (String, Vec<(usize, u
             boundaries.push((start, text.len(), *index));
         }
     }
+
     return (text, boundaries);
 }
 
@@ -814,8 +855,10 @@ fn evaluate_literal(
                 budget,
             )?;
         }
+
         return Ok(());
     }
+
     for (start, _, _) in &boundaries {
         if !haystack
             .get(*start..)
@@ -823,6 +866,7 @@ fn evaluate_literal(
         {
             continue;
         }
+
         push_byte_match(
             frame,
             row,
@@ -834,6 +878,7 @@ fn evaluate_literal(
             budget,
         )?;
     }
+
     return Ok(());
 }
 
@@ -853,6 +898,7 @@ fn evaluate_regex(
                 reason: "regex produced a zero-width match".to_owned(),
             });
         }
+
         push_byte_match(
             frame,
             row,
@@ -864,6 +910,7 @@ fn evaluate_regex(
             budget,
         )?;
     }
+
     return Ok(());
 }
 
@@ -890,6 +937,7 @@ fn push_byte_match(
     }) {
         return Ok(());
     }
+
     let text_bytes = matched_boundaries
         .iter()
         .filter_map(|(_, _, index)| return row.cells.get(*index))
@@ -897,10 +945,12 @@ fn push_byte_match(
             return total.saturating_add(cell.grapheme.len());
         });
     budget.charge_match(matched_boundaries.len(), text_bytes)?;
+
     let cells: Vec<&LogicalCell> = matched_boundaries
         .iter()
         .filter_map(|(_, _, index)| return row.cells.get(*index))
         .collect();
+
     return push_match(output, make_match(frame, spec, &cells));
 }
 
@@ -912,9 +962,11 @@ fn matched_boundary_range(
     let start_boundary = boundaries
         .binary_search_by_key(&start, |(cell_start, _, _)| return *cell_start)
         .ok();
+
     let end_boundary = boundaries
         .binary_search_by_key(&end, |(_, cell_end, _)| return *cell_end)
         .ok();
+
     return match (start_boundary, end_boundary) {
         (Some(start_boundary), Some(end_boundary)) => Ok(start_boundary..=end_boundary),
         _ => Err(QueryError::InvalidQuery {
@@ -936,7 +988,9 @@ fn evaluate_style_ranges(
         let Some(cell) = row.cells.get(*index) else {
             continue;
         };
+
         budget.charge_work(1)?;
+
         let contiguous = run
             .last()
             .is_none_or(|previous| return previous.end_column == cell.column);
@@ -944,17 +998,21 @@ fn evaluate_style_ranges(
             run.push(cell);
             continue;
         }
+
         if !run.is_empty() {
             charge_and_push_match(frame, spec, &run, output, budget)?;
             run.clear();
         }
+
         if style_matches(spec.style.as_ref(), cell) {
             run.push(cell);
         }
     }
+
     if !run.is_empty() {
         charge_and_push_match(frame, spec, &run, output, budget)?;
     }
+
     return Ok(());
 }
 
@@ -969,6 +1027,7 @@ fn charge_and_push_match(
         return total.saturating_add(cell.grapheme.len());
     });
     budget.charge_match(cells.len(), text_bytes)?;
+
     return push_match(output, make_match(frame, spec, cells));
 }
 
@@ -979,7 +1038,9 @@ fn push_match(output: &mut Vec<ScreenMatch>, screen_match: ScreenMatch) -> Resul
             maximum: MAX_QUERY_MATCHES,
         });
     }
+
     output.push(screen_match);
+
     return Ok(());
 }
 
@@ -1006,17 +1067,20 @@ fn make_match(frame: &Arc<ScreenFrame>, spec: &LocatorSpec, cells: &[&LogicalCel
             range.end_column = cell.end_column;
             continue;
         }
+
         ranges.push(MatchRange {
             row: cell.row,
             start_column: cell.column,
             end_column: cell.end_column,
         });
     }
+
     let ranges: Arc<[MatchRange]> = Arc::from(ranges);
     let text: String = cells
         .iter()
         .map(|cell| return cell.grapheme.as_str())
         .collect();
+
     let covered_cells: Vec<MatchedCell> = cells
         .iter()
         .take(MAX_COVERED_CELLS)
@@ -1030,6 +1094,7 @@ fn make_match(frame: &Arc<ScreenFrame>, spec: &LocatorSpec, cells: &[&LogicalCel
             };
         })
         .collect();
+
     return ScreenMatch {
         frame: Arc::clone(frame),
         ranges,
@@ -1047,6 +1112,7 @@ fn logical_rows(frame: &ScreenFrame) -> Result<Vec<LogicalRow>, QueryError> {
             reason: "text detail has no authoritative cell-to-column or appearance map".to_owned(),
         });
     }
+
     let mut rows: Vec<LogicalRow> = Vec::new();
     frame.for_each_cell(|metadata, column, grapheme, wide_kind, appearance| {
         if rows.last().is_none_or(|row| return row.row != metadata.row) {
@@ -1057,15 +1123,14 @@ fn logical_rows(frame: &ScreenFrame) -> Result<Vec<LogicalRow>, QueryError> {
                 cells: Vec::new(),
             });
         }
+
         if wide_kind == WideKind::SpacerTail {
             return;
         }
-        let grapheme = if grapheme.is_empty() {
-            " ".to_owned()
-        } else {
-            grapheme.to_owned()
-        };
+
+        let grapheme = if grapheme.is_empty() { " ".to_owned() } else { grapheme.to_owned() };
         let end_column = column.saturating_add(if wide_kind == WideKind::Wide { 2 } else { 1 });
+
         if let Some(row) = rows.last_mut() {
             row.cells.push(LogicalCell {
                 row: metadata.row,
@@ -1077,6 +1142,7 @@ fn logical_rows(frame: &ScreenFrame) -> Result<Vec<LogicalRow>, QueryError> {
             });
         }
     });
+
     return Ok(rows);
 }
 

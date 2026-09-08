@@ -1,5 +1,6 @@
 # Rust build outputs
 /target/
+*.rlib
 
 # Repository-local bootstrap tools and dependency caches
 /.tools/
@@ -54,3 +55,6 @@ core.*
 # Platform metadata
 .DS_Store
 Thumbs.db
+
+# Statement spacing tool state
+.statement-spacing/

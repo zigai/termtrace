@@ -20,14 +20,14 @@ use termtrace_evidence::artifact::{
 use termtrace_model::{
     artifact::bundle::{BundleProfile, BundleVerificationPolicy},
     artifact::tmux::{
-        TMUX_BUNDLE_FORMAT, TMUX_BUNDLE_VERSION, TMUX_RECORDING_FORMAT, TMUX_RECORDING_VERSION,
         TmuxBundleManifest, TmuxBundleTrack, TmuxRecordingLifecycle, TmuxRecordingManifest,
+        TMUX_BUNDLE_FORMAT, TMUX_BUNDLE_VERSION, TMUX_RECORDING_FORMAT, TMUX_RECORDING_VERSION,
     },
     value::ByteString,
 };
 use uuid::Uuid;
 
-use crate::{Error, Result, bundle};
+use crate::{bundle, Error, Result};
 
 pub mod streaming;
 
@@ -55,11 +55,13 @@ pub fn create(
             destination.display()
         )));
     }
+
     let aggregate_bytes = read_regular_bounded(
         aggregate_manifest,
         MAX_AGGREGATE_MANIFEST_BYTES,
         "aggregate tmux manifest",
     )?;
+
     let aggregate = parse_aggregate(aggregate_manifest, &aggregate_bytes)?;
     validate_aggregate(&aggregate)?;
     let source_tracks = source_tracks(aggregate_manifest, &aggregate)?;
@@ -68,6 +70,7 @@ pub fn create(
     let parent = destination
         .parent()
         .ok_or_else(|| return Error::invalid("tmux evidence export destination has no parent"))?;
+
     let staging = parent.join(format!(".tmux-export-{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
     let cleanup = DirectoryCleanup::new(staging.clone());
@@ -75,16 +78,19 @@ pub fn create(
         &staging.join("aggregate-recording-manifest.json"),
         &aggregate_bytes,
     )?;
+
     if let Some(boundary) = &aggregate.lifecycle_journal {
         let source_directory = aggregate_manifest
             .parent()
             .ok_or_else(|| return Error::invalid("tmux manifest has no parent"))?;
+
         tmux_journal::copy_committed(
             &source_directory.join(tmux_journal::JOURNAL_NAME),
             &staging.join("aggregate-lifecycle.jsonl"),
             boundary,
         )?;
     }
+
     create_private_directory(&staging.join("tracks"))?;
 
     let mut tracks: Vec<TmuxBundleTrack> = Vec::with_capacity(source_tracks.len());
@@ -118,6 +124,7 @@ pub fn create(
         tracks,
         members,
     };
+
     let manifest_path = staging.join("manifest.json");
     let mut manifest_bytes = serde_json::to_vec_pretty(&manifest)
         .map_err(|source| return Error::json(&manifest_path, source))?;
@@ -127,7 +134,9 @@ pub fn create(
             "tmux evidence export manifest exceeds {MAX_TMUX_BUNDLE_MANIFEST_BYTES} bytes"
         )));
     }
+
     write_secure(&manifest_path, &manifest_bytes)?;
+
     verify_contents(
         &staging,
         aggregate_manifest,
@@ -135,9 +144,12 @@ pub fn create(
         &aggregate,
         &source_tracks,
     )?;
+
     sync_directory(&staging)?;
     commit_directory(parent, &staging, destination)?;
+
     cleanup.disarm();
+
     return Ok(manifest);
 }
 
@@ -158,9 +170,11 @@ pub fn verify(
         MAX_AGGREGATE_MANIFEST_BYTES,
         "aggregate tmux manifest",
     )?;
+
     let aggregate = parse_aggregate(aggregate_manifest, &aggregate_bytes)?;
     validate_aggregate(&aggregate)?;
     let source_tracks = source_tracks(aggregate_manifest, &aggregate)?;
+
     return verify_contents(
         directory,
         aggregate_manifest,
@@ -192,9 +206,12 @@ fn source_tracks(
                 "aggregate export exceeds its materialized track budget; use streaming export",
             ));
         }
+
         tracks.push(track);
+
         return Ok(());
     })?;
+
     return Ok(tracks);
 }
 
@@ -206,6 +223,7 @@ fn visit_source_tracks(
     let composite = aggregate.composite_track.session.as_ref().ok_or_else(|| {
         return Error::invalid("aggregate tmux recording has no linked composite track");
     })?;
+
     visit(SourceTrack {
         role: "composite",
         pane_id: None,
@@ -215,6 +233,7 @@ fn visit_source_tracks(
             .session_id
             .ok_or_else(|| return Error::invalid("composite track has no identity"))?,
     })?;
+
     let mut current = aggregate
         .pane_tracks
         .iter()
@@ -224,22 +243,27 @@ fn visit_source_tracks(
         let directory = aggregate_manifest
             .parent()
             .ok_or_else(|| return Error::invalid("aggregate manifest has no parent"))?;
+
         let catalog = TmuxCatalog::read_verified(directory, aggregate)?;
         let mut next = 0;
+
         loop {
             let page = catalog.tracks(next, 128, false)?;
             if page.is_empty() {
                 break;
             }
+
             for entry in page {
                 next = entry
                     .sequence
                     .checked_add(1)
                     .ok_or_else(|| return Error::invalid("tmux catalog sequence overflow"))?;
+
                 current.remove(&(
                     entry.track.pane_id.clone(),
                     path_from_bytes(&entry.track.session),
                 ));
+
                 visit(SourceTrack {
                     role: "pane",
                     pane_id: Some(entry.track.pane_id),
@@ -255,6 +279,7 @@ fn visit_source_tracks(
                     "historical pane track identity differs from its inventory key",
                 ));
             }
+
             current.remove(&(track.pane_id.clone(), path_from_bytes(&track.session)));
             visit(SourceTrack {
                 role: "pane",
@@ -264,11 +289,13 @@ fn visit_source_tracks(
             })?;
         }
     }
+
     if !current.is_empty() {
         return Err(Error::invalid(
             "current pane track is missing from the historical inventory",
         ));
     }
+
     return Ok(());
 }
 
@@ -280,6 +307,7 @@ fn track_directory(index: usize, pane_id: Option<&str>) -> String {
     if pane_id.is_some() {
         return format!("tracks/pane-{index:04}");
     }
+
     return "tracks/composite".to_owned();
 }
 
@@ -289,6 +317,7 @@ fn validate_aggregate(aggregate: &TmuxRecordingManifest) -> Result<()> {
             "unsupported aggregate tmux recording manifest format or version",
         ));
     }
+
     if !matches!(aggregate.lifecycle, TmuxRecordingLifecycle::Completed)
         || !matches!(
             aggregate.composite_track.lifecycle,
@@ -299,6 +328,7 @@ fn validate_aggregate(aggregate: &TmuxRecordingManifest) -> Result<()> {
             "aggregate tmux recording and composite track must be completed before export",
         ));
     }
+
     return Ok(());
 }
 
@@ -310,16 +340,20 @@ fn validate_destination(
     let parent = destination
         .parent()
         .ok_or_else(|| return Error::invalid("tmux evidence export destination has no parent"))?;
+
     let parent = parent
         .canonicalize()
         .map_err(|source| return Error::filesystem(parent, source))?;
+
     let name = destination
         .file_name()
         .ok_or_else(|| return Error::invalid("tmux evidence export destination has no basename"))?;
+
     let candidate = parent.join(name);
     let aggregate_root = aggregate_manifest
         .parent()
         .and_then(|path| return path.canonicalize().ok());
+
     if aggregate_root
         .as_ref()
         .is_some_and(|root| return candidate.starts_with(root))
@@ -328,17 +362,20 @@ fn validate_destination(
             "tmux evidence export destination must be outside the aggregate recording",
         ));
     }
+
     for track in tracks {
         let canonical = track
             .session
             .canonicalize()
             .map_err(|source| return Error::filesystem(&track.session, source))?;
+
         if candidate.starts_with(&canonical) {
             return Err(Error::invalid(
                 "tmux evidence export destination must be outside every canonical track",
             ));
         }
     }
+
     return Ok(());
 }
 
@@ -357,6 +394,7 @@ fn verify_contents(
             |_| return Ok(()),
         )?;
     }
+
     let manifest_path = directory.join("manifest.json");
     let manifest_bytes = read_regular_bounded(
         &manifest_path,
@@ -365,11 +403,13 @@ fn verify_contents(
     )?;
     let manifest: TmuxBundleManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|source| return Error::json(&manifest_path, source))?;
+
     if manifest.format != TMUX_BUNDLE_FORMAT || manifest.version != TMUX_BUNDLE_VERSION {
         return Err(Error::invalid(
             "unsupported tmux evidence export manifest format or version",
         ));
     }
+
     if manifest.recording_id != aggregate.recording_id
         || manifest.recording_name != aggregate.name
         || manifest.aggregate_manifest
@@ -380,21 +420,25 @@ fn verify_contents(
             "tmux evidence export does not bind the requested aggregate recording",
         ));
     }
+
     if manifest.tracks.len() != source_tracks.len() {
         return Err(Error::invalid(
             "tmux evidence export track inventory does not match the aggregate recording",
         ));
     }
+
     let stored_aggregate = read_regular_bounded(
         &directory.join("aggregate-recording-manifest.json"),
         MAX_AGGREGATE_MANIFEST_BYTES,
         "embedded aggregate tmux manifest",
     )?;
+
     if stored_aggregate != aggregate_bytes {
         return Err(Error::invalid(
             "embedded aggregate tmux manifest differs from the trusted source",
         ));
     }
+
     verify_artifact_members(directory, &manifest.members)?;
     for (index, (track, source)) in manifest.tracks.iter().zip(source_tracks.iter()).enumerate() {
         let expected_directory = track_directory(index, source.pane_id.as_deref());
@@ -407,8 +451,10 @@ fn verify_contents(
                 "tmux evidence export track {index} does not match its aggregate relationship"
             )));
         }
+
         let policy = BundleVerificationPolicy::new(&source.session, BundleProfile::Forensic);
         let nested = bundle::verify_profile(&directory.join(&track.directory), &policy)?;
+
         if track.session_id != source.session_id
             || track.session_id != nested.session_id
             || track.source_final_event_hash != nested.source_final_event_hash
@@ -418,12 +464,14 @@ fn verify_contents(
             )));
         }
     }
+
     return Ok(manifest);
 }
 
 fn ensure_bounded_tree(root: &Path, maximum: usize) -> Result<()> {
     let mut entries = 0_usize;
     count_tree_entries(root, root, &mut entries, maximum)?;
+
     return Ok(());
 }
 
@@ -440,6 +488,7 @@ fn count_tree_entries(
         if directory == root && entry.file_name() == "manifest.json" {
             continue;
         }
+
         *entries = entries.checked_add(1).ok_or_else(|| {
             return Error::invalid("tmux evidence export tree entry count overflow");
         })?;
@@ -448,19 +497,23 @@ fn count_tree_entries(
                 "tmux evidence export exceeds {maximum} tree entries"
             )));
         }
+
         let path = entry.path();
         if !path.starts_with(root) {
             return Err(Error::invalid(
                 "tmux evidence export traversal escaped its root",
             ));
         }
+
         let file_type = entry
             .file_type()
             .map_err(|source| return Error::filesystem(&path, source))?;
+
         if file_type.is_dir() {
             count_tree_entries(root, &path, entries, maximum)?;
         }
     }
+
     return Ok(());
 }
 
@@ -480,12 +533,14 @@ fn read_regular_bounded(path: &Path, maximum: u64, description: &str) -> Result<
             path.display()
         )));
     }
+
     if metadata.len() > maximum {
         return Err(Error::invalid(format!(
             "{description} `{}` exceeds {maximum} bytes",
             path.display()
         )));
     }
+
     return fs_err::read(path).map_err(|source| return Error::filesystem(path, source));
 }
 

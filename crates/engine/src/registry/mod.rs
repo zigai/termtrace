@@ -34,8 +34,8 @@ use termtrace_model::{
     protocol::control::CONTROL_PROTOCOL_VERSION,
     registry::{
         AliasReservation, DetachedSessionPaths, GarbageCollectionCandidate,
-        GarbageCollectionReport, REGISTRY_ENTRY_FORMAT, REGISTRY_ENTRY_VERSION, RegistryEntry,
-        RegistryLifecycle, RegistryListEntry, RegistrySessionResolution,
+        GarbageCollectionReport, RegistryEntry, RegistryLifecycle, RegistryListEntry,
+        RegistrySessionResolution, REGISTRY_ENTRY_FORMAT, REGISTRY_ENTRY_VERSION,
     },
     value::ByteString,
 };
@@ -48,6 +48,7 @@ const REGISTRY_RESERVATION_FORMAT: &str = "termtrace-session-registry-reservatio
 const REGISTRY_RESERVATION_VERSION: u32 = 1;
 
 pub use liveness::recorder_identity;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RegistryRecord {
     Reservation(AliasReservation),
@@ -65,6 +66,7 @@ impl<'de> Deserialize<'de> for RegistryRecord {
                 .map(Self::Reservation)
                 .map_err(de::Error::custom);
         }
+
         return serde_json::from_value(value)
             .map(Self::Entry)
             .map_err(de::Error::custom);

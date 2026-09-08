@@ -9,21 +9,21 @@ use std::{
 
 use blake3::Hash;
 use serde::Serialize;
-use serde_json::value::{RawValue, to_raw_value};
+use serde_json::value::{to_raw_value, RawValue};
 use termtrace_model::{
     execution::event::{Event, EventLogHeader},
     execution::event_log::{CanonicalBoundary, DurabilityMode, DurabilityPolicy, DurabilityRecord},
     protocol::control::LiveEventCursor,
 };
 
-use crate::storage::{Error, Result, artifact::sync_parent_directory};
+use crate::storage::{artifact::sync_parent_directory, Error, Result};
 
 use super::{
     segments::SegmentWriter,
     types::SessionClock,
     validation::{
-        OWNER_FILE_MODE, chained_hash, invalid_log, validate_event_geometry, validate_header,
-        validate_parent_directory,
+        chained_hash, invalid_log, validate_event_geometry, validate_header,
+        validate_parent_directory, OWNER_FILE_MODE,
     },
 };
 
@@ -79,6 +79,7 @@ impl Write for CountingWrite<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let written = self.writer.write(buf)?;
         self.bytes += u64::try_from(written).unwrap_or(u64::MAX);
+
         return Ok(written);
     }
 
@@ -120,6 +121,7 @@ impl EventLogWriter {
     pub fn path(&self) -> &Path {
         return &self.path;
     }
+
     /// Writer descriptor identity and immutable header hash for live followers.
     pub fn source_identity(&self) -> (u64, u64, String) {
         return (
@@ -146,6 +148,7 @@ impl EventLogWriter {
                 .copied()
                 .map(WriterCursor::projection)
         };
+
         return (start, self.durable_cursor.projection());
     }
 
@@ -153,14 +156,17 @@ impl EventLogWriter {
     pub fn elapsed_ns(&self) -> u64 {
         return self.clock.elapsed_ns();
     }
+
     /// Sequence number that will be assigned to the next event.
     pub fn next_seq(&self) -> u64 {
         return self.next_seq;
     }
+
     /// Hash of the latest observed event, or the header before the first event.
     pub fn current_hash(&self) -> String {
         return self.previous_hash.to_hex().to_string();
     }
+
     /// Latest event boundary accepted by the writer.
     pub fn observed_boundary(&self) -> CanonicalBoundary {
         return CanonicalBoundary {
@@ -169,6 +175,7 @@ impl EventLogWriter {
             output_bytes: self.observed_output_bytes,
         };
     }
+
     /// Latest event boundary known to be data-synchronized.
     pub fn durable_boundary(&self) -> CanonicalBoundary {
         return CanonicalBoundary {
@@ -177,6 +184,7 @@ impl EventLogWriter {
             output_bytes: self.durable_output_bytes,
         };
     }
+
     /// Durability measurements accumulated by this writer.
     pub fn durability_record(&self) -> DurabilityRecord {
         return DurabilityRecord {
@@ -189,6 +197,7 @@ impl EventLogWriter {
                 && self.durable_output_bytes == self.observed_output_bytes,
         };
     }
+
     /// Create a new event log using the default durability policy.
     ///
     /// # Errors
@@ -201,6 +210,7 @@ impl EventLogWriter {
     ) -> Result<Self> {
         return Self::create_with_policy(path, header, clock, DurabilityPolicy::default());
     }
+
     /// Create a new event log with an explicit durability policy.
     ///
     /// # Errors
@@ -215,7 +225,9 @@ impl EventLogWriter {
         let path = path.as_ref().to_path_buf();
         validate_parent_directory(&path)?;
         validate_header(&path, header)?;
+
         durability_policy.validate()?;
+
         if header.started_unix_ns != clock.started_unix_ns() {
             return Err(invalid_log(
                 &path,
@@ -223,6 +235,7 @@ impl EventLogWriter {
                 "header wall-clock origin does not match the session clock",
             ));
         }
+
         let file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -234,6 +247,7 @@ impl EventLogWriter {
                     source,
                 };
             })?;
+
         let header_bytes = serde_json::to_vec(header).map_err(|source| {
             return Error::InvalidJson {
                 path: path.clone(),
@@ -241,6 +255,7 @@ impl EventLogWriter {
                 source,
             };
         })?;
+
         let previous_hash = blake3::hash(&header_bytes);
         let storage = SegmentWriter::new(&path, file).map_err(|source| {
             return Error::Filesystem {
@@ -248,6 +263,7 @@ impl EventLogWriter {
                 source,
             };
         })?;
+
         let mut writer = BufWriter::new(storage);
         writer
             .write_all(&header_bytes)
@@ -260,21 +276,26 @@ impl EventLogWriter {
                     source,
                 };
             })?;
+
         sync_parent_directory(&path)?;
+
         let metadata = writer.get_ref().metadata().map_err(|source| {
             return Error::Filesystem {
                 path: path.clone(),
                 source,
             };
         })?;
+
         let initial_cursor = WriterCursor {
             next_event_seq: 0,
             file_offset: u64::try_from(header_bytes.len()).unwrap_or(u64::MAX) + 1,
             hash: previous_hash,
             monotonic_ns: 0,
         };
+
         let mut recent_cursors = VecDeque::with_capacity(RECENT_CURSOR_LIMIT);
         recent_cursors.push_back(initial_cursor);
+
         return Ok(Self {
             path,
             writer,
@@ -300,6 +321,7 @@ impl EventLogWriter {
             header_hash: previous_hash,
         });
     }
+
     /// Append and synchronize a canonical event at the current session time.
     ///
     /// # Errors
@@ -308,6 +330,7 @@ impl EventLogWriter {
     pub fn append(&mut self, event: Event) -> Result<u64> {
         return self.append_at(self.clock.elapsed_ns(), event);
     }
+
     /// Append an output event according to the configured durability policy.
     ///
     /// # Errors
@@ -341,19 +364,24 @@ impl EventLogWriter {
                     .durability_policy
                     .maximum_uncommitted_bytes
                     .unwrap_or(u64::MAX);
+
                 let maximum_interval = self
                     .durability_policy
                     .maximum_interval_ms
                     .map_or(Duration::MAX, Duration::from_millis);
+
                 self.uncommitted_output_bytes.saturating_add(output_bytes) >= maximum_bytes
                     || self
                         .uncommitted_since
                         .is_some_and(|started| return started.elapsed() >= maximum_interval)
             }
         };
+
         let observation = observed.map(|instant| return self.clock.observed_ns(instant));
+
         return self.append_at_observation(self.clock.elapsed_ns(), observation, event, durable);
     }
+
     /// Synchronize pending bounded-durability output when its time threshold has elapsed.
     ///
     /// Returns whether synchronization occurred.
@@ -374,12 +402,16 @@ impl EventLogWriter {
         {
             return Ok(false);
         }
+
         self.synchronize_observed()?;
+
         return Ok(true);
     }
+
     pub(super) fn append_at(&mut self, monotonic_ns: u64, event: Event) -> Result<u64> {
         return self.append_at_policy(monotonic_ns, event, true);
     }
+
     fn append_at_policy(&mut self, monotonic_ns: u64, event: Event, durable: bool) -> Result<u64> {
         return self.append_at_observation(monotonic_ns, None, event, durable);
     }
@@ -398,16 +430,19 @@ impl EventLogWriter {
                 "observation is after append time",
             ));
         }
+
         if self.poisoned {
             return Err(Error::EventLogPoisoned {
                 path: self.path.clone(),
             });
         }
+
         let seq = self.next_seq;
         validate_event_geometry(&self.path, seq.saturating_add(2), &event)?;
         let next_seq = seq.checked_add(1).ok_or_else(|| {
             return invalid_log(&self.path, seq.saturating_add(2), "event sequence overflow");
         })?;
+
         let payload = to_raw_value(&event).map_err(|source| {
             return Error::InvalidJson {
                 path: self.path.clone(),
@@ -415,6 +450,7 @@ impl EventLogWriter {
                 source,
             };
         })?;
+
         let body = EncodedEventBody {
             seq,
             monotonic_ns,
@@ -428,11 +464,13 @@ impl EventLogWriter {
                 source,
             };
         })?;
+
         let hash = chained_hash(self.previous_hash, &body_bytes);
         let output_bytes = match &event {
             Event::Output { data } => u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX),
             _ => 0,
         };
+
         let next_output_bytes = self
             .observed_output_bytes
             .checked_add(output_bytes)
@@ -443,6 +481,7 @@ impl EventLogWriter {
                     "output byte count overflow",
                 );
             })?;
+
         let previous_hash_text = self.previous_hash.to_hex();
         let hash_text = hash.to_hex();
         let record = EncodedEventRecord {
@@ -453,6 +492,7 @@ impl EventLogWriter {
             hash: hash_text.as_str(),
             event: &payload,
         };
+
         let mut counted = CountingWrite {
             writer: &mut self.writer,
             bytes: 0,
@@ -475,11 +515,13 @@ impl EventLogWriter {
         };
         if let Err(source) = write_result {
             self.poisoned = true;
+
             return Err(Error::Filesystem {
                 path: self.path.clone(),
                 source,
             });
         }
+
         self.next_seq = next_seq;
         self.previous_hash = hash;
         self.observed_output_bytes = next_output_bytes;
@@ -489,20 +531,25 @@ impl EventLogWriter {
             hash,
             monotonic_ns,
         };
+
         if self.recent_cursors.len() == RECENT_CURSOR_LIMIT {
             self.recent_cursors.pop_front();
         }
+
         self.recent_cursors.push_back(self.observed_cursor);
+
         if output_bytes > 0 {
             if self.uncommitted_since.is_none() {
                 self.uncommitted_since = Some(Instant::now());
             }
+
             self.uncommitted_output_bytes =
                 self.uncommitted_output_bytes.saturating_add(output_bytes);
             self.maximum_observed_uncommitted_bytes = self
                 .maximum_observed_uncommitted_bytes
                 .max(self.uncommitted_output_bytes);
         }
+
         if durable {
             self.durable_next_seq = next_seq;
             self.durable_hash = hash;
@@ -510,38 +557,46 @@ impl EventLogWriter {
             self.durable_cursor = self.observed_cursor;
             self.record_successful_sync();
         }
+
         return Ok(seq);
     }
+
     fn synchronize_observed(&mut self) -> Result<()> {
         if self.poisoned {
             return Err(Error::EventLogPoisoned {
                 path: self.path.clone(),
             });
         }
+
         if let Err(source) = self
             .writer
             .flush()
             .and_then(|()| return self.writer.get_ref().sync_data())
         {
             self.poisoned = true;
+
             return Err(Error::Filesystem {
                 path: self.path.clone(),
                 source,
             });
         }
+
         self.durable_next_seq = self.next_seq;
         self.durable_hash = self.previous_hash;
         self.durable_output_bytes = self.observed_output_bytes;
         self.durable_cursor = self.observed_cursor;
         self.record_successful_sync();
+
         return Ok(());
     }
+
     fn record_successful_sync(&mut self) {
         if let Some(started) = self.uncommitted_since.take() {
             self.maximum_observed_uncommitted_ns = self
                 .maximum_observed_uncommitted_ns
                 .max(u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX));
         }
+
         self.uncommitted_output_bytes = 0;
         self.sync_count = self.sync_count.saturating_add(1);
     }

@@ -13,7 +13,7 @@ use std::{
 
 use nix::{
     errno::Errno,
-    sys::signal::{Signal, killpg},
+    sys::signal::{killpg, Signal},
     unistd::Pid,
 };
 use uuid::Uuid;
@@ -39,9 +39,9 @@ use termtrace_evidence::{
 use termtrace_export::bundle::{create as create_bundle, verify_profile as verify_bundle};
 use termtrace_media::{
     native_capture::{
-        CaptureOptions, CaptureOutcome, capture as capture_native, validated_visual_manifests,
+        capture as capture_native, validated_visual_manifests, CaptureOptions, CaptureOutcome,
     },
-    playback::{PlaybackOptions, playback},
+    playback::{playback, PlaybackOptions},
     save::{save, verify_saved_artifact},
 };
 use termtrace_model::{
@@ -51,9 +51,9 @@ use termtrace_model::{
     execution::event::{EventProjection, InputKind},
     execution::session::{SessionCompletion, VerificationLevel, VerificationReport},
     protocol::control::{
-        ActionPostcondition, ActionPostconditionResult, ControlCommand, ControlData,
-        ControlErrorDetails, ControlRequest, ControlResult, InputSequenceAtom, PointerOperation,
-        ScreenPredicate, StableCaptureQuality, derive_input_operation_id,
+        derive_input_operation_id, ActionPostcondition, ActionPostconditionResult, ControlCommand,
+        ControlData, ControlErrorDetails, ControlRequest, ControlResult, InputSequenceAtom,
+        PointerOperation, ScreenPredicate, StableCaptureQuality,
     },
     terminal::analysis::{DiagnoseReport, DiagnosticCheck, ExplainReport},
     terminal::diff::SemanticDiff,
@@ -69,14 +69,14 @@ use termtrace_model::{
 };
 
 use crate::{
-    Error, Result,
     actions::{ActionCompletion, ActionCondition, ActionOptions, ActionResult, InputAtom},
     error::RetrySafety,
     protocol::{
-        ExchangeTiming, control_endpoint_is_reachable, exchange, send_request,
-        send_request_response, wait_for_screen,
+        control_endpoint_is_reachable, exchange, send_request, send_request_response,
+        wait_for_screen, ExchangeTiming,
     },
     screen::StableCaptureOptions,
+    Error, Result,
 };
 
 mod builder;

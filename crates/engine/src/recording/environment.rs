@@ -44,6 +44,7 @@ impl EffectiveEnvironment {
             canonical.into_os_string(),
         );
         self.policy.effective_digest = digest_variables(&self.variables);
+
         return Ok(());
     }
 
@@ -56,6 +57,7 @@ impl EffectiveEnvironment {
     pub fn resolve(spec: &EnvironmentSpec, term: &str) -> Result<Self> {
         spec.validate()
             .map_err(|error| return terminal_error("validate environment", error.to_string()))?;
+
         return Self::resolve_validated(spec, term);
     }
 
@@ -64,6 +66,7 @@ impl EffectiveEnvironment {
         term: &str,
     ) -> Result<Self> {
         let ambient: BTreeMap<OsString, OsString> = env::vars_os().collect();
+
         return Self::resolve_from_snapshot(spec, term, &ambient);
     }
 
@@ -79,6 +82,7 @@ impl EffectiveEnvironment {
         for name in &spec.unset {
             variables.remove(OsStr::new(name));
         }
+
         for name in &spec.copy {
             let value = ambient.get(OsStr::new(name)).ok_or_else(|| {
                 return Error::TerminalOperation {
@@ -88,16 +92,19 @@ impl EffectiveEnvironment {
             })?;
             variables.insert(OsString::from(name), value.clone());
         }
+
         for (name, value) in &spec.set {
             variables.insert(
                 OsString::from(name),
                 OsString::from_vec(value.as_bytes().to_vec()),
             );
         }
+
         apply_color_policy(&mut variables, spec.color);
         variables.insert(OsString::from("TERM"), OsString::from(term));
         variables.insert(OsString::from("COLORTERM"), OsString::from("truecolor"));
         let effective_digest = digest_variables(&variables);
+
         return Ok(Self {
             variables,
             policy: ChildEnvironmentPolicy {
@@ -155,14 +162,17 @@ fn set_color_variables(
 fn digest_variables(variables: &BTreeMap<OsString, OsString>) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"termtrace-child-environment-v1\0");
+
     for (name, value) in variables {
         let name = name.as_os_str().as_bytes();
         let value = value.as_os_str().as_bytes();
+
         hasher.update(&u64::try_from(name.len()).unwrap_or(u64::MAX).to_le_bytes());
         hasher.update(name);
         hasher.update(&u64::try_from(value.len()).unwrap_or(u64::MAX).to_le_bytes());
         hasher.update(value);
     }
+
     return hasher.finalize().to_hex().to_string();
 }
 
@@ -211,6 +221,7 @@ mod tests {
             (OsString::from("LC_ALL"), OsString::from("en_US.UTF-8")),
             (OsString::from("NO_COLOR"), OsString::from("host-value")),
         ]);
+
         let inherited_spec = EnvironmentSpec {
             set: BTreeMap::from([(
                 "HOME".to_owned(),
@@ -263,16 +274,19 @@ mod tests {
             set: BTreeMap::from([("VAR_A".to_owned(), ByteString::from(b"val_a".as_slice()))]),
             ..EnvironmentSpec::default()
         });
+
         let spec_b = Arc::new(EnvironmentSpec {
             base: EnvironmentBase::Clear,
             set: BTreeMap::from([("VAR_B".to_owned(), ByteString::from(b"val_b".as_slice()))]),
             ..EnvironmentSpec::default()
         });
+
         let expected_a = EffectiveEnvironment::resolve(&spec_a, "xterm-test")
             .expect("resolve a")
             .policy()
             .effective_digest
             .clone();
+
         let expected_b = EffectiveEnvironment::resolve(&spec_b, "xterm-test")
             .expect("resolve b")
             .policy()
@@ -286,6 +300,7 @@ mod tests {
             } else {
                 (Arc::clone(&spec_b), expected_b.clone(), "VAR_B", "VAR_A")
             };
+
             return thread::spawn(move || {
                 let resolved = EffectiveEnvironment::resolve(&spec, "xterm-test")
                     .expect("parallel resolution");
@@ -294,6 +309,7 @@ mod tests {
                 assert!(!resolved.variables().contains_key(OsStr::new(absent)));
             });
         });
+
         for worker in workers {
             worker.join().expect("resolution worker");
         }

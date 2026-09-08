@@ -14,11 +14,11 @@ use termtrace_model::{
 use uuid::Uuid;
 
 use crate::{
-    Error, Result,
     analysis::profile::{
-        ResolvedGhosttyProfile, builtin_terminal_colors, escape_config_string, resolve_profile,
-        restore_profile, terminal_colors_from_config,
+        builtin_terminal_colors, escape_config_string, resolve_profile, restore_profile,
+        terminal_colors_from_config, ResolvedGhosttyProfile,
     },
+    Error, Result,
 };
 
 use super::finish_with_cleanup;
@@ -44,10 +44,12 @@ pub fn resolve_ghostty_profile(
                 source: source_error,
             };
         })?;
+
         let Some(path) = canonical.to_str() else {
             return Err(profile_error("Ghostty config path must be valid UTF-8"));
         };
         let wrapper = format!("config-file = \"{}\"\n", escape_config_string(path));
+
         (
             query_isolated_config(wrapper.as_bytes())?,
             Some(ByteString::from(canonical.as_os_str().as_bytes())),
@@ -55,6 +57,7 @@ pub fn resolve_ghostty_profile(
     } else {
         (query_default_config()?, None)
     };
+
     return resolve_profile(&base, source_config, overrides, query_isolated_config);
 }
 
@@ -83,13 +86,17 @@ pub fn resolved_terminal_colors() -> Result<TerminalColors> {
         Ok(output) => output,
         Err(error) => {
             tracing::debug!(%error, "Ghostty is unavailable; recording pinned libghostty default colors");
+
             return Ok(colors);
         }
     };
+
     if !output.status.success() {
         tracing::debug!(status = %output.status, "Ghostty config query failed; recording pinned libghostty default colors");
+
         return Ok(colors);
     }
+
     return terminal_colors_from_config(&output.stdout);
 }
 
@@ -98,6 +105,7 @@ fn materialize_profile(root: &Path, config: &[u8]) -> Result<PathBuf> {
     let ghostty = root.join("ghostty");
     create_private_directory(&ghostty)?;
     write_secure(&ghostty.join("config.ghostty"), config)?;
+
     return Ok(root.to_path_buf());
 }
 
@@ -106,6 +114,7 @@ fn query_default_config() -> Result<Vec<u8>> {
         .arg("+show-config")
         .output()
         .map_err(|error| return profile_error(format!("run Ghostty config query: {error}")))?;
+
     return checked_config_output(output, "query default Ghostty config");
 }
 
@@ -121,12 +130,14 @@ fn query_isolated_config(config: &[u8]) -> Result<Vec<u8>> {
             })
             .and_then(|output| return checked_config_output(output, "resolve Ghostty config"));
     });
+
     let cleanup = if root.exists() {
         fs_err::remove_dir_all(&root)
             .map_err(|source| return Error::Filesystem { path: root, source })
     } else {
         Ok(())
     };
+
     return finish_with_cleanup(result, cleanup);
 }
 
@@ -138,6 +149,7 @@ fn checked_config_output(output: Output, operation: &'static str) -> Result<Vec<
             String::from_utf8_lossy(&output.stderr).trim()
         )));
     }
+
     return Ok(output.stdout);
 }
 

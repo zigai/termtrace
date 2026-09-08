@@ -65,8 +65,10 @@ impl<W: Write> Write for BudgetWriter<W> {
         if u64::try_from(buf.len()).unwrap_or(u64::MAX) > self.remaining {
             return Err(io::Error::other("artifact exceeds its byte budget"));
         }
+
         let count = self.inner.write(buf)?;
         self.remaining -= u64::try_from(count).unwrap_or(u64::MAX);
+
         return Ok(count);
     }
 

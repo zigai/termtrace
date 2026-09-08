@@ -7,7 +7,7 @@ use std::{
 
 use nix::{
     errno::Errno,
-    fcntl::{RenameFlags, renameat2},
+    fcntl::{renameat2, RenameFlags},
 };
 use termtrace_model::{artifact::bundle::BundleManifest, artifact::metadata::ArtifactMember};
 use uuid::Uuid;
@@ -15,9 +15,9 @@ use uuid::Uuid;
 use crate::{
     artifact::BudgetWriter,
     auxiliary::bundle::{
-        BUNDLE_MANIFEST_NAME, BundleIdentity, BundleMemberMetadata, MAX_BUNDLE_MANIFEST_BYTES,
-        MAX_BUNDLE_MEMBERS, create_private_directory, create_private_parents, secure_file,
-        sync_directory, sync_parent, validate_relative_path,
+        create_private_directory, create_private_parents, secure_file, sync_directory, sync_parent,
+        validate_relative_path, BundleIdentity, BundleMemberMetadata, BUNDLE_MANIFEST_NAME,
+        MAX_BUNDLE_MANIFEST_BYTES, MAX_BUNDLE_MEMBERS,
     },
     storage::{Error, Result},
 };
@@ -51,20 +51,25 @@ impl BundleDraft {
         let name = destination
             .file_name()
             .ok_or_else(|| return Error::invalid("bundle path has no basename"))?;
+
         if !parent.is_dir() {
             return Err(Error::invalid("bundle parent directory does not exist"));
         }
+
         if destination.exists() {
             return Err(Error::DestinationExists {
                 path: destination.clone(),
             });
         }
+
         let staging = parent.join(format!(
             ".{}.{}.tmp",
             name.to_string_lossy(),
             Uuid::now_v7()
         ));
+
         create_private_directory(&staging)?;
+
         return Ok(Self {
             destination,
             staging,
@@ -92,11 +97,13 @@ impl BundleDraft {
         if self.members.len() >= MAX_BUNDLE_MEMBERS {
             return Err(Error::invalid("bundle contains too many members"));
         }
+
         if metadata.media_type.is_empty() || metadata.relationship.is_empty() {
             return Err(Error::invalid(
                 "bundle member media type and relationship must be non-empty",
             ));
         }
+
         let relative = relative.as_ref();
         let path = validate_relative_path(relative)?;
         if !self.paths.insert(path.clone()) {
@@ -104,15 +111,18 @@ impl BundleDraft {
                 "bundle contains duplicate member `{path}`"
             )));
         }
+
         create_private_parents(&self.staging, relative)?;
         let destination = self.staging.join(relative);
         let writer = match secure_file(&destination) {
             Ok(file) => BufWriter::new(file),
             Err(error) => {
                 self.paths.remove(&path);
+
                 return Err(error);
             }
         };
+
         return Ok(BundleMemberWriter {
             draft: self,
             writer: Some(writer),
@@ -139,6 +149,7 @@ impl BundleDraft {
         let mut member = self.start_member(relative, metadata)?;
         io::copy(reader, &mut member)
             .map_err(|source| return Error::filesystem(&member.destination, source))?;
+
         return member.finish();
     }
 
@@ -190,10 +201,13 @@ impl BundleDraft {
                 .write_all(b"\n")
                 .map_err(|source| return Error::filesystem(&manifest_path, source))?;
         }
+
         manifest_file
             .sync_all()
             .map_err(|source| return Error::filesystem(&manifest_path, source))?;
+
         sync_directory(&self.staging)?;
+
         let parent = self
             .destination
             .parent()
@@ -206,6 +220,7 @@ impl BundleDraft {
             .destination
             .file_name()
             .ok_or_else(|| return Error::invalid("bundle path has no basename"))?;
+
         let directory =
             File::open(parent).map_err(|source| return Error::filesystem(parent, source))?;
         renameat2(
@@ -221,13 +236,16 @@ impl BundleDraft {
                     path: self.destination.clone(),
                 };
             }
+
             return Error::filesystem(
                 &self.destination,
                 io::Error::from_raw_os_error(error as i32),
             );
         })?;
+
         sync_parent(&self.destination)?;
         self.committed = true;
+
         return Ok(manifest);
     }
 }
@@ -267,7 +285,9 @@ impl BundleMemberWriter<'_> {
             .flush()
             .and_then(|()| return writer.get_ref().sync_all())
             .map_err(|source| return Error::filesystem(&self.destination, source))?;
+
         sync_parent(&self.destination)?;
+
         let member = ArtifactMember {
             path: self.path.clone(),
             byte_length: self.byte_length,
@@ -279,6 +299,7 @@ impl BundleMemberWriter<'_> {
         };
         self.draft.members.push(member.clone());
         self.finished = true;
+
         return Ok(member);
     }
 }
@@ -288,6 +309,7 @@ impl Write for BundleMemberWriter<'_> {
         if u64::try_from(buf.len()).unwrap_or(u64::MAX) > self.draft.remaining_bytes {
             return Err(io::Error::other("bundle exceeds its byte budget"));
         }
+
         let writer = self
             .writer
             .as_mut()
@@ -302,6 +324,7 @@ impl Write for BundleMemberWriter<'_> {
             .byte_length
             .checked_add(u64::try_from(count).unwrap_or(u64::MAX))
             .ok_or_else(|| return io::Error::other("bundle member size overflow"))?;
+
         return Ok(count);
     }
 
@@ -319,6 +342,7 @@ impl Drop for BundleMemberWriter<'_> {
         if self.finished {
             return;
         }
+
         self.writer.take();
         self.draft.remaining_bytes = self.draft.remaining_bytes.saturating_add(self.byte_length);
         let _ = fs_err::remove_file(&self.destination);

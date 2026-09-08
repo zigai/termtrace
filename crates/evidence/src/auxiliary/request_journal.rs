@@ -8,7 +8,7 @@ use std::{
     str,
 };
 
-use rusqlite::{Connection, OptionalExtension as _, params};
+use rusqlite::{params, Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
 use termtrace_model::{
     execution::event::Event,
@@ -21,9 +21,9 @@ use termtrace_model::{
 use uuid::Uuid;
 
 use crate::storage::{
-    Error, Result,
     event_log::EventLogCursor,
-    identifier_index::{IdentifierSet, RequestIndex, RequestPosition, index_error},
+    identifier_index::{index_error, IdentifierSet, RequestIndex, RequestPosition},
+    Error, Result,
 };
 
 pub use termtrace_model::execution::request_journal::{
@@ -81,8 +81,11 @@ impl MutationJournal {
             .map_err(|source| return Error::filesystem(&path, source))?;
         file.sync_data()
             .map_err(|source| return Error::filesystem(&path, source))?;
+
         sync_parent_directory(&path)?;
+
         let index = RequestIndex::create(&session.join("mutation-index.sqlite3"))?;
+
         return Ok(Self {
             index,
             path,
@@ -131,12 +134,15 @@ impl MutationJournal {
         self.writer
             .flush()
             .map_err(|source| return Error::filesystem(&self.path, source))?;
+
         let Some(position) = self.index.lookup(request_id)? else {
             return Ok(None);
         };
+
         if position.length > MAX_MUTATION_JOURNAL_RECORD_BYTES {
             return Err(Error::invalid("mutation index record length exceeds limit"));
         }
+
         let mut file = File::open(&self.path)
             .map_err(|source| return Error::filesystem(&self.path, source))?;
         file.seek(SeekFrom::Start(position.offset))
@@ -145,14 +151,17 @@ impl MutationJournal {
         file.take(position.length)
             .read_to_string(&mut line)
             .map_err(|source| return Error::filesystem(&self.path, source))?;
+
         let sequence = usize::try_from(position.sequence)
             .map_err(|_| return Error::invalid("mutation sequence exceeds platform range"))?;
+
         let record = decode_record(
             line.trim_end_matches('\n'),
             sequence,
             &position.previous_hash,
             &self.path,
         )?;
+
         if record.request_id != request_id
             || record.hash != position.hash
             || u64::try_from(line.len()).unwrap_or(u64::MAX) != position.length
@@ -161,6 +170,7 @@ impl MutationJournal {
                 "mutation journal does not match its committed index",
             ));
         }
+
         return Ok(Some(record));
     }
 
@@ -187,11 +197,13 @@ impl MutationJournal {
         if event_end_seq < event_start_seq {
             return Err(Error::invalid("mutation event range is reversed"));
         }
+
         if response.request_id != request_id {
             return Err(Error::invalid(
                 "mutation response request ID does not match journal request ID",
             ));
         }
+
         let body = MutationJournalBody {
             format: MUTATION_JOURNAL_FORMAT,
             version: MUTATION_JOURNAL_VERSION,
@@ -229,6 +241,7 @@ impl MutationJournal {
         })?;
         encoded.push(b'\n');
         let record_bytes = u64::try_from(encoded.len()).unwrap_or(u64::MAX);
+
         if record_bytes > MAX_MUTATION_JOURNAL_RECORD_BYTES
             || self.encoded_bytes.checked_add(record_bytes).is_none()
         {
@@ -236,11 +249,13 @@ impl MutationJournal {
                 "mutation journal byte budget would be exceeded",
             ));
         }
+
         self.writer
             .write_all(&encoded)
             .and_then(|()| return self.writer.flush())
             .and_then(|()| return self.writer.get_ref().sync_data())
             .map_err(|source| return Error::filesystem(&self.path, source))?;
+
         self.index.insert(
             request_id,
             &RequestPosition {
@@ -251,12 +266,15 @@ impl MutationJournal {
                 hash: record.hash.clone(),
             },
         )?;
+
         self.encoded_bytes = self.encoded_bytes.saturating_add(record_bytes);
         self.next_seq = self
             .next_seq
             .checked_add(1)
             .ok_or_else(|| return Error::invalid("mutation journal sequence overflow"))?;
+
         self.previous_hash.clone_from(&record.hash);
+
         return Ok(record);
     }
 }
@@ -287,6 +305,7 @@ pub fn guarded_command_hash(
             source,
         };
     })?;
+
     return Ok(blake3::hash(&bytes).to_hex().to_string());
 }
 
@@ -301,17 +320,22 @@ pub fn read_mutation_journal(path: &Path) -> Result<Vec<MutationJournalRecord>> 
     if !path.exists() {
         return Ok(Vec::new());
     }
+
     let metadata =
         fs_err::symlink_metadata(path).map_err(|source| return Error::filesystem(path, source))?;
+
     if !metadata.is_file() || metadata.len() > MAX_MUTATION_JOURNAL_BYTES {
         return Err(Error::invalid(
             "mutation journal is not a bounded regular file",
         ));
     }
+
     let reader =
         BufReader::new(File::open(path).map_err(|source| return Error::filesystem(path, source))?);
+
     let mut records: Vec<MutationJournalRecord> = Vec::new();
     let mut previous_hash = "0".repeat(64);
+
     for (index, line) in reader.lines().enumerate() {
         let line = line.map_err(|source| return Error::filesystem(path, source))?;
         if u64::try_from(line.len()).unwrap_or(u64::MAX) > MAX_MUTATION_JOURNAL_RECORD_BYTES {
@@ -319,10 +343,12 @@ pub fn read_mutation_journal(path: &Path) -> Result<Vec<MutationJournalRecord>> 
                 "mutation journal record exceeds its byte limit",
             ));
         }
+
         let record = decode_record(&line, index, &previous_hash, path)?;
         previous_hash.clone_from(&record.hash);
         records.push(record);
     }
+
     return Ok(records);
 }
 
@@ -348,6 +374,7 @@ impl MutationJournalCursor {
             Err(error) if error.kind() == ErrorKind::NotFound => None,
             Err(source) => return Err(Error::filesystem(path, source)),
         };
+
         return Ok(Self {
             path: path.to_path_buf(),
             reader,
@@ -370,9 +397,11 @@ impl MutationJournalCursor {
             .take(MAX_MUTATION_JOURNAL_RECORD_BYTES + 1)
             .read_until(b'\n', &mut line)
             .map_err(|source| return Error::filesystem(&self.path, source))?;
+
         if bytes == 0 {
             return Ok(None);
         }
+
         if u64::try_from(bytes).unwrap_or(u64::MAX) > MAX_MUTATION_JOURNAL_RECORD_BYTES
             || line.last() != Some(&b'\n')
         {
@@ -380,6 +409,7 @@ impl MutationJournalCursor {
                 "mutation journal record is oversized or unterminated",
             ));
         }
+
         let line = str::from_utf8(&line)
             .map_err(|_| return Error::invalid("mutation journal is not UTF-8"))?;
         let record = decode_record(line, self.sequence, &self.previous_hash, &self.path)?;
@@ -387,7 +417,9 @@ impl MutationJournalCursor {
             .sequence
             .checked_add(1)
             .ok_or_else(|| return Error::invalid("mutation journal sequence overflow"))?;
+
         self.previous_hash.clone_from(&record.hash);
+
         return Ok(Some(record));
     }
 }
@@ -410,8 +442,10 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
         CREATE TABLE operations (seq INTEGER PRIMARY KEY, id BLOB NOT NULL);",
         )
         .map_err(index_error)?;
+
     let mut identifiers = IdentifierSet::default();
     let mut count = 0_u64;
+
     let mut final_hash = String::new();
     while let Some(record) = journal.next_record()? {
         if !identifiers.insert(record.request_id)? {
@@ -419,18 +453,22 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
                 "mutation journal repeats a request identifier",
             ));
         }
+
         database
             .execute(
                 "INSERT OR IGNORE INTO boundaries (seq) VALUES (?1)",
                 [record.event_end_seq],
             )
             .map_err(index_error)?;
+
         count += 1;
         final_hash = record.hash;
     }
+
     if count == 0 {
         return Ok(0);
     }
+
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
     let header_bytes = serde_json::to_vec(cursor.header()).map_err(|source| {
         return Error::InvalidJson {
@@ -439,6 +477,7 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
             source,
         };
     })?;
+
     let header_hash = blake3::hash(&header_bytes).to_hex().to_string();
     database
         .execute("UPDATE boundaries SET hash=?1 WHERE seq=0", [&header_hash])
@@ -450,10 +489,12 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
         let mut operation = database
             .prepare("INSERT INTO operations VALUES (?1, ?2)")
             .map_err(index_error)?;
+
         while let Some(event) = cursor.next_record()? {
             boundary
                 .execute(params![event.hash, event.seq + 1])
                 .map_err(index_error)?;
+
             if let Some(id) = event_operation_id(&event.event) {
                 operation
                     .execute(params![event.seq, id.as_bytes().as_slice()])
@@ -461,10 +502,12 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
             }
         }
     }
+
     let _pending = cursor.finish()?;
     let mut journal = MutationJournalCursor::open(&path)?;
     let mut verified_count = 0;
     let mut verified_hash = String::new();
+
     while let Some(record) = journal.next_record()? {
         let expected_hash: Option<String> = database
             .query_row(
@@ -480,6 +523,7 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
                 "mutation journal event hash does not match the canonical boundary",
             ));
         }
+
         if record.event_end_seq > record.event_start_seq {
             let mut statement = database
                 .prepare("SELECT id FROM operations WHERE seq>=?1 AND seq<?2 ORDER BY seq")
@@ -487,7 +531,9 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
             let mut rows = statement
                 .query([record.event_start_seq, record.event_end_seq])
                 .map_err(index_error)?;
+
             let mut previous = None;
+
             let mut actual_count = 0;
             while let Some(row) = rows.next().map_err(index_error)? {
                 let bytes: Vec<u8> = row.get(0).map_err(index_error)?;
@@ -497,14 +543,17 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
                 if previous == Some(id) {
                     continue;
                 }
+
                 if record.operation_ids.get(actual_count) != Some(&id) {
                     return Err(Error::invalid(
                         "mutation journal operation IDs do not match its canonical range",
                     ));
                 }
+
                 previous = Some(id);
                 actual_count += 1;
             }
+
             if actual_count == 0 || actual_count != record.operation_ids.len() {
                 return Err(Error::invalid(
                     "mutation journal operation IDs do not match its canonical range",
@@ -515,6 +564,7 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
                 "event-free mutation journal outcome names canonical operations",
             ));
         }
+
         if let Some(boundaries) = response_boundaries(&record.response)
             && (boundaries.observed.next_event_seq != record.event_end_seq
                 || boundaries.observed.event_hash != record.event_hash)
@@ -523,14 +573,17 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
                 "mutation response boundary does not match its canonical range",
             ));
         }
+
         verified_count += 1;
         verified_hash = record.hash;
     }
+
     if verified_count != count || verified_hash != final_hash {
         return Err(Error::invalid(
             "mutation journal changed during verification",
         ));
     }
+
     return Ok(count);
 }
 
@@ -586,12 +639,14 @@ fn decode_record(
             source,
         };
     })?;
+
     if header.format != MUTATION_JOURNAL_FORMAT || header.version != MUTATION_JOURNAL_VERSION {
         return Err(Error::invalid(format!(
             "unsupported mutation journal format `{}` version {}",
             header.format, header.version
         )));
     }
+
     let record: MutationJournalRecord = serde_json::from_str(line).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
@@ -599,7 +654,9 @@ fn decode_record(
             source,
         };
     })?;
+
     let seq = u64::try_from(index).unwrap_or(u64::MAX);
+
     if record.seq != seq
         || record.prev_hash != previous_hash
         || record.response.request_id != record.request_id
@@ -609,6 +666,7 @@ fn decode_record(
             "mutation journal sequence, correlation, or event range is invalid",
         ));
     }
+
     let body = MutationJournalBody {
         format: &record.format,
         version: record.version,
@@ -622,11 +680,13 @@ fn decode_record(
         event_hash: &record.event_hash,
         response: &record.response,
     };
+
     if record.hash != hash_body(&body, path)? {
         return Err(Error::invalid(
             "mutation journal record hash does not match",
         ));
     }
+
     return Ok(record);
 }
 
@@ -638,6 +698,7 @@ fn hash_body(body: &MutationJournalBody<'_>, path: &Path) -> Result<String> {
             source,
         };
     })?;
+
     return Ok(blake3::hash(&bytes).to_hex().to_string());
 }
 
@@ -645,9 +706,11 @@ fn sync_parent_directory(path: &Path) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| return Error::invalid("journal path has no parent"))?;
+
     File::open(parent)
         .and_then(|directory| return directory.sync_all())
         .map_err(|source| return Error::filesystem(parent, source))?;
+
     return Ok(());
 }
 

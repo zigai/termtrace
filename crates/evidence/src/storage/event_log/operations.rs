@@ -6,7 +6,7 @@ use termtrace_model::{
 };
 use uuid::Uuid;
 
-use crate::storage::{Result, identifier_index::IdentifierSet};
+use crate::storage::{identifier_index::IdentifierSet, Result};
 
 use super::validation::invalid_log;
 
@@ -26,9 +26,11 @@ pub(super) fn validate_operation_transition(
                 "too many concurrently pending operations",
             ));
         }
+
         if !seen.insert(operation_id)? {
             return Err(invalid_log(path, line, "operation identifier was reused"));
         }
+
         pending.insert(
             operation_id,
             PendingOperation {
@@ -38,14 +40,17 @@ pub(super) fn validate_operation_transition(
                 expected_bytes,
             },
         );
+
         return Ok(());
     }
+
     let Some(result) = operation_result(&record.event) else {
         return Ok(());
     };
     let intent = pending
         .remove(&result.operation_id)
         .ok_or_else(|| return invalid_log(path, line, "operation result has no pending intent"))?;
+
     if intent.kind != result.kind {
         return Err(invalid_log(
             path,
@@ -53,6 +58,7 @@ pub(super) fn validate_operation_transition(
             "operation result kind does not match its intent",
         ));
     }
+
     match result.status {
         OperationStatus::Applied if result.error_code.is_some() => {
             return Err(invalid_log(
@@ -70,6 +76,7 @@ pub(super) fn validate_operation_transition(
         }
         OperationStatus::Applied | OperationStatus::Failed => {}
     }
+
     if let (Some(expected), Some(written)) = (intent.expected_bytes, result.bytes_written)
         && (written > expected
             || (result.status == OperationStatus::Applied && written != expected))
@@ -80,6 +87,7 @@ pub(super) fn validate_operation_transition(
             "input result byte count is inconsistent with its intent",
         ));
     }
+
     return Ok(());
 }
 

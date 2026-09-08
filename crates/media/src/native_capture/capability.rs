@@ -8,19 +8,18 @@ use std::{
     time::{Duration, Instant},
 };
 
+use super::{
+    media::{validate_screenshot_probe, validate_video_probe},
+    process::{
+        ghostty_overrides, probe_output, spawn_xvfb, wait_for_file, wait_for_x_socket,
+        DisplayLease, ManagedChild,
+    },
+    util::external_error,
+    Result,
+};
 use termtrace_evidence::artifact::{create_private_directory, write_secure};
 use termtrace_model::protocol::capability::{
     Capability, CapabilityStatus, NATIVE_SCREENSHOT_CAPABILITY, NATIVE_VIDEO_CAPABILITY,
-};
-
-use super::{
-    Result,
-    media::{validate_screenshot_probe, validate_video_probe},
-    process::{
-        DisplayLease, ManagedChild, ghostty_overrides, probe_output, spawn_xvfb, wait_for_file,
-        wait_for_x_socket,
-    },
-    util::external_error,
 };
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -51,19 +50,25 @@ fn native_capabilities_with(
             .map(|program| return (*program).to_owned())
             .collect();
     };
+
     let screenshot_missing = screenshot
         .then(|| return missing(&["ghostty", "Xvfb", "dbus-run-session", "import", "ffprobe"]));
+
     let video_missing = video
         .then(|| return missing(&["ghostty", "Xvfb", "dbus-run-session", "ffmpeg", "ffprobe"]));
+
     let probe_screenshot =
         cfg!(target_os = "linux") && screenshot_missing.as_ref().is_some_and(Vec::is_empty);
+
     let probe_video =
         cfg!(target_os = "linux") && video_missing.as_ref().is_some_and(Vec::is_empty);
+
     let [screenshot_result, video_result] = if probe_screenshot || probe_video {
         probe(probe_screenshot, probe_video)
     } else {
         [Ok(()), Ok(())]
     };
+
     return [
         screenshot_missing.map(|missing| {
             return capability(NATIVE_SCREENSHOT_CAPABILITY, &missing, screenshot_result);
@@ -79,11 +84,7 @@ fn capability(id: &str, missing: &[String], result: ProbeResult) -> Capability {
     let (status, code, detail, remediation) = if !cfg!(target_os = "linux") || !missing.is_empty() {
         (
             CapabilityStatus::Blocked,
-            if video {
-                "native_video_dependency_missing"
-            } else {
-                "native_host_tools_missing"
-            },
+            if video { "native_video_dependency_missing" } else { "native_host_tools_missing" },
             if cfg!(target_os = "linux") {
                 format!("missing tools: {}", missing.join(", "))
             } else {
@@ -101,11 +102,7 @@ fn capability(id: &str, missing: &[String], result: ProbeResult) -> Capability {
     } else {
         (
             CapabilityStatus::Ready,
-            if video {
-                "native_video_ready"
-            } else {
-                "native_screenshot_ready"
-            },
+            if video { "native_video_ready" } else { "native_screenshot_ready" },
             if video {
                 "private-display Ghostty launch, libx264rgb capture and video probe succeeded"
                     .to_owned()
@@ -116,6 +113,7 @@ fn capability(id: &str, missing: &[String], result: ProbeResult) -> Capability {
             None,
         )
     };
+
     return Capability {
         id: id.to_owned(),
         status,
@@ -140,17 +138,21 @@ fn operational_probe(screenshot: bool, video: bool) -> [ProbeResult; 2] {
     if let Err(error) = create_private_directory(&staging) {
         return failed_probes(error.into());
     }
+
     let deadline = Instant::now() + PROBE_TIMEOUT;
     let result = probe_staged(&staging, deadline, screenshot, video);
+
     let cleanup = fs::remove_dir_all(&staging);
     if let Err(error) = cleanup {
         return failed_probes(external_error("native probe cleanup", error));
     }
+
     return result.unwrap_or_else(failed_probes);
 }
 
 fn failed_probes(error: super::Error) -> [ProbeResult; 2] {
     let detail: String = error.to_string().chars().take(2048).collect();
+
     return [Err(detail.clone()), Err(detail)];
 }
 
@@ -164,6 +166,7 @@ fn probe_staged(
     let display = format!(":{}", lease.number);
     let mut xvfb = spawn_xvfb(None, &lease, WIDTH, HEIGHT, staging)?;
     wait_for_x_socket(&lease, &mut xvfb, remaining(deadline)?)?;
+
     let ready = staging.join("fixture-ready");
     // The fixture is a shell builtin-only program, not the caller's executable: library hosts
     // need not implement any CLI, and no descendant sleeps survive the terminal's teardown.
@@ -198,6 +201,7 @@ fn probe_staged(
     xvfb.check_running()?;
     ghostty.terminate();
     xvfb.terminate();
+
     return Ok([screenshot_result, video_result]);
 }
 
@@ -216,6 +220,7 @@ fn run_probe(name: &'static str, command: &mut Command, deadline: Instant) -> Re
 
 fn wait_for_painted_frame(display: &str, deadline: Instant, video: bool) -> Result<()> {
     let deadline = deadline.min(Instant::now() + STEP_TIMEOUT);
+
     loop {
         let sample = if video {
             run_probe(
@@ -263,12 +268,14 @@ fn wait_for_painted_frame(display: &str, deadline: Instant, video: bool) -> Resu
         if sample == [0x10, 0x20, 0x30] {
             return Ok(());
         }
+
         if Instant::now() >= deadline {
             return Err(external_error(
                 "Ghostty frame readiness",
                 "controlled background was not painted before the deadline",
             ));
         }
+
         thread::sleep(Duration::from_millis(20));
     }
 }
@@ -323,12 +330,10 @@ fn probe_capture(staging: &Path, display: &str, deadline: Instant, video: bool) 
             deadline,
         )?
     };
+
     write_secure(&path, &bytes)?;
-    let name = if video {
-        "video-ffprobe"
-    } else {
-        "screenshot-ffprobe"
-    };
+
+    let name = if video { "video-ffprobe" } else { "screenshot-ffprobe" };
     let bytes = run_probe(
         name,
         Command::new("ffprobe")
@@ -345,6 +350,7 @@ fn probe_capture(staging: &Path, display: &str, deadline: Instant, video: bool) 
     )?;
     let report: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|error| return external_error("ffprobe report", error))?;
+
     if video {
         validate_video_probe(&report, FPS, WIDTH, HEIGHT)?;
         if report
@@ -357,6 +363,7 @@ fn probe_capture(staging: &Path, display: &str, deadline: Instant, video: bool) 
     } else {
         validate_screenshot_probe(&report, WIDTH, HEIGHT)?;
     }
+
     return Ok(());
 }
 
@@ -375,6 +382,7 @@ mod tests {
         );
         let screenshot = screenshot.expect("screenshot was selected");
         let video = video.expect("video was selected");
+
         assert_eq!(screenshot.status, CapabilityStatus::Blocked);
         assert!(screenshot.detail.contains("import"));
         assert_eq!(video.status, CapabilityStatus::Ready);

@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 
 use uuid::Uuid;
 
-use termtrace_evidence::request_journal::{MutationJournal, guarded_command_hash};
+use termtrace_evidence::request_journal::{guarded_command_hash, MutationJournal};
 use termtrace_model::protocol::control::{ControlCommand, ControlResponse};
 
 use super::super::{
@@ -44,8 +44,10 @@ impl MutationHistory {
         let requested_hash = guarded_command_hash(command, expected_presented_state_hash)?;
         if let Some(cached) = self.cached.get(&request_id) {
             let response = mutation_retry_response(request_id, &requested_hash, cached);
+
             return Ok((requested_hash, Some(response)));
         }
+
         let Some(record) = self.journal.lookup(request_id)? else {
             return Ok((requested_hash, None));
         };
@@ -54,7 +56,9 @@ impl MutationHistory {
             response: record.response,
         };
         let response = mutation_retry_response(request_id, &requested_hash, &cached);
+
         self.cache(request_id, cached);
+
         return Ok((requested_hash, Some(response)));
     }
 
@@ -69,6 +73,7 @@ impl MutationHistory {
                 "operation identifier was already reserved by another mutation",
             ));
         }
+
         return Ok(());
     }
 
@@ -87,8 +92,10 @@ impl MutationHistory {
                     "input sequence operation identifier was already reserved by another mutation",
                 ));
             }
+
             return Ok(());
         }
+
         return self.reserve_operation(request_id);
     }
 
@@ -109,6 +116,7 @@ impl MutationHistory {
         {
             let attempted = usize::try_from(event_end_seq.saturating_sub(event_start_seq) / 2)
                 .unwrap_or(usize::MAX);
+
             atoms
                 .iter()
                 .take(attempted)
@@ -133,6 +141,7 @@ impl MutationHistory {
                 response: record.response,
             },
         );
+
         return Ok(());
     }
 
@@ -140,6 +149,7 @@ impl MutationHistory {
         if self.cached.insert(request_id, value).is_none() {
             self.order.push_back(request_id);
         }
+
         while self.cached.len() > self.capacity {
             let Some(evicted) = self.order.pop_front() else {
                 break;
@@ -157,6 +167,7 @@ fn mutation_retry_response(
     if cached.command_hash == requested_hash {
         return cached.response.clone();
     }
+
     return control_error_response(
         request_id,
         "request_id_collision",
@@ -179,6 +190,7 @@ mod tests {
         history
             .reserve_operation(Uuid::nil())
             .expect("initial reservation");
+
         let first = Uuid::from_u128(1);
         let second = Uuid::nil();
         let command = ControlCommand::InputSequence {

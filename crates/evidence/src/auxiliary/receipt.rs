@@ -21,9 +21,9 @@ use termtrace_model::{
 use uuid::Uuid;
 
 use crate::storage::{
-    Error, Result,
-    artifact::{ARTIFACT_ROOT_LOG, read_artifact_roots},
+    artifact::{read_artifact_roots, ARTIFACT_ROOT_LOG},
     session::{read_completion, read_manifest, verify_session},
+    Error, Result,
 };
 
 pub use termtrace_model::execution::receipt::{
@@ -46,6 +46,7 @@ pub fn receipt_signing_capability() -> Capability {
             remediation: None,
         };
     }
+
     return Capability {
         id: RECEIPT_SIGNING_CAPABILITY.to_owned(),
         status: CapabilityStatus::Blocked,
@@ -58,6 +59,7 @@ pub fn receipt_signing_capability() -> Capability {
 fn executable(command: impl AsRef<OsStr>) -> Option<PathBuf> {
     let command = command.as_ref();
     let path = env::var_os("PATH")?;
+
     return env::split_paths(&path)
         .map(|directory| return directory.join(command))
         .find(|candidate| return candidate.is_file());
@@ -74,14 +76,17 @@ pub fn create_ssh_receipt(session: &Path, key: &Path, signer_key_id: &str) -> Re
     if !verification.valid {
         return Err(Error::invalid("canonical content is invalid"));
     }
+
     if signer_key_id.is_empty() || signer_key_id.contains(['\n', '\r']) {
         return Err(Error::invalid(
             "signer key ID must be non-empty and single-line",
         ));
     }
+
     let payload = build_payload(session, signer_key_id)?;
     let path = session.join(EVIDENCE_RECEIPT_NAME);
     sign_ssh_receipt(&path, payload, key)?;
+
     return Ok(path);
 }
 
@@ -91,12 +96,14 @@ fn build_payload(session: &Path, signer_key_id: &str) -> Result<EvidenceReceiptP
     let completion_path = session.join("completion.json");
     let completion_bytes = fs_err::read(&completion_path)
         .map_err(|source| return Error::filesystem(completion_path.clone(), source))?;
+
     let roots = read_artifact_roots(&session.join(ARTIFACT_ROOT_LOG))?;
     let available_count = u64::try_from(roots.len()).unwrap_or(u64::MAX);
     let created_unix_ns = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| return Error::ClockBeforeEpoch)?
         .as_nanos();
+
     return receipt_payload(
         manifest.session_id,
         &completion,
@@ -123,11 +130,13 @@ pub(crate) fn receipt_payload(
             "artifact checkpoint exceeds the current root catalog",
         ));
     }
+
     let artifact_root_hash = if artifact_root_count == 0 {
         None
     } else {
         let index = usize::try_from(artifact_root_count - 1)
             .map_err(|_| return Error::invalid("artifact checkpoint is not addressable"))?;
+
         Some(
             roots
                 .get(index)
@@ -136,6 +145,7 @@ pub(crate) fn receipt_payload(
                 .clone(),
         )
     };
+
     return Ok(EvidenceReceiptPayload {
         domain: EVIDENCE_RECEIPT_FORMAT.to_owned(),
         version: EVIDENCE_RECEIPT_VERSION,
@@ -159,17 +169,21 @@ fn sign_ssh_receipt(
     key: &Path,
 ) -> Result<()> {
     validate_payload(&payload)?;
+
     if receipt_path.exists() {
         return Err(Error::DestinationExists {
             path: receipt_path.to_path_buf(),
         });
     }
+
     let parent = receipt_path
         .parent()
         .ok_or_else(|| return Error::invalid("receipt path has no parent"))?;
+
     if !parent.is_dir() {
         return Err(Error::invalid("receipt parent directory does not exist"));
     }
+
     let signed_bytes = signed_payload_bytes(&payload)?;
     let temporary = parent.join(format!(".receipt-sign-{}", Uuid::now_v7()));
     write_temporary(&temporary, &signed_bytes)?;
@@ -183,30 +197,38 @@ fn sign_ssh_receipt(
         .arg(&temporary)
         .stdin(Stdio::null())
         .output();
+
     let output = match output {
         Ok(output) => output,
         Err(error) => {
             cleanup_temporary(&temporary, &signature_path);
+
             return Err(command_error("launch OpenSSH signer", error.to_string()));
         }
     };
+
     let signature = fs_err::read(&signature_path).map_err(|source| {
         cleanup_temporary(&temporary, &signature_path);
+
         if output.status.success() {
             return Error::filesystem(signature_path.clone(), source);
         }
+
         return command_error(
             "sign evidence receipt",
             String::from_utf8_lossy(&output.stderr).trim().to_owned(),
         );
     })?;
+
     cleanup_temporary(&temporary, &signature_path);
+
     if !output.status.success() {
         return Err(command_error(
             "sign evidence receipt",
             String::from_utf8_lossy(&output.stderr).trim().to_owned(),
         ));
     }
+
     let receipt = EvidenceReceipt {
         format: EVIDENCE_RECEIPT_FORMAT.to_owned(),
         version: EVIDENCE_RECEIPT_VERSION,
@@ -225,8 +247,10 @@ fn sign_ssh_receipt(
             source,
         };
     })?;
+
     write_temporary(receipt_path, &bytes)?;
     sync_parent(receipt_path)?;
+
     return Ok(());
 }
 
@@ -239,11 +263,14 @@ fn sign_ssh_receipt(
 pub fn read_receipt(receipt_path: &Path) -> Result<EvidenceReceipt> {
     let metadata = fs_err::symlink_metadata(receipt_path)
         .map_err(|source| return Error::filesystem(receipt_path, source))?;
+
     if !metadata.is_file() || metadata.len() > MAX_RECEIPT_BYTES {
         return Err(Error::invalid("receipt is not a bounded regular file"));
     }
+
     let bytes = fs_err::read(receipt_path)
         .map_err(|source| return Error::filesystem(receipt_path, source))?;
+
     let receipt = serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path: receipt_path.to_path_buf(),
@@ -251,7 +278,9 @@ pub fn read_receipt(receipt_path: &Path) -> Result<EvidenceReceipt> {
             source,
         };
     })?;
+
     validate_envelope(&receipt)?;
+
     return Ok(receipt);
 }
 
@@ -274,6 +303,7 @@ pub fn verify_ssh_receipt(
             "receipt payload does not match current canonical roots or artifact checkpoint",
         ));
     }
+
     let signed_bytes = signed_payload_bytes(&receipt.payload)?;
     let temporary_directory = tempfile::Builder::new()
         .prefix("termtrace-receipt-")
@@ -285,6 +315,7 @@ pub fn verify_ssh_receipt(
                 source,
             };
         })?;
+
     let signature_path = temporary_directory.path().join("receipt.sig");
     write_temporary(&signature_path, receipt.signature.value.as_bytes())?;
     let cryptographic_valid = run_ssh_verification(
@@ -294,6 +325,7 @@ pub fn verify_ssh_receipt(
         &signature_path,
         &signed_bytes,
     )?;
+
     let signer_trusted = match allowed_signers {
         Some(policy) if cryptographic_valid => run_ssh_verification(
             "verify",
@@ -304,6 +336,7 @@ pub fn verify_ssh_receipt(
         )?,
         Some(_) | None => false,
     };
+
     return Ok(ReceiptVerification {
         signer_key_id: receipt.payload.signer_key_id,
         cryptographic_valid,
@@ -324,11 +357,13 @@ fn validate_payload(payload: &EvidenceReceiptPayload) -> Result<()> {
             "unsupported receipt payload or invalid signer key ID",
         ));
     }
+
     return Ok(());
 }
 
 fn validate_envelope(receipt: &EvidenceReceipt) -> Result<()> {
     validate_payload(&receipt.payload)?;
+
     if receipt.format != EVIDENCE_RECEIPT_FORMAT
         || receipt.version != EVIDENCE_RECEIPT_VERSION
         || receipt.signature.scheme != "openssh"
@@ -339,6 +374,7 @@ fn validate_envelope(receipt: &EvidenceReceipt) -> Result<()> {
             "unsupported receipt format, signature scheme, or canonicalization",
         ));
     }
+
     return Ok(());
 }
 
@@ -351,6 +387,7 @@ fn signed_payload_bytes(payload: &EvidenceReceiptPayload) -> Result<Vec<u8>> {
             source,
         };
     })?);
+
     return Ok(bytes);
 }
 
@@ -363,9 +400,11 @@ fn run_ssh_verification(
 ) -> Result<bool> {
     let mut command = Command::new("ssh-keygen");
     command.args(["-Y", mode]);
+
     if let Some(policy) = allowed_signers {
         command.args(["-f"]).arg(policy).args(["-I", key_id]);
     }
+
     let mut child = command
         .args(["-n", SIGNATURE_NAMESPACE, "-s"])
         .arg(signature)
@@ -382,12 +421,15 @@ fn run_ssh_verification(
     let status = child
         .wait()
         .map_err(|error| return command_error("wait for OpenSSH verifier", error.to_string()))?;
+
     if let Err(error) = write_result {
         if error.kind() == ErrorKind::BrokenPipe && !status.success() {
             return Ok(false);
         }
+
         return Err(command_error("write verifier payload", error.to_string()));
     }
+
     return Ok(status.success());
 }
 
@@ -403,11 +445,13 @@ fn write_temporary(path: &Path, bytes: &[u8]) -> Result<()> {
                     path: path.to_path_buf(),
                 };
             }
+
             return Error::filesystem(path, source);
         })?;
     file.write_all(bytes)
         .and_then(|()| return file.sync_all())
         .map_err(|source| return Error::filesystem(path, source))?;
+
     return Ok(());
 }
 
@@ -420,6 +464,7 @@ fn sync_parent(path: &Path) -> Result<()> {
     directory
         .sync_all()
         .map_err(|source| return Error::filesystem(parent, source))?;
+
     return Ok(());
 }
 

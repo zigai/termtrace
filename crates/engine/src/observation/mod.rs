@@ -15,7 +15,7 @@ mod model;
 mod session;
 
 pub(crate) use cache::publish_endpoint_checkpoint;
-use cache::{CachedSemanticState, load_checkpoint, publish_checkpoint};
+use cache::{load_checkpoint, publish_checkpoint, CachedSemanticState};
 pub use cache::{prune_replay_cache, replay_cache_status};
 use model::observation_error;
 pub use model::state_text;

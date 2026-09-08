@@ -10,15 +10,14 @@ use termtrace_evidence::artifact::{
     write_secure,
 };
 use termtrace_model::artifact::presentation::{
-    CaptionLayout, ChangeSource, PRESENTATION_FORMAT_VERSION, PresentationManifest,
-    PresentationOutcome, PresentationPlan, PresentationPreviewManifest, PresentationPreviewOutcome,
-    PresentationSource, PreviewOptions,
+    CaptionLayout, ChangeSource, PresentationManifest, PresentationOutcome, PresentationPlan,
+    PresentationPreviewManifest, PresentationPreviewOutcome, PresentationSource, PreviewOptions,
+    PRESENTATION_FORMAT_VERSION,
 };
 
 use crate::{Error, Result};
 
 use super::{
-    NANOS_PER_SECOND,
     ffmpeg::{
         append_change_visualization, append_pixel_transforms, command_version,
         prepare_subtitle_resources, probe_delivery_video, render_contact_sheet,
@@ -32,11 +31,13 @@ use super::{
         presentation_source_identity_hash, presentation_source_truth_layer,
         validate_preview_options,
     },
+    NANOS_PER_SECOND,
 };
 
 fn require_presentation_tools() -> Result<()> {
     command_version("ffmpeg")?;
     command_version("ffprobe")?;
+
     return Ok(());
 }
 
@@ -56,29 +57,36 @@ pub(super) fn export_with_capability_check(
     if plan.clips.is_empty() || plan.output_frame_count == 0 {
         return Err(plan_error("presentation plan has no output frames"));
     }
+
     validate_planned_source(&plan.source)?;
+
     if destination.exists() {
         return Err(Error::ArtifactExists {
             path: destination.to_path_buf(),
         });
     }
+
     let parent = destination
         .parent()
         .ok_or_else(|| return plan_error("presentation destination must have a parent"))?;
+
     if check_capabilities {
         require_presentation_tools()?;
     }
+
     fs_err::create_dir_all(parent).map_err(|source| {
         return Error::Filesystem {
             path: parent.to_path_buf(),
             source,
         };
     })?;
+
     let staging = parent.join(format!(".presentation-{}.tmp", uuid::Uuid::now_v7()));
     create_private_directory(&staging)?;
     let _staging_cleanup = DirectoryCleanup(staging.clone());
     export_staged(plan, &staging)?;
     commit_directory(parent, &staging, destination)?;
+
     return Ok(PresentationOutcome {
         directory: destination.to_path_buf(),
         video: destination.join("presentation.mp4"),
@@ -92,21 +100,26 @@ pub fn preview(
     options: PreviewOptions,
 ) -> Result<PresentationPreviewOutcome> {
     validate_preview_options(options)?;
+
     if options.change_only && plan.change_visualization.is_none() {
         return Err(plan_error(
             "change-only preview requires change_visualization in the edit plan",
         ));
     }
+
     validate_planned_source(&plan.source)?;
+
     let destination = destination.as_ref();
     if destination.exists() {
         return Err(Error::ArtifactExists {
             path: destination.to_path_buf(),
         });
     }
+
     let parent = destination
         .parent()
         .ok_or_else(|| return plan_error("preview destination must have a parent"))?;
+
     require_presentation_tools()?;
     fs_err::create_dir_all(parent).map_err(|source| {
         return Error::Filesystem {
@@ -114,6 +127,7 @@ pub fn preview(
             source,
         };
     })?;
+
     let composed = parent.join(format!(".preview-source-{}.tmp", uuid::Uuid::now_v7()));
     let _composed_cleanup = DirectoryCleanup(composed.clone());
     let rendered = export_with_capability_check(plan, &composed, false)?;
@@ -150,21 +164,26 @@ pub fn preview(
         &staging.join("source-presentation-manifest.json"),
         &source_manifest,
     )?;
+
     thread::scope(|scope| -> Result<()> {
         let contact_sheet = scope.spawn(|| {
             return render_contact_sheet(&rendered.video, &staging, &selected_frames, options);
         });
+
         let preview_video = scope.spawn(|| {
             return render_low_resolution_preview(&rendered.video, &staging, options.preview_width);
         });
+
         contact_sheet
             .join()
             .map_err(|_panic| return plan_error("contact-sheet rendering worker panicked"))??;
         preview_video
             .join()
             .map_err(|_panic| return plan_error("preview-video rendering worker panicked"))??;
+
         return Ok(());
     })?;
+
     let members = collect_artifact_members(&staging)?;
     let manifest = PresentationPreviewManifest {
         version: PRESENTATION_FORMAT_VERSION,
@@ -183,9 +202,11 @@ pub fn preview(
             source,
         };
     })?;
+
     write_secure(&staging.join("manifest.json"), &manifest_bytes)?;
     verify_artifact_members(&staging, &manifest.members)?;
     commit_directory(parent, &staging, destination)?;
+
     return Ok(PresentationPreviewOutcome {
         directory: destination.to_path_buf(),
         contact_sheet: destination.join("contact-sheet.png"),
@@ -228,12 +249,14 @@ pub(super) fn select_preview_frames(
                     .filter(|(start, end)| return start < end)
                     .collect::<Vec<_>>();
                 intervals.sort_unstable();
+
                 intervals
             }
             Some(_) => vec![(1, plan.output_frame_count)],
             None => Vec::new(),
         }
     };
+
     let mut merged: Vec<(u64, u64)> = Vec::with_capacity(intervals.len());
     for (start, end) in intervals
         .drain(..)
@@ -247,14 +270,18 @@ pub(super) fn select_preview_frames(
             merged.push((start, end));
         }
     }
+
     let candidates: u64 = merged.iter().map(|(start, end)| return end - start).sum();
     let count = u64::from(options.max_frames).min(candidates);
+
     if count == 0 {
         return Err(plan_error("preview selection contains no frames"));
     }
+
     let mut selected = Vec::with_capacity(usize::from(options.max_frames));
     let mut intervals = merged.into_iter();
     let mut interval = intervals.next();
+
     let mut preceding = 0;
     for index in 0..count {
         let candidate_index = if count == 1 {
@@ -263,16 +290,19 @@ pub(super) fn select_preview_frames(
             u64::try_from(u128::from(index) * u128::from(candidates - 1) / u128::from(count - 1))
                 .map_err(|_error| return plan_error("preview sample index overflowed"))?
         };
+
         while let Some((start, end)) = interval {
             let length = end - start;
             if candidate_index - preceding < length {
                 selected.push(start + candidate_index - preceding);
                 break;
             }
+
             preceding += length;
             interval = intervals.next();
         }
     }
+
     return Ok(selected);
 }
 
@@ -282,6 +312,7 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
     let mut filters = Vec::new();
     let captioned = plan.layout.caption != CaptionLayout::None
         && plan.clips.iter().any(|clip| return clip.caption.is_some());
+
     for (index, clip) in plan.clips.iter().enumerate() {
         let mut filter = format!(
             "[0:v]trim=start_frame={}:end_frame={},setpts=(PTS-STARTPTS)*{}/{}",
@@ -300,9 +331,11 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
             )
             .map_err(|_error| return plan_error("could not build FFmpeg hold filter"))?;
         }
+
         if captioned && plan.layout.caption == CaptionLayout::Footer {
             filter.push_str(",pad=iw:ih+48:0:0:color=black");
         }
+
         if captioned && let Some(caption) = &clip.caption {
             let caption_name = format!("caption-{index}.txt");
             let caption_path = staging.join(&caption_name);
@@ -314,10 +347,12 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
             )
             .map_err(|_error| return plan_error("could not build FFmpeg caption filter"))?;
         }
+
         write!(&mut filter, "[v{index}]")
             .map_err(|_error| return plan_error("could not build FFmpeg clip filter"))?;
         filters.push(filter);
     }
+
     let inputs = (0..plan.clips.len())
         .map(|index| return format!("[v{index}]"))
         .collect::<String>();
@@ -325,9 +360,11 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
         "{inputs}concat=n={}:v=1:a=0[joined]",
         plan.clips.len()
     ));
+
     let subtitle_resources = prepare_subtitle_resources(plan, staging)?;
     let changed = append_change_visualization(&mut filters, plan, "joined")?;
     let mut prior = append_pixel_transforms(&mut filters, plan, staging, &changed)?;
+
     for (index, resource) in subtitle_resources.iter().enumerate() {
         let next = format!("subtitle{index}");
         filters.push(format!(
@@ -339,8 +376,10 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
             filter_path_value(Path::new("fonts"))?,
             next,
         ));
+
         prior = next;
     }
+
     filters.push(format!("[{prior}]null[outv]"));
     let filter = format!("{};\n", filters.join(";\n"));
     write_secure(&filter_path, filter.as_bytes())?;
@@ -349,6 +388,7 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
     }) {
         write_source_frame_hashes(&source_video, staging)?;
     }
+
     let encoder = match plan.delivery.codec.as_str() {
         "h264" => "libx264",
         "h264_rgb" => "libx264rgb",
@@ -358,6 +398,7 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
             )));
         }
     };
+
     let ffmpeg_arguments = vec![
         "-hide_banner".to_owned(),
         "-nostdin".to_owned(),
@@ -389,6 +430,7 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
         "+faststart".to_owned(),
         "presentation.mp4".to_owned(),
     ];
+
     let process = Command::new("ffmpeg")
         .args(&ffmpeg_arguments)
         .current_dir(staging)
@@ -401,6 +443,7 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
                 source,
             };
         })?;
+
     write_secure(&staging.join("ffmpeg.log"), &process.stderr)?;
     if !process.status.success() {
         return Err(plan_error(format!(
@@ -409,6 +452,7 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
             String::from_utf8_lossy(&process.stderr)
         )));
     }
+
     let (output_probe, ffmpeg_version) =
         thread::scope(|scope| -> Result<(serde_json::Value, String)> {
             let probe = scope.spawn(|| -> Result<serde_json::Value> {
@@ -423,20 +467,24 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
                         };
                     })?,
                 )?;
+
                 return Ok(output_probe);
             });
+
             let frame_map = scope.spawn(|| -> Result<()> {
                 let semantic_spans = if matches!(plan.source, PresentationSource::Semantic { .. }) {
                     read_semantic_frame_spans(&staging.join("semantic-source-map.jsonl"))?
                 } else {
                     Vec::new()
                 };
+
                 return write_presentation_map(
                     &staging.join("presentation-map.jsonl"),
                     plan,
                     &semantic_spans,
                 );
             });
+
             let normalized_plan = scope.spawn(|| -> Result<()> {
                 let normalized = serde_json::to_vec_pretty(plan).map_err(|source| {
                     return Error::InvalidJson {
@@ -445,11 +493,13 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
                         source,
                     };
                 })?;
+
                 return Ok(write_secure(
                     &staging.join("normalized-plan.json"),
                     &normalized,
                 )?);
             });
+
             let version = scope.spawn(|| return command_version("ffmpeg"));
             let output_probe = probe
                 .join()
@@ -463,14 +513,17 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
             let ffmpeg_version = version
                 .join()
                 .map_err(|_panic| return plan_error("FFmpeg-version worker panicked"))??;
+
             return Ok((output_probe, ffmpeg_version));
         })?;
+
     let members = collect_artifact_members(staging)?;
     let output_video_hash = members
         .iter()
         .find(|member| return member.path == "presentation.mp4")
         .map(|member| return member.blake3.clone())
         .ok_or_else(|| return plan_error("presentation member list has no output video"))?;
+
     let manifest = PresentationManifest {
         version: PRESENTATION_FORMAT_VERSION,
         plan: plan.clone(),
@@ -489,7 +542,9 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
             source,
         };
     })?;
+
     write_secure(&staging.join("manifest.json"), &manifest_bytes)?;
     verify_artifact_members(staging, &manifest.members)?;
+
     return Ok(manifest);
 }

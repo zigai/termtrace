@@ -21,6 +21,7 @@ impl SessionBuilder {
     pub fn geometry(mut self, cols: u16, rows: u16) -> Self {
         self.cols = cols;
         self.rows = rows;
+
         return self;
     }
 
@@ -28,6 +29,7 @@ impl SessionBuilder {
     #[must_use]
     pub fn working_directory(mut self, path: impl Into<PathBuf>) -> Self {
         self.working_directory = Some(path.into());
+
         return self;
     }
 
@@ -35,6 +37,7 @@ impl SessionBuilder {
     #[must_use]
     pub fn startup_timeout(mut self, timeout: Duration) -> Self {
         self.startup_timeout = timeout;
+
         return self;
     }
 
@@ -42,6 +45,7 @@ impl SessionBuilder {
     #[must_use]
     pub fn environment(mut self, environment: EnvironmentSpec) -> Self {
         self.environment = environment;
+
         return self;
     }
 
@@ -49,6 +53,7 @@ impl SessionBuilder {
     #[must_use]
     pub fn clear_environment(mut self) -> Self {
         self.environment.base = EnvironmentBase::Clear;
+
         return self;
     }
 
@@ -58,6 +63,7 @@ impl SessionBuilder {
         self.environment
             .set
             .insert(name.into(), ByteString::new(value.into()));
+
         return self;
     }
 
@@ -65,6 +71,7 @@ impl SessionBuilder {
     #[must_use]
     pub fn unset_environment(mut self, name: impl Into<String>) -> Self {
         self.environment.unset.insert(name.into());
+
         return self;
     }
 
@@ -72,6 +79,7 @@ impl SessionBuilder {
     #[must_use]
     pub fn copy_environment(mut self, name: impl Into<String>) -> Self {
         self.environment.copy.insert(name.into());
+
         return self;
     }
 
@@ -79,6 +87,7 @@ impl SessionBuilder {
     #[must_use]
     pub fn color_policy(mut self, policy: ColorPolicy) -> Self {
         self.environment.color = policy;
+
         return self;
     }
 
@@ -86,6 +95,7 @@ impl SessionBuilder {
     #[must_use]
     pub fn output_byte_budget(mut self, bytes: u64) -> Self {
         self.output_byte_budget = Some(bytes);
+
         return self;
     }
 
@@ -94,23 +104,28 @@ impl SessionBuilder {
         if self.command.is_empty() {
             return Err(client_error("launch command is empty"));
         }
+
         fs_err::create_dir_all(&self.terminal.evidence_root).map_err(|source| {
             return Error::Filesystem {
                 path: self.terminal.evidence_root.clone(),
                 source,
             };
         })?;
+
         self.environment
             .validate()
             .map_err(|source| return client_error(source.to_string()))?;
+
         let path = self
             .terminal
             .evidence_root
             .join(format!("{}.tt", Uuid::now_v7().simple()));
+
         let log_path = self
             .terminal
             .evidence_root
             .join(format!(".{}.driver.log", Uuid::now_v7()));
+
         let environment_bytes = serde_json::to_vec(&self.environment).map_err(|source| {
             return Error::InvalidJson {
                 path: PathBuf::from("<environment-spec-stdin>"),
@@ -118,6 +133,7 @@ impl SessionBuilder {
                 source,
             };
         })?;
+
         let log = OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -129,6 +145,7 @@ impl SessionBuilder {
                     source,
                 };
             })?;
+
         let mut process = Command::new(&self.terminal.binary);
         process
             .args([
@@ -142,9 +159,11 @@ impl SessionBuilder {
             ])
             .arg(&path)
             .arg("--environment-spec-stdin");
+
         if let Some(limit) = self.output_byte_budget {
             process.arg("--output-byte-budget").arg(limit.to_string());
         }
+
         process
             .arg("--")
             .args(&self.command)
@@ -156,9 +175,11 @@ impl SessionBuilder {
                 };
             })?))
             .stderr(Stdio::from(log));
+
         if let Some(directory) = self.working_directory {
             process.current_dir(directory);
         }
+
         let mut child = process.spawn().map_err(|source| {
             return Error::Filesystem {
                 path: self.terminal.binary.clone(),
@@ -177,12 +198,15 @@ impl SessionBuilder {
         if let Err(error) = environment_write {
             let _kill = child.kill();
             let _wait = child.wait();
+
             return Err(error);
         }
+
         let deadline = Instant::now() + self.startup_timeout;
         while !control_endpoint_is_reachable(&path) {
             let status = child.try_wait().map_err(|source| {
                 let _kill = child.kill();
+
                 return Error::Filesystem {
                     path: self.terminal.binary.clone(),
                     source,
@@ -191,22 +215,28 @@ impl SessionBuilder {
             if let Some(status) = status {
                 if path.join("completion.json").is_file() {
                     validate_completed_session(&path)?;
+
                     break;
                 }
+
                 return Err(client_error(format!(
                     "recorder exited before readiness with {status}"
                 )));
             }
+
             if Instant::now() >= deadline {
                 let _kill = child.kill();
                 let _wait = child.wait();
+
                 return Err(client_error(format!(
                     "recorder readiness timed out; diagnostics: {}",
                     log_path.display()
                 )));
             }
+
             thread::sleep(Duration::from_millis(10));
         }
+
         return Session::open(path, self.terminal.binary, Some(child));
     }
 }

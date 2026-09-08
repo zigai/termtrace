@@ -1,0 +1,14 @@
+[statement_spacing]
+schema_version = 1
+
+[statement_spacing.grouping]
+bindings = "multiline"
+expressions = "multiline"
+self_fields = "distinct"
+
+[statement_spacing.control_flow]
+guard_chain = "contextual"
+related_continuation = false
+
+[statement_spacing.exits]
+tail = "visual"

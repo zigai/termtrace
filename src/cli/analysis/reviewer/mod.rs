@@ -4,8 +4,8 @@ use std::{
     io::{self, Stdout},
     path::{Path, PathBuf},
     sync::{
-        Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
+        Arc, Condvar, Mutex,
     },
     thread::{self, JoinHandle},
     time::Duration,
@@ -17,27 +17,27 @@ use crossterm::{
         KeyEventKind, MouseEventKind,
     },
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
-    Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    Terminal,
 };
 use signal_hook::{
     consts::{SIGINT, SIGTERM},
     flag::register as register_signal,
 };
 use termtrace_engine::{
-    Error, Result,
     analysis::{
         diagnostics::native_correlations_for_state,
-        reviewer::{ReviewEntry, ReviewPage, ReviewQuery, ReviewViewport, load_review_page},
+        reviewer::{load_review_page, ReviewEntry, ReviewPage, ReviewQuery, ReviewViewport},
     },
-    observation::{StatePoint, semantic_state_with_hash_for_session_cancellable},
+    observation::{semantic_state_with_hash_for_session_cancellable, StatePoint},
+    Error, Result,
 };
 use termtrace_evidence::session::read_completion;
 use termtrace_media::native_capture::validated_visual_manifests_for_state;
@@ -87,38 +87,44 @@ impl ReviewWorker {
         let worker_shared = Arc::clone(&shared);
         let running = thread::Builder::new()
             .name("semantic-review-pages".to_owned())
-            .spawn(move || {
-                loop {
-                    let (lock, changed) = &*worker_shared;
-                    let Ok(mut work) = lock.lock() else {
+            .spawn(move || loop {
+                let (lock, changed) = &*worker_shared;
+
+                let Ok(mut work) = lock.lock() else {
+                    return;
+                };
+                while work.pending.is_none() && !work.stopped {
+                    let Ok(next) = changed.wait(work) else {
                         return;
                     };
-                    while work.pending.is_none() && !work.stopped {
-                        let Ok(next) = changed.wait(work) else {
-                            return;
-                        };
-                        work = next;
-                    }
-                    if work.stopped {
-                        return;
-                    }
-                    let Some(request) = work.pending.take() else {
-                        continue;
-                    };
-                    drop(work);
-                    let loaded = load_work(&session, &request);
-                    if request.cancelled.load(Ordering::Relaxed) {
-                        continue;
-                    }
-                    let Ok(mut work) = lock.lock() else {
-                        return;
-                    };
-                    if !work.stopped {
-                        work.completed = Some((request.generation, loaded));
-                    }
+                    work = next;
+                }
+
+                if work.stopped {
+                    return;
+                }
+
+                let Some(request) = work.pending.take() else {
+                    continue;
+                };
+                drop(work);
+
+                let loaded = load_work(&session, &request);
+
+                if request.cancelled.load(Ordering::Relaxed) {
+                    continue;
+                }
+
+                let Ok(mut work) = lock.lock() else {
+                    return;
+                };
+
+                if !work.stopped {
+                    work.completed = Some((request.generation, loaded));
                 }
             })
             .map_err(terminal_error)?;
+
         return Ok(Self {
             shared,
             running: Some(running),
@@ -141,7 +147,9 @@ impl ReviewWorker {
             kind,
             cancelled: Arc::clone(&self.cancelled),
         });
+
         changed.notify_one();
+
         return Ok(());
     }
 
@@ -149,6 +157,7 @@ impl ReviewWorker {
         if self.running.as_ref().is_some_and(JoinHandle::is_finished) {
             return Err(review_error("review page worker exited unexpectedly"));
         }
+
         let mut work = self
             .shared
             .0
@@ -157,9 +166,11 @@ impl ReviewWorker {
         let Some((generation, result)) = work.completed.take() else {
             return Ok(None);
         };
+
         if generation != self.generation {
             return Ok(None);
         }
+
         return result.map(Some);
     }
 }
@@ -168,11 +179,14 @@ impl Drop for ReviewWorker {
     fn drop(&mut self) {
         self.cancelled.store(true, Ordering::Relaxed);
         let (lock, changed) = &*self.shared;
+
         if let Ok(mut work) = lock.lock() {
             work.stopped = true;
             work.pending = None;
+
             changed.notify_one();
         }
+
         if let Some(running) = self.running.take() {
             let _joined = running.join();
         }
@@ -188,7 +202,9 @@ fn load_work(session: &Path, request: &Request) -> Result<Loaded> {
                 false,
                 &request.cancelled,
             )?;
+
             let completion = read_completion(session)?;
+
             Ok(Loaded::Endpoint(Endpoint {
                 viewport: ReviewViewport::from_state(&state),
                 state_hash,
@@ -202,7 +218,9 @@ fn load_work(session: &Path, request: &Request) -> Result<Loaded> {
             let evidence =
                 validated_visual_manifests_for_state(session, *state_id, &request.cancelled)
                     .map_err(|source| return review_error(source.to_string()))?;
+
             let completion = read_completion(session)?;
+
             Ok(Loaded::Native(native_correlations_for_state(
                 completion.session_id,
                 *state_id,
@@ -234,8 +252,10 @@ impl ReviewModel {
         if let Some(query) = search_query {
             validate_search_query(query)?;
         }
+
         let mut worker = ReviewWorker::start(session.to_path_buf())?;
         worker.submit(WorkKind::Endpoint)?;
+
         return Ok(Self {
             session: session.to_path_buf(),
             worker,
@@ -256,6 +276,7 @@ impl ReviewModel {
         match self.worker.take()? {
             Some(Loaded::Endpoint(endpoint)) => {
                 self.endpoint = Some(endpoint);
+
                 if let Some(query) = self.initial_query.take() {
                     self.query(query)?;
                 }
@@ -274,6 +295,7 @@ impl ReviewModel {
             }
             None => {}
         }
+
         return Ok(());
     }
 
@@ -289,27 +311,22 @@ impl ReviewModel {
     fn query(&mut self, query: ReviewQuery) -> Result<()> {
         self.status = "loading exact semantic page; navigation, Escape and quit remain available";
         self.worker.submit(WorkKind::Page(query))?;
+
         return Ok(());
     }
 
     fn move_selection(&mut self, forward: bool) -> Result<()> {
         let Some(page) = self.page.as_mut() else {
-            return self.query(if forward {
-                ReviewQuery::State(0)
-            } else {
-                ReviewQuery::Final
-            });
+            return self.query(if forward { ReviewQuery::State(0) } else { ReviewQuery::Final });
         };
         let mut target = page.selected;
+
         loop {
-            target = if forward {
-                target.saturating_add(1)
-            } else {
-                target.saturating_sub(1)
-            };
+            target = if forward { target.saturating_add(1) } else { target.saturating_sub(1) };
             if target == page.selected {
                 return Ok(());
             }
+
             let Some(entry) = page
                 .entries
                 .iter()
@@ -322,13 +339,17 @@ impl ReviewModel {
                 self.native.clear();
                 self.status = "exact semantic page loaded; validating selected native evidence";
                 self.worker.submit(WorkKind::Native(target))?;
+
                 return Ok(());
             }
+
             if target == 0 || target == u64::MAX {
                 return Ok(());
             }
         }
+
         let from = page.selected;
+
         return self.query(ReviewQuery::Move {
             from,
             forward,
@@ -340,6 +361,7 @@ impl ReviewModel {
         let from_ns = self
             .selected_entry()
             .map_or(u64::MAX, |entry| return entry.monotonic_ns);
+
         return self.query(ReviewQuery::Event {
             from_ns,
             forward,
@@ -350,9 +372,11 @@ impl ReviewModel {
     fn jump_search(&mut self, forward: bool) -> Result<()> {
         let Some(query) = self.search_query.clone() else {
             self.status = "supply --search TEXT to navigate semantic matches";
+
             return Ok(());
         };
         let from = self.selected_entry().map(|entry| return entry.state_id);
+
         return self.query(ReviewQuery::Search {
             from,
             forward,
@@ -366,8 +390,10 @@ struct TerminalModeGuard;
 impl TerminalModeGuard {
     fn enter() -> Result<Self> {
         enable_raw_mode().map_err(terminal_error)?;
+
         let guard = Self;
         execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture).map_err(terminal_error)?;
+
         return Ok(guard);
     }
 }
@@ -388,17 +414,21 @@ pub(in crate::cli) fn run(
     let interrupted = Arc::new(AtomicBool::new(false));
     register_signal(SIGINT, Arc::clone(&interrupted)).map_err(terminal_error)?;
     register_signal(SIGTERM, Arc::clone(&interrupted)).map_err(terminal_error)?;
+
     let mut model = ReviewModel::open(session.as_ref(), around_marker, search_query)?;
     let _guard = TerminalModeGuard::enter()?;
     let mut terminal =
         Terminal::new(CrosstermBackend::new(io::stdout())).map_err(terminal_error)?;
     terminal.clear().map_err(terminal_error)?;
+
     while !interrupted.load(Ordering::Relaxed) {
         model.update()?;
         draw(&mut terminal, &model)?;
+
         if !event::poll(Duration::from_millis(30)).map_err(terminal_error)? {
             continue;
         }
+
         match event::read().map_err(terminal_error)? {
             TerminalEvent::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                 KeyCode::Char('q') => break,
@@ -430,7 +460,9 @@ pub(in crate::cli) fn run(
             _ => {}
         }
     }
+
     terminal.show_cursor().map_err(terminal_error)?;
+
     return Ok(());
 }
 
@@ -442,10 +474,12 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) 
             .as_ref()
             .map(|endpoint| return &endpoint.viewport);
     });
+
     let text = viewport.map_or_else(
         || return "Validating completed canonical source…".to_owned(),
         |viewport| return sanitize_text(&viewport.text),
     );
+
     terminal.draw(|frame| {
         let [main, status] = Layout::default().direction(Direction::Vertical).constraints([Constraint::Min(4), Constraint::Length(3)]).areas(frame.area());
         let [timeline_area, viewport_area, details_area] = Layout::default().direction(Direction::Horizontal).constraints([Constraint::Length(24), Constraint::Percentage(60), Constraint::Min(28)]).areas(main);
@@ -453,6 +487,7 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) 
             || return vec![ListItem::new("Exact ordinals loading"), ListItem::new("Home: initial state")],
             |page| {
                 let index = page.entries.iter().position(|entry| return entry.state_id == page.selected).unwrap_or(0);
+
                 return page.entries.iter().skip(index.saturating_sub(10)).take(21).map(|entry| {
                     return ListItem::new(format!("{} {} s{} e{}", if entry.state_id == page.selected { ">" } else { " " }, if entry.presented { "P" } else { "H" }, entry.state_id, entry.event_seq.map_or_else(|| return "-".to_owned(), |seq| return seq.to_string())));
                 }).collect();
@@ -465,11 +500,13 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) 
         } else {
             let identity = selected.map_or_else(|| return model.endpoint.as_ref().map_or_else(|| return "source: validating".to_owned(), |endpoint| return format!("state: endpoint (ordinal pending)\npresented: true\nhash: {}\ncanonical final hash: {}", endpoint.state_hash, endpoint.source_hash)), |entry| return format!("state: {}\nevent: {}\nbyte offset: {:?}\ntime: {} ns\npresented: {}\nhash: {}\ndirty: {}\ndirty rows: {:?}", entry.state_id, entry.event_seq.map_or_else(|| return "initial".to_owned(), |seq| return seq.to_string()), entry.event_byte_offset, entry.monotonic_ns, entry.presented, entry.state_hash, entry.dirty, entry.dirty_rows));
             let native = if model.native.is_empty() { "no sampled/proven native frame".to_owned() } else { model.native.iter().map(|correlation| return format!("{:?} frame={:?} {}", correlation.level, correlation.frame, correlation.limitation)).collect::<Vec<_>>().join("\n") };
+
             format!("{}\nsession: {}\ncursor: {:?},{:?} visible={}\nmode filter: {}\nsearch: {} (on-demand exact scan)\nnative: {}", identity, sanitize_text(&model.session.display().to_string()), viewport.and_then(|viewport| return viewport.cursor_row), viewport.and_then(|viewport| return viewport.cursor_column), viewport.is_some_and(|viewport| return viewport.cursor_visible), if model.presented_only { "presented" } else { "all" }, sanitize_text(model.search_query.as_deref().unwrap_or("-")), native)
         };
         frame.render_widget(Paragraph::new(details).block(Block::default().title(" evidence ").borders(Borders::ALL)).wrap(Wrap { trim: false }), details_area);
         frame.render_widget(Paragraph::new(vec![Line::styled(" q quit · j/k state · m/M marker · i/I input · n/N match · ? help ", Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)), Line::from(model.status)]), status);
     }).map_err(terminal_error)?;
+
     return Ok(());
 }
 
@@ -479,6 +516,7 @@ fn validate_search_query(query: &str) -> Result<()> {
             "review search must contain 1 through 4096 bytes",
         ));
     }
+
     return Ok(());
 }
 
@@ -489,6 +527,7 @@ fn sanitize_text(text: &str) -> String {
             if character == '\n' || character == '\t' || !character.is_control() {
                 return character;
             }
+
             return '\u{fffd}';
         })
         .collect();
@@ -500,6 +539,7 @@ fn terminal_error(source: io::Error) -> Error {
         source,
     };
 }
+
 fn review_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),

@@ -1,9 +1,9 @@
 use super::control::client_error;
 use super::{
-    ControlCommand, ControlData, ControlRequest, Duration, Error, Instant, Observation, Path,
-    Result, StatePoint, completed_semantic_state_with_hash_for_session,
-    observation_from_live_snapshot, observe_completed_session_with_options,
-    semantic_state_from_live_snapshot, send_request, thread,
+    completed_semantic_state_with_hash_for_session, observation_from_live_snapshot,
+    observe_completed_session_with_options, semantic_state_from_live_snapshot, send_request,
+    thread, ControlCommand, ControlData, ControlRequest, Duration, Error, Instant, Observation,
+    Path, Result, StatePoint,
 };
 use termtrace_model::terminal::state::SemanticState;
 
@@ -23,14 +23,17 @@ fn request_snapshot_across_completion(session: &Path) -> Result<Option<ControlDa
         {
             let completion = session.join("completion.json");
             let deadline = Instant::now() + COMPLETION_TRANSITION_TIMEOUT;
+
             loop {
                 if completion.is_file() {
                     return Ok(None);
                 }
+
                 let now = Instant::now();
                 if now >= deadline {
                     return Err(error);
                 }
+
                 thread::sleep(
                     COMPLETION_TRANSITION_POLL_INTERVAL
                         .min(deadline.saturating_duration_since(now)),
@@ -70,11 +73,13 @@ pub fn observe_session_with_options(
             include_hidden,
         )?);
     }
+
     if state_point != StatePoint::LatestPresented {
         return Err(client_error(
             "live sessions currently support only latest-presented selection",
         ));
     }
+
     let Some(snapshot) = request_snapshot_across_completion(session)? else {
         return Ok(observe_completed_session_with_options(
             session,
@@ -82,6 +87,7 @@ pub fn observe_session_with_options(
             include_hidden,
         )?);
     };
+
     return Ok(observation_from_live_snapshot(session, snapshot)?);
 }
 
@@ -97,6 +103,7 @@ pub fn semantic_state_for_session(
     include_hidden: bool,
 ) -> Result<SemanticState> {
     let (state, _) = semantic_state_with_hash_for_session(session, point, include_hidden)?;
+
     return Ok(state);
 }
 
@@ -118,11 +125,13 @@ pub fn semantic_state_with_hash_for_session(
             include_hidden,
         )?);
     }
+
     if point != &StatePoint::LatestPresented {
         return Err(client_error(
             "live semantic states support only latest-presented selection",
         ));
     }
+
     let Some(snapshot) = request_snapshot_across_completion(session)? else {
         return Ok(completed_semantic_state_with_hash_for_session(
             session,
@@ -130,5 +139,6 @@ pub fn semantic_state_with_hash_for_session(
             include_hidden,
         )?);
     };
+
     return Ok(semantic_state_from_live_snapshot(snapshot)?);
 }

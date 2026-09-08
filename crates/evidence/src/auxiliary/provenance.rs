@@ -47,17 +47,20 @@ pub fn collect_execution_provenance(
             let value = child_environment
                 .get(OsStr::new(&name))
                 .map(|value| return value.as_bytes());
+
             let sensitivity = if is_public_configuration(&name) {
                 ProvenanceSensitivity::PublicConfiguration
             } else {
                 ProvenanceSensitivity::PotentiallySensitive
             };
+
             return (
                 name,
                 represent_environment_value(capture, value, sensitivity),
             );
         })
         .collect();
+
     let executable = command.first().map_or_else(
         || return unresolved_file(OsStr::new("")),
         |requested| {
@@ -68,6 +71,7 @@ pub fn collect_execution_provenance(
             );
         },
     );
+
     let invoked_file = discover_invoked_file(command, &executable, working_directory).map(
         |(requested, resolved)| {
             return collect_file_provenance(
@@ -77,6 +81,7 @@ pub fn collect_execution_provenance(
             );
         },
     );
+
     return ExecutionProvenance {
         policy: policy.clone(),
         environment,
@@ -99,8 +104,10 @@ fn collect_runtime_provenance(
         current_executable.clone(),
         hash_files,
     );
+
     let uid = getuid().as_raw();
     let effective_uid = geteuid().as_raw();
+
     return RuntimeProvenance {
         uid,
         effective_uid,
@@ -138,6 +145,7 @@ fn collect_file_provenance(
     } else {
         (None, ContentIdentityStatus::NotRequested)
     };
+
     return FileProvenance {
         requested: ByteString::from(requested.as_bytes()),
         resolved: Some(ByteString::from(resolved.as_os_str().as_bytes())),
@@ -171,8 +179,10 @@ fn resolve_executable(
         } else {
             working_directory.join(requested_path)
         };
+
         return canonical_executable(candidate);
     }
+
     let search = child_environment.get(OsStr::new("PATH"))?;
     for directory in env::split_paths(search) {
         let directory = if directory.as_os_str().is_empty() {
@@ -182,10 +192,12 @@ fn resolve_executable(
         } else {
             working_directory.join(directory)
         };
+
         if let Some(path) = canonical_executable(directory.join(requested_path)) {
             return Some(path);
         }
     }
+
     return None;
 }
 
@@ -194,6 +206,7 @@ fn canonical_executable(path: PathBuf) -> Option<PathBuf> {
     if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
         return None;
     }
+
     return path.canonicalize().ok();
 }
 
@@ -209,22 +222,24 @@ fn discover_invoked_file(
         name.as_ref(),
         "sh" | "bash" | "dash" | "zsh" | "node" | "ruby" | "perl"
     ) || name.starts_with("python");
+
     if !interpreter {
         return None;
     }
+
     let argument = command.get(1)?;
     if argument.as_bytes().starts_with(b"-") {
         return None;
     }
+
     let path = Path::new(argument);
-    let candidate = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        working_directory.join(path)
-    };
+    let candidate =
+        if path.is_absolute() { path.to_path_buf() } else { working_directory.join(path) };
+
     if !candidate.metadata().ok()?.is_file() {
         return None;
     }
+
     return Some((argument.clone(), candidate.canonicalize().ok()?));
 }
 
@@ -232,6 +247,7 @@ fn hash_file(path: &Path) -> Option<String> {
     let mut file = File::open(path).ok()?;
     let mut hasher = blake3::Hasher::new();
     hasher.update_reader(&mut file).ok()?;
+
     return Some(hasher.finalize().to_hex().to_string());
 }
 
@@ -240,6 +256,7 @@ fn read_process_umask() -> Option<u32> {
     let value = status
         .lines()
         .find_map(|line| return line.strip_prefix("Umask:").map(str::trim))?;
+
     return u32::from_str_radix(value, 8).ok();
 }
 
@@ -273,6 +290,7 @@ fn effective_rules(
                     rules.insert(name.to_owned(), ProvenanceCapture::Value);
                 }
             }
+
             return rules;
         }
         ProvenancePolicyKind::Custom => return policy.environment.clone(),
@@ -291,17 +309,17 @@ fn represent_environment_value(
     } else {
         requested_capture
     };
+
     let value_hash = match capture {
         ProvenanceCapture::Value | ProvenanceCapture::Hash => {
             value.map(|bytes| return blake3::hash(bytes).to_hex().to_string())
         }
         ProvenanceCapture::Name | ProvenanceCapture::NotCaptured => None,
     };
-    let captured_value = if capture == ProvenanceCapture::Value {
-        value.map(ByteString::from)
-    } else {
-        None
-    };
+
+    let captured_value =
+        if capture == ProvenanceCapture::Value { value.map(ByteString::from) } else { None };
+
     return EnvironmentProvenance {
         capture,
         present: value.is_some(),
@@ -354,12 +372,10 @@ mod tests {
                 .map(|item| return item.capture),
             Some(ProvenanceCapture::Name)
         );
-        assert!(
-            collected
-                .environment
-                .get("LANG")
-                .is_none_or(|item| return item.value.is_none() && item.value_hash.is_none())
-        );
+        assert!(collected
+            .environment
+            .get("LANG")
+            .is_none_or(|item| return item.value.is_none() && item.value_hash.is_none()));
     }
 
     #[test]
@@ -368,8 +384,10 @@ mod tests {
             kind: ProvenancePolicyKind::Custom,
             environment: BTreeMap::from([("PRIVATE_TOKEN".to_owned(), ProvenanceCapture::Hash)]),
         };
+
         let environment =
             BTreeMap::from([(OsString::from("PRIVATE_TOKEN"), OsString::from("secret"))]);
+
         let collected = collect_execution_provenance(
             &policy,
             &environment,
@@ -377,6 +395,7 @@ mod tests {
             Path::new("/"),
             recorder(),
         );
+
         let item = collected.environment.get("PRIVATE_TOKEN").expect("item");
         assert_eq!(item.capture, ProvenanceCapture::Hash);
         assert_eq!(
@@ -396,8 +415,10 @@ mod tests {
             kind: ProvenancePolicyKind::Custom,
             environment: BTreeMap::from([("PRIVATE_TOKEN".to_owned(), ProvenanceCapture::Value)]),
         };
+
         let environment =
             BTreeMap::from([(OsString::from("PRIVATE_TOKEN"), OsString::from("secret"))]);
+
         let collected = collect_execution_provenance(
             &policy,
             &environment,
@@ -405,6 +426,7 @@ mod tests {
             Path::new("/"),
             recorder(),
         );
+
         let item = collected.environment.get("PRIVATE_TOKEN").expect("item");
         assert_eq!(item.capture, ProvenanceCapture::Hash);
         assert!(item.value.is_none());
@@ -416,10 +438,12 @@ mod tests {
         let temporary = tempfile::tempdir().expect("temporary directory");
         let script = temporary.path().join("fixture.sh");
         fs_err::write(&script, b"exit 0\n").expect("script");
+
         let policy = ProvenancePolicy {
             kind: ProvenancePolicyKind::Reproducible,
             environment: BTreeMap::new(),
         };
+
         let environment = BTreeMap::new();
         let collected = collect_execution_provenance(
             &policy,
@@ -446,10 +470,12 @@ mod tests {
         let executable = temporary.path().join("child-only-command");
         fs_err::write(&executable, b"#!/bin/sh\nexit 0\n").expect("fixture executable");
         fs_err::set_permissions(&executable, Permissions::from_mode(0o700)).expect("fixture mode");
+
         let environment = BTreeMap::from([(
             OsString::from("PATH"),
             temporary.path().as_os_str().to_os_string(),
         )]);
+
         let collected = collect_execution_provenance(
             &ProvenancePolicy::default(),
             &environment,

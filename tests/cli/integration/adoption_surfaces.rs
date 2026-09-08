@@ -19,6 +19,7 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         .launch([fixtures.join("line-command.sh").into_os_string()])
         .start()
         .expect("launch line fixture");
+
     wait_for_screen(
         line.path(),
         ScreenPredicate::Contains {
@@ -28,6 +29,7 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("line fixture ready");
+
     wait_for_screen(
         line.path(),
         ScreenPredicate::All {
@@ -94,6 +96,7 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("unchanged screen predicate");
+
     line.keyboard().text("fixture-value\n").expect("line input");
     wait_for_output(
         line.path(),
@@ -101,6 +104,7 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("line fixture output");
+
     line.complete(Duration::from_secs(5))
         .expect("line completion");
 
@@ -108,6 +112,7 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         .launch([fixtures.join("alternate-screen.py").into_os_string()])
         .start()
         .expect("launch alternate-screen fixture");
+
     wait_for_screen(
         alternate.path(),
         ScreenPredicate::Contains {
@@ -117,12 +122,15 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("alternate fixture ready");
+
     alternate
         .keyboard()
         .press(NamedKey::ArrowRight, KeyModifiers::default())
         .expect("mode-aware arrow");
+
     wait_for_output(alternate.path(), b"INPUT_HEX=", Duration::from_secs(5))
         .expect("alternate fixture input evidence");
+
     alternate
         .complete(Duration::from_secs(5))
         .expect("alternate completion");
@@ -135,6 +143,7 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         ])
         .start()
         .expect("launch final-state fixture");
+
     let final_wait = wait_for_screen(
         final_state.path(),
         ScreenPredicate::Contains {
@@ -162,12 +171,14 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         .arg(fixtures.join("query-heavy.py"))
         .assert()
         .success();
+
     wait_for_output(
         &query_session,
         b"QUERY_RESPONSES_OK",
         Duration::from_secs(1),
     )
     .expect("query response fixture output");
+
     let log = EventLog::read(query_session.join("events.jsonl")).expect("query event log");
     assert!(log.events.iter().any(|record| {
         return matches!(record.event, Event::QueryResponse { .. });
@@ -199,6 +210,7 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
         env!("CARGO_BIN_EXE_termtrace"),
         temporary.path().join("client-evidence"),
     );
+
     let mut session = terminal
         .launch([
             OsString::from("/bin/sh"),
@@ -208,6 +220,7 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
         .geometry(90, 25)
         .start()
         .expect("launch through Rust facade");
+
     wait_for_output(session.path(), b"READY", Duration::from_secs(5)).expect("ready output");
     let frame = session
         .screen()
@@ -215,15 +228,13 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
         .expect("screen frame");
     assert_eq!(frame.geometry.cols, 90);
     assert_eq!(frame.geometry.rows, 25);
-    assert!(
-        session
-            .screen()
-            .observation()
-            .expect("screen observation")
-            .frame
-            .viewport_text
-            .contains("READY")
-    );
+    assert!(session
+        .screen()
+        .observation()
+        .expect("screen observation")
+        .frame
+        .viewport_text
+        .contains("READY"));
     session
         .screen()
         .wait(
@@ -251,6 +262,7 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
         .keyboard()
         .text("client\n")
         .expect("typed client input");
+
     wait_for_output(session.path(), b"<client>", Duration::from_secs(5)).expect("client output");
     let completion = session
         .complete(Duration::from_secs(5))
@@ -263,13 +275,11 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
             .expect("semantic inspection")
             .source_completed
     );
-    assert!(
-        !session
-            .semantic()
-            .timeline(false, true)
-            .expect("timeline")
-            .is_empty()
-    );
+    assert!(!session
+        .semantic()
+        .timeline(false, true)
+        .expect("timeline")
+        .is_empty());
     assert!(
         session
             .semantic()
@@ -284,14 +294,12 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
         .semantic()
         .diagnose(vec![DiagnosticCheck::Dirty], 50)
         .expect("semantic diagnosis");
-    assert!(
-        !session
-            .events()
-            .page(0, 32, true)
-            .expect("event page")
-            .0
-            .is_empty()
-    );
+    assert!(!session
+        .events()
+        .page(0, 32, true)
+        .expect("event page")
+        .0
+        .is_empty());
 }
 
 #[test]
@@ -309,6 +317,7 @@ fn rust_facade_bridges_actor_shutdown_to_completion_publication() {
     let completion = session.join("completion.json");
     let pending_completion = session.join("completion.pending.json");
     fs::rename(&completion, &pending_completion).expect("stage delayed completion");
+
     let manifest = read_manifest(&session).expect("read short-lived session manifest");
     let address = SocketAddr::from_abstract_name(manifest.control_socket.as_bytes())
         .expect("construct fake control address");
@@ -323,12 +332,16 @@ fn rust_facade_bridges_actor_shutdown_to_completion_publication() {
             .expect("read snapshot request");
         assert!(!request.is_empty(), "snapshot request was not dispatched");
         drop(connection);
+
         thread::sleep(Duration::from_millis(100));
+
         fs::rename(restore_source, restore_destination).expect("publish delayed completion");
     });
+
     let observation =
         termtrace_sdk::observe_session_with_options(&session, StatePoint::LatestPresented, false)
             .expect("bridge observation across completion publication");
+
     restore.join().expect("join completion publisher");
     assert!(observation.source_completed);
 
@@ -337,14 +350,17 @@ fn rust_facade_bridges_actor_shutdown_to_completion_publication() {
     let restore_destination = completion;
     let restore = thread::spawn(move || {
         thread::sleep(Duration::from_millis(100));
+
         fs::rename(restore_source, restore_destination).expect("republish delayed completion");
     });
+
     let (_, state_hash) = termtrace_sdk::semantic_state_with_hash_for_session(
         &session,
         &StatePoint::LatestPresented,
         true,
     )
     .expect("bridge semantic state across completion publication");
+
     restore.join().expect("join semantic completion publisher");
     assert_eq!(state_hash, observation.state_hash);
 }
@@ -356,6 +372,7 @@ fn rust_facade_attach_retains_the_canonical_session_path() {
         env!("CARGO_BIN_EXE_termtrace"),
         temporary.path().join("evidence"),
     );
+
     let mut recording = terminal
         .launch([
             OsString::from("/bin/sh"),
@@ -371,6 +388,7 @@ fn rust_facade_attach_retains_the_canonical_session_path() {
         .path()
         .canonicalize()
         .expect("canonical recording path");
+
     drop(recording);
 
     let reference = temporary.path().join("session-link");

@@ -42,8 +42,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         || return repository_root.join("vendor/ghostty/zig-out"),
         PathBuf::from,
     );
+
     let header = prefix.join("include/ghostty/vt.h");
     let library = prefix.join("lib/libghostty-vt.a");
+
     println!("cargo:rerun-if-changed={}", header.display());
     println!("cargo:rerun-if-changed={}", library.display());
 
@@ -61,6 +63,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 library.display()
             )
         };
+
         return Err(message.into());
     }
 
@@ -72,5 +75,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-link-lib=dylib=m");
     println!("cargo:rustc-link-lib=dylib=dl");
     println!("cargo:rustc-link-lib=dylib=pthread");
+
     return Ok(());
 }

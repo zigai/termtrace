@@ -51,6 +51,7 @@ pub(super) fn control_response_timeout(command: &ControlCommand, wait_slack: Dur
                     Duration::from_nanos(*timeout_ns)
                 }
             };
+
             input_sequence_response_timeout(atoms, *pace_ns)
                 .saturating_add(postcondition_timeout)
                 .saturating_add(wait_slack)
@@ -69,12 +70,14 @@ pub(super) fn validate_frame(encoded: &[u8]) -> Result<()> {
                 .to_owned(),
         });
     }
+
     return Ok(());
 }
 
 fn input_sequence_response_timeout(atoms: &[InputSequenceAtom], pace_ns: u64) -> Duration {
     let gaps = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
     let pacing = Duration::from_nanos(pace_ns.saturating_mul(gaps)).min(MAX_INPUT_SEQUENCE_PACING);
+
     return DEFAULT_CONTROL_TIMEOUT.saturating_add(pacing);
 }
 
@@ -113,6 +116,7 @@ mod tests {
                 caller_intent: None,
             },
         ];
+
         let command = ControlCommand::InputSequence {
             atoms,
             pace_ns: 11_000_000_000,

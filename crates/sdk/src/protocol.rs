@@ -21,8 +21,8 @@ use nix::{
 use termtrace_engine::{
     inspection::wait_for_completion,
     observation::{
-        CaptureQuality, StatePoint, project_screen_frame, resolved_screen_state_for_session,
-        state_text,
+        project_screen_frame, resolved_screen_state_for_session, state_text, CaptureQuality,
+        StatePoint,
     },
     recording::control::{compile_screen_predicate, evaluate_screen_predicate},
 };
@@ -33,9 +33,9 @@ use termtrace_model::terminal::screen::ScreenFrameSource;
 use termtrace_model::{
     execution::session::SessionManifest,
     protocol::control::{
-        ActionPostcondition, CONTROL_PROTOCOL_VERSION, ControlCommand, ControlData, ControlRequest,
-        ControlResponse, ControlResult, InputSequenceAtom, MAX_CONTROL_MESSAGE_BYTES,
-        ScreenPredicate,
+        ActionPostcondition, ControlCommand, ControlData, ControlRequest, ControlResponse,
+        ControlResult, InputSequenceAtom, ScreenPredicate, CONTROL_PROTOCOL_VERSION,
+        MAX_CONTROL_MESSAGE_BYTES,
     },
     terminal::{inspection::ScreenWaitOutcome, screen::ScreenProjectionRequest},
 };
@@ -65,6 +65,7 @@ fn read_control_manifest(session_directory: &Path) -> Result<SessionManifest> {
             reason: "session manifest exceeds the client transport limit".to_owned(),
         });
     }
+
     return serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path,
@@ -90,6 +91,7 @@ pub(crate) fn connect_session_control(session_directory: &Path) -> Result<UnixSt
             source: IoError::new(ErrorKind::NotFound, "session manifest is unavailable"),
         });
     }
+
     let manifest = read_control_manifest(session_directory)?;
     let address = control_socket_address(&manifest.control_socket)?;
     let stream = UnixStream::connect_addr(&address).map_err(|source| {
@@ -106,6 +108,7 @@ pub(crate) fn connect_session_control(session_directory: &Path) -> Result<UnixSt
             source: IoError::from_raw_os_error(error as i32),
         };
     })?;
+
     if credentials.uid() != getuid().as_raw() {
         return Err(Error::ControlUnavailable {
             session: session_directory.to_path_buf(),
@@ -116,8 +119,10 @@ pub(crate) fn connect_session_control(session_directory: &Path) -> Result<UnixSt
             ),
         });
     }
+
     return Ok(stream);
 }
+
 /// Return whether the live recorder's abstract control endpoint accepts a connection.
 pub fn control_endpoint_is_reachable(session_directory: impl AsRef<Path>) -> bool {
     return connect_session_control(session_directory.as_ref()).is_ok();
@@ -170,16 +175,20 @@ pub fn wait_for_screen(
             let remaining = timeout
                 .saturating_sub(started_at.elapsed())
                 .max(Duration::from_secs(5));
+
             if let Err(completion_error) = wait_for_completion(session_directory, remaining) {
                 if session_directory.join("completion.json").is_file() {
                     return Err(completion_error.into());
                 }
+
                 return Err(error);
             }
+
             return completed_screen_wait(session_directory, predicate, stable_for_ns);
         }
         Err(error) => return Err(error),
     };
+
     let ControlData::ScreenWait {
         matched,
         first_match_monotonic_ns,
@@ -194,6 +203,7 @@ pub fn wait_for_screen(
             reason: "actor returned an unexpected screen-wait response".to_owned(),
         });
     };
+
     return Ok(ScreenWaitOutcome {
         predicate,
         matched,
@@ -213,8 +223,10 @@ fn completed_screen_wait(
 ) -> Result<ScreenWaitOutcome> {
     let compiled = compile_screen_predicate(&predicate)
         .map_err(|reason| return Error::InvalidOperation { reason })?;
+
     let (state, source, presented) =
         resolved_screen_state_for_session(session, StatePoint::LatestPresented, false)?;
+
     let frame = project_screen_frame(
         &state,
         &ScreenProjectionRequest::default(),
@@ -223,6 +235,7 @@ fn completed_screen_wait(
         CaptureQuality::Completed,
     )
     .map_err(Error::ScreenFrame)?;
+
     let viewport_text = state_text(&state);
     let matched = evaluate_screen_predicate(&compiled, &state, &viewport_text, &frame.state_hash);
     let observed_monotonic_ns = match &frame.source {
@@ -232,6 +245,7 @@ fn completed_screen_wait(
         } => *observed_monotonic_ns,
         ScreenFrameSource::Resolved { monotonic_ns, .. } => monotonic_ns.unwrap_or_default(),
     };
+
     return Ok(ScreenWaitOutcome {
         predicate,
         matched,
@@ -257,6 +271,7 @@ pub fn send_request(
     request: &ControlRequest,
 ) -> Result<ControlData> {
     let response = send_request_response(session_directory, request)?;
+
     match response.result {
         ControlResult::Ok { data } => return Ok(data),
         ControlResult::Error { code, message, .. } => {
@@ -335,6 +350,7 @@ pub(crate) fn exchange(
     timing: ExchangeTiming,
 ) -> Result<ControlResponse> {
     let stream = connect_session_control(session_directory)?;
+
     return exchange_stream(session_directory, stream, request, timing);
 }
 
@@ -352,6 +368,7 @@ fn exchange_stream(
             source,
         };
     })?;
+
     if u64::try_from(request_frame.len().saturating_add(1)).unwrap_or(u64::MAX)
         > MAX_CONTROL_MESSAGE_BYTES
     {
@@ -359,7 +376,9 @@ fn exchange_stream(
             reason: "request must be no larger than 1 MiB".to_owned(),
         });
     }
+
     request_frame.push(b'\n');
+
     let timeout = timing.remaining(session_directory, "write request", false)?;
     stream
         .set_read_timeout(Some(timeout))
@@ -411,11 +430,13 @@ fn exchange_stream(
             source,
         };
     })?;
+
     if response.version != CONTROL_PROTOCOL_VERSION || response.request_id != request.request_id {
         return Err(Error::InvalidControlProtocol {
             reason: "response version or request identifier does not match".to_owned(),
         });
     }
+
     return Ok(response);
 }
 
@@ -441,6 +462,7 @@ pub(crate) fn control_response_timeout(command: &ControlCommand, wait_slack: Dur
                     Duration::from_nanos(*timeout_ns)
                 }
             };
+
             input_sequence_response_timeout(atoms, *pace_ns)
                 .saturating_add(postcondition_timeout)
                 .saturating_add(wait_slack)
@@ -452,6 +474,7 @@ pub(crate) fn control_response_timeout(command: &ControlCommand, wait_slack: Dur
 fn input_sequence_response_timeout(atoms: &[InputSequenceAtom], pace_ns: u64) -> Duration {
     let gaps = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
     let pacing = Duration::from_nanos(pace_ns.saturating_mul(gaps)).min(MAX_INPUT_SEQUENCE_PACING);
+
     return DEFAULT_CONTROL_TIMEOUT.saturating_add(pacing);
 }
 
@@ -459,9 +482,11 @@ fn control_lifecycle_hint(session: &Path) -> String {
     if session.join("completion.json").is_file() {
         return "completed".to_owned();
     }
+
     if !session.join("session.json").is_file() {
         return "not_a_session".to_owned();
     }
+
     return "control_endpoint_unreachable_or_recorder_starting".to_owned();
 }
 
@@ -481,6 +506,7 @@ fn control_transport_error(
             source,
         };
     }
+
     return Error::ControlTransport {
         session: session.to_path_buf(),
         phase,
@@ -502,6 +528,7 @@ fn validate_response_frame(session: &Path, timeout: Duration, encoded: &[u8]) ->
             ),
         ));
     }
+
     return validate_frame(encoded);
 }
 
@@ -515,6 +542,7 @@ fn validate_frame(encoded: &[u8]) -> Result<()> {
                 .to_owned(),
         });
     }
+
     return Ok(());
 }
 

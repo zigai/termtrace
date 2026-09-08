@@ -21,6 +21,7 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
         ])
         .assert()
         .success();
+
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
     let expected = canonical_output_bytes(&log);
     assert_eq!(expected, b"A\x1b[?1049h\x1b[31mB\x1b[0m\xffC");
@@ -44,6 +45,7 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
             };
         })
         .expect("output event");
+
     let mut bounded = Command::cargo_bin("termtrace").expect("binary should build");
     bounded
         .args(["analyze", "output"])
@@ -72,6 +74,7 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
         .stderr(predicate::str::contains(
             "projection_quality=unsuitable_for_full_screen",
         ));
+
     let projection = fs_err::read_to_string(projection_manifest).expect("projection report");
     assert!(projection.contains(r#""projection_quality": "unsuitable_for_full_screen""#));
     assert!(projection.contains(r#""alternate_screen_observed": true"#));
@@ -98,6 +101,7 @@ fn output_follow_emits_each_durable_prefix_once_until_completion() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn recorder");
+
     wait_for_control(&session);
     let follower = StdCommand::new(binary)
         .args(["analyze", "output"])
@@ -107,6 +111,7 @@ fn output_follow_emits_each_durable_prefix_once_until_completion() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn output follower");
+
     let recorder_output = recorder.wait_with_output().expect("wait for recorder");
     assert!(recorder_output.status.success(), "{recorder_output:?}");
     let followed = follower.wait_with_output().expect("wait for follower");
@@ -148,11 +153,9 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
         .get_output()
         .stdout
         .clone();
-    assert!(
-        !output
-            .windows(b"secret-bytes".len())
-            .any(|w| return w == b"secret-bytes")
-    );
+    assert!(!output
+        .windows(b"secret-bytes".len())
+        .any(|w| return w == b"secret-bytes"));
     let mut byte_count = 0;
     for line in output
         .split(|byte| return *byte == b'\n')
@@ -171,6 +174,7 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
             .as_u64()
             .expect("output byte count");
     }
+
     assert_eq!(byte_count, b"secret-bytes".len() as u64);
 
     let mut exact = Command::cargo_bin("termtrace").expect("binary should build");
@@ -183,10 +187,12 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
         .get_output()
         .stdout
         .clone();
+
     let exact_line = exact_output
         .split(|byte| return *byte == b'\n')
         .find(|line| return !line.is_empty())
         .expect("exact event JSON line");
+
     let exact_record: serde_json::Value =
         serde_json::from_slice(exact_line).expect("exact event JSON");
     assert_eq!(exact_record["metadata_only"], false);
@@ -215,6 +221,7 @@ fn events_follow_resumes_filtered_durable_records_without_duplicates() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn recorder");
+
     wait_for_control(&session);
     let follower = StdCommand::new(binary)
         .args(["--response", "full", "analyze", "events"])
@@ -224,13 +231,12 @@ fn events_follow_resumes_filtered_durable_records_without_duplicates() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn event follower");
-    assert!(
-        recorder
-            .wait_with_output()
-            .expect("wait for recorder")
-            .status
-            .success()
-    );
+
+    assert!(recorder
+        .wait_with_output()
+        .expect("wait for recorder")
+        .status
+        .success());
     let followed = follower.wait_with_output().expect("wait for follower");
     assert!(followed.status.success(), "{followed:?}");
     let projected = followed
@@ -239,6 +245,7 @@ fn events_follow_resumes_filtered_durable_records_without_duplicates() {
         .filter(|line| return !line.is_empty())
         .map(|line| return serde_json::from_slice::<serde_json::Value>(line).expect("projection"))
         .collect::<Vec<_>>();
+
     let log = EventLog::read(session.join("events.jsonl")).expect("completed event log");
     let expected_sequences = log
         .events
@@ -246,6 +253,7 @@ fn events_follow_resumes_filtered_durable_records_without_duplicates() {
         .filter(|record| return matches!(record.event, Event::Output { .. }))
         .map(|record| return record.seq)
         .collect::<Vec<_>>();
+
     let projected_sequences = projected
         .iter()
         .map(|value| return value["seq"].as_u64().expect("sequence"))
@@ -273,7 +281,9 @@ fn start_event_follow_recorder(session: &Path) -> Child {
             "trap 'exit 0' TERM; while :; do sleep 0.1; done",
         ]);
     let recorder = command.spawn().expect("spawn recorder");
+
     wait_for_control(session);
+
     return recorder;
 }
 
@@ -290,9 +300,11 @@ fn follow_test_marker(session: &Path, label: &str) -> u64 {
         }),
     )
     .expect("durable marker");
+
     let ControlData::Marked { event_seq, .. } = data else {
         panic!("unexpected marker response");
     };
+
     return event_seq;
 }
 
@@ -314,9 +326,11 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn query-heavy prefix recorder");
+
     wait_for_control(&session);
     wait_for_output(&session, b"PREFIX_READY", Duration::from_secs(30))
         .expect("canonical prefix exceeds retained cursor history");
+
     let ControlData::Status { boundaries, .. } =
         send_request(&session, &ControlRequest::new(ControlCommand::Status)).expect("status")
     else {
@@ -381,11 +395,13 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
         for line in BufReader::new(stdout).lines() {
             let value: serde_json::Value =
                 serde_json::from_str(&line.expect("follow line")).expect("projection");
+
             if sender.send(value).is_err() {
                 break;
             }
         }
     });
+
     let raced = receiver
         .recv_timeout(Duration::from_secs(10))
         .expect("retained marker delivery");
@@ -396,6 +412,7 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
         .expect("new durable marker delivery");
     assert_eq!(delivered["seq"], fresh);
     send_request(&session, &ControlRequest::new(ControlCommand::Stop)).expect("stop recorder");
+
     let recorded = recorder.wait_with_output().expect("recorder completion");
     assert!(recorded.status.success(), "{recorded:?}");
     let followed = follower.wait_with_output().expect("follow completion");
@@ -436,6 +453,7 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
     source
         .seek(SeekFrom::Start(start.file_offset))
         .expect("seek suffix");
+
     let mut line = String::new();
     BufReader::new(source)
         .read_line(&mut line)
@@ -452,6 +470,7 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
         event: &record.event,
     })
     .expect("hash preimage");
+
     let mut hasher = blake3::Hasher::new();
     hasher.update(
         blake3::Hash::from_hex(&record.prev_hash)
@@ -472,6 +491,7 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
         .expect("seek overwrite");
     writer.write_all(&changed).expect("replace suffix");
     writer.sync_all().expect("sync forgery");
+
     let followed = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
         .args(["--response", "full", "analyze", "events"])
         .arg(&session)
@@ -498,7 +518,9 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
         .write_all(line.as_bytes())
         .expect("restore canonical record");
     writer.sync_all().expect("sync restoration");
+
     send_request(&session, &ControlRequest::new(ControlCommand::Stop)).expect("stop");
+
     let recorded = recorder.wait_with_output().expect("recorder exit");
     assert!(recorded.status.success(), "{recorded:?}");
 }
@@ -514,6 +536,7 @@ fn events_follow_rejects_replaced_actor_source_descriptor() {
     let original = session.join("original-events.jsonl");
     fs::rename(&path, &original).expect("move actor file");
     fs::copy(&original, &path).expect("identical imported replacement");
+
     let followed = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
         .args(["--response", "full", "analyze", "events"])
         .arg(&session)
@@ -530,7 +553,9 @@ fn events_follow_rejects_replaced_actor_source_descriptor() {
     assert!(followed.stdout.is_empty());
     assert!(String::from_utf8_lossy(&followed.stderr).contains("source identity"));
     fs::rename(&original, &path).expect("restore actor descriptor path");
+
     send_request(&session, &ControlRequest::new(ControlCommand::Stop)).expect("stop");
+
     let recorded = recorder.wait_with_output().expect("recorder exit");
     assert!(recorded.status.success(), "{recorded:?}");
 }
@@ -554,6 +579,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn live recorder");
+
     wait_for_control(&session);
 
     let mut marker = Command::cargo_bin("termtrace").expect("binary should build");
@@ -572,6 +598,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("is incomplete"));
+
     let mut incomplete_capture = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_capture
         .args(["artifact", "capture", "--session"])
@@ -595,14 +622,12 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     )
     .expect("explicit live snapshot");
     assert!(!snapshot.source_complete);
-    assert!(
-        snapshot
-            .directory
-            .file_name()
-            .expect("snapshot basename")
-            .to_string_lossy()
-            .contains("snapshot-")
-    );
+    assert!(snapshot
+        .directory
+        .file_name()
+        .expect("snapshot basename")
+        .to_string_lossy()
+        .contains("snapshot-"));
     let snapshot_manifest: ReplayManifest = serde_json::from_slice(
         &fs_err::read(snapshot.directory.join("manifest.json")).expect("snapshot manifest"),
     )
@@ -616,6 +641,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""kind":"completed""#));
+
     let output = child.wait_with_output().expect("wait for live recorder");
     assert!(output.status.success(), "recorder failed: {output:?}");
 
@@ -653,6 +679,7 @@ fn marker_listing_distinguishes_each_repeated_label_occurrence() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn marker fixture");
+
     wait_for_control(&session);
 
     for _ in 0..2 {
@@ -664,8 +691,10 @@ fn marker_listing_distinguishes_each_repeated_label_occurrence() {
         )
         .expect("record repeated marker");
     }
+
     send_request(&session, &ControlRequest::new(ControlCommand::Stop))
         .expect("stop marker fixture");
+
     let output = child.wait_with_output().expect("wait for marker fixture");
     assert!(output.status.success(), "marker fixture failed: {output:?}");
 
@@ -678,22 +707,23 @@ fn marker_listing_distinguishes_each_repeated_label_occurrence() {
         .get_output()
         .stdout
         .clone();
+
     let markers: Vec<serde_json::Value> =
         serde_json::from_slice(&markers).expect("marker listing JSON");
     assert_eq!(markers.len(), 2);
-    assert!(
-        markers
-            .iter()
-            .all(|marker| return marker["occurrence_count"] == 2)
-    );
+    assert!(markers
+        .iter()
+        .all(|marker| return marker["occurrence_count"] == 2));
     assert_eq!(markers[0]["occurrence_index"], 1);
     assert_eq!(markers[1]["occurrence_index"], 2);
     let first_seq = markers[0]["event_seq"]
         .as_u64()
         .expect("first marker event");
+
     let first_time = markers[0]["monotonic_ns"]
         .as_u64()
         .expect("first marker time");
+
     let selected = resolve_session_prefix_source_selection(
         &session,
         Some(first_seq + 1),
@@ -707,6 +737,12 @@ fn marker_listing_distinguishes_each_repeated_label_occurrence() {
     assert_eq!(selected.start_monotonic_ns, first_time);
     assert_eq!(selected.end_monotonic_ns, first_time + 1);
     assert!(resolve_session_prefix_source_selection(
-        &session, None, None, None, Some("repeated"), None,
-    ).is_err());
+        &session,
+        None,
+        None,
+        None,
+        Some("repeated"),
+        None,
+    )
+    .is_err());
 }

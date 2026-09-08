@@ -16,6 +16,7 @@ impl Keyboard<'_> {
             input_kind: InputKind::Text,
             caller_intent: None,
         });
+
         return self.session.send(&request);
     }
 

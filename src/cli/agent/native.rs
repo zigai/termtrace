@@ -1,19 +1,19 @@
 use std::{
     env,
     path::Path,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
 
-use termtrace_engine::Error as EngineError;
 use termtrace_engine::observation::{replay_endpoint_for_prefix, replay_endpoint_for_session};
-use termtrace_media::native_capture::{CaptureOutcome, NativeReplayWorker, native_capture_target};
+use termtrace_engine::Error as EngineError;
+use termtrace_media::native_capture::{native_capture_target, CaptureOutcome, NativeReplayWorker};
 use termtrace_model::{
     execution::session::CaptureTarget,
     protocol::control::{ControlCommand, ControlData},
     terminal::{observation::StatePoint, replay::ReplayEndpoint},
 };
-use termtrace_sdk::{Error, Result, request};
+use termtrace_sdk::{request, Error, Result};
 use uuid::Uuid;
 
 use super::runtime::Driver;
@@ -45,6 +45,7 @@ impl Driver {
                 }
                 .into());
             }
+
             match request(session, ControlCommand::Status) {
                 Ok(ControlData::Status { boundaries, .. }) => Some(boundaries.durable),
                 Err(_) if session.join("completion.json").is_file() => None,
@@ -57,11 +58,13 @@ impl Driver {
                 }
             }
         };
+
         let endpoint = if let Some(boundary) = &boundary {
             replay_endpoint_for_prefix(session, boundary, &cancelled)?
         } else {
             replay_endpoint_for_session(session, point, &cancelled)?
         };
+
         if self.native.as_ref().is_some_and(|active| {
             return active.handle != handle
                 || active.viewport != viewport
@@ -70,6 +73,7 @@ impl Driver {
         }) {
             self.native = None;
         }
+
         if self.native.is_none() {
             let helper = env::current_exe().map_err(|source| {
                 return Error::Filesystem {
@@ -77,6 +81,7 @@ impl Driver {
                     source,
                 };
             })?;
+
             let (target, _) = native_capture_target(&helper, session, viewport)?;
             let worker = NativeReplayWorker::start(
                 &helper,
@@ -92,11 +97,13 @@ impl Driver {
                 worker,
             });
         }
+
         let active = self.native.as_mut().ok_or_else(|| {
             return EngineError::InvalidReplay {
                 reason: "native replay worker unavailable".to_owned(),
             };
         })?;
+
         let captured = if let Some(boundary) = boundary {
             active.worker.capture_latest_prefix(&boundary, destination)
         } else {
@@ -105,10 +112,12 @@ impl Driver {
         match captured {
             Ok(capture) => {
                 active.last = endpoint;
+
                 return Ok(capture);
             }
             Err(error) => {
                 self.native = None;
+
                 return Err(error.into());
             }
         }

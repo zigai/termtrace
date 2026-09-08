@@ -109,6 +109,7 @@ pub enum Error {
 
 /// Result returned by media operations.
 pub type Result<T, E = Error> = StdResult<T, E>;
+
 pub(crate) fn finish_with_cleanup<T>(primary: Result<T>, cleanup: Result<()>) -> Result<T> {
     match (primary, cleanup) {
         (Ok(value), Ok(())) => return Ok(value),

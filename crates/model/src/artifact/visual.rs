@@ -200,6 +200,7 @@ pub fn visual_directory_name_for(
         StateSelection::All => VISUAL_DIRECTORY.to_owned(),
         StateSelection::Presented => format!("{VISUAL_DIRECTORY}-presented"),
     };
+
     return source_range.map_or_else(
         || return base.clone(),
         |range| return format!("{base}-{}", range.artifact_suffix()),

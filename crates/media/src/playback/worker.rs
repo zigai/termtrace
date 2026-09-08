@@ -25,9 +25,9 @@ use uuid::Uuid;
 
 use super::{
     runtime::{emit_endpoint, emit_event},
-    terminal::{RawTerminalGuard, TerminalInputDrain, query_terminal, resize_and_query},
+    terminal::{query_terminal, resize_and_query, RawTerminalGuard, TerminalInputDrain},
 };
-use crate::{Error, Result, error::finish_with_cleanup};
+use crate::{error::finish_with_cleanup, Error, Result};
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
@@ -65,6 +65,7 @@ struct PlaybackPosition {
 pub fn playback_worker(session: &Path, socket: &Path, geometry_file: &Path) -> Result<()> {
     let mut raw = RawTerminalGuard::enter(true)?;
     let result = run_worker(session, socket, geometry_file, raw.is_active());
+
     return finish_with_cleanup(result, raw.restore());
 }
 
@@ -77,11 +78,13 @@ fn run_worker(
     let manifest = read_manifest(session)?;
     let manifest_hash = manifest_hash(&canonical_manifest_bytes(&manifest)?);
     let reported = resize_and_query(manifest.geometry.cols, manifest.geometry.rows)?;
+
     if (reported.cols, reported.rows) != (manifest.geometry.cols, manifest.geometry.rows) {
         return Err(invalid(
             "native replay worker could not establish the canonical grid",
         ));
     }
+
     let listener =
         UnixListener::bind(socket).map_err(|source| return filesystem(socket, source))?;
     fs::set_permissions(socket, fs::Permissions::from_mode(0o600))
@@ -89,11 +92,13 @@ fn run_worker(
     listener
         .set_nonblocking(true)
         .map_err(|source| return filesystem(socket, source))?;
+
     write_secure(
         geometry_file,
         &serde_json::to_vec(&reported)
             .map_err(|source| return json_error(geometry_file, source))?,
     )?;
+
     let deadline = Instant::now() + Duration::from_secs(20);
     let stream = loop {
         match listener.accept() {
@@ -106,11 +111,14 @@ fn run_worker(
             Err(error) => return Err(filesystem(socket, error)),
         }
     };
+
     drop(listener);
+
     let mut input = BufReader::new(stream);
     let mut last = None;
     let mut resizes = HashMap::new();
     let mut line = Vec::new();
+
     loop {
         line.clear();
         let count = input
@@ -121,18 +129,22 @@ fn run_worker(
         if count == 0 {
             return Ok(());
         }
+
         if count > 64 * 1024 || line.last() != Some(&b'\n') {
             return Err(invalid("native worker request exceeds its framing limit"));
         }
+
         let request: WorkerRequest =
             serde_json::from_slice(&line).map_err(|source| return json_error(socket, source))?;
         let endpoint = match request {
             WorkerRequest::Close => {
                 write_response(input.get_mut(), &WorkerResponse::Closed, socket)?;
+
                 return Ok(());
             }
             WorkerRequest::Advance { endpoint } => endpoint,
         };
+
         if endpoint.session_id != manifest.session_id
             || endpoint.session_manifest_hash != manifest_hash
         {
@@ -140,6 +152,7 @@ fn run_worker(
                 "native worker endpoint has a different source session",
             ));
         }
+
         let result = advance(
             session,
             &endpoint,
@@ -154,6 +167,7 @@ fn run_worker(
                     &WorkerResponse::Ready { endpoint, geometry },
                     socket,
                 )?;
+
                 last = Some(position);
             }
             Err(error) => {
@@ -164,6 +178,7 @@ fn run_worker(
                     },
                     socket,
                 )?;
+
                 return Err(error);
             }
         }
@@ -183,6 +198,7 @@ fn advance(
     }) {
         return Err(invalid("native replay worker requires forward endpoints"));
     }
+
     if endpoint
         .event_seq
         .is_some_and(|seq| return seq >= endpoint.boundary.next_event_seq)
@@ -192,15 +208,18 @@ fn advance(
             "native replay endpoint is outside its source prefix",
         ));
     }
+
     let mut drain = TerminalInputDrain::start(terminal_input)?;
     let result = advance_events(session, endpoint, last, resizes);
     let position = finish_with_cleanup(result, drain.stop())?;
     let geometry = query_terminal()?;
+
     if (geometry.cols, geometry.rows) != (endpoint.cols, endpoint.rows) {
         return Err(invalid(
             "native replay endpoint grid differs from canonical semantics",
         ));
     }
+
     return Ok((position, geometry));
 }
 
@@ -218,9 +237,11 @@ fn advance_events(
             "native replay source header differs from its endpoint",
         ));
     }
+
     let mut output_bytes = 0_u64;
     let mut event_hash = None;
     let mut output = io::stdout().lock();
+
     while cursor.next_event_seq() < endpoint.boundary.next_event_seq {
         let record = cursor
             .next_record()?
@@ -229,25 +250,30 @@ fn advance_events(
             output_bytes = output_bytes
                 .saturating_add(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX));
         }
+
         if let Some(last) = last
             && last.endpoint.event_seq == Some(record.seq)
             && last.event_hash.as_deref() != Some(record.hash.as_str())
         {
             return Err(invalid("previously replayed source bytes changed"));
         }
+
         let Some(target) = endpoint.event_seq else {
             continue;
         };
         if record.seq > target {
             continue;
         }
+
         if record.seq == target {
             event_hash = Some(record.hash.clone());
         }
+
         if let Some(previous) = last.and_then(|last| return last.endpoint.event_seq) {
             if record.seq < previous {
                 continue;
             }
+
             if record.seq == previous {
                 if let Event::Output { data } = &record.event {
                     let start = last
@@ -257,6 +283,7 @@ fn advance_events(
                         .ok_or_else(|| {
                             return invalid("previous native output endpoint has no byte offset");
                         })?;
+
                     let end = if record.seq == target {
                         endpoint
                             .event_byte_offset
@@ -268,6 +295,7 @@ fn advance_events(
                     } else {
                         data.as_bytes().len()
                     };
+
                     let bytes = data.as_bytes().get(start..end).ok_or_else(|| {
                         return invalid(
                             "native output endpoint moved backward or exceeds its event",
@@ -280,9 +308,11 @@ fn advance_events(
                             return filesystem(Path::new("<playback-stdout>"), source);
                         })?;
                 }
+
                 continue;
             }
         }
+
         if record.seq == target {
             emit_endpoint(
                 &mut output,
@@ -294,15 +324,18 @@ fn advance_events(
             emit_event(&mut output, resizes, &record.event, None)?;
         }
     }
+
     cursor.validate_boundary(
         endpoint.boundary.next_event_seq,
         &endpoint.boundary.event_hash,
     )?;
+
     if output_bytes != endpoint.boundary.output_bytes {
         return Err(invalid(
             "native replay prefix output-byte count differs from its commitment",
         ));
     }
+
     return Ok(PlaybackPosition {
         endpoint: endpoint.clone(),
         event_hash,
@@ -312,6 +345,7 @@ fn advance_events(
 fn write_response(stream: &mut UnixStream, response: &WorkerResponse, path: &Path) -> Result<()> {
     serde_json::to_writer(&mut *stream, response)
         .map_err(|source| return json_error(path, source))?;
+
     return stream
         .write_all(b"\n")
         .map_err(|source| return filesystem(path, source));

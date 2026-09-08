@@ -32,10 +32,12 @@ fn native_processes_stop_after_driver_is_killed() {
         .timeout(Duration::from_secs(20))
         .assert()
         .success();
+
     let mut driver = Driver::spawn(env!("CARGO_BIN_EXE_termtrace")).expect("driver");
     let response = driver
         .request(DriverMethod::Attach { session }, Duration::from_secs(5))
         .expect("attach");
+
     let DriverResult::Ok {
         data: DriverData::Attached { handle, .. },
     } = response.result
@@ -70,14 +72,17 @@ fn native_processes_stop_after_driver_is_killed() {
         &fs::read(destination.join("native-resources.json")).expect("resources"),
     )
     .expect("resources JSON");
+
     let mut ancestor = resources["terminal_pid"].as_u64().expect("terminal PID");
     let mut owner = None;
+
     for _ in 0..16 {
         let args = fs::read(format!("/proc/{ancestor}/cmdline")).expect("ancestor command");
         if args.split(|byte| return *byte == 0).nth(1) == Some(b"agent".as_slice()) {
             owner = Some(ancestor);
             break;
         }
+
         let stat = fs::read_to_string(format!("/proc/{ancestor}/stat")).expect("ancestor state");
         ancestor = stat
             .rsplit_once(')')
@@ -89,12 +94,15 @@ fn native_processes_stop_after_driver_is_killed() {
             .parse()
             .expect("numeric parent");
     }
+
     let owner = owner.expect("driver ancestor");
     let mut pending = vec![owner];
     let mut descendants = Vec::new();
+
     while let Some(pid) = pending.pop() {
         let children =
             fs::read_to_string(format!("/proc/{pid}/task/{pid}/children")).expect("owned children");
+
         for child in children.split_whitespace() {
             let child = child.parse::<u64>().expect("child PID");
             descendants.push(child);
@@ -105,19 +113,19 @@ fn native_processes_stop_after_driver_is_killed() {
             );
         }
     }
+
     assert!(
         descendants.len() >= 4,
         "expected terminal and display supervisors"
     );
-    assert!(
-        StdCommand::new("kill")
-            .args(["-KILL", &owner.to_string()])
-            .status()
-            .expect("kill owner")
-            .success()
-    );
+    assert!(StdCommand::new("kill")
+        .args(["-KILL", &owner.to_string()])
+        .status()
+        .expect("kill owner")
+        .success());
     let _ = driver.close(Duration::from_secs(2));
     let deadline = Instant::now() + Duration::from_secs(5);
+
     loop {
         let running = descendants.iter().any(|pid| {
             return fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
@@ -130,6 +138,7 @@ fn native_processes_stop_after_driver_is_killed() {
         if !running {
             break;
         }
+
         assert!(
             Instant::now() < deadline,
             "native processes survived owner death"
@@ -151,6 +160,7 @@ fn installed_driver_reuses_native_worker_and_restarts_for_backward_selection() {
         .timeout(Duration::from_secs(20))
         .assert()
         .success();
+
     let mut driver = Driver::spawn(env!("CARGO_BIN_EXE_termtrace")).expect("installed driver");
     let response = driver
         .request(
@@ -160,6 +170,7 @@ fn installed_driver_reuses_native_worker_and_restarts_for_backward_selection() {
             Duration::from_secs(5),
         )
         .expect("attach");
+
     let DriverResult::Ok {
         data: DriverData::Attached { handle, .. },
     } = response.result
@@ -167,6 +178,7 @@ fn installed_driver_reuses_native_worker_and_restarts_for_backward_selection() {
         panic!("unexpected attach response");
     };
     let mut pids = Vec::new();
+
     for state_id in [1, 3, 0] {
         let destination = temporary.path().join(format!("state-{state_id}"));
         let response = driver
@@ -194,12 +206,14 @@ fn installed_driver_reuses_native_worker_and_restarts_for_backward_selection() {
         );
         validate_replay_screenshot(&session, &destination, &AtomicBool::new(false))
             .expect("verified screenshot");
+
         let resources: serde_json::Value = serde_json::from_slice(
             &fs::read(destination.join("native-resources.json")).expect("resources"),
         )
         .expect("resource JSON");
         pids.push(resources["terminal_pid"].as_u64().expect("terminal PID"));
     }
+
     assert_eq!(pids[0], pids[1]);
     assert_ne!(pids[1], pids[2]);
     let response = driver
@@ -214,6 +228,7 @@ fn installed_driver_reuses_native_worker_and_restarts_for_backward_selection() {
     driver
         .close(Duration::from_secs(5))
         .expect("driver cleanup");
+
     for pid in pids {
         assert!(!Path::new(&format!("/proc/{pid}")).exists());
     }
@@ -229,7 +244,9 @@ fn native_live_prefix_excludes_hidden_bytes_and_remains_verifiable_after_complet
         .args(["record", "--no-input", "--max-duration", "30s", "--out"]).arg(&session)
         .args(["--", "/bin/sh", "-c", "printf 'OLD\\033[?2026hHIDDEN'; while [ ! -f \"$1\" ]; do sleep 0.05; done; printf '\\033[?2026lNEW'", "source"])
         .arg(&release).stdout(Stdio::null()).stderr(Stdio::null()).spawn().expect("recorder");
+
     wait_for_control(&session);
+
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let status = termtrace_sdk::request(&session, ControlCommand::Status).expect("status");
@@ -238,12 +255,14 @@ fn native_live_prefix_excludes_hidden_bytes_and_remains_verifiable_after_complet
         {
             break;
         }
+
         assert!(
             Instant::now() < deadline,
             "initial output did not become durable"
         );
         thread::sleep(Duration::from_millis(10));
     }
+
     let destination = session.join("live");
     let capture = Command::cargo_bin("termtrace")
         .expect("binary")
@@ -254,6 +273,7 @@ fn native_live_prefix_excludes_hidden_bytes_and_remains_verifiable_after_complet
         .timeout(Duration::from_secs(25))
         .output()
         .expect("capture process");
+
     fs::write(&release, b"release").expect("release recorder");
     assert!(recorder.wait().expect("recording status").success());
     assert!(
@@ -295,6 +315,7 @@ fn native_live_prefix_excludes_hidden_bytes_and_remains_verifiable_after_complet
     let manifest: VisualManifest =
         serde_json::from_slice(&fs::read(destination.join("manifest.json")).expect("manifest"))
             .expect("visual manifest");
+
     verify_artifact_members(&destination, &manifest.members)
         .expect("verified pixels and prefix commitment");
     assert_eq!(
@@ -318,6 +339,7 @@ fn native_replay_batch_orders_endpoints_and_reuses_one_terminal() {
         .timeout(Duration::from_secs(20))
         .assert()
         .success();
+
     let destination = session.join("batch");
     Command::cargo_bin("termtrace")
         .expect("binary")
@@ -338,13 +360,16 @@ fn native_replay_batch_orders_endpoints_and_reuses_one_terminal() {
         .timeout(Duration::from_secs(60))
         .assert()
         .success();
+
     let mut terminal_pid = None;
     let mut images = Vec::new();
+
     for (index, expected_state) in [3_u64, 0, 3].into_iter().enumerate() {
         let artifact = destination.join(format!("capture-{index:04}"));
         let manifest: VisualManifest =
             serde_json::from_slice(&fs::read(artifact.join("manifest.json")).expect("manifest"))
                 .expect("visual manifest");
+
         verify_artifact_members(&artifact, &manifest.members).expect("verified screenshot payload");
         assert_eq!(manifest.selected_state_id, Some(expected_state));
         let endpoint: ReplayEndpoint = serde_json::from_slice(
@@ -362,6 +387,7 @@ fn native_replay_batch_orders_endpoints_and_reuses_one_terminal() {
             &fs::read(artifact.join("native-resources.json")).expect("resources"),
         )
         .expect("resources JSON");
+
         let pid = resources["terminal_pid"]
             .as_u64()
             .expect("owned terminal PID");
@@ -370,8 +396,10 @@ fn native_replay_batch_orders_endpoints_and_reuses_one_terminal() {
         } else {
             terminal_pid = Some(pid);
         }
+
         images.push(fs::read(artifact.join("final.png")).expect("PNG"));
     }
+
     assert_eq!(images[0], images[2]);
     assert_ne!(images[0], images[1]);
     let completion = validate_completed_session(&session).expect("completed source");
@@ -415,6 +443,7 @@ fn original_native_acquires_before_execution_and_preserves_exit_status() {
         .timeout(Duration::from_secs(40))
         .assert()
         .code(7);
+
     let completion = validate_completed_session(&session).expect("valid completed recording");
     assert_eq!(completion.exit_code, Some(7));
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
@@ -426,25 +455,24 @@ fn original_native_acquires_before_execution_and_preserves_exit_status() {
     let manifest: VisualManifest =
         serde_json::from_slice(&fs::read(visual.join("manifest.json")).expect("manifest bytes"))
             .expect("visual manifest");
+
     verify_artifact_members(&visual, &manifest.members).expect("all native members verified");
     let resources: serde_json::Value = serde_json::from_slice(
         &fs::read(visual.join("native-resources.json")).expect("resource report bytes"),
     )
     .expect("resource report");
     assert!(resources["terminal_pid"].is_number());
-    assert!(
-        resources["resources"]
-            .as_array()
-            .expect("resource identities")
-            .iter()
-            .any(|resource| return resource["kind"] == "terminal_executable"
-                && resource["blake3"]
-                    .as_str()
-                    .is_some_and(|hash| return hash.len() == 64)
-                && resource["byte_length"]
-                    .as_u64()
-                    .is_some_and(|bytes| return bytes > 0))
-    );
+    assert!(resources["resources"]
+        .as_array()
+        .expect("resource identities")
+        .iter()
+        .any(|resource| return resource["kind"] == "terminal_executable"
+            && resource["blake3"]
+                .as_str()
+                .is_some_and(|hash| return hash.len() == 64)
+            && resource["byte_length"]
+                .as_u64()
+                .is_some_and(|bytes| return bytes > 0)));
     assert_eq!(manifest.capture_kind, "original_execution");
     assert_eq!(
         manifest.source_event_hash,
@@ -461,17 +489,16 @@ fn original_native_acquires_before_execution_and_preserves_exit_status() {
                 return serde_json::from_str(&line.expect("frame line")).expect("frame JSON");
             })
             .collect();
+
     let first = frames.first().expect("first acquired frame");
     assert_eq!(
         first["acquisition_unix_ns"].as_u64().map(u128::from),
         Some(manifest.capture_started_unix_ns)
     );
     assert!(first["elapsed_since_execution_start_ns"].is_null());
-    assert!(
-        frames
-            .iter()
-            .any(|frame| return frame["elapsed_since_execution_start_ns"].is_number())
-    );
+    assert!(frames
+        .iter()
+        .any(|frame| return frame["elapsed_since_execution_start_ns"].is_number()));
     let packet_count = manifest
         .video_probe
         .as_ref()
@@ -506,27 +533,30 @@ fn original_native_cancellation_stops_the_managed_command() {
         .stderr(File::create(&log_path).expect("capture log"))
         .spawn()
         .expect("capture child");
+
     wait_for_control(&session);
-    assert!(
-        ProcessCommand::new("kill")
-            .args(["-TERM", &capture.id().to_string()])
-            .status()
-            .expect("signal capture")
-            .success()
-    );
+    assert!(ProcessCommand::new("kill")
+        .args(["-TERM", &capture.id().to_string()])
+        .status()
+        .expect("signal capture")
+        .success());
     let deadline = Instant::now() + Duration::from_secs(12);
     loop {
         if let Some(status) = capture.try_wait().expect("capture status") {
             assert!(!status.success());
+
             break;
         }
+
         if Instant::now() >= deadline {
             let _ = capture.kill();
             let _ = capture.wait();
             panic!("capture did not stop on cancellation");
         }
+
         thread::sleep(Duration::from_millis(20));
     }
+
     thread::sleep(Duration::from_secs(2));
     assert!(
         !marker.exists(),

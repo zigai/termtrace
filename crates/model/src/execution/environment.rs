@@ -85,37 +85,45 @@ impl EnvironmentSpec {
             .len()
             .saturating_add(self.copy.len())
             .saturating_add(self.unset.len());
+
         if count > MAX_VARIABLES {
             return Err(ModelValidationError::TooManyEnvironmentEntries);
         }
+
         for name in self.set.keys().chain(&self.copy).chain(&self.unset) {
             validate_name(name)?;
+
             if reserved_name(name) {
                 return Err(ModelValidationError::ControlledEnvironmentVariable {
                     name: name.clone(),
                 });
             }
         }
+
         for (name, value) in &self.set {
             if value.as_bytes().contains(&0) {
                 return Err(ModelValidationError::EnvironmentValueContainsNul {
                     name: name.clone(),
                 });
             }
+
             if value.as_bytes().len() > MAX_VALUE_BYTES {
                 return Err(ModelValidationError::EnvironmentValueTooLarge { name: name.clone() });
             }
         }
+
         for name in &self.copy {
             if self.set.contains_key(name) || self.unset.contains(name) {
                 return Err(conflict(name));
             }
         }
+
         for name in &self.unset {
             if self.set.contains_key(name) {
                 return Err(conflict(name));
             }
         }
+
         return Ok(());
     }
 }
@@ -134,9 +142,11 @@ impl ChildEnvironmentPolicy {
             .len()
             .saturating_add(self.copied_names.len())
             .saturating_add(self.unset_names.len());
+
         if count > MAX_VARIABLES {
             return Err(ModelValidationError::TooManyEnvironmentEntries);
         }
+
         for name in self
             .explicit_names
             .iter()
@@ -144,12 +154,14 @@ impl ChildEnvironmentPolicy {
             .chain(&self.unset_names)
         {
             validate_name(name)?;
+
             if reserved_name(name) {
                 return Err(ModelValidationError::ReservedEnvironmentVariable {
                     name: name.clone(),
                 });
             }
         }
+
         if let Some(name) = self
             .explicit_names
             .intersection(&self.copied_names)
@@ -159,6 +171,7 @@ impl ChildEnvironmentPolicy {
         {
             return Err(conflict(name));
         }
+
         if self.effective_digest.len() != 64
             || !self
                 .effective_digest
@@ -167,6 +180,7 @@ impl ChildEnvironmentPolicy {
         {
             return Err(ModelValidationError::InvalidEnvironmentDigest);
         }
+
         return Ok(());
     }
 }
@@ -186,6 +200,7 @@ fn validate_name(name: &str) -> Result<(), ModelValidationError> {
             name: name.to_owned(),
         });
     }
+
     return Ok(());
 }
 

@@ -2,7 +2,7 @@
 
 use crate::support::*;
 use std::ffi::OsStr;
-use termtrace_model::protocol::control::{InputSequenceAtom, derive_input_operation_id};
+use termtrace_model::protocol::control::{derive_input_operation_id, InputSequenceAtom};
 use uuid::Uuid;
 
 #[test]
@@ -23,15 +23,19 @@ fn named_key_is_encoded_from_live_application_cursor_mode() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn key fixture");
+
     wait_for_control(&session);
+
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
     wait.arg("wait")
         .arg(&session)
         .args(["--output", "READY", "--timeout", "5s"])
         .assert()
         .success();
+
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
     send.arg("act").arg(&session).arg("up").assert().success();
+
     let output = child.wait_with_output().expect("key fixture completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
 
@@ -62,6 +66,7 @@ fn send_writes_text_file_and_stdin_bytes_directly() {
     let session = temporary.path().join("direct-send-session");
     let input_file = temporary.path().join("input.bin");
     fs_err::write(&input_file, b"\0B").expect("direct input fixture");
+
     let child = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
         .args(["record", "--no-input", "--out"])
         .arg(&session)
@@ -75,6 +80,7 @@ fn send_writes_text_file_and_stdin_bytes_directly() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn direct input fixture");
+
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("ready output");
 
@@ -93,6 +99,7 @@ fn send_writes_text_file_and_stdin_bytes_directly() {
             .get_output()
             .stdout
             .clone();
+
         let response: serde_json::Value =
             serde_json::from_slice(&output).expect("direct send response");
         assert_eq!(response["bytes_written"], byte_count);
@@ -107,6 +114,7 @@ fn send_writes_text_file_and_stdin_bytes_directly() {
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""bytes_written":4"#));
+
     let output = child.wait_with_output().expect("direct input completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
     wait_for_output(
@@ -144,6 +152,7 @@ fn act_accepts_natural_modifier_aliases_and_single_character_text() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn natural key fixture");
+
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("ready output");
 
@@ -151,6 +160,7 @@ fn act_accepts_natural_modifier_aliases_and_single_character_text() {
         let mut send = Command::cargo_bin("termtrace").expect("binary should build");
         send.arg("act").arg(&session).arg(atom).assert().success();
     }
+
     let output = child.wait_with_output().expect("natural key completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
 
@@ -201,6 +211,7 @@ fn focus_events_are_mode_gated_encoded_and_audited() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn focus fixture");
+
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("focus mode ready");
 
@@ -214,6 +225,7 @@ fn focus_events_are_mode_gated_encoded_and_audited() {
             .assert()
             .success();
     }
+
     let output = child.wait_with_output().expect("focus fixture completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
 
@@ -281,6 +293,7 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn pointer fixture");
+
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("pointer mode ready");
 
@@ -291,6 +304,7 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
         .args(["click", "--cell", "2,3", "--button", "left", "--strict"])
         .assert()
         .success();
+
     let output = child
         .wait_with_output()
         .expect("pointer fixture completion");
@@ -340,6 +354,7 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
         }
         _ => return None,
     });
+
     let Some((
         operation,
         button,
@@ -396,6 +411,7 @@ fn pointer_scroll_accepts_separated_and_equals_negative_values() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn pointer scroll fixture");
+
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("pointer mode ready");
 
@@ -406,6 +422,7 @@ fn pointer_scroll_accepts_separated_and_equals_negative_values() {
         .args(["scroll", "--cell", "2,3", "--lines", "-2", "--strict"])
         .assert()
         .success();
+
     let mut equals = Command::cargo_bin("termtrace").expect("binary should build");
     equals
         .args(["control", "pointer"])
@@ -420,6 +437,7 @@ fn pointer_scroll_accepts_separated_and_equals_negative_values() {
         .arg("--wait")
         .assert()
         .success();
+
     let output = child
         .wait_with_output()
         .expect("pointer fixture completion");
@@ -498,6 +516,7 @@ fn activate_resolves_visible_text_rejects_ambiguity_and_records_region() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn activation fixture");
+
     wait_for_control(&session);
     wait_for_output(
         &session,
@@ -519,6 +538,7 @@ fn activate_resolves_visible_text_rejects_ambiguity_and_records_region() {
         .stdout(predicate::str::contains(r#""applied":"none""#))
         .stdout(predicate::str::contains(r#""retry":"safe_new_request""#))
         .stderr(predicate::str::is_empty());
+
     let mut activate = Command::cargo_bin("termtrace").expect("binary should build");
     activate
         .args(["control", "activate"])
@@ -527,6 +547,7 @@ fn activate_resolves_visible_text_rejects_ambiguity_and_records_region() {
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""kind":"activated""#));
+
     let output = child
         .wait_with_output()
         .expect("activation fixture completion");
@@ -596,7 +617,9 @@ fn paced_unicode_text_splits_only_at_scalar_boundaries() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn paced fixture");
+
     wait_for_control(&session);
+
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
     wait.arg("wait")
         .arg(&session)
@@ -611,6 +634,7 @@ fn paced_unicode_text_splits_only_at_scalar_boundaries() {
         .args(["--pace", "1ms", "--verbose", "text:é界", "enter"])
         .assert()
         .success();
+
     let response: serde_json::Value =
         serde_json::from_slice(&sent.get_output().stdout).expect("sequence response");
     assert_eq!(
@@ -636,11 +660,9 @@ fn paced_unicode_text_splits_only_at_scalar_boundaries() {
         })
         .collect::<Vec<_>>();
     assert_eq!(text_chunks, vec!["é".as_bytes(), "界".as_bytes()]);
-    assert!(
-        text_chunks
-            .iter()
-            .all(|chunk| return str::from_utf8(chunk).is_ok())
-    );
+    assert!(text_chunks
+        .iter()
+        .all(|chunk| return str::from_utf8(chunk).is_ok()));
 }
 
 #[test]
@@ -660,19 +682,23 @@ fn semantic_paste_uses_live_bracketed_mode_and_records_wrappers() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn paste fixture");
+
     wait_for_control(&session);
+
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
     wait.arg("wait")
         .arg(&session)
         .args(["--output", "READY", "--timeout", "5s"])
         .assert()
         .success();
+
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
     send.arg("act")
         .arg(&session)
         .arg("paste:one\ntwo")
         .assert()
         .success();
+
     let output = child.wait_with_output().expect("paste fixture completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
     let log = EventLog::read(session.join("events.jsonl")).expect("event log");
@@ -708,6 +734,7 @@ fn paced_sequence_encodes_each_atom_after_pumping_mode_changes() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn paced mode fixture");
+
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("ready output");
 
@@ -731,6 +758,7 @@ fn paced_sequence_encodes_each_atom_after_pumping_mode_changes() {
         ])
         .assert()
         .success();
+
     let response: serde_json::Value =
         serde_json::from_slice(&sent.get_output().stdout).expect("sequence response");
     assert_eq!(
@@ -803,8 +831,10 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn snapshot fixture");
+
     wait_for_control(&session);
     wait_for_output(&session, b"HIDDEN", Duration::from_secs(5)).expect("hidden output");
+
     let mut visible = Command::cargo_bin("termtrace").expect("binary should build");
     visible
         .arg("wait")
@@ -812,8 +842,10 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         .args(["--screen", "VISIBLE", "--timeout", "5s"])
         .assert()
         .success();
+
     let hidden = send_request(&session, &ControlRequest::new(ControlCommand::Snapshot))
         .expect("hidden snapshot");
+
     let hidden_snapshot = match hidden {
         ControlData::Snapshot {
             viewport_text,
@@ -823,6 +855,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         _ => None,
     }
     .expect("snapshot response");
+
     let (viewport_text, presented) = hidden_snapshot;
     assert!(presented);
     assert!(viewport_text.contains("VISIBLE"));
@@ -835,9 +868,11 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         .arg("text:x")
         .assert()
         .success();
+
     wait_for_output(&session, b"BUSY", Duration::from_secs(5)).expect("committed output");
     let committed = send_request(&session, &ControlRequest::new(ControlCommand::Snapshot))
         .expect("committed snapshot");
+
     let viewport_text = match committed {
         ControlData::Snapshot { viewport_text, .. } => Some(viewport_text),
         _ => None,
@@ -860,6 +895,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         .success()
         .stdout(predicate::str::contains(r#""scope":"screen""#))
         .stdout(predicate::str::contains(r#""quality":"matched""#));
+
     let mut absent_wait = Command::cargo_bin("termtrace").expect("binary should build");
     absent_wait
         .arg("wait")
@@ -874,6 +910,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         ])
         .assert()
         .success();
+
     for arguments in [
         ["--screen-regex", "B.SY"],
         ["--row-contains", "0:BUSY"],
@@ -890,12 +927,14 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
             .assert()
             .success();
     }
+
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
     stop.arg("stop")
         .arg(&session)
         .arg("--wait")
         .assert()
         .success();
+
     let output = child
         .wait_with_output()
         .expect("snapshot fixture completion");
@@ -919,6 +958,7 @@ fn adjacent_request_atom_identities_close_with_valid_canonical_evidence() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn adjacent identity fixture");
+
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("fixture ready");
     for (request_id, bytes) in [
@@ -950,6 +990,7 @@ fn adjacent_request_atom_identities_close_with_valid_canonical_evidence() {
             response,
         );
     }
+
     send_request(
         &session,
         &ControlRequest::new(ControlCommand::Input {
@@ -959,6 +1000,7 @@ fn adjacent_request_atom_identities_close_with_valid_canonical_evidence() {
         }),
     )
     .expect("finish fixture input");
+
     let output = child.wait_with_output().expect("fixture completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
     let log = EventLog::read(session.join("events.jsonl")).expect("unique operation evidence");
@@ -985,8 +1027,10 @@ fn raw_operation_collisions_reject_atomically_across_mutation_kinds() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn reserved identity fixture");
+
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("fixture ready");
+
     let used = Uuid::now_v7();
     let fresh = Uuid::now_v7();
     let atom = |operation_id, byte| {
@@ -1002,18 +1046,22 @@ fn raw_operation_collisions_reject_atomically_across_mutation_kinds() {
         pace_ns: 0,
         include_atom_outcomes: true,
     });
+
     let first_response = send_request_response(&session, &first).expect("first sequence");
     assert!(matches!(&first_response.result, ControlResult::Ok { .. }));
     let marker = ControlRequest::new(ControlCommand::Mark {
         label: "reserved-marker".to_owned(),
     });
+
     send_request(&session, &marker).expect("reserve non-input mutation identity");
+
     let mut scalar = ControlRequest::new(ControlCommand::Input {
         data: ByteString::new(b"BAD".to_vec()),
         input_kind: InputKind::Text,
         caller_intent: None,
     });
     scalar.request_id = used;
+
     for request in [
         ControlRequest::new(ControlCommand::InputSequence {
             atoms: vec![atom(fresh, b'X'), atom(used, b'Y')],
@@ -1037,6 +1085,7 @@ fn raw_operation_collisions_reject_atomically_across_mutation_kinds() {
             rejected,
         );
     }
+
     assert_eq!(
         send_request_response(&session, &first).expect("exact accepted retry"),
         first_response,
@@ -1050,6 +1099,7 @@ fn raw_operation_collisions_reject_atomically_across_mutation_kinds() {
         }),
     )
     .expect("rejected batch did not reserve fresh prefix");
+
     let output = child.wait_with_output().expect("fixture completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
     let log = EventLog::read(session.join("events.jsonl")).expect("unique operation evidence");

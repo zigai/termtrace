@@ -28,6 +28,7 @@ impl SessionClock {
             .duration_since(UNIX_EPOCH)
             .map_err(|_| return Error::ClockBeforeEpoch)?
             .as_nanos();
+
         return Ok(Self {
             monotonic_origin: Instant::now(),
             started_unix_ns,
@@ -113,6 +114,7 @@ impl From<&EventLog> for EventLogSummary {
                 _ => {}
             }
         }
+
         return summary;
     }
 }

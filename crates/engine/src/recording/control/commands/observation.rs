@@ -1,18 +1,19 @@
 use super::{
-    ActionPostcondition, ActionPostconditionResult, ActorBoundaries, ByteString, CaptureQuality,
-    CompiledScreenPredicate, ControlCommand, ControlData, Duration, Error, EventLogWriter, Instant,
-    LiveTerminal, Result, ScreenFrame, ScreenFrameSource, ScreenPostconditionQuality,
-    ScreenProjectionRequest, SessionActor, StableCaptureQuality, Uuid, action, actor_boundaries,
-    compile_screen_predicate, control_rejected, encode_all, evaluate_screen_predicate,
-    presented_state_hash, project_screen_frame, semantic_state_hash, semantic_viewport_text,
-    terminal_error,
+    action, actor_boundaries, compile_screen_predicate, control_rejected, encode_all,
+    evaluate_screen_predicate, presented_state_hash, project_screen_frame, semantic_state_hash,
+    semantic_viewport_text, terminal_error, ActionPostcondition, ActionPostconditionResult,
+    ActorBoundaries, ByteString, CaptureQuality, CompiledScreenPredicate, ControlCommand,
+    ControlData, Duration, Error, EventLogWriter, Instant, LiveTerminal, Result, ScreenFrame,
+    ScreenFrameSource, ScreenPostconditionQuality, ScreenProjectionRequest, SessionActor,
+    StableCaptureQuality, Uuid,
 };
-use nix::time::{ClockId, clock_gettime};
+use nix::time::{clock_gettime, ClockId};
 use termtrace_model::protocol::control::ClockSample;
 
 fn system_monotonic_ns() -> Result<u64> {
     let time = clock_gettime(ClockId::CLOCK_MONOTONIC)
         .map_err(|error| return terminal_error("sample monotonic clock", error.to_string()))?;
+
     return u64::try_from(i128::from(time.tv_sec()) * 1_000_000_000 + i128::from(time.tv_nsec()))
         .map_err(|error| return terminal_error("represent monotonic clock", error.to_string()));
 }
@@ -24,6 +25,7 @@ fn sample_clock(event_log: &EventLogWriter) -> Result<ClockSample> {
     let width = after
         .checked_sub(before)
         .ok_or_else(|| return terminal_error("sample monotonic clock", "clock moved backwards"))?;
+
     return Ok(ClockSample {
         session_monotonic_ns,
         system_monotonic_ns: before + width / 2,
@@ -79,6 +81,7 @@ pub(super) fn compile_action_postcondition(
         }
         _ => {}
     }
+
     return Err(control_rejected(
         "invalid_action_postcondition",
         "action postcondition exceeds its predicate limits or durations do not satisfy stable <= timeout <= 1h",
@@ -97,6 +100,7 @@ pub(super) fn evaluate_action_postcondition(
     let child_completed = child_exited && output_closed;
     let started_at = waiting.started_at;
     let projection = &waiting.action.projection;
+
     return match &waiting.action.postcondition {
         AdmittedPostcondition::None => {
             let frame = actor_screen_frame(
@@ -107,6 +111,7 @@ pub(super) fn evaluate_action_postcondition(
                 projection,
                 CaptureQuality::Live,
             )?;
+
             Ok(Some(ActionPostconditionResult::None {
                 matched: true,
                 frame,
@@ -121,13 +126,17 @@ pub(super) fn evaluate_action_postcondition(
                 Some((prior_hash, _)) if prior_hash == &state_hash => {}
                 _ => waiting.matching_state = Some((state_hash, now)),
             }
+
             let stable = waiting.matching_state.as_ref().is_some_and(|(_, since)| {
                 return since.elapsed() >= Duration::from_nanos(*stable_for_ns);
             });
+
             let deadline = !child_exited && now >= started_at + Duration::from_nanos(*timeout_ns);
+
             if !stable && !child_completed && !output_closed && !deadline {
                 return Ok(None);
             }
+
             let quality = if stable {
                 StableCaptureQuality::Stable
             } else if child_completed {
@@ -137,6 +146,7 @@ pub(super) fn evaluate_action_postcondition(
             } else {
                 StableCaptureQuality::Deadline
             };
+
             let capture_quality = if stable {
                 CaptureQuality::Stable
             } else if deadline {
@@ -144,6 +154,7 @@ pub(super) fn evaluate_action_postcondition(
             } else {
                 CaptureQuality::Live
             };
+
             let frame = actor_screen_frame(
                 session_id,
                 event_log,
@@ -152,6 +163,7 @@ pub(super) fn evaluate_action_postcondition(
                 projection,
                 capture_quality,
             )?;
+
             Ok(Some(ActionPostconditionResult::Idle {
                 matched: stable,
                 quality,
@@ -166,10 +178,13 @@ pub(super) fn evaluate_action_postcondition(
             let viewport_text = semantic_viewport_text(&live.presented);
             let matched =
                 evaluate_screen_predicate(predicate, &live.presented, &viewport_text, &state_hash);
+
             let deadline = !child_exited && now >= started_at + Duration::from_nanos(*timeout_ns);
+
             if !matched && !child_completed && !output_closed && !deadline {
                 return Ok(None);
             }
+
             let quality = if matched {
                 ScreenPostconditionQuality::MatchedUnsettled
             } else if child_completed {
@@ -179,11 +194,13 @@ pub(super) fn evaluate_action_postcondition(
             } else {
                 ScreenPostconditionQuality::Deadline
             };
+
             let capture_quality = if deadline && !matched {
                 CaptureQuality::Incomplete
             } else {
                 CaptureQuality::Live
             };
+
             let frame = actor_screen_frame(
                 session_id,
                 event_log,
@@ -192,6 +209,7 @@ pub(super) fn evaluate_action_postcondition(
                 projection,
                 capture_quality,
             )?;
+
             Ok(Some(ActionPostconditionResult::Screen {
                 matched,
                 quality,
@@ -214,6 +232,7 @@ pub(super) fn actor_screen_frame(
         boundaries,
         observed_monotonic_ns: event_log.elapsed_ns(),
     };
+
     return project_screen_frame(&live.presented, projection, source, true, capture_quality)
         .map_err(Error::ScreenFrame);
 }
@@ -231,6 +250,7 @@ impl SessionActor<'_> {
             ControlCommand::EventCursor { next_event_seq } => {
                 let (device, inode, header_hash) = self.event_log.source_identity();
                 let (start, durable) = self.event_log.follow_cursors(*next_event_seq);
+
                 Ok(ControlData::EventCursor {
                     device,
                     inode,
@@ -256,6 +276,7 @@ impl SessionActor<'_> {
                         )));
                     }
                 };
+
                 let compressed = match encode_all(encoded.as_slice(), 3) {
                     Ok(compressed) => compressed,
                     Err(error) => {
@@ -265,10 +286,12 @@ impl SessionActor<'_> {
                         )));
                     }
                 };
+
                 let state_hash = match semantic_state_hash(&self.live.presented) {
                     Ok(state_hash) => state_hash,
                     Err(error) => return Some(Err(Error::ScreenFrame(error))),
                 };
+
                 Ok(ControlData::Snapshot {
                     semantic_state_zstd: ByteString::from(compressed),
                     viewport_text: semantic_viewport_text(&self.live.presented),
@@ -286,6 +309,7 @@ impl SessionActor<'_> {
             }
             ControlCommand::ScreenFrame { projection } => {
                 let boundaries = actor_boundaries(&self.event_log);
+
                 actor_screen_frame(
                     self.session_id,
                     &self.event_log,
@@ -304,6 +328,7 @@ impl SessionActor<'_> {
             }
             _ => return None,
         };
+
         return Some(outcome);
     }
 }

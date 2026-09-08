@@ -1,6 +1,6 @@
 use super::*;
 use nix::{
-    sys::signal::{Signal, kill},
+    sys::signal::{kill, Signal},
     unistd::Pid,
 };
 use std::env;
@@ -10,16 +10,19 @@ use termtrace_export::tmux;
 #[test]
 fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
     use termtrace_model::artifact::tmux::{
-        TMUX_RECORDING_FORMAT, TMUX_RECORDING_VERSION, TmuxCompositeTrack, TmuxLifecycleEvent,
-        TmuxPaneTrack, TmuxRecordingCoverage, TmuxRecordingLifecycle, TmuxRecordingManifest,
+        TmuxCompositeTrack, TmuxLifecycleEvent, TmuxPaneTrack, TmuxRecordingCoverage,
+        TmuxRecordingLifecycle, TmuxRecordingManifest, TMUX_RECORDING_FORMAT,
+        TMUX_RECORDING_VERSION,
     };
 
     let temporary = TempDir::new().expect("temporary directory");
     fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
         .expect("secure aggregate root");
+
     let composite = temporary.path().join("composite");
     let pane = temporary.path().join("pane");
     let previous = temporary.path().join("previous-pane");
+
     for (session, output) in [
         (&composite, "COMPOSITE"),
         (&pane, "PANE"),
@@ -33,14 +36,17 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
             .assert()
             .success();
     }
+
     let state = temporary.path().join("state");
     let recordings = state.join("tmux-recordings");
     let aggregate = recordings.join("work");
     fs::create_dir_all(&aggregate).expect("aggregate directory");
+
     for directory in [state.as_path(), recordings.as_path(), aggregate.as_path()] {
         fs::set_permissions(directory, Permissions::from_mode(0o700))
             .expect("private aggregate directory");
     }
+
     let composite_manifest = read_manifest(&composite).expect("composite manifest");
     let mut manifest = TmuxRecordingManifest {
         lifecycle_journal: None,
@@ -71,6 +77,7 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
             .into_iter()
             .map(|path| {
                 let identity = read_manifest(path).expect("pane manifest").session_id;
+
                 return (
                     identity,
                     TmuxPaneTrack {
@@ -89,6 +96,7 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
         events: Vec::new(),
         coverage_gaps: Vec::new(),
     };
+
     for _ in 1..=260 {
         let sequence = manifest
             .lifecycle_journal
@@ -105,6 +113,7 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
         });
         tmux_journal::append(&aggregate, &mut manifest).expect("append lifecycle");
     }
+
     assert_eq!(
         manifest.events.len(),
         128,
@@ -114,10 +123,12 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
         .lifecycle_journal
         .clone()
         .expect("journal boundary");
+
     let journal = aggregate.join(tmux_journal::JOURNAL_NAME);
     let mut count = 0;
     tmux_journal::visit(&journal, &boundary, |_| {
         count += 1;
+
         return Ok(());
     })
     .expect("complete lifecycle history");
@@ -131,6 +142,7 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
             .write_all(b"interrupted uncommitted suffix")
             .expect("partial write");
     }
+
     tmux_journal::append(&aggregate, &mut manifest).expect("recover publication suffix");
     assert_eq!(
         fs::metadata(&journal).expect("journal metadata").len(),
@@ -156,6 +168,7 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
         .args(["--from-sequence", "2", "--limit", "3"])
         .assert()
         .success();
+
     let page: serde_json::Value =
         serde_json::from_slice(&output.get_output().stdout).expect("event page");
     assert_eq!(page["events"][0]["sequence"], 2);
@@ -188,6 +201,7 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
         .arg(&bundle)
         .assert()
         .success();
+
     let response = compact_json_line(&output.get_output().stdout);
     assert_eq!(response["recording_name"], "work");
     assert_eq!(response["track_count"], 3);
@@ -221,9 +235,11 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
             track.directory
         );
     }
+
     assert!(bundle.join("aggregate-lifecycle.jsonl").is_file());
     tmux::streaming::verify(&bundle, aggregate.join("manifest.json"))
         .expect("journal-bound bundle");
+
     fs::write(bundle.join("extra"), b"extra").expect("extra file");
     assert!(tmux::streaming::verify(&bundle, aggregate.join("manifest.json")).is_err());
     fs::remove_file(bundle.join("extra")).expect("remove extra file");
@@ -243,6 +259,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
     let temporary = TempDir::new().expect("temporary directory");
     fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
         .expect("secure aggregate root");
+
     let binary = tmux_binary();
     let socket = format!("termtrace-aggregate-test-{}", uuid::Uuid::now_v7());
     let root = temporary.path().to_str().expect("UTF-8 temporary path");
@@ -273,12 +290,14 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         .get_output()
         .stdout
         .clone();
+
     let _server = PrivateTmux {
         binary: binary.clone(),
         socket: socket.clone(),
         session: "aggregate".to_owned(),
         tmux_tmpdir: env::var_os("TMUX_TMPDIR").map(PathBuf::from),
     };
+
     let started: serde_json::Value =
         serde_json::from_slice(&output).expect("aggregate start response");
     assert_eq!(started["name"], "work");
@@ -297,6 +316,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         {
             break value;
         }
+
         assert!(
             Instant::now() < deadline,
             "aggregate manifest did not link both track layers"
@@ -316,12 +336,14 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
             track["session"]
         );
     }
+
     assert_eq!(linked["coverage"], "warn");
     let deadline = Instant::now() + Duration::from_secs(5);
     let observer = loop {
         let snapshot: serde_json::Value =
             serde_json::from_slice(&fs::read(&manifest).expect("read observer startup snapshot"))
                 .expect("startup snapshot JSON");
+
         let output = _server
             .command()
             .args(["show-options", "-gqv", "@termtrace-supervisor-pid"])
@@ -338,15 +360,19 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         {
             break pid;
         }
+
         assert!(Instant::now() < deadline, "observer did not start");
         thread::sleep(Duration::from_millis(20));
     };
+
     kill(Pid::from_raw(observer), Signal::SIGKILL).expect("kill isolated observer");
+
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let value: serde_json::Value =
             serde_json::from_slice(&fs::read(&manifest).expect("read observer restart snapshot"))
                 .expect("restart snapshot JSON");
+
         let restarted = value["events"].as_array().is_some_and(|events| {
             return events
                 .iter()
@@ -363,12 +389,14 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         if restarted {
             break;
         }
+
         assert!(
             Instant::now() < deadline,
             "observer did not restart with a durable coverage gap"
         );
         thread::sleep(Duration::from_millis(20));
     }
+
     assert!(linked["events"].as_array().is_some_and(|events| {
         return events
             .iter()
@@ -418,6 +446,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
             .stdout,
     ))
     .expect("UTF-8 pane ID");
+
     let gap_deadline = Instant::now() + Duration::from_secs(5);
     let uncovered = loop {
         let refreshed: serde_json::Value = serde_json::from_slice(
@@ -451,6 +480,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         {
             break gap;
         }
+
         assert!(
             Instant::now() < gap_deadline,
             "aggregate manifest did not retain the uncovered pane"
@@ -484,6 +514,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
                 .stdout,
         )
         .expect("aggregate status after gap resolution");
+
         let gap_page: serde_json::Value = serde_json::from_slice(
             &Command::cargo_bin("termtrace")
                 .expect("binary should build")
@@ -494,6 +525,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
                 .stdout,
         )
         .expect("historical gap inventory");
+
         let historical = gap_page["entries"]
             .as_array()
             .and_then(|gaps| {
@@ -508,6 +540,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         if historical["resolved_unix_ns"].is_u64() {
             break (historical, refreshed);
         }
+
         assert!(
             Instant::now() < resolution_deadline,
             "aggregate gap did not acquire resolution evidence"
@@ -521,12 +554,15 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
     let initial_last_observed = uncovered["last_observed_unix_ns"]
         .as_u64()
         .expect("initial gap last observation");
+
     let final_last_observed = resolved.0["last_observed_unix_ns"]
         .as_u64()
         .expect("resolved gap last observation");
+
     let resolved_unix_ns = resolved.0["resolved_unix_ns"]
         .as_u64()
         .expect("gap resolution timestamp");
+
     assert!(final_last_observed >= initial_last_observed);
     assert!(resolved_unix_ns >= final_last_observed);
     assert!(resolved.1["events"].as_array().is_some_and(|events| {
@@ -544,6 +580,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         .args(["tmux", "stop", "work", "--output-root", root, "--wait"])
         .assert()
         .success();
+
     let video = temporary.path().join("aggregate.mp4");
     Command::cargo_bin("termtrace")
         .expect("binary should build")
@@ -572,6 +609,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         .stderr(predicate::str::contains(
             "semantic_video_dependency_missing",
         ));
+
     let stopped: serde_json::Value =
         serde_json::from_slice(&fs::read(&manifest).expect("read stopped aggregate manifest"))
             .expect("stopped aggregate manifest JSON");

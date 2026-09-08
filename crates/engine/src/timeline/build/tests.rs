@@ -3,7 +3,7 @@ use super::*;
 use uuid::Uuid;
 
 use crate::replay::{
-    StateSelection, reset_test_replay_output_bytes, test_replay_output_bytes, write_index,
+    reset_test_replay_output_bytes, test_replay_output_bytes, write_index, StateSelection,
 };
 use termtrace_evidence::artifact::create_private_directory;
 use termtrace_model::execution::event::{EventLogHeader, EventRecord};
@@ -44,6 +44,7 @@ fn ranged_timeline_log() -> EventLog {
             },
         },
     ];
+
     return EventLog {
         header: EventLogHeader::new(
             session_id,
@@ -76,17 +77,17 @@ fn ranged_timeline_pages_from_a_replay_baseline() {
         build_timeline_page(&log, false, false, range, 1, 8).expect("remaining timeline page");
     assert!(!second.entries.is_empty());
     assert_eq!(second.next_offset, None);
-    assert!(
-        first
-            .entries
-            .iter()
-            .chain(&second.entries)
-            .all(|entry| return (2..4).contains(&entry.monotonic_ns))
-    );
+    assert!(first
+        .entries
+        .iter()
+        .chain(&second.entries)
+        .all(|entry| return (2..4).contains(&entry.monotonic_ns)));
 }
+
 fn indexed_control_log(temporary: &tempfile::TempDir) -> EventLog {
     let session_id = Uuid::now_v7();
     let mut events: Vec<EventRecord> = Vec::new();
+
     for seq in 0..400_u64 {
         events.push(EventRecord {
             observed_monotonic_ns: None,
@@ -99,6 +100,7 @@ fn indexed_control_log(temporary: &tempfile::TempDir) -> EventLog {
             },
         });
     }
+
     let log = EventLog {
         header: EventLogHeader::new(
             session_id,
@@ -114,10 +116,12 @@ fn indexed_control_log(temporary: &tempfile::TempDir) -> EventLog {
         pending_operations: Vec::new(),
         source_path: Some(temporary.path().join("events.jsonl")),
     };
+
     let directory = temporary.path().join(DERIVED_DIRECTORY);
     create_private_directory(&directory).expect("derived directory");
     write_index(&directory, &log, None, true, StateSelection::All)
         .expect("control-rich checkpoint index");
+
     return log;
 }
 
@@ -129,7 +133,9 @@ fn late_control_pages_and_ranges_seek_auxiliary_output() {
     canonical.source_path = None;
     let full = build_timeline(&canonical, true, true, None).expect("full control timeline");
     let offset = full.len().saturating_sub(20);
+
     reset_test_auxiliary_scan();
+
     let page = build_timeline_page(
         &log,
         true,
@@ -139,6 +145,7 @@ fn late_control_pages_and_ranges_seek_auxiliary_output() {
         5,
     )
     .expect("late control page");
+
     let (offset_bytes, offset_events, offset_first_event) = test_auxiliary_scan();
     assert!(
         offset_first_event > 0,
@@ -165,11 +172,15 @@ fn late_control_pages_and_ranges_seek_auxiliary_output() {
         start_monotonic_ns: 350,
         end_monotonic_ns: 361,
     });
+
     let expected =
         build_timeline(&canonical, true, true, range).expect("full ranged control timeline");
+
     reset_test_auxiliary_scan();
+
     let ranged =
         build_timeline_page(&log, true, true, range, 0, 10_000).expect("late ranged control page");
+
     let (range_bytes, range_events, range_first_event) = test_auxiliary_scan();
     assert!(
         range_first_event >= 348,
@@ -191,6 +202,7 @@ fn late_control_pages_and_ranges_seek_auxiliary_output() {
 fn indexed_range_preserves_control_spanning_output_events() {
     let template = tempfile::TempDir::new().expect("template directory");
     let mut log = indexed_control_log(&template);
+
     for (seq, data) in [
         (348_usize, b"\x1b]2;".as_slice()),
         (349_usize, b"spanning-title".as_slice()),
@@ -201,22 +213,29 @@ fn indexed_range_preserves_control_spanning_output_events() {
         };
         *output = ByteString::from(data);
     }
+
     let temporary = tempfile::TempDir::new().expect("indexed directory");
     log.source_path = Some(temporary.path().join("events.jsonl"));
     let directory = temporary.path().join(DERIVED_DIRECTORY);
     create_private_directory(&directory).expect("derived directory");
     write_index(&directory, &log, None, true, StateSelection::All).expect("spanning-control index");
+
     let range = Some(SourceRange {
         start_monotonic_ns: 350,
         end_monotonic_ns: 351,
     });
+
     let mut canonical = log.clone();
     canonical.source_path = None;
     let expected = build_timeline(&canonical, true, true, range).expect("canonical spanning range");
+
     reset_test_auxiliary_scan();
+
     let page =
         build_timeline_page(&log, true, true, range, 0, 10_000).expect("indexed spanning range");
+
     let (bytes, events, first_event) = test_auxiliary_scan();
+
     assert_eq!(page.entries, expected);
     assert_eq!(page.next_offset, None);
     assert_eq!(first_event, 348);
@@ -236,12 +255,15 @@ fn unindexed_range_preserves_csi_spanning_output_events() {
             data: ByteString::from(data),
         };
     }
+
     let range = Some(SourceRange {
         start_monotonic_ns: 3,
         end_monotonic_ns: 4,
     });
+
     let expected =
         build_timeline(&log, true, true, range).expect("canonical unindexed spanning range");
+
     let page =
         build_timeline_page(&log, true, true, range, 0, 10_000).expect("unindexed spanning range");
 
@@ -260,6 +282,7 @@ fn unindexed_range_preserves_csi_spanning_output_events() {
 fn streaming_pages_match_full_timeline_with_controls() {
     let log = ranged_timeline_log();
     let full = build_timeline(&log, true, true, None).expect("full timeline");
+
     for offset in 0..=full.len() {
         let page = build_timeline_page(
             &log,
@@ -316,9 +339,13 @@ fn late_page_uses_checkpoint_and_retains_only_requested_entries() {
         pending_operations: Vec::new(),
         source_path: Some(temporary.path().join("events.jsonl")),
     };
+
     write_index(&directory, &log, None, true, StateSelection::All).expect("checkpointed index");
+
     reset_test_replay_output_bytes();
+
     reset_test_max_page_entries();
+
     let page = build_timeline_page(&log, true, false, None, 1_090, 3).expect("late timeline page");
     let replayed_bytes = test_replay_output_bytes();
     assert!(

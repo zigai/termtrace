@@ -9,11 +9,11 @@ use termtrace_model::execution::event::{
 use termtrace_model::value::ByteString;
 
 use crate::{
-    Error,
     event_log::{
         EventLog, EventLogCursor, EventLogSummary, EventLogWriter, OperationKind, PendingOperation,
         SessionClock,
     },
+    Error,
 };
 
 #[test]
@@ -21,6 +21,7 @@ fn finite_snapshot_excludes_later_appends_and_partial_records() {
     let temporary = TempDir::new().expect("temporary directory");
     let path = temporary.path().join("session/events.jsonl");
     secure_directory(path.parent().expect("parent"));
+
     let clock = SessionClock::now().expect("clock");
     let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("writer");
     writer
@@ -31,7 +32,9 @@ fn finite_snapshot_excludes_later_appends_and_partial_records() {
             },
         )
         .expect("first output");
+
     let mut snapshot = EventLogCursor::open_snapshot(&path).expect("snapshot");
+
     writer
         .append_at(
             20,
@@ -49,12 +52,10 @@ fn finite_snapshot_excludes_later_appends_and_partial_records() {
         10
     );
     assert!(snapshot.next_record().expect("snapshot end").is_none());
-    assert!(
-        snapshot
-            .finish_snapshot()
-            .expect("prefix verification")
-            .is_empty()
-    );
+    assert!(snapshot
+        .finish_snapshot()
+        .expect("prefix verification")
+        .is_empty());
     assert_eq!(
         EventLogSummary::snapshot(&path)
             .expect("new snapshot")
@@ -62,6 +63,7 @@ fn finite_snapshot_excludes_later_appends_and_partial_records() {
         2
     );
     drop(writer);
+
     OpenOptions::new()
         .append(true)
         .open(&path)
@@ -102,6 +104,7 @@ fn live_suffix_crosses_pending_operation_without_claiming_full_verification() {
     let temporary = TempDir::new().expect("temporary directory");
     let path = temporary.path().join("session/events.jsonl");
     secure_directory(path.parent().expect("parent"));
+
     let clock = SessionClock::now().expect("clock");
     let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("writer");
     let operation_id = Uuid::now_v7();
@@ -122,6 +125,7 @@ fn live_suffix_crosses_pending_operation_without_claiming_full_verification() {
         .expect("pending intent");
     let (start, _) = writer.follow_cursors(writer.next_seq());
     let start = start.expect("retained position");
+
     writer
         .append_at(
             11,
@@ -135,12 +139,11 @@ fn live_suffix_crosses_pending_operation_without_claiming_full_verification() {
         .expect("input result");
     let (_, durable) = writer.follow_cursors(start.next_event_seq);
     let (device, inode, header_hash) = writer.source_identity();
-    assert!(
-        EventLog::read(&path)
-            .expect("full verification")
-            .pending_operations
-            .is_empty()
-    );
+
+    assert!(EventLog::read(&path)
+        .expect("full verification")
+        .pending_operations
+        .is_empty());
     // The old intent is outside the requested suffix. Corrupting it makes any
     // hidden prefix scan fail, while the actor-anchored result remains authentic.
     let (header_position, _) = writer.follow_cursors(0);
@@ -155,6 +158,7 @@ fn live_suffix_crosses_pending_operation_without_claiming_full_verification() {
         .expect("seek old intent");
     source.write_all(b"!").expect("corrupt old intent");
     source.sync_all().expect("sync corruption");
+
     let mut cursor = EventLogCursor::open(&path).expect("open");
     cursor
         .resume_live_suffix(&start, device, inode, &header_hash)
@@ -180,6 +184,7 @@ fn rejects_header_without_terminal_colors() {
     let temporary = TempDir::new().expect("temporary directory");
     let path = temporary.path().join("session/events.jsonl");
     secure_directory(path.parent().expect("parent"));
+
     let clock = SessionClock::now().expect("valid clock");
     let mut value = serde_json::to_value(header(&clock)).expect("header JSON");
     value
@@ -199,6 +204,7 @@ fn round_trip_preserves_binary_events_and_integrity_chain() {
     let temporary = TempDir::new().expect("temporary directory");
     let path = temporary.path().join("session/events.jsonl");
     secure_directory(path.parent().expect("parent"));
+
     let clock = SessionClock::now().expect("valid clock");
     let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("create log");
 
@@ -250,6 +256,7 @@ fn round_trip_preserves_binary_events_and_integrity_chain() {
             "writer must preserve the canonical record wire encoding"
         );
     }
+
     assert_eq!(recording.events[0].seq, 0);
     assert_eq!(recording.events[1].seq, 1);
     assert!(matches!(
@@ -280,11 +287,13 @@ fn round_trip_preserves_binary_events_and_integrity_chain() {
         .permissions()
         .mode()
         & 0o777;
+
     let file_mode = fs_err::metadata(&path)
         .expect("file metadata")
         .permissions()
         .mode()
         & 0o777;
+
     assert_eq!(directory_mode, OWNER_DIRECTORY_MODE);
     assert_eq!(file_mode, OWNER_FILE_MODE);
 }
@@ -294,6 +303,7 @@ fn live_cursor_reads_each_appended_event_once() {
     let temporary = TempDir::new().expect("temporary directory");
     let path = temporary.path().join("session/events.jsonl");
     secure_directory(path.parent().expect("parent"));
+
     let clock = SessionClock::now().expect("valid clock");
     let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("create log");
     let mut cursor = EventLogCursor::open(&path).expect("open live cursor");

@@ -2,6 +2,7 @@ use crate::support::*;
 use serde::Deserialize;
 
 use termtrace_model::artifact::tmux::{TmuxBundleTrack, TmuxStreamingBundleManifest};
+
 mod bundle;
 mod coverage;
 mod lifecycle;
@@ -51,12 +52,15 @@ impl PrivateTmux {
 
     fn new_with_config_args(temporary: &TempDir, shell: &str, config_arguments: &[&str]) -> Self {
         let binary = tmux_binary();
+
         fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
             .expect("secure tmux test root");
+
         let socket = format!("termtrace-test-{}", uuid::Uuid::now_v7());
         let config = temporary.path().join("termtrace.tmux.conf");
         let configured_tmux = temporary.path().join("tmux executable alias");
         symlink(&binary, &configured_tmux).expect("create tmux executable alias");
+
         let mut generate = Command::cargo_bin("termtrace").expect("binary should build");
         generate.args([
             "--response",
@@ -79,6 +83,7 @@ impl PrivateTmux {
             .get_output()
             .stdout
             .clone();
+
         let mut configuration = b"set-option -g default-terminal tmux-256color\n".to_vec();
         configuration.extend_from_slice(&generated);
         fs::write(&config, configuration).expect("write generated tmux config");
@@ -99,6 +104,7 @@ impl PrivateTmux {
             .status()
             .expect("start private tmux server");
         assert!(status.success(), "private tmux server did not start");
+
         return Self {
             binary,
             socket,
@@ -109,8 +115,10 @@ impl PrivateTmux {
 
     fn unmanaged(temporary: &TempDir, shell: &str) -> Self {
         let binary = tmux_binary();
+
         fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
             .expect("secure tmux test root");
+
         let socket = format!("termtrace-test-{}", uuid::Uuid::now_v7());
         let status = StdCommand::new(&binary)
             .args([
@@ -133,6 +141,7 @@ impl PrivateTmux {
             .status()
             .expect("start unmanaged private tmux server");
         assert!(status.success(), "private tmux server did not start");
+
         return Self {
             binary,
             socket,
@@ -143,12 +152,15 @@ impl PrivateTmux {
 
     fn unmanaged_default(temporary: &TempDir, shell: &str) -> Self {
         let binary = tmux_binary();
+
         fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
             .expect("secure isolated tmux test root");
+
         let tmux_tmpdir = temporary.path().join("tmux-sockets");
         fs::create_dir_all(&tmux_tmpdir).expect("create isolated tmux socket root");
         fs::set_permissions(&tmux_tmpdir, Permissions::from_mode(0o700))
             .expect("secure isolated tmux socket root");
+
         let output = StdCommand::new(&binary)
             .args([
                 "-f",
@@ -174,6 +186,7 @@ impl PrivateTmux {
             "isolated default tmux server did not start: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+
         return Self {
             binary,
             socket: "default".to_owned(),
@@ -186,24 +199,30 @@ impl PrivateTmux {
         let mut command = StdCommand::new(&self.binary);
         command.args(["-L", self.socket.as_str()]);
         command.env_remove("TMUX");
+
         if let Some(tmux_tmpdir) = &self.tmux_tmpdir {
             command.env("TMUX_TMPDIR", tmux_tmpdir);
         }
+
         return command;
     }
 
     fn pane_session(&self, pane: &str) -> PathBuf {
         let deadline = Instant::now() + Duration::from_secs(5);
+
         loop {
             let output = self
                 .command()
                 .args(["show-options", "-pqv", "-t", pane, "@termtrace-session"])
                 .output()
                 .expect("query pane recording");
+
             let value = trim_newline(output.stdout);
+
             if output.status.success() && !value.is_empty() {
                 return PathBuf::from(OsString::from_vec(value));
             }
+
             assert!(
                 Instant::now() < deadline,
                 "tmux pane did not publish its recording path"
@@ -218,6 +237,7 @@ impl PrivateTmux {
         predicate: impl Fn(&serde_json::Value) -> bool,
     ) -> serde_json::Value {
         let deadline = Instant::now() + Duration::from_secs(5);
+
         loop {
             let output = Command::cargo_bin("termtrace")
                 .expect("binary should build")
@@ -235,6 +255,7 @@ impl PrivateTmux {
             if predicate(&status) {
                 return status;
             }
+
             assert!(
                 Instant::now() < deadline,
                 "timed out waiting for {description}: last status={status}"
@@ -254,11 +275,13 @@ impl PrivateTmux {
             "could not query {option} for {pane}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+
         return trim_newline(output.stdout);
     }
 
     fn wait_for_process_marker(&self, pane: &str, option: &str) {
         let deadline = Instant::now() + Duration::from_secs(5);
+
         loop {
             let pid = trim_newline(
                 self.command()
@@ -270,6 +293,7 @@ impl PrivateTmux {
             if self.pane_option(pane, option) == pid {
                 return;
             }
+
             assert!(
                 Instant::now() < deadline,
                 "tmux pane {pane} did not publish {option}"
@@ -285,6 +309,7 @@ impl PrivateTmux {
             .output()
             .expect("query configured Termtrace executable");
         assert!(output.status.success());
+
         return String::from_utf8(trim_newline(output.stdout)).expect("UTF-8 executable");
     }
 
@@ -303,6 +328,7 @@ impl PrivateTmux {
         while self.pane_exists(pane) && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(20));
         }
+
         if self.pane_exists(pane) {
             let panes = self
                 .command()
@@ -314,6 +340,7 @@ impl PrivateTmux {
                 ])
                 .output()
                 .expect("diagnose pane list");
+
             let supervisor = self
                 .command()
                 .args(["show-options", "-gqv", "@termtrace-supervisor-pid"])
@@ -336,6 +363,7 @@ impl PrivateTmux {
 fn wait_for_recorded_resize(session: &Path, cols: u16, rows: u16) {
     let events = session.join("events.jsonl");
     let deadline = Instant::now() + Duration::from_secs(5);
+
     loop {
         let diagnostic = match EventLog::read(&events) {
             Ok(log) => {
@@ -347,9 +375,11 @@ fn wait_for_recorded_resize(session: &Path, cols: u16, rows: u16) {
                         _ => return None,
                     })
                     .collect::<Vec<_>>();
+
                 if observed.contains(&(cols, rows)) {
                     return;
                 }
+
                 format!("observed resize intents={observed:?}")
             }
             Err(error) => format!("event log was not readable: {error}"),
@@ -370,6 +400,7 @@ fn wait_for_recorded_resize(session: &Path, cols: u16, rows: u16) {
 fn wait_for_tmux_server_exit(server_pid: u64) {
     let server_pid = server_pid.to_string();
     let deadline = Instant::now() + Duration::from_secs(5);
+
     loop {
         let output = StdCommand::new("kill")
             .args(["-0", server_pid.as_str()])
@@ -378,6 +409,7 @@ fn wait_for_tmux_server_exit(server_pid: u64) {
         if !output.status.success() {
             return;
         }
+
         assert!(
             Instant::now() < deadline,
             "original tmux server process {server_pid} remained alive after kill-server"
@@ -413,6 +445,7 @@ fn tmux_new_window(server: &PrivateTmux, command: &[&str]) -> String {
         "tmux window creation failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+
     return String::from_utf8(trim_newline(output.stdout)).expect("UTF-8 pane ID");
 }
 
@@ -431,6 +464,7 @@ fn tmux_split_window(server: &PrivateTmux, target: &str) -> String {
         "tmux window split failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+
     return String::from_utf8(trim_newline(output.stdout)).expect("UTF-8 pane ID");
 }
 
@@ -448,6 +482,7 @@ fn tmux_new_session(server: &PrivateTmux, name: &str, command: &[&str]) -> Strin
         "tmux session creation failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+
     return String::from_utf8(trim_newline(output.stdout)).expect("UTF-8 pane ID");
 }
 
@@ -455,6 +490,7 @@ fn trim_newline(mut bytes: Vec<u8>) -> Vec<u8> {
     if bytes.last() == Some(&b'\n') {
         bytes.pop();
     }
+
     return bytes;
 }
 
@@ -464,6 +500,7 @@ fn tmux_binary() -> PathBuf {
     } else {
         PathBuf::from("tmux")
     };
+
     let status = StdCommand::new(&binary)
         .arg("-V")
         .stdout(Stdio::null())
@@ -473,5 +510,6 @@ fn tmux_binary() -> PathBuf {
         status.as_ref().is_ok_and(|status| return status.success()),
         "tmux is required by the CLI integration suite: {status:?}"
     );
+
     return binary;
 }

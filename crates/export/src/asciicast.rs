@@ -56,10 +56,13 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
         },
         output,
     )?;
+
     let mut inputs: HashMap<Uuid, ByteString> = HashMap::new();
     let mut resizes: HashMap<Uuid, (u16, u16)> = HashMap::new();
+
     while let Some(record) = cursor.next_record()? {
         let seconds = Duration::from_nanos(record.monotonic_ns).as_secs_f64();
+
         match &record.event {
             Event::Output { data } => write_cast_event(
                 &mut writer,
@@ -114,8 +117,11 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
             _ => {}
         }
     }
+
     cursor.finish()?;
+
     finish_writer(writer, output)?;
+
     return Ok(());
 }
 
@@ -132,11 +138,13 @@ fn write_cast_event(
 fn write_line(writer: &mut impl Write, value: &impl Serialize, path: &Path) -> Result<()> {
     serde_json::to_writer(&mut *writer, value)
         .map_err(|source| return Error::json(path, source))?;
+
     writer.write_all(b"\n").map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),
             source,
         };
     })?;
+
     return Ok(());
 }

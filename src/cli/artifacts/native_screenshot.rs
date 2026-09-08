@@ -2,7 +2,7 @@ use std::{
     env,
     path::Path,
     process::ExitCode,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
 
@@ -11,7 +11,7 @@ use signal_hook::{
     consts::{SIGINT, SIGTERM},
     flag, low_level,
 };
-use termtrace_media::native_capture::{NativeReplayWorker, native_capture_target};
+use termtrace_media::native_capture::{native_capture_target, NativeReplayWorker};
 use termtrace_model::{
     execution::session::CaptureTarget,
     protocol::{
@@ -22,11 +22,12 @@ use termtrace_model::{
 };
 
 use crate::cli::{
-    output::{ResponseWriter, write_json_line},
+    output::{write_json_line, ResponseWriter},
     tooling::require_cli_capability,
 };
 
 struct CancellationSignals(Vec<signal_hook::SigId>);
+
 impl Drop for CancellationSignals {
     fn drop(&mut self) {
         for signal in self.0.drain(..) {
@@ -43,6 +44,7 @@ pub(super) fn run(
     viewport: Option<CaptureTarget>,
 ) -> Result<ExitCode> {
     require_cli_capability(NATIVE_SCREENSHOT_CAPABILITY)?;
+
     let live_boundary = if session.join("completion.json").is_file() {
         None
     } else {
@@ -51,6 +53,7 @@ pub(super) fn run(
                 "live native capture currently requires the latest presented state"
             ));
         }
+
         match termtrace_sdk::request(session, ControlCommand::Status) {
             Ok(ControlData::Status { boundaries, .. }) => Some(boundaries.durable),
             Err(_) if session.join("completion.json").is_file() => None,
@@ -62,13 +65,16 @@ pub(super) fn run(
             }
         }
     };
+
     let cancelled = Arc::new(AtomicBool::new(false));
+
     let mut signals = CancellationSignals(Vec::new());
     for signal in [SIGINT, SIGTERM] {
         signals
             .0
             .push(flag::register(signal, Arc::clone(&cancelled)).into_diagnostic()?);
     }
+
     let helper = env::current_exe().into_diagnostic()?;
     let (target, _) = native_capture_target(&helper, session, viewport).into_diagnostic()?;
     let mut worker =
@@ -79,6 +85,7 @@ pub(super) fn run(
             .capture_batch(points, destination)
             .into_diagnostic()?;
         worker.close();
+
         return write_json_line(
             response,
             &serde_json::json!({
@@ -89,6 +96,7 @@ pub(super) fn run(
             }),
         );
     }
+
     let capture = if let Some(boundary) = live_boundary {
         worker.capture_latest_prefix(&boundary, destination)
     } else {
@@ -101,6 +109,7 @@ pub(super) fn run(
     }
     .into_diagnostic()?;
     worker.close();
+
     return write_json_line(
         response,
         &serde_json::json!({

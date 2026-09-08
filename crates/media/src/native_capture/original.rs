@@ -10,25 +10,24 @@ use std::{
 };
 
 use termtrace_evidence::{
-    Error as EvidenceError,
     artifact::{
         append_artifact_root, collect_artifact_members, commit_directory, create_private_directory,
         secure_file, sync_directory, write_secure,
     },
     event_log::EventLogSummary,
     session::{read_completion, read_manifest, validate_completion_summary_candidate},
+    Error as EvidenceError,
 };
 use termtrace_model::{
     artifact::visual::{
-        CaptureKind, CaptureOptions, CaptureOutcome, GHOSTTY_EFFECTIVE_CONFIG_NAME,
-        VISUAL_MANIFEST_VERSION, VisualManifest,
+        CaptureKind, CaptureOptions, CaptureOutcome, VisualManifest, GHOSTTY_EFFECTIVE_CONFIG_NAME,
+        VISUAL_MANIFEST_VERSION,
     },
     execution::session::SessionCompletion,
     value::geometry::TerminalGeometryReport,
 };
 
 use super::{
-    Error, Result,
     capture::{preserve_failed, require_native_tools, validate_options},
     index::{validate_acquisition_frames, write_original_acquisition_map},
     media::{
@@ -36,15 +35,15 @@ use super::{
     },
     portal,
     process::{
-        DisplayLease, ManagedChild, ghostty_overrides, owned_command, probe_output, spawn_xvfb,
-        stop_ffmpeg, wait_for_x_socket,
+        ghostty_overrides, owned_command, probe_output, spawn_xvfb, stop_ffmpeg, wait_for_x_socket,
+        DisplayLease, ManagedChild,
     },
     profile::materialize_profile,
     resources::capture_resources,
     util::{
         command_output, command_output_in_profile, external_error, outcome, secure_permissions,
     },
-    validate_visual_manifest,
+    validate_visual_manifest, Error, Result,
 };
 
 /// Pixel acquisition backend for a managed original execution.
@@ -115,18 +114,22 @@ pub fn capture_original_with_backend(
             "requires a new session and full execution video",
         ));
     }
+
     let parent = options
         .session_directory
         .parent()
         .filter(|path| return path.is_dir())
         .ok_or_else(|| return external_error("original capture", "session parent must exist"))?;
+
     let destination = options
         .destination
         .clone()
         .unwrap_or_else(|| return options.session_directory.join("visual-original"));
+
     if destination.exists() {
         return Err(Error::ArtifactExists { path: destination });
     }
+
     let destination_parent = destination
         .parent()
         .filter(|parent| return parent.is_dir() || *parent == options.session_directory)
@@ -136,15 +139,18 @@ pub fn capture_original_with_backend(
                 "destination parent must exist or be the new session",
             );
         })?;
+
     match backend {
         OriginalCaptureBackend::PrivateX11 => require_native_tools(&CaptureKind::Video)?,
         OriginalCaptureBackend::WaylandPortal => portal::require_tools()?,
     }
+
     let staging = parent.join(format!(".original-visual.{}.tmp", uuid::Uuid::now_v7()));
     create_private_directory(&staging)?;
     let result = capture_staged(
         helper, options, profile, cancelled, backend, arguments, &staging,
     );
+
     let (manifest, completion) = match result {
         Ok(manifest) => manifest,
         Err(error) => {
@@ -158,13 +164,16 @@ pub fn capture_original_with_backend(
                     .args(["--wait", "--timeout-ms", "3000"]),
                 Duration::from_secs(4),
             );
+
             return Err(preserve_failed(parent, &staging, error));
         }
     };
+
     // Recording creates the session itself. Only after completion can the native
     // staging directory become its direct child for the common artifact commit protocol.
     let publication_staging =
         destination_parent.join(format!(".visual.{}.tmp", uuid::Uuid::now_v7()));
+
     if let Err(source) = fs::rename(&staging, &publication_staging) {
         return Err(preserve_failed(
             parent,
@@ -175,6 +184,7 @@ pub fn capture_original_with_backend(
             },
         ));
     }
+
     if let Err(error) = commit_directory(destination_parent, &publication_staging, &destination) {
         return Err(preserve_failed(
             destination_parent,
@@ -182,7 +192,9 @@ pub fn capture_original_with_backend(
             Error::from(error),
         ));
     }
+
     sync_directory(destination_parent)?;
+
     let session = fs::canonicalize(&options.session_directory).map_err(|source| {
         return Error::Filesystem {
             path: options.session_directory.clone(),
@@ -195,6 +207,7 @@ pub fn capture_original_with_backend(
             source,
         };
     })?;
+
     if canonical_destination.starts_with(&session) {
         append_artifact_root(
             &session,
@@ -206,6 +219,7 @@ pub fn capture_original_with_backend(
             None,
         )?;
     }
+
     return Ok(outcome(destination, &CaptureKind::Video));
 }
 
@@ -222,36 +236,45 @@ fn capture_staged(
     let effective = command_output_in_profile("ghostty", &["+show-config"], Some(&root))?;
     let effective_hash = blake3::hash(&effective).to_hex().to_string();
     write_secure(&staging.join(GHOSTTY_EFFECTIVE_CONFIG_NAME), &effective)?;
+
     let ghostty_version =
         String::from_utf8_lossy(&command_output("ghostty", &["+version"])?).into_owned();
+
     let ffmpeg_version = String::from_utf8_lossy(&command_output("ffmpeg", &["-version"])?)
         .lines()
         .next()
         .unwrap_or_default()
         .to_owned();
+
     let lease = if backend == OriginalCaptureBackend::PrivateX11 {
         Some(DisplayLease::acquire()?)
     } else {
         None
     };
+
     let display = lease
         .as_ref()
         .map(|lease| return format!(":{}", lease.number));
+
     let mut xvfb = if let Some(lease) = lease.as_ref() {
         let mut server = spawn_xvfb(Some(helper), lease, options.width, options.height, staging)?;
         wait_for_x_socket(lease, &mut server, Duration::from_secs(5))?;
+
         Some(server)
     } else {
         None
     };
+
     let video = staging.join("session.mkv");
     let mut ffmpeg = if let Some(display) = display.as_ref() {
         let mut capture = spawn_video_ffmpeg(options, staging, display, &video)?;
         wait_for_acquisition(&mut capture, staging, cancelled)?;
+
         Some(capture)
     } else {
         None
     };
+
     let finished = staging.join("recording-exit-status");
     let stderr = secure_file(&staging.join("ghostty.stderr.log"))?;
     let stdout = secure_file(&staging.join("ghostty.stdout.log"))?;
@@ -268,13 +291,16 @@ fn capture_staged(
             "--title=Termtrace original capture".to_owned(),
         ]);
     }
+
     let gate = staging.join("execution-ready");
     if backend == OriginalCaptureBackend::PrivateX11 {
         write_secure(&gate, b"ready\n")?;
     }
+
     let mut command = if backend == OriginalCaptureBackend::PrivateX11 {
         let mut command = owned_command(helper, "dbus-run-session")?;
         command.arg("--").arg("ghostty");
+
         command
     } else {
         owned_command(helper, "ghostty")?
@@ -287,6 +313,7 @@ fn capture_staged(
     } else {
         command.env("GDK_BACKEND", "wayland");
     }
+
     // All user paths and arguments are positional shell parameters, never shell source.
     let mut ghostty = ManagedChild::spawn_logged("ghostty", command
         .args(&overrides).arg("-e").arg("/bin/sh")
@@ -298,21 +325,28 @@ fn capture_staged(
     if backend == OriginalCaptureBackend::WaylandPortal {
         let mut capture = portal::spawn(helper, options, staging)?;
         portal::wait_for_acquisition(&mut capture, &mut ghostty, staging, cancelled)?;
+
         write_secure(&gate, b"ready\n")?;
+
         ffmpeg = Some(capture);
     }
+
     let mut ffmpeg = ffmpeg.ok_or_else(|| {
         return external_error("original capture", "capture process was not started");
     })?;
     while !finished.is_file() {
         check_cancelled(cancelled)?;
+
         ghostty.check_running()?;
         ffmpeg.check_running()?;
+
         if let Some(xvfb) = xvfb.as_mut() {
             xvfb.check_running()?;
         }
+
         thread::sleep(Duration::from_millis(20));
     }
+
     let completion = read_completion(&options.session_directory)?;
     let summary =
         EventLogSummary::read_with_check(options.session_directory.join("events.jsonl"), || {
@@ -321,25 +355,31 @@ fn capture_staged(
                     reason: "original capture cancelled".to_owned(),
                 });
             }
+
             return Ok(());
         })?;
+
     validate_completion_summary_candidate(&options.session_directory, &summary, &completion)?;
+
     if completion.failure.is_some() {
         return Err(external_error(
             "original capture",
             "recorder reported an evidence failure",
         ));
     }
+
     let status = fs::read_to_string(&finished).map_err(|source| {
         return Error::Filesystem {
             path: finished.clone(),
             source,
         };
     })?;
+
     let recorder_status = status
         .trim()
         .parse::<u8>()
         .map_err(|error| return external_error("original capture", error))?;
+
     let expected_status = if completion.resource_limit.is_some() || completion.signal_name.is_some()
     {
         1
@@ -349,12 +389,14 @@ fn capture_staged(
             .and_then(|code| return u8::try_from(code).ok())
             .unwrap_or(1)
     };
+
     if recorder_status != expected_status {
         return Err(external_error(
             "original capture",
             "recorder exit status does not match canonical completion",
         ));
     }
+
     let session = read_manifest(&options.session_directory)?;
     if session
         .ghostty_visual
@@ -367,20 +409,25 @@ fn capture_staged(
             "recorded configuration differs from original terminal configuration",
         ));
     }
+
     // Retain the terminal after command completion; this frame is an acquisition,
     // not an assertion that a particular semantic state has been presented.
     let screenshot = staging.join("final.png");
     if let Some(display) = display.as_ref() {
         capture_screenshot(options, staging, display, &screenshot)?;
     }
+
     capture_resources(&ghostty, staging, cancelled, "after_execution")?;
     stop_ffmpeg(&mut ffmpeg, Duration::from_secs(10), staging)?;
     ghostty.terminate();
+
     if let Some(xvfb) = xvfb.as_mut() {
         xvfb.terminate();
     }
+
     secure_permissions(&video)?;
     secure_permissions(&screenshot)?;
+
     let video_probe = match backend {
         OriginalCaptureBackend::PrivateX11 => {
             probe_video(&video, options.fps, options.width, options.height)?
@@ -389,23 +436,27 @@ fn capture_staged(
             probe_variable_video(&video, options.width, options.height)?
         }
     };
+
     let packets = video_probe
         .pointer("/streams/0/nb_read_packets")
         .and_then(serde_json::Value::as_str)
         .and_then(|value| return value.parse().ok())
         .ok_or_else(|| return external_error("original capture", "missing encoded frame count"))?;
+
     let capture_started = match backend {
         OriginalCaptureBackend::PrivateX11 => {
             validate_acquisition_frames(&staging.join("ffmpeg-video.log"), packets)?
         }
         OriginalCaptureBackend::WaylandPortal => portal::validate_completion(staging, packets)?,
     };
+
     if capture_started > session.started_unix_ns {
         return Err(external_error(
             "original capture",
             "first frame was acquired after execution began",
         ));
     }
+
     if backend == OriginalCaptureBackend::PrivateX11 {
         write_original_acquisition_map(
             &staging.join("acquisition-map.jsonl"),
@@ -413,12 +464,14 @@ fn capture_staged(
             session.started_unix_ns,
         )?;
     }
+
     let correlation = match backend {
         OriginalCaptureBackend::PrivateX11 => "acquisition_clock_only_no_presentation_claim",
         OriginalCaptureBackend::WaylandPortal => {
             "pipewire_pts_and_collector_receipt_no_presentation_claim"
         }
     };
+
     write_secure(
         &staging.join("execution-timing.json"),
         format!(
@@ -427,6 +480,7 @@ fn capture_staged(
         )
         .as_bytes(),
     )?;
+
     let geometry = session.geometry;
     let manifest = VisualManifest {
         version: VISUAL_MANIFEST_VERSION,
@@ -472,6 +526,7 @@ fn capture_staged(
         frame_samples: Vec::new(),
         guarantee_level: "native_capture_environment".to_owned(),
     };
+
     validate_visual_manifest(&manifest)?;
     let bytes = serde_json::to_vec_pretty(&manifest).map_err(|source| {
         return Error::InvalidJson {
@@ -480,7 +535,9 @@ fn capture_staged(
             source,
         };
     })?;
+
     write_secure(&staging.join("manifest.json"), &bytes)?;
+
     return Ok((bytes, completion));
 }
 
@@ -488,6 +545,7 @@ fn check_cancelled(cancelled: &AtomicBool) -> Result<()> {
     if cancelled.load(Ordering::Relaxed) {
         return Err(external_error("original capture", "capture cancelled"));
     }
+
     return Ok(());
 }
 
@@ -497,9 +555,12 @@ fn wait_for_acquisition(
     cancelled: &AtomicBool,
 ) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(10);
+
     loop {
         check_cancelled(cancelled)?;
+
         ffmpeg.check_running()?;
+
         let path = staging.join("ffmpeg-video.log");
         let mut bytes = Vec::new();
         fs::File::open(&path)
@@ -508,12 +569,14 @@ fn wait_for_acquisition(
         if String::from_utf8_lossy(&bytes).contains(" pts_time:") {
             return Ok(());
         }
+
         if Instant::now() >= deadline {
             return Err(external_error(
                 "original capture",
                 "timed out waiting for first acquired video frame",
             ));
         }
+
         thread::sleep(Duration::from_millis(20));
     }
 }

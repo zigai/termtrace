@@ -3,7 +3,7 @@
 use crate::support::*;
 use std::sync::mpsc;
 
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
 #[test]
 fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
@@ -47,6 +47,7 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
         .expect("scenario JSON"),
     )
     .expect("write scenario");
+
     let second = temporary.path().join("simple.termtrace.json");
     fs_err::write(
         &second,
@@ -87,16 +88,12 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
         .arg(&junit)
         .assert()
         .success();
-    assert!(
-        artifacts
-            .join("snapshots/ready-workflow-final.frame.json")
-            .is_file()
-    );
-    assert!(
-        fs_err::read_to_string(&junit)
-            .expect("JUnit XML")
-            .contains("failures=\"0\"")
-    );
+    assert!(artifacts
+        .join("snapshots/ready-workflow-final.frame.json")
+        .is_file());
+    assert!(fs_err::read_to_string(&junit)
+        .expect("JUnit XML")
+        .contains("failures=\"0\""));
 
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
     let assertion = command
@@ -108,6 +105,7 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
         .args(["--jobs", "2"])
         .assert()
         .success();
+
     let report: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("scenario report");
     assert_eq!(report["status"], "passed");
@@ -134,6 +132,7 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
             .assert()
             .success();
     }
+
     let mut timeline = Command::cargo_bin("termtrace").expect("binary should build");
     timeline
         .args(["analyze", "timeline"])
@@ -155,6 +154,7 @@ fn bundled_agent_skill_scenario_is_directly_executable() {
     let temporary = TempDir::new().expect("temporary directory");
     let scenario = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("skills/termtrace/examples/ready.termtrace.json");
+
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
     command
         .arg("test")
@@ -204,6 +204,7 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
         .args(["--reruns", "1"])
         .assert()
         .failure();
+
     let report: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("failure report");
     assert_eq!(report["status"], "failed");
@@ -226,6 +227,7 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
         &fs_err::read(failure.join("final-screen.json")).expect("final screen snapshot"),
     )
     .expect("final screen snapshot JSON");
+
     let ControlData::Snapshot {
         viewport_text,
         cols,
@@ -258,16 +260,18 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
     let copied_scenario = fs_err::read(failure.join("scenario.json")).expect("copied scenario");
     let encoded_secret = serde_json::to_vec(&ByteString::from(b"scenario-private".as_slice()))
         .expect("encoded secret");
-    assert!(
-        !copied_scenario
-            .windows(b"scenario-private".len())
-            .any(|window| return window == b"scenario-private")
-    );
+
+    assert!(!copied_scenario
+        .windows(b"scenario-private".len())
+        .any(|window| return window == b"scenario-private"));
     let encoded_secret = &encoded_secret[1..encoded_secret.len() - 1];
+
     for entry in fs_err::read_dir(failure).expect("failure artifacts") {
         let path = entry.expect("failure artifact entry").path();
+
         if path.is_file() {
             let bytes = fs_err::read(&path).expect("failure artifact");
+
             for secret in [b"scenario-private".as_slice(), encoded_secret] {
                 assert!(
                     !bytes
@@ -326,16 +330,15 @@ fn scenario_wait_requires_the_requested_stability_interval() {
         .arg(&artifacts)
         .assert()
         .failure();
+
     let report: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("scenario report");
     assert_eq!(report["status"], "failed");
     let attempt = &report["cases"][0]["attempts"][0]["report"];
     assert_eq!(attempt["failure"]["step_index"], 0);
-    assert!(
-        attempt["failure"]["message"]
-            .as_str()
-            .is_some_and(|message| return message.contains("requested stability before Deadline"))
-    );
+    assert!(attempt["failure"]["message"]
+        .as_str()
+        .is_some_and(|message| return message.contains("requested stability before Deadline")));
 }
 
 #[test]
@@ -354,6 +357,7 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
         ])
         .assert()
         .success();
+
     let event_path = session.join("events.jsonl");
     let before = fs_err::read(&event_path).expect("event log before review");
 
@@ -364,6 +368,7 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
         .arg("--json")
         .assert()
         .success();
+
     let summary: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("review summary");
     assert_eq!(
@@ -371,13 +376,11 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
         "semantic_cells_only_no_raw_replay"
     );
     assert!(summary["state_count"].as_u64().expect("state count") > 0);
-    assert!(
-        !assertion
-            .get_output()
-            .stdout
-            .windows("hostile-payload".len())
-            .any(|window| return window == b"hostile-payload")
-    );
+    assert!(!assertion
+        .get_output()
+        .stdout
+        .windows("hostile-payload".len())
+        .any(|window| return window == b"hostile-payload"));
     let mut search = Command::cargo_bin("termtrace").expect("binary should build");
     let searched = search
         .args(["analyze", "review"])
@@ -385,18 +388,18 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
         .args(["--json", "--search", "SAFE"])
         .assert()
         .success();
+
     let result: serde_json::Value =
         serde_json::from_slice(&searched.get_output().stdout).expect("review search");
     assert_eq!(result["query"], "SAFE");
     assert!(!result["matches"].as_array().expect("matches").is_empty());
-    assert!(
-        result["matches"][0]["selector"]
-            .as_str()
-            .is_some_and(|selector| return selector.starts_with("--state "))
-    );
+    assert!(result["matches"][0]["selector"]
+        .as_str()
+        .is_some_and(|selector| return selector.starts_with("--state ")));
     let state_id = result["matches"][0]["state_id"]
         .as_u64()
         .expect("matched state ID");
+
     let exported = temporary.path().join("review-export");
     let mut export = Command::cargo_bin("termtrace").expect("binary should build");
     export
@@ -444,6 +447,7 @@ fn recorded_reviewer_session(temporary: &TempDir, name: &str) -> PathBuf {
         .args(["--", "/bin/sh", "-c", "printf REVIEWER"])
         .assert()
         .success();
+
     return session;
 }
 
@@ -460,6 +464,7 @@ fn reviewer_pty_output(session: &Path, signal: Option<&str>) -> Vec<u8> {
             pixel_height: 480,
         })
         .expect("reviewer PTY");
+
     let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_termtrace"));
     command.args([
         "analyze",
@@ -472,28 +477,36 @@ fn reviewer_pty_output(session: &Path, signal: Option<&str>) -> Vec<u8> {
     let (chunk_sender, chunk_receiver) = mpsc::channel();
     let reader_thread = thread::spawn(move || {
         let mut output = Vec::new();
+
         let mut buffer = [0_u8; 4_096];
         while let Ok(count) = reader.read(&mut buffer) {
             if count == 0 {
                 break;
             }
+
             let chunk = buffer.iter().copied().take(count).collect::<Vec<_>>();
             output.extend_from_slice(&chunk);
+
             if chunk_sender.send(chunk).is_err() {
                 break;
             }
         }
+
         return output;
     });
+
     let mut writer = pty.master.take_writer().expect("take PTY writer");
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut entered_alternate_screen = false;
     let mut observed = Vec::new();
+
     while Instant::now() < deadline {
         let remaining = deadline.saturating_duration_since(Instant::now());
+
         match chunk_receiver.recv_timeout(remaining) {
             Ok(chunk) => {
                 observed.extend_from_slice(&chunk);
+
                 if observed
                     .windows(b"\x1b[?1049h".len())
                     .any(|window| return window == b"\x1b[?1049h")
@@ -505,10 +518,12 @@ fn reviewer_pty_output(session: &Path, signal: Option<&str>) -> Vec<u8> {
             Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
+
     if !entered_alternate_screen {
         child.kill().expect("terminate stalled reviewer");
         let _status = child.wait().expect("reap stalled reviewer");
     }
+
     assert!(
         entered_alternate_screen,
         "reviewer did not enter the alternate screen: {}",
@@ -527,10 +542,12 @@ fn reviewer_pty_output(session: &Path, signal: Option<&str>) -> Vec<u8> {
         writer.write_all(b"q").expect("quit reviewer");
         writer.flush().expect("flush reviewer input");
     }
+
     let status = child.wait().expect("wait for reviewer");
     assert!(status.success(), "reviewer did not exit successfully");
     drop(writer);
     drop(pty.master);
+
     let output = reader_thread.join().expect("join reviewer PTY reader");
     assert!(
         output
@@ -546,6 +563,7 @@ fn reviewer_pty_output(session: &Path, signal: Option<&str>) -> Vec<u8> {
         "reviewer did not disable mouse capture: {}",
         String::from_utf8_lossy(&output)
     );
+
     return output;
 }
 
@@ -576,6 +594,7 @@ fn reviewer_rolls_back_raw_mode_when_terminal_setup_fails() {
             pixel_height: 480,
         })
         .expect("reviewer rollback PTY");
+
     let script = r#"
 before=$(stty -g) || exit 91
 "$1" analyze review "$2" >/dev/full
@@ -588,6 +607,7 @@ else
 fi
 printf '\n__TERMTRACE_REVIEWER_ROLLBACK__=%s reviewer_status=%s\n' "$restored" "$reviewer_status"
 "#;
+
     let mut command = CommandBuilder::new("/bin/sh");
     command.args([
         "-c",
@@ -600,16 +620,20 @@ printf '\n__TERMTRACE_REVIEWER_ROLLBACK__=%s reviewer_status=%s\n' "$restored" "
         .slave
         .spawn_command(command)
         .expect("spawn rollback shell");
+
     drop(pty.slave);
     let mut reader = pty.master.try_clone_reader().expect("clone PTY reader");
     let reader_thread = thread::spawn(move || {
         let mut output = Vec::new();
         let _read_result = reader.read_to_end(&mut output);
+
         return output;
     });
+
     let status = child.wait().expect("wait for rollback shell");
     assert!(status.success(), "rollback shell failed");
     drop(pty.master);
+
     let output = reader_thread.join().expect("join rollback PTY reader");
     assert!(
         output
@@ -630,7 +654,7 @@ printf '\n__TERMTRACE_REVIEWER_ROLLBACK__=%s reviewer_status=%s\n' "$restored" "
 fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
     use std::sync::atomic::AtomicBool;
     use termtrace_engine::{
-        analysis::reviewer::{REVIEW_PAGE_STATES, ReviewQuery, load_review_page},
+        analysis::reviewer::{load_review_page, ReviewQuery, REVIEW_PAGE_STATES},
         observation::state_text,
         replay::inspect,
     };
@@ -650,14 +674,17 @@ fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
         ])
         .assert()
         .success();
+
     let log = EventLog::read(session.join("events.jsonl")).expect("event log");
     let states = replay(&log)
         .expect("bounded fixture reference replay")
         .states;
+
     let hidden = states
         .iter()
         .find(|state| return !state.presented)
         .expect("fixture contains synchronized hidden semantic boundaries");
+
     let cancelled = AtomicBool::new(false);
     let page = load_review_page(&session, &ReviewQuery::State(hidden.state_id), &cancelled)
         .expect("exact hidden page")
@@ -679,10 +706,12 @@ fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
             "pages cannot sample away hidden states"
         );
     }
+
     let next_presented = states
         .iter()
         .find(|state| return state.state_id > hidden.state_id && state.presented)
         .expect("next presented state");
+
     let next = load_review_page(
         &session,
         &ReviewQuery::Move {
@@ -706,6 +735,7 @@ fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
     )
     .expect("paged semantic search")
     .expect("matching page");
+
     let inspection =
         inspect(&log, StateSelector::StateId(found.selected)).expect("reference matched state");
     assert!(state_text(&inspection.state).contains("TARGET"));
@@ -733,6 +763,7 @@ fn reviewer_cancels_large_background_loading_and_restores_the_terminal() {
         ])
         .assert()
         .success();
+
     let _quit = reviewer_pty_output(&session, None);
     let _signal = reviewer_pty_output(&session, Some("TERM"));
 }
@@ -740,7 +771,7 @@ fn reviewer_cancels_large_background_loading_and_restores_the_terminal() {
 #[test]
 fn reviewer_pages_resolve_marker_and_input_source_boundaries() {
     use std::sync::atomic::AtomicBool;
-    use termtrace_engine::analysis::reviewer::{ReviewQuery, load_review_page};
+    use termtrace_engine::analysis::reviewer::{load_review_page, ReviewQuery};
 
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("reviewer-source-jumps");
@@ -757,6 +788,7 @@ fn reviewer_pages_resolve_marker_and_input_source_boundaries() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("record source jump fixture");
+
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("fixture ready");
     send_request(
@@ -766,6 +798,7 @@ fn reviewer_pages_resolve_marker_and_input_source_boundaries() {
         }),
     )
     .expect("canonical marker");
+
     send_request(
         &session,
         &ControlRequest::new(ControlCommand::Input {
@@ -775,11 +808,13 @@ fn reviewer_pages_resolve_marker_and_input_source_boundaries() {
         }),
     )
     .expect("canonical input");
+
     let output = child.wait_with_output().expect("fixture completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
     let log = EventLog::read(session.join("events.jsonl")).expect("closed evidence");
     let states = replay(&log).expect("bounded reference states").states;
     let cancelled = AtomicBool::new(false);
+
     for (query, marker) in [
         (ReviewQuery::Marker("checkpoint".to_owned()), true),
         (
@@ -814,14 +849,17 @@ fn reviewer_pages_resolve_marker_and_input_source_boundaries() {
                         }
                     )
                 };
+
                 return selected.then_some(record.monotonic_ns);
             })
             .expect("canonical source event");
+
         let expected = states
             .iter()
             .find(|state| return state.monotonic_ns >= time)
             .or_else(|| return states.last())
             .expect("state at source boundary");
+
         let page = load_review_page(&session, &query, &cancelled)
             .expect("source boundary page")
             .expect("selected boundary");

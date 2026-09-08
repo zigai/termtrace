@@ -4,6 +4,7 @@ mod build;
 mod selection;
 pub(crate) mod stream;
 mod time;
+
 pub use termtrace_model::terminal::replay::SourceRange;
 
 pub use build::{build_timeline, build_timeline_page};

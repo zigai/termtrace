@@ -20,6 +20,7 @@ fn recovers_valid_prefix_and_reports_uncertain_intent() {
     let clock = SessionClock::now().expect("valid clock");
     let mut writer = EventLogWriter::create(&source, &header(&clock), clock).expect("create log");
     let operation_id = Uuid::now_v7();
+
     writer
         .append_at(
             1,
@@ -44,6 +45,7 @@ fn recovers_valid_prefix_and_reports_uncertain_intent() {
         )
         .expect("append intent");
     drop(writer);
+
     let original_valid = fs_err::read(&source).expect("valid prefix");
     let mut file = OpenOptions::new()
         .append(true)
@@ -68,9 +70,7 @@ fn recovers_valid_prefix_and_reports_uncertain_intent() {
         fs_err::read(&recovered).expect("recovered bytes"),
         original_valid
     );
-    assert!(
-        fs_err::read(&source)
-            .expect("source retained")
-            .ends_with(br#"{"seq":2"#)
-    );
+    assert!(fs_err::read(&source)
+        .expect("source retained")
+        .ends_with(br#"{"seq":2"#));
 }

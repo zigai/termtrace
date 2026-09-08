@@ -14,6 +14,7 @@ fn writer(path: &Path) -> EventLogWriter {
         480,
         "xterm-ghostty",
     );
+
     return EventLogWriter::create(path, &header, clock).expect("writer");
 }
 
@@ -23,6 +24,7 @@ fn file_index_matches_memory_and_excludes_later_appends() {
     let session = temporary.path().join("session");
     create_private_directory(&session).expect("private directory");
     let event_path = session.join("events.jsonl");
+
     let mut writer = writer(&event_path);
     for bytes in [
         b"hello\x1b[".as_slice(),
@@ -36,13 +38,16 @@ fn file_index_matches_memory_and_excludes_later_appends() {
             })
             .expect("output");
     }
+
     let log = EventLog::read(&event_path).expect("memory source");
     let summary = EventLogSummary::snapshot(&event_path).expect("snapshot");
+
     writer
         .append(Event::Output {
             data: ByteString::from(b"LATER".as_slice()),
         })
         .expect("later output");
+
     for range in [
         None,
         Some(SourceRange {
@@ -53,7 +58,9 @@ fn file_index_matches_memory_and_excludes_later_appends() {
         let memory = session.join(format!("memory-{}", range.is_some()));
         let stream = session.join(format!("stream-{}", range.is_some()));
         create_private_directory(&memory).expect("memory directory");
+
         create_private_directory(&stream).expect("stream directory");
+
         write_index(&memory, &log, range, false, StateSelection::All).expect("memory index");
         write_source_index(
             &stream,
@@ -63,6 +70,7 @@ fn file_index_matches_memory_and_excludes_later_appends() {
             StateSelection::All,
         )
         .expect("stream index");
+
         for name in [
             "state-index.jsonl",
             "control-index.jsonl",
@@ -78,26 +86,26 @@ fn file_index_matches_memory_and_excludes_later_appends() {
                 "{name}"
             );
         }
-        assert!(
-            !fs_err::read_to_string(stream.join("final.txt"))
-                .expect("final text")
-                .contains("LATER")
-        );
+
+        assert!(!fs_err::read_to_string(stream.join("final.txt"))
+            .expect("final text")
+            .contains("LATER"));
     }
+
     let invalid = session.join("invalid");
     create_private_directory(&invalid).expect("invalid directory");
+
     let mut wrong = summary;
     wrong.terminal.as_mut().expect("terminal").hash = "0".repeat(64);
-    assert!(
-        write_source_index(
-            &invalid,
-            &IndexSource::File(&event_path, &wrong),
-            None,
-            false,
-            StateSelection::All
-        )
-        .is_err()
-    );
+
+    assert!(write_source_index(
+        &invalid,
+        &IndexSource::File(&event_path, &wrong),
+        None,
+        false,
+        StateSelection::All
+    )
+    .is_err());
 }
 
 #[test]
@@ -107,6 +115,7 @@ fn streaming_index_exceeds_materializing_reader_event_limit() {
     let session = temporary.path().join("session");
     create_private_directory(&session).expect("private directory");
     let event_path = session.join("events.jsonl");
+
     let mut writer = writer(&event_path);
     for _ in 0..1_000_001 {
         writer
@@ -116,6 +125,7 @@ fn streaming_index_exceeds_materializing_reader_event_limit() {
             })
             .expect("marker");
     }
+
     drop(writer);
     assert!(
         EventLog::read(&event_path).is_err(),

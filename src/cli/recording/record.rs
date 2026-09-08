@@ -10,6 +10,7 @@ pub(in crate::cli) fn run_record(
     if arguments.original_native {
         return super::original::run_original(response, arguments);
     }
+
     let RecordArgs {
         original_native: _,
         original_fps: _,
@@ -37,6 +38,7 @@ pub(in crate::cli) fn run_record(
             if source_kind != "ansi_stream" || blake3.len() != 64 {
                 return Err(miette::miette!("invalid internal ANSI import provenance"));
             }
+
             Some(ImportProvenance {
                 source_kind,
                 byte_count,
@@ -51,17 +53,20 @@ pub(in crate::cli) fn run_record(
             ));
         }
     };
+
     let supplied_environment = if arguments.environment_spec_stdin {
         if !no_input {
             return Err(miette::miette!(
                 "--environment-spec-stdin requires --no-input so stdin cannot be consumed twice"
             ));
         }
+
         let mut bytes = Vec::new();
         io::stdin()
             .take(4 * 1024 * 1024 + 1)
             .read_to_end(&mut bytes)
             .into_diagnostic()?;
+
         Some(
             parse_environment_spec(&bytes, Path::new("<environment-spec-stdin>"))
                 .into_diagnostic()?,
@@ -87,18 +92,21 @@ pub(in crate::cli) fn run_record(
     } else {
         None
     };
+
     if let Some(predecessor) = restart_source {
         if import_provenance.is_some() {
             return Err(miette::miette!(
                 "restart cannot carry ANSI import provenance"
             ));
         }
+
         let overrides = restart_overrides
             .as_deref()
             .map(serde_json::from_str)
             .transpose()
             .into_diagnostic()?
             .unwrap_or_default();
+
         let options = restarted_record_options(
             out,
             session_alias,
@@ -106,8 +114,10 @@ pub(in crate::cli) fn run_record(
             &overrides,
             supplied_environment,
         )?;
+
         return report_record_outcome(record_for_response(response, &options)?);
     }
+
     let durability_policy = durability_policy_for(&arguments)?;
     if !matches!(arguments.provenance, ProvenancePolicyArg::Custom)
         && !arguments.provenance_environment.is_empty()
@@ -116,10 +126,12 @@ pub(in crate::cli) fn run_record(
             "--provenance-env requires --provenance custom"
         ));
     }
+
     let provenance_policy = ProvenancePolicy {
         kind: arguments.provenance.into(),
         environment: arguments.provenance_environment.iter().cloned().collect(),
     };
+
     let environment = supplied_environment.unwrap_or_default();
     let overrides = GhosttyVisualOverrides {
         font_family: arguments.font_family.clone(),
@@ -132,16 +144,19 @@ pub(in crate::cli) fn run_record(
     let needs_profile = arguments.ghostty_config.is_some()
         || !overrides.is_empty()
         || matches!(arguments.geometry, GeometryMode::Fit);
+
     let ghostty_profile = if let Some(provenance) = resolved_ghostty_profile_provenance {
         if !overrides.is_empty() {
             return Err(miette::miette!(
                 "resolved native profile cannot carry additional visual overrides"
             ));
         }
+
         let path = arguments
             .ghostty_config
             .as_deref()
             .ok_or_else(|| miette::miette!("resolved native profile requires a config file"))?;
+
         Some(
             restore_ghostty_profile(
                 fs::read(path).into_diagnostic()?,
@@ -157,20 +172,25 @@ pub(in crate::cli) fn run_record(
     } else {
         None
     };
+
     let (geometry, geometry_provenance) =
         resolve_record_geometry(&arguments, ghostty_profile.as_ref())?;
+
     let cell_width_px = geometry
         .pixel_width
         .checked_div(geometry.cols)
         .ok_or_else(|| miette::miette!("resolved terminal has no columns"))?;
+
     let cell_height_px = geometry
         .pixel_height
         .checked_div(geometry.rows)
         .ok_or_else(|| miette::miette!("resolved terminal has no rows"))?;
+
     let colors = ghostty_profile
         .as_ref()
         .map_or_else(builtin_terminal_colors, terminal_colors_for_profile)
         .into_diagnostic()?;
+
     let outcome = record_for_response(
         response,
         &RecordOptions {
@@ -213,28 +233,34 @@ pub(in crate::cli) fn run_record(
             },
         },
     )?;
+
     return report_record_outcome(outcome);
 }
 
 pub(super) fn durability_policy_for(arguments: &RecordingArgs) -> Result<DurabilityPolicy> {
     let has_threshold = arguments.durability_max_interval_ms.is_some()
         || arguments.durability_max_uncommitted_bytes.is_some();
+
     if !matches!(arguments.durability, DurabilityModeArg::Bounded) && has_threshold {
         return Err(miette::miette!(
             "--durability-max-interval-ms and --durability-max-uncommitted-bytes require --durability bounded"
         ));
     }
+
     let interval = arguments
         .durability_max_interval_ms
         .unwrap_or(DEFAULT_DURABILITY_MAX_INTERVAL_MS);
+
     let bytes = arguments
         .durability_max_uncommitted_bytes
         .unwrap_or(DEFAULT_DURABILITY_MAX_UNCOMMITTED_BYTES);
+
     if matches!(arguments.durability, DurabilityModeArg::Bounded) && (interval == 0 || bytes == 0) {
         return Err(miette::miette!(
             "bounded durability thresholds must be greater than zero"
         ));
     }
+
     return Ok(arguments.durability.policy(interval, bytes));
 }
 
@@ -243,6 +269,7 @@ pub(super) fn record_for_response(
     options: &RecordOptions,
 ) -> Result<RecordOutcome> {
     let mut output = response_output(response);
+
     return record_with_output(options, &mut output).into_diagnostic();
 }
 
@@ -251,6 +278,7 @@ pub(super) fn report_record_outcome(outcome: RecordOutcome) -> Result<ExitCode> 
     if outcome.resource_limit.is_some() {
         return Ok(ExitCode::FAILURE);
     }
+
     return match (outcome.exit_code, outcome.signal_name) {
         (Some(code), None) => u8::try_from(code).map(ExitCode::from).into_diagnostic(),
         _ => Ok(ExitCode::FAILURE),

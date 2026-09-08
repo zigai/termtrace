@@ -1,9 +1,9 @@
 use super::{
-    ACTION_RESPONSE_BYTES, MAX_AGENT_RESPONSE_BYTES, MAX_CAPTURE_BYTES, ResolvedResponseMode,
-    ResponseField, ResponseState, ResponseWriter, START_RESPONSE_BYTES, STOP_RESPONSE_BYTES,
-    WAIT_STATUS_RESPONSE_BYTES, bounded_agent_response, bounded_capture_projection, capture_raw,
-    compact_success, compact_task_value, enforce_success_budget, human_summary,
-    pagination_projection, retry_for_applied,
+    bounded_agent_response, bounded_capture_projection, capture_raw, compact_success,
+    compact_task_value, enforce_success_budget, human_summary, pagination_projection,
+    retry_for_applied, ResolvedResponseMode, ResponseField, ResponseState, ResponseWriter,
+    ACTION_RESPONSE_BYTES, MAX_AGENT_RESPONSE_BYTES, MAX_CAPTURE_BYTES, START_RESPONSE_BYTES,
+    STOP_RESPONSE_BYTES, WAIT_STATUS_RESPONSE_BYTES,
 };
 use super::{human::human_screen_summary, projection::compact_value_with_paths};
 
@@ -17,6 +17,7 @@ fn compact_fields_hide_forensic_tables_by_default() {
         "observed_monotonic_ns": 42,
         "nullable": null,
     });
+
     let compact = compact_value_with_paths(source.clone(), &[], false).unwrap_or_default();
     assert_eq!(compact["state_hash"], "abc");
     assert!(compact.get("cursor").is_none());
@@ -50,6 +51,7 @@ fn oversized_agent_errors_keep_required_retry_contract() {
         "session_state": "live",
         "screen": "x".repeat(MAX_AGENT_RESPONSE_BYTES),
     });
+
     let encoded = bounded_agent_response(response).unwrap_or_default();
     assert!(encoded.len() <= MAX_AGENT_RESPONSE_BYTES);
     let compact: serde_json::Value =
@@ -60,6 +62,7 @@ fn oversized_agent_errors_keep_required_retry_contract() {
     assert_eq!(compact["session_state"], "live");
     assert_eq!(compact["truncated"], true);
 }
+
 #[test]
 fn oversized_agent_pages_keep_the_next_offset() {
     let response = serde_json::json!({
@@ -81,6 +84,7 @@ fn oversized_agent_pages_keep_the_next_offset() {
             }
         ]
     });
+
     let encoded = bounded_agent_response(response).unwrap_or_default();
     let compact: serde_json::Value =
         serde_json::from_slice(&encoded).unwrap_or(serde_json::Value::Null);
@@ -97,6 +101,7 @@ fn oversized_raw_pages_keep_the_trailing_resume_cursor() {
         "timeline".to_owned(),
         false,
     );
+
     let output = format!(
         "{}\npage: {{\"offset\":0,\"limit\":600,\"returned\":600,\"truncated\":true,\"next_offset\":580}}\n",
         "x".repeat(MAX_CAPTURE_BYTES)
@@ -141,6 +146,7 @@ fn capture_budget_fallback_keeps_only_pagination_metadata() {
             "next_offset": 60
         }
     });
+
     let projection = pagination_projection(&value).unwrap_or_default();
     assert_eq!(projection["kind"], "timeline");
     assert_eq!(projection["output_page"]["next_offset"], 60);
@@ -163,6 +169,7 @@ fn oversized_capture_projection_keeps_state_identity_and_omits_bulk_state() {
             "grid": ["x".repeat(MAX_CAPTURE_BYTES)]
         }
     });
+
     let projection = bounded_capture_projection(&value).unwrap_or_default();
     assert_eq!(projection["record"]["state_id"], 13_000);
     assert_eq!(projection["record"]["state_hash"], "abc");
@@ -189,12 +196,14 @@ fn rich_wait_and_action_frames_keep_bounded_agent_identity_and_text() {
             ]
         }
     });
+
     let wait = serde_json::json!({
         "predicate": { "predicate": "contains", "text": "MISSING" },
         "matched": false,
         "quality": "deadline",
         "frame": frame,
     });
+
     let projected = bounded_capture_projection(&wait).expect("bounded wait projection");
     let compact = compact_task_value(projected, &[], "wait").expect("compact wait");
     assert_eq!(compact["scope"], "screen");
@@ -216,6 +225,7 @@ fn rich_wait_and_action_frames_keep_bounded_agent_identity_and_text() {
             "outcome": "matched_unsettled"
         }
     });
+
     let projected = bounded_capture_projection(&action).expect("bounded action projection");
     let compact = compact_task_value(projected, &[], "act").expect("compact action");
     assert_eq!(compact["input"]["applied"], "all");
@@ -233,6 +243,7 @@ fn response_state(
     fields: Vec<ResponseField>,
 ) -> ResponseState {
     let captured_bytes = serde_json::to_vec(&value).expect("response fixture").len();
+
     return ResponseState {
         mode: ResolvedResponseMode::Agent,
         fields,
@@ -277,6 +288,7 @@ fn task_projections_are_allowlisted_and_meet_default_byte_gates() {
         }),
         Vec::new(),
     );
+
     let start =
         enforce_success_budget(compact_success(&start), "start", &[]).expect("start budget");
     assert_eq!(start["session_state"], "ended");
@@ -301,6 +313,7 @@ fn task_projections_are_allowlisted_and_meet_default_byte_gates() {
         }),
         Vec::new(),
     );
+
     let send = enforce_success_budget(compact_success(&send), "send", &[]).expect("send budget");
     assert_eq!(send["atoms"], 3);
     assert_eq!(send["bytes"], 9);
@@ -330,6 +343,7 @@ fn task_projections_are_allowlisted_and_meet_default_byte_gates() {
         }),
         Vec::new(),
     );
+
     let act = enforce_success_budget(compact_success(&act), "act", &[]).expect("act budget");
     assert_eq!(act["input"]["applied"], "all");
     assert!(act.get("postcondition").is_none());
@@ -382,9 +396,11 @@ fn task_projections_are_allowlisted_and_meet_default_byte_gates() {
         let state = response_state(command, mutating, value, Vec::new());
         let response = enforce_success_budget(compact_success(&state), command, &[])
             .expect("task response budget");
+
         if command != "wait" {
             assert!(serde_json::to_vec(&response).expect("task JSON").len() < limit);
         }
+
         let mut gated_response = response.clone();
         if command == "status" {
             assert_eq!(gated_response["pid"], 42);
@@ -393,12 +409,14 @@ fn task_projections_are_allowlisted_and_meet_default_byte_gates() {
                 .expect("status response")
                 .remove("pid");
         }
+
         assert!(!contains_forbidden_default_field(&gated_response));
         if command == "wait" {
             assert_eq!(response["session_state"], "ended");
             assert_eq!(response["kind"], "stable_snapshot");
             assert!(response.get("screen").is_some());
         }
+
         if command == "stop" {
             assert_eq!(response["kind"], "completed");
         }
@@ -408,6 +426,7 @@ fn task_projections_are_allowlisted_and_meet_default_byte_gates() {
 #[test]
 fn oversized_task_metadata_meets_encoded_byte_gates_without_screen_exemptions() {
     let large = "metadata".repeat(200);
+
     for (command, mutating, limit, value) in [
         (
             "start",
@@ -467,6 +486,7 @@ fn oversized_task_metadata_meets_encoded_byte_gates_without_screen_exemptions() 
         );
         let response: serde_json::Value = serde_json::from_slice(&encoded).expect("response JSON");
         assert_eq!(response["ok"], true);
+
         if command == "act" {
             assert_eq!(response["input"]["applied"], "all");
             assert_eq!(response["postcondition"]["matched"], false);
@@ -508,6 +528,7 @@ fn boundary_is_only_included_when_requested_and_partial_requires_inspection() {
         "bytes_written": 1,
         "boundary": {"event_hash": "a".repeat(64), "next_event_seq": 3},
     });
+
     let default = compact_success(&response_state("send", true, value.clone(), Vec::new()));
     assert!(default.get("boundary").is_none());
     let requested = compact_success(&response_state(
@@ -521,6 +542,7 @@ fn boundary_is_only_included_when_requested_and_partial_requires_inspection() {
     assert_eq!(retry_for_applied("unknown"), "same_request_id_only");
     assert_eq!(retry_for_applied("partial"), "inspect_before_retry");
 }
+
 #[test]
 fn human_screen_renders_text_sparse_and_diff_content() {
     let base = serde_json::json!({
@@ -529,6 +551,7 @@ fn human_screen_renders_text_sparse_and_diff_content() {
         "quality": "stable",
         "size": [80, 24],
     });
+
     let mut text = base.clone();
     text["screen"] = serde_json::json!("hello\nworld");
     let text = human_screen_summary(&text);
@@ -555,6 +578,7 @@ fn human_screen_renders_text_sparse_and_diff_content() {
     assert!(diff.contains("Viewport diff from prior to current"));
     assert!(diff.contains("row 4: changed"));
 }
+
 #[test]
 fn human_task_summaries_preserve_status_findings_mutation_and_paths() {
     let status = human_summary(&serde_json::json!({"kind": "status", "pid": 42}), "status");

@@ -12,8 +12,8 @@ use nix::{
     libc::{O_NOFOLLOW, O_NONBLOCK},
     unistd::geteuid,
 };
-use rusqlite::{Connection, OpenFlags, OptionalExtension as _, Transaction, params};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension as _, Transaction};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use termtrace_model::artifact::tmux::{
     TmuxCatalogSummary, TmuxCoverageGap, TmuxGapCatalogEntry, TmuxJournalBoundary,
     TmuxLifecycleEvent, TmuxPaneTrack, TmuxRecordingManifest, TmuxTrackCatalogEntry,
@@ -21,8 +21,8 @@ use termtrace_model::artifact::tmux::{
 use uuid::Uuid;
 
 use crate::{
+    tmux_journal::{self, record_hash, visit_records, Record},
     Error, Result,
-    tmux_journal::{self, Record, record_hash, visit_records},
 };
 
 /// Rebuildable index filename beside the canonical lifecycle journal.
@@ -69,6 +69,7 @@ impl TmuxCatalog {
             }
             Err(error) => return Err(error),
         };
+
         if let Some(connection) = connection {
             connection
                 .busy_timeout(Duration::from_secs(2))
@@ -76,6 +77,7 @@ impl TmuxCatalog {
             connection
                 .execute_batch("PRAGMA cache_size=-1024; BEGIN DEFERRED;")
                 .map_err(|error| return sql_error(&path, error))?;
+
             if let Some(head) = load_head(&connection, &path)?
                 && matches_manifest(&head, manifest)
             {
@@ -87,6 +89,7 @@ impl TmuxCatalog {
                 });
             }
         }
+
         return Self::read_verified(directory, manifest);
     }
 
@@ -102,6 +105,7 @@ impl TmuxCatalog {
         let connection = Connection::open("").map_err(|error| return sql_error(&path, error))?;
         let mut catalog = Self::initialize(connection, directory)?;
         catalog.rebuild(manifest)?;
+
         return Ok(catalog);
     }
 
@@ -110,10 +114,12 @@ impl TmuxCatalog {
         let path = directory.join(CATALOG_NAME);
         checked_index_file(&path, true)?;
         let connection = Connection::open(&path).map_err(|error| return sql_error(&path, error))?;
+
         let mut catalog = Self::initialize(connection, directory)?;
         if !matches_manifest(&catalog.head, manifest) {
             catalog.rebuild(manifest)?;
         }
+
         return Ok(catalog);
     }
 
@@ -130,7 +136,9 @@ impl TmuxCatalog {
             CREATE TABLE IF NOT EXISTS gaps (sequence INTEGER PRIMARY KEY, pane TEXT, kind TEXT NOT NULL, detail TEXT NOT NULL, first_ns TEXT NOT NULL, value TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, latest_sequence INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS active_gaps ON gaps(resolved, sequence);
             CREATE INDEX IF NOT EXISTS gap_identity ON gaps(pane,kind,detail,first_ns);").map_err(|error| return sql_error(&path, error))?;
+
         let head = load_head(&connection, &path)?.unwrap_or_else(empty_head);
+
         return Ok(Self {
             connection,
             path,
@@ -149,6 +157,7 @@ impl TmuxCatalog {
                 "DELETE FROM tracks; DELETE FROM gaps; DELETE FROM events; DELETE FROM head;",
             )
             .map_err(|error| return sql_error(&self.path, error))?;
+
         let mut head = empty_head();
         if let Some(boundary) = &manifest.lifecycle_journal {
             visit_records(&self.journal, boundary, |record, offset, length| {
@@ -160,12 +169,15 @@ impl TmuxCatalog {
                     length,
                     &mut head.counts,
                 )?;
+
                 return Ok(());
             })?;
+
             head.bytes = boundary.bytes;
             head.sequence = boundary.sequence;
             head.hash.clone_from(&boundary.hash);
         }
+
         if manifest
             .catalog
             .as_ref()
@@ -175,11 +187,14 @@ impl TmuxCatalog {
                 "tmux inventory counts differ from the canonical journal",
             ));
         }
+
         store_head(&transaction, &self.path, &head)?;
         transaction
             .commit()
             .map_err(|error| return sql_error(&self.path, error))?;
+
         self.head = head;
+
         return Ok(());
     }
 
@@ -192,6 +207,7 @@ impl TmuxCatalog {
             .connection
             .transaction()
             .map_err(|error| return sql_error(&self.path, error))?;
+
         let mut counts = self.head.counts.clone();
         for (record, offset, length) in records {
             apply_record(
@@ -203,17 +219,21 @@ impl TmuxCatalog {
                 &mut counts,
             )?;
         }
+
         let head = Head {
             bytes: boundary.bytes,
             sequence: boundary.sequence,
             hash: boundary.hash.clone(),
             counts,
         };
+
         store_head(&transaction, &self.path, &head)?;
         transaction
             .commit()
             .map_err(|error| return sql_error(&self.path, error))?;
+
         self.head = head;
+
         return Ok(self.head.counts.clone());
     }
 
@@ -242,6 +262,7 @@ impl TmuxCatalog {
             )
             .optional()
             .map_err(|error| return sql_error(&self.path, error))?;
+
         return row
             .map(|(sequence, value, completed)| {
                 return self.decode_track(sequence, &value, completed);
@@ -260,6 +281,7 @@ impl TmuxCatalog {
         unfinished_only: bool,
     ) -> Result<Vec<TmuxTrackCatalogEntry>> {
         check_limit(limit)?;
+
         let mut statement = self.connection.prepare("SELECT sequence,value,completed FROM tracks WHERE sequence>=?1 AND (?2=0 OR completed=0) ORDER BY sequence LIMIT ?3").map_err(|error| return sql_error(&self.path, error))?;
         let rows = statement
             .query_map(params![from_sequence, unfinished_only, limit], |row| {
@@ -270,19 +292,24 @@ impl TmuxCatalog {
                 ));
             })
             .map_err(|error| return sql_error(&self.path, error))?;
+
         let mut entries = Vec::new();
+
         let mut bytes = 0_usize;
         for row in rows {
             let (sequence, value, completed) =
                 row.map_err(|error| return sql_error(&self.path, error))?;
             bytes = bytes.saturating_add(value.len());
+
             if bytes > 4 * 1024 * 1024 {
                 return Err(Error::invalid(
                     "tmux track page exceeds four MiB; request fewer entries",
                 ));
             }
+
             entries.push(self.decode_track(sequence, &value, completed)?);
         }
+
         return Ok(entries);
     }
 
@@ -297,6 +324,7 @@ impl TmuxCatalog {
         unresolved_only: bool,
     ) -> Result<Vec<TmuxGapCatalogEntry>> {
         check_limit(limit)?;
+
         let mut statement = self.connection.prepare("SELECT sequence,value,latest_sequence FROM gaps WHERE sequence>=?1 AND (?2=0 OR resolved=0) ORDER BY sequence LIMIT ?3").map_err(|error| return sql_error(&self.path, error))?;
         let rows = statement
             .query_map(params![from_sequence, unresolved_only, limit], |row| {
@@ -307,28 +335,34 @@ impl TmuxCatalog {
                 ));
             })
             .map_err(|error| return sql_error(&self.path, error))?;
+
         let mut entries = Vec::new();
+
         let mut bytes = 0_usize;
         for row in rows {
             let (sequence, value, latest) =
                 row.map_err(|error| return sql_error(&self.path, error))?;
             bytes = bytes.saturating_add(value.len());
+
             if bytes > 4 * 1024 * 1024 {
                 return Err(Error::invalid(
                     "tmux coverage page exceeds four MiB; request fewer entries",
                 ));
             }
+
             let record = self.event(latest)?;
             if record.value.as_deref() != Some(value.as_str()) {
                 return Err(Error::invalid(
                     "tmux gap index differs from its journal record",
                 ));
             }
+
             entries.push(TmuxGapCatalogEntry {
                 sequence,
                 gap: decode(&self.path, &value)?,
             });
         }
+
         return Ok(entries);
     }
 
@@ -351,6 +385,7 @@ impl TmuxCatalog {
                 },
             )
             .map_err(|error| return sql_error(&self.path, error))?;
+
         if length > MAX_RECORD_BYTES
             || offset
                 .checked_add(length)
@@ -360,11 +395,13 @@ impl TmuxCatalog {
                 "tmux catalog points outside its committed prefix",
             ));
         }
+
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(O_NOFOLLOW | O_NONBLOCK)
             .open(&self.journal)
             .map_err(|error| return Error::filesystem(&self.journal, error))?;
+
         if !file
             .metadata()
             .map_err(|error| return Error::filesystem(&self.journal, error))?
@@ -372,6 +409,7 @@ impl TmuxCatalog {
         {
             return Err(Error::invalid("tmux journal is not a regular file"));
         }
+
         file.seek(SeekFrom::Start(offset))
             .map_err(|error| return Error::filesystem(&self.journal, error))?;
         let mut bytes = Vec::new();
@@ -380,6 +418,7 @@ impl TmuxCatalog {
             .map_err(|error| return Error::filesystem(&self.journal, error))?;
         let record: Record = serde_json::from_slice(&bytes)
             .map_err(|error| return json_error(&self.journal, error))?;
+
         if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != length
             || bytes.last() != Some(&b'\n')
             || record.event.sequence != sequence
@@ -390,6 +429,7 @@ impl TmuxCatalog {
                 "tmux catalog record differs from canonical evidence",
             ));
         }
+
         return Ok(record.event);
     }
 
@@ -405,6 +445,7 @@ impl TmuxCatalog {
                 "tmux track index differs from its canonical link",
             ));
         }
+
         return Ok(TmuxTrackCatalogEntry {
             sequence,
             track: decode(&self.path, value)?,
@@ -427,6 +468,7 @@ fn apply_record(
             params![record.event.sequence, offset, length, record.hash],
         )
         .map_err(|error| return sql_error(path, error))?;
+
     let Some(value) = &record.event.value else {
         return Ok(());
     };
@@ -438,6 +480,7 @@ fn apply_record(
                     "tmux track link has a different pane identity",
                 ));
             }
+
             let existing: Option<String> = transaction
                 .query_row(
                     "SELECT value FROM tracks WHERE id=?1",
@@ -446,8 +489,10 @@ fn apply_record(
                 )
                 .optional()
                 .map_err(|error| return sql_error(path, error))?;
+
             if let Some(existing) = existing {
                 let previous: TmuxPaneTrack = decode(path, &existing)?;
+
                 if previous.pane_id != track.pane_id || previous.session != track.session {
                     return Err(Error::invalid("tmux recording identity was rebound"));
                 }
@@ -463,6 +508,7 @@ fn apply_record(
                         ],
                     )
                     .map_err(|error| return sql_error(path, error))?;
+
                 counts.tracks = increment(counts.tracks)?;
                 counts.unfinished_tracks = increment(counts.unfinished_tracks)?;
             }
@@ -470,6 +516,7 @@ fn apply_record(
         "pane_track_completed" => {
             let id = Uuid::parse_str(value)
                 .map_err(|_| return Error::invalid("invalid completed tmux recording identity"))?;
+
             let changed = transaction
                 .execute(
                     "UPDATE tracks SET completed=1 WHERE id=?1 AND completed=0",
@@ -496,6 +543,7 @@ fn apply_record(
                     ],
                 )
                 .map_err(|error| return sql_error(path, error))?;
+
             counts.coverage_gaps = increment(counts.coverage_gaps)?;
         }
         "coverage_gap_resolved" if value.starts_with('{') => {
@@ -503,7 +551,9 @@ fn apply_record(
             if gap.resolved_unix_ns.is_none() {
                 return Err(Error::invalid("resolved tmux gap has no resolution time"));
             }
+
             let changed = transaction.execute("UPDATE gaps SET value=?1,resolved=1,latest_sequence=?2 WHERE pane IS ?3 AND kind=?4 AND detail=?5 AND first_ns=?6 AND resolved=0", params![value, record.event.sequence, gap.pane_id, gap.kind, gap.detail, gap.first_observed_unix_ns.to_string()]).map_err(|error| return sql_error(path, error))?;
+
             if changed != 1 {
                 return Err(Error::invalid(
                     "resolved tmux gap has no unique open interval",
@@ -512,6 +562,7 @@ fn apply_record(
         }
         _ => {}
     }
+
     return Ok(());
 }
 
@@ -528,6 +579,7 @@ fn checked_index_file(path: &Path, create: bool) -> Result<File> {
     let metadata = file
         .metadata()
         .map_err(|error| return Error::filesystem(path, error))?;
+
     if !metadata.is_file()
         || metadata.uid() != geteuid().as_raw()
         || metadata.permissions().mode() & 0o077 != 0
@@ -536,8 +588,10 @@ fn checked_index_file(path: &Path, create: bool) -> Result<File> {
             "tmux catalog must be a private file owned by the current user",
         ));
     }
+
     return Ok(file);
 }
+
 fn matches_manifest(head: &Head, manifest: &TmuxRecordingManifest) -> bool {
     return manifest.lifecycle_journal.as_ref().map_or(
         head.sequence == 0 && head.bytes == 0,
@@ -551,6 +605,7 @@ fn matches_manifest(head: &Head, manifest: &TmuxRecordingManifest) -> bool {
         .as_ref()
         .is_none_or(|counts| return *counts == head.counts);
 }
+
 fn load_head(connection: &Connection, path: &Path) -> Result<Option<Head>> {
     return connection
         .query_row("SELECT value FROM head WHERE id=1", [], |row| {
@@ -561,13 +616,16 @@ fn load_head(connection: &Connection, path: &Path) -> Result<Option<Head>> {
         .map(|value| return decode(path, &value))
         .transpose();
 }
+
 fn store_head(transaction: &Transaction<'_>, path: &Path, head: &Head) -> Result<()> {
     let value = serde_json::to_string(head).map_err(|error| return json_error(path, error))?;
     transaction
         .execute("INSERT OR REPLACE INTO head VALUES (1,?1)", [value])
         .map_err(|error| return sql_error(path, error))?;
+
     return Ok(());
 }
+
 fn empty_head() -> Head {
     return Head {
         bytes: 0,
@@ -576,25 +634,31 @@ fn empty_head() -> Head {
         counts: TmuxCatalogSummary::default(),
     };
 }
+
 fn check_limit(limit: u16) -> Result<()> {
     if limit == 0 || limit > 4096 {
         return Err(Error::invalid(
             "tmux catalog pages require 1 to 4096 entries",
         ));
     }
+
     return Ok(());
 }
+
 fn increment(value: u64) -> Result<u64> {
     return value
         .checked_add(1)
         .ok_or_else(|| return Error::invalid("tmux catalog counter overflow"));
 }
+
 fn decode<T: DeserializeOwned>(path: &Path, value: &str) -> Result<T> {
     return serde_json::from_str(value).map_err(|error| return json_error(path, error));
 }
+
 fn sql_error(path: &Path, error: rusqlite::Error) -> Error {
     return Error::filesystem(path, io::Error::other(error));
 }
+
 fn json_error(path: &Path, source: serde_json::Error) -> Error {
     return Error::InvalidJson {
         path: path.to_path_buf(),

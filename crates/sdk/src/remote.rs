@@ -11,8 +11,8 @@ use termtrace_model::protocol::control::{
 };
 
 use crate::{
-    Error, Result,
     protocol::{self, ExchangeTiming},
+    Error, Result,
 };
 
 /// Lightweight connection configuration for a canonical live session.
@@ -35,6 +35,7 @@ impl Client {
                 reason: "TERMTRACE_SESSION is not set".to_owned(),
             };
         })?;
+
         return Ok(Self::new(session));
     }
 

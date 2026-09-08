@@ -1,6 +1,7 @@
 use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
+
 use args::IntegritySubcommand;
 
 use std::{fmt::Write as _, mem::take, process::ExitCode};
@@ -25,11 +26,13 @@ pub(super) fn run_verify(response: &mut ResponseWriter, arguments: VerifyArgs) -
             "--allowed-signers requires --level signature"
         ));
     }
+
     let mut report = verify_session_with_trust(
         arguments.session,
         arguments.level.into(),
         arguments.allowed_signers.as_deref(),
     );
+
     let valid = report.valid;
     let (findings, page, partial) = paginate(take(&mut report.findings), &arguments.page);
     report.findings = findings;
@@ -40,9 +43,11 @@ pub(super) fn run_verify(response: &mut ResponseWriter, arguments: VerifyArgs) -
         let status = if valid { "valid" } else { "invalid" };
         let level = stable_enum_label(&report.level)?;
         let mut output = format!("{status}: {} ({level})\n", report.session.display(),);
+
         for finding in &report.findings {
             writeln!(output, "{}: {}", finding.code, finding.message).into_diagnostic()?;
         }
+
         if partial {
             writeln!(
                 output,
@@ -51,17 +56,21 @@ pub(super) fn run_verify(response: &mut ResponseWriter, arguments: VerifyArgs) -
             )
             .into_diagnostic()?;
         }
+
         write_stdout(response, output)?;
     }
+
     if valid {
         return Ok(ExitCode::SUCCESS);
     }
+
     return Ok(ExitCode::FAILURE);
 }
 
 pub(super) fn run_sign(response: &mut ResponseWriter, arguments: SignArgs) -> Result<ExitCode> {
     let receipt = create_ssh_receipt(&arguments.session, &arguments.key, &arguments.signer)
         .into_diagnostic()?;
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -85,6 +94,7 @@ pub(super) fn run_recover(
             "recovery requires --session or --event-log"
         ));
     };
+
     return write_json_line(response, &report);
 }
 

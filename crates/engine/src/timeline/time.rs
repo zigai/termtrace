@@ -13,9 +13,11 @@ pub fn parse_time_offset_ns(value: &str) -> StdResult<u64, String> {
     if value.is_empty() {
         return Err("time offset cannot be empty".to_owned());
     }
+
     if value.contains(':') {
         return parse_clock_offset(value);
     }
+
     let (number, scale) = [
         ("ns", 1),
         ("us", 1_000),
@@ -31,6 +33,7 @@ pub fn parse_time_offset_ns(value: &str) -> StdResult<u64, String> {
             .map(|number| return (number, scale));
     })
     .unwrap_or((value, NANOS_PER_SECOND));
+
     return parse_scaled_decimal(number, scale)
         .map_err(|reason| return format!("invalid time offset `{value}`: {reason}"));
 }
@@ -50,24 +53,30 @@ fn parse_clock_offset(value: &str) -> StdResult<u64, String> {
             ));
         }
     };
+
     if parts.len() == 3 && minutes >= 60 {
         return Err(format!(
             "invalid time offset `{value}`: minutes must be below 60 in HH:MM:SS"
         ));
     }
+
     let seconds_ns = parse_scaled_decimal(seconds, NANOS_PER_SECOND)
         .map_err(|reason| return format!("invalid time offset `{value}`: {reason}"))?;
+
     if seconds_ns >= NANOS_PER_MINUTE {
         return Err(format!(
             "invalid time offset `{value}`: seconds must be below 60"
         ));
     }
+
     let hours_ns = hours
         .checked_mul(NANOS_PER_HOUR)
         .ok_or_else(|| return format!("invalid time offset `{value}`: value overflows"))?;
+
     let minutes_ns = minutes
         .checked_mul(NANOS_PER_MINUTE)
         .ok_or_else(|| return format!("invalid time offset `{value}`: value overflows"))?;
+
     return hours_ns
         .checked_add(minutes_ns)
         .and_then(|total| return total.checked_add(seconds_ns))
@@ -80,31 +89,41 @@ fn parse_scaled_decimal(number: &str, scale: u64) -> StdResult<u64, String> {
         .map_or((number, None), |(whole, fraction)| {
             return (whole, Some(fraction));
         });
+
     if whole.is_empty() || number.matches('.').count() > 1 {
         return Err("expected a non-negative decimal number".to_owned());
     }
+
     let whole = parse_integer(whole, "value")?;
     let whole_ns = whole
         .checked_mul(scale)
         .ok_or_else(|| return "value overflows nanoseconds".to_owned())?;
+
     let Some(fraction) = fraction else {
         return Ok(whole_ns);
     };
+
     if fraction.is_empty() || fraction.len() > 18 {
         return Err("fraction must contain between 1 and 18 digits".to_owned());
     }
+
     let numerator = parse_integer(fraction, "fraction")?;
     let exponent =
         u32::try_from(fraction.len()).map_err(|_| return "fraction is too precise".to_owned())?;
+
     let denominator = 10_u64
         .checked_pow(exponent)
         .ok_or_else(|| return "fraction is too precise".to_owned())?;
+
     let scaled = u128::from(numerator) * u128::from(scale);
+
     if scaled % u128::from(denominator) != 0 {
         return Err("fraction is more precise than one nanosecond".to_owned());
     }
+
     let fraction_ns = u64::try_from(scaled / u128::from(denominator))
         .map_err(|_| return "fraction overflows nanoseconds".to_owned())?;
+
     return whole_ns
         .checked_add(fraction_ns)
         .ok_or_else(|| return "value overflows nanoseconds".to_owned());

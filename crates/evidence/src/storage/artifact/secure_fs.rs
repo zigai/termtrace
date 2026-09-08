@@ -8,9 +8,9 @@ use std::{
 
 use nix::{
     errno::Errno,
-    fcntl::{OFlag, OpenHow, RenameFlags, ResolveFlag, open, openat2, renameat2},
-    sys::stat::{Mode, SFlag, fstat, mkdirat},
-    unistd::{Uid, UnlinkatFlags, fsync, unlinkat},
+    fcntl::{open, openat2, renameat2, OFlag, OpenHow, RenameFlags, ResolveFlag},
+    sys::stat::{fstat, mkdirat, Mode, SFlag},
+    unistd::{fsync, unlinkat, Uid, UnlinkatFlags},
 };
 use uuid::Uuid;
 
@@ -42,11 +42,13 @@ pub fn secure_file(path: &Path) -> Result<File> {
         Mode::from_bits_truncate(0o600),
         path,
     )?;
+
     validate_private_regular_file_fd(&file, path)?;
     sync_fd(
         &parent,
         path.parent().unwrap_or_else(|| return Path::new(".")),
     )?;
+
     return Ok(File::from(file));
 }
 
@@ -61,13 +63,16 @@ pub fn create_private_directory(path: &Path) -> Result<()> {
     let leaf = safe_file_name(path)?;
     mkdirat(&parent, leaf, Mode::from_bits_truncate(0o700))
         .map_err(|error| return nix_filesystem(path, error))?;
+
     let directory = open_directory_at(&parent, leaf, path)?;
     validate_private_directory_fd(&directory, path)?;
+
     return sync_fd(
         &parent,
         path.parent().unwrap_or_else(|| return Path::new(".")),
     );
 }
+
 pub(super) fn open_parent_directory(path: &Path, create_missing: bool) -> Result<OwnedFd> {
     let parent = path.parent().ok_or_else(|| {
         return Error::Filesystem {
@@ -75,6 +80,7 @@ pub(super) fn open_parent_directory(path: &Path, create_missing: bool) -> Result
             source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
         };
     })?;
+
     return open_directory_path(parent, create_missing);
 }
 
@@ -86,6 +92,7 @@ pub(super) fn open_directory_path(path: &Path, create_missing: bool) -> Result<O
         Mode::empty(),
     )
     .map_err(|error| return nix_filesystem(Path::new(starting_path), error))?;
+
     let mut traversed = PathBuf::from(starting_path);
     for component in path.components() {
         let name = match component {
@@ -102,6 +109,7 @@ pub(super) fn open_directory_path(path: &Path, create_missing: bool) -> Result<O
             }
         };
         traversed.push(name);
+
         let mut created_or_raced = false;
         let next = match open_directory_at(&directory, name, &traversed) {
             Ok(next) => next,
@@ -109,15 +117,18 @@ pub(super) fn open_directory_path(path: &Path, create_missing: bool) -> Result<O
                 if create_missing && source.kind() == ErrorKind::NotFound =>
             {
                 created_or_raced = true;
+
                 match mkdirat(&directory, name, Mode::from_bits_truncate(0o700)) {
                     Ok(()) | Err(Errno::EEXIST) => {}
                     Err(error) => return Err(nix_filesystem(&traversed, error)),
                 }
+
                 let next = open_directory_at(&directory, name, &traversed)?;
                 sync_fd(
                     &directory,
                     traversed.parent().unwrap_or_else(|| return Path::new(".")),
                 )?;
+
                 next
             }
             Err(error) => return Err(error),
@@ -125,8 +136,10 @@ pub(super) fn open_directory_path(path: &Path, create_missing: bool) -> Result<O
         if created_or_raced {
             validate_private_directory_fd(&next, &traversed)?;
         }
+
         directory = next;
     }
+
     return Ok(directory);
 }
 
@@ -172,6 +185,7 @@ pub(super) fn validate_private_directory_fd(directory: &OwnedFd, path: &Path) ->
     let stat = fstat(directory).map_err(|error| return nix_filesystem(path, error))?;
     let kind = SFlag::from_bits_truncate(stat.st_mode);
     let mode = stat.st_mode & 0o777;
+
     if !kind.contains(SFlag::S_IFDIR) || stat.st_uid != Uid::effective().as_raw() || mode != 0o700 {
         return Err(Error::InsecureArtifactDirectory {
             path: path.to_path_buf(),
@@ -179,6 +193,7 @@ pub(super) fn validate_private_directory_fd(directory: &OwnedFd, path: &Path) ->
             mode,
         });
     }
+
     return Ok(());
 }
 
@@ -198,6 +213,7 @@ pub(super) fn validate_private_regular_file_fd(file: &OwnedFd, path: &Path) -> R
             ),
         });
     }
+
     return Ok(());
 }
 
@@ -227,6 +243,7 @@ pub fn finish_writer(mut writer: BufWriter<File>, path: &Path) -> Result<()> {
                 source,
             };
         })?;
+
     return sync_parent_directory(path);
 }
 
@@ -237,6 +254,7 @@ pub fn finish_writer(mut writer: BufWriter<File>, path: &Path) -> Result<()> {
 /// Returns an error when the directory path is unsafe, missing, or cannot be synced.
 pub fn sync_directory(path: &Path) -> Result<()> {
     let directory = open_directory_path(path, false)?;
+
     return sync_fd(&directory, path);
 }
 
@@ -255,6 +273,7 @@ pub fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> R
                 .to_owned(),
         });
     }
+
     let directory = open_directory_path(session, false)?;
     let staging_name = staging.file_name().ok_or_else(|| {
         return Error::InvalidEvidence {
@@ -266,6 +285,7 @@ pub fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> R
             reason: "artifact directory has no basename".to_owned(),
         };
     })?;
+
     renameat2(
         &directory,
         staging_name,
@@ -279,11 +299,13 @@ pub fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> R
                 path: destination.to_path_buf(),
             };
         }
+
         return Error::Filesystem {
             path: destination.to_path_buf(),
             source: IoError::from_raw_os_error(error as i32),
         };
     })?;
+
     return sync_fd(&directory, session);
 }
 
@@ -315,6 +337,7 @@ fn write_secure_with_hook(
             source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
         };
     })?;
+
     let parent = open_parent_directory(path, true)?;
     let destination_name = safe_file_name(path)?;
     let staging_name = format!(".termtrace-write-{}.tmp", Uuid::now_v7());
@@ -326,6 +349,7 @@ fn write_secure_with_hook(
         Mode::from_bits_truncate(0o600),
         &staging_path,
     )?;
+
     validate_private_regular_file_fd(&staging, &staging_path)?;
     let mut staging = File::from(staging);
     let mut renamed = false;
@@ -343,6 +367,7 @@ fn write_secure_with_hook(
                 source,
             };
         })?;
+
         after_stage(SecureWriteStage::DataSynced)?;
         renameat2(
             &parent,
@@ -357,12 +382,17 @@ fn write_secure_with_hook(
                     path: path.to_path_buf(),
                 };
             }
+
             return nix_filesystem(path, error);
         })?;
+
         renamed = true;
+
         after_stage(SecureWriteStage::Renamed)?;
+
         return sync_fd(&parent, parent_path);
     })();
+
     if result.is_err() && !renamed {
         let _cleanup_result = unlinkat(
             &parent,
@@ -371,6 +401,7 @@ fn write_secure_with_hook(
         )
         .and_then(|()| return fsync(&parent));
     }
+
     return result;
 }
 
@@ -387,6 +418,7 @@ pub(super) fn write_secure_with_failure(
                 source: IoError::other(format!("injected secure-write failure after {stage:?}")),
             });
         }
+
         return Ok(());
     });
 }
@@ -398,6 +430,8 @@ pub(crate) fn sync_parent_directory(path: &Path) -> Result<()> {
             source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
         };
     })?;
+
     let directory = open_directory_path(parent, false)?;
+
     return sync_fd(&directory, parent);
 }

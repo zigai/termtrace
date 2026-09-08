@@ -19,18 +19,18 @@ use termtrace_evidence::{
 use termtrace_model::{
     artifact::metadata::ArtifactSourceRange,
     terminal::replay::{
-        DERIVED_DIRECTORY, GHOSTTY_REVISION, IndexOptions, IndexOutcome, ReplayArtifacts,
-        ReplayManifest, STATE_FORMAT_VERSION, SemanticReplayCheckpoint, SourceRange,
-        StateIndexEntry, StateInspection, StateRecord, StateSelection, StateSelector,
+        IndexOptions, IndexOutcome, ReplayArtifacts, ReplayManifest, SemanticReplayCheckpoint,
+        SourceRange, StateIndexEntry, StateInspection, StateRecord, StateSelection, StateSelector,
+        DERIVED_DIRECTORY, GHOSTTY_REVISION, STATE_FORMAT_VERSION,
     },
     value::ByteString,
 };
 
 use super::{
-    ReplaySeed, engine::validate_generated_replay_seed, invalid_replay, json_error,
-    replay_for_index, state_delta, trust::SourceIdentity,
+    engine::validate_generated_replay_seed, invalid_replay, json_error, replay_for_index,
+    state_delta, trust::SourceIdentity, ReplaySeed,
 };
-use crate::{Error, Result, timeline::resolve_source_range};
+use crate::{timeline::resolve_source_range, Error, Result};
 
 mod control;
 mod rank;
@@ -86,39 +86,47 @@ pub fn index_session_with_options(
 ) -> Result<IndexOutcome> {
     let session_directory = session_directory.as_ref();
     let completion_exists = session_directory.join("completion.json").is_file();
+
     if !completion_exists && !options.live_snapshot {
         return Err(Error::SessionIncomplete {
             session: session_directory.to_path_buf(),
         });
     }
+
     let event_path = session_directory.join("events.jsonl");
     let identity = completion_exists
         .then(|| return SourceIdentity::capture(session_directory))
         .transpose()?;
+
     let summary = if completion_exists {
         EventLogSummary::read(&event_path)?
     } else {
         EventLogSummary::snapshot(&event_path)?
     };
+
     let source_complete = if completion_exists {
         validate_completion_summary_candidate(
             session_directory,
             &summary,
             &read_completion(session_directory)?,
         )?;
+
         true
     } else {
         false
     };
+
     let final_monotonic_ns = summary
         .terminal
         .as_ref()
         .map_or(0, |record| return record.monotonic_ns);
+
     let source_range = resolve_source_range(
         options.start_monotonic_ns,
         options.end_monotonic_ns,
         final_monotonic_ns,
     )?;
+
     let mut directory_name = derived_directory_name_for(source_range, options.state_selection);
     if !source_complete {
         let source_hash = summary.terminal.as_ref().map_or_else(
@@ -127,14 +135,17 @@ pub fn index_session_with_options(
                 return record.hash.clone();
             },
         );
+
         let short_hash = source_hash.get(..12).unwrap_or(source_hash.as_str());
         write!(directory_name, "-snapshot-{short_hash}")
             .map_err(|_| return invalid_replay("format live snapshot directory name"))?;
     }
+
     let destination = session_directory.join(directory_name);
     if destination.exists() {
         return Err(Error::ArtifactExists { path: destination });
     }
+
     let staging = session_directory.join(format!(".derived.{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
     let result = write_source_index(
@@ -148,6 +159,7 @@ pub fn index_session_with_options(
         if let Some(identity) = identity.as_ref() {
             identity.check(session_directory)?;
         }
+
         commit_directory(session_directory, &staging, &destination)?;
         let manifest_path = destination.join("manifest.json");
         let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
@@ -156,6 +168,7 @@ pub fn index_session_with_options(
                 source,
             };
         })?;
+
         if source_complete {
             append_artifact_root(
                 session_directory,
@@ -175,6 +188,7 @@ pub fn index_session_with_options(
                 }),
             )?;
         }
+
         return Ok(IndexOutcome {
             directory: destination.clone(),
             state_count: retained_state_count,
@@ -196,8 +210,10 @@ pub fn index_session_with_options(
                 }),
             });
         }
+
         return Err(primary);
     }
+
     return result;
 }
 
@@ -215,6 +231,7 @@ pub fn derived_directory_name_for(
         StateSelection::All => DERIVED_DIRECTORY.to_owned(),
         StateSelection::Presented => format!("{DERIVED_DIRECTORY}-presented"),
     };
+
     return source_range.map_or_else(
         || return base.clone(),
         |range| return format!("{base}-{}", range.artifact_suffix()),
@@ -235,6 +252,7 @@ pub(crate) fn load_nearest_replay_seed(
     })?;
     let manifest: ReplayManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|source| return json_error(manifest_path, source))?;
+
     if manifest.version != STATE_FORMAT_VERSION
         || manifest.ghostty_revision != GHOSTTY_REVISION
         || manifest.state_selection != StateSelection::All
@@ -244,6 +262,7 @@ pub(crate) fn load_nearest_replay_seed(
             "semantic checkpoint index does not match the replay source",
         ));
     }
+
     verify_artifact_members(directory, &manifest.members)?;
     let checkpoint_selector = match selector {
         StateSelector::Final => Some(CheckpointSelector::Final),
@@ -261,6 +280,7 @@ pub(crate) fn load_nearest_replay_seed(
                     source,
                 };
             })?;
+
             let mut target_state_id = None;
             for line in BufReader::new(file).lines() {
                 let line = line.map_err(|source| {
@@ -271,11 +291,13 @@ pub(crate) fn load_nearest_replay_seed(
                 })?;
                 let entry: StateIndexEntry = serde_json::from_str(&line)
                     .map_err(|source| return json_error(index_path.clone(), source))?;
+
                 if entry.state_hash == *state_hash {
                     target_state_id = Some(entry.state_id);
                     break;
                 }
             }
+
             target_state_id.map(CheckpointSelector::StateId)
         }
     };
@@ -295,6 +317,7 @@ pub(crate) fn load_nearest_replay_seed(
             source,
         };
     })?;
+
     let mut selected = None;
     for line in BufReader::new(decoder).lines() {
         let line = line.map_err(|source| {
@@ -312,8 +335,10 @@ pub(crate) fn load_nearest_replay_seed(
             });
             continue;
         }
+
         break;
     }
+
     return Ok(selected);
 }
 
@@ -377,6 +402,7 @@ fn write_source_index(
             source,
         };
     })?;
+
     let checkpoints_path = directory.join("checkpoints.jsonl.zst");
     let checkpoints_file = secure_file(&checkpoints_path)?;
     let mut checkpoints =
@@ -392,6 +418,7 @@ fn write_source_index(
             source,
         };
     })?;
+
     let mut index = secure_writer(&directory.join("state-index.jsonl"))?;
     let mut retained_state_count = 0_u64;
     let mut final_retained_state_hash = None;
@@ -405,6 +432,7 @@ fn write_source_index(
             let checkpoint_candidate = state_selection == StateSelection::All
                 && !state.modes.alternate_screen
                 && record.state_id % REPLAY_CHECKPOINT_STATE_INTERVAL == 0;
+
             let mut checkpoint = false;
             if checkpoint_candidate && let Some(engine_vt) = engine.format_replay_seed()? {
                 let inspection = StateInspection {
@@ -415,6 +443,7 @@ fn write_source_index(
                     inspection: inspection.clone(),
                     engine_vt: engine_vt.clone(),
                 };
+
                 match validate_generated_replay_seed(source.header(), &seed) {
                     Ok(()) => {
                         write_json_line(
@@ -425,6 +454,7 @@ fn write_source_index(
                             },
                             directory,
                         )?;
+
                         checkpoint = true;
                     }
                     Err(Error::CheckpointReconstruction { mismatched_fields }) => {
@@ -437,15 +467,19 @@ fn write_source_index(
                     Err(error) => return Err(error),
                 }
             }
+
             if state_selection == StateSelection::Presented && !record.presented {
                 return Ok(());
             }
+
             if state_selection == StateSelection::Presented {
                 record.state_id = retained_state_count;
                 record.delta = state_delta(previous_retained_state.as_ref(), state);
                 previous_retained_state = Some(state.clone());
             }
+
             write_json_line(&mut states, &record, directory)?;
+
             let state_key = (
                 record.monotonic_ns,
                 record.event_seq.unwrap_or(0),
@@ -454,10 +488,12 @@ fn write_source_index(
             );
             let (timeline_rank, control_index_offset, control_rank) = if checkpoint {
                 let (rank, offset, control_count) = ranks.before(state_key, record.state_id)?;
+
                 (Some(rank), Some(offset), Some(control_count))
             } else {
                 (None, None, None)
             };
+
             let entry = StateIndexEntry {
                 state_id: record.state_id,
                 state_hash: record.state_hash.clone(),
@@ -475,14 +511,17 @@ fn write_source_index(
             retained_state_count = retained_state_count
                 .checked_add(1)
                 .ok_or_else(|| return invalid_replay("retained semantic state count overflow"))?;
+
             return Ok(());
         },
     )?;
+
     // Range replay can stop early; verify that its pass still reaches the same
     // complete canonical prefix before publishing any derived artifact.
     for record in records {
         drop(record?);
     }
+
     let states_file = states.finish().map_err(|source| {
         return Error::Filesystem {
             path: states_path.clone(),
@@ -507,6 +546,7 @@ fn write_source_index(
             source,
         };
     })?;
+
     finish_writer(index, &directory.join("state-index.jsonl"))?;
     write_secure(&directory.join("final.txt"), &artifacts.final_text)?;
     write_secure(&directory.join("final.vt"), &artifacts.final_vt)?;
@@ -528,15 +568,18 @@ fn write_source_index(
     };
     let manifest_bytes = serde_json::to_vec_pretty(&manifest)
         .map_err(|source| return json_error(directory.join("manifest.json"), source))?;
+
     write_secure(&directory.join("manifest.json"), &manifest_bytes)?;
     verify_artifact_members(directory, &manifest.members)?;
     sync_directory(directory)?;
+
     return Ok((artifacts, retained_state_count));
 }
 
 fn write_json_line(writer: &mut impl Write, value: &impl Serialize, path: &Path) -> Result<()> {
     serde_json::to_writer(&mut *writer, value)
         .map_err(|source| return json_error(path.to_path_buf(), source))?;
+
     return writer.write_all(b"\n").map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),

@@ -6,10 +6,13 @@ pub(super) fn append_bounded_text(output: &mut String, value: &str) -> bool {
     let remaining = MAX_COMPACT_SCREEN_BYTES.saturating_sub(output.len());
     if value.len() <= remaining {
         output.push_str(value);
+
         return false;
     }
+
     let end = value.floor_char_boundary(remaining);
     output.push_str(value.get(..end).unwrap_or_default());
+
     return true;
 }
 
@@ -22,13 +25,16 @@ pub(super) fn bounded_screen_frame_text(
     {
         let mut output = String::new();
         let truncated = append_bounded_text(&mut output, viewport_text);
+
         return Some((output, truncated));
     }
+
     let rows = frame
         .get("data")
         .and_then(serde_json::Value::as_object)?
         .get("rows")
         .and_then(serde_json::Value::as_array)?;
+
     let mut output = String::new();
     for (index, row) in rows.iter().enumerate() {
         let text = row
@@ -38,10 +44,12 @@ pub(super) fn bounded_screen_frame_text(
         if index != 0 && append_bounded_text(&mut output, "\n") {
             return Some((output, true));
         }
+
         if append_bounded_text(&mut output, text) {
             return Some((output, true));
         }
     }
+
     return Some((output, false));
 }
 
@@ -58,16 +66,19 @@ pub(super) fn bounded_screen_frame_projection(
     ] {
         copy_value(frame, &mut projection, key, key);
     }
+
     copy_value(frame, &mut projection, "geometry", "geometry");
     if let Some((screen, truncated)) = bounded_screen_frame_text(frame) {
         projection.insert(
             "viewport_text".to_owned(),
             serde_json::Value::String(screen),
         );
+
         if truncated {
             projection.insert("screen_truncated".to_owned(), serde_json::Value::Bool(true));
         }
     }
+
     return serde_json::Value::Object(projection);
 }
 
@@ -99,6 +110,7 @@ pub(super) fn bounded_capture_projection(value: &serde_json::Value) -> Option<se
         .and_then(|value| return value.as_object().cloned())
         .unwrap_or_default();
     projection.extend(scalar_fields(source));
+
     for key in [
         "record",
         "boundary",
@@ -120,11 +132,14 @@ pub(super) fn bounded_capture_projection(value: &serde_json::Value) -> Option<se
             projection.insert(key.to_owned(), bounded_screen_frame_projection(nested));
             continue;
         }
+
         let nested = scalar_fields(nested);
+
         if !nested.is_empty() {
             projection.insert(key.to_owned(), serde_json::Value::Object(nested));
         }
     }
+
     return (!projection.is_empty()).then_some(serde_json::Value::Object(projection));
 }
 
@@ -146,6 +161,7 @@ pub(super) fn compact_value_with_paths(
                     return compact_value_with_paths(value, fields, preserve_canonical_paths);
                 })
                 .collect::<Vec<_>>();
+
             (!values.is_empty()).then_some(serde_json::Value::Array(values))
         }
         serde_json::Value::Object(values) => {
@@ -186,12 +202,14 @@ pub(super) fn compact_value_with_paths(
                 if !keep {
                     continue;
                 }
+
                 if let Some(value) =
                     compact_value_with_paths(value, fields, preserve_canonical_paths)
                 {
                     compact.insert(key, value);
                 }
             }
+
             (!compact.is_empty()).then_some(serde_json::Value::Object(compact))
         }
         value => Some(value),
@@ -222,6 +240,7 @@ pub(super) fn nested_string(value: Option<&serde_json::Value>, key: &str) -> Opt
         });
     });
 }
+
 pub(super) fn failure_string(value: Option<&serde_json::Value>, key: &str) -> Option<String> {
     return nested_string(value, key)
         .or_else(|| {
@@ -252,6 +271,7 @@ pub(super) fn session_state(
         }
         .to_owned();
     }
+
     if let Some(session_state) = value.and_then(|value| return value_string(value, "session_state"))
     {
         return match session_state.as_str() {
@@ -263,41 +283,45 @@ pub(super) fn session_state(
         }
         .to_owned();
     }
+
     if let Some(startup_state) = value.and_then(|value| return value_string(value, "startup_state"))
     {
-        return if startup_state == "live" {
-            "live".to_owned()
-        } else {
-            "ended".to_owned()
-        };
+        return if startup_state == "live" { "live".to_owned() } else { "ended".to_owned() };
     }
+
     if value.is_some_and(|value| {
         return response_type(Some(value), command_type) == "completed"
             || value.get("completion").is_some();
     }) {
         return "ended".to_owned();
     }
+
     if let Some(ended) = value
         .and_then(|value| return value.get("ended"))
         .and_then(serde_json::Value::as_bool)
     {
         return if ended { "ended" } else { "live" }.to_owned();
     }
+
     if value
         .and_then(|value| return value_string(value, "quality"))
         .is_some_and(|quality| return quality == "completed")
     {
         return "ended".to_owned();
     }
+
     if success && matches!(command_type, "start" | "restart") {
         return "live".to_owned();
     }
+
     if success && command_type == "stop" {
         return "ended".to_owned();
     }
+
     if success && matches!(command_type, "send" | "act") {
         return "live".to_owned();
     }
+
     return "unknown".to_owned();
 }
 
@@ -317,6 +341,7 @@ pub(super) fn compact_postcondition(
     include_screen: bool,
 ) -> Option<serde_json::Value> {
     let source = value.as_object()?;
+
     let mut postcondition = serde_json::Map::new();
     for key in [
         "matched",
@@ -332,13 +357,16 @@ pub(super) fn compact_postcondition(
     ] {
         copy_value(source, &mut postcondition, key, key);
     }
+
     copy_value(source, &mut postcondition, "state_hash", "state");
     if include_screen {
         copy_value(source, &mut postcondition, "viewport_text", "screen");
         copy_value(source, &mut postcondition, "screen", "screen");
     }
+
     copy_value(source, &mut postcondition, "geometry", "size");
     copy_value(source, &mut postcondition, "size", "size");
+
     return (!postcondition.is_empty()).then_some(serde_json::Value::Object(postcondition));
 }
 
@@ -349,17 +377,21 @@ pub(super) fn compact_completion(
 ) {
     copy_value(source, target, "exit_code", "exit_code");
     copy_value(source, target, "signal_name", "signal");
+
     if let Some(failure) = source.get("failure").and_then(serde_json::Value::as_object) {
         copy_value(failure, target, "code", "code");
         copy_value(failure, target, "message", "message");
     }
+
     if !include_boundary {
         return;
     }
+
     let mut boundary = serde_json::Map::new();
     copy_value(source, &mut boundary, "event_count", "next_event_seq");
     copy_value(source, &mut boundary, "final_event_hash", "event_hash");
     copy_value(source, &mut boundary, "output_bytes", "output_bytes");
+
     if !boundary.is_empty() {
         target.insert("boundary".to_owned(), serde_json::Value::Object(boundary));
     }
@@ -376,6 +408,7 @@ pub(super) fn compact_task_value(
     ) {
         return compact_value_with_paths(value, fields, command_type == "test");
     }
+
     let source = value.as_object()?;
     let copy_compacted = |target: &mut serde_json::Map<String, serde_json::Value>,
                           source_key: &str,
@@ -386,6 +419,7 @@ pub(super) fn compact_task_value(
             target.insert(target_key.to_owned(), value);
         }
     };
+
     let mut projected = serde_json::Map::new();
     match command_type {
         "start" => {
@@ -393,6 +427,7 @@ pub(super) fn compact_task_value(
             copy_value(source, &mut projected, "session_id", "session_id");
             copy_value(source, &mut projected, "startup_state", "startup_state");
             copy_value(source, &mut projected, "canonical_session_display", "path");
+
             if let Some(completion) = source
                 .get("completion")
                 .and_then(serde_json::Value::as_object)
@@ -403,6 +438,7 @@ pub(super) fn compact_task_value(
                     selected(fields, ResponseField::Boundary),
                 );
             }
+
             if let Some(postcondition) = source
                 .get("postcondition")
                 .and_then(|value| return compact_postcondition(value, false))
@@ -427,8 +463,10 @@ pub(super) fn compact_task_value(
                         summary.insert(key.to_owned(), value);
                     }
                 }
+
                 projected.insert("input".to_owned(), serde_json::Value::Object(summary));
             }
+
             if let Some(observation) = source
                 .get("observation")
                 .and_then(serde_json::Value::as_object)
@@ -440,18 +478,23 @@ pub(super) fn compact_task_value(
                 copy_value(observation, &mut summary, "capture_quality", "quality");
                 copy_value(observation, &mut summary, "scope", "scope");
                 copy_value(observation, &mut summary, "screen", "screen");
+
                 if let Some((screen, truncated)) = bounded_screen_frame_text(observation) {
                     summary.insert("screen".to_owned(), serde_json::Value::String(screen));
+
                     if truncated {
                         summary
                             .insert("screen_truncated".to_owned(), serde_json::Value::Bool(true));
                     }
                 }
+
                 projected.insert("observation".to_owned(), serde_json::Value::Object(summary));
             }
+
             if source.get("ended").and_then(serde_json::Value::as_bool) == Some(true) {
                 projected.insert("ended".to_owned(), serde_json::Value::Bool(true));
             }
+
             if source
                 .get("postcondition")
                 .and_then(serde_json::Value::as_object)
@@ -479,17 +522,21 @@ pub(super) fn compact_task_value(
             {
                 projected.insert("size".to_owned(), serde_json::json!([cols, rows]));
             }
+
             if let Some(frame) = source.get("frame").and_then(serde_json::Value::as_object) {
                 copy_value(frame, &mut projected, "state_hash", "state");
                 copy_value(frame, &mut projected, "geometry", "size");
+
                 if let Some((screen, truncated)) = bounded_screen_frame_text(frame) {
                     projected.insert("screen".to_owned(), serde_json::Value::String(screen));
+
                     if truncated {
                         projected
                             .insert("screen_truncated".to_owned(), serde_json::Value::Bool(true));
                     }
                 }
             }
+
             if source.get("predicate").is_some() {
                 projected.insert(
                     "scope".to_owned(),
@@ -522,9 +569,11 @@ pub(super) fn compact_task_value(
             ] {
                 copy_value(source, &mut projected, key, key);
             }
+
             copy_value(source, &mut projected, "session", "session");
             copy_value(source, &mut projected, "session_display", "session");
             copy_value(source, &mut projected, "diagnostic", "message");
+
             if let Some(completion) = source
                 .get("completion")
                 .and_then(serde_json::Value::as_object)
@@ -538,18 +587,22 @@ pub(super) fn compact_task_value(
         }
         _ => return None,
     }
+
     if selected(fields, ResponseField::Boundary) {
         for key in ["boundary", "boundaries", "durability"] {
             copy_compacted(&mut projected, key, key);
         }
     }
+
     if selected(fields, ResponseField::Cursor) {
         copy_compacted(&mut projected, "cursor", "cursor");
     }
+
     if selected(fields, ResponseField::Modes) {
         copy_compacted(&mut projected, "modes", "modes");
         copy_compacted(&mut projected, "terminal_modes", "terminal_modes");
     }
+
     if selected(fields, ResponseField::Timing) {
         for key in [
             "first_observed_monotonic_ns",
@@ -562,6 +615,7 @@ pub(super) fn compact_task_value(
             copy_compacted(&mut projected, key, key);
         }
     }
+
     return Some(serde_json::Value::Object(projected));
 }
 
@@ -581,6 +635,7 @@ pub(super) fn response_without_screen(value: &serde_json::Value) -> serde_json::
                         .then(|| return (key.clone(), response_without_screen(value)));
                 })
                 .collect::<serde_json::Map<_, _>>();
+
             serde_json::Value::Object(values)
         }
         value => value.clone(),
@@ -601,6 +656,7 @@ pub(super) fn enforce_success_budget(
     if !fields.is_empty() {
         return Ok(response);
     }
+
     let limit = match command_type {
         "start" => START_RESPONSE_BYTES,
         "send" | "act" => ACTION_RESPONSE_BYTES,
@@ -608,9 +664,11 @@ pub(super) fn enforce_success_budget(
         "stop" => STOP_RESPONSE_BYTES,
         _ => return Ok(response),
     };
+
     if response_size_without_screen(&response)? <= limit {
         return Ok(response);
     }
+
     if let Some(postcondition) = response
         .get_mut("postcondition")
         .and_then(serde_json::Value::as_object_mut)
@@ -628,9 +686,11 @@ pub(super) fn enforce_success_budget(
             postcondition.remove(key);
         }
     }
+
     if response_size_without_screen(&response)? <= limit {
         return Ok(response);
     }
+
     for key in [
         "message",
         "reason",
@@ -646,18 +706,22 @@ pub(super) fn enforce_success_budget(
         if let Some(response) = response.as_object_mut() {
             response.remove(key);
         }
+
         if response_size_without_screen(&response)? <= limit {
             return Ok(response);
         }
     }
+
     return Ok(response);
 }
+
 pub(super) fn bounded_agent_response(response: serde_json::Value) -> Result<Vec<u8>> {
     let mut encoded = serde_json::to_vec(&response).into_diagnostic()?;
     if encoded.len() > MAX_AGENT_RESPONSE_BYTES {
         let response_bytes = encoded.len();
         let response_type =
             value_string(&response, "type").unwrap_or_else(|| return "result".to_owned());
+
         let ok = response
             .get("ok")
             .and_then(serde_json::Value::as_bool)
@@ -678,8 +742,10 @@ pub(super) fn bounded_agent_response(response: serde_json::Value) -> Result<Vec<
         } else {
             let value = nested_string(Some(&response), "applied")
                 .unwrap_or_else(|| return "unknown".to_owned());
+
             applied_from_str(&value).map(Some)
         };
+
         let retry = if ok {
             response_string_value(response.get("retry"), "retry").and_then(|value| {
                 return value.map(|value| return retry_from_str(&value)).transpose();
@@ -691,8 +757,10 @@ pub(super) fn bounded_agent_response(response: serde_json::Value) -> Result<Vec<
         } else {
             let value = nested_string(Some(&response), "retry")
                 .unwrap_or_else(|| return "same_request_id_only".to_owned());
+
             retry_from_str(&value).map(Some)
         };
+
         let session_state = if ok {
             response_string_value(response.get("session_state"), "session_state").and_then(
                 |value| {
@@ -712,8 +780,10 @@ pub(super) fn bounded_agent_response(response: serde_json::Value) -> Result<Vec<
         } else {
             let value = nested_string(Some(&response), "session_state")
                 .unwrap_or_else(|| return "unknown".to_owned());
+
             session_state_from_str(&value).map(Some)
         };
+
         let mut fields = BTreeMap::new();
         for key in [
             "state",
@@ -729,6 +799,7 @@ pub(super) fn bounded_agent_response(response: serde_json::Value) -> Result<Vec<
                 fields.insert(key.to_owned(), value);
             }
         }
+
         if let Some(pagination) = pagination_projection(&response)
             && let Some(source) = pagination.as_object()
         {
@@ -738,6 +809,7 @@ pub(super) fn bounded_agent_response(response: serde_json::Value) -> Result<Vec<
                 }
             }
         }
+
         let compact = match (applied, retry, session_state) {
             (Ok(applied), Ok(retry), Ok(session_state)) => typed_envelope(CliResponseEnvelope {
                 version: CLI_RESPONSE_VERSION,
@@ -765,6 +837,8 @@ pub(super) fn bounded_agent_response(response: serde_json::Value) -> Result<Vec<
         };
         encoded = serde_json::to_vec(&compact).into_diagnostic()?;
     }
+
     encoded.push(b'\n');
+
     return Ok(encoded);
 }

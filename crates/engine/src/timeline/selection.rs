@@ -22,12 +22,14 @@ pub fn resolve_source_range(
     if start.is_none() && end.is_none() {
         return Ok(None);
     }
+
     // A half-open range ending at the final timestamp would exclude the final
     // event. Advance by one nanosecond so an omitted end still means "through
     // the complete session" without giving ranged replay a special last-event case.
     let source_end = final_monotonic_ns.checked_add(1).ok_or_else(|| {
         return range_error("source timeline ends at u64::MAX and cannot form an exclusive bound");
     })?;
+
     let start = start.unwrap_or(0);
     let end = end.unwrap_or(source_end);
     if start >= end {
@@ -35,16 +37,19 @@ pub fn resolve_source_range(
             "source range must be non-empty with FROM < TO, got {start}..{end}"
         )));
     }
+
     if start > final_monotonic_ns {
         return Err(range_error(format!(
             "source range starts at {start} ns after the final event at {final_monotonic_ns} ns"
         )));
     }
+
     if end > source_end {
         return Err(range_error(format!(
             "source range ends at {end} ns after the exclusive source endpoint {source_end} ns"
         )));
     }
+
     return Ok(Some(SourceRange {
         start_monotonic_ns: start,
         end_monotonic_ns: end,
@@ -72,23 +77,28 @@ pub fn resolve_source_selection(
             "choose either `--from` or `--from-marker`, not both",
         ));
     }
+
     if end.is_some() && to_marker.is_some() {
         return Err(range_error(
             "choose either `--to` or `--to-marker`, not both",
         ));
     }
+
     let start = match from_marker {
         Some(label) => Some(resolve_marker(log, label)?),
         None => start,
     };
+
     let end = match to_marker {
         Some(label) => Some(resolve_marker(log, label)?),
         None => end,
     };
+
     let final_monotonic_ns = log
         .events
         .last()
         .map_or(0, |record| return record.monotonic_ns);
+
     return resolve_source_range(start, end, final_monotonic_ns);
 }
 
@@ -96,6 +106,7 @@ fn resolve_marker(log: &EventLog, label: &str) -> Result<u64> {
     if label.is_empty() {
         return Err(range_error("marker label must not be empty"));
     }
+
     let matches = log
         .events
         .iter()
@@ -103,6 +114,7 @@ fn resolve_marker(log: &EventLog, label: &str) -> Result<u64> {
             return matches!(&record.event, Event::Marker { label: value, .. } if value == label);
         })
         .collect::<Vec<_>>();
+
     match matches.as_slice() {
         [record] => return Ok(record.monotonic_ns),
         [] => {
@@ -182,54 +194,61 @@ fn resolve_cursor_source_selection(
             "choose either `--from` or `--from-marker`, not both",
         ));
     }
+
     if end.is_some() && to_marker.is_some() {
         return Err(range_error(
             "choose either `--to` or `--to-marker`, not both",
         ));
     }
+
     if from_marker == Some("") || to_marker == Some("") {
         return Err(range_error("marker label must not be empty"));
     }
+
     if start.is_none() && end.is_none() && from_marker.is_none() && to_marker.is_none() {
         return Ok(None);
     }
+
     let mut final_time = 0;
     let mut from = (0_u64, 0_u64);
     let mut to = (0_u64, 0_u64);
+
     while event_count.is_none_or(|limit| return cursor.next_event_seq() < limit) {
         let Some(record) = cursor.next_record()? else {
             break;
         };
         final_time = record.monotonic_ns;
+
         if let Event::Marker { label, .. } = record.event {
             if from_marker == Some(label.as_str()) {
                 from.0 = from.0.saturating_add(1);
                 from.1 = record.monotonic_ns;
             }
+
             if to_marker == Some(label.as_str()) {
                 to.0 = to.0.saturating_add(1);
                 to.1 = record.monotonic_ns;
             }
         }
     }
+
     if event_count.is_some_and(|count| return cursor.next_event_seq() != count) {
         return Err(range_error(
             "requested marker-selection prefix is unavailable",
         ));
     }
-    let _pending = if snapshot {
-        cursor.finish_snapshot()?
-    } else {
-        cursor.finish()?
-    };
+
+    let _pending = if snapshot { cursor.finish_snapshot()? } else { cursor.finish()? };
     let start = from_marker
         .map(|label| return resolve_found_marker(label, from))
         .transpose()?
         .or(start);
+
     let end = to_marker
         .map(|label| return resolve_found_marker(label, to))
         .transpose()?
         .or(end);
+
     return resolve_source_range(start, end, final_time);
 }
 
@@ -244,6 +263,7 @@ fn resolve_found_marker(label: &str, (count, time): (u64, u64)) -> Result<u64> {
         ))),
     };
 }
+
 pub(super) fn range_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),

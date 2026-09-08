@@ -6,11 +6,11 @@ use resvg::tiny_skia::{Color, FilterQuality, Pixmap, PixmapPaint, Transform};
 use resvg::usvg::{Options, Tree};
 use termtrace_model::artifact::save::SemanticRasterProfile;
 use termtrace_model::terminal::state::{
-    MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS, Rgb, SemanticState,
+    Rgb, SemanticState, MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS,
 };
 use termtrace_terminal::supported_geometry_cell_count;
 
-use crate::error::{Result, render_error};
+use crate::error::{render_error, Result};
 use crate::font::semantic_font_set;
 use crate::semantic_svg::render_svg_scene;
 
@@ -40,6 +40,7 @@ pub fn render_png_with_profile(
 ) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     write_png(state, profile, &mut bytes)?;
+
     return Ok(bytes);
 }
 
@@ -71,6 +72,7 @@ pub fn write_png(
     stream
         .finish()
         .map_err(|error| return render_error(format!("finish semantic PNG: {error}")))?;
+
     return png
         .finish()
         .map_err(|error| return render_error(format!("finish semantic PNG: {error}")));
@@ -94,6 +96,7 @@ pub fn render_video_rgba(
     profile: SemanticRasterProfile,
 ) -> Result<Vec<u8>> {
     validate_geometry(state.cols, state.rows, "semantic state")?;
+
     validate_canvas_geometry(canvas_cols, canvas_rows)?;
     if canvas_cols < state.cols || canvas_rows < state.rows {
         return Err(render_error(format!(
@@ -101,11 +104,13 @@ pub fn render_video_rgba(
             state.cols, state.rows
         )));
     }
+
     let pixmap = rasterize_svg_pixmap(
         &render_svg_scene(state, canvas_cols, canvas_rows, false)?,
         profile,
         Some(state.colors.background),
     )?;
+
     return Ok(pixmap.take());
 }
 
@@ -131,6 +136,7 @@ fn rasterize_svg_pixmap(
         let mut pixmap = Pixmap::new(size.width(), size.height())
             .ok_or_else(|| return render_error("allocate semantic PNG surface"))?;
         resvg::render(&tree, Transform::default(), &mut pixmap.as_mut());
+
         return Ok(pixmap);
     }
 
@@ -149,6 +155,7 @@ fn rasterize_svg_pixmap(
         Transform::from_scale(2.0, 2.0),
         &mut intermediate.as_mut(),
     );
+
     let mut target = Pixmap::new(size.width(), size.height())
         .ok_or_else(|| return render_error("allocate semantic PNG surface"))?;
     if let Some(background) = opaque_background {
@@ -159,6 +166,7 @@ fn rasterize_svg_pixmap(
             u8::MAX,
         ));
     }
+
     let paint = PixmapPaint {
         quality: FilterQuality::Bicubic,
         ..PixmapPaint::default()
@@ -171,6 +179,7 @@ fn rasterize_svg_pixmap(
         Transform::from_scale(0.5, 0.5),
         None,
     );
+
     return Ok(target);
 }
 
@@ -180,6 +189,7 @@ pub(super) fn validate_geometry(cols: u16, rows: u16, label: &str) -> Result<()>
             "{label} geometry {cols}x{rows} exceeds terminal rendering bounds"
         )));
     }
+
     return Ok(());
 }
 
@@ -189,6 +199,7 @@ fn validate_canvas_geometry(cols: u16, rows: u16) -> Result<()> {
             "semantic video canvas geometry {cols}x{rows} exceeds terminal rendering bounds"
         )));
     }
+
     return Ok(());
 }
 
@@ -202,6 +213,7 @@ mod tests {
     fn rasterize_state(state: &SemanticState) -> Pixmap {
         let svg =
             render_svg_scene(state, state.cols, state.rows, false).expect("render raster test SVG");
+
         return rasterize_svg_pixmap(
             &svg,
             SemanticRasterProfile::Direct,
@@ -263,8 +275,10 @@ mod tests {
                 });
             })
             .collect();
+
         let first = painted_rows.first().copied().expect("icons paint pixels");
         let last = painted_rows.last().copied().expect("icons paint pixels");
+
         assert!(first > 0);
         assert!(last < pixmap.height().saturating_sub(1));
     }
@@ -284,6 +298,7 @@ mod tests {
         let hollow = rasterize_state(&state);
         state.cursor.visible = false;
         let hidden = rasterize_state(&state);
+
         for y in 2..22 {
             for x in 2..10 {
                 assert_eq!(hollow.pixel(x, y), hidden.pixel(x, y));
@@ -295,6 +310,7 @@ mod tests {
         let block = rasterize_state(&state);
         let cursor = state.colors.cursor.unwrap_or(state.colors.foreground);
         let background = state.colors.background;
+
         assert!((0..block.height()).any(|y| {
             return (0..block.width()).any(|x| {
                 return block.pixel(x, y).is_some_and(|pixel| {

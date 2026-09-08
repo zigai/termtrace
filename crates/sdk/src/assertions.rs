@@ -116,6 +116,7 @@ pub fn normalize_frame(
             serde_json::json!(frame.capture_quality),
         );
     }
+
     return Ok(value);
 }
 
@@ -126,6 +127,7 @@ pub fn normalized_snapshot(
     options: ScreenSnapshotOptions,
 ) -> Result<String, AssertionError> {
     let value = normalize_frame(frame, profile, options).map_err(AssertionError::Snapshot)?;
+
     return serde_json::to_string_pretty(&value)
         .map_err(|_| return AssertionError::Snapshot(ScreenFrameError::Serialization));
 }
@@ -206,6 +208,7 @@ fn span_row_from_cells(row: &ScreenCellRow) -> ScreenSpanRow {
             });
             continue;
         }
+
         let mut text = String::new();
         append_snapshot_grapheme(&mut text, &cell.grapheme, cell.wide_kind);
         spans.push(ScreenSpan {
@@ -220,6 +223,7 @@ fn span_row_from_cells(row: &ScreenCellRow) -> ScreenSpanRow {
             }],
         });
     }
+
     return ScreenSpanRow {
         row: row.row,
         soft_wrapped: row.soft_wrapped,
@@ -247,6 +251,7 @@ fn cell_row_from_spans(row: &ScreenSpanRow) -> ScreenCellRow {
             });
         })
         .collect();
+
     return ScreenCellRow {
         row: row.row,
         soft_wrapped: row.soft_wrapped,
@@ -260,10 +265,13 @@ fn append_snapshot_grapheme(text: &mut String, grapheme: &str, wide_kind: WideKi
     if matches!(wide_kind, WideKind::SpacerHead | WideKind::SpacerTail) {
         return;
     }
+
     if grapheme.is_empty() {
         text.push(' ');
+
         return;
     }
+
     text.push_str(grapheme);
 }
 
@@ -272,6 +280,7 @@ pub fn assert_exists(result: &QueryResult) -> Result<(), ExpectationMismatch> {
     if result.count() > 0 {
         return Ok(());
     }
+
     return Err(mismatch(
         "exists",
         "at least one match",
@@ -285,6 +294,7 @@ pub fn assert_not_exists(result: &QueryResult) -> Result<(), ExpectationMismatch
     if result.count() == 0 {
         return Ok(());
     }
+
     return Err(mismatch(
         "not_exists",
         "0 matches",
@@ -298,6 +308,7 @@ pub fn assert_count(result: &QueryResult, expected: usize) -> Result<(), Expecta
     if result.count() == expected {
         return Ok(());
     }
+
     return Err(mismatch(
         "count",
         &format!("{expected} matches"),
@@ -312,6 +323,7 @@ pub fn assert_screen_text(frame: &ScreenFrame, expected: &str) -> Result<(), Exp
     if !expected.is_empty() && text.contains(expected) {
         return Ok(());
     }
+
     return Err(mismatch(
         "screen_text",
         &format!("screen contains {expected:?}"),
@@ -328,6 +340,7 @@ pub fn assert_match_text(
     if screen_match.text.as_ref() == expected {
         return Ok(());
     }
+
     return Err(mismatch(
         "match_text",
         &format!("text {expected:?}"),
@@ -349,15 +362,19 @@ pub fn assert_match_style(
             if matches!(wide_kind, WideKind::SpacerHead | WideKind::SpacerTail) {
                 return;
             }
+
             let in_match = screen_match.ranges.iter().any(|range| {
                 return range.row == metadata.row
                     && column >= range.start_column
                     && column < range.end_column;
             });
+
             if !in_match {
                 return;
             }
+
             covered += 1;
+
             if !expected.matches(appearance, wide_kind) {
                 mismatched += 1;
             }
@@ -365,6 +382,7 @@ pub fn assert_match_style(
     if covered > 0 && mismatched == 0 {
         return Ok(());
     }
+
     return Err(mismatch(
         "match_style",
         &format!("all covered cells match {expected:?}"),
@@ -381,6 +399,7 @@ pub fn assert_cursor(
     if &frame.cursor == expected {
         return Ok(());
     }
+
     return Err(mismatch(
         "cursor",
         &format!("{expected:?}"),
@@ -408,9 +427,11 @@ pub fn assert_no_wrapped_rows(frame: &ScreenFrame) -> Result<(), ExpectationMism
             .map(|row| return row.row)
             .collect(),
     };
+
     if wrapped.is_empty() {
         return Ok(());
     }
+
     return Err(mismatch(
         "no_wrapped_rows",
         "no native wrapped rows",
@@ -429,6 +450,7 @@ pub fn assert_neutral_region(
             reason: "neutral assertion region must be nonempty".to_owned(),
         }));
     }
+
     if region.bottom > frame.geometry.rows || region.right > frame.geometry.cols {
         return Err(AssertionError::Query(QueryError::InvalidQuery {
             reason: format!(
@@ -437,6 +459,7 @@ pub fn assert_neutral_region(
             ),
         }));
     }
+
     let returned = frame.returned_region;
     if region.top < returned.top
         || region.left < returned.left
@@ -449,11 +472,13 @@ pub fn assert_neutral_region(
             ),
         }));
     }
+
     if matches!(&frame.data, ScreenFrameData::Text { .. }) {
         return Err(AssertionError::Query(QueryError::InsufficientFrameDetail {
             reason: "neutral-region assertion requires spans or cells".to_owned(),
         }));
     }
+
     let mut checked = 0usize;
     let mut non_neutral = 0usize;
     frame.for_each_cell(|metadata, column, grapheme, wide_kind, appearance| {
@@ -464,6 +489,7 @@ pub fn assert_neutral_region(
         {
             return;
         }
+
         checked += 1;
         let style = &appearance.style;
         let neutral_style = style.foreground == ColorSpec::None
@@ -478,11 +504,14 @@ pub fn assert_neutral_region(
             && !style.strikethrough
             && !style.overline
             && style.underline == 0;
+
         let neutral_grapheme = grapheme.is_empty() || grapheme == " ";
+
         let neutral_width = matches!(
             wide_kind,
             WideKind::Narrow | WideKind::SpacerHead | WideKind::SpacerTail
         );
+
         if !neutral_style
             || !neutral_grapheme
             || !neutral_width
@@ -493,10 +522,13 @@ pub fn assert_neutral_region(
             non_neutral += 1;
         }
     });
+
     let expected_cells = usize::from(region.width()) * usize::from(region.height());
+
     if checked == expected_cells && non_neutral == 0 {
         return Ok(());
     }
+
     return Err(AssertionError::Mismatch(mismatch(
         "neutral_region",
         &format!("{expected_cells} neutral terminal cells"),
@@ -510,6 +542,7 @@ pub fn assert_no_presented_transient(frame: &ScreenFrame) -> Result<(), Expectat
     if frame.presented && !frame.modes.synchronized_output {
         return Ok(());
     }
+
     return Err(mismatch(
         "no_presented_transient",
         "presented=true and synchronized_output=false",
@@ -530,6 +563,7 @@ fn mismatch(
     let (expected, expected_truncated) = bounded(expected);
     let (actual, actual_truncated) = bounded(actual);
     let (excerpt, excerpt_truncated) = bounded(&frame_excerpt(frame));
+
     return ExpectationMismatch {
         assertion,
         expected,
@@ -582,6 +616,7 @@ fn frame_excerpt(frame: &ScreenFrame) -> String {
             .map(|row| return (row.row, row.text.as_str()))
             .collect(),
     };
+
     return rows
         .iter()
         .map(|(row, text)| format!("{row}: {text}"))
@@ -591,6 +626,7 @@ fn frame_excerpt(frame: &ScreenFrame) -> String {
 
 fn bounded(text: &str) -> (String, bool) {
     let end = text.floor_char_boundary(MAX_ASSERTION_CHARS);
+
     return (
         text.get(..end).unwrap_or_default().to_owned(),
         end != text.len(),
@@ -606,6 +642,7 @@ mod tests {
             "../../../fixtures/conformance/locators/locator.json"
         ))
         .expect("locator fixture");
+
         return serde_json::from_value(value.get("frame").cloned().expect("fixture frame"))
             .expect("screen frame");
     }
@@ -619,6 +656,7 @@ mod tests {
             right: 1,
             bottom: 1,
         };
+
         assert!(matches!(
             assert_neutral_region(
                 &frame,

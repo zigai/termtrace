@@ -17,14 +17,14 @@ use termtrace_model::{
     terminal::screen::{ScreenFrameData, ScreenProjectionRequest},
 };
 use termtrace_sdk::{
-    ScreenFrameQuery, StableCaptureOptions, Terminal,
     assertions::SnapshotProfile,
     control_endpoint_is_reachable,
     locator::{LocatorSpec, StyleFilter},
     testing::{
-        EvidencePolicy, TerminalTest, TerminalTestConfig, TestFailure, TestOutcome,
-        run_terminal_test,
+        run_terminal_test, EvidencePolicy, TerminalTest, TerminalTestConfig, TestFailure,
+        TestOutcome,
     },
+    ScreenFrameQuery, StableCaptureOptions, Terminal,
 };
 
 fn looping_command() -> Vec<OsString> {
@@ -50,6 +50,7 @@ fn rust_test_helper_discards_styled_stable_attempt_after_snapshot() {
     .into_iter()
     .map(OsString::from)
     .collect::<Vec<OsString>>();
+
     let terminal = Terminal::new(env!("CARGO_BIN_EXE_termtrace"), evidence.path());
     let mut config = TerminalTestConfig::new(terminal, command);
     config.columns = 8;
@@ -64,6 +65,7 @@ fn rust_test_helper_discards_styled_stable_attempt_after_snapshot() {
                 .expect("open test session")
                 .output()
                 .wait_for(b"READY", Duration::from_secs(5))?;
+
             let capture =
                 test.screen()
                     .expect("open test screen")
@@ -73,6 +75,7 @@ fn rust_test_helper_discards_styled_stable_attempt_after_snapshot() {
                         projection: ScreenProjectionRequest::default(),
                         allow_incomplete: false,
                     })?;
+
             let ScreenFrameData::Spans { rows } = &capture.frame.data else {
                 panic!("stable frame did not return span detail");
             };
@@ -87,6 +90,7 @@ fn rust_test_helper_discards_styled_stable_attempt_after_snapshot() {
                 .expect("styled READY span")
                 .appearance
                 .resolved_background;
+
             let query = LocatorSpec::text("READY")?.with_style(StyleFilter {
                 resolved_background: Some(resolved_background),
                 ..StyleFilter::default()
@@ -98,6 +102,7 @@ fn rust_test_helper_discards_styled_stable_attempt_after_snapshot() {
                 SnapshotProfile::Spans,
                 Default::default(),
             )?;
+
             return Ok(());
         },
     );
@@ -125,6 +130,7 @@ fn rust_test_helper_retains_verified_failure_artifacts() {
             .output()
             .wait_for(b"READY", Duration::from_secs(5))
             .map_err(|_| return "READY was not observed")?;
+
         return Err("PRIMARY_FAILURE_SENTINEL");
     });
 
@@ -154,6 +160,7 @@ fn rust_test_helper_retains_verified_failure_artifacts() {
         &fs::read(screenshot.join("save-manifest.json")).expect("screenshot manifest"),
     )
     .expect("valid screenshot manifest");
+
     fs::write(screenshot.join("screen.png"), b"changed").expect("corrupt screenshot");
     assert!(verify_saved_artifact(&screenshot, &manifest).is_err());
 }
@@ -178,6 +185,7 @@ fn rust_test_helper_creates_and_reports_snapshot_mismatches() {
                 .expect("open test screen")
                 .frame(Default::default())?;
             test.assert_snapshot("ready", &frame, SnapshotProfile::Spans, Default::default())?;
+
             return Ok(());
         },
     );
@@ -203,9 +211,11 @@ fn rust_test_helper_creates_and_reports_snapshot_mismatches() {
                 .expect("open test screen")
                 .frame(Default::default())?;
             test.assert_snapshot("ready", &frame, SnapshotProfile::Spans, Default::default())?;
+
             return Ok(());
         },
     );
+
     let TestFailure::Body {
         error,
         finalization,
@@ -233,6 +243,7 @@ fn rust_test_helper_timeout_retains_evidence_and_reaps_session() {
         OsString::from("timeout-fixture"),
         pid_path.clone().into_os_string(),
     ];
+
     let mut config = TerminalTestConfig::new(terminal, command);
     config.evidence_policy = EvidencePolicy::Always;
     let mut test = TerminalTest::launch(config).expect("launch timed test");
@@ -241,6 +252,7 @@ fn rust_test_helper_timeout_retains_evidence_and_reaps_session() {
         .output()
         .wait_for(b"READY", Duration::from_secs(5))
         .expect("READY output");
+
     let session_path = test
         .session()
         .expect("open test session")
@@ -268,9 +280,11 @@ fn rust_test_helper_timeout_retains_evidence_and_reaps_session() {
     assert!(!control_endpoint_is_reachable(&session_path));
     let process_path = PathBuf::from(format!("/proc/{recorded_pid}"));
     let deadline = Instant::now() + Duration::from_secs(2);
+
     while process_path.exists() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
     }
+
     assert!(
         !process_path.exists(),
         "recorded child survived finalization"
@@ -284,6 +298,7 @@ fn rust_test_helper_timeout_retains_evidence_and_reaps_session() {
     let inventory = || {
         let mut pending = vec![evidence.clone()];
         let mut files = BTreeMap::new();
+
         while let Some(path) = pending.pop() {
             if path.is_dir() {
                 pending.extend(
@@ -298,6 +313,7 @@ fn rust_test_helper_timeout_retains_evidence_and_reaps_session() {
                 );
             }
         }
+
         return files;
     };
     let before = inventory();
@@ -325,6 +341,7 @@ fn rust_test_helper_preserves_body_failure_when_cleanup_fails() {
             .expect("open test session")
             .force_close()
             .map_err(|_| return "fixture force-close failed")?;
+
         return Err("PRIMARY_CLEANUP_FAILURE_SENTINEL");
     });
 
@@ -389,10 +406,12 @@ fn rust_test_helper_does_not_claim_deleted_evidence_after_discard_failure() {
         .output()
         .wait_for(b"READY", Duration::from_secs(5))
         .expect("READY output");
+
     let locked = test
         .evidence_directory()
         .expect("attempt evidence")
         .join("locked");
+
     fs::create_dir_all(&locked).expect("locked directory");
     fs::write(locked.join("entry"), b"retained").expect("locked entry");
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o000))
@@ -404,6 +423,7 @@ fn rust_test_helper_does_not_claim_deleted_evidence_after_discard_failure() {
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o700))
             .expect("restore cleanup permissions");
     }
+
     assert!(!report.retained);
     assert!(report.evidence_directory.is_none());
     assert!(report.verified_artifacts.is_empty());
@@ -434,6 +454,7 @@ fn rust_test_helper_reports_cleanup_failure_while_resuming_panic() {
                 panic!("PRIMARY_PANIC_CLEANUP_SENTINEL");
             },
         );
+
         return;
     }
 

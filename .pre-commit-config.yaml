@@ -10,6 +10,13 @@ repos:
         pass_filenames: false
         files: ^(?:build\.rs|(?:crates|src|tests)/.*\.rs)$
 
+      - id: cargo-statement-spacing
+        name: cargo statement-spacing
+        entry: cargo statement-spacing check
+        language: system
+        pass_filenames: false
+        files: ^(?:build\.rs|(?:crates|src|tests)/.*\.rs)$
+
       - id: ruff-check
         name: ruff check
         entry: >-

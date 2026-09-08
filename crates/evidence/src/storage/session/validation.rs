@@ -4,18 +4,17 @@ use termtrace_model::{
     execution::event::Event,
     execution::request_journal::MUTATION_JOURNAL_NAME,
     execution::session::{
-        COMPLETION_VALIDATION_VERSION, GHOSTTY_REPLAY_PROFILE_NAME, GeometrySource,
-        ResourceLimitKind, SESSION_COMPLETION_FORMAT, SESSION_COMPLETION_VERSION,
-        SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, SessionCompletion, SessionManifest,
+        GeometrySource, ResourceLimitKind, SessionCompletion, SessionManifest,
+        COMPLETION_VALIDATION_VERSION, GHOSTTY_REPLAY_PROFILE_NAME, SESSION_COMPLETION_FORMAT,
+        SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
         TMUX_PANE_PROVENANCE_VERSION,
     },
 };
 
 use crate::storage::{
-    CompletionIntegrityError, CompletionIntegrityKind, Error, Result,
     artifact::hash_regular_file,
     event_log::{EventLog, EventLogSummary},
-    is_lowercase_blake3,
+    is_lowercase_blake3, CompletionIntegrityError, CompletionIntegrityKind, Error, Result,
 };
 
 use super::io::{canonical_manifest_bytes, manifest_hash, read_completion, read_manifest};
@@ -36,8 +35,10 @@ pub fn validate_completed_log(
             session: session_directory.to_path_buf(),
         });
     }
+
     let completion = read_completion(session_directory)?;
     validate_completion_candidate(session_directory, log, &completion)?;
+
     return Ok(completion);
 }
 
@@ -58,6 +59,7 @@ pub(super) fn validate_replay_profile_file(
             ),
         });
     }
+
     return Ok(());
 }
 
@@ -89,9 +91,11 @@ pub fn validate_completed_session(session_directory: &Path) -> Result<SessionCom
             session: session_directory.to_path_buf(),
         });
     }
+
     let completion = read_completion(session_directory)?;
     let summary = EventLogSummary::read(session_directory.join("events.jsonl"))?;
     validate_completion_summary_candidate(session_directory, &summary, &completion)?;
+
     return Ok(completion);
 }
 
@@ -112,9 +116,12 @@ pub fn validate_completion_summary_candidate(
             source,
         };
     })?;
+
     let manifest = read_manifest(session_directory)?;
     validate_manifest(&manifest)?;
+
     validate_completion_format(completion)?;
+
     return validate_completion_with_loaded(
         session_directory,
         log,
@@ -138,11 +145,14 @@ pub(super) fn validate_completion_with_loaded(
         )
         .into());
     }
+
     validate_replay_profile_file(session_directory, manifest)?;
+
     let final_event_hash = log
         .terminal
         .as_ref()
         .map(|record| return record.hash.as_str());
+
     let event_count = log.event_count;
     let actual_manifest_hash = manifest_hash(manifest_bytes);
     let header_bytes = serde_json::to_vec(&log.header).map_err(|source| {
@@ -152,7 +162,9 @@ pub(super) fn validate_completion_with_loaded(
             source,
         };
     })?;
+
     let event_header_hash = blake3::hash(&header_bytes).to_hex().to_string();
+
     if manifest.session_id != log.header.session_id
         || manifest.started_unix_ns != log.header.started_unix_ns
         || manifest.geometry.cols != log.header.cols
@@ -165,6 +177,7 @@ pub(super) fn validate_completion_with_loaded(
         )
         .into());
     }
+
     if log.header.session_manifest_hash != actual_manifest_hash {
         return Err(CompletionIntegrityError::new(
             CompletionIntegrityKind::SessionManifestHash,
@@ -174,23 +187,27 @@ pub(super) fn validate_completion_with_loaded(
             ),
         ));
     }
+
     if completion.session_id != log.header.session_id {
         return Err(
             Error::invalid("completion session identifier does not match the event log").into(),
         );
     }
+
     if completion.session_manifest_hash != actual_manifest_hash {
         return Err(CompletionIntegrityError::new(
             CompletionIntegrityKind::SessionManifestHash,
             "completion session manifest hash does not match session.json",
         ));
     }
+
     if completion.event_header_hash != event_header_hash {
         return Err(CompletionIntegrityError::new(
             CompletionIntegrityKind::EventHeaderHash,
             "completion event header hash does not match events.jsonl",
         ));
     }
+
     if final_event_hash != Some(completion.final_event_hash.as_str()) {
         return Err(CompletionIntegrityError::new(
             CompletionIntegrityKind::FinalEventHash,
@@ -201,6 +218,7 @@ pub(super) fn validate_completion_with_loaded(
             ),
         ));
     }
+
     if completion.event_count != event_count {
         return Err(CompletionIntegrityError::new(
             CompletionIntegrityKind::EventCount,
@@ -210,6 +228,7 @@ pub(super) fn validate_completion_with_loaded(
             ),
         ));
     }
+
     let Some(terminal) = log.terminal.as_ref() else {
         return Err(CompletionIntegrityError::new(
             CompletionIntegrityKind::TerminalExitMissing,
@@ -225,36 +244,42 @@ pub(super) fn validate_completion_with_loaded(
             "completed event log does not end with an Exit event",
         ));
     };
+
     if completion.terminal_event_seq != terminal.seq {
         return Err(Error::invalid(
             "completion terminal event sequence does not match the final Exit event",
         )
         .into());
     }
+
     if completion.exit_code != *code || completion.signal_name != *signal_name {
         return Err(CompletionIntegrityError::new(
             CompletionIntegrityKind::ExitOutcome,
             "completion exit outcome does not match the final Exit event",
         ));
     }
+
     if completion.durability.policy != manifest.durability_policy {
         return Err(CompletionIntegrityError::new(
             CompletionIntegrityKind::DurabilityRecord,
             "completion durability policy does not match the chain-bound session policy",
         ));
     }
+
     if !completion.durability.final_sync_completed || completion.durability.sync_count == 0 {
         return Err(CompletionIntegrityError::new(
             CompletionIntegrityKind::DurabilityRecord,
             "completion does not record a successful final event-log synchronization",
         ));
     }
+
     if !log.pending_operations.is_empty() {
         return Err(CompletionIntegrityError::new(
             CompletionIntegrityKind::PendingMutationIntents,
             "completed event log contains pending mutation intents",
         ));
     }
+
     let output_bytes = log.output_bytes;
     if completion.output_bytes != output_bytes {
         return Err(CompletionIntegrityError::new(
@@ -265,6 +290,7 @@ pub(super) fn validate_completion_with_loaded(
             ),
         ));
     }
+
     if let Some(limit) = manifest.resource_limits.output_bytes
         && output_bytes > limit
         && completion.resource_limit.is_none()
@@ -274,6 +300,7 @@ pub(super) fn validate_completion_with_loaded(
         )
         .into());
     }
+
     if let Some(outcome) = &completion.resource_limit {
         let [output_trigger, duration_trigger, idle_trigger] = log.resource_triggers;
         let (configured_limit, triggered, policy_label, trigger_label) = match outcome.kind {
@@ -310,11 +337,13 @@ pub(super) fn validate_completion_with_loaded(
                 outcome.observed >= limit
             }
         };
+
         if outcome.limit != limit || !observed_valid {
             return Err(Error::invalid(format!(
                 "completion resource-limit outcome does not match manifest policy and {policy_label}"
             )).into());
         }
+
         if !triggered {
             return Err(Error::invalid(format!(
                 "resource-limit completion has no canonical {trigger_label} trigger"
@@ -322,6 +351,7 @@ pub(super) fn validate_completion_with_loaded(
             .into());
         }
     }
+
     return Ok(());
 }
 
@@ -332,51 +362,60 @@ pub(super) fn validate_manifest(manifest: &SessionManifest) -> Result<()> {
             manifest.format
         )));
     }
+
     if manifest.version != SESSION_MANIFEST_VERSION {
         return Err(Error::invalid(format!(
             "unsupported session format version {}",
             manifest.version
         )));
     }
+
     if manifest.control_socket != format!("{CONTROL_SOCKET_PREFIX}{}", manifest.session_id) {
         return Err(Error::invalid(
             "session manifest control endpoint does not match its session ID",
         ));
     }
+
     if manifest.request_journal != MUTATION_JOURNAL_NAME {
         return Err(Error::invalid(
             "session manifest names an unsupported mutation journal path",
         ));
     }
+
     if let Some(profile) = &manifest.ghostty_visual {
         if profile.replay_profile != GHOSTTY_REPLAY_PROFILE_NAME {
             return Err(Error::invalid(format!(
                 "session manifest Ghostty replay profile must be the canonical root artifact `{GHOSTTY_REPLAY_PROFILE_NAME}`"
             )));
         }
+
         if !is_lowercase_blake3(&profile.replay_profile_hash) {
             return Err(Error::invalid(
                 "session manifest Ghostty replay profile hash must be exactly 64 lowercase hexadecimal characters",
             ));
         }
+
         if !is_lowercase_blake3(&profile.effective_config_hash) {
             return Err(Error::invalid(
                 "session manifest Ghostty effective configuration hash must be exactly 64 lowercase hexadecimal characters",
             ));
         }
     }
+
     if manifest.geometry_provenance.source == GeometrySource::GhosttyFit {
         if manifest.geometry_provenance.capture_target.is_none() {
             return Err(Error::invalid(
                 "Ghostty-fitted geometry requires a canonical capture target",
             ));
         }
+
         if manifest.ghostty_visual.is_none() {
             return Err(Error::invalid(
                 "Ghostty-fitted geometry requires recorded Ghostty profile provenance",
             ));
         }
     }
+
     if let Some(tmux) = &manifest.tmux_pane
         && (tmux.version != TMUX_PANE_PROVENANCE_VERSION
             || tmux.tmux_version.is_empty()
@@ -395,28 +434,34 @@ pub(super) fn validate_manifest(manifest: &SessionManifest) -> Result<()> {
             "session manifest contains invalid tmux pane provenance",
         ));
     }
+
     manifest.durability_policy.validate()?;
+
     if manifest.resource_limits.output_bytes == Some(0) {
         return Err(Error::invalid(
             "session resource budgets must be greater than zero",
         ));
     }
+
     manifest.child_environment.validate().map_err(|error| {
         return Error::invalid(format!(
             "invalid manifest child environment policy: {error}"
         ));
     })?;
+
     return Ok(());
 }
 
 fn valid_tmux_id(value: &str, prefix: u8) -> bool {
     let bytes = value.as_bytes();
+
     return bytes.first() == Some(&prefix)
         && bytes.len() > 1
         && bytes
             .get(1..)
             .is_some_and(|suffix| return suffix.iter().all(u8::is_ascii_digit));
 }
+
 pub(super) fn validate_completion_format(completion: &SessionCompletion) -> Result<()> {
     if completion.format != SESSION_COMPLETION_FORMAT {
         return Err(Error::invalid(format!(
@@ -424,17 +469,20 @@ pub(super) fn validate_completion_format(completion: &SessionCompletion) -> Resu
             completion.format
         )));
     }
+
     if completion.version != SESSION_COMPLETION_VERSION {
         return Err(Error::invalid(format!(
             "unsupported completion format version {}",
             completion.version
         )));
     }
+
     if completion.validation_version != COMPLETION_VALIDATION_VERSION {
         return Err(Error::invalid(format!(
             "unsupported completion validation version {}",
             completion.validation_version
         )));
     }
+
     return Ok(());
 }

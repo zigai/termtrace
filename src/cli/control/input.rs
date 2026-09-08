@@ -16,6 +16,7 @@ pub(in crate::cli) fn run_send(
         (None, None, true) => {
             let mut data: Vec<u8> = Vec::new();
             io::stdin().read_to_end(&mut data).into_diagnostic()?;
+
             (data, InputKind::Raw)
         }
         _ => {
@@ -24,6 +25,7 @@ pub(in crate::cli) fn run_send(
             ));
         }
     };
+
     if data.is_empty() {
         return Err(miette::miette!("direct input must not be empty"));
     }
@@ -32,6 +34,7 @@ pub(in crate::cli) fn run_send(
     if resolved.lifecycle != RegistryLifecycle::Live {
         return write_session_lifecycle(response, &resolved, "send", ExitCode::FAILURE);
     }
+
     let request_id = uuid::Uuid::now_v7();
     let atom = InputSequenceAtom::Bytes {
         operation_id: derive_input_operation_id(request_id, 0),
@@ -60,9 +63,11 @@ pub(in crate::cli) fn run_send(
                     "session_state": "unknown",
                 }),
             )?;
+
             return Ok(ExitCode::FAILURE);
         }
     };
+
     let data = match control_response.result {
         ControlResult::Ok { data } => data,
         ControlResult::Error {
@@ -84,9 +89,11 @@ pub(in crate::cli) fn run_send(
                     "session_state": "live",
                 }),
             )?;
+
             return Ok(ExitCode::FAILURE);
         }
     };
+
     let ControlData::InputSequenceApplied {
         sequence_id,
         bytes_written,
@@ -98,6 +105,7 @@ pub(in crate::cli) fn run_send(
             "recording actor returned an unexpected direct-input payload"
         ));
     };
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -122,6 +130,7 @@ pub(super) fn input_sequence_atom_for_cli(
             caller_intent,
         });
     }
+
     if let Some(paste) = atom.strip_prefix("paste:") {
         return Ok(InputSequenceAtom::Paste {
             operation_id,
@@ -129,6 +138,7 @@ pub(super) fn input_sequence_atom_for_cli(
             caller_intent,
         });
     }
+
     let (data, input_kind) = if let Some(text) = atom.strip_prefix("text:") {
         (text.as_bytes().to_vec(), InputKind::Text)
     } else if let Some(raw) = atom.strip_prefix("raw:") {
@@ -144,6 +154,7 @@ pub(super) fn input_sequence_atom_for_cli(
             "unknown input atom; run `termtrace control keys` or use text:VALUE, paste:VALUE, raw:VALUE, or raw-file:PATH"
         ));
     };
+
     return Ok(InputSequenceAtom::Bytes {
         operation_id,
         data: ByteString::new(data),
@@ -156,6 +167,7 @@ pub(super) fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifie
     let normalized = atom.to_ascii_lowercase().replace('+', "-");
     let mut remaining = normalized.as_str();
     let mut modifiers = KeyModifiers::default();
+
     let mut modifier_count = 0_u8;
     loop {
         let (next, selected) = if let Some(next) = remaining.strip_prefix("ctrl-") {
@@ -164,7 +176,9 @@ pub(super) fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifie
                     "control modifier was supplied more than once"
                 ));
             }
+
             modifiers.control = true;
+
             (next, true)
         } else if let Some(next) = remaining.strip_prefix("control-") {
             if modifiers.control {
@@ -172,7 +186,9 @@ pub(super) fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifie
                     "control modifier was supplied more than once"
                 ));
             }
+
             modifiers.control = true;
+
             (next, true)
         } else if let Some(next) = remaining.strip_prefix("shift-") {
             if modifiers.shift {
@@ -180,13 +196,17 @@ pub(super) fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifie
                     "shift modifier was supplied more than once"
                 ));
             }
+
             modifiers.shift = true;
+
             (next, true)
         } else if let Some(next) = remaining.strip_prefix("alt-") {
             if modifiers.alt {
                 return Err(miette::miette!("alt modifier was supplied more than once"));
             }
+
             modifiers.alt = true;
+
             (next, true)
         } else if let Some(next) = remaining.strip_prefix("super-") {
             if modifiers.super_key {
@@ -194,7 +214,9 @@ pub(super) fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifie
                     "super modifier was supplied more than once"
                 ));
             }
+
             modifiers.super_key = true;
+
             (next, true)
         } else {
             (remaining, false)
@@ -202,9 +224,11 @@ pub(super) fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifie
         if !selected {
             break;
         }
+
         modifier_count = modifier_count.saturating_add(1);
         remaining = next;
     }
+
     let key = match remaining {
         "enter" => NamedKey::Enter,
         "escape" | "esc" => NamedKey::Escape,
@@ -224,12 +248,15 @@ pub(super) fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifie
             let suffix = value
                 .strip_prefix('f')
                 .ok_or_else(|| miette::miette!("function key must be f1 through f24"))?;
+
             let number = suffix
                 .parse::<u8>()
                 .map_err(|_| miette::miette!("function key must be f1 through f24"))?;
+
             if !(1..=24).contains(&number) {
                 return Err(miette::miette!("function key must be f1 through f24"));
             }
+
             NamedKey::Function(number)
         }
         value if modifier_count > 0 && value.len() == 1 => {
@@ -237,15 +264,18 @@ pub(super) fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifie
                 .chars()
                 .next()
                 .ok_or_else(|| miette::miette!("modified letter is missing"))?;
+
             if !letter.is_ascii_alphabetic() {
                 return Err(miette::miette!(
                     "modified printable keys currently support ASCII letters; run `termtrace control keys`"
                 ));
             }
+
             NamedKey::Letter(letter)
         }
         _ => return Ok(None),
     };
+
     return Ok(Some((key, modifiers)));
 }
 
@@ -281,10 +311,12 @@ pub(in crate::cli) fn run_resize(
         .pixel_width
         .or_else(|| return arguments.cols.checked_mul(12))
         .ok_or_else(|| miette::miette!("pixel width overflow; pass --pixel-width explicitly"))?;
+
     let pixel_height = arguments
         .pixel_height
         .or_else(|| return arguments.rows.checked_mul(24))
         .ok_or_else(|| miette::miette!("pixel height overflow; pass --pixel-height explicitly"))?;
+
     return run_control_guarded(
         response,
         arguments.session,
@@ -354,10 +386,13 @@ pub(in crate::cli) fn run_pointer(
                 scroll.postcondition,
             ),
         };
+
     let resolved = resolve_session(arguments.session)?;
+
     if resolved.lifecycle != RegistryLifecycle::Live {
         return write_session_lifecycle(response, &resolved, "pointer", ExitCode::FAILURE);
     }
+
     let mut request = ControlRequest::new(ControlCommand::Pointer {
         column,
         row,
@@ -365,13 +400,16 @@ pub(in crate::cli) fn run_pointer(
         strict,
     });
     request.expected_presented_state_hash = expected_presented_state_hash;
+
     if let Some(request_id) = request_id {
         request.request_id = request_id;
     }
+
     let input = match send_cli_control(response, &resolved.path, &request, "pointer")? {
         CliControlOutcome::Applied(data) => *data,
         CliControlOutcome::Rejected(exit_code) => return Ok(exit_code),
     };
+
     let predicate = match (postcondition.wait_screen, postcondition.wait_screen_absent) {
         (Some(text), None) => Some(ScreenPredicate::Contains { text }),
         (None, Some(text)) => Some(ScreenPredicate::Absent { text }),
@@ -392,6 +430,7 @@ pub(in crate::cli) fn run_pointer(
         Duration::from_millis(postcondition.timeout_ms),
     )
     .into_diagnostic()?;
+
     return write_json_line(
         response,
         &serde_json::json!({

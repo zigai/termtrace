@@ -13,7 +13,7 @@ use termtrace_model::artifact::tmux::{
     TmuxJournalBoundary, TmuxLifecycleEvent, TmuxRecordingManifest,
 };
 
-use crate::{Error, Result, tmux_catalog::TmuxCatalog};
+use crate::{tmux_catalog::TmuxCatalog, Error, Result};
 
 /// Journal filename relative to an aggregate recording directory.
 pub const JOURNAL_NAME: &str = "lifecycle.jsonl";
@@ -31,6 +31,7 @@ pub(crate) struct Record {
 pub(crate) fn record_hash(previous: &str, event: &TmuxLifecycleEvent) -> Result<String> {
     let bytes = serde_json::to_vec(&(previous, event))
         .map_err(|error| return json_error(Path::new(JOURNAL_NAME), error))?;
+
     return Ok(blake3::hash(&bytes).to_hex().to_string());
 }
 
@@ -42,9 +43,11 @@ pub(crate) fn record_hash(previous: &str, event: &TmuxLifecycleEvent) -> Result<
 /// a directory sync by the caller.
 pub fn append(directory: &Path, manifest: &mut TmuxRecordingManifest) -> Result<()> {
     let mut catalog = TmuxCatalog::for_append(directory, manifest)?;
+
     if manifest.catalog.is_none() {
         seed_catalog_history(manifest)?;
     }
+
     let path = directory.join(JOURNAL_NAME);
     let mut boundary = manifest
         .lifecycle_journal
@@ -54,6 +57,7 @@ pub fn append(directory: &Path, manifest: &mut TmuxRecordingManifest) -> Result<
             sequence: 0,
             hash: String::new(),
         });
+
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -65,23 +69,28 @@ pub fn append(directory: &Path, manifest: &mut TmuxRecordingManifest) -> Result<
     let metadata = file
         .metadata()
         .map_err(|error| return Error::filesystem(&path, error))?;
+
     if !metadata.is_file() || metadata.len() < boundary.bytes {
         return Err(Error::invalid(
             "tmux lifecycle journal is not a complete regular file",
         ));
     }
+
     file.set_len(boundary.bytes)
         .map_err(|error| return Error::filesystem(&path, error))?;
     file.seek(SeekFrom::Start(boundary.bytes))
         .map_err(|error| return Error::filesystem(&path, error))?;
+
     let mut indexed = Vec::new();
     for event in &manifest.events {
         if event.sequence <= boundary.sequence {
             continue;
         }
+
         if boundary.sequence.checked_add(1) != Some(event.sequence) {
             return Err(Error::invalid("tmux lifecycle sequence is discontinuous"));
         }
+
         let hash = record_hash(&boundary.hash, event)?;
         let record = Record {
             previous_hash: boundary.hash.clone(),
@@ -98,28 +107,36 @@ pub fn append(directory: &Path, manifest: &mut TmuxRecordingManifest) -> Result<
                 "tmux lifecycle record exceeds its frame limit",
             ));
         }
+
         file.write_all(&bytes)
             .map_err(|error| return Error::filesystem(&path, error))?;
+
         indexed.push((record, boundary.bytes, count));
         boundary.bytes = boundary
             .bytes
             .checked_add(count)
             .ok_or_else(|| return Error::invalid("tmux lifecycle byte offset overflow"))?;
+
         boundary.sequence = event.sequence;
         boundary.hash = hash;
     }
+
     file.sync_all()
         .map_err(|error| return Error::filesystem(&path, error))?;
+
     manifest.catalog = Some(catalog.append(&indexed, &boundary)?);
     manifest.lifecycle_journal = Some(boundary);
     let discard = manifest.events.len().saturating_sub(RECENT_EVENTS);
     manifest.events.drain(..discard);
+
     while manifest.track_history.len() > 128 {
         manifest.track_history.pop_first();
     }
+
     manifest
         .coverage_gaps
         .retain(|gap| return gap.resolved_unix_ns.is_none());
+
     return Ok(());
 }
 
@@ -133,6 +150,7 @@ fn seed_catalog_history(manifest: &mut TmuxRecordingManifest) -> Result<()> {
         },
         |event| return event.sequence,
     );
+
     let mut append = |kind: &str,
                       pane_id: Option<String>,
                       value: String,
@@ -150,6 +168,7 @@ fn seed_catalog_history(manifest: &mut TmuxRecordingManifest) -> Result<()> {
             pane_id,
             value: Some(value),
         });
+
         return Ok(());
     };
     for track in manifest.track_history.values() {
@@ -161,6 +180,7 @@ fn seed_catalog_history(manifest: &mut TmuxRecordingManifest) -> Result<()> {
             track.linked_unix_ns,
         )?;
     }
+
     for gap in &manifest.coverage_gaps {
         let mut opened = gap.clone();
         opened.resolved_unix_ns = None;
@@ -171,6 +191,7 @@ fn seed_catalog_history(manifest: &mut TmuxRecordingManifest) -> Result<()> {
                 .map_err(|error| return json_error(Path::new(JOURNAL_NAME), error))?,
             gap.first_observed_unix_ns,
         )?;
+
         if let Some(resolved) = gap.resolved_unix_ns {
             append(
                 "coverage_gap_resolved",
@@ -181,6 +202,7 @@ fn seed_catalog_history(manifest: &mut TmuxRecordingManifest) -> Result<()> {
             )?;
         }
     }
+
     return Ok(());
 }
 
@@ -207,15 +229,18 @@ pub(crate) fn visit_records(
     let metadata = file
         .metadata()
         .map_err(|error| return Error::filesystem(path, error))?;
+
     if !metadata.is_file() || metadata.len() < boundary.bytes {
         return Err(Error::invalid(
             "tmux lifecycle journal committed prefix is missing",
         ));
     }
+
     let mut reader = BufReader::new(file.take(boundary.bytes));
     let mut sequence = 0_u64;
     let mut hash = String::new();
     let mut offset = 0_u64;
+
     loop {
         let mut bytes = Vec::new();
         let count = reader
@@ -226,6 +251,7 @@ pub(crate) fn visit_records(
         if count == 0 {
             break;
         }
+
         if u64::try_from(count).unwrap_or(u64::MAX) > MAX_RECORD_BYTES
             || bytes.last() != Some(&b'\n')
         {
@@ -233,6 +259,7 @@ pub(crate) fn visit_records(
                 "tmux lifecycle journal has an invalid frame",
             ));
         }
+
         let record: Record =
             serde_json::from_slice(&bytes).map_err(|error| return json_error(path, error))?;
         if sequence.checked_add(1) != Some(record.event.sequence)
@@ -241,18 +268,23 @@ pub(crate) fn visit_records(
         {
             return Err(Error::invalid("tmux lifecycle journal chain differs"));
         }
+
         sequence = record.event.sequence;
         hash.clone_from(&record.hash);
+
         let count = u64::try_from(count)
             .map_err(|_| return Error::invalid("tmux record length overflow"))?;
+
         visitor(&record, offset, count)?;
         offset = offset
             .checked_add(count)
             .ok_or_else(|| return Error::invalid("tmux journal offset overflow"))?;
     }
+
     if sequence != boundary.sequence || hash != boundary.hash {
         return Err(Error::invalid("tmux lifecycle journal boundary differs"));
     }
+
     return Ok(());
 }
 
@@ -277,14 +309,17 @@ pub fn copy_committed(
         .map_err(|error| return Error::filesystem(destination, error))?;
     let count = io::copy(&mut input, &mut output)
         .map_err(|error| return Error::filesystem(destination, error))?;
+
     if count != boundary.bytes {
         return Err(Error::invalid(
             "tmux lifecycle journal changed during export",
         ));
     }
+
     output
         .sync_all()
         .map_err(|error| return Error::filesystem(destination, error))?;
+
     return visit(destination, boundary, |_| return Ok(()));
 }
 

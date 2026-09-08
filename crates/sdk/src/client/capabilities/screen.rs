@@ -2,12 +2,12 @@ use super::super::control::{
     client_error, exact_duration_ns, public_control_error, validate_stable_options,
 };
 use super::super::{
-    CaptureQuality, ControlCommand, ControlData, ControlRequest, ControlResult, Duration, Error,
-    ExchangeTiming, FrameDetail, Observation, Result, ScreenFrame, ScreenPredicate,
-    ScreenProjectionRequest, ScreenRegion, ScreenWaitOutcome, Session, StableCaptureOptions,
-    StableCaptureQuality, StatePoint, Uuid, exchange, observe_session_with_options,
-    project_screen_frame, resolved_screen_state_for_session, send_request_response,
-    wait_for_screen,
+    exchange, observe_session_with_options, project_screen_frame,
+    resolved_screen_state_for_session, send_request_response, wait_for_screen, CaptureQuality,
+    ControlCommand, ControlData, ControlRequest, ControlResult, Duration, Error, ExchangeTiming,
+    FrameDetail, Observation, Result, ScreenFrame, ScreenPredicate, ScreenProjectionRequest,
+    ScreenRegion, ScreenWaitOutcome, Session, StableCaptureOptions, StableCaptureQuality,
+    StatePoint, Uuid,
 };
 
 /// Presented-screen operations.
@@ -43,6 +43,7 @@ impl Screen<'_> {
                 StatePoint::LatestPresented,
                 false,
             )?;
+
             return project_screen_frame(
                 &state,
                 &projection,
@@ -52,6 +53,7 @@ impl Screen<'_> {
             )
             .map_err(Error::ScreenFrame);
         }
+
         let request = ControlRequest::new(ControlCommand::ScreenFrame { projection });
         let response = send_request_response(&self.session.path, &request)?;
         let data = match response.result {
@@ -62,9 +64,11 @@ impl Screen<'_> {
                 details,
             } => return Err(public_control_error(code, message, details, None, None)),
         };
+
         let ControlData::ScreenFrame { frame } = data else {
             return Err(client_error("actor returned the wrong rich-screen payload"));
         };
+
         return Ok(frame);
     }
 
@@ -99,6 +103,7 @@ impl Screen<'_> {
     pub fn capture_stable(&self, options: StableCaptureOptions) -> Result<StableScreenCapture> {
         validate_stable_options(options)?;
         let stable_for_ns = exact_duration_ns("stable_for", options.stable_for)?;
+
         if self.session.path.join("completion.json").is_file() {
             return Ok(StableScreenCapture {
                 quality: StableCaptureQuality::Stable,
@@ -108,6 +113,7 @@ impl Screen<'_> {
                 stable_for_ns,
             });
         }
+
         let mut request = ControlRequest::new(ControlCommand::CaptureStable {
             stable_for_ns,
             timeout_ns: exact_duration_ns("timeout", options.timeout)?,
@@ -119,6 +125,7 @@ impl Screen<'_> {
             &request,
             ExchangeTiming::deadline(options.timeout)?,
         )?;
+
         let data = match response.result {
             ControlResult::Ok { data } => data,
             ControlResult::Error {
@@ -127,6 +134,7 @@ impl Screen<'_> {
                 details,
             } => return Err(public_control_error(code, message, details, None, None)),
         };
+
         let ControlData::StableSnapshot {
             frame,
             first_observed_monotonic_ns,
@@ -147,11 +155,13 @@ impl Screen<'_> {
             observed_monotonic_ns,
             stable_for_ns,
         };
+
         if quality != StableCaptureQuality::Stable && !options.allow_incomplete {
             return Err(Error::StableCaptureIncomplete {
                 result: Box::new(capture),
             });
         }
+
         return Ok(capture);
     }
 }

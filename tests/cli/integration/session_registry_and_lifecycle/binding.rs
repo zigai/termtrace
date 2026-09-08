@@ -12,6 +12,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .args(["--", "/bin/true"])
         .assert()
         .success();
+
     let manifest = read_manifest(&session).expect("manifest");
     let evidence_before = ["session.json", "events.jsonl", "completion.json"]
         .into_iter()
@@ -35,6 +36,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .get_output()
         .stdout
         .clone();
+
     let registered = compact_json_line(&registered);
     assert_eq!(registered["session_id"], manifest.session_id.to_string());
     assert_eq!(
@@ -92,6 +94,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .assert()
         .success()
         .stdout("[]\n");
+
     let mut all = Command::cargo_bin("termtrace").expect("binary should build");
     let all = all
         .env("TERMTRACE_STATE_DIR", &state)
@@ -103,11 +106,13 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .get_output()
         .stdout
         .clone();
+
     let rows: serde_json::Value = serde_json::from_slice(&all).expect("registry list JSON");
     let row = rows
         .as_array()
         .and_then(|rows| return rows.first())
         .expect("registry row");
+
     validate_json_value("registry-list-entry.schema.json", row);
     assert!(
         row.get("canonical_session_display").is_none(),
@@ -123,10 +128,12 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .get_output()
         .stdout
         .clone();
+
     let human = String::from_utf8(human).expect("registry table");
     let mut lines = human.lines();
     let header = lines.next().expect("registry table header");
     let row = lines.next().expect("registry table row");
+
     assert!(
         lines.next().is_none(),
         "unexpected registry table:\n{human}"
@@ -163,6 +170,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .get_output()
         .stdout
         .clone();
+
     let removed = compact_json_line(&removed);
     assert_eq!(removed["evidence_preserved"], true);
     assert_eq!(
@@ -174,6 +182,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
             .to_string()
     );
     assert!(!entry_path.exists(), "registry entry should be removed");
+
     for (name, expected) in evidence_before {
         assert_eq!(
             fs_err::read(session.join(name)).expect("preserved evidence"),
@@ -182,6 +191,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
         );
     }
 }
+
 #[test]
 fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
     let temporary = TempDir::new().expect("temporary directory");
@@ -194,6 +204,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
         .args(["--", "/bin/true"])
         .assert()
         .success();
+
     fs_err::remove_file(session.join("completion.json")).expect("remove completion fixture");
 
     let mut register = Command::cargo_bin("termtrace").expect("binary should build");
@@ -212,6 +223,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
         .success()
         .stdout(predicate::str::contains(r#""lifecycle":"incomplete""#))
         .stdout(predicate::str::contains("control_unavailable").not());
+
     let mut incomplete_control = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_control
         .env("TERMTRACE_STATE_DIR", &state)
@@ -220,6 +232,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
         .failure()
         .stdout(predicate::str::contains(r#""lifecycle":"incomplete""#))
         .stderr(predicate::str::contains("control_unavailable").not());
+
     let mut incomplete_screen = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_screen
         .env("TERMTRACE_STATE_DIR", &state)
@@ -229,6 +242,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
         .stdout(predicate::str::contains(r#""operation":"screen""#))
         .stdout(predicate::str::contains(r#""lifecycle":"incomplete""#))
         .stderr(predicate::str::contains("control_unavailable").not());
+
     let mut incomplete_video = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_video
         .env("TERMTRACE_STATE_DIR", &state)
@@ -267,6 +281,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
         .success()
         .stdout(predicate::str::contains(r#""lifecycle":"stale""#))
         .stderr(predicate::str::contains("control_unavailable").not());
+
     let mut stale_screen = Command::cargo_bin("termtrace").expect("binary should build");
     stale_screen
         .env("TERMTRACE_STATE_DIR", &state)
@@ -276,6 +291,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
         .stdout(predicate::str::contains(r#""operation":"screen""#))
         .stdout(predicate::str::contains(r#""lifecycle":"stale""#))
         .stderr(predicate::str::contains("control_unavailable").not());
+
     let mut stale_video = Command::cargo_bin("termtrace").expect("binary should build");
     stale_video
         .env("TERMTRACE_STATE_DIR", &state)

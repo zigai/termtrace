@@ -134,6 +134,7 @@ pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Val
             "boundary": compact_boundaries(boundaries),
         }),
     };
+
     return Ok(value);
 }
 
@@ -149,6 +150,7 @@ pub(super) fn send_cli_control(
     operation: &'static str,
 ) -> Result<CliControlOutcome> {
     let control_response = send_request_response(session, request).into_diagnostic()?;
+
     match control_response.result {
         ControlResult::Ok { data } => return Ok(CliControlOutcome::Applied(Box::new(data))),
         ControlResult::Error {
@@ -170,6 +172,7 @@ pub(super) fn send_cli_control(
                     "session_state": "live",
                 }),
             )?;
+
             return Ok(CliControlOutcome::Rejected(ExitCode::FAILURE));
         }
     }
@@ -186,15 +189,18 @@ pub(in crate::cli) fn run_control_guarded(
     if resolved.lifecycle != RegistryLifecycle::Live {
         return write_session_lifecycle(response, &resolved, "control", ExitCode::FAILURE);
     }
+
     let mut control_request = ControlRequest::new(command);
     if let Some(request_id) = request_id {
         control_request.request_id = request_id;
     }
+
     control_request.expected_presented_state_hash = expected_presented_state_hash;
     let data = match send_cli_control(response, &resolved.path, &control_request, "control")? {
         CliControlOutcome::Applied(data) => *data,
         CliControlOutcome::Rejected(exit_code) => return Ok(exit_code),
     };
+
     return write_json_line(response, &compact_control_data(&data)?);
 }
 
@@ -209,6 +215,7 @@ pub(in crate::cli) fn run_status(
         let completion =
             wait_for_completion(&resolved.path, Duration::from_millis(arguments.timeout_ms))
                 .into_diagnostic()?;
+
         return write_json_line(
             response,
             &serde_json::json!({
@@ -219,9 +226,11 @@ pub(in crate::cli) fn run_status(
             }),
         );
     }
+
     if resolved.lifecycle != RegistryLifecycle::Live {
         return write_session_lifecycle(response, &resolved, "status", ExitCode::SUCCESS);
     }
+
     let data = request(resolved.path, ControlCommand::Status).into_diagnostic()?;
     if let ControlData::Status {
         pid,
@@ -238,8 +247,10 @@ pub(in crate::cli) fn run_status(
             boundaries: boundaries.clone(),
             clock_sample,
         };
+
         return write_json_line(response, &status);
     }
+
     return Err(miette::miette!(
         "unexpected status response from recording actor"
     ));
@@ -263,6 +274,7 @@ pub(in crate::cli) fn run_stop(
     let resolved = resolve_session(arguments.session)?;
     if resolved.lifecycle == RegistryLifecycle::Completed {
         let completion = wait_for_completion(&resolved.path, Duration::ZERO).into_diagnostic()?;
+
         return write_json_line(
             response,
             &serde_json::json!({
@@ -271,24 +283,30 @@ pub(in crate::cli) fn run_stop(
             }),
         );
     }
+
     if resolved.lifecycle != RegistryLifecycle::Live {
         return write_session_lifecycle(response, &resolved, "stop", ExitCode::FAILURE);
     }
+
     let mut control_request = ControlRequest::new(ControlCommand::Stop);
     if let Some(request_id) = arguments.request_id {
         control_request.request_id = request_id;
     }
+
     control_request.expected_presented_state_hash = arguments.expected_presented_state_hash;
     let acknowledged = match send_cli_control(response, &resolved.path, &control_request, "stop")? {
         CliControlOutcome::Applied(data) => *data,
         CliControlOutcome::Rejected(exit_code) => return Ok(exit_code),
     };
+
     if !arguments.wait {
         return write_json_line(response, &compact_control_data(&acknowledged)?);
     }
+
     let completion =
         wait_for_completion(&resolved.path, Duration::from_millis(arguments.timeout_ms))
             .into_diagnostic()?;
+
     return write_json_line(
         response,
         &serde_json::json!({

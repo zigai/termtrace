@@ -1,10 +1,10 @@
 use super::{
-    AdmittedAction, CONTROL_PROTOCOL_VERSION, ControlCommand, ControlErrorDetails, ControlRequest,
-    ControlResponse, ControlResult, Duration, Error, InputSequenceExecution, Instant,
-    MAX_SCREEN_WAITERS, PendingInputSequence, Result, ScreenWaiter, SessionActor, action,
-    actor_boundaries, compile_action_postcondition, compile_screen_predicate, control_error_code,
-    control_error_response, control_rejected, mpsc, presented_state_hash,
+    action, actor_boundaries, compile_action_postcondition, compile_screen_predicate,
+    control_error_code, control_error_response, control_rejected, mpsc, presented_state_hash,
     screen_frame_error_response, terminal_error, valid_blake3_hash, validate_screen_region,
+    AdmittedAction, ControlCommand, ControlErrorDetails, ControlRequest, ControlResponse,
+    ControlResult, Duration, Error, InputSequenceExecution, Instant, PendingInputSequence, Result,
+    ScreenWaiter, SessionActor, CONTROL_PROTOCOL_VERSION, MAX_SCREEN_WAITERS,
 };
 
 impl SessionActor<'_> {
@@ -30,9 +30,12 @@ impl SessionActor<'_> {
                 "invalid_observation_guard",
                 "presented-state guards are only valid for mutations",
             );
+
             let _ = response_sender.send(response);
+
             return Ok(());
         }
+
         let read_only = matches!(
             request.command,
             ControlCommand::Ping
@@ -53,19 +56,25 @@ impl SessionActor<'_> {
             )?;
             if let Some(response) = prior {
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
+
             if self.mutation_history.is_full() {
                 let response = control_error_response(
                     request.request_id,
                     "mutation_limit_reached",
                     "session mutation operation limit has been reached",
                 );
+
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
+
             Some(hash)
         };
+
         if self
             .pending_input_sequence
             .as_ref()
@@ -76,9 +85,12 @@ impl SessionActor<'_> {
                 "action_busy",
                 "an actor-ordered action is still applying input or evaluating its postcondition",
             );
+
             let _ = response_sender.send(response);
+
             return Ok(());
         }
+
         if let ControlCommand::WaitScreen {
             predicate,
             stable_for_ns,
@@ -93,6 +105,7 @@ impl SessionActor<'_> {
                 {
                     return Err("invalid screen wait duration".to_owned());
                 }
+
                 return Ok(predicate);
             });
             let Ok(predicate) = predicate else {
@@ -101,9 +114,12 @@ impl SessionActor<'_> {
                     "invalid_screen_wait",
                     "screen predicate exceeds its text/regex/region/composition limits or durations do not satisfy stable <= timeout <= 1h",
                 );
+
                 let _ = response_sender.send(response);
+
                 return Ok(());
             };
+
             if let Err(error) = validate_screen_region(
                 projection,
                 self.live.presented.cols,
@@ -116,18 +132,24 @@ impl SessionActor<'_> {
                     &self.event_log,
                     "screen_wait_admission",
                 );
+
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
+
             if self.screen_waiters.len() >= MAX_SCREEN_WAITERS {
                 let response = control_error_response(
                     request.request_id,
                     "waiter_limit_reached",
                     "session screen waiter limit has been reached",
                 );
+
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
+
             self.screen_waiters.push(ScreenWaiter {
                 request_id: request.request_id,
                 predicate: Some(predicate),
@@ -137,8 +159,10 @@ impl SessionActor<'_> {
                 projection: *projection,
                 response: response_sender,
             });
+
             return Ok(());
         }
+
         if let ControlCommand::CaptureStable {
             stable_for_ns,
             timeout_ns,
@@ -155,9 +179,12 @@ impl SessionActor<'_> {
                     "invalid_stable_capture",
                     "durations must satisfy stable <= timeout <= 1h and timeout must be nonzero",
                 );
+
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
+
             if let Err(error) = validate_screen_region(
                 projection,
                 self.live.presented.cols,
@@ -170,18 +197,24 @@ impl SessionActor<'_> {
                     &self.event_log,
                     "stable_capture_admission",
                 );
+
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
+
             if self.screen_waiters.len() >= MAX_SCREEN_WAITERS {
                 let response = control_error_response(
                     request.request_id,
                     "waiter_limit_reached",
                     "session screen waiter limit has been reached",
                 );
+
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
+
             self.screen_waiters.push(ScreenWaiter {
                 request_id: request.request_id,
                 predicate: None,
@@ -191,15 +224,19 @@ impl SessionActor<'_> {
                 projection: *projection,
                 response: response_sender,
             });
+
             return Ok(());
         }
+
         if self.pending_input_sequence.is_some() && !read_only {
             let response = control_error_response(
                 request.request_id,
                 "input_sequence_busy",
                 "another paced input sequence is still in progress",
             );
+
             let _ = response_sender.send(response);
+
             return Ok(());
         }
 
@@ -209,6 +246,7 @@ impl SessionActor<'_> {
         let stale = guard.is_some_and(|hash| {
             return valid_blake3_hash(hash) && hash != current_state_hash;
         });
+
         let invalid_guard = guard.is_some_and(|hash| return !valid_blake3_hash(hash));
         if !invalid_guard && !stale {
             let sequence = match &request.command {
@@ -231,22 +269,26 @@ impl SessionActor<'_> {
                 )),
                 _ => None,
             };
+
             if let Some((atoms, pace_ns, include_atom_outcomes, action)) = sequence {
                 let admitted_action = action
                     .map(|(postcondition, projection)| {
                         let postcondition = compile_action_postcondition(postcondition)?;
+
                         validate_screen_region(
                             projection,
                             self.live.presented.cols,
                             self.live.presented.rows,
                         )
                         .map_err(Error::ScreenFrame)?;
+
                         return Ok(AdmittedAction {
                             postcondition,
                             projection: *projection,
                         });
                     })
                     .transpose();
+
                 let execution = admitted_action.and_then(|action| {
                     let execution = InputSequenceExecution::new(
                         request.request_id,
@@ -254,10 +296,13 @@ impl SessionActor<'_> {
                         pace_ns,
                         include_atom_outcomes,
                     )?;
+
                     self.mutation_history
                         .reserve_command(request.request_id, &request.command)?;
+
                     return Ok((execution, action));
                 });
+
                 match execution {
                     Ok((execution, action)) => {
                         self.pending_input_sequence = Some(PendingInputSequence {
@@ -272,6 +317,7 @@ impl SessionActor<'_> {
                             event_start_seq,
                             phase: action::InputSequencePhase::Applying { execution, action },
                         });
+
                         return Ok(());
                     }
                     Err(error) => {
@@ -300,7 +346,9 @@ impl SessionActor<'_> {
                                 response.clone(),
                             )?;
                         }
+
                         let _ = response_sender.send(response);
+
                         return match error {
                             Error::ControlRejected { .. } | Error::ScreenFrame(_) => Ok(()),
                             error => Err(error),
@@ -309,6 +357,7 @@ impl SessionActor<'_> {
                 }
             }
         }
+
         let outcome = if invalid_guard {
             Err(control_rejected(
                 "invalid_observation_guard",
@@ -364,6 +413,7 @@ impl SessionActor<'_> {
                 error.to_string(),
             ),
         };
+
         if let Some(command_hash) = command_hash {
             self.mutation_history.remember(
                 request.request_id,
@@ -375,9 +425,11 @@ impl SessionActor<'_> {
                 response.clone(),
             )?;
         }
+
         if response_sender.send(response).is_err() {
             tracing::warn!(request_id = %request.request_id, "control response receiver disconnected");
         }
+
         match outcome {
             Ok(_)
             | Err(

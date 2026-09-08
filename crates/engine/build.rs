@@ -7,6 +7,7 @@ fn main() {
 
     let Some(manifest_dir) = env::var_os("CARGO_MANIFEST_DIR") else {
         println!("cargo:rustc-env=TERMTRACE_BUILD_REVISION=unknown");
+
         return;
     };
     let manifest_dir = PathBuf::from(manifest_dir);
@@ -29,9 +30,11 @@ fn main() {
                 .current_dir(&repository_root)
                 .output()
                 .ok()?;
+
             if !output.status.success() {
                 return None;
             }
+
             return String::from_utf8(output.stdout).ok();
         })
         .map_or_else(

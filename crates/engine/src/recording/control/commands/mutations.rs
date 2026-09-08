@@ -1,11 +1,12 @@
 use super::{
-    ByteString, ControlCommand, ControlData, Errno, Error, Event, EventLogWriter, FocusEvent,
-    HOST_SIGNAL_GRACE_PERIOD, InputDescriptor, InputKind, InputSource, Instant, MouseAction,
-    MouseButton, OperationStatus, Pid, PointerOperation, ProcessSignal, Result, SessionActor,
-    Signal, TerminalGeometry, Uuid, actor_boundaries, apply_input, apply_resize, control_rejected,
-    encode_focus, find_text_regions, finish_with_cleanup, interpolate_cell, killpg, mode_hash,
-    mouse_button_name, prepare_bytes, prepare_key, prepare_paste, presented_state_hash,
-    resize_semantic, supported_geometry_cell_count, terminal_error, validate_control_input,
+    actor_boundaries, apply_input, apply_resize, control_rejected, encode_focus, find_text_regions,
+    finish_with_cleanup, interpolate_cell, killpg, mode_hash, mouse_button_name, prepare_bytes,
+    prepare_key, prepare_paste, presented_state_hash, resize_semantic,
+    supported_geometry_cell_count, terminal_error, validate_control_input, ByteString,
+    ControlCommand, ControlData, Errno, Error, Event, EventLogWriter, FocusEvent, InputDescriptor,
+    InputKind, InputSource, Instant, MouseAction, MouseButton, OperationStatus, Pid,
+    PointerOperation, ProcessSignal, Result, SessionActor, Signal, TerminalGeometry, Uuid,
+    HOST_SIGNAL_GRACE_PERIOD,
 };
 
 impl SessionActor<'_> {
@@ -17,6 +18,7 @@ impl SessionActor<'_> {
         if let Some(outcome) = self.execute_observation_command(request_id, command) {
             return outcome;
         }
+
         match command {
             ControlCommand::Input {
                 data,
@@ -37,6 +39,7 @@ impl SessionActor<'_> {
                     caller_intent.clone(),
                     &input.data,
                 )?;
+
                 return Ok(ControlData::InputApplied {
                     operation_id: request_id,
                     input_kind: *input_kind,
@@ -67,6 +70,7 @@ impl SessionActor<'_> {
                     None,
                     &input.data,
                 )?;
+
                 return Ok(ControlData::InputApplied {
                     operation_id: request_id,
                     input_kind: InputKind::Keys,
@@ -92,6 +96,7 @@ impl SessionActor<'_> {
                     None,
                     &input.data,
                 )?;
+
                 return Ok(ControlData::InputApplied {
                     operation_id: request_id,
                     input_kind: InputKind::Paste,
@@ -109,6 +114,7 @@ impl SessionActor<'_> {
                     .values
                     .iter()
                     .any(|mode| return !mode.ansi && mode.number == 1004 && mode.enabled);
+
                 if !reporting_enabled {
                     if *strict {
                         return Err(control_rejected(
@@ -116,6 +122,7 @@ impl SessionActor<'_> {
                             "the application has not enabled DEC focus reporting mode 1004",
                         ));
                     }
+
                     return Ok(ControlData::InputNoop {
                         input_kind: InputKind::Focus,
                         reason: "focus_reporting_disabled".to_owned(),
@@ -123,11 +130,9 @@ impl SessionActor<'_> {
                         boundaries: actor_boundaries(&self.event_log),
                     });
                 }
-                let encoded = encode_focus(if *focused {
-                    FocusEvent::In
-                } else {
-                    FocusEvent::Out
-                })?;
+
+                let encoded =
+                    encode_focus(if *focused { FocusEvent::In } else { FocusEvent::Out })?;
                 let applied = apply_input(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
@@ -144,6 +149,7 @@ impl SessionActor<'_> {
                     None,
                     encoded.as_bytes(),
                 )?;
+
                 return Ok(ControlData::InputApplied {
                     operation_id: request_id,
                     input_kind: InputKind::Focus,
@@ -169,6 +175,7 @@ impl SessionActor<'_> {
                         ),
                     ));
                 }
+
                 let modes = self.live.semantic.snapshot()?.modes;
                 let terminal_modes_hash = mode_hash(&modes, "serialize pointer modes")?;
                 let reporting_enabled = modes.values.iter().any(|mode| {
@@ -176,6 +183,7 @@ impl SessionActor<'_> {
                         && matches!(mode.number, 9 | 1000 | 1002 | 1003)
                         && mode.enabled;
                 });
+
                 if !reporting_enabled {
                     if *strict {
                         return Err(control_rejected(
@@ -183,6 +191,7 @@ impl SessionActor<'_> {
                             "the application has not enabled a DEC mouse tracking mode",
                         ));
                     }
+
                     return Ok(ControlData::InputNoop {
                         input_kind: InputKind::Pointer,
                         reason: "pointer_reporting_disabled".to_owned(),
@@ -190,6 +199,7 @@ impl SessionActor<'_> {
                         boundaries: actor_boundaries(&self.event_log),
                     });
                 }
+
                 let mut encoded = Vec::new();
                 let (operation_name, button_name, lines, end_cell, click_count) = match operation {
                     PointerOperation::Click { button } => {
@@ -199,6 +209,7 @@ impl SessionActor<'_> {
                                 "wheel buttons are reserved for scroll operations",
                             ));
                         }
+
                         for action in [MouseAction::Press, MouseAction::Release] {
                             encoded.extend_from_slice(
                                 self.live
@@ -216,6 +227,7 @@ impl SessionActor<'_> {
                                     .as_bytes(),
                             );
                         }
+
                         ("click", mouse_button_name(*button), 0, None, 1)
                     }
                     PointerOperation::MultiClick { button, count } => {
@@ -227,6 +239,7 @@ impl SessionActor<'_> {
                                 "multi-click requires a non-wheel button and a count from 2 through 4",
                             ));
                         }
+
                         for _ in 0..*count {
                             for action in [MouseAction::Press, MouseAction::Release] {
                                 encoded.extend_from_slice(
@@ -246,6 +259,7 @@ impl SessionActor<'_> {
                                 );
                             }
                         }
+
                         ("multi_click", mouse_button_name(*button), 0, None, *count)
                     }
                     PointerOperation::Drag {
@@ -265,6 +279,7 @@ impl SessionActor<'_> {
                                 "drag requires a non-wheel button, an in-bounds destination, and 1 through 100 motion steps",
                             ));
                         }
+
                         encoded.extend_from_slice(
                             self.live
                                 .semantic
@@ -280,10 +295,13 @@ impl SessionActor<'_> {
                                 )?
                                 .as_bytes(),
                         );
+
                         let step_count = u32::from(*steps);
+
                         for step in 1..=step_count {
                             let drag_column =
                                 interpolate_cell(*column, *to_column, step, step_count);
+
                             let drag_row = interpolate_cell(*row, *to_row, step, step_count);
                             encoded.extend_from_slice(
                                 self.live
@@ -301,6 +319,7 @@ impl SessionActor<'_> {
                                     .as_bytes(),
                             );
                         }
+
                         encoded.extend_from_slice(
                             self.live
                                 .semantic
@@ -316,6 +335,7 @@ impl SessionActor<'_> {
                                 )?
                                 .as_bytes(),
                         );
+
                         (
                             "drag",
                             mouse_button_name(*button),
@@ -331,11 +351,9 @@ impl SessionActor<'_> {
                                 "scroll lines must be between -100 and 100 and nonzero",
                             ));
                         }
-                        let button = if *lines < 0 {
-                            MouseButton::WheelUp
-                        } else {
-                            MouseButton::WheelDown
-                        };
+
+                        let button =
+                            if *lines < 0 { MouseButton::WheelUp } else { MouseButton::WheelDown };
                         for _ in 0..lines.unsigned_abs() {
                             encoded.extend_from_slice(
                                 self.live
@@ -353,9 +371,11 @@ impl SessionActor<'_> {
                                     .as_bytes(),
                             );
                         }
+
                         ("scroll", mouse_button_name(button), *lines, None, 0)
                     }
                 };
+
                 if encoded.is_empty() {
                     if *strict {
                         return Err(control_rejected(
@@ -363,6 +383,7 @@ impl SessionActor<'_> {
                             "the current tracking mode suppressed this pointer operation",
                         ));
                     }
+
                     return Ok(ControlData::InputNoop {
                         input_kind: InputKind::Pointer,
                         reason: "pointer_has_no_output".to_owned(),
@@ -370,6 +391,7 @@ impl SessionActor<'_> {
                         boundaries: actor_boundaries(&self.event_log),
                     });
                 }
+
                 let applied = apply_input(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
@@ -397,6 +419,7 @@ impl SessionActor<'_> {
                     None,
                     &encoded,
                 )?;
+
                 return Ok(ControlData::InputApplied {
                     operation_id: request_id,
                     input_kind: InputKind::Pointer,
@@ -418,6 +441,7 @@ impl SessionActor<'_> {
                         "activation text must contain 1 to 4096 bytes on one row",
                     ));
                 }
+
                 let semantic_state = self.live.semantic.snapshot()?;
                 if semantic_state.modes.synchronized_output {
                     return Err(control_rejected(
@@ -425,23 +449,27 @@ impl SessionActor<'_> {
                         "text activation is unavailable during synchronized output",
                     ));
                 }
+
                 let state_hash = presented_state_hash(&self.live)?;
                 let matches = find_text_regions(&self.live.presented, text);
                 let visible = matches
                     .iter()
                     .filter(|region| return !region.concealed)
                     .collect::<Vec<_>>();
+
                 if visible.is_empty() {
                     let code = if matches.is_empty() {
                         "activation_text_not_found"
                     } else {
                         "activation_text_concealed"
                     };
+
                     return Err(control_rejected(
                         code,
                         "activation requires a visible row-contained text match",
                     ));
                 }
+
                 if *unique && visible.len() != 1 {
                     let candidates = visible
                         .iter()
@@ -453,24 +481,30 @@ impl SessionActor<'_> {
                         })
                         .collect::<Vec<_>>()
                         .join(",");
+
                     return Err(control_rejected(
                         "activation_text_ambiguous",
                         &format!("activation text matched multiple regions: {candidates}"),
                     ));
                 }
+
                 let region = visible.first().ok_or_else(|| {
                     return control_rejected("activation_text_not_found", "no match");
                 })?;
+
                 let target_column = region
                     .start_column
                     .saturating_add(region.end_column.saturating_sub(region.start_column + 1) / 2);
+
                 let terminal_modes_hash =
                     mode_hash(&semantic_state.modes, "serialize activation modes")?;
+
                 let reporting_enabled = semantic_state.modes.values.iter().any(|mode| {
                     return !mode.ansi
                         && matches!(mode.number, 9 | 1000 | 1002 | 1003)
                         && mode.enabled;
                 });
+
                 if !reporting_enabled {
                     if *strict {
                         return Err(control_rejected(
@@ -478,6 +512,7 @@ impl SessionActor<'_> {
                             "the application has not enabled a DEC mouse tracking mode",
                         ));
                     }
+
                     return Ok(ControlData::InputNoop {
                         input_kind: InputKind::Pointer,
                         reason: "pointer_reporting_disabled".to_owned(),
@@ -485,6 +520,7 @@ impl SessionActor<'_> {
                         boundaries: actor_boundaries(&self.event_log),
                     });
                 }
+
                 let mut encoded = Vec::new();
                 for action in [MouseAction::Press, MouseAction::Release] {
                     encoded.extend_from_slice(
@@ -503,6 +539,7 @@ impl SessionActor<'_> {
                             .as_bytes(),
                     );
                 }
+
                 if encoded.is_empty() {
                     if *strict {
                         return Err(control_rejected(
@@ -510,6 +547,7 @@ impl SessionActor<'_> {
                             "the current tracking mode suppressed the activation click",
                         ));
                     }
+
                     return Ok(ControlData::InputNoop {
                         input_kind: InputKind::Pointer,
                         reason: "pointer_has_no_output".to_owned(),
@@ -517,6 +555,7 @@ impl SessionActor<'_> {
                         boundaries: actor_boundaries(&self.event_log),
                     });
                 }
+
                 let applied = apply_input(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
@@ -540,6 +579,7 @@ impl SessionActor<'_> {
                     None,
                     &encoded,
                 )?;
+
                 return Ok(ControlData::Activated {
                     operation_id: request_id,
                     text: text.clone(),
@@ -567,6 +607,7 @@ impl SessionActor<'_> {
                     pixel_width: *pixel_width,
                     pixel_height: *pixel_height,
                 };
+
                 validate_control_geometry(geometry)?;
                 apply_resize(
                     self.spawned.master.as_mut(),
@@ -574,12 +615,15 @@ impl SessionActor<'_> {
                     request_id,
                     geometry,
                 )?;
+
                 resize_semantic(&mut self.live.semantic, geometry)?;
                 self.live.geometry = geometry;
                 let latest = self.live.semantic.snapshot()?;
+
                 if !latest.modes.synchronized_output {
                     self.live.presented = latest;
                 }
+
                 return Ok(ControlData::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),
                 });
@@ -592,6 +636,7 @@ impl SessionActor<'_> {
                     *signal,
                     false,
                 )?;
+
                 return Ok(ControlData::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),
                 });
@@ -600,10 +645,12 @@ impl SessionActor<'_> {
                 data.validate().map_err(|reason| {
                     return control_rejected("invalid_application_event", reason);
                 })?;
+
                 self.event_log.append(Event::Application {
                     operation_id: request_id,
                     data: data.clone(),
                 })?;
+
                 return Ok(ControlData::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),
                 });
@@ -616,10 +663,12 @@ impl SessionActor<'_> {
                         "marker must contain 1 to 256 UTF-8 bytes",
                     ));
                 }
+
                 let event_seq = self.event_log.append(Event::Marker {
                     operation_id: request_id,
                     label: label.to_owned(),
                 })?;
+
                 return Ok(ControlData::Marked {
                     label: label.to_owned(),
                     event_seq,
@@ -634,10 +683,12 @@ impl SessionActor<'_> {
                     ProcessSignal::Terminate,
                     false,
                 )?;
+
                 if self.host_signal_kill_deadline.is_none() {
                     self.host_signal_kill_deadline =
                         Some(Instant::now() + HOST_SIGNAL_GRACE_PERIOD);
                 }
+
                 return Ok(ControlData::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),
                 });
@@ -668,6 +719,7 @@ fn validate_control_geometry(geometry: TerminalGeometry) -> Result<()> {
             "terminal geometry exceeds the supported row, column, or cell limit, or has zero pixels",
         ));
     }
+
     return Ok(());
 }
 
@@ -684,10 +736,12 @@ pub(in crate::recording) fn apply_signal(
         number: signal as i32,
         name: name.to_owned(),
     })?;
+
     let signal_result = pid
         .and_then(|value| return i32::try_from(value).ok())
         .ok_or(Errno::ESRCH)
         .and_then(|value| return killpg(Pid::from_raw(value), signal));
+
     let status = if signal_result.is_ok() {
         OperationStatus::Applied
     } else {
@@ -704,12 +758,15 @@ pub(in crate::recording) fn apply_signal(
         })
         .map(|_| ())
         .map_err(Error::from);
+
     let Some(error) = signal_result.err() else {
         return result_write;
     };
+
     if missing_is_ok && error == Errno::ESRCH {
         return result_write;
     }
+
     return finish_with_cleanup(
         Err(control_rejected(
             "signal_failed",
@@ -718,6 +775,7 @@ pub(in crate::recording) fn apply_signal(
         result_write,
     );
 }
+
 fn nix_signal(signal: ProcessSignal) -> (Signal, &'static str) {
     match signal {
         ProcessSignal::Interrupt => return (Signal::SIGINT, "SIGINT"),

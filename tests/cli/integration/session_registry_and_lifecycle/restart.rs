@@ -6,6 +6,7 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
     let state = temporary.path().join("state");
     let working = temporary.path().join("working");
     fs_err::create_dir(&working).expect("working directory");
+
     let mut start = Command::cargo_bin("termtrace").expect("binary should build");
     let started = start
         .env("TERMTRACE_STATE_DIR", &state)
@@ -32,14 +33,17 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
         ])
         .assert()
         .success();
+
     let started_json: serde_json::Value =
         serde_json::from_slice(&started.get_output().stdout).expect("start response");
+
     let predecessor = PathBuf::from(
         started_json
             .pointer("/path")
             .and_then(serde_json::Value::as_str)
             .expect("predecessor path"),
     );
+
     let predecessor_manifest = read_manifest(&predecessor).expect("predecessor manifest");
 
     let mut restart = Command::cargo_bin("termtrace").expect("binary should build");
@@ -48,8 +52,10 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
         .args(["--response", "full", "restart", "demo"])
         .assert()
         .success();
+
     let response: serde_json::Value =
         serde_json::from_slice(&restarted.get_output().stdout).expect("restart response");
+
     let successor_bytes: ByteString = serde_json::from_value(
         response
             .pointer("/successor/canonical_session")
@@ -57,7 +63,9 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
             .clone(),
     )
     .expect("successor path bytes");
+
     let successor = PathBuf::from(OsString::from_vec(successor_bytes.as_bytes().to_vec()));
+
     assert_eq!(
         response["predecessor"]["canonical_session_display"],
         predecessor.display().to_string()
@@ -69,6 +77,7 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
     assert_ne!(predecessor, successor);
     let predecessor_evidence = ["session.json", "events.jsonl", "completion.json"]
         .map(|name| return fs_err::read(predecessor.join(name)).expect("predecessor evidence"));
+
     let successor_manifest = read_manifest(&successor).expect("successor manifest");
     assert_eq!(successor_manifest.command, predecessor_manifest.command);
     assert_eq!(
@@ -90,6 +99,7 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
     );
     let completion: SessionCompletion =
         serde_json::from_slice(&predecessor_evidence[2]).expect("predecessor completion");
+
     let lineage = successor_manifest.lineage.expect("restart lineage");
     assert_eq!(
         lineage.predecessor_session_id,
@@ -111,11 +121,13 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
         .assert()
         .success()
         .stdout(format!("{}\n", successor.display()));
+
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
     stop.env("TERMTRACE_STATE_DIR", &state)
         .args(["stop", "demo", "--wait"])
         .assert()
         .success();
+
     for (name, expected) in ["session.json", "events.jsonl", "completion.json"]
         .into_iter()
         .zip(predecessor_evidence)
@@ -130,6 +142,7 @@ fn restart_applies_only_explicit_successor_overrides() {
     let state = temporary.path().join("state");
     let changed_cwd = temporary.path().join("changed");
     fs_err::create_dir(&changed_cwd).expect("changed cwd");
+
     let mut start = Command::cargo_bin("termtrace").expect("binary should build");
     start
         .env("TERMTRACE_STATE_DIR", &state)
@@ -185,8 +198,10 @@ fn restart_applies_only_explicit_successor_overrides() {
         ])
         .assert()
         .success();
+
     let response: serde_json::Value =
         serde_json::from_slice(&restarted.get_output().stdout).expect("restart response");
+
     let successor_bytes: ByteString = serde_json::from_value(
         response
             .pointer("/successor/canonical_session")
@@ -194,6 +209,7 @@ fn restart_applies_only_explicit_successor_overrides() {
             .clone(),
     )
     .expect("successor path bytes");
+
     let successor = PathBuf::from(OsString::from_vec(successor_bytes.as_bytes().to_vec()));
     let manifest = read_manifest(&successor).expect("successor manifest");
     assert_eq!(
@@ -265,11 +281,14 @@ fn restart_verifies_resupplied_environment_and_requires_explicit_change() {
         "RESTART_SECRET".to_owned(),
         ByteString::from(b"changed-private".as_slice()),
     );
+
     for (path, spec) in [(&original_path, &original), (&changed_path, &changed)] {
         fs_err::write(path, serde_json::to_vec(spec).expect("environment JSON"))
             .expect("environment file");
+
         fs_err::set_permissions(path, Permissions::from_mode(0o600)).expect("private spec");
     }
+
     let mut start = Command::cargo_bin("termtrace").expect("binary should build");
     start
         .env("TERMTRACE_STATE_DIR", &state)
@@ -303,6 +322,7 @@ fn restart_verifies_resupplied_environment_and_requires_explicit_change() {
         .arg(&changed_path)
         .assert()
         .failure();
+
     let supervisor_errors = fs_err::read_dir(state.join("supervisor"))
         .expect("supervisor directory")
         .filter_map(|entry| return entry.ok().map(|entry| return entry.path()))
@@ -323,12 +343,15 @@ fn restart_verifies_resupplied_environment_and_requires_explicit_change() {
         .arg("--allow-environment-change")
         .assert()
         .success();
+
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
     stop.env("TERMTRACE_STATE_DIR", &state)
         .args(["stop", "secret-restart", "--wait"])
         .assert()
         .success();
+
     let mut pending = vec![state];
+
     while let Some(path) = pending.pop() {
         if path.is_dir() {
             pending.extend(

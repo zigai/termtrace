@@ -19,9 +19,9 @@ use super::validation::{
 };
 use super::*;
 use crate::{
-    Error,
     event_log::{EventLog, EventLogWriter, SessionClock},
-    provenance::{RecorderBuildIdentity, collect_execution_provenance},
+    provenance::{collect_execution_provenance, RecorderBuildIdentity},
+    Error,
 };
 
 fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
@@ -30,6 +30,7 @@ fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
     fs_err::create_dir(&session).expect("session directory");
     fs_err::set_permissions(&session, Permissions::from_mode(0o700))
         .expect("secure session directory");
+
     let clock = SessionClock::now().expect("session clock");
     let session_id = Uuid::now_v7();
     let environment = BTreeMap::new();
@@ -94,16 +95,20 @@ fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
         432,
         "xterm-ghostty",
     );
+
     let header_bytes = serde_json::to_vec(&header).expect("header JSON");
+
     let mut writer =
         EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
     for event in events {
         writer.append(event).expect("append event");
     }
+
     let event_count = writer.next_seq();
     let final_event_hash = writer.current_hash();
     let durability = writer.durability_record();
     drop(writer);
+
     let completion = SessionCompletion {
         format: SESSION_COMPLETION_FORMAT.to_owned(),
         version: SESSION_COMPLETION_VERSION,
@@ -121,12 +126,15 @@ fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
         resource_limit: None,
         failure: None,
     };
+
     fs_err::write(
         session.join("completion.json"),
         serde_json::to_vec(&completion).expect("completion JSON"),
     )
     .expect("write completion");
+
     let log = EventLog::read(session.join("events.jsonl")).expect("read event log");
+
     return (temporary, log);
 }
 
@@ -156,6 +164,7 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
 
     let mut missing_target = fitted.clone();
     missing_target.geometry_provenance.capture_target = None;
+
     assert!(matches!(
         validate_manifest(&missing_target),
         Err(Error::InvalidEvidence { .. })
@@ -163,6 +172,7 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
 
     let mut missing_profile = fitted;
     missing_profile.ghostty_visual = None;
+
     assert!(matches!(
         validate_manifest(&missing_profile),
         Err(Error::InvalidEvidence { .. })
@@ -174,6 +184,7 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
         .as_mut()
         .expect("Ghostty provenance")
         .replay_profile = "nested/ghostty-profile.ghostty".to_owned();
+
     assert!(matches!(
         validate_manifest(&invalid_path),
         Err(Error::InvalidEvidence { .. })
@@ -185,6 +196,7 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
         .as_mut()
         .expect("Ghostty provenance")
         .replay_profile_hash = "A".repeat(64);
+
     assert!(matches!(
         validate_manifest(&invalid_replay_hash),
         Err(Error::InvalidEvidence { .. })
@@ -195,6 +207,7 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
         .as_mut()
         .expect("Ghostty provenance")
         .effective_config_hash = "f".repeat(63);
+
     assert!(matches!(
         validate_manifest(&manifest),
         Err(Error::InvalidEvidence { .. })
@@ -208,6 +221,7 @@ fn completed_content_validation_binds_the_replay_profile_file() {
     let profile_path = session.join(GHOSTTY_REPLAY_PROFILE_NAME);
     let profile_bytes = b"font-size = 13\n";
     fs_err::write(&profile_path, profile_bytes).expect("replay profile");
+
     let mut manifest = read_manifest(&session).expect("session manifest");
     manifest.ghostty_visual = Some(GhosttyVisualProvenance {
         source_config: None,
@@ -218,7 +232,9 @@ fn completed_content_validation_binds_the_replay_profile_file() {
     });
 
     validate_replay_profile_file(&session, &manifest).expect("matching replay profile");
+
     fs_err::write(&profile_path, b"font-size = 14\n").expect("tampered replay profile");
+
     let error =
         validate_replay_profile_file(&session, &manifest).expect_err("profile hash must bind");
     assert!(matches!(error, Error::InvalidEvidence { .. }));
@@ -230,6 +246,7 @@ fn completed_validation_requires_terminal_exit() {
         operation_id: Uuid::now_v7(),
         label: "not-an-exit".to_owned(),
     }]);
+
     let error = validate_completed_log(&temporary.path().join("session"), &log)
         .expect_err("nonterminal completion must fail");
     assert!(matches!(error, Error::InvalidEvidence { .. }));
@@ -258,6 +275,7 @@ fn completed_validation_rejects_pending_mutation() {
             signal_name: None,
         },
     ]);
+
     let error = validate_completed_log(&temporary.path().join("session"), &log)
         .expect_err("pending mutation must fail");
     assert!(matches!(error, Error::InvalidEvidence { .. }));
@@ -306,22 +324,26 @@ fn persisted_format_readers_reject_version_corpus_without_compatibility_fallback
                 let mut rejected = serde_json::to_vec(&header).expect("rejected event header");
                 rejected.push(b'\n');
                 fs_err::write(&path, rejected).expect("write rejected event header");
+
                 EventLog::read(&path).expect_err("old event version must be rejected")
             }
             "session_manifest" => {
                 let mut manifest = read_manifest(&session).expect("session manifest");
                 manifest.version = rejected_version;
+
                 validate_manifest(&manifest).expect_err("old session version must be rejected")
             }
             "completion_manifest" => {
                 let mut completion = read_completion(&session).expect("completion manifest");
                 completion.version = rejected_version;
+
                 validate_completion_format(&completion)
                     .expect_err("old completion version must be rejected")
             }
             "completion_validation" => {
                 let mut completion = read_completion(&session).expect("completion manifest");
                 completion.validation_version = rejected_version;
+
                 validate_completion_format(&completion)
                     .expect_err("old completion validation version must be rejected")
             }

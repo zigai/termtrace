@@ -36,31 +36,28 @@ fn environment_values_never_enter_recorder_argv_or_manifest() {
         .expect("environment stdin")
         .write_all(&encoded)
         .expect("write environment stdin");
+
     wait_for_control(&session);
     wait_for_output(&session, b"ENV_READY", Duration::from_secs(5))
         .expect("child received secret environment");
+
     let argv = fs_err::read(format!("/proc/{}/cmdline", recorder.id())).expect("recorder argv");
-    assert!(
-        !argv
-            .windows(secret.len())
-            .any(|window| return window == secret)
-    );
+    assert!(!argv
+        .windows(secret.len())
+        .any(|window| return window == secret));
     let manifest = fs_err::read(session.join("session.json")).expect("manifest");
-    assert!(
-        !manifest
-            .windows(secret.len())
-            .any(|window| return window == secret)
-    );
+    assert!(!manifest
+        .windows(secret.len())
+        .any(|window| return window == secret));
     let manifest: SessionManifest = serde_json::from_slice(&manifest).expect("manifest JSON");
     assert_eq!(manifest.resource_limits.output_bytes, Some(1_000_000));
     send_request(&session, &ControlRequest::new(ControlCommand::Stop)).expect("stop child");
+
     let recorder_output = recorder.wait_with_output().expect("recorder exit");
-    assert!(
-        !recorder_output
-            .stderr
-            .windows(secret.len())
-            .any(|window| return window == secret)
-    );
+    assert!(!recorder_output
+        .stderr
+        .windows(secret.len())
+        .any(|window| return window == secret));
 
     let invalid_session = temporary.path().join("invalid-secret-safe");
     let invalid_secret = b"error-must-not-contain-this-secret";
@@ -73,6 +70,7 @@ fn environment_values_never_enter_recorder_argv_or_manifest() {
         copy: BTreeSet::from(["TERMTRACE_VARIABLE_THAT_MUST_NOT_EXIST_7B11".to_owned()]),
         ..EnvironmentSpec::default()
     };
+
     let mut invalid = Command::cargo_bin("termtrace").expect("binary should build");
     let invalid_output = invalid
         .args(["record", "--no-input", "--out"])
@@ -85,10 +83,8 @@ fn environment_values_never_enter_recorder_argv_or_manifest() {
         .get_output()
         .stderr
         .clone();
-    assert!(
-        !invalid_output
-            .windows(invalid_secret.len())
-            .any(|window| return window == invalid_secret)
-    );
+    assert!(!invalid_output
+        .windows(invalid_secret.len())
+        .any(|window| return window == invalid_secret));
     assert!(!invalid_session.exists());
 }

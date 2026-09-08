@@ -17,6 +17,7 @@ impl Terminal {
             evidence_root: evidence_root.into(),
         };
     }
+
     /// Caller-owned parent directory used for fresh canonical sessions.
     #[must_use]
     pub fn evidence_root(&self) -> &Path {
@@ -55,6 +56,7 @@ impl Terminal {
                 source,
             };
         })?;
+
         return Session::open(path, self.binary.clone(), None);
     }
 }

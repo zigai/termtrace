@@ -29,6 +29,7 @@ fn mouse_encoder_uses_live_sgr_modes_and_zero_based_cells() {
             480,
         )
         .expect("mouse press");
+
     let release = terminal
         .encode_mouse(
             MouseAction::Release,
@@ -41,6 +42,7 @@ fn mouse_encoder_uses_live_sgr_modes_and_zero_based_cells() {
             480,
         )
         .expect("mouse release");
+
     let motion = terminal
         .encode_mouse(
             MouseAction::Motion,
@@ -53,6 +55,7 @@ fn mouse_encoder_uses_live_sgr_modes_and_zero_based_cells() {
             480,
         )
         .expect("mouse motion");
+
     assert_eq!(press.as_bytes(), b"\x1b[<0;3;4M");
     assert_eq!(release.as_bytes(), b"\x1b[<0;3;4m");
     assert_eq!(motion.as_bytes(), b"\x1b[<32;4;4M");
@@ -112,17 +115,21 @@ fn every_supported_symbolic_key_encodes_for_all_modifiers_and_keyboard_modes() {
         NamedKey::ArrowLeft,
         NamedKey::ArrowRight,
     ];
+
     for mode_bits in 0_u8..16 {
         let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
         if mode_bits & 1 != 0 {
             terminal.write(b"\x1b[?1h");
         }
+
         if mode_bits & 2 != 0 {
             terminal.write(b"\x1b=");
         }
+
         if mode_bits & 4 != 0 {
             terminal.write(b"\x1b[>4;2m");
         }
+
         if mode_bits & 8 != 0 {
             terminal.write(b"\x1b[=1;1u");
         }
@@ -132,6 +139,7 @@ fn every_supported_symbolic_key_encodes_for_all_modifiers_and_keyboard_modes() {
             for key in named_keys {
                 assert_supported_encoding(&terminal, key, modifiers, mode_bits);
             }
+
             for number in 1_u8..=24 {
                 assert_supported_encoding(
                     &terminal,
@@ -140,9 +148,11 @@ fn every_supported_symbolic_key_encodes_for_all_modifiers_and_keyboard_modes() {
                     mode_bits,
                 );
             }
+
             if modifier_bits == 0 {
                 continue;
             }
+
             for letter in 'a'..='z' {
                 assert_supported_encoding(
                     &terminal,
@@ -175,6 +185,7 @@ fn assert_supported_encoding(
                 "supported key {key:?} with modifiers {modifiers:?} failed in keyboard mode matrix {mode_bits:04b}: {error}"
             );
         });
+
     let uses_extended_fallback = matches!(key, NamedKey::Function(13..=24)) && mode_bits & 8 == 0;
     let expected_encoder = if uses_extended_fallback {
         "termtrace-xterm-extended-function-key-v1"
@@ -190,6 +201,7 @@ fn assert_supported_encoding(
     {
         assert_eq!(encoded.data.as_bytes(), *expected);
     }
+
     assert!(
         !encoded.data.as_bytes().is_empty(),
         "supported key {key:?} with modifiers {modifiers:?} emitted no bytes in keyboard mode matrix {mode_bits:04b}"

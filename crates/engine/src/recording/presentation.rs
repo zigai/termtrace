@@ -40,6 +40,7 @@ pub(super) fn process_semantic_output(
 ) -> Result<()> {
     for (offset, byte) in data.iter().enumerate() {
         live.source_byte_offset = Some(u64::try_from(offset).unwrap_or(u64::MAX));
+
         match live.presentation_tracker.push(*byte) {
             PresentationAction::Immediate => {
                 process_semantic_bytes(
@@ -52,14 +53,13 @@ pub(super) fn process_semantic_output(
             }
             PresentationAction::Buffered => {}
             PresentationAction::Sequence { bytes, command } => {
-                let before_command = if command == Some(true) {
-                    Some(live.semantic.snapshot()?)
-                } else {
-                    None
-                };
+                let before_command =
+                    if command == Some(true) { Some(live.semantic.snapshot()?) } else { None };
                 process_semantic_bytes(live, writer, event_log, mutation_history, &bytes)?;
+
                 if command.is_some() {
                     let after_command = live.semantic.snapshot()?;
+
                     match live
                         .presentation_tracker
                         .reconcile(after_command.modes.synchronized_output)
@@ -78,6 +78,7 @@ pub(super) fn process_semantic_output(
             }
         }
     }
+
     return Ok(());
 }
 
@@ -94,12 +95,14 @@ pub(super) fn process_semantic_bytes(
         live.semantic.write(slice::from_ref(byte));
         live.pending_query_responses
             .extend(live.semantic.take_responses());
+
         if live.suppress_mirrored_queries {
             if was_tracking || complete || live.query_tracker.is_tracking() {
                 live.mirror_sequence.push(*byte);
             } else {
                 live.mirror_output.push(*byte);
             }
+
             if complete || !live.query_tracker.is_tracking() {
                 if live.pending_query_responses.is_empty() {
                     live.mirror_output.append(&mut live.mirror_sequence);
@@ -110,12 +113,15 @@ pub(super) fn process_semantic_bytes(
                 }
             }
         }
+
         if complete
             || (!live.query_tracker.is_tracking() && !live.pending_query_responses.is_empty())
         {
             let query = ByteString::from(live.query_tracker.bytes());
+
             for response in take(&mut live.pending_query_responses) {
                 let operation_id = Uuid::now_v7();
+
                 event_log.append(Event::QueryResponse {
                     source_event_seq: live.source_event_seq,
                     source_byte_offset: live.source_byte_offset,
@@ -137,10 +143,12 @@ pub(super) fn process_semantic_bytes(
                 )?;
             }
         }
+
         if complete {
             live.query_tracker.clear();
         }
     }
+
     return Ok(());
 }
 
@@ -153,12 +161,14 @@ pub(super) fn resize_semantic(semantic: &mut GhosttyVt, geometry: TerminalGeomet
             geometry_cell_size(geometry.pixel_height, geometry.rows),
         )
         .map_err(Error::from)?;
+
     return Ok(());
 }
 
 pub(super) fn geometry_cell_size(pixels: u16, cells: u16) -> u32 {
     return u32::from(pixels.checked_div(cells).unwrap_or(0).max(1));
 }
+
 pub(super) struct TextRegion {
     pub(super) start_column: u16,
     pub(super) end_column: u16,
@@ -170,16 +180,20 @@ pub(super) fn find_text_regions(state: &SemanticState, needle: &str) -> Vec<Text
     let mut regions = Vec::new();
     for row in &state.grid {
         let mut text = String::new();
+
         let mut cells = Vec::with_capacity(row.cells.len());
         for cell in &row.cells {
             let start = text.len();
+
             if cell.grapheme.is_empty() {
                 text.push(' ');
             } else {
                 text.push_str(&cell.grapheme);
             }
+
             cells.push((start, text.len(), cell.column, cell.style.invisible));
         }
+
         for (start, _) in text.match_indices(needle) {
             let end = start.saturating_add(needle.len());
             let mut matching = cells.iter().filter(|(cell_start, cell_end, _, _)| {
@@ -199,5 +213,6 @@ pub(super) fn find_text_regions(state: &SemanticState, needle: &str) -> Vec<Text
             });
         }
     }
+
     return regions;
 }

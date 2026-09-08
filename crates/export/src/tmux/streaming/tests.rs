@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use tempfile::TempDir;
 use termtrace_evidence::tmux_catalog::CATALOG_NAME;
 use termtrace_model::artifact::tmux::{
-    TMUX_RECORDING_FORMAT, TMUX_RECORDING_VERSION, TmuxCompositeTrack, TmuxPaneTrack,
-    TmuxRecordingCoverage, TmuxRecordingLifecycle,
+    TmuxCompositeTrack, TmuxPaneTrack, TmuxRecordingCoverage, TmuxRecordingLifecycle,
+    TMUX_RECORDING_FORMAT, TMUX_RECORDING_VERSION,
 };
 
 use super::*;
@@ -14,6 +14,7 @@ fn source_traversal_exceeds_the_legacy_limit_and_ignores_an_untrusted_index() {
     let temporary = TempDir::new().expect("temporary directory");
     let directory = temporary.path().join("aggregate");
     create_private_directory(&directory).expect("aggregate directory");
+
     let mut aggregate = TmuxRecordingManifest {
         format: TMUX_RECORDING_FORMAT.to_owned(),
         version: TMUX_RECORDING_VERSION,
@@ -56,6 +57,7 @@ fn source_traversal_exceeds_the_legacy_limit_and_ignores_an_untrusted_index() {
             },
         );
     }
+
     tmux_journal::append(&directory, &mut aggregate).expect("canonical history");
     assert_eq!(aggregate.track_history.len(), 128);
     fs_err::write(directory.join(CATALOG_NAME), b"untrusted derived index").expect("replace cache");
@@ -65,7 +67,9 @@ fn source_traversal_exceeds_the_legacy_limit_and_ignores_an_untrusted_index() {
         if count == 1 {
             assert_eq!(source.session, Path::new("/source/pane-0"));
         }
+
         count += 1;
+
         return Ok(());
     })
     .expect("all sources from authoritative history");

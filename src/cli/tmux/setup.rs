@@ -16,24 +16,24 @@ use termtrace_model::value::ByteString;
 use crate::cli::output::{write_json_line, write_stdout};
 
 use super::{
-    GUARDED_HOOKS, OPTION_AGGREGATE_MANIFEST, OPTION_CELL_HEIGHT, OPTION_CELL_WIDTH,
-    OPTION_COVERAGE, OPTION_GHOSTTY_CONFIG, OPTION_LAUNCH_HOOK, OPTION_ORIGINAL_COMMAND,
-    OPTION_ORIGINAL_LAUNCH_HOOK, OPTION_ORIGINAL_SHELL, OPTION_OUTPUT_ROOT, OPTION_PROFILE_MODE,
-    OPTION_SCOPE, OPTION_TERM, OPTION_TERMTRACE, OPTION_TMUX, OPTION_VERSION, RESERVED_OPTIONS,
-    TMUX_HOOK_INDEX, TMUX_INTEGRATION_VERSION, TMUX_WRAPPER_BINARY_ENV,
     args::{
         TmuxConfigArgs, TmuxConnectionArgs, TmuxCoverageMode, TmuxEnableArgs,
         TmuxGhosttyProfileMode, TmuxSetupArgs,
     },
     client::{
-        TmuxClient, hook_name, option_path, option_text, parse_option, shell_quote,
-        tmux_config_quote,
+        hook_name, option_path, option_text, parse_option, shell_quote, tmux_config_quote,
+        TmuxClient,
     },
     scope::{
-        TmuxScopePolicy, initial_scope_policy, resolve_live_scope, scope_bytes, scope_from_options,
-        set_scope_policy,
+        initial_scope_policy, resolve_live_scope, scope_bytes, scope_from_options,
+        set_scope_policy, TmuxScopePolicy,
     },
     supervisor::{clear_managed_pane_options, grandfather_current_panes, tmux_status_report},
+    GUARDED_HOOKS, OPTION_AGGREGATE_MANIFEST, OPTION_CELL_HEIGHT, OPTION_CELL_WIDTH,
+    OPTION_COVERAGE, OPTION_GHOSTTY_CONFIG, OPTION_LAUNCH_HOOK, OPTION_ORIGINAL_COMMAND,
+    OPTION_ORIGINAL_LAUNCH_HOOK, OPTION_ORIGINAL_SHELL, OPTION_OUTPUT_ROOT, OPTION_PROFILE_MODE,
+    OPTION_SCOPE, OPTION_TERM, OPTION_TERMTRACE, OPTION_TMUX, OPTION_VERSION, RESERVED_OPTIONS,
+    TMUX_HOOK_INDEX, TMUX_INTEGRATION_VERSION, TMUX_WRAPPER_BINARY_ENV,
 };
 
 #[derive(Clone, Debug)]
@@ -57,6 +57,7 @@ pub(in crate::cli) fn run_tmux_config(
     arguments: TmuxConfigArgs,
 ) -> Result<ExitCode> {
     let setup = prepare_tmux_setup(arguments.setup, arguments.tmux)?;
+
     return write_stdout(response, tmux_config_fragment(&setup)?);
 }
 
@@ -69,6 +70,7 @@ pub(in crate::cli) fn run_tmux_enable(
     setup.scope = resolve_live_scope(&client, &setup.scope)?;
     let already_enabled = enable_prepared_tmux_setup(&client, &setup)?;
     let report = tmux_status_report(&client)?;
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -97,11 +99,13 @@ pub(super) fn enable_prepared_tmux_setup(
                 "tmux recording is already configured with unsupported integration version {existing_version}"
             ));
         }
+
         if (option_text(client, OPTION_LAUNCH_HOOK)? == "1") != setup.launch_hook {
             return Err(miette::miette!(
                 "disable the existing tmux integration before changing launch-hook mode"
             ));
         }
+
         client.set_option(OPTION_COVERAGE, OsStr::new(setup.coverage.as_str()))?;
         client.set_option(
             OPTION_AGGREGATE_MANIFEST,
@@ -110,20 +114,27 @@ pub(super) fn enable_prepared_tmux_setup(
                 .as_ref()
                 .map_or_else(|| return OsStr::new(""), |path| return path.as_os_str()),
         )?;
+
         client.run_shell_background(supervisor_shell_command(setup).as_os_str())?;
+
         return Ok(true);
     }
+
     let original_command = client.option("default-command")?;
+
     if setup.launch_hook {
         let _ = client.output(["show-options", "-gv", "pane-launch-command"])?;
     }
+
     let original_shell = client.option("default-shell")?;
     if original_shell.is_empty() {
         return Err(miette::miette!("tmux default-shell is empty"));
     }
+
     let hook_command = tmux_hook_command();
     for name in GUARDED_HOOKS {
         let existing = client.hook(name)?;
+
         if !existing.is_empty() && existing != hook_command.as_bytes() {
             return Err(miette::miette!(
                 "tmux hook {} already uses reserved index {TMUX_HOOK_INDEX}",
@@ -131,17 +142,22 @@ pub(super) fn enable_prepared_tmux_setup(
             ));
         }
     }
+
     if let Err(error) = apply_tmux_setup(client, setup, &original_command, &original_shell) {
         let _rollback = rollback_tmux_setup(client, &original_command);
+
         return Err(error);
     }
+
     if let Err(error) = grandfather_current_panes(client).and_then(|()| {
         return client.run_shell_background(supervisor_shell_command(setup).as_os_str());
     }) {
         let _cleanup = clear_managed_pane_options(client);
         let _rollback = rollback_tmux_setup(client, &original_command);
+
         return Err(error);
     }
+
     return Ok(false);
 }
 
@@ -160,11 +176,13 @@ pub(in crate::cli) fn run_tmux_disable(
             }),
         );
     }
+
     if version != TMUX_INTEGRATION_VERSION {
         return Err(miette::miette!(
             "cannot disable unsupported tmux recording integration version {version}"
         ));
     }
+
     let termtrace = client.option(OPTION_TERMTRACE)?;
     let tmux = client.option(OPTION_TMUX)?;
     let expected_setup = setup_from_options(&client, termtrace, tmux)?;
@@ -175,9 +193,11 @@ pub(in crate::cli) fn run_tmux_disable(
             "tmux launch command changed after Termtrace was enabled; refusing to overwrite it"
         ));
     }
+
     let expected_hook = tmux_hook_command();
     for name in GUARDED_HOOKS {
         let current = client.hook(name)?;
+
         if !current.is_empty() && current != expected_hook.as_bytes() {
             return Err(miette::miette!(
                 "tmux hook {} changed after Termtrace was enabled; refusing to overwrite it",
@@ -185,18 +205,24 @@ pub(in crate::cli) fn run_tmux_disable(
             ));
         }
     }
+
     let original = client.option(OPTION_ORIGINAL_COMMAND)?;
     restore_launch_hook(&client)?;
+
     if !expected_setup.launch_hook {
         client.set_option("default-command", OsStr::from_bytes(&original))?;
     }
+
     for name in GUARDED_HOOKS {
         client.unset_hook(name)?;
     }
+
     for name in RESERVED_OPTIONS {
         client.unset_option(name)?;
     }
+
     clear_managed_pane_options(&client)?;
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -213,6 +239,7 @@ pub(super) fn prepare_tmux_setup(setup: TmuxSetupArgs, tmux: PathBuf) -> Result<
             "tmux fallback cell dimensions must be nonzero"
         ));
     }
+
     if setup
         .term
         .as_ref()
@@ -222,6 +249,7 @@ pub(super) fn prepare_tmux_setup(setup: TmuxSetupArgs, tmux: PathBuf) -> Result<
             "tmux terminal identity override must be nonempty"
         ));
     }
+
     if matches!(setup.ghostty_profile, TmuxGhosttyProfileMode::Off)
         && setup.ghostty_config.is_some()
     {
@@ -229,24 +257,29 @@ pub(super) fn prepare_tmux_setup(setup: TmuxSetupArgs, tmux: PathBuf) -> Result<
             "--ghostty-config cannot be used with --ghostty-profile off"
         ));
     }
+
     let scope = initial_scope_policy(
         setup.explicit_only,
         &setup.sessions,
         &setup.windows,
         &setup.panes,
     )?;
+
     let registry = match setup.output_root {
         Some(root) => SessionRegistry::open(root).into_diagnostic()?,
         None => SessionRegistry::open_default().into_diagnostic()?,
     };
+
     let output_root = fs_err::canonicalize(registry.state_root()).into_diagnostic()?;
     let termtrace =
         fs_err::canonicalize(env::current_exe().into_diagnostic()?).into_diagnostic()?;
+
     let ghostty_config = setup
         .ghostty_config
         .map(fs_err::canonicalize)
         .transpose()
         .into_diagnostic()?;
+
     return Ok(PreparedTmuxSetup {
         launch_hook: setup.launch_hook,
         termtrace,
@@ -273,6 +306,7 @@ pub(super) fn setup_from_options(
         .map_err(|_| {
         return miette::miette!("unsupported Ghostty profile mode `{profile_text}`");
     })?;
+
     return Ok(PreparedTmuxSetup {
         launch_hook: option_text(client, OPTION_LAUNCH_HOOK)? == "1",
         termtrace: PathBuf::from(OsString::from_vec(termtrace)),
@@ -283,6 +317,7 @@ pub(super) fn setup_from_options(
         ghostty_config: option_path(client, OPTION_GHOSTTY_CONFIG)?,
         coverage: {
             let cov_text = option_text(client, OPTION_COVERAGE)?;
+
             <TmuxCoverageMode as clap::ValueEnum>::from_str(&cov_text, true).map_err(|_| {
                 return miette::miette!("unsupported tmux coverage mode `{cov_text}`");
             })?
@@ -298,6 +333,7 @@ pub(super) fn setup_from_options(
 pub(super) fn tmux_config_fragment(setup: &PreparedTmuxSetup) -> Result<Vec<u8>> {
     let wrapper = tmux_wrapper_command(setup);
     let hook = tmux_hook_command();
+
     let mut output = String::from(
         "# Generated by `termtrace tmux config`. Source this before tmux creates panes.\n\
 %if \"#{==:#{@termtrace-recording-version},}\"\n\
@@ -308,6 +344,7 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
     if setup.launch_hook {
         output.push_str("%if \"#{==:#{@termtrace-launch-hook},}\"\nset-option -gF @termtrace-original-pane-launch-command \"#{pane-launch-command}\"\n%endif\n");
     }
+
     append_config_option(
         &mut output,
         OPTION_LAUNCH_HOOK,
@@ -376,11 +413,13 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
             tmux_config_quote(hook.as_bytes()),
         );
     }
+
     let _ = writeln!(
         output,
         "run-shell -b {}",
         tmux_config_quote(supervisor_shell_command(setup).as_bytes()),
     );
+
     return Ok(output.into_bytes());
 }
 
@@ -398,10 +437,12 @@ pub(super) fn apply_tmux_setup(
         let original = client.output(["show-options", "-gv", "pane-launch-command"])?;
         client.set_option(OPTION_ORIGINAL_LAUNCH_HOOK, OsStr::from_bytes(&original))?;
     }
+
     client.set_option(
         OPTION_LAUNCH_HOOK,
         OsStr::new(if setup.launch_hook { "1" } else { "0" }),
     )?;
+
     client.set_option(OPTION_ORIGINAL_COMMAND, OsStr::from_bytes(original_command))?;
     client.set_option(OPTION_ORIGINAL_SHELL, OsStr::from_bytes(original_shell))?;
     client.set_option(OPTION_TERMTRACE, setup.termtrace.as_os_str())?;
@@ -415,6 +456,7 @@ pub(super) fn apply_tmux_setup(
             .as_ref()
             .map_or_else(|| return OsStr::new(""), |path| return path.as_os_str()),
     )?;
+
     client.set_option(OPTION_COVERAGE, OsStr::new(setup.coverage.as_str()))?;
     client.set_option(
         OPTION_AGGREGATE_MANIFEST,
@@ -423,11 +465,13 @@ pub(super) fn apply_tmux_setup(
             .as_ref()
             .map_or_else(|| return OsStr::new(""), |path| return path.as_os_str()),
     )?;
+
     client.set_option(OPTION_CELL_WIDTH, OsStr::new(&setup.cell_width.to_string()))?;
     client.set_option(
         OPTION_CELL_HEIGHT,
         OsStr::new(&setup.cell_height.to_string()),
     )?;
+
     client.set_option(OPTION_TERM, OsStr::new(&setup.term))?;
     set_scope_policy(client, &setup.scope)?;
     client.set_option(OPTION_VERSION, OsStr::new(TMUX_INTEGRATION_VERSION))?;
@@ -435,25 +479,32 @@ pub(super) fn apply_tmux_setup(
         launch_option(setup),
         tmux_wrapper_command(setup).as_os_str(),
     )?;
+
     let hook = tmux_hook_command();
+
     for name in GUARDED_HOOKS {
         client.set_hook(name, hook.as_os_str())?;
     }
+
     return Ok(());
 }
 
 pub(super) fn rollback_tmux_setup(client: &TmuxClient, original_command: &[u8]) -> Result<()> {
     let launch_hook = option_text(client, OPTION_LAUNCH_HOOK)? == "1";
     restore_launch_hook(client)?;
+
     if !launch_hook {
         client.set_option("default-command", OsStr::from_bytes(original_command))?;
     }
+
     for name in GUARDED_HOOKS {
         let _ = client.unset_hook(name);
     }
+
     for name in RESERVED_OPTIONS {
         let _ = client.unset_option(name);
     }
+
     return Ok(());
 }
 
@@ -465,18 +516,16 @@ pub(super) fn tmux_wrapper_command(setup: &PreparedTmuxSetup) -> OsString {
     command.push(b' ');
     command.extend_from_slice(&shell_quote(setup.termtrace.as_os_str().as_bytes()));
     command.extend_from_slice(b" tmux run --response quiet");
+
     if setup.launch_hook {
         command.extend_from_slice(b" --pane-launch -- \"$@\"");
     }
+
     return OsString::from_vec(command);
 }
 
 pub(super) fn launch_option(setup: &PreparedTmuxSetup) -> &'static str {
-    return if setup.launch_hook {
-        "pane-launch-command"
-    } else {
-        "default-command"
-    };
+    return if setup.launch_hook { "pane-launch-command" } else { "default-command" };
 }
 
 fn restore_launch_hook(client: &TmuxClient) -> Result<()> {
@@ -484,6 +533,7 @@ fn restore_launch_hook(client: &TmuxClient) -> Result<()> {
         let original = client.option(OPTION_ORIGINAL_LAUNCH_HOOK)?;
         client.set_option("pane-launch-command", OsStr::from_bytes(&original))?;
     }
+
     return Ok(());
 }
 
@@ -501,5 +551,6 @@ pub(super) fn supervisor_shell_command(setup: &PreparedTmuxSetup) -> OsString {
     command.push(b' ');
     command.extend_from_slice(&shell_quote(setup.termtrace.as_os_str().as_bytes()));
     command.extend_from_slice(b" tmux watchdog --response quiet");
+
     return OsString::from_vec(command);
 }

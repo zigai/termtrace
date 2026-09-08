@@ -10,6 +10,7 @@ use crate::{
     artifact::metadata::{ArtifactMember, ArtifactSensitivity},
     value::ByteString,
 };
+
 /// Reserved manifest filename at a bundle root.
 pub const BUNDLE_MANIFEST_NAME: &str = "manifest.json";
 /// Stable bundle manifest format identifier.

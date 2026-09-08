@@ -2,6 +2,7 @@ use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
 mod native_screenshot;
+
 use args::ArtifactSubcommand;
 
 use std::{
@@ -16,8 +17,8 @@ use std::{
 
 use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::{
+    timeline::{resolve_session_source_selection, SourceRange},
     Error,
-    timeline::{SourceRange, resolve_session_source_selection},
 };
 use termtrace_evidence::{
     artifact::write_secure,
@@ -31,13 +32,13 @@ use termtrace_export::{
     bundle::{create as create_bundle, plan as plan_bundle, verify_profile},
 };
 use termtrace_media::native_capture::{
-    CaptureKind, CaptureOptions, capture, native_capture_target,
+    capture, native_capture_target, CaptureKind, CaptureOptions,
 };
 use termtrace_media::presentation::{
-    EDIT_PLAN_VERSION, EditPlan, PixelTransform, PresentationDelivery, PresentationSource,
-    PresentationSourceRequest, PreviewOptions, VideoIdlePolicy, VideoRenderConfig,
     export as export_presentation, plan_with_source as plan_presentation,
     preview as preview_presentation, read_edit_plan, video_clip_ranges_session, video_clips,
+    EditPlan, PixelTransform, PresentationDelivery, PresentationSource, PresentationSourceRequest,
+    PreviewOptions, VideoIdlePolicy, VideoRenderConfig, EDIT_PLAN_VERSION,
 };
 use termtrace_media::save::{save, save_screenshot_batch};
 use termtrace_model::{
@@ -75,6 +76,7 @@ pub(super) fn run_export_asciicast(
 ) -> Result<ExitCode> {
     let output = arguments.out;
     export_asciicast(arguments.session, &output).into_diagnostic()?;
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -89,23 +91,28 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
     let bytes = if arguments.input == Path::new("-") {
         let mut bytes: Vec<u8> = Vec::new();
         io::stdin().read_to_end(&mut bytes).into_diagnostic()?;
+
         bytes
     } else {
         fs_err::read(&arguments.input).into_diagnostic()?
     };
+
     if bytes.is_empty() {
         return Err(miette::miette!("ANSI import input must not be empty"));
     }
+
     if arguments.out.exists() {
         return Err(Error::ArtifactExists {
             path: arguments.out,
         })
         .into_diagnostic();
     }
+
     let parent = arguments
         .out
         .parent()
         .ok_or_else(|| miette::miette!("ANSI import destination has no parent"))?;
+
     fs_err::create_dir_all(parent).into_diagnostic()?;
     let input = parent.join(format!(".ansi-import-{}.tmp", uuid::Uuid::now_v7()));
     write_secure(&input, &bytes).into_diagnostic()?;
@@ -137,8 +144,10 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .output();
+
     let cleanup = fs_err::remove_file(&input);
     let process = process.into_diagnostic()?;
+
     cleanup.into_diagnostic()?;
     if !process.status.success() {
         return Err(miette::miette!(
@@ -147,6 +156,7 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
             String::from_utf8_lossy(&process.stderr)
         ));
     }
+
     validate_completed_session(&arguments.out).into_diagnostic()?;
     let mut cursor = EventLogCursor::open(arguments.out.join("events.jsonl")).into_diagnostic()?;
     let mut offset = 0_usize;
@@ -158,14 +168,17 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
                     "ANSI import canonical output does not match the exact source bytes"
                 ));
             }
+
             offset = end;
         }
     }
+
     if offset != bytes.len() {
         return Err(miette::miette!(
             "ANSI import canonical output does not match the exact source bytes"
         ));
     }
+
     let manifest = read_manifest(&arguments.out).into_diagnostic()?;
     if manifest
         .import_provenance
@@ -180,6 +193,7 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
             "ANSI import session did not bind its source provenance"
         ));
     }
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -204,13 +218,16 @@ pub(super) fn run_video_facade(
                 "video output must use the `.mp4` extension"
             ));
         }
+
         if out.exists() {
             return Err(Error::ArtifactExists { path: out.clone() }).into_diagnostic();
         }
+
         let sidecar = video_sidecar_path(out);
         if sidecar.exists() {
             return Err(Error::ArtifactExists { path: sidecar }).into_diagnostic();
         }
+
         Some(sidecar)
     } else {
         None
@@ -220,12 +237,14 @@ pub(super) fn run_video_facade(
     if resolved.lifecycle != RegistryLifecycle::Completed {
         return write_session_lifecycle(response, &resolved, "video", ExitCode::FAILURE);
     }
+
     let session = resolved.path;
     if arguments.renderer == VideoSourceArg::Native && arguments.semantic_raster_profile.is_some() {
         return Err(miette::miette!(
             "--semantic-raster-profile configures semantic video only"
         ));
     }
+
     if arguments.renderer == VideoSourceArg::Native
         && !session.join("visual/manifest.json").is_file()
     {
@@ -234,6 +253,7 @@ pub(super) fn run_video_facade(
             session.display()
         ));
     }
+
     let preset_config = VideoPresetConfig::from_preset(arguments.preset);
     let requested_fps = arguments.fps;
     let provisional_fps = requested_fps.unwrap_or(preset_config.fps);
@@ -252,8 +272,10 @@ pub(super) fn run_video_facade(
         response,
         format_args!("Planning video from {}...", session.display()),
     );
+
     let plan = if let Some(edit_path) = arguments.edit.as_ref() {
         let edit = read_edit_plan(edit_path).into_diagnostic()?;
+
         plan_presentation(&session, &edit, source).into_diagnostic()?
     } else {
         validate_completed_session(&session).into_diagnostic()?;
@@ -262,6 +284,7 @@ pub(super) fn run_video_facade(
             .terminal
             .as_ref()
             .map_or(0, |record| return record.monotonic_ns);
+
         let mut selected = resolve_session_source_selection(
             &session,
             None,
@@ -280,6 +303,7 @@ pub(super) fn run_video_facade(
                 "video range must contain positive recorded time"
             ));
         }
+
         let ranges = video_clip_ranges_session(
             &session,
             selected,
@@ -289,16 +313,19 @@ pub(super) fn run_video_facade(
             }),
         )
         .into_diagnostic()?;
+
         let provisional =
             facade_edit_plan(&arguments, &ranges, provisional_fps, hold_start, hold_end)?;
         let first_plan = plan_presentation(&session, &provisional, source).into_diagnostic()?;
         let edit = facade_edit_plan(&arguments, &ranges, first_plan.fps, hold_start, hold_end)?;
+
         if edit == provisional {
             first_plan
         } else {
             plan_presentation(&session, &edit, source).into_diagnostic()?
         }
     };
+
     if requested_fps.is_some_and(|fps| return fps != plan.fps) {
         return Err(miette::miette!(
             "requested {} FPS but the verified native capture is {} FPS; recapture at the requested rate",
@@ -306,6 +333,7 @@ pub(super) fn run_video_facade(
             plan.fps
         ));
     }
+
     if arguments.dry_run {
         return write_json_line(response, &plan);
     }
@@ -324,6 +352,7 @@ pub(super) fn run_video_facade(
             },
         )
         .into_diagnostic()?;
+
         return write_json_line(
             response,
             &serde_json::json!({
@@ -343,6 +372,7 @@ pub(super) fn run_video_facade(
     let output = arguments
         .out
         .ok_or_else(|| miette::miette!("video export requires --out"))?;
+
     let sidecar = sidecar.ok_or_else(|| miette::miette!("video export sidecar is missing"))?;
     write_progress(
         response,
@@ -356,6 +386,7 @@ pub(super) fn run_video_facade(
             }
         ),
     );
+
     let outcome = export_presentation(&plan, &sidecar).into_diagnostic()?;
     fs_err::hard_link(&outcome.video, &output)
         .map_err(|source| {
@@ -365,10 +396,12 @@ pub(super) fn run_video_facade(
             };
         })
         .into_diagnostic()?;
+
     write_progress(
         response,
         "Published video and manifested render configuration.",
     );
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -400,16 +433,19 @@ fn facade_edit_plan(
     let hold_start_ms = duration_millis(hold_start, "--hold-start")?;
     let hold_end_ms = duration_millis(hold_end, "--hold-end")?;
     let clips = video_clips(ranges, fps, hold_start_ms, hold_end_ms).into_diagnostic()?;
+
     let mut transforms: Vec<PixelTransform> = Vec::new();
     if arguments.cursor_style == VideoCursorStyleArg::Hidden {
         transforms.push(PixelTransform::CursorMask);
     }
+
     if let Some(resolution) = arguments.resolution {
         transforms.push(PixelTransform::Resize {
             width: resolution.width,
             height: resolution.height,
         });
     }
+
     if let Some(scale) = arguments.scale
         && scale != 1
     {
@@ -418,8 +454,10 @@ fn facade_edit_plan(
             denominator: 1,
         });
     }
+
     let preset_config = VideoPresetConfig::from_preset(arguments.preset);
     let delivery = preset_config.delivery;
+
     return Ok(EditPlan {
         version: EDIT_PLAN_VERSION,
         clips,
@@ -519,6 +557,7 @@ impl VideoPresetConfig {
         return explicit.map_or(self.default_raster_profile, Into::into);
     }
 }
+
 #[cfg(test)]
 fn semantic_raster_profile(
     preset: VideoPresetArg,
@@ -542,6 +581,7 @@ fn video_sidecar_path(output: &Path) -> PathBuf {
     {
         return sidecar;
     }
+
     return Path::new(".").join(sidecar);
 }
 
@@ -562,6 +602,7 @@ fn require_video_render_capabilities(source: PresentationSourceRequest) -> Resul
     if let Some(source_capability) = source_capability {
         require_cli_capability(source_capability)?;
     }
+
     return require_cli_capability(presentation_capability);
 }
 
@@ -571,7 +612,9 @@ pub(super) fn run_capture(
 ) -> Result<ExitCode> {
     let (start_monotonic_ns, end_monotonic_ns) =
         resolve_cli_range(&arguments.session, &arguments.range)?;
+
     require_cli_capability(NATIVE_VIDEO_CAPABILITY)?;
+
     let viewport = match (arguments.width, arguments.height) {
         (Some(width), Some(height)) => Some(CaptureTarget { width, height }),
         (None, None) => None,
@@ -581,9 +624,11 @@ pub(super) fn run_capture(
             ));
         }
     };
+
     let helper = env::current_exe().into_diagnostic()?;
     let (target, geometry_solver) =
         native_capture_target(&helper, &arguments.session, viewport).into_diagnostic()?;
+
     let outcome = capture(
         &helper,
         &CaptureOptions {
@@ -604,6 +649,7 @@ pub(super) fn run_capture(
         },
     )
     .into_diagnostic()?;
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -625,11 +671,13 @@ pub(super) fn run_save(response: &mut ResponseWriter, arguments: SaveArgs) -> Re
         Some(StatePoint::LatestPresented),
         "save",
     )?;
+
     let formats = arguments
         .format
         .into_iter()
         .map(SaveFormat::from)
         .collect::<Vec<_>>();
+
     let outcome = save(
         &session,
         &arguments.out,
@@ -639,6 +687,7 @@ pub(super) fn run_save(response: &mut ResponseWriter, arguments: SaveArgs) -> Re
         None,
     )
     .into_diagnostic()?;
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -687,20 +736,24 @@ pub(super) fn run_screenshot(
             .into_iter()
             .map(|label| return StatePoint::Marker { label }),
     );
+
     if points.is_empty() {
         points.push(StatePoint::LatestPresented);
     }
+
     if arguments.renderer == ShowRenderer::Native {
         if arguments.format != ScreenshotFormat::Png {
             return Err(miette::miette!(
                 "native screenshots are PNG; semantic SVG fallback is disabled"
             ));
         }
+
         if arguments.include_hidden {
             return Err(miette::miette!(
                 "native screenshots cannot render hidden synchronized-output states"
             ));
         }
+
         return native_screenshot::run(
             response,
             &session,
@@ -709,19 +762,23 @@ pub(super) fn run_screenshot(
             arguments.viewport,
         );
     }
+
     if arguments.viewport.is_some() || arguments.strict {
         return Err(miette::miette!(
             "native viewport options require --renderer native"
         ));
     }
+
     let format = match arguments.format {
         ScreenshotFormat::Svg => SaveFormat::Svg,
         ScreenshotFormat::Png => SaveFormat::Png,
     };
+
     let filename = match arguments.format {
         ScreenshotFormat::Svg => "screen.svg",
         ScreenshotFormat::Png => "screen.png",
     };
+
     if points.len() > 1 {
         let manifest = save_screenshot_batch(
             &session,
@@ -731,7 +788,9 @@ pub(super) fn run_screenshot(
             arguments.include_hidden,
         )
         .into_diagnostic()?;
+
         let manifest_path = arguments.out.join("batch-manifest.json");
+
         return write_json_line(
             response,
             &serde_json::json!({
@@ -745,10 +804,12 @@ pub(super) fn run_screenshot(
             }),
         );
     }
+
     let point = points
         .into_iter()
         .next()
         .ok_or_else(|| return miette::miette!("missing screenshot point"))?;
+
     let outcome = save(
         &session,
         &arguments.out,
@@ -758,8 +819,10 @@ pub(super) fn run_screenshot(
         None,
     )
     .into_diagnostic()?;
+
     let image_path = outcome.directory.join(filename);
     let manifest_path = outcome.directory.join("save-manifest.json");
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -784,8 +847,10 @@ pub(super) fn run_bug_report_facade(
     if resolved.lifecycle != RegistryLifecycle::Completed {
         return write_session_lifecycle(response, &resolved, "bug_report", ExitCode::FAILURE);
     }
+
     let manifest = create_bug_report(&resolved.path, &arguments.out, arguments.screenshot)
         .into_diagnostic()?;
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -801,6 +866,7 @@ pub(super) fn run_bundle(response: &mut ResponseWriter, arguments: BundleArgs) -
     if arguments.dry_run {
         return write_json_line(response, &plan_bundle(profile));
     }
+
     let session = resolve_session_path(arguments.session)?;
     if arguments.archive {
         if arguments.out.exists() {
@@ -809,16 +875,20 @@ pub(super) fn run_bundle(response: &mut ResponseWriter, arguments: BundleArgs) -
             })
             .into_diagnostic();
         }
+
         let parent = arguments
             .out
             .parent()
             .ok_or_else(|| return miette::miette!("bundle archive path has no parent"))?;
+
         let staging = parent.join(format!(".bundle-source-{}.tmp", uuid::Uuid::now_v7()));
         let manifest = create_bundle(&session, &staging, profile, None).into_diagnostic()?;
         let policy = BundleVerificationPolicy::new(&session, profile);
         let result = create_bundle_archive(&staging, &arguments.out, &policy);
         let _cleanup = fs_err::remove_dir_all(&staging);
+
         result.into_diagnostic()?;
+
         return write_json_line(
             response,
             &serde_json::json!({
@@ -830,7 +900,9 @@ pub(super) fn run_bundle(response: &mut ResponseWriter, arguments: BundleArgs) -
             }),
         );
     }
+
     let manifest = create_bundle(&session, &arguments.out, profile, None).into_diagnostic()?;
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -852,6 +924,7 @@ pub(super) fn run_bundle_verify(
     } else {
         verify_bundle_archive(&arguments.bundle, &policy).into_diagnostic()?
     };
+
     return write_json_line(
         response,
         &serde_json::json!({

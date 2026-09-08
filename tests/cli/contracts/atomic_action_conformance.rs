@@ -65,9 +65,11 @@ struct SdkSummary {
 fn shared_fixture_matches_through_every_public_sdk_facade() {
     let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("fixtures/conformance/actions/atomic-action.json");
+
     let fixture: Fixture =
         serde_json::from_slice(&fs_err::read(&fixture_path).expect("shared atomic-action fixture"))
             .expect("shared atomic-action fixture JSON");
+
     let temporary = TempDir::new().expect("temporary directory");
 
     let rust = rust_summary(&fixture, temporary.path());
@@ -97,6 +99,7 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
         env!("CARGO_BIN_EXE_termtrace"),
         temporary.path().join("resource-action-evidence"),
     );
+
     let mut session = terminal
         .launch([
             OsString::from("/bin/sh"),
@@ -108,12 +111,15 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
         .geometry(160, 45)
         .start()
         .expect("launch oversized action fixture");
+
     wait_for_output(session.path(), b"READY", Duration::from_secs(5))
         .expect("oversized action fixture ready");
+
     let initial = session
         .screen()
         .frame(ScreenProjectionRequest::default())
         .expect("initial oversized action frame");
+
     let atoms = [
         InputAtom::Text("once".to_owned()),
         InputAtom::Key {
@@ -121,6 +127,7 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
             modifiers: KeyModifiers::default(),
         },
     ];
+
     let options = ActionOptions {
         request_id: Some(
             Uuid::parse_str("019fddda-17c8-7000-87da-8785e71ab5e1")
@@ -147,6 +154,7 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
     let error = session
         .act(&atoms, options.clone())
         .expect_err("oversized action projection must fail loudly");
+
     let Error::ActionTerminatingFrame {
         request_id,
         retry_safety,
@@ -165,6 +173,7 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
     let retry = session
         .act(&atoms, options)
         .expect_err("cached oversized action retry must retain its failure");
+
     let Error::ActionTerminatingFrame {
         request_id: retry_request_id,
         retry_safety: retry_safety_retry,
@@ -181,6 +190,7 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
     assert_eq!(retry_limit, limit);
     wait_for_output(session.path(), b"COUNT:1:once", Duration::from_secs(5))
         .expect("first action input reached the fixture");
+
     let frame = session
         .screen()
         .frame(ScreenProjectionRequest::default())
@@ -199,6 +209,7 @@ fn action_termination_frame_remains_live_actor_evidence() {
         env!("CARGO_BIN_EXE_termtrace"),
         temporary.path().join("action-quality-evidence"),
     );
+
     let mut session = terminal
         .launch([
             OsString::from("/bin/sh"),
@@ -207,8 +218,10 @@ fn action_termination_frame_remains_live_actor_evidence() {
         ])
         .start()
         .expect("launch action quality fixture");
+
     wait_for_output(session.path(), b"READY", Duration::from_secs(5))
         .expect("action quality fixture ready");
+
     let result = session
         .act(
             &[
@@ -230,6 +243,7 @@ fn action_termination_frame_remains_live_actor_evidence() {
             },
         )
         .expect("child-terminated action result");
+
     let ActionCompletion::Screen {
         quality:
             ScreenPostconditionQuality::ChildCompleted | ScreenPostconditionQuality::OutputClosed,
@@ -238,6 +252,7 @@ fn action_termination_frame_remains_live_actor_evidence() {
     else {
         panic!("unexpected action completion: {:?}", result.completion);
     };
+
     assert_eq!(
         result.frame.capture_quality,
         CaptureQuality::Live,
@@ -256,10 +271,12 @@ fn force_close_terminates_the_recorded_process_group() {
         env!("CARGO_BIN_EXE_termtrace"),
         temporary.path().join("force-close-evidence"),
     );
+
     let command = format!(
         "trap '' HUP TERM; printf '%s' $$ > '{}'; exec sleep 600",
         pid_path.display()
     );
+
     let mut session = terminal
         .launch([
             OsString::from("/bin/sh"),
@@ -268,10 +285,13 @@ fn force_close_terminates_the_recorded_process_group() {
         ])
         .start()
         .expect("launch force-close fixture");
+
     let deadline = Instant::now() + Duration::from_secs(5);
+
     while !pid_path.exists() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
     }
+
     let recorded_pid: u32 = fs_err::read_to_string(&pid_path)
         .expect("recorded process PID")
         .parse()
@@ -281,9 +301,11 @@ fn force_close_terminates_the_recorded_process_group() {
 
     let process_path = PathBuf::from(format!("/proc/{recorded_pid}"));
     let deadline = Instant::now() + Duration::from_secs(2);
+
     while process_path.exists() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
     }
+
     assert!(
         !process_path.exists(),
         "recorded process remained alive after force-close"
@@ -300,22 +322,26 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
         env!("CARGO_BIN_EXE_termtrace"),
         temporary.join("rust-action-evidence"),
     );
+
     let command: Vec<OsString> = fixture.command.iter().map(OsString::from).collect();
     let mut session = terminal
         .launch(command)
         .geometry(fixture.region.width, fixture.region.height)
         .start()
         .expect("launch Rust action fixture");
+
     wait_for_output(
         session.path(),
         fixture.ready_text.as_bytes(),
         Duration::from_secs(5),
     )
     .expect("Rust fixture ready");
+
     let initial = session
         .screen()
         .frame(ScreenProjectionRequest::default())
         .expect("initial Rust frame");
+
     let atoms: Vec<InputAtom> = fixture
         .input
         .iter()
@@ -330,6 +356,7 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
             };
         })
         .collect();
+
     let options = ActionOptions {
         request_id: Some(fixture.request_id),
         if_state: Some(initial.state_hash),
@@ -351,9 +378,11 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
     let result = session
         .act(&atoms, options.clone())
         .expect("Rust atomic action");
+
     let retry = session
         .act(&atoms, options)
         .expect("idempotent Rust action retry");
+
     let stable = session
         .screen()
         .capture_stable(StableCaptureOptions {
@@ -363,6 +392,7 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
             allow_incomplete: false,
         })
         .expect("Rust stable capture");
+
     let matched = matches!(
         result.completion,
         ActionCompletion::Screen {
@@ -371,11 +401,13 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
                 | ScreenPostconditionQuality::MatchedUnsettled,
         }
     ) && frame_contains(&result.frame, &fixture.expected_text);
+
     let actor_boundaries = matches!(
         &result.frame.source,
         ScreenFrameSource::Actor { boundaries, .. }
             if boundaries == &result.boundaries
     );
+
     let summary = SdkSummary {
         state_hash_valid: result.frame.state_hash.len() == 64,
         atom_count: result.input.atom_count,
@@ -385,9 +417,11 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
         stable_quality: stable.quality == StableCaptureQuality::Stable,
         actor_boundaries,
     };
+
     session
         .stop(Some(Duration::from_secs(5)))
         .expect("stop Rust fixture");
+
     return summary;
 }
 
@@ -397,11 +431,7 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
 )]
 fn python_summary(fixture: &Path, temporary: &Path, asynchronous: bool) -> SdkSummary {
     let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/python");
-    let code = if asynchronous {
-        PYTHON_ASYNC_CONFORMANCE
-    } else {
-        PYTHON_SYNC_CONFORMANCE
-    };
+    let code = if asynchronous { PYTHON_ASYNC_CONFORMANCE } else { PYTHON_SYNC_CONFORMANCE };
     let output = StdCommand::new("uv")
         .args(["run", "--isolated", "--project"])
         .arg(package)
@@ -422,6 +452,7 @@ fn python_summary(fixture: &Path, temporary: &Path, asynchronous: bool) -> SdkSu
         "Python action conformance failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+
     return serde_json::from_slice(&output.stdout).expect("Python action summary JSON");
 }
 
@@ -445,6 +476,7 @@ fn typescript_summary(fixture: &Path, temporary: &Path) -> SdkSummary {
         "TypeScript action conformance failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+
     return serde_json::from_slice(&output.stdout).expect("TypeScript action summary JSON");
 }
 

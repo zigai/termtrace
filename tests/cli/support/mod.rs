@@ -1,7 +1,7 @@
 //! Shared imports and helpers for CLI integration tests.
 
-use assert_cmd::Command as AssertCommand;
 pub(crate) use assert_cmd::cargo::CargoError;
+use assert_cmd::Command as AssertCommand;
 pub(crate) use predicates::prelude::*;
 pub(crate) use std::{
     collections::{BTreeMap, BTreeSet},
@@ -12,7 +12,7 @@ pub(crate) use std::{
     ops::{Deref, DerefMut},
     os::unix::{
         ffi::{OsStrExt, OsStringExt},
-        fs::{PermissionsExt, symlink},
+        fs::{symlink, PermissionsExt},
     },
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, Output, Stdio},
@@ -27,12 +27,14 @@ impl Command {
     pub(crate) fn cargo_bin<S: AsRef<str>>(name: S) -> Result<Self, CargoError> {
         let mut command = AssertCommand::cargo_bin(name)?;
         command.env_remove("TERMTRACE_RESPONSE");
+
         return Ok(Self(command));
     }
 
     pub(crate) fn new<S: AsRef<OsStr>>(program: S) -> Self {
         let mut command = AssertCommand::new(program);
         command.env_remove("TERMTRACE_RESPONSE");
+
         return Self(command);
     }
 }
@@ -58,6 +60,7 @@ impl StdCommand {
     pub(crate) fn new<S: AsRef<OsStr>>(program: S) -> Self {
         let mut command = ProcessCommand::new(program.as_ref());
         command.env_remove("TERMTRACE_RESPONSE");
+
         return Self(command);
     }
 }
@@ -85,6 +88,7 @@ impl TempDir {
             env::var_os("TERMTRACE_CI_EVIDENCE_ROOT").map_or_else(tempfile::TempDir::new, |root| {
                 return tempfile::TempDir::new_in(root);
             });
+
         return directory.map(Self);
     }
 
@@ -100,6 +104,7 @@ impl Drop for TempDir {
         }
     }
 }
+
 pub(crate) use termtrace_engine::{
     inspection::{inspect_session, wait_for_completion, wait_for_output},
     recording::control_socket_name,
@@ -114,7 +119,7 @@ pub(crate) use termtrace_evidence::{
 pub(crate) use termtrace_model::{
     execution::environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},
     execution::event::{
-        EVENT_LOG_VERSION, Event, InputDescriptor, InputKind, InputSource, OperationStatus,
+        Event, InputDescriptor, InputKind, InputSource, OperationStatus, EVENT_LOG_VERSION,
     },
     execution::provenance::{
         ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind, ProvenanceSensitivity,
@@ -129,16 +134,16 @@ pub(crate) use termtrace_model::{
     terminal::analysis::DiagnosticCheck,
     terminal::observation::StatePoint,
     terminal::replay::{
-        GHOSTTY_REVISION, IndexOptions, ReplayManifest, SourceRange, StateRecord, StateSelection,
-        StateSelector,
+        IndexOptions, ReplayManifest, SourceRange, StateRecord, StateSelection, StateSelector,
+        GHOSTTY_REVISION,
     },
     terminal::screen::{ScreenFrameData, ScreenFrameSource, ScreenProjectionRequest, ScreenRegion},
     terminal::state::{KeyModifiers, NamedKey},
     value::ByteString,
 };
 pub(crate) use termtrace_sdk::{
-    Error, StableCaptureOptions, Terminal as ClientTerminal, control_endpoint_is_reachable,
-    send_request, send_request_response, wait_for_screen,
+    control_endpoint_is_reachable, send_request, send_request_response, wait_for_screen, Error,
+    StableCaptureOptions, Terminal as ClientTerminal,
 };
 pub(crate) use zstd::stream::read::Decoder;
 
@@ -159,6 +164,7 @@ pub(crate) fn canonical_output_bytes(log: &EventLog) -> Vec<u8> {
 
 pub(crate) fn wait_for_control(session: &Path) {
     let deadline = Instant::now() + Duration::from_secs(5);
+
     while !control_endpoint_is_reachable(session) {
         assert!(
             Instant::now() < deadline,
@@ -185,6 +191,7 @@ pub(crate) fn compact_json_line(bytes: &[u8]) -> serde_json::Value {
         "result must not contain pretty-JSON indentation: {}",
         String::from_utf8_lossy(bytes)
     );
+
     return serde_json::from_slice(bytes).expect("compact result JSON");
 }
 
@@ -193,6 +200,7 @@ pub(crate) fn wait_for_path(path: &Path) {
     while !path.exists() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
     }
+
     assert!(
         path.exists(),
         "path did not become ready: {}",
@@ -211,16 +219,20 @@ pub(crate) fn assert_late_checkpoint_inspection(session: &Path) {
         .arg(session)
         .assert()
         .success();
+
     let entries =
         fs_err::read_to_string(session.join("derived/state-index.jsonl")).expect("state index");
+
     let entries = entries
         .lines()
         .map(|line| return serde_json::from_str::<serde_json::Value>(line).expect("index entry"))
         .collect::<Vec<_>>();
+
     let late_state = entries
         .last()
         .and_then(|entry| return entry["state_id"].as_u64())
         .expect("late state id");
+
     let checkpoint = entries
         .iter()
         .filter(|entry| return entry["checkpoint"] == true)
@@ -256,6 +268,7 @@ pub(crate) fn assert_late_checkpoint_inspection(session: &Path) {
 pub(crate) fn validate_json_file(schema: &str, instance: &Path) {
     let value = serde_json::from_slice(&fs_err::read(instance).expect("instance file"))
         .expect("instance JSON");
+
     validate_json_value(schema, &value);
 }
 
@@ -281,6 +294,7 @@ pub(crate) fn read_zstd_text(path: &Path) -> String {
     decoder
         .read_to_string(&mut text)
         .expect("decompress JSONL artifact");
+
     return text;
 }
 
@@ -291,8 +305,10 @@ pub(crate) fn read_zstd_text(path: &Path) -> String {
 )]
 pub(crate) fn validate_json_lines_text(schema: &str, text: &str) {
     let validator = compile_schema(schema);
+
     for (index, line) in text.lines().enumerate() {
         let value = serde_json::from_str(line).expect("JSONL value");
+
         if let Err(error) = validator.validate(&value) {
             panic!("{schema} rejected record {}: {error}", index + 1);
         }
@@ -307,8 +323,10 @@ pub(crate) fn compile_schema(schema: &str) -> jsonschema::Validator {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("schemas")
         .join(schema);
+
     let schema_value: serde_json::Value =
         serde_json::from_slice(&fs_err::read(path).expect("schema file")).expect("schema JSON");
+
     return jsonschema::validator_for(&schema_value).expect("valid schema");
 }
 

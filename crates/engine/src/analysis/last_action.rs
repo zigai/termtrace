@@ -7,7 +7,7 @@ use std::{
 
 use termtrace_evidence::{
     event_log::EventLog,
-    request_journal::{MUTATION_JOURNAL_NAME, MutationJournalCursor},
+    request_journal::{MutationJournalCursor, MUTATION_JOURNAL_NAME},
 };
 use termtrace_model::{
     execution::event::{Event, EventRecord, OperationStatus},
@@ -25,13 +25,14 @@ use termtrace_terminal::frame_event_records;
 use uuid::Uuid;
 
 use crate::{
-    Error, Result,
     analysis::diagnostics::diagnose_states,
     diff::diff_inspections_with_semantic_states,
-    replay::{StateInspection, visit_states},
+    replay::{visit_states, StateInspection},
+    Error, Result,
 };
 
 mod stream;
+
 pub use stream::analyze_last_action_session;
 
 const MAX_ACTION_WARNINGS: usize = 16;
@@ -61,10 +62,12 @@ pub fn analyze_last_action(
             "broad-change percentage must be between 1 and 100",
         ));
     }
+
     let action = last_input_action(session, log)?;
     let from_point = StatePoint::EventSeq {
         event_seq: action.request_event_start_seq,
     };
+
     let mut before_inspection: Option<StateInspection> = None;
     let mut after_inspection: Option<StateInspection> = None;
     let mut presentation_eligible_states = 0_u64;
@@ -82,11 +85,14 @@ pub fn analyze_last_action(
         } else if record.presented {
             presentation_eligible_states = presentation_eligible_states.saturating_add(1);
         }
+
         after_inspection = Some(StateInspection {
             record: record.clone(),
             state: state.clone(),
         });
+
         states.push(record.clone());
+
         return Ok(());
     })?;
 
@@ -94,11 +100,13 @@ pub fn analyze_last_action(
         .ok_or_else(|| return task_error("no state matches action start sequence"))?;
     let to_inspection =
         after_inspection.ok_or_else(|| return task_error("no state matches final sequence"))?;
+
     let to_point = StatePoint::StateId {
         state_id: to_inspection.record.state_id,
     };
     let (difference, before, after) =
         diff_inspections_with_semantic_states(from_point, to_point, from_inspection, to_inspection);
+
     let output_generated = output_summary(log, action.intent_event_seq);
     let tokens = frame_event_records(&log.events)?;
     let diagnostic_report = diagnose_states(
@@ -109,6 +117,7 @@ pub fn analyze_last_action(
         &states,
         &tokens,
     );
+
     let action_token_ids = tokens
         .iter()
         .filter(|token| {
@@ -119,18 +128,21 @@ pub fn analyze_last_action(
         })
         .map(|token| return token.token_id)
         .collect::<Vec<_>>();
+
     let (findings, findings_truncated) = bounded_action_findings(
         diagnostic_report.findings,
         difference.from.state_id,
         difference.to.state_id,
         action_token_ids.first().copied(),
     );
+
     let source_final_event_hash = log
         .events
         .last()
         .ok_or_else(|| return task_error("canonical input action has no event record"))?
         .hash
         .clone();
+
     return Ok(finish_analysis(ActionAnalysisInputs {
         session_id: log.header.session_id,
         source_final_event_hash,
@@ -188,6 +200,7 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
     let cells_changed = difference.rows.iter().fold(0_u64, |total, row| {
         return total.saturating_add(u64::try_from(row.cells.len()).unwrap_or(u64::MAX));
     });
+
     let mode_changes = changed_modes(difference.modes.as_ref());
     let inspection = LastActionReport {
         format: "termtrace-last-action".to_owned(),
@@ -207,6 +220,7 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
         warnings,
         warnings_truncated,
     };
+
     let diagnostics = LastActionDiagnosticsReport {
         format: "termtrace-last-action-diagnostics".to_owned(),
         version: 1,
@@ -218,6 +232,7 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
         findings,
         findings_truncated,
     };
+
     return LastActionAnalysis {
         inspection,
         diagnostics,
@@ -226,15 +241,18 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
 
 fn last_input_action(session: &Path, log: &EventLog) -> Result<LastActionBoundary> {
     let mut journal = MutationJournalCursor::open(&session.join(MUTATION_JOURNAL_NAME))?;
+
     let mut last_action = None;
     while let Some(request) = journal.next_record()? {
         if let Some(action) = journaled_input_action(log, &request)? {
             last_action = Some(action);
         }
     }
+
     if let Some(action) = last_action {
         return Ok(action);
     }
+
     return unjournaled_input_action(log);
 }
 
@@ -251,9 +269,11 @@ fn journaled_input_action(
                 && matches!(record.event, Event::InputIntent { .. });
         })
         .collect::<Vec<_>>();
+
     if intents.is_empty() {
         return Ok(None);
     }
+
     return Ok(Some(action_boundary(
         log,
         Some(request.request_id),
@@ -270,6 +290,7 @@ fn unjournaled_input_action(log: &EventLog) -> Result<LastActionBoundary> {
         .rev()
         .find(|record| return matches!(record.event, Event::InputIntent { .. }))
         .ok_or_else(|| return task_error("session contains no canonical input action"))?;
+
     return action_boundary(
         log,
         None,
@@ -293,6 +314,7 @@ fn action_boundary(
     let mut error_code = None;
     let mut first_intent_event_seq = None;
     let mut last_result_event_seq = None;
+
     for intent in intents {
         let Event::InputIntent {
             operation_id, data, ..
@@ -303,7 +325,9 @@ fn action_boundary(
         operation_ids.push(*operation_id);
         intended_bytes =
             intended_bytes.saturating_add(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX));
+
         first_intent_event_seq.get_or_insert(intent.seq);
+
         let (result_seq, atom_status, atom_bytes_written, atom_error_code) = log
             .events
             .iter()
@@ -322,17 +346,21 @@ fn action_boundary(
             .ok_or_else(|| return task_error("input intent has no canonical input result"))?;
         bytes_written = bytes_written.saturating_add(*atom_bytes_written);
         last_result_event_seq = Some(result_seq);
+
         if *atom_status == OperationStatus::Failed {
             status = OperationStatus::Failed;
+
             if error_code.is_none() {
                 error_code.clone_from(atom_error_code);
             }
         }
     }
+
     let intent_event_seq = first_intent_event_seq
         .ok_or_else(|| return task_error("input action has no canonical intent"))?;
     let result_event_seq = last_result_event_seq
         .ok_or_else(|| return task_error("input action has no canonical result"))?;
+
     return Ok(LastActionBoundary {
         request_id,
         atom_count: u32::try_from(operation_ids.len()).unwrap_or(u32::MAX),
@@ -362,6 +390,7 @@ fn output_summary(log: &EventLog, intent_event_seq: u64) -> ActionOutputSummary 
         .fold((0_u64, 0_u64), |(events, bytes), len| {
             return (events.saturating_add(1), bytes.saturating_add(len));
         });
+
     return ActionOutputSummary {
         event_count,
         byte_count,
@@ -379,11 +408,13 @@ fn changed_modes(change: Option<&ValueChange<ModeState>>) -> Vec<ActionModeChang
         .chain(after.keys())
         .copied()
         .collect::<BTreeSet<_>>();
+
     return keys
         .into_iter()
         .filter_map(|(ansi, number)| {
             let before = before.get(&(ansi, number)).copied().unwrap_or(false);
             let after = after.get(&(ansi, number)).copied().unwrap_or(false);
+
             return (before != after).then_some(ActionModeChange {
                 number,
                 ansi,
@@ -419,14 +450,18 @@ fn bounded_action_findings(
                 });
         })
         .collect::<Vec<_>>();
+
     let truncated = selected.len() > MAX_ACTION_FINDINGS;
+
     selected.truncate(MAX_ACTION_FINDINGS);
+
     for finding in &mut selected {
         finding.facts.truncate(MAX_FINDING_FACTS);
         finding.state_ids.truncate(MAX_FINDING_REFERENCES);
         finding.token_ids.truncate(MAX_FINDING_REFERENCES);
         finding.native_correlations.truncate(MAX_FINDING_REFERENCES);
     }
+
     return (selected, truncated);
 }
 
@@ -442,8 +477,10 @@ fn action_warnings(
     let changed_cells = rows.iter().fold(0_u64, |total, row| {
         return total.saturating_add(u64::try_from(row.cells.len()).unwrap_or(u64::MAX));
     });
+
     let total_cells = u64::from(after.cols.max(before.cols))
         .saturating_mul(u64::from(after.rows.max(before.rows)));
+
     let mut warnings = Vec::new();
     if total_cells > 0
         && changed_cells.saturating_mul(100)
@@ -457,6 +494,7 @@ fn action_warnings(
             )],
         });
     }
+
     if output.byte_count > 0 && presentation_eligible_states == 0 {
         warnings.push(ActionWarning {
             code: "output_without_presentation".to_owned(),
@@ -467,6 +505,7 @@ fn action_warnings(
             )],
         });
     }
+
     if !after.cursor.in_viewport {
         warnings.push(ActionWarning {
             code: "cursor_outside_expected_region".to_owned(),
@@ -474,6 +513,7 @@ fn action_warnings(
             facts: vec!["resulting cursor is outside the viewport".to_owned()],
         });
     }
+
     if after.modes.synchronized_output {
         warnings.push(ActionWarning {
             code: "synchronized_output_misuse".to_owned(),
@@ -483,6 +523,7 @@ fn action_warnings(
             ],
         });
     }
+
     for finding in findings {
         let code = match finding.code.as_str() {
             "presented_transient" | "clear_then_repaint" => "flicker",
@@ -492,6 +533,7 @@ fn action_warnings(
         if warnings.iter().any(|warning| return warning.code == code) {
             continue;
         }
+
         warnings.push(ActionWarning {
             code: code.to_owned(),
             confidence: finding.confidence,
@@ -503,7 +545,9 @@ fn action_warnings(
                 .collect(),
         });
     }
+
     let truncated = warnings.len() > MAX_ACTION_WARNINGS;
     warnings.truncate(MAX_ACTION_WARNINGS);
+
     return (warnings, truncated);
 }

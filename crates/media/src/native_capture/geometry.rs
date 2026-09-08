@@ -1,5 +1,13 @@
 use std::{env::temp_dir, fs, path::Path, time::Duration};
 
+use super::{
+    process::{
+        ghostty_overrides, spawn_geometry_probe, spawn_xvfb, wait_for_json, wait_for_success,
+        wait_for_x_socket, DisplayLease,
+    },
+    profile::materialize_profile,
+    Error, Result,
+};
 use termtrace_engine::{
     analysis::profile::ResolvedGhosttyProfile,
     recording::{resolve_ghostty_profile, restore_ghostty_profile},
@@ -9,21 +17,12 @@ use termtrace_evidence::{
     session::read_manifest,
 };
 use termtrace_model::{
-    artifact::visual::{GHOSTTY_EFFECTIVE_CONFIG_NAME, GeometryProbeAttempt, GeometrySolveReport},
+    artifact::visual::{GeometryProbeAttempt, GeometrySolveReport, GHOSTTY_EFFECTIVE_CONFIG_NAME},
     execution::session::{
-        CaptureTarget, GHOSTTY_REPLAY_PROFILE_NAME, GeometrySource, GhosttyVisualOverrides,
-        SessionGeometry,
+        CaptureTarget, GeometrySource, GhosttyVisualOverrides, SessionGeometry,
+        GHOSTTY_REPLAY_PROFILE_NAME,
     },
     value::geometry::TerminalGeometryReport,
-};
-
-use super::{
-    Error, Result,
-    process::{
-        DisplayLease, ghostty_overrides, spawn_geometry_probe, spawn_xvfb, wait_for_json,
-        wait_for_success, wait_for_x_socket,
-    },
-    profile::materialize_profile,
 };
 
 /// Resolve the native capture viewport requested by a session or explicit caller override.
@@ -39,6 +38,7 @@ pub fn native_capture_target(
     if let Some(target) = viewport {
         return Ok((target, None));
     }
+
     let manifest = read_manifest(session)?;
     let initial = manifest
         .geometry_provenance
@@ -49,6 +49,7 @@ pub fn native_capture_target(
                 height: manifest.geometry.pixel_height.saturating_add(128).max(200),
             };
         });
+
     let profile = if let Some(provenance) = &manifest.ghostty_visual {
         if provenance.replay_profile != GHOSTTY_REPLAY_PROFILE_NAME {
             return Err(Error::InvalidReplay {
@@ -58,12 +59,15 @@ pub fn native_capture_target(
                 ),
             });
         }
+
         let path = session.join(GHOSTTY_REPLAY_PROFILE_NAME);
         let bytes = fs::read(&path).map_err(|source| return Error::Filesystem { path, source })?;
+
         restore_ghostty_profile(bytes, provenance.clone())?
     } else {
         resolve_ghostty_profile(None, GhosttyVisualOverrides::default())?
     };
+
     let report = solve_ghostty_geometry(
         helper,
         manifest.geometry.cols,
@@ -71,6 +75,7 @@ pub fn native_capture_target(
         initial,
         &profile,
     )?;
+
     return Ok((report.selected, Some(report)));
 }
 
@@ -89,8 +94,10 @@ pub fn probe_ghostty_geometry(
             reason: "fitted geometry requires a viewport of at least 320x200 pixels".to_owned(),
         });
     }
+
     let staging = temp_dir().join(format!("termtrace-geometry-{}", uuid::Uuid::now_v7()));
     create_private_directory(&staging)?;
+
     match probe_staged(helper, target, profile, &staging) {
         Ok(fitted) => {
             fs::remove_dir_all(&staging).map_err(|source| {
@@ -99,6 +106,7 @@ pub fn probe_ghostty_geometry(
                     source,
                 };
             })?;
+
             return Ok(fitted);
         }
         Err(source) => {
@@ -137,8 +145,10 @@ pub(super) fn solve_geometry_with(
             reason: "native geometry solver requires a nonzero canonical grid".to_owned(),
         });
     }
+
     let mut attempts: Vec<GeometryProbeAttempt> = Vec::new();
     let mut target = initial;
+
     for _ in 0..8 {
         if attempts
             .iter()
@@ -151,14 +161,17 @@ pub(super) fn solve_geometry_with(
                 "search cycled",
             ));
         }
+
         let report = probe(target)?;
         attempts.push(GeometryProbeAttempt { target, report });
+
         if (report.cols, report.rows) == (required_cols, required_rows) {
             let verified = probe(target)?;
             attempts.push(GeometryProbeAttempt {
                 target,
                 report: verified,
             });
+
             if (verified.cols, verified.rows) == (required_cols, required_rows) {
                 return Ok(GeometrySolveReport {
                     required_cols,
@@ -167,8 +180,10 @@ pub(super) fn solve_geometry_with(
                     selected: target,
                 });
             }
+
             continue;
         }
+
         let overhead_width = target.width.saturating_sub(report.text_width);
         let overhead_height = target.height.saturating_sub(report.text_height);
         let width = required_cols
@@ -188,6 +203,7 @@ pub(super) fn solve_geometry_with(
             height: height.max(200),
         };
     }
+
     return Err(solver_error(
         required_cols,
         required_rows,
@@ -204,6 +220,7 @@ pub(super) fn validate_capture_geometry(
     viewport_height: u16,
 ) -> Result<()> {
     validate_report(reported)?;
+
     if (reported.cols, reported.rows) != (expected.cols, expected.rows) {
         return Err(Error::InvalidReplay {
             reason: format!(
@@ -212,6 +229,7 @@ pub(super) fn validate_capture_geometry(
             ),
         });
     }
+
     if source == GeometrySource::GhosttyFit
         && (reported.text_width, reported.text_height)
             != (expected.pixel_width, expected.pixel_height)
@@ -226,6 +244,7 @@ pub(super) fn validate_capture_geometry(
             ),
         });
     }
+
     return Ok(());
 }
 
@@ -239,11 +258,13 @@ fn probe_staged(
         &staging.join(GHOSTTY_EFFECTIVE_CONFIG_NAME),
         &profile.effective_config,
     )?;
+
     let root = materialize_profile(&staging.join("ghostty-profile"), &profile.replay_config)?;
     let lease = DisplayLease::acquire()?;
     let display = format!(":{}", lease.number);
     let mut xvfb = spawn_xvfb(Some(helper), &lease, target.width, target.height, staging)?;
     wait_for_x_socket(&lease, &mut xvfb, Duration::from_secs(5))?;
+
     let report_path = staging.join("geometry.json");
     let mut ghostty = spawn_geometry_probe(
         helper,
@@ -257,7 +278,9 @@ fn probe_staged(
     let report = wait_for_json(&report_path, &mut ghostty, Duration::from_secs(20))?;
     wait_for_success(&mut ghostty, Duration::from_secs(5), staging)?;
     xvfb.terminate();
+
     validate_report(report)?;
+
     return Ok(report);
 }
 
@@ -273,6 +296,7 @@ fn validate_report(report: TerminalGeometryReport) -> Result<()> {
             reason: "Ghostty reported inconsistent grid, cell, and text-area dimensions".to_owned(),
         });
     }
+
     return Ok(());
 }
 
@@ -290,6 +314,7 @@ fn solver_error(cols: u16, rows: u16, attempts: &[GeometryProbeAttempt], reason:
         })
         .collect::<Vec<_>>()
         .join(", ");
+
     return Error::InvalidReplay {
         reason: format!(
             "could not fit native viewport to {cols}x{rows} grid ({reason}); probes: {probes}"

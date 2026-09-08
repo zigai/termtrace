@@ -15,12 +15,12 @@ use termtrace_sdk::{Error, Result};
 use uuid::Uuid;
 
 use super::{
-    framing::{DriverFrame, read_frame},
+    framing::{read_frame, DriverFrame},
     operations::{driver_error, driver_failure_with_retry, driver_response_is_cacheable},
 };
 use termtrace_model::protocol::driver::{
-    DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION, DriverData,
-    DriverRequest, DriverResponse, DriverResult,
+    DriverData, DriverRequest, DriverResponse, DriverResult, DRIVER_MAX_REQUEST_BYTES,
+    DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
 };
 
 pub(super) const DRIVER_RESPONSE_CACHE_BYTES: usize = 16 * 1024 * 1024;
@@ -29,6 +29,7 @@ pub(super) const DRIVER_RESPONSE_CACHE_BYTES: usize = 16 * 1024 * 1024;
 pub(in crate::cli) fn serve(mut input: impl BufRead, output: impl Write) -> Result<()> {
     let mut output = BufWriter::new(output);
     let mut driver = Driver::default();
+
     while let Some(frame) = read_frame(&mut input)? {
         let encoded = match frame {
             DriverFrame::Request(request) => driver.handle_request(*request),
@@ -64,6 +65,7 @@ pub(in crate::cli) fn serve(mut input: impl BufRead, output: impl Write) -> Resu
                 };
             })?;
     }
+
     return Ok(());
 }
 
@@ -75,6 +77,7 @@ fn encode_driver_response(response: &DriverResponse) -> Result<Vec<u8>> {
             source,
         };
     })?;
+
     return Ok(bytes);
 }
 
@@ -115,24 +118,32 @@ impl Driver {
                     "driver request method could not be encoded",
                     None,
                 );
+
                 let bytes = serde_json::to_vec(&err).unwrap_or_default();
+
                 return bytes;
             }
         };
+
         if let Some(cached) = self.cached.get(&request.request_id) {
             if cached.method_hash == method_hash {
                 let bytes = serde_json::to_vec(&cached.response).unwrap_or_default();
+
                 return bytes;
             }
+
             let err = driver_error(
                 request.request_id,
                 "request_id_collision",
                 "driver request identifier was already used for a different method",
                 None,
             );
+
             let bytes = serde_json::to_vec(&err).unwrap_or_default();
+
             return bytes;
         }
+
         let response = if request.version != DRIVER_PROTOCOL_VERSION {
             driver_error(
                 request.request_id,
@@ -143,10 +154,13 @@ impl Driver {
         } else {
             self.execute(&request)
         };
+
         let (response, encoded) = bounded_response_with_bytes(response);
+
         if driver_response_is_cacheable(&response) {
             self.cache(request.request_id, method_hash, response, encoded.len());
         }
+
         return encoded;
     }
 
@@ -166,11 +180,14 @@ impl Driver {
                 encoded_bytes,
             },
         );
+
         self.order.push_back(request_id);
+
         while self.cached_bytes > DRIVER_RESPONSE_CACHE_BYTES {
             let Some(evicted) = self.order.pop_front() else {
                 break;
             };
+
             if let Some(response) = self.cached.remove(&evicted) {
                 self.cached_bytes = self.cached_bytes.saturating_sub(response.encoded_bytes);
             }
@@ -186,12 +203,15 @@ pub(super) fn bounded_response_with_bytes(response: DriverResponse) -> (DriverRe
             "driver response could not be encoded",
             None,
         );
+
         let err_bytes = serde_json::to_vec(&err).unwrap_or_default();
+
         return (err, err_bytes);
     };
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) <= DRIVER_MAX_RESPONSE_BYTES {
         return (response, bytes);
     }
+
     let rich_screen_response = matches!(
         &response.result,
         DriverResult::Ok {
@@ -204,6 +224,7 @@ pub(super) fn bounded_response_with_bytes(response: DriverResponse) -> (DriverRe
                 },
         }
     );
+
     let fallback = DriverResponse {
         version: DRIVER_PROTOCOL_VERSION,
         request_id: response.request_id,
@@ -223,6 +244,7 @@ pub(super) fn bounded_response_with_bytes(response: DriverResponse) -> (DriverRe
         ),
     };
     let fallback_bytes = serde_json::to_vec(&fallback).unwrap_or_default();
+
     return (fallback, fallback_bytes);
 }
 

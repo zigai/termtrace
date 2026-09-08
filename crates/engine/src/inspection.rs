@@ -27,9 +27,12 @@ pub fn inspect_session(
     let session = session_directory.as_ref();
     if session.join("completion.json").is_file() {
         validate_completed_session(session)?;
+
         return inspect_session_stream(session, selector, None);
     }
+
     EventLogSummary::read(session.join("events.jsonl"))?;
+
     return inspect_prefix_stream(session, selector);
 }
 
@@ -42,12 +45,14 @@ pub fn wait_for_output(
     if needle.is_empty() {
         return Err(wait_error("wait condition must not be empty"));
     }
+
     let session = session_directory.as_ref();
     let event_path = session.join("events.jsonl");
     let completion_path = session.join("completion.json");
     let deadline = Instant::now() + timeout;
     let mut cursor = EventLogCursor::open(&event_path)?;
     let mut matcher = OutputMatcher::new(needle);
+
     loop {
         while let Some(record) = cursor.next_record()? {
             if let Event::Output { data } = &record.event
@@ -59,10 +64,12 @@ pub fn wait_for_output(
                     monotonic_ns: record.monotonic_ns,
                 });
             }
+
             if matches!(record.event, Event::Exit { .. }) {
                 return Err(wait_error("child exited before output matched"));
             }
         }
+
         if completion_path.is_file() {
             if let Some(line) = cursor.incomplete_line() {
                 return Err(Error::InvalidEventLog {
@@ -71,12 +78,15 @@ pub fn wait_for_output(
                     reason: "truncated line without newline terminator".to_owned(),
                 });
             }
+
             return Err(wait_error("session completed before output matched"));
         }
+
         let now = Instant::now();
         if now >= deadline {
             return Err(wait_error("timed out before output matched"));
         }
+
         thread::sleep(Duration::from_millis(50).min(deadline.saturating_duration_since(now)));
     }
 }
@@ -89,13 +99,16 @@ pub fn wait_for_completion(
     let session = session_directory.as_ref();
     let completion_path = session.join("completion.json");
     let deadline = Instant::now() + timeout;
+
     loop {
         if completion_path.is_file() {
             return Ok(validate_completed_session(session)?);
         }
+
         if Instant::now() >= deadline {
             return Err(wait_error("timed out before session completion"));
         }
+
         thread::sleep(Duration::from_millis(50));
     }
 }
@@ -114,17 +127,21 @@ impl<'needle> OutputMatcher<'needle> {
     )]
     fn new(needle: &'needle [u8]) -> Self {
         let mut prefix_lengths: Vec<usize> = vec![0; needle.len()];
+
         let mut matched = 0;
         for index in 1..needle.len() {
             let byte = needle[index];
             while matched > 0 && needle[matched] != byte {
                 matched = prefix_lengths[matched - 1];
             }
+
             if needle[matched] == byte {
                 matched += 1;
             }
+
             prefix_lengths[index] = matched;
         }
+
         return Self {
             needle,
             prefix_lengths,
@@ -142,14 +159,18 @@ impl<'needle> OutputMatcher<'needle> {
             while self.matched > 0 && self.needle[self.matched] != byte {
                 self.matched = self.prefix_lengths[self.matched - 1];
             }
+
             if self.needle[self.matched] == byte {
                 self.matched += 1;
             }
+
             self.output_offset = self.output_offset.saturating_add(1);
+
             if self.matched == self.needle.len() {
                 return Some(self.output_offset);
             }
         }
+
         return None;
     }
 }

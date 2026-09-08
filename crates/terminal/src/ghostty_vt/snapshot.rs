@@ -38,14 +38,18 @@ impl<'engine> Snapshot<'engine> {
         if let Some(state) = self.snapshot_if_changed()? {
             return Ok(state);
         }
+
         let mut state = self.last_snapshot.as_ref().cloned().ok_or_else(|| {
             return invalid_snapshot("unchanged terminal has no prior snapshot");
         })?;
         state.dirty = DirtyState::Clean;
+
         state.dirty_rows.clear();
+
         for row in &mut state.grid {
             row.dirty = false;
         }
+
         return Ok(state);
     }
 
@@ -53,14 +57,17 @@ impl<'engine> Snapshot<'engine> {
         check("update render state", unsafe {
             sys::ghostty_render_state_update(self.render, self.terminal)
         })?;
+
         let cols = self.render_get(
             "get columns",
             sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_COLS,
         )?;
+
         let rows = self.render_get(
             "get rows",
             sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_ROWS,
         )?;
+
         let dirty = self.dirty_state()?;
         let cursor = self.cursor_state()?;
         let modes = self.mode_state()?;
@@ -79,6 +86,7 @@ impl<'engine> Snapshot<'engine> {
         {
             return Ok(None);
         }
+
         let colors = if dirty == DirtyState::Clean {
             match previous {
                 Some(state) => state.colors.clone(),
@@ -87,12 +95,15 @@ impl<'engine> Snapshot<'engine> {
         } else {
             self.color_state()?
         };
+
         let grid = self.grid(cols, rows, dirty, previous)?;
         let dirty_rows = grid
             .iter()
             .filter_map(|row| return row.dirty.then_some(row.row))
             .collect();
+
         self.reset_render_dirty()?;
+
         let state = SemanticState {
             cols,
             rows,
@@ -105,10 +116,13 @@ impl<'engine> Snapshot<'engine> {
             metadata,
             grid,
         };
+
         if previous.is_some_and(|previous| return semantic_content_eq(previous, &state)) {
             return Ok(None);
         }
+
         *self.last_snapshot = Some(state.clone());
+
         return Ok(Some(state));
     }
 }
@@ -128,9 +142,11 @@ pub(super) fn format_replay_seed(terminal: sys::GhosttyTerminal) -> Result<Optio
             (&raw mut pending_wrap).cast::<c_void>(),
         )
     })?;
+
     if pending_wrap {
         return Ok(None);
     }
+
     return format_with_unwrap(terminal, Format::Vt, true).map(Some);
 }
 
@@ -144,6 +160,7 @@ fn format_with_unwrap(
         Format::Vt => sys::GhosttyFormatterFormat_GHOSTTY_FORMATTER_FORMAT_VT,
         Format::Html => sys::GhosttyFormatterFormat_GHOSTTY_FORMATTER_FORMAT_HTML,
     };
+
     let screen = sys::GhosttyFormatterScreenExtra {
         size: size_of::<sys::GhosttyFormatterScreenExtra>(),
         cursor: true,
@@ -172,6 +189,7 @@ fn format_with_unwrap(
         selection: ptr::null(),
     };
     let formatter = Formatter::new(terminal, options)?;
+
     return formatter.output();
 }
 
@@ -181,6 +199,7 @@ impl Snapshot<'_> {
         check(operation, unsafe {
             sys::ghostty_render_state_get(self.render, key, (&raw mut value).cast::<c_void>())
         })?;
+
         return Ok(value);
     }
 
@@ -196,6 +215,7 @@ impl Snapshot<'_> {
                 (&raw mut style).cast::<c_void>(),
             )
         })?;
+
         return decode_style(style);
     }
 
@@ -217,14 +237,17 @@ impl Snapshot<'_> {
         check(operation, unsafe {
             sys::ghostty_terminal_get(self.terminal, key, (&raw mut value).cast::<c_void>())
         })?;
+
         if value.len == 0 {
             return Ok(Vec::new());
         }
+
         if value.ptr.is_null() {
             return Err(invalid_snapshot(
                 "terminal string has a non-zero length and null pointer",
             ));
         }
+
         return Ok(unsafe { slice::from_raw_parts(value.ptr, value.len) }.to_vec());
     }
 
@@ -234,6 +257,7 @@ impl Snapshot<'_> {
         check("get terminal mode", unsafe {
             sys::ghostty_terminal_mode_get(self.terminal, packed, &raw mut enabled)
         })?;
+
         return Ok(enabled);
     }
 
@@ -252,6 +276,7 @@ impl Snapshot<'_> {
                 enabled: self.mode(number, true)?,
             });
         }
+
         for &number in DEC_MODES {
             values.push(TerminalMode {
                 number,
@@ -259,12 +284,14 @@ impl Snapshot<'_> {
                 enabled: self.mode(number, false)?,
             });
         }
+
         let dec = |number| {
             return values
                 .iter()
                 .find(|mode| return !mode.ansi && mode.number == number)
                 .is_some_and(|mode| return mode.enabled);
         };
+
         return Ok(ModeState {
             synchronized_output: dec(2026),
             alternate_screen: dec(47) || dec(1047) || dec(1049),
@@ -279,6 +306,7 @@ impl Snapshot<'_> {
             "get dirty state",
             sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_DIRTY,
         )?;
+
         match dirty {
             sys::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FALSE => {
                 return Ok(DirtyState::Clean);
@@ -303,14 +331,17 @@ impl Snapshot<'_> {
             "get cursor visibility",
             sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_CURSOR_VISIBLE,
         )?;
+
         let blinking = self.render_get(
             "get cursor blinking",
             sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_CURSOR_BLINKING,
         )?;
+
         let in_viewport: bool = self.render_get(
             "get cursor viewport presence",
             sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE,
         )?;
+
         let (column, row, wide_tail) = if in_viewport {
             (
                 Some(self.render_get(
@@ -329,11 +360,14 @@ impl Snapshot<'_> {
         } else {
             (None, None, None)
         };
+
         let raw_style: u32 = self.render_get(
             "get cursor style",
             sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE,
         )?;
+
         let style = decode_cursor_style(raw_style)?;
+
         return Ok(CursorState {
             visible,
             blinking,
@@ -353,6 +387,7 @@ impl Snapshot<'_> {
         check("get render colors", unsafe {
             sys::ghostty_render_state_colors_get(self.render, &raw mut colors)
         })?;
+
         return Ok(ColorState {
             background: colors.background.into(),
             foreground: colors.foreground.into(),
@@ -376,8 +411,10 @@ impl Snapshot<'_> {
             for row in &mut grid {
                 row.dirty = false;
             }
+
             return Ok(grid);
         }
+
         let read_all = dirty == DirtyState::Full || reusable.is_none();
         let mut handles = RenderIterators::new()?;
         check("populate row iterator", unsafe {
@@ -387,6 +424,7 @@ impl Snapshot<'_> {
                 (&raw mut handles.row).cast::<c_void>(),
             )
         })?;
+
         let mut grid = Vec::with_capacity(usize::from(rows));
         while unsafe { sys::ghostty_render_state_row_iterator_next(handles.row) } {
             let row = u16::try_from(grid.len()).unwrap_or(u16::MAX);
@@ -401,16 +439,19 @@ impl Snapshot<'_> {
                     "get raw row",
                     sys::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_RAW,
                 )?;
+
                 let soft_wrapped = raw_row_get(
                     raw_row,
                     "get row wrap",
                     sys::GhosttyRowData_GHOSTTY_ROW_DATA_WRAP,
                 )?;
+
                 let wrap_continuation = raw_row_get(
                     raw_row,
                     "get row wrap continuation",
                     sys::GhosttyRowData_GHOSTTY_ROW_DATA_WRAP_CONTINUATION,
                 )?;
+
                 check("populate row cells", unsafe {
                     sys::ghostty_render_state_row_get(
                         handles.row,
@@ -418,6 +459,7 @@ impl Snapshot<'_> {
                         (&raw mut handles.cells).cast::<c_void>(),
                     )
                 })?;
+
                 let mut selection = sys::GhosttyRenderStateRowSelection {
                     size: size_of::<sys::GhosttyRenderStateRowSelection>(),
                     ..Default::default()
@@ -429,6 +471,7 @@ impl Snapshot<'_> {
                         (&raw mut selection).cast::<c_void>(),
                     ) == sys::GhosttyResult_GHOSTTY_SUCCESS
                 };
+
                 let mut cells = Vec::with_capacity(usize::from(cols));
                 for column in 0..cols {
                     if !unsafe { sys::ghostty_render_state_row_cells_next(handles.cells) } {
@@ -437,10 +480,12 @@ impl Snapshot<'_> {
                             result: sys::GhosttyResult_GHOSTTY_NO_VALUE,
                         });
                     }
+
                     let selected =
                         has_selection && column >= selection.start_x && column <= selection.end_x;
                     cells.push(read_cell(handles.cells, column, selected)?);
                 }
+
                 RowState {
                     row,
                     soft_wrapped,
@@ -466,18 +511,22 @@ impl Snapshot<'_> {
                     (&raw const clean).cast::<c_void>(),
                 )
             })?;
+
             grid.push(row_state);
         }
+
         if grid.len() != usize::from(rows) {
             return Err(invalid_snapshot(
                 "render row count differs from terminal rows",
             ));
         }
+
         return Ok(grid);
     }
 
     fn reset_render_dirty(&self) -> Result<()> {
         let clean = sys::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FALSE;
+
         return check("reset render dirty state", unsafe {
             sys::ghostty_render_state_set(
                 self.render,
@@ -499,13 +548,16 @@ impl RenderIterators {
         check("create row iterator", unsafe {
             sys::ghostty_render_state_row_iterator_new(ptr::null(), &raw mut row)
         })?;
+
         let mut cells = ptr::null_mut();
         if let Err(error) = check("create row cells", unsafe {
             sys::ghostty_render_state_row_cells_new(ptr::null(), &raw mut cells)
         }) {
             unsafe { sys::ghostty_render_state_row_iterator_free(row) };
+
             return Err(error);
         }
+
         return Ok(Self { row, cells });
     }
 }
@@ -514,6 +566,7 @@ impl Drop for RenderIterators {
     fn drop(&mut self) {
         unsafe {
             sys::ghostty_render_state_row_cells_free(self.cells);
+
             sys::ghostty_render_state_row_iterator_free(self.row);
         }
     }
@@ -530,6 +583,7 @@ impl Formatter {
         check("create terminal formatter", unsafe {
             sys::ghostty_formatter_terminal_new(ptr::null(), &raw mut formatter, terminal, options)
         })?;
+
         return Ok(Self(formatter));
     }
 
@@ -538,15 +592,18 @@ impl Formatter {
         let size_result = unsafe {
             sys::ghostty_formatter_format_buf(self.0, ptr::null_mut(), 0, &raw mut length)
         };
+
         if size_result == sys::GhosttyResult_GHOSTTY_SUCCESS && length == 0 {
             return Ok(Vec::new());
         }
+
         if size_result != sys::GhosttyResult_GHOSTTY_OUT_OF_SPACE {
             return Err(Error::GhosttyVt {
                 operation: "size formatter output",
                 result: size_result,
             });
         }
+
         let mut output = vec![0_u8; length];
         check("format terminal", unsafe {
             sys::ghostty_formatter_format_buf(
@@ -557,6 +614,7 @@ impl Formatter {
             )
         })?;
         output.truncate(length);
+
         return Ok(output);
     }
 }
@@ -576,6 +634,7 @@ fn row_get<T: Default>(
     check(operation, unsafe {
         sys::ghostty_render_state_row_get(row, key, (&raw mut value).cast::<c_void>())
     })?;
+
     return Ok(value);
 }
 
@@ -588,13 +647,16 @@ fn cell_get<T: Default>(
     check(operation, unsafe {
         sys::ghostty_render_state_row_cells_get(cells, key, (&raw mut value).cast::<c_void>())
     })?;
+
     return Ok(value);
 }
+
 fn raw_row_get<T: Default>(row: sys::GhosttyRow, operation: &'static str, key: u32) -> Result<T> {
     let mut value = T::default();
     check(operation, unsafe {
         sys::ghostty_row_get(row, key, (&raw mut value).cast::<c_void>())
     })?;
+
     return Ok(value);
 }
 
@@ -607,6 +669,7 @@ fn raw_cell_get<T: Default>(
     check(operation, unsafe {
         sys::ghostty_cell_get(cell, key, (&raw mut value).cast::<c_void>())
     })?;
+
     return Ok(value);
 }
 
@@ -626,6 +689,7 @@ fn read_cell(
             (&raw mut style).cast::<c_void>(),
         )
     })?;
+
     return Ok(CellState {
         column,
         grapheme: read_grapheme(cells)?,
@@ -649,11 +713,13 @@ fn read_wide_kind(cells: sys::GhosttyRenderStateRowCells) -> Result<WideKind> {
         "get raw cell",
         sys::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW,
     )?;
+
     let wide: sys::GhosttyCellWide = raw_cell_get(
         cell,
         "get cell wide kind",
         sys::GhosttyCellData_GHOSTTY_CELL_DATA_WIDE,
     )?;
+
     return decode_wide_kind(wide);
 }
 
@@ -681,15 +747,18 @@ fn read_grapheme(cells: sys::GhosttyRenderStateRowCells) -> Result<String> {
             (&raw mut buffer).cast::<c_void>(),
         )
     };
+
     if first == sys::GhosttyResult_GHOSTTY_SUCCESS && buffer.len == 0 {
         return Ok(String::new());
     }
+
     if first != sys::GhosttyResult_GHOSTTY_OUT_OF_SPACE {
         return Err(Error::GhosttyVt {
             operation: "size cell grapheme",
             result: first,
         });
     }
+
     let mut bytes = vec![0_u8; buffer.len];
     buffer.ptr = bytes.as_mut_ptr();
     buffer.cap = bytes.len();
@@ -701,6 +770,7 @@ fn read_grapheme(cells: sys::GhosttyRenderStateRowCells) -> Result<String> {
         )
     })?;
     bytes.truncate(buffer.len);
+
     return String::from_utf8(bytes).map_err(|_| {
         return Error::GhosttyVt {
             operation: "decode cell grapheme",
@@ -714,6 +784,7 @@ fn optional_cell_color(cells: sys::GhosttyRenderStateRowCells, key: u32) -> Resu
     let result = unsafe {
         sys::ghostty_render_state_row_cells_get(cells, key, (&raw mut color).cast::<c_void>())
     };
+
     match result {
         sys::GhosttyResult_GHOSTTY_SUCCESS => return Ok(Some(color.into())),
         sys::GhosttyResult_GHOSTTY_INVALID_VALUE => return Ok(None),
@@ -835,18 +906,14 @@ mod tests {
         assert!(primary.modes.bracketed_paste);
         assert_eq!(primary.cursor.column, Some(2));
         assert_eq!(primary.cursor.row, Some(1));
-        assert!(
-            primary.grid[0]
-                .cells
-                .iter()
-                .any(|cell| return cell.grapheme == "界")
-        );
-        assert!(
-            primary.grid[0]
-                .cells
-                .iter()
-                .any(|cell| return cell.grapheme == "e\u{301}")
-        );
+        assert!(primary.grid[0]
+            .cells
+            .iter()
+            .any(|cell| return cell.grapheme == "界"));
+        assert!(primary.grid[0]
+            .cells
+            .iter()
+            .any(|cell| return cell.grapheme == "e\u{301}"));
         assert!(primary.grid[0].cells.iter().any(|cell| {
             return cell.resolved_foreground == Some(Rgb { r: 1, g: 2, b: 3 });
         }));
@@ -854,13 +921,11 @@ mod tests {
         terminal.write(b"\x1b[?1049hALT");
         let alternate = terminal.snapshot().expect("alternate snapshot");
         assert!(alternate.modes.alternate_screen);
-        assert!(
-            alternate
-                .grid
-                .iter()
-                .flat_map(|row| return &row.cells)
-                .any(|cell| return cell.grapheme == "A")
-        );
+        assert!(alternate
+            .grid
+            .iter()
+            .flat_map(|row| return &row.cells)
+            .any(|cell| return cell.grapheme == "A"));
         terminal.write(b"\x1b[?1049l");
         let restored = terminal.snapshot().expect("restored snapshot");
         assert!(!restored.modes.alternate_screen);
@@ -875,12 +940,10 @@ mod tests {
                 .expect("HTML UTF-8")
                 .contains("plain")
         );
-        assert!(
-            terminal
-                .format(Format::Vt)
-                .expect("VT format")
-                .contains(&0x1b)
-        );
+        assert!(terminal
+            .format(Format::Vt)
+            .expect("VT format")
+            .contains(&0x1b));
     }
 
     #[test]
@@ -907,6 +970,7 @@ mod tests {
         let resized = terminal.snapshot().expect("resized snapshot");
         assert_eq!((resized.cols, resized.rows), (10, 3));
     }
+
     #[test]
     fn preserves_native_wrap_and_wide_facts_across_clean_reuse() {
         let mut terminal = GhosttyVt::new(4, 3, 0).expect("create terminal");
@@ -914,33 +978,27 @@ mod tests {
         let first = terminal.snapshot().expect("first snapshot");
         assert!(first.grid.iter().any(|row| return row.soft_wrapped));
         assert!(first.grid.iter().any(|row| return row.wrap_continuation));
-        assert!(
-            first
-                .grid
-                .iter()
-                .flat_map(|row| return &row.cells)
-                .any(|cell| {
-                    return cell.wide_kind == WideKind::Wide;
-                })
-        );
-        assert!(
-            first
-                .grid
-                .iter()
-                .flat_map(|row| return &row.cells)
-                .any(|cell| {
-                    return cell.wide_kind == WideKind::SpacerTail;
-                })
-        );
-        assert!(
-            first
-                .grid
-                .iter()
-                .flat_map(|row| return &row.cells)
-                .any(|cell| {
-                    return cell.wide_kind == WideKind::SpacerHead;
-                })
-        );
+        assert!(first
+            .grid
+            .iter()
+            .flat_map(|row| return &row.cells)
+            .any(|cell| {
+                return cell.wide_kind == WideKind::Wide;
+            }));
+        assert!(first
+            .grid
+            .iter()
+            .flat_map(|row| return &row.cells)
+            .any(|cell| {
+                return cell.wide_kind == WideKind::SpacerTail;
+            }));
+        assert!(first
+            .grid
+            .iter()
+            .flat_map(|row| return &row.cells)
+            .any(|cell| {
+                return cell.wide_kind == WideKind::SpacerHead;
+            }));
 
         let reused = terminal.snapshot().expect("clean reused snapshot");
         assert!(reused.grid.iter().all(|row| return !row.dirty));
@@ -950,6 +1008,7 @@ mod tests {
                 && left.cells == right.cells;
         }));
     }
+
     #[test]
     fn rejects_unknown_native_wide_kind() {
         assert!(matches!(

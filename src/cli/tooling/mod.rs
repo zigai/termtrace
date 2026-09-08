@@ -1,6 +1,7 @@
 use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
+
 use args::ToolingSubcommand;
 
 use std::{
@@ -17,10 +18,10 @@ use std::{
 use clap_complete::generate;
 use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::{
-    Error as EngineError,
     analysis::capability::{
         probe_capabilities as probe_engine_capabilities, require as require_engine_capability,
     },
+    Error as EngineError,
 };
 use termtrace_evidence::{artifact::write_secure, receipt::receipt_signing_capability};
 use termtrace_media::{
@@ -54,6 +55,7 @@ pub(super) fn probe_capabilities() -> CapabilityReport {
     let mut external = derived_media_capabilities().to_vec();
     external.extend(native_capabilities(true, true));
     external.push(receipt_signing_capability());
+
     return probe_engine_capabilities(external);
 }
 
@@ -72,9 +74,11 @@ fn require_selected_capability(id: &str) -> termtrace_engine::Result<()> {
     let Some(capability) = capability else {
         return require_engine_capability(&probe_engine_capabilities([]), id);
     };
+
     if capability.status == CapabilityStatus::Ready {
         return Ok(());
     }
+
     return Err(EngineError::CapabilityBlocked {
         id: capability.id,
         code: capability.code,
@@ -88,6 +92,7 @@ fn require_selected_capability(id: &str) -> termtrace_engine::Result<()> {
 pub(super) fn require_capability(id: &str) -> termtrace_sdk::Result<()> {
     return require_selected_capability(id).map_err(termtrace_sdk::Error::from);
 }
+
 pub(super) fn require_cli_capability(id: &str) -> Result<()> {
     match require_selected_capability(id) {
         Ok(()) => return Ok(()),
@@ -124,6 +129,7 @@ pub(super) fn run_version(
             }),
         );
     }
+
     return write_stdout(
         response,
         format!(
@@ -141,6 +147,7 @@ pub(super) fn run_doctor(response: &mut ResponseWriter, arguments: DoctorArgs) -
     } else {
         write_stdout(response, capability_text(&report, arguments.explain)?)?;
     }
+
     if arguments
         .require
         .iter()
@@ -148,6 +155,7 @@ pub(super) fn run_doctor(response: &mut ResponseWriter, arguments: DoctorArgs) -
     {
         return Ok(ExitCode::FAILURE);
     }
+
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -165,15 +173,18 @@ fn capability_text(report: &CapabilityReport, explain: bool) -> Result<String> {
             capability.detail
         )
         .into_diagnostic()?;
+
         if explain && let Some(remediation) = &capability.remediation {
             writeln!(output, "  fix: {remediation}").into_diagnostic()?;
         }
     }
+
     return Ok(output);
 }
 
 pub(super) fn run_client(response: &mut ResponseWriter, arguments: ClientArgs) -> Result<ExitCode> {
     let assets = client_assets_root()?;
+
     return match arguments.command {
         ClientCommand::Status => write_json_line(
             response,
@@ -213,14 +224,17 @@ fn run_python_client(assets: &Path, arguments: ClientRunArgs) -> Result<ExitCode
                 .env("TERMTRACE_BINARY", &binary)
                 .status()
                 .into_diagnostic()?;
+
             return Ok(process_exit_code(status));
         }
+
         let python_root = assets.join("python");
         let python_path = match env::var_os("PYTHONPATH") {
             Some(existing) => env::join_paths([python_root.as_os_str(), existing.as_os_str()])
                 .map_err(|error| return miette::miette!("invalid PYTHONPATH: {error}"))?,
             None => python_root.into_os_string(),
         };
+
         let status = ProcessCommand::new("python3")
             .arg(&script)
             .args(&arguments.arguments)
@@ -232,11 +246,14 @@ fn run_python_client(assets: &Path, arguments: ClientRunArgs) -> Result<ExitCode
                     "Python client execution requires `uv` or Python 3 with `msgspec`: {error}"
                 );
             })?;
+
         return Ok(process_exit_code(status));
     })();
+
     if let Some(temporary) = temporary {
         temporary.close().into_diagnostic()?;
     }
+
     return result;
 }
 
@@ -246,6 +263,7 @@ fn run_typescript_client(assets: &Path, arguments: ClientRunArgs) -> Result<Exit
             "TypeScript client execution requires Bun on PATH"
         ));
     }
+
     let temporary = create_client_temp_directory()?;
     let result = (|| {
         let package = temporary.path().join("node_modules/@termtrace/test");
@@ -256,34 +274,41 @@ fn run_typescript_client(assets: &Path, arguments: ClientRunArgs) -> Result<Exit
             br#"{"type":"module","exports":"./index.js"}"#,
         )
         .into_diagnostic()?;
+
         let package_entry = assets
             .join("typescript/lib/index.js")
             .canonicalize()
             .into_diagnostic()?;
+
         let package_entry = package_entry.to_str().ok_or_else(|| {
             return miette::miette!("TypeScript client assets path is not valid UTF-8");
         })?;
+
         let package_entry = serde_json::to_string(package_entry).into_diagnostic()?;
         write_secure(
             &package.join("index.js"),
             format!("export * from {package_entry};\n").as_bytes(),
         )
         .into_diagnostic()?;
+
         let script = if arguments.script.as_os_str() == OsStr::new("-") {
             let source = temporary.path().join("source");
             fs_err::create_dir(&source).into_diagnostic()?;
             fs_err::set_permissions(&source, Permissions::from_mode(0o700)).into_diagnostic()?;
             let path = source.join("client.ts");
             write_secure(&path, &read_client_stdin()?).into_diagnostic()?;
+
             path
         } else {
             arguments.script.canonicalize().into_diagnostic()?
         };
+
         let node_modules = temporary.path().join("node_modules");
         let mut node_paths: Vec<PathBuf> = vec![node_modules];
         if let Some(existing) = env::var_os("NODE_PATH") {
             node_paths.extend(env::split_paths(&existing));
         }
+
         let node_path = env::join_paths(node_paths).into_diagnostic()?;
         let binary = env::current_exe().into_diagnostic()?;
         let status = ProcessCommand::new("bun")
@@ -294,9 +319,12 @@ fn run_typescript_client(assets: &Path, arguments: ClientRunArgs) -> Result<Exit
             .env("TERMTRACE_BINARY", binary)
             .status()
             .into_diagnostic()?;
+
         return Ok(process_exit_code(status));
     })();
+
     temporary.close().into_diagnostic()?;
+
     return result;
 }
 
@@ -315,6 +343,7 @@ fn prepare_client_script(
     if script.as_os_str() != OsStr::new("-") {
         return Ok((script.canonicalize().into_diagnostic()?, None));
     }
+
     let temporary = create_client_temp_directory()?;
     let path = temporary.path().join(format!("client.{extension}"));
     let result = read_client_stdin().and_then(|bytes| {
@@ -322,8 +351,10 @@ fn prepare_client_script(
     });
     if let Err(error) = result {
         temporary.close().into_diagnostic()?;
+
         return Err(error);
     }
+
     return Ok((path, Some(temporary)));
 }
 
@@ -333,11 +364,13 @@ fn read_client_stdin() -> Result<Vec<u8>> {
         .take(4 * 1024 * 1024 + 1)
         .read_to_end(&mut bytes)
         .into_diagnostic()?;
+
     if bytes.len() > 4 * 1024 * 1024 {
         return Err(miette::miette!(
             "standard-input client program exceeds the 4 MiB limit"
         ));
     }
+
     return Ok(bytes);
 }
 
@@ -346,14 +379,17 @@ fn client_assets_root() -> Result<PathBuf> {
     if let Some(path) = env::var_os("TERMTRACE_CLIENT_ASSETS") {
         candidates.push(PathBuf::from(path));
     }
+
     if let Ok(binary) = env::current_exe()
         && let Some(directory) = binary.parent()
     {
         candidates.push(directory.join("clients"));
+
         if let Some(prefix) = directory.parent() {
             candidates.push(prefix.join("share/termtrace/clients"));
         }
     }
+
     candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("packages"));
     for candidate in candidates {
         if candidate.join("python/pyproject.toml").is_file()
@@ -367,6 +403,7 @@ fn client_assets_root() -> Result<PathBuf> {
             });
         }
     }
+
     return Err(miette::miette!(
         "Termtrace client assets are unavailable; reinstall a release archive that includes `clients/` or set TERMTRACE_CLIENT_ASSETS"
     ));
@@ -376,8 +413,10 @@ fn executable_on_path(program: &str) -> bool {
     let Some(path) = env::var_os("PATH") else {
         return false;
     };
+
     return env::split_paths(&path).any(|directory| {
         let candidate = directory.join(program);
+
         return candidate.metadata().is_ok_and(|metadata| {
             return metadata.is_file() && metadata.permissions().mode() & 0o111 != 0;
         });
@@ -388,10 +427,12 @@ fn process_exit_code(status: ExitStatus) -> ExitCode {
     if status.success() {
         return ExitCode::SUCCESS;
     }
+
     let code = status
         .code()
         .and_then(|code| return u8::try_from(code).ok())
         .unwrap_or(1);
+
     return ExitCode::from(code);
 }
 
@@ -402,6 +443,7 @@ pub(super) fn run_completions(
     let mut command = completion_command();
     let mut output = Vec::new();
     generate(arguments.shell, &mut command, "termtrace", &mut output);
+
     return write_stdout(response, output);
 }
 
@@ -409,6 +451,7 @@ pub(super) fn run_driver() -> Result<ExitCode> {
     let stdin = io::stdin();
     let stdout = io::stdout();
     serve_driver(BufReader::new(stdin.lock()), stdout.lock()).into_diagnostic()?;
+
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -421,7 +464,9 @@ pub(super) fn run_schemas(
         .into_diagnostic()?
         .iter()
         .any(|schema| return directory.join(schema.filename).exists());
+
     let paths = termtrace_schema::write_all(&directory).into_diagnostic()?;
+
     return write_json_line(
         response,
         &serde_json::json!({

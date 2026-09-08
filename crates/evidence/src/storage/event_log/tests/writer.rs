@@ -14,11 +14,11 @@ use termtrace_model::{
 };
 
 use crate::{
-    Error,
     event_log::{
         DurabilityMode, DurabilityPolicy, EventLog, EventLogCursor, EventLogSummary,
         EventLogWriter, SessionClock,
     },
+    Error,
 };
 
 use super::support::{header, secure_directory};
@@ -39,6 +39,7 @@ fn canonical_validation_and_live_resume_cross_compressed_segments() {
             })
             .expect("append across chunks");
     }
+
     writer
         .append(Event::Exit {
             code: Some(0),
@@ -50,11 +51,9 @@ fn canonical_validation_and_live_resume_cross_compressed_segments() {
         fs::metadata(&path).expect("root metadata").len(),
         16 * 1024 * 1024
     );
-    assert!(
-        session
-            .join("events.jsonl.segments/00000000000000000001.zst")
-            .is_file()
-    );
+    assert!(session
+        .join("events.jsonl.segments/00000000000000000001.zst")
+        .is_file());
     let summary = EventLogSummary::read(&path).expect("validate all chunks");
     assert_eq!(summary.event_count, 621);
     assert_eq!(summary.output_bytes, 620 * 48 * 1024);
@@ -68,10 +67,12 @@ fn canonical_validation_and_live_resume_cross_compressed_segments() {
     suffix
         .resume_live_suffix(&start.expect("retained cursor"), device, inode, &hash)
         .expect("seek compressed segment");
+
     let mut count = 0;
     while suffix.next_record().expect("next suffix record").is_some() {
         count += 1;
     }
+
     assert_eq!(count, 111);
     suffix
         .validate_live_boundary(&end)
@@ -83,6 +84,7 @@ fn observation_time_survives_delayed_append_and_is_integrity_bound() {
     let temporary = TempDir::new().expect("temporary directory");
     let path = temporary.path().join("session/events.jsonl");
     secure_directory(path.parent().expect("parent"));
+
     let clock = SessionClock::now().expect("clock");
     let observed = Instant::now();
     let expected = clock.observed_ns(observed);
@@ -102,6 +104,7 @@ fn observation_time_survives_delayed_append_and_is_integrity_bound() {
             signal_name: None,
         })
         .expect("exit");
+
     let log = EventLog::read(&path).expect("verify observation");
     assert_eq!(log.events[0].observed_monotonic_ns, Some(expected));
     assert!(log.events[0].monotonic_ns >= expected);
@@ -126,6 +129,7 @@ fn distinguishes_observed_and_durable_boundaries() {
     let temporary = TempDir::new().expect("temporary directory");
     let path = temporary.path().join("session/events.jsonl");
     secure_directory(path.parent().expect("parent"));
+
     let clock = SessionClock::now().expect("valid clock");
     let mut writer = EventLogWriter::create_with_policy(
         &path,
@@ -164,6 +168,7 @@ fn distinguishes_observed_and_durable_boundaries() {
 #[test]
 fn applies_strict_bounded_and_throughput_output_policies() {
     let temporary = TempDir::new().expect("temporary directory");
+
     for (name, policy, expected_durable) in [
         (
             "strict",
@@ -231,6 +236,7 @@ fn bounded_policy_flushes_an_idle_pending_prefix() {
             data: ByteString::from(&b"x"[..]),
         })
         .expect("append buffered output");
+
     thread::sleep(Duration::from_millis(5));
     assert!(writer.flush_due().expect("flush due prefix"));
     assert_eq!(writer.durable_boundary(), writer.observed_boundary());
@@ -246,6 +252,7 @@ fn refuses_group_readable_artifact_directory() {
     fs_err::create_dir(&directory).expect("create directory");
     fs_err::set_permissions(&directory, Permissions::from_mode(0o750))
         .expect("set insecure permissions");
+
     let path = directory.join("events.jsonl");
     let clock = SessionClock::now().expect("valid clock");
 

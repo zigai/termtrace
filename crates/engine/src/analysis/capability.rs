@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, env};
 
 use termtrace_model::{
     protocol::capability::{
-        CAPABILITY_IDS, CORE_CAPABILITY, Capability, CapabilityReport, CapabilityStatus,
+        Capability, CapabilityReport, CapabilityStatus, CAPABILITY_IDS, CORE_CAPABILITY,
         SEMANTIC_CAPABILITY,
     },
     terminal::replay::GHOSTTY_REVISION,
@@ -23,9 +23,11 @@ pub fn require(report: &CapabilityReport, id: &str) -> Result<()> {
             ),
         };
     })?;
+
     if capability.status == CapabilityStatus::Ready {
         return Ok(());
     }
+
     return Err(Error::CapabilityBlocked {
         id: capability.id.clone(),
         code: capability.code.clone(),
@@ -62,6 +64,7 @@ pub fn probe_capabilities(external: impl IntoIterator<Item = Capability>) -> Cap
             "reinstall a build containing the pinned semantic engine",
         ),
     };
+
     let core = if cfg!(target_os = "linux") {
         ready(
             CORE_CAPABILITY,
@@ -155,8 +158,10 @@ mod tests {
             "missing tools: ffmpeg",
             "install FFmpeg",
         )]);
+
         let error =
             require(&report, NATIVE_VIDEO_CAPABILITY).expect_err("blocked capability must fail");
+
         let Error::CapabilityBlocked {
             id,
             code,

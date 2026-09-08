@@ -1,9 +1,9 @@
 use super::super::{
-    CaptureOptions, CaptureOutcome, Duration, Error, PlaybackOptions, Result, Session,
-    capture_native, playback,
+    capture_native, playback, CaptureOptions, CaptureOutcome, Duration, Error, PlaybackOptions,
+    Result, Session,
 };
-use std::sync::{Arc, atomic::AtomicBool};
-use termtrace_media::native_capture::{NativeReplayWorker, native_capture_target};
+use std::sync::{atomic::AtomicBool, Arc};
+use termtrace_media::native_capture::{native_capture_target, NativeReplayWorker};
 use termtrace_model::execution::session::CaptureTarget;
 
 /// Session-bound native capture, playback, and presentation operations.
@@ -24,6 +24,7 @@ impl Native<'_> {
     ) -> Result<NativeReplayWorker> {
         let (target, _) =
             native_capture_target(&self.session.helper, &self.session.path, viewport)?;
+
         return NativeReplayWorker::start(
             &self.session.helper,
             &self.session.path,
@@ -38,6 +39,7 @@ impl Native<'_> {
     pub fn capture(&self, options: &CaptureOptions) -> Result<CaptureOutcome> {
         let mut options = options.clone();
         options.session_directory.clone_from(&self.session.path);
+
         return capture_native(&self.session.helper, &options).map_err(Error::from);
     }
 
@@ -45,6 +47,7 @@ impl Native<'_> {
     pub fn playback(&self, options: &PlaybackOptions) -> Result<()> {
         let mut options = options.clone();
         options.session_directory.clone_from(&self.session.path);
+
         return playback(&options).map_err(Error::from);
     }
 }

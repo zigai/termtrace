@@ -41,6 +41,7 @@ fn row_diffs(previous: Option<&SemanticState>, current: &SemanticState) -> Vec<R
                 return old.soft_wrapped != row.soft_wrapped
                     || old.wrap_continuation != row.wrap_continuation;
             });
+
             let cells = row
                 .cells
                 .iter()
@@ -50,6 +51,7 @@ fn row_diffs(previous: Option<&SemanticState>, current: &SemanticState) -> Vec<R
                 })
                 .cloned()
                 .collect::<Vec<_>>();
+
             return (wrap_changed || !cells.is_empty()).then_some(RowDiff {
                 row: row.row,
                 soft_wrapped: row.soft_wrapped,

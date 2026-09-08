@@ -274,6 +274,7 @@ impl From<SemanticRasterProfileArg> for SemanticRasterProfile {
         };
     }
 }
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(in crate::cli) enum VideoPresetArg {
     /// Crisp, compact H.264 suitable for documentation.

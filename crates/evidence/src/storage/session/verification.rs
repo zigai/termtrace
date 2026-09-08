@@ -1,11 +1,11 @@
 use std::{fs, path::Path};
 
 use termtrace_model::{
-    execution::receipt::{EVIDENCE_RECEIPT_NAME, EvidenceReceiptPayload},
+    execution::receipt::{EvidenceReceiptPayload, EVIDENCE_RECEIPT_NAME},
     execution::request_journal::MUTATION_JOURNAL_NAME,
     execution::session::{
-        MutationJournalStatus, SessionCompletion, VERIFICATION_REPORT_FORMAT,
-        VERIFICATION_REPORT_VERSION, VerificationFinding, VerificationLevel, VerificationReport,
+        MutationJournalStatus, SessionCompletion, VerificationFinding, VerificationLevel,
+        VerificationReport, VERIFICATION_REPORT_FORMAT, VERIFICATION_REPORT_VERSION,
     },
 };
 
@@ -15,9 +15,9 @@ use crate::{
         request_journal::validate_mutation_journal,
     },
     storage::{
-        CompletionIntegrityKind, Error,
-        artifact::{ARTIFACT_ROOT_LOG, read_artifact_roots, verify_session_artifacts},
+        artifact::{read_artifact_roots, verify_session_artifacts, ARTIFACT_ROOT_LOG},
         event_log::EventLogSummary,
+        CompletionIntegrityKind, Error,
     },
 };
 
@@ -65,6 +65,7 @@ pub fn verify_session_with_trust(
         findings: Vec::new(),
         output_page: None,
     };
+
     let manifest_path = session_directory.join("session.json");
     let manifest_bytes = match fs::read(&manifest_path) {
         Ok(bytes) => bytes,
@@ -74,27 +75,34 @@ pub fn verify_session_with_trust(
                 "session_manifest_unreadable",
                 error.to_string(),
             );
+
             return report;
         }
     };
+
     let actual_manifest_hash = manifest_hash(&manifest_bytes);
     report.session_manifest_hash = Some(actual_manifest_hash.clone());
     let manifest = match read_manifest(session_directory) {
         Ok(manifest) => manifest,
         Err(error) => {
             finding(&mut report, "session_manifest_invalid", error.to_string());
+
             return report;
         }
     };
     report.session_id = Some(manifest.session_id);
+
     if let Err(error) = validate_manifest(&manifest) {
         finding(&mut report, "session_format_unsupported", error.to_string());
+
         return report;
     }
+
     let log = match EventLogSummary::read(session_directory.join(&manifest.event_log)) {
         Ok(log) => log,
         Err(error) => {
             finding(&mut report, "event_log_invalid", error.to_string());
+
             return report;
         }
     };
@@ -110,21 +118,27 @@ pub fn verify_session_with_trust(
                 "completion_invalid_or_missing",
                 error.to_string(),
             );
+
             return report;
         }
     };
+
     if let Err(error) = validate_completion_format(&completion) {
         finding(
             &mut report,
             "completion_format_unsupported",
             error.to_string(),
         );
+
         return report;
     }
+
     if level == VerificationLevel::Structure {
         report.valid = true;
+
         return report;
     }
+
     if let Err(error) = validate_completion_with_loaded(
         session_directory,
         &log,
@@ -134,8 +148,10 @@ pub fn verify_session_with_trust(
     ) {
         let code = content_finding_code(error.kind);
         finding(&mut report, code, error.error.to_string());
+
         return report;
     }
+
     match verify_session_artifacts(
         session_directory,
         &actual_manifest_hash,
@@ -144,9 +160,11 @@ pub fn verify_session_with_trust(
         Ok(count) => report.artifact_roots_verified = count,
         Err(error) => {
             finding(&mut report, "artifact_integrity_invalid", error.to_string());
+
             return report;
         }
     }
+
     if session_directory.join(MUTATION_JOURNAL_NAME).exists() {
         match validate_mutation_journal(session_directory) {
             Ok(count) => {
@@ -159,6 +177,7 @@ pub fn verify_session_with_trust(
             }
         }
     }
+
     match level {
         VerificationLevel::Structure
         | VerificationLevel::Content
@@ -167,6 +186,7 @@ pub fn verify_session_with_trust(
             verify_signature(session_directory, allowed_signers, &completion, &mut report)
         }
     }
+
     return report;
 }
 
@@ -183,16 +203,20 @@ fn verify_signature(
             "signature_receipt_missing",
             "no detached evidence receipt is available",
         );
+
         return;
     }
+
     report.signature_receipt_present = true;
     let expected = match expected_receipt_payload(session, completion, &receipt_path) {
         Ok(payload) => payload,
         Err(error) => {
             finding(report, "signature_receipt_invalid", error.to_string());
+
             return;
         }
     };
+
     match verify_ssh_receipt(&receipt_path, &expected, allowed_signers) {
         Ok(signature) => {
             report.signature_signer_key_id = Some(signature.signer_key_id);
@@ -202,6 +226,7 @@ fn verify_signature(
             report.artifact_authenticity_established = signature.signer_trusted
                 && signature.artifact_root_count > 0
                 && signature.artifact_root_count == report.artifact_roots_verified;
+
             if !signature.cryptographic_valid {
                 finding(
                     report,
@@ -238,6 +263,7 @@ fn expected_receipt_payload(
             reason: error.to_string(),
         };
     })?;
+
     let roots = read_artifact_roots(&session.join(ARTIFACT_ROOT_LOG))?;
     let completion_path = session.join("completion.json");
     let completion_bytes = fs::read(&completion_path).map_err(|source| {
@@ -246,6 +272,7 @@ fn expected_receipt_payload(
             source,
         };
     })?;
+
     return receipt_payload(
         completion.session_id,
         completion,
@@ -263,6 +290,7 @@ fn finding(report: &mut VerificationReport, code: &str, message: impl Into<Strin
         message: message.into(),
     });
 }
+
 fn content_finding_code(kind: CompletionIntegrityKind) -> &'static str {
     return match kind {
         CompletionIntegrityKind::CanonicalContent => "canonical_content_invalid",

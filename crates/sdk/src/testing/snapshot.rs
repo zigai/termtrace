@@ -46,9 +46,11 @@ pub(super) fn snapshot_path(
         && name
             .bytes()
             .all(|byte| return byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
+
     if valid {
         return Ok(snapshot_root.join(format!("{name}.json")));
     }
+
     return Err(TerminalAssertionError::Assertion(AssertionError::Mismatch(
         ExpectationMismatch {
             assertion: "terminal_snapshot_name",
@@ -77,13 +79,16 @@ pub fn assert_snapshot_file(
 
     let mut actual = normalized_snapshot(frame, profile, options)?;
     actual.push('\n');
+
     let parent = path
         .parent()
         .ok_or_else(|| return testing_error("snapshot path has no parent"))?;
+
     if update {
         if !parent.exists() {
             create_private_directory(parent).map_err(Error::from)?;
         }
+
         let temporary = parent.join(format!(".snapshot-{}.tmp", Uuid::now_v7()));
         write_secure(&temporary, actual.as_bytes()).map_err(Error::from)?;
         fs_err::rename(&temporary, path).map_err(|source| {
@@ -92,9 +97,12 @@ pub fn assert_snapshot_file(
                 source,
             };
         })?;
+
         sync_directory(parent).map_err(Error::from)?;
+
         return Ok(());
     }
+
     if !path.exists() {
         return Err(snapshot_mismatch(
             frame,
@@ -103,12 +111,14 @@ pub fn assert_snapshot_file(
             String::new(),
         ));
     }
+
     let (mut file, byte_count) = open_regular_file_nofollow(path)?;
     if byte_count > MAX_SNAPSHOT_BYTES {
         return Err(TerminalAssertionError::Operation(testing_error(
             "reviewed snapshot exceeds 4 MiB",
         )));
     }
+
     let mut expected = String::new();
     file.read_to_string(&mut expected).map_err(|source| {
         return Error::Filesystem {
@@ -116,14 +126,17 @@ pub fn assert_snapshot_file(
             source,
         };
     })?;
+
     if expected == actual {
         return Ok(());
     }
+
     let excerpt = format!(
         "expected:\n{}\nactual:\n{}",
         bounded_text(&expected),
         bounded_text(&actual)
     );
+
     return Err(snapshot_mismatch(
         frame,
         format!("reviewed snapshot {}", path.display()),
@@ -157,6 +170,7 @@ fn snapshot_mismatch(
 
 pub(super) fn bounded_text(value: &str) -> String {
     let end = value.floor_char_boundary(MAX_SECONDARY_FAILURE_CHARS);
+
     return value.get(..end).unwrap_or_default().to_owned();
 }
 
@@ -177,9 +191,11 @@ pub(super) fn open_regular_file_nofollow(path: &Path) -> Result<(File, u64)> {
             source,
         };
     })?;
+
     if !metadata.is_file() {
         return Err(testing_error("evidence member is not a regular file"));
     }
+
     return Ok((file, metadata.len()));
 }
 

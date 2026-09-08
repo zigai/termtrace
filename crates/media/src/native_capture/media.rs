@@ -10,9 +10,9 @@ use termtrace_evidence::artifact::{secure_file, write_secure};
 use termtrace_model::artifact::visual::{CaptureOptions, NativeFrameSample};
 
 use super::{
-    Error, Result,
-    process::{ManagedChild, probe_output, probe_output_with_check, wait_for_success},
+    process::{probe_output, probe_output_with_check, wait_for_success, ManagedChild},
     util::{external_error, unix_now_ns},
+    Error, Result,
 };
 
 pub(super) fn spawn_video_ffmpeg(
@@ -26,8 +26,10 @@ pub(super) fn spawn_video_ffmpeg(
     let clone = log
         .try_clone()
         .map_err(|source| return Error::Filesystem { path, source })?;
+
     let size = format!("{}x{}", options.width, options.height);
     let fps = options.fps.to_string();
+
     return ManagedChild::spawn_logged(
         "ffmpeg",
         Command::new("ffmpeg")
@@ -102,6 +104,7 @@ pub(super) fn capture_screenshot(
             .stdout(Stdio::null())
             .stderr(Stdio::from(log)),
     )?;
+
     return wait_for_success(&mut child, Duration::from_secs(15), staging);
 }
 
@@ -131,12 +134,15 @@ pub(super) fn capture_stable_x11_frame_with_check(
     let mut previous_hash: Option<String> = None;
     let mut stable_run = 0_u8;
     let mut log: Vec<u8> = Vec::new();
+
     for sample in 0_u16..20 {
         check()?;
+
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err(external_error("X11 frame import", "capture timed out"));
         }
+
         let path = staging.join(format!(".native-sample-{sample:04}.png"));
         let output = probe_output_with_check(
             "X11 frame import",
@@ -150,8 +156,10 @@ pub(super) fn capture_stable_x11_frame_with_check(
         if let Err(error) = output {
             log.extend_from_slice(error.to_string().as_bytes());
             write_secure(&staging.join("x11-screenshot.log"), &log)?;
+
             return Err(error);
         }
+
         let bytes = fs::read(&path).map_err(|source| {
             return Error::Filesystem {
                 path: path.clone(),
@@ -161,26 +169,28 @@ pub(super) fn capture_stable_x11_frame_with_check(
         fs::remove_file(&path).map_err(|source| return Error::Filesystem { path, source })?;
         let hash = blake3::hash(&bytes).to_hex().to_string();
         let same_as_previous = previous_hash.as_ref() == Some(&hash);
-        stable_run = if same_as_previous {
-            stable_run.saturating_add(1)
-        } else {
-            1
-        };
+        stable_run = if same_as_previous { stable_run.saturating_add(1) } else { 1 };
         samples.push(NativeFrameSample {
             sample,
             captured_unix_ns: unix_now_ns()?,
             blake3: hash.clone(),
             same_as_previous,
         });
+
         previous_hash = Some(hash);
+
         if stable_run >= 3 {
             write_secure(screenshot, &bytes)?;
             write_secure(&staging.join("x11-screenshot.log"), &log)?;
+
             return Ok(samples);
         }
+
         thread::sleep(Duration::from_millis(50));
     }
+
     write_secure(&staging.join("x11-screenshot.log"), &log)?;
+
     return Err(Error::ExternalCommand {
         operation: "X11 frame import".to_owned(),
         reason: "native frame did not produce three consecutive identical samples".to_owned(),
@@ -195,6 +205,7 @@ pub(super) fn probe_video(
 ) -> Result<serde_json::Value> {
     let probe = ffprobe(path, &["-count_packets", "-show_streams", "-show_format"])?;
     validate_video_probe(&probe, fps, width, height)?;
+
     return Ok(probe);
 }
 
@@ -205,12 +216,14 @@ pub(super) fn validate_video_probe(
     height: u16,
 ) -> Result<()> {
     let stream = first_stream(probe)?;
+
     let rate = format!("{fps}/1");
     let packets = stream
         .get("nb_read_packets")
         .and_then(serde_json::Value::as_str)
         .and_then(|value| return value.parse::<u64>().ok())
         .unwrap_or(0);
+
     if stream
         .get("avg_frame_rate")
         .and_then(serde_json::Value::as_str)
@@ -223,11 +236,14 @@ pub(super) fn validate_video_probe(
             reason: format!("video probe does not match {width}x{height} at {rate} with packets"),
         });
     }
+
     return Ok(());
 }
+
 pub(super) fn probe_screenshot(path: &Path, width: u16, height: u16) -> Result<serde_json::Value> {
     let probe = ffprobe(path, &["-show_streams"])?;
     validate_screenshot_probe(&probe, width, height)?;
+
     return Ok(probe);
 }
 
@@ -245,8 +261,10 @@ pub(super) fn validate_screenshot_probe(
             reason: "screenshot dimensions or codec do not match".to_owned(),
         });
     }
+
     return Ok(());
 }
+
 fn ffprobe(path: &Path, args: &[&str]) -> Result<serde_json::Value> {
     let output = probe_output(
         "ffprobe",
@@ -257,6 +275,7 @@ fn ffprobe(path: &Path, args: &[&str]) -> Result<serde_json::Value> {
             .arg(path),
         Duration::from_secs(30),
     )?;
+
     return serde_json::from_slice(&output).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
@@ -287,8 +306,10 @@ pub(super) fn probe_variable_video(
             "encoded stream has incorrect geometry or no frames",
         ));
     }
+
     return Ok(probe);
 }
+
 fn first_stream(probe: &serde_json::Value) -> Result<&serde_json::Value> {
     return probe
         .get("streams")

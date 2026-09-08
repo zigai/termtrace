@@ -31,14 +31,14 @@ use termtrace_model::{
 use termtrace_terminal::Format;
 
 use super::{
-    CachedSemanticState, frame_from_state, frame_hash, load_checkpoint, observation_error,
-    publish_checkpoint, publish_endpoint_checkpoint,
+    frame_from_state, frame_hash, load_checkpoint, observation_error, publish_checkpoint,
+    publish_endpoint_checkpoint, CachedSemanticState,
 };
 use crate::replay::{
-    EndpointInspection, RenderedStateFormats, inspect_latest_presented_prefix,
-    inspect_latest_presented_stream, inspect_prefix_stream, inspect_session_stream,
-    inspect_session_stream_with_formats,
-    trust::{SourceIdentity, check_cancelled},
+    inspect_latest_presented_prefix, inspect_latest_presented_stream, inspect_prefix_stream,
+    inspect_session_stream, inspect_session_stream_with_formats,
+    trust::{check_cancelled, SourceIdentity},
+    EndpointInspection, RenderedStateFormats,
 };
 use crate::{Error, Result};
 
@@ -59,7 +59,9 @@ pub fn replay_endpoint_for_prefix(
 ) -> Result<ReplayEndpoint> {
     let (header, state) =
         inspect_latest_presented_prefix(&session.join("events.jsonl"), boundary, cancelled)?;
+
     let manifest = read_manifest(session)?;
+
     if header.session_id != manifest.session_id
         || header.session_manifest_hash != manifest_hash(&canonical_manifest_bytes(&manifest)?)
     {
@@ -67,6 +69,7 @@ pub fn replay_endpoint_for_prefix(
             "prefix manifest does not match its canonical header",
         ));
     }
+
     return Ok(ReplayEndpoint {
         session_id: header.session_id,
         session_manifest_hash: header.session_manifest_hash,
@@ -111,9 +114,11 @@ pub fn presented_replay_endpoint_for_session(
     let manifest = read_manifest(session)?;
     let completion = read_completion(session)?;
     let (state, _) = resolve_completed_state(session, point, &completion, Some(cancelled))?;
+
     if !state.presented {
         return Ok(None);
     }
+
     return Ok(Some(ReplayEndpoint {
         session_id: manifest.session_id,
         session_manifest_hash: completion.session_manifest_hash,
@@ -160,12 +165,15 @@ pub fn observe_session_with_options(
             source,
         };
     })?;
+
     let manifest = read_manifest(&canonical)?;
+
     if !canonical.join("completion.json").is_file() {
         return Err(observation_error(
             "session is live; engine observation requires completed evidence or explicit validated-prefix observation",
         ));
     }
+
     return observe_completed(&canonical, manifest.session_id, state_point, include_hidden);
 }
 
@@ -187,13 +195,16 @@ pub fn observe_completed_with_formats(
             source,
         };
     })?;
+
     let manifest = read_manifest(&canonical)?;
     let source = SourceIdentity::capture(&canonical)?;
     let completion = validate_completed_session(&canonical)?;
     let selector = state_selector_for_session(&canonical, &state_point, None)?;
     let (inspection, rendered) =
         inspect_session_stream_with_formats(&canonical, selector, formats)?;
+
     source.check(&canonical)?;
+
     let state = CachedSemanticState {
         state_id: Some(inspection.record.state_id),
         event_seq: inspection.record.event_seq,
@@ -212,8 +223,10 @@ pub fn observe_completed_with_formats(
         include_hidden,
         ObservationResolution::CanonicalReplay,
     )?;
+
     return Ok((observation, rendered));
 }
+
 /// Build a truth-labeled observation from one actor-owned live snapshot.
 ///
 /// # Errors
@@ -230,6 +243,7 @@ pub fn observation_from_live_snapshot(
             source,
         };
     })?;
+
     let manifest = read_manifest(&canonical)?;
     let ControlData::Snapshot {
         semantic_state_zstd: _,
@@ -260,6 +274,7 @@ pub fn observation_from_live_snapshot(
         modes,
     };
     let payload_hash = frame_hash(&frame)?;
+
     return Ok(Observation {
         source_kind: ObservationSourceKind::LiveSession,
         session_id: Some(manifest.session_id),
@@ -298,11 +313,13 @@ pub fn observe_validated_prefix(
             source,
         };
     })?;
+
     if canonical.join("completion.json").exists() {
         return Err(observation_error(
             "validated-prefix observation requires incomplete evidence",
         ));
     }
+
     let manifest = read_manifest(&canonical)?;
     let source = SourceIdentity::capture_candidate(&canonical)?;
     let log = EventLogSummary::read(canonical.join("events.jsonl"))?;
@@ -310,6 +327,7 @@ pub fn observe_validated_prefix(
         &canonical,
         state_selector_for_session(&canonical, &point, None)?,
     )?;
+
     if source != SourceIdentity::capture_candidate(&canonical)?
         || canonical.join("completion.json").exists()
     {
@@ -317,11 +335,13 @@ pub fn observe_validated_prefix(
             "canonical prefix changed during observation",
         ));
     }
+
     if !inspection.record.presented && !include_hidden {
         return Err(observation_error(
             "selected semantic state is hidden; pass explicit hidden-state permission",
         ));
     }
+
     let frame = frame_from_state(&inspection.state);
     let payload_hash = frame_hash(&frame)?;
     let output_bytes = log.output_bytes;
@@ -335,9 +355,11 @@ pub fn observe_validated_prefix(
                     source,
                 };
             })?;
+
             blake3::hash(&bytes).to_hex().to_string()
         }
     };
+
     return Ok(Observation {
         source_kind: ObservationSourceKind::InterruptedSession,
         session_id: Some(manifest.session_id),
@@ -371,6 +393,7 @@ fn observe_completed(
 ) -> Result<Observation> {
     let completion = read_completion(session)?;
     let (state, resolution) = resolve_completed_state(session, &point, &completion, None)?;
+
     return completed_observation_from_cached(
         session,
         session_id,
@@ -399,14 +422,17 @@ pub fn resolved_screen_state_for_session(
             source,
         };
     })?;
+
     let manifest = read_manifest(&canonical)?;
     let completion = read_completion(&canonical)?;
     let (state, resolution) = resolve_completed_state(&canonical, &point, &completion, None)?;
+
     if !state.presented && !include_hidden {
         return Err(observation_error(
             "selected semantic state is hidden; pass explicit hidden-state permission",
         ));
     }
+
     let source = ScreenFrameSource::Resolved {
         source_kind: ObservationSourceKind::CompletedSession,
         session_id: Some(manifest.session_id),
@@ -423,6 +449,7 @@ pub fn resolved_screen_state_for_session(
         integrity: ObservationIntegrity::CanonicalChained,
         resolution,
     };
+
     return Ok((state.state, source, state.presented));
 }
 
@@ -433,11 +460,14 @@ fn resolve_completed_state(
     cancelled: Option<&AtomicBool>,
 ) -> Result<(CachedSemanticState, ObservationResolution)> {
     check_cancelled(cancelled)?;
+
     let source = SourceIdentity::capture(session)?;
     if let Some(state) = load_checkpoint(session, point, completion)? {
         source.check(session)?;
+
         return Ok((state, ObservationResolution::ValidatedCheckpoint));
     }
+
     if matches!(point, StatePoint::StateHash { .. })
         && let Some(state) = load_checkpoint(session, &StatePoint::LatestPresented, completion)?
         && matches!(
@@ -446,8 +476,10 @@ fn resolve_completed_state(
         )
     {
         source.check(session)?;
+
         return Ok((state, ObservationResolution::ValidatedCheckpoint));
     }
+
     let summary = EventLogSummary::read_with_check(session.join("events.jsonl"), || {
         return check_cancelled(cancelled).map_err(|error| {
             return termtrace_evidence::Error::InvalidEvidence {
@@ -455,6 +487,7 @@ fn resolve_completed_state(
             };
         });
     })?;
+
     validate_completion_summary_candidate(session, &summary, completion)?;
     source.check(session)?;
     if matches!(
@@ -473,6 +506,7 @@ fn resolve_completed_state(
         ) {
             tracing::warn!(%error, "could not publish endpoint replay checkpoint");
         }
+
         if matches!(point, StatePoint::LatestPresented)
             || matches!(
                 point,
@@ -485,6 +519,7 @@ fn resolve_completed_state(
             ));
         }
     }
+
     let selector = state_selector_for_session(session, point, cancelled)?;
     let inspection = inspect_session_stream(session, selector, cancelled)?;
     source.check(session)?;
@@ -493,6 +528,7 @@ fn resolve_completed_state(
     {
         tracing::warn!(%error, "could not publish disposable replay checkpoint");
     }
+
     return Ok((
         CachedSemanticState {
             state_id: Some(inspection.record.state_id),
@@ -533,8 +569,10 @@ fn completed_observation_from_cached(
             "selected semantic state is hidden; pass explicit hidden-state permission",
         ));
     }
+
     let frame = frame_from_state(&state.state);
     let payload_hash = frame_hash(&frame)?;
+
     return Ok(Observation {
         source_kind: ObservationSourceKind::CompletedSession,
         session_id: Some(session_id),
@@ -584,15 +622,19 @@ pub fn state_selector_for_session(
     };
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
     let mut found = None;
+
     while let Some(record) = cursor.next_record()? {
         check_cancelled(cancelled)?;
+
         if matches!(&record.event, Event::Marker { label: value, .. } if value == label)
             && found.replace(record.seq).is_some()
         {
             return Err(observation_error("marker label is ambiguous"));
         }
     }
+
     let _pending = cursor.finish()?;
+
     return found
         .map(StateSelector::EventSeq)
         .ok_or_else(|| return observation_error("marker does not exist"));
@@ -610,6 +652,7 @@ pub fn semantic_state_for_session(
     include_hidden: bool,
 ) -> Result<SemanticState> {
     let (state, _) = semantic_state_with_hash_for_session(session, point, include_hidden)?;
+
     return Ok(state);
 }
 
@@ -658,20 +701,25 @@ fn semantic_state_with_hash_for_session_inner(
             source,
         };
     })?;
+
     if !canonical.join("completion.json").is_file() {
         return Err(observation_error(
             "session is live; semantic state resolution requires completed evidence",
         ));
     }
+
     let completion = read_completion(&canonical)?;
     let (state, _) = resolve_completed_state(&canonical, point, &completion, cancelled)?;
+
     if !state.presented && !include_hidden {
         return Err(observation_error(
             "selected semantic state is hidden; pass explicit hidden-state permission",
         ));
     }
+
     return Ok((state.state, state.state_hash));
 }
+
 /// Decode the complete semantic state carried by one actor-owned live snapshot.
 ///
 /// # Errors
@@ -692,6 +740,7 @@ pub fn semantic_state_from_live_snapshot(snapshot: ControlData) -> Result<(Seman
     let decoder = Decoder::new(semantic_state_zstd.as_bytes()).map_err(|error| {
         return observation_error(format!("decompress live semantic snapshot: {error}"));
     })?;
+
     let mut decoded: Vec<u8> = Vec::new();
     decoder
         .take(MAX_LIVE_SEMANTIC_STATE_BYTES.saturating_add(1))
@@ -699,11 +748,13 @@ pub fn semantic_state_from_live_snapshot(snapshot: ControlData) -> Result<(Seman
         .map_err(|error| {
             return observation_error(format!("decompress live semantic snapshot: {error}"));
         })?;
+
     if u64::try_from(decoded.len()).unwrap_or(u64::MAX) > MAX_LIVE_SEMANTIC_STATE_BYTES {
         return Err(observation_error(
             "live semantic snapshot exceeds the 32 MiB decoded limit",
         ));
     }
+
     let state = serde_json::from_slice(&decoded).map_err(|source| {
         return Error::InvalidJson {
             path: PathBuf::from("<live-semantic-snapshot>"),
@@ -711,12 +762,13 @@ pub fn semantic_state_from_live_snapshot(snapshot: ControlData) -> Result<(Seman
             source,
         };
     })?;
+
     return Ok((state, state_hash));
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read as _, repeat};
+    use std::io::{repeat, Read as _};
 
     use termtrace_model::{
         execution::event_log::CanonicalBoundary, terminal::observation::ActorBoundaries,
@@ -761,10 +813,8 @@ mod tests {
 
         let error = semantic_state_from_live_snapshot(snapshot)
             .expect_err("oversized live semantic state must be rejected");
-        assert!(
-            error
-                .to_string()
-                .contains("exceeds the 32 MiB decoded limit")
-        );
+        assert!(error
+            .to_string()
+            .contains("exceeds the 32 MiB decoded limit"));
     }
 }

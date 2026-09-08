@@ -2,7 +2,7 @@ use std::{collections::VecDeque, path::Path, sync::atomic::AtomicBool};
 
 use termtrace_evidence::{
     event_log::EventLogCursor,
-    session::{SessionSnapshot, validate_completed_session},
+    session::{validate_completed_session, SessionSnapshot},
 };
 use termtrace_model::{
     execution::event::{Event, EventRecord},
@@ -19,8 +19,8 @@ use super::{
     selection::range_error,
 };
 use crate::{
-    Result,
     replay::{timeline_event, trust::SourceIdentity, visit_recording_states_range_while},
+    Result,
 };
 
 /// Visit an ordered completed timeline with bounded canonical, VT, and semantic cursors.
@@ -38,6 +38,7 @@ pub fn visit_session_timeline_while(
     visitor: impl FnMut(TimelineEntry) -> Result<bool>,
 ) -> Result<()> {
     validate_completed_session(session)?;
+
     return visit_recording_timeline_while(
         session,
         true,
@@ -82,12 +83,14 @@ fn visit_recording_timeline_while(
     let mut controls = include_controls
         .then(|| return TokenCursor::new(session, range))
         .transpose()?;
+
     let mut canonical_next = next_canonical(&mut canonical, range)?;
     let mut control_next = controls
         .as_mut()
         .map(TokenCursor::next)
         .transpose()?
         .flatten();
+
     let mut stopped = false;
     let mut auxiliary = || -> Result<Option<TimelineEntry>> {
         let use_canonical = match (&canonical_next, &control_next) {
@@ -98,14 +101,17 @@ fn visit_recording_timeline_while(
         if use_canonical {
             let entry = canonical_next.take();
             canonical_next = next_canonical(&mut canonical, range)?;
+
             return Ok(entry);
         }
+
         let entry = control_next.take();
         control_next = controls
             .as_mut()
             .map(TokenCursor::next)
             .transpose()?
             .flatten();
+
         return Ok(entry);
     };
     let mut pending = auxiliary()?;
@@ -118,6 +124,7 @@ fn visit_recording_timeline_while(
             if !include_hidden && !record.presented {
                 return Ok(true);
             }
+
             let semantic = semantic_timeline_entry(record);
             while pending
                 .as_ref()
@@ -128,14 +135,19 @@ fn visit_recording_timeline_while(
                     .ok_or_else(|| return range_error("timeline cursor lost its pending entry"))?;
                 if !visitor(entry)? {
                     stopped = true;
+
                     return Ok(false);
                 }
+
                 pending = auxiliary()?;
             }
+
             if !visitor(semantic)? {
                 stopped = true;
+
                 return Ok(false);
             }
+
             return Ok(true);
         },
     )?;
@@ -144,14 +156,17 @@ fn visit_recording_timeline_while(
             if !visitor(entry)? {
                 break;
             }
+
             pending = auxiliary()?;
         }
     }
+
     if source != SourceIdentity::capture_candidate(session)? {
         return Err(range_error(
             "canonical source changed during timeline generation",
         ));
     }
+
     return Ok(());
 }
 
@@ -170,6 +185,7 @@ pub fn build_session_timeline_page(
     if limit == 0 {
         return Err(range_error("timeline page limit must be greater than zero"));
     }
+
     let mut entries = Vec::with_capacity(usize::from(limit));
     let mut seen = 0_u64;
     let mut more = false;
@@ -177,15 +193,21 @@ pub fn build_session_timeline_page(
         if seen >= offset {
             if entries.len() == usize::from(limit) {
                 more = true;
+
                 return Ok(false);
             }
+
             entries.push(entry);
         }
+
         seen = seen.saturating_add(1);
+
         return Ok(true);
     })?;
+
     let next_offset = more
         .then(|| return offset.saturating_add(u64::try_from(entries.len()).unwrap_or(u64::MAX)));
+
     return Ok(TimelinePage {
         entries,
         next_offset,
@@ -209,6 +231,7 @@ fn next_canonical(
             }));
         }
     }
+
     return Ok(None);
 }
 
@@ -244,15 +267,18 @@ impl TokenCursor {
                 }) {
                     continue;
                 }
+
                 let Some(first) = token.source.first() else {
                     continue;
                 };
+
                 return Ok(Some(TimelineEntry {
                     monotonic_ns: first.monotonic_ns,
                     event_seq: Some(first.event_seq),
                     item: TimelineItem::VtToken { token },
                 }));
             }
+
             let Some(framer) = self.framer.as_mut() else {
                 return Ok(None);
             };
@@ -266,11 +292,14 @@ impl TokenCursor {
                     u64::try_from(self.byte_offset).unwrap_or(u64::MAX),
                     *byte,
                 )?);
+
                 self.byte_offset = self.byte_offset.saturating_add(1);
                 continue;
             }
+
             self.output = self.cursor.next_record()?;
             self.byte_offset = 0;
+
             if self.output.is_none()
                 && let Some(framer) = self.framer.take()
             {

@@ -40,14 +40,17 @@ pub fn create(
     let canonical = session
         .canonicalize()
         .map_err(|source| return Error::filesystem(session, source))?;
+
     if destination.starts_with(&canonical) {
         return Err(Error::invalid(
             "bug-report destination must be outside the canonical session",
         ));
     }
+
     let completion = validate_completed_session(&canonical)?;
     let session_manifest = read_manifest(&canonical)?;
     let mut cursor = EventLogCursor::open(canonical.join("events.jsonl"))?;
+
     let mut has_input = false;
     while let Some(record) = cursor.next_record()? {
         if matches!(record.event, Event::InputIntent { .. }) {
@@ -55,25 +58,32 @@ pub fn create(
             break;
         }
     }
+
     let analysis = has_input
         .then(|| return analyze_last_action_session(&canonical, 50))
         .transpose()?;
+
     let observation = observe_session(&canonical, StatePoint::LatestPresented)?;
     let parent = destination
         .parent()
         .ok_or_else(|| return Error::invalid("bug-report path has no parent"))?;
+
     if !parent.is_dir() {
         return Err(Error::invalid("bug-report parent directory does not exist"));
     }
+
     let name = destination
         .file_name()
         .ok_or_else(|| return Error::invalid("bug-report path has no basename"))?;
+
     let staging = parent.join(format!(
         ".{}.{}.tmp",
         name.to_string_lossy(),
         Uuid::now_v7()
     ));
+
     create_private_directory(&staging)?;
+
     let published = (|| -> Result<BugReportManifest> {
         let metadata = BugReportMetadata {
             session_id: session_manifest.session_id,
@@ -92,36 +102,44 @@ pub fn create(
                 .as_ref()
                 .map(|failure| return failure.code.clone()),
         };
+
         let reference = BugReportSessionReference {
             canonical_session: ByteString::from(canonical.as_os_str().as_encoded_bytes()),
             session_id: session_manifest.session_id,
             final_event_hash: completion.final_event_hash.clone(),
             event_count: completion.event_count,
         };
+
         write_json(&staging.join("metadata.json"), &metadata)?;
         write_secure(
             &staging.join("last-screen.txt"),
             observation.frame.viewport_text.as_bytes(),
         )?;
+
         if let Some(analysis) = &analysis {
             write_json(&staging.join("last-action.json"), &analysis.inspection)?;
             write_json(&staging.join("diagnostics.json"), &analysis.diagnostics)?;
         }
+
         write_json(&staging.join("session-reference.json"), &reference)?;
+
         if include_screenshot {
             let screenshot_state =
                 inspect_completed_session(&canonical, StateSelector::LatestPresented)?.state;
+
             write_secure(
                 &staging.join("screenshot.png"),
                 &render_png(&screenshot_state)?,
             )?;
         }
+
         let mut members = collect_artifact_members(&staging)?;
         if members.len() > MAX_BUG_REPORT_MEMBERS {
             return Err(Error::invalid(format!(
                 "bug report exceeds {MAX_BUG_REPORT_MEMBERS} members"
             )));
         }
+
         for member in &mut members {
             let (sensitivity, relationship, schema_type) = member_semantics(&member.path)
                 .ok_or_else(|| {
@@ -134,6 +152,7 @@ pub fn create(
             member.relationship = relationship.to_owned();
             member.schema_type = schema_type.map(str::to_owned);
         }
+
         let manifest = BugReportManifest {
             format: "termtrace-bug-report".to_owned(),
             version: 2,
@@ -145,21 +164,28 @@ pub fn create(
             includes_last_action: analysis.is_some(),
             members,
         };
+
         write_json(&staging.join("manifest.json"), &manifest)?;
         sync_directory(&staging)?;
+
         return Ok(manifest);
     })();
+
     let manifest = match published {
         Ok(manifest) => manifest,
         Err(error) => {
             let _cleanup = fs_err::remove_dir_all(&staging);
+
             return Err(error);
         }
     };
+
     if let Err(error) = commit_directory(parent, &staging, destination) {
         let _cleanup = fs_err::remove_dir_all(&staging);
+
         return Err(error.into());
     }
+
     return Ok(manifest);
 }
 
@@ -168,6 +194,7 @@ fn member_semantics(
 ) -> Option<(ArtifactSensitivity, &'static str, Option<&'static str>)> {
     let sensitive = ArtifactSensitivity::SensitiveTerminalData;
     let operational = ArtifactSensitivity::OperationalMetadata;
+
     return match path {
         "metadata.json" => Some((operational, "redacted_session_metadata", None)),
         "last-screen.txt" => Some((sensitive, "last_relevant_screen", None)),
@@ -184,5 +211,6 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
         .map_err(|source| return Error::json(PathBuf::from(path), source))?;
     bytes.push(b'\n');
     write_secure(path, &bytes)?;
+
     return Ok(());
 }

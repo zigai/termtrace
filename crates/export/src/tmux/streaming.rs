@@ -11,11 +11,11 @@ use termtrace_evidence::artifact::{
 use termtrace_model::artifact::tmux::TmuxStreamingBundleManifest;
 
 use super::{
-    BundleProfile, BundleVerificationPolicy, ByteString, DirectoryCleanup, Error,
-    MAX_AGGREGATE_MANIFEST_BYTES, Result, TmuxBundleTrack, TmuxRecordingManifest, Uuid, bundle,
-    commit_directory, create_private_directory, parse_aggregate, read_regular_bounded,
+    bundle, commit_directory, create_private_directory, parse_aggregate, read_regular_bounded,
     sync_directory, tmux_journal, track_directory, validate_aggregate, validate_destination,
-    visit_source_tracks, write_secure,
+    visit_source_tracks, write_secure, BundleProfile, BundleVerificationPolicy, ByteString,
+    DirectoryCleanup, Error, Result, TmuxBundleTrack, TmuxRecordingManifest, Uuid,
+    MAX_AGGREGATE_MANIFEST_BYTES,
 };
 use std::os::unix::ffi::OsStrExt as _;
 
@@ -37,24 +37,30 @@ pub fn create(
 ) -> Result<TmuxStreamingBundleManifest> {
     let aggregate_manifest = aggregate_manifest.as_ref();
     let destination = destination.as_ref();
+
     if destination.exists() {
         return Err(Error::invalid("tmux export destination already exists"));
     }
+
     let bytes = read_regular_bounded(
         aggregate_manifest,
         MAX_AGGREGATE_MANIFEST_BYTES,
         "aggregate manifest",
     )?;
+
     let aggregate = parse_aggregate(aggregate_manifest, &bytes)?;
     validate_aggregate(&aggregate)?;
+
     validate_destination(destination, aggregate_manifest, &[])?;
     // Validate every source before creating a destination that might lie inside it.
     visit_source_tracks(aggregate_manifest, &aggregate, |source| {
         return validate_destination(destination, aggregate_manifest, &[source]);
     })?;
+
     let parent = destination
         .parent()
         .ok_or_else(|| return Error::invalid("export destination has no parent"))?;
+
     let staging = parent.join(format!(".tmux-export-{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
     let cleanup = DirectoryCleanup::new(staging.clone());
@@ -63,12 +69,14 @@ pub fn create(
         let source = aggregate_manifest
             .parent()
             .ok_or_else(|| return Error::invalid("aggregate has no parent"))?;
+
         tmux_journal::copy_committed(
             &source.join(tmux_journal::JOURNAL_NAME),
             &staging.join("aggregate-lifecycle.jsonl"),
             boundary,
         )?;
     }
+
     create_private_directory(&staging.join("tracks"))?;
     let inventory_path = staging.join(INVENTORY);
     let mut writer = secure_writer(&inventory_path)?;
@@ -81,11 +89,13 @@ pub fn create(
             BundleProfile::Forensic,
             None,
         )?;
+
         if nested.session_id != source.session_id {
             return Err(Error::invalid(
                 "historical track identity differs from its canonical session",
             ));
         }
+
         let track = TmuxBundleTrack {
             role: source.role.to_owned(),
             pane_id: source.pane_id,
@@ -97,19 +107,24 @@ pub fn create(
         let mut row = serde_json::to_vec(&track)
             .map_err(|error| return Error::json(&inventory_path, error))?;
         row.push(b'\n');
+
         if u64::try_from(row.len()).unwrap_or(u64::MAX) > MAX_ROW_BYTES {
             return Err(Error::invalid(
                 "tmux track inventory row exceeds its byte budget",
             ));
         }
+
         writer
             .write_all(&row)
             .map_err(|error| return Error::filesystem(&inventory_path, error))?;
+
         count = count
             .checked_add(1)
             .ok_or_else(|| return Error::invalid("tmux track count overflow"))?;
+
         return Ok(());
     })?;
+
     finish_writer(writer, &inventory_path)?;
     let (inventory_bytes, inventory_hash) = hash_regular_file(&inventory_path)?;
     let manifest = TmuxStreamingBundleManifest {
@@ -124,15 +139,19 @@ pub fn create(
         track_inventory_bytes: inventory_bytes,
         track_inventory_blake3: inventory_hash,
     };
+
     let path = staging.join("manifest.json");
     write_secure(
         &path,
         &serde_json::to_vec_pretty(&manifest).map_err(|error| return Error::json(&path, error))?,
     )?;
+
     verify_contents(&staging, aggregate_manifest, &bytes, &aggregate)?;
     sync_directory(&staging)?;
     commit_directory(parent, &staging, destination)?;
+
     cleanup.disarm();
+
     return Ok(manifest);
 }
 
@@ -148,6 +167,7 @@ pub fn verify(
     let bytes = read_regular_bounded(path, MAX_AGGREGATE_MANIFEST_BYTES, "aggregate manifest")?;
     let aggregate = parse_aggregate(path, &bytes)?;
     validate_aggregate(&aggregate)?;
+
     return verify_contents(directory.as_ref(), path, &bytes, &aggregate);
 }
 
@@ -162,6 +182,7 @@ fn verify_contents(
         read_regular_bounded(&path, MAX_ROW_BYTES, "streaming tmux bundle manifest")?;
     let manifest: TmuxStreamingBundleManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| return Error::json(&path, error))?;
+
     if manifest.format != FORMAT
         || manifest.version != VERSION
         || manifest.recording_id != aggregate.recording_id
@@ -173,33 +194,41 @@ fn verify_contents(
             "streaming tmux export does not bind the requested aggregate",
         ));
     }
+
     let embedded = read_regular_bounded(
         &directory.join("aggregate-recording-manifest.json"),
         MAX_AGGREGATE_MANIFEST_BYTES,
         "embedded aggregate",
     )?;
+
     if embedded != aggregate_bytes {
         return Err(Error::invalid(
             "embedded aggregate differs from the trusted source",
         ));
     }
+
     if let Some(boundary) = &aggregate.lifecycle_journal {
         let journal = directory.join("aggregate-lifecycle.jsonl");
         let (_, length) = open_regular_file_nofollow(&journal)?;
+
         if length != boundary.bytes {
             return Err(Error::invalid(
                 "aggregate journal has an unexpected suffix or truncation",
             ));
         }
+
         tmux_journal::visit(&journal, boundary, |_| return Ok(()))?;
     }
+
     let inventory = directory.join(INVENTORY);
     let (bytes, hash) = hash_regular_file(&inventory)?;
+
     if bytes != manifest.track_inventory_bytes || hash != manifest.track_inventory_blake3 {
         return Err(Error::invalid(
             "tmux track inventory digest or length changed",
         ));
     }
+
     let (file, _) = open_regular_file_nofollow(&inventory)?;
     let mut reader = BufReader::new(file);
     let mut count = 0_usize;
@@ -211,6 +240,7 @@ fn verify_contents(
             .take(MAX_ROW_BYTES + 1)
             .read_until(b'\n', &mut row)
             .map_err(|error| return Error::filesystem(&inventory, error))?;
+
         if row.last() != Some(&b'\n')
             || u64::try_from(row.len()).unwrap_or(u64::MAX) > MAX_ROW_BYTES
         {
@@ -218,10 +248,14 @@ fn verify_contents(
                 "missing, incomplete, or oversized tmux inventory row",
             ));
         }
+
         hasher.update(&row);
+
         let track: TmuxBundleTrack =
             serde_json::from_slice(&row).map_err(|error| return Error::json(&inventory, error))?;
+
         let expected = track_directory(count, source.pane_id.as_deref());
+
         if track.role != source.role
             || track.pane_id != source.pane_id
             || track.directory != expected
@@ -232,6 +266,7 @@ fn verify_contents(
                 "tmux track differs from its historical aggregate relationship",
             ));
         }
+
         let nested_path = directory.join(&expected);
         if !fs_err::symlink_metadata(&nested_path)
             .map_err(|error| return Error::filesystem(&nested_path, error))?
@@ -239,10 +274,12 @@ fn verify_contents(
         {
             return Err(Error::invalid("nested track must be a real directory"));
         }
+
         let nested = bundle::verify_profile(
             &nested_path,
             &BundleVerificationPolicy::new(&source.session, BundleProfile::Forensic),
         )?;
+
         if nested.session_id != source.session_id
             || nested.source_final_event_hash != track.source_final_event_hash
         {
@@ -250,9 +287,11 @@ fn verify_contents(
                 "nested track identity or final hash differs",
             ));
         }
+
         count = count
             .checked_add(1)
             .ok_or_else(|| return Error::invalid("tmux track count overflow"))?;
+
         return Ok(());
     })?;
     if !reader
@@ -266,11 +305,13 @@ fn verify_contents(
             "tmux inventory changed or contains extra tracks",
         ));
     }
+
     verify_directory_entries(
         directory,
         aggregate.lifecycle_journal.is_some(),
         manifest.track_count,
     )?;
+
     return Ok(manifest);
 }
 
@@ -284,9 +325,11 @@ fn verify_directory_entries(directory: &Path, journal: bool, track_count: u64) -
             || name == "aggregate-recording-manifest.json"
             || name == INVENTORY
             || (journal && name == "aggregate-lifecycle.jsonl");
+
         let kind = entry
             .file_type()
             .map_err(|error| return Error::filesystem(entry.path(), error))?;
+
         #[expect(
             clippy::filetype_is_file,
             reason = "aggregate exports require regular files; symlinks, sockets, FIFOs, and devices are invalid"
@@ -295,7 +338,9 @@ fn verify_directory_entries(directory: &Path, journal: bool, track_count: u64) -
             return Err(Error::invalid("unexpected entry in aggregate export"));
         }
     }
+
     let tracks = directory.join("tracks");
+
     let mut count = 0_u64;
     for entry in
         fs_err::read_dir(&tracks).map_err(|error| return Error::filesystem(&tracks, error))?
@@ -310,15 +355,18 @@ fn verify_directory_entries(directory: &Path, journal: bool, track_count: u64) -
                 "unexpected entry in aggregate track directory",
             ));
         }
+
         count = count
             .checked_add(1)
             .ok_or_else(|| return Error::invalid("track directory count overflow"))?;
     }
+
     if count != track_count {
         return Err(Error::invalid(
             "aggregate export contains extra or missing track directories",
         ));
     }
+
     return Ok(());
 }
 
@@ -337,7 +385,9 @@ mod directory_tests {
         fs::create_dir_all(root.path().join("tracks")).expect("tracks directory");
         let manifest = root.path().join("manifest.json");
         fs::write(&manifest, b"{}").expect("regular manifest");
+
         verify_directory_entries(root.path(), false, 0).expect("regular file accepted");
+
         fs::remove_file(&manifest).expect("remove regular file");
 
         let target = tempfile::NamedTempFile::new().expect("external regular file");
@@ -346,6 +396,7 @@ mod directory_tests {
         fs::remove_file(&manifest).expect("remove symlink");
 
         let _socket = UnixListener::bind(&manifest).expect("manifest socket");
+
         assert!(verify_directory_entries(root.path(), false, 0).is_err());
         fs::remove_file(&manifest).expect("remove socket path");
 

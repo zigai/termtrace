@@ -7,6 +7,7 @@ pub(in crate::cli) fn run_geometry_probe(arguments: GeometryProbeArgs) -> Result
     let mut raw = original.clone();
     cfmakeraw(&mut raw);
     tcsetattr(&stdin, SetArg::TCSANOW, &raw).into_diagnostic()?;
+
     let report = query_terminal_geometry();
     let restored = tcsetattr(&stdin, SetArg::TCSANOW, &original).into_diagnostic();
     let report = match (report, restored) {
@@ -19,6 +20,7 @@ pub(in crate::cli) fn run_geometry_probe(arguments: GeometryProbeArgs) -> Result
             ));
         }
     };
+
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -28,6 +30,7 @@ pub(in crate::cli) fn run_geometry_probe(arguments: GeometryProbeArgs) -> Result
     serde_json::to_writer(&mut output, &report).into_diagnostic()?;
     output.write_all(b"\n").into_diagnostic()?;
     output.sync_all().into_diagnostic()?;
+
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -38,25 +41,30 @@ pub(super) fn query_terminal_geometry() -> Result<TerminalGeometryReport> {
         .and_then(|()| return output.flush())
         .into_diagnostic()?;
     drop(output);
+
     let stdin = io::stdin();
     let deadline = Instant::now() + GEOMETRY_QUERY_TIMEOUT;
     let mut bytes: Vec<u8> = Vec::with_capacity(128);
     let mut buffer = [0_u8; 128];
+
     loop {
         if let Some(report) = parse_terminal_geometry(&bytes)? {
             return Ok(report);
         }
+
         if Instant::now() >= deadline {
             return Err(miette::miette!(
                 "timed out waiting for XTWINOPS geometry reports"
             ));
         }
+
         let mut descriptors = [PollFd::new(stdin.as_fd(), PollFlags::POLLIN)];
         match poll(&mut descriptors, PollTimeout::from(100_u16)) {
             Ok(0) | Err(Errno::EINTR) => continue,
             Ok(_) => {}
             Err(error) => return Err(error).into_diagnostic(),
         }
+
         match read(&stdin, &mut buffer) {
             Ok(0) | Err(Errno::EIO) => {
                 return Err(miette::miette!("terminal closed before reporting geometry"));
@@ -70,6 +78,7 @@ pub(super) fn query_terminal_geometry() -> Result<TerminalGeometryReport> {
             Err(Errno::EINTR) => {}
             Err(error) => return Err(error).into_diagnostic(),
         }
+
         if bytes.len() > 4096 {
             return Err(miette::miette!(
                 "terminal geometry response exceeded 4096 bytes"
@@ -81,6 +90,7 @@ pub(super) fn query_terminal_geometry() -> Result<TerminalGeometryReport> {
 pub(super) fn parse_terminal_geometry(bytes: &[u8]) -> Result<Option<TerminalGeometryReport>> {
     let mut text_size = None;
     let mut cell_size = None;
+
     let mut grid_size = None;
     for sequence in String::from_utf8_lossy(bytes).split('\x1b').skip(1) {
         let Some(body) = sequence.strip_prefix('[') else {
@@ -94,12 +104,14 @@ pub(super) fn parse_terminal_geometry(bytes: &[u8]) -> Result<Option<TerminalGeo
             .map(str::parse::<u16>)
             .collect::<StdResult<Vec<u16>, _>>()
             .into_diagnostic()?;
+
         let Some((kind, dimensions)) = values.split_first() else {
             continue;
         };
         let (Some(first), Some(second)) = (dimensions.first(), dimensions.get(1)) else {
             continue;
         };
+
         match *kind {
             4 => text_size = Some((*second, *first)),
             6 => cell_size = Some((*second, *first)),
@@ -107,6 +119,7 @@ pub(super) fn parse_terminal_geometry(bytes: &[u8]) -> Result<Option<TerminalGeo
             _ => {}
         }
     }
+
     let (Some((text_width, text_height)), Some((cell_width, cell_height)), Some((cols, rows))) =
         (text_size, cell_size, grid_size)
     else {
@@ -117,6 +130,7 @@ pub(super) fn parse_terminal_geometry(bytes: &[u8]) -> Result<Option<TerminalGeo
             "terminal reported a zero geometry dimension"
         ));
     }
+
     return Ok(Some(TerminalGeometryReport {
         cols,
         rows,
@@ -126,6 +140,7 @@ pub(super) fn parse_terminal_geometry(bytes: &[u8]) -> Result<Option<TerminalGeo
         text_height,
     }));
 }
+
 pub(super) fn resolve_record_geometry(
     arguments: &RecordingArgs,
     ghostty_profile: Option<&ResolvedGhosttyProfile>,
@@ -136,10 +151,12 @@ pub(super) fn resolve_record_geometry(
                 .cols
                 .checked_mul(arguments.cell_width)
                 .ok_or_else(|| miette::miette!("manual terminal width overflow"))?;
+
             let pixel_height = arguments
                 .rows
                 .checked_mul(arguments.cell_height)
                 .ok_or_else(|| miette::miette!("manual terminal height overflow"))?;
+
             return Ok((
                 SessionGeometry {
                     cols: arguments.cols,
@@ -156,6 +173,7 @@ pub(super) fn resolve_record_geometry(
         GeometryMode::Inherit => {
             let geometry = inherited_geometry(arguments.cell_width, arguments.cell_height)
                 .into_diagnostic()?;
+
             return Ok((
                 geometry,
                 GeometryProvenance {
@@ -168,9 +186,11 @@ pub(super) fn resolve_record_geometry(
             let target = arguments.viewport.ok_or_else(|| {
                 return miette::miette!("--geometry fit requires --viewport WIDTHxHEIGHT");
             })?;
+
             let profile = ghostty_profile.ok_or_else(|| {
                 return miette::miette!("fitted geometry requires a resolved Ghostty profile");
             })?;
+
             let helper = current_exe().into_diagnostic()?;
             let report = probe_ghostty_geometry(&helper, target, profile).into_diagnostic()?;
             let geometry = SessionGeometry {
@@ -179,6 +199,7 @@ pub(super) fn resolve_record_geometry(
                 pixel_width: report.text_width,
                 pixel_height: report.text_height,
             };
+
             return Ok((
                 geometry,
                 GeometryProvenance {

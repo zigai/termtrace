@@ -24,6 +24,7 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
         .get_output()
         .stdout
         .clone();
+
     let report: serde_json::Value = serde_json::from_slice(&output).expect("verify JSON");
     assert_eq!(report["valid"], true);
     assert_eq!(report["level"], "content");
@@ -38,6 +39,7 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
         .get_output()
         .stdout
         .clone();
+
     let report: serde_json::Value =
         serde_json::from_slice(&output).expect("verify durability JSON");
     assert_eq!(report["valid"], true);
@@ -59,6 +61,7 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
         .get_output()
         .stdout
         .clone();
+
     let report: serde_json::Value = serde_json::from_slice(&output).expect("tampered verify JSON");
     assert_eq!(report["valid"], false);
     assert!(
@@ -119,6 +122,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
         .get_output()
         .stdout
         .clone();
+
     let verified: serde_json::Value = serde_json::from_slice(&output).expect("verify JSON");
     assert_eq!(verified["signature_cryptographic_valid"], true);
     assert_eq!(verified["signature_signer_trusted"], false);
@@ -143,6 +147,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
         .get_output()
         .stdout
         .clone();
+
     let trusted_json: serde_json::Value =
         serde_json::from_slice(&trusted_output).expect("trusted JSON");
     assert_eq!(trusted_json["session_authenticity_established"], true);
@@ -161,6 +166,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
         serde_json::to_vec_pretty(&receipt).expect("tampered receipt JSON"),
     )
     .expect("tamper receipt");
+
     let mut tampered = Command::cargo_bin("termtrace").expect("binary should build");
     let output = tampered
         .args(["integrity", "verify"])
@@ -173,6 +179,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
         .get_output()
         .stdout
         .clone();
+
     let report: serde_json::Value = serde_json::from_slice(&output).expect("tampered verify JSON");
     assert_eq!(report["valid"], false);
     assert!(

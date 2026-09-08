@@ -1,8 +1,8 @@
 use super::super::control::client_error;
 use super::super::{
-    BundleManifest, BundleProfile, BundleVerificationPolicy, Path, Result, SaveFormat, SaveOutcome,
-    Session, StatePoint, VerificationLevel, VerificationReport, create_bundle, save, verify_bundle,
-    verify_saved_artifact, verify_session,
+    create_bundle, save, verify_bundle, verify_saved_artifact, verify_session, BundleManifest,
+    BundleProfile, BundleVerificationPolicy, Path, Result, SaveFormat, SaveOutcome, Session,
+    StatePoint, VerificationLevel, VerificationReport,
 };
 
 /// Completed evidence, artifact, and retention operations.
@@ -25,7 +25,9 @@ impl Evidence<'_> {
             false,
             None,
         )?;
+
         verify_saved_artifact(&outcome.directory, &outcome.manifest)?;
+
         return Ok(outcome);
     }
 
@@ -39,11 +41,13 @@ impl Evidence<'_> {
         let manifest = create_bundle(&self.session.path, destination, profile, None)?;
         let policy = BundleVerificationPolicy::new(&self.session.path, profile);
         let verified = verify_bundle(destination, &policy)?;
+
         if verified != manifest {
             return Err(client_error(
                 "verified bundle manifest changed after publication",
             ));
         }
+
         return Ok(verified);
     }
 

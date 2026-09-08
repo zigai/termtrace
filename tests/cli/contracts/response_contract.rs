@@ -45,11 +45,9 @@ fn explicit_agent_help_is_versioned_but_default_help_stays_readable() {
     assert_eq!(response["v"], 1);
     assert_eq!(response["ok"], true);
     assert_eq!(response["type"], "help");
-    assert!(
-        response["output"]
-            .as_str()
-            .is_some_and(|help| return help.contains("canonical output"))
-    );
+    assert!(response["output"]
+        .as_str()
+        .is_some_and(|help| return help.contains("canonical output")));
 
     let default = termtrace()
         .arg("--help")

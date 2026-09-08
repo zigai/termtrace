@@ -11,6 +11,7 @@ pub(super) fn validate_action_options(atoms: &[InputAtom], options: &ActionOptio
             reason: "action must contain 1 through 4096 atoms".to_owned(),
         });
     }
+
     if options
         .caller_intent
         .as_ref()
@@ -21,12 +22,14 @@ pub(super) fn validate_action_options(atoms: &[InputAtom], options: &ActionOptio
             reason: "caller intent must not exceed 1024 UTF-8 bytes".to_owned(),
         });
     }
+
     for (index, atom) in atoms.iter().enumerate() {
         let byte_len = match atom {
             InputAtom::Text(text) | InputAtom::Paste(text) => text.len(),
             InputAtom::Bytes(bytes) => bytes.len(),
             InputAtom::Key { .. } => continue,
         };
+
         if byte_len == 0 || byte_len > 64 * 1024 {
             return Err(Error::InvalidAtom {
                 atom_index: index,
@@ -35,6 +38,7 @@ pub(super) fn validate_action_options(atoms: &[InputAtom], options: &ActionOptio
             });
         }
     }
+
     let pace_ns = exact_duration_ns("pace", options.pace)?;
     if pace_ns > 60_000_000_000 {
         return Err(Error::InvalidDuration {
@@ -42,6 +46,7 @@ pub(super) fn validate_action_options(atoms: &[InputAtom], options: &ActionOptio
             reason: "pace may not exceed 60 seconds".to_owned(),
         });
     }
+
     let atom_count = u64::try_from(atoms.len()).unwrap_or(u64::MAX);
     if pace_ns
         .checked_mul(atom_count)
@@ -52,6 +57,7 @@ pub(super) fn validate_action_options(atoms: &[InputAtom], options: &ActionOptio
             reason: "pace multiplied by atom count may not exceed 60 seconds".to_owned(),
         });
     }
+
     validate_postcondition_durations(&options.postcondition)?;
     if matches!(options.projection.detail, FrameDetail::Cells)
         && options.projection.region.is_none()
@@ -63,6 +69,7 @@ pub(super) fn validate_action_options(atoms: &[InputAtom], options: &ActionOptio
             reason: InvalidRegionReason::CellsRequireExplicitRegion,
         }));
     }
+
     return Ok(());
 }
 
@@ -75,18 +82,21 @@ pub(super) fn validate_postcondition_durations(postcondition: &ActionCondition) 
         } => {
             let stable_for_ns = exact_duration_ns("stable_for", *stable_for)?;
             let timeout_ns = exact_duration_ns("timeout", *timeout)?;
+
             if stable_for_ns == 0 {
                 return Err(Error::InvalidDuration {
                     field: "stable_for",
                     reason: "idle stability must be greater than zero".to_owned(),
                 });
             }
+
             if stable_for_ns > timeout_ns {
                 return Err(Error::InvalidDuration {
                     field: "timeout",
                     reason: "timeout must be nonzero and at least stable_for".to_owned(),
                 });
             }
+
             if timeout_ns > 3_600_000_000_000 {
                 return Err(Error::InvalidDuration {
                     field: "timeout",
@@ -96,6 +106,7 @@ pub(super) fn validate_postcondition_durations(postcondition: &ActionCondition) 
         }
         ActionCondition::Screen { timeout, .. } => {
             let timeout_ns = exact_duration_ns("timeout", *timeout)?;
+
             if timeout_ns == 0 || timeout_ns > 3_600_000_000_000 {
                 return Err(Error::InvalidDuration {
                     field: "timeout",
@@ -104,6 +115,7 @@ pub(super) fn validate_postcondition_durations(postcondition: &ActionCondition) 
             }
         }
     }
+
     return Ok(());
 }
 
@@ -127,18 +139,21 @@ pub(super) fn wire_postcondition(postcondition: &ActionCondition) -> Result<Acti
 pub(super) fn validate_stable_options(options: StableCaptureOptions) -> Result<()> {
     let stable_for_ns = exact_duration_ns("stable_for", options.stable_for)?;
     let timeout_ns = exact_duration_ns("timeout", options.timeout)?;
+
     if stable_for_ns == 0 {
         return Err(Error::InvalidDuration {
             field: "stable_for",
             reason: "stable_for must be greater than zero".to_owned(),
         });
     }
+
     if stable_for_ns > timeout_ns || timeout_ns > 3_600_000_000_000 {
         return Err(Error::InvalidDuration {
             field: "timeout",
             reason: "timeout must satisfy stable_for <= timeout <= one hour".to_owned(),
         });
     }
+
     if matches!(options.projection.detail, FrameDetail::Cells)
         && options.projection.region.is_none()
     {
@@ -149,6 +164,7 @@ pub(super) fn validate_stable_options(options: StableCaptureOptions) -> Result<(
             reason: InvalidRegionReason::CellsRequireExplicitRegion,
         }));
     }
+
     return Ok(());
 }
 
@@ -210,20 +226,24 @@ pub(super) fn public_control_error(
             retry_safety: RetrySafety::NewRequest,
         };
     }
+
     if matches!(code.as_str(), "action_busy" | "input_sequence_busy") {
         return Error::ActionBusy { message };
     }
+
     if code == "input_sequence_incomplete"
         && let Some(details) = details.as_ref()
         && let Some(input_sequence) = details.input_sequence.clone()
     {
         let uncertain = input_sequence.failed_atom_bytes_written != 0;
+
         return Error::PartialInput {
             details: input_sequence,
             retry_safety: RetrySafety::SameRequestOnly,
             uncertain,
         };
     }
+
     if let Some(details) = details.as_ref()
         && let Some(screen) = details.screen_frame.as_ref()
     {
@@ -237,8 +257,10 @@ pub(super) fn public_control_error(
                 rows,
                 reason,
             };
+
             return public_screen_frame_error(request_id, details, source);
         }
+
         if code == "screen_frame_resource_limit"
             && let (Some(detail), Some(region), Some(limit_kind), Some(requested), Some(maximum)) = (
                 screen.detail,
@@ -254,6 +276,7 @@ pub(super) fn public_control_error(
                 "response_bytes" => ScreenFrameLimitKind::ResponseBytes,
                 _ => return Error::ControlRejected { code, message },
             };
+
             let source = ScreenFrameError::ResourceLimit {
                 limit,
                 requested,
@@ -261,9 +284,11 @@ pub(super) fn public_control_error(
                 detail,
                 region,
             };
+
             return public_screen_frame_error(request_id, details, source);
         }
     }
+
     return Error::ControlRejected { code, message };
 }
 
@@ -283,6 +308,7 @@ pub(super) fn public_screen_frame_error(
             source,
         };
     }
+
     return Error::ScreenFrame(source);
 }
 

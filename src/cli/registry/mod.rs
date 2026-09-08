@@ -1,6 +1,7 @@
 use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
+
 use args::RegistrySubcommand;
 
 use std::{
@@ -25,7 +26,9 @@ pub(super) fn run_register(
     let entry = registry
         .register(&arguments.name, &arguments.session)
         .into_diagnostic()?;
+
     let display_path = entry.session_path();
+
     return write_json_line(
         response,
         &RegistryMutationResult {
@@ -48,26 +51,32 @@ pub(super) fn run_resolve(
 ) -> Result<ExitCode> {
     let registry = SessionRegistry::open_default().into_diagnostic()?;
     let entry = registry.resolve(&arguments.name).into_diagnostic()?;
+
     if arguments.json {
         return write_json_line(response, &entry);
     }
+
     let mut path = entry.session_path().into_os_string().into_vec();
     path.push(b'\n');
+
     return write_stdout(response, path);
 }
 
 pub(super) fn run_list(response: &mut ResponseWriter, arguments: ListArgs) -> Result<ExitCode> {
     let registry = SessionRegistry::open_default().into_diagnostic()?;
     let entries = registry.list(arguments.all).into_diagnostic()?;
+
     if arguments.json {
         return write_json_line(response, &entries);
     }
+
     let rows = entries
         .into_iter()
         .map(|entry| {
             let path = PathBuf::from(OsString::from_vec(
                 entry.canonical_session.as_bytes().to_vec(),
             ));
+
             return (
                 entry.alias,
                 entry.lifecycle.as_str(),
@@ -76,15 +85,19 @@ pub(super) fn run_list(response: &mut ResponseWriter, arguments: ListArgs) -> Re
             );
         })
         .collect::<Vec<_>>();
+
     let alias_width = rows
         .iter()
         .fold("ALIAS".len(), |width, row| return width.max(row.0.len()));
+
     let lifecycle_width = rows.iter().fold("LIFECYCLE".len(), |width, row| {
         return width.max(row.1.len());
     });
+
     let session_id_width = rows.iter().fold("SESSION ID".len(), |width, row| {
         return width.max(row.2.len());
     });
+
     let mut output = String::new();
     writeln!(
         output,
@@ -92,6 +105,7 @@ pub(super) fn run_list(response: &mut ResponseWriter, arguments: ListArgs) -> Re
         "ALIAS", "LIFECYCLE", "SESSION ID",
     )
     .into_diagnostic()?;
+
     for (alias, lifecycle, session_id, path) in rows {
         writeln!(
             output,
@@ -99,6 +113,7 @@ pub(super) fn run_list(response: &mut ResponseWriter, arguments: ListArgs) -> Re
         )
         .into_diagnostic()?;
     }
+
     return write_stdout(response, output);
 }
 
@@ -106,6 +121,7 @@ pub(super) fn run_remove(response: &mut ResponseWriter, arguments: RemoveArgs) -
     let registry = SessionRegistry::open_default().into_diagnostic()?;
     let entry = registry.remove(&arguments.name).into_diagnostic()?;
     let canonical_session_display = entry.session_path().display().to_string();
+
     return write_json_line(
         response,
         &serde_json::json!({
@@ -128,6 +144,7 @@ pub(super) fn run_gc(response: &mut ResponseWriter, arguments: GcArgs) -> Result
             arguments.apply,
         )
         .into_diagnostic()?;
+
     return write_json_line(response, &report);
 }
 

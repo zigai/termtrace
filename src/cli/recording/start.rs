@@ -19,11 +19,13 @@ pub(in crate::cli) fn run_start(
         until_screen_regex,
         timeout,
     };
+
     if startup_timeout_ms == 0 {
         return Err(miette::miette!(
             "--startup-timeout-ms must be greater than zero"
         ));
     }
+
     let _durability_policy = durability_policy_for(&recording)?;
     let registry = SessionRegistry::open_default().into_diagnostic()?;
     let executable = env::current_exe().into_diagnostic()?;
@@ -33,46 +35,50 @@ pub(in crate::cli) fn run_start(
             .take(4 * 1024 * 1024 + 1)
             .read_to_end(&mut bytes)
             .into_diagnostic()?;
+
         Some(bytes)
     } else {
         None
     };
+
     let paths = registry.allocate_detached_paths().into_diagnostic()?;
     let lease = Duration::from_millis(startup_timeout_ms).saturating_add(Duration::from_secs(5));
     let reservation = registry
         .reserve(&name, &paths.session, lease)
         .into_diagnostic()?;
+
     let stdout = match open_detached_log(&paths.stdout_log) {
         Ok(stdout) => stdout,
         Err(error) => {
             release_start_reservation(&registry, &reservation);
+
             return Err(error);
         }
     };
+
     let stderr = match open_detached_log(&paths.stderr_log) {
         Ok(stderr) => stderr,
         Err(error) => {
             release_start_reservation(&registry, &reservation);
+
             return Err(error);
         }
     };
+
     let record_arguments = detached_record_arguments(&name, &paths.session, &recording);
     let mut command = ProcessCommand::new("setsid");
     command
         .arg(executable)
         .args(record_arguments)
         .env_remove("TERMTRACE_RESPONSE")
-        .stdin(if environment_stdin.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
+        .stdin(if environment_stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
     let mut recorder = match command.spawn() {
         Ok(recorder) => recorder,
         Err(source) => {
             release_start_reservation(&registry, &reservation);
+
             return Err(source).into_diagnostic();
         }
     };
@@ -84,8 +90,10 @@ pub(in crate::cli) fn run_start(
         stdin.write_all(&bytes).into_diagnostic()?;
         drop(stdin);
     }
+
     let deadline = Instant::now() + Duration::from_millis(startup_timeout_ms);
     let mut ready_since: Option<Instant> = None;
+
     loop {
         if paths.session.join("completion.json").is_file() {
             return promote_completed_start(
@@ -96,10 +104,12 @@ pub(in crate::cli) fn run_start(
                 &synchronization,
             );
         }
+
         if paths.session.join("session.json").is_file()
             && recorder_identity(&paths.session).is_some()
         {
             let ready_at = ready_since.get_or_insert_with(Instant::now);
+
             if ready_at.elapsed() >= Duration::from_millis(30) {
                 let entry = registry.promote(&reservation).map_err(|error| {
                     return miette::miette!(
@@ -109,9 +119,11 @@ pub(in crate::cli) fn run_start(
                         paths.stderr_log.display(),
                     );
                 })?;
+
                 return report_start_outcome(response, &entry, &paths, None, &synchronization);
             }
         }
+
         if let Some(status) = recorder.try_wait().into_diagnostic()? {
             if paths.session.join("completion.json").is_file() {
                 return promote_completed_start(
@@ -122,7 +134,9 @@ pub(in crate::cli) fn run_start(
                     &synchronization,
                 );
             }
+
             release_start_reservation(&registry, &reservation);
+
             return Err(miette::miette!(
                 "detached recorder exited before publishing valid completion evidence with {status}; session candidate: {}; stdout log: {}; stderr log: {}",
                 paths.session.display(),
@@ -130,6 +144,7 @@ pub(in crate::cli) fn run_start(
                 paths.stderr_log.display(),
             ));
         }
+
         if Instant::now() >= deadline {
             return Err(miette::miette!(
                 "detached recorder did not become ready within {startup_timeout_ms} ms; its owned alias reservation and pending session remain recoverable: {}; stdout log: {}; stderr log: {}",
@@ -138,6 +153,7 @@ pub(in crate::cli) fn run_start(
                 paths.stderr_log.display(),
             ));
         }
+
         thread::sleep(Duration::from_millis(10));
     }
 }
@@ -183,6 +199,7 @@ fn promote_completed_start(
             paths.stderr_log.display(),
         );
     })?;
+
     return report_start_outcome(response, &entry, paths, Some(&completion), synchronization);
 }
 
@@ -200,6 +217,7 @@ fn report_start_outcome(
         }
         Some(_) => "completed_failure",
     };
+
     let canonical_session_display = entry.session_path().display().to_string();
     let mut output = serde_json::json!({
         "kind": "started",
@@ -215,6 +233,7 @@ fn report_start_outcome(
         "ready": completion.is_none(),
         "completion": completion,
     });
+
     let mut synchronization_ok = true;
     if synchronization.requested() {
         let (matched, postcondition) = if completion.is_some() {
@@ -240,18 +259,23 @@ fn report_start_outcome(
             }
         };
         synchronization_ok = matched;
+
         output
             .as_object_mut()
             .ok_or_else(|| miette::miette!("start response is not an object"))?
             .insert("postcondition".to_owned(), postcondition);
     }
+
     write_json_line(response, &output)?;
+
     if !synchronization_ok {
         return Ok(ExitCode::FAILURE);
     }
+
     let Some(completion) = completion else {
         return Ok(ExitCode::SUCCESS);
     };
+
     return Ok(match (completion.exit_code, &completion.signal_name) {
         (Some(code), None) => u8::try_from(code).map_or(ExitCode::FAILURE, ExitCode::from),
         _ => ExitCode::FAILURE,
@@ -272,12 +296,14 @@ fn start_postcondition(
             }),
         )
         .into_diagnostic()?;
+
         let ControlData::StableSnapshot { frame, quality, .. } = data else {
             return Err(miette::miette!(
                 "actor returned the wrong stable-capture payload"
             ));
         };
         let matched_ok = quality == StableCaptureQuality::Stable;
+
         return Ok((
             matched_ok,
             serde_json::json!({
@@ -290,6 +316,7 @@ fn start_postcondition(
             }),
         ));
     }
+
     let (kind, predicate) = match (
         &synchronization.until_screen,
         &synchronization.until_screen_regex,
@@ -307,9 +334,11 @@ fn start_postcondition(
             ));
         }
     };
+
     let matched = wait_for_screen(session, predicate, Duration::ZERO, synchronization.timeout)
         .into_diagnostic()?;
     let matched_ok = matched.matched;
+
     return Ok((
         matched_ok,
         serde_json::json!({
@@ -327,6 +356,7 @@ fn start_postcondition(
         }),
     ));
 }
+
 pub(super) fn detached_record_arguments(
     alias: &str,
     session: &Path,
@@ -349,12 +379,15 @@ pub(super) fn record_arguments(
     if !forward_stdin {
         arguments.push(OsString::from("--no-input"));
     }
+
     if let Some(alias) = alias {
         push_record_option(&mut arguments, "--session-alias", OsStr::new(alias));
     }
+
     if let Some(cwd) = &recording.cwd {
         push_record_option(&mut arguments, "--cwd", cwd.as_os_str());
     }
+
     push_record_option(
         &mut arguments,
         "--geometry",
@@ -364,6 +397,7 @@ pub(super) fn record_arguments(
             GeometryMode::Fit => "fit",
         }),
     );
+
     if let Some(viewport) = recording.viewport {
         push_record_option(
             &mut arguments,
@@ -371,23 +405,30 @@ pub(super) fn record_arguments(
             OsStr::new(&format!("{}x{}", viewport.width, viewport.height)),
         );
     }
+
     if let Some(path) = &recording.ghostty_config {
         push_record_option(&mut arguments, "--ghostty-config", path.as_os_str());
     }
+
     if let Some(value) = &recording.font_family {
         push_record_option(&mut arguments, "--font-family", OsStr::new(value));
     }
+
     if let Some(value) = &recording.font_size {
         push_record_option(&mut arguments, "--font-size", OsStr::new(value));
     }
+
     push_optional_u16(&mut arguments, "--padding-x", recording.padding_x);
     push_optional_u16(&mut arguments, "--padding-y", recording.padding_y);
+
     if let Some(value) = &recording.foreground {
         push_record_option(&mut arguments, "--foreground", OsStr::new(value));
     }
+
     if let Some(value) = &recording.background {
         push_record_option(&mut arguments, "--background", OsStr::new(value));
     }
+
     push_record_option(
         &mut arguments,
         "--cols",
@@ -409,21 +450,27 @@ pub(super) fn record_arguments(
         OsStr::new(&recording.cell_height.to_string()),
     );
     push_record_option(&mut arguments, "--term", OsStr::new(&recording.term));
+
     if let Some(path) = &recording.environment_spec {
         push_record_option(&mut arguments, "--environment-spec", path.as_os_str());
     }
+
     if recording.environment_spec_stdin {
         arguments.push(OsString::from("--environment-spec-stdin"));
     }
+
     if recording.clear_env {
         arguments.push(OsString::from("--clear-env"));
     }
+
     for name in &recording.copy_env {
         push_record_option(&mut arguments, "--copy-env", OsStr::new(name));
     }
+
     for name in &recording.unset_env {
         push_record_option(&mut arguments, "--unset-env", OsStr::new(name));
     }
+
     if let Some(policy) = recording.color_policy {
         push_record_option(
             &mut arguments,
@@ -435,6 +482,7 @@ pub(super) fn record_arguments(
             }),
         );
     }
+
     if let Some(value) = recording.output_byte_budget {
         push_record_option(
             &mut arguments,
@@ -442,6 +490,7 @@ pub(super) fn record_arguments(
             OsStr::new(&value.to_string()),
         );
     }
+
     if let Some(value) = recording.max_duration {
         push_record_option(
             &mut arguments,
@@ -449,6 +498,7 @@ pub(super) fn record_arguments(
             OsStr::new(&format!("{}ms", value.as_millis())),
         );
     }
+
     let idle_timeout = recording.idle_timeout.unwrap_or(if forward_stdin {
         Duration::ZERO
     } else {
@@ -461,6 +511,7 @@ pub(super) fn record_arguments(
             OsStr::new(&format!("{}ms", idle_timeout.as_millis())),
         );
     }
+
     push_record_option(
         &mut arguments,
         "--durability",
@@ -470,6 +521,7 @@ pub(super) fn record_arguments(
             DurabilityModeArg::Throughput => "throughput",
         }),
     );
+
     if let Some(value) = recording.durability_max_interval_ms {
         push_record_option(
             &mut arguments,
@@ -477,6 +529,7 @@ pub(super) fn record_arguments(
             OsStr::new(&value.to_string()),
         );
     }
+
     if let Some(value) = recording.durability_max_uncommitted_bytes {
         push_record_option(
             &mut arguments,
@@ -484,6 +537,7 @@ pub(super) fn record_arguments(
             OsStr::new(&value.to_string()),
         );
     }
+
     push_record_option(
         &mut arguments,
         "--provenance",
@@ -493,6 +547,7 @@ pub(super) fn record_arguments(
             ProvenancePolicyArg::Custom => "custom",
         }),
     );
+
     for (name, capture) in &recording.provenance_environment {
         let capture = match capture {
             ProvenanceCapture::Value => "value",
@@ -506,8 +561,10 @@ pub(super) fn record_arguments(
             OsStr::new(&format!("{name}={capture}")),
         );
     }
+
     arguments.push(OsString::from("--"));
     arguments.extend(recording.command.iter().cloned());
+
     return arguments;
 }
 

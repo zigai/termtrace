@@ -24,15 +24,16 @@ use termtrace_model::{
 };
 
 use crate::{
-    Error, Result,
-    analysis::diagnostics::{ValidatedVisualManifest, visit_native_correlations},
+    analysis::diagnostics::{visit_native_correlations, ValidatedVisualManifest},
     observation::state_text,
     replay::{inspect_completed_session, visit_session_states_while},
+    Error, Result,
 };
 
 mod pager;
+
 pub use pager::{
-    REVIEW_PAGE_STATES, ReviewEntry, ReviewPage, ReviewQuery, ReviewViewport, load_review_page,
+    load_review_page, ReviewEntry, ReviewPage, ReviewQuery, ReviewViewport, REVIEW_PAGE_STATES,
 };
 
 /// Load and summarize a validated completed session without changing it.
@@ -47,10 +48,13 @@ pub fn summarize(
     let mut final_state_hash = String::new();
     visit_session_states_while(&session, &AtomicBool::new(false), |record, _| {
         state_count = state_count.saturating_add(1);
+
         if record.presented {
             presented_state_count = presented_state_count.saturating_add(1);
         }
+
         final_state_hash.clone_from(&record.state_hash);
+
         return Ok(true);
     })?;
     if state_count == 0 {
@@ -58,19 +62,24 @@ pub fn summarize(
             "completed session contains no semantic states",
         ));
     }
+
     let mut native_correlation_count = 0_u64;
     visit_native_correlations(completion.session_id, None, visual_evidence, |_| {
         native_correlation_count = native_correlation_count.saturating_add(1);
     });
+
     let mut marker_count = 0_u64;
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+
     while let Some(record) = cursor.next_record()? {
         if matches!(record.event, Event::Marker { .. }) {
             marker_count = marker_count.saturating_add(1);
         }
     }
+
     cursor.validate_boundary(completion.event_count, &completion.final_event_hash)?;
     let _pending = cursor.finish()?;
+
     return Ok(ReviewSummary {
         canonical_session: session,
         state_count,
@@ -85,8 +94,10 @@ pub fn summarize(
 /// Search every semantic viewport in a validated completed session.
 pub fn search(session: impl AsRef<Path>, query: &str) -> Result<ReviewSearchResult> {
     validate_query(query)?;
+
     let session = session.as_ref().to_path_buf();
     validate_completed_session(&session)?;
+
     let mut matches: Vec<ReviewSearchMatch> = Vec::new();
     visit_session_states_while(&session, &AtomicBool::new(false), |record, state| {
         if state_text(state).contains(query) {
@@ -98,8 +109,10 @@ pub fn search(session: impl AsRef<Path>, query: &str) -> Result<ReviewSearchResu
                 selector: format!("--state {}", record.state_id),
             });
         }
+
         return Ok(true);
     })?;
+
     return Ok(ReviewSearchResult {
         canonical_session: session,
         query: query.to_owned(),
@@ -119,6 +132,7 @@ pub fn export_state(
         .map_err(|error| {
             return review_error(format!("review state {state_id} does not exist: {error}"));
         })?;
+
     let state_json = serde_json::to_vec_pretty(&inspection).map_err(|source_error| {
         return Error::InvalidJson {
             path: PathBuf::from("<review-state>"),
@@ -126,21 +140,27 @@ pub fn export_state(
             source: source_error,
         };
     })?;
+
     let screen = state_text(&inspection.state);
     let destination = destination.as_ref();
+
     if destination.exists() {
         return Err(review_error("review export destination already exists"));
     }
+
     let parent = destination
         .parent()
         .ok_or_else(|| return review_error("review export destination has no parent"))?;
+
     fs::create_dir_all(parent)
         .map_err(|source_error| return filesystem_error(parent, source_error))?;
+
     let temporary = temporary_export_path(parent)?;
     DirBuilder::new()
         .mode(0o700)
         .create(&temporary)
         .map_err(|source_error| return filesystem_error(&temporary, source_error))?;
+
     let result = export_into(
         &temporary,
         destination,
@@ -150,9 +170,11 @@ pub fn export_state(
         state_json,
         screen,
     );
+
     if result.is_err() {
         let _cleanup_result = fs::remove_dir_all(&temporary);
     }
+
     return result;
 }
 
@@ -185,10 +207,13 @@ fn export_into(
     })?;
     manifest_json.push(b'\n');
     write_secure(&temporary.join("manifest.json"), &manifest_json)?;
+
     let parent = destination
         .parent()
         .ok_or_else(|| return review_error("review export destination has no parent"))?;
+
     commit_directory(parent, temporary, destination)?;
+
     return Ok(manifest);
 }
 
@@ -196,6 +221,7 @@ fn validate_query(query: &str) -> Result<()> {
     if !query.is_empty() && query.len() <= 4096 {
         return Ok(());
     }
+
     return Err(review_error(
         "review search must contain 1 through 4096 bytes",
     ));
@@ -208,6 +234,7 @@ fn temporary_export_path(parent: &Path) -> Result<PathBuf> {
             return review_error(format!("system clock precedes Unix epoch: {source}"));
         })?
         .as_nanos();
+
     return Ok(parent.join(format!(".review-export-{}-{timestamp}.tmp", process::id())));
 }
 

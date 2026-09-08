@@ -11,8 +11,8 @@ use std::{
 
 use nix::{
     errno::Errno,
-    fcntl::{FcntlArg, Flock, FlockArg, OFlag, fcntl},
-    sys::signal::{Signal, killpg},
+    fcntl::{fcntl, FcntlArg, Flock, FlockArg, OFlag},
+    sys::signal::{killpg, Signal},
     unistd::Pid,
 };
 use serde::de::DeserializeOwned;
@@ -23,8 +23,8 @@ use termtrace_model::{
 };
 
 use super::{
-    Error, Result,
     util::{external_error, read_json, status_error_with_logs},
+    Error, Result,
 };
 
 pub(super) struct ManagedChild {
@@ -33,6 +33,7 @@ pub(super) struct ManagedChild {
     group: Option<Pid>,
     output: Option<ProbeOutput>,
 }
+
 pub(super) struct DisplayLease {
     pub(super) number: u16,
     // Persistent inode with a kernel lock; owner death releases the lease.
@@ -51,12 +52,14 @@ impl ProbeOutput {
     fn drain(&mut self, name: &str) -> Result<()> {
         drain_pipe(&mut self.stdout, &mut self.stdout_bytes, 1_048_576, name)?;
         drain_pipe(&mut self.stderr, &mut self.stderr_bytes, 65_536, name)?;
+
         return Ok(());
     }
 }
 
 fn drain_pipe(pipe: &mut impl Read, bytes: &mut Vec<u8>, limit: usize, name: &str) -> Result<()> {
     let mut buffer = [0_u8; 8192];
+
     loop {
         match pipe.read(&mut buffer) {
             Ok(0) => return Ok(()),
@@ -67,6 +70,7 @@ fn drain_pipe(pipe: &mut impl Read, bytes: &mut Vec<u8>, limit: usize, name: &st
                         format!("probe output exceeded {limit} bytes"),
                     ));
                 }
+
                 let chunk = buffer.get(..count).ok_or_else(|| {
                     return external_error(name, "pipe returned an invalid byte count");
                 })?;
@@ -97,24 +101,29 @@ pub(super) fn probe_output_with_check(
     command.stdin(Stdio::null());
     let mut process = ManagedChild::spawn_group(name, command)?;
     let deadline = Instant::now() + timeout;
+
     loop {
         check()?;
         if let Some(status) = process.try_wait()? {
             if !status.success() {
                 return Err(process.failure(status));
             }
+
             let output = process
                 .output
                 .take()
                 .ok_or_else(|| return external_error(name, "probe output pipes are unavailable"))?;
+
             return Ok(output.stdout_bytes);
         }
+
         if Instant::now() >= deadline {
             return Err(external_error(
                 name,
                 "timed out while waiting for probe exit",
             ));
         }
+
         thread::sleep(Duration::from_millis(10));
     }
 }
@@ -167,6 +176,7 @@ pub(super) fn spawn_xvfb(
     if let Some(output) = process.output.as_mut() {
         output.log = Some(log);
     }
+
     return Ok(process);
 }
 
@@ -181,6 +191,7 @@ pub(super) fn spawn_geometry_probe(
 ) -> Result<ManagedChild> {
     let stdout = secure_file(&staging.join(format!("{stem}.stdout.log")))?;
     let stderr = secure_file(&staging.join(format!("{stem}.stderr.log")))?;
+
     return ManagedChild::spawn_logged(
         "ghostty geometry probe",
         owned_command(helper, "dbus-run-session")?
@@ -239,19 +250,18 @@ pub(super) fn spawn_ghostty(
         .arg("--ready-file")
         .arg(ready)
         .arg("--start-delay-ms")
-        .arg(if matches!(&options.kind, CaptureKind::Video) {
-            "1500"
-        } else {
-            "0"
-        })
+        .arg(if matches!(&options.kind, CaptureKind::Video) { "1500" } else { "0" })
         .arg("--final-hold-ms")
         .arg("1500");
+
     if let Some(value) = options.start_monotonic_ns {
         command.arg("--from-ns").arg(value.to_string());
     }
+
     if let Some(value) = options.end_monotonic_ns {
         command.arg("--to-ns").arg(value.to_string());
     }
+
     if let CaptureKind::Screenshot {
         event_seq,
         event_byte_offset,
@@ -262,12 +272,14 @@ pub(super) fn spawn_ghostty(
             .arg("--endpoint-event-seq")
             .arg(event_seq.to_string())
             .arg("--instant");
+
         if let Some(value) = event_byte_offset {
             command
                 .arg("--endpoint-event-byte-offset")
                 .arg(value.to_string());
         }
     }
+
     command
         .env("DISPLAY", display)
         .env("GDK_BACKEND", "x11")
@@ -275,9 +287,11 @@ pub(super) fn spawn_ghostty(
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
+
     if let Some(profile) = profile {
         command.env("XDG_CONFIG_HOME", profile);
     }
+
     return ManagedChild::spawn_logged("ghostty", &mut command);
 }
 
@@ -292,6 +306,7 @@ pub(super) fn owned_command(helper: &Path, program: &str) -> Result<Command> {
         .ok_or_else(|| {
             return external_error("native process identity", "missing process start ticks");
         })?;
+
     let mut command = Command::new(helper);
     command.args([
         "owned-process",
@@ -302,6 +317,7 @@ pub(super) fn owned_command(helper: &Path, program: &str) -> Result<Command> {
         "--",
         program,
     ]);
+
     return Ok(command);
 }
 
@@ -313,7 +329,9 @@ impl DisplayLease {
             {
                 continue;
             }
+
             let lock_path = PathBuf::from(format!("/tmp/termtrace-X{number}.lock"));
+
             match OpenOptions::new()
                 .write(true)
                 .create(true)
@@ -329,12 +347,14 @@ impl DisplayLease {
                             source,
                         };
                     })?;
+
                     if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 {
                         return Err(external_error(
                             "native display lease",
                             "lease must be a private regular file",
                         ));
                     }
+
                     let mut file = match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
                         Ok(lock) => lock,
                         Err((_, Errno::EWOULDBLOCK)) => continue,
@@ -342,11 +362,13 @@ impl DisplayLease {
                             return Err(external_error("native display lease", error));
                         }
                     };
+
                     if Path::new(&format!("/tmp/.X{number}-lock")).exists()
                         || Path::new(&format!("/tmp/.X11-unix/X{number}")).exists()
                     {
                         continue;
                     }
+
                     file.set_len(0).map_err(|source| {
                         return Error::Filesystem {
                             path: lock_path.clone(),
@@ -359,6 +381,7 @@ impl DisplayLease {
                             source,
                         };
                     })?;
+
                     return Ok(Self {
                         number,
                         _lock: file,
@@ -373,6 +396,7 @@ impl DisplayLease {
                 }
             }
         }
+
         return Err(Error::ExternalCommand {
             operation: "Xvfb".to_owned(),
             reason: "no private display number is available".to_owned(),
@@ -384,12 +408,14 @@ impl ManagedChild {
     pub(super) fn id(&self) -> Option<u32> {
         return self.child.as_ref().map(Child::id);
     }
+
     /// Own a process group while preserving the caller's file-backed output streams.
     pub(super) fn spawn_logged(name: &'static str, command: &mut Command) -> Result<Self> {
         let child = command
             .process_group(0)
             .spawn()
             .map_err(|error| return external_error(name, error))?;
+
         let mut managed = Self::new(name, child);
         let child = managed
             .child
@@ -398,8 +424,10 @@ impl ManagedChild {
         managed.group = Some(Pid::from_raw(
             i32::try_from(child.id()).map_err(|error| return external_error(name, error))?,
         ));
+
         return Ok(managed);
     }
+
     pub(super) fn new(name: &'static str, child: Child) -> Self {
         return Self {
             name,
@@ -408,6 +436,7 @@ impl ManagedChild {
             output: None,
         };
     }
+
     pub(super) fn spawn_group(name: &'static str, command: &mut Command) -> Result<Self> {
         let mut child = command
             .process_group(0)
@@ -420,6 +449,7 @@ impl ManagedChild {
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
+
                 return Err(external_error(name, error));
             }
         };
@@ -445,6 +475,7 @@ impl ManagedChild {
             .map_err(|error| return external_error(name, error))?;
         fcntl(&stderr, FcntlArg::F_SETFL(OFlag::O_NONBLOCK))
             .map_err(|error| return external_error(name, error))?;
+
         managed.output = Some(ProbeOutput {
             stdout,
             stderr,
@@ -452,12 +483,15 @@ impl ManagedChild {
             stderr_bytes: Vec::new(),
             log: None,
         });
+
         return Ok(managed);
     }
+
     fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
         if let Some(output) = self.output.as_mut() {
             output.drain(self.name)?;
         }
+
         let status = self
             .child
             .as_mut()
@@ -474,8 +508,10 @@ impl ManagedChild {
         {
             output.drain(self.name)?;
         }
+
         return Ok(status);
     }
+
     fn failure(&self, status: ExitStatus) -> Error {
         let detail = self.output.as_ref().map_or_else(String::new, |output| {
             return String::from_utf8_lossy(&output.stderr_bytes)
@@ -483,6 +519,7 @@ impl ManagedChild {
                 .take(2048)
                 .collect();
         });
+
         return external_error(
             self.name,
             format!("exited with {status}: {}", detail.trim()),
@@ -493,29 +530,38 @@ impl ManagedChild {
         if let Some(status) = self.try_wait()? {
             return Err(self.failure(status));
         }
+
         return Ok(());
     }
+
     pub(super) fn terminate(&mut self) {
         if let Some(group) = self.group.take() {
             let _ = killpg(group, Signal::SIGTERM);
             let deadline = Instant::now() + Duration::from_millis(250);
+
             while Instant::now() < deadline {
                 if killpg(group, None).is_err() {
                     break;
                 }
+
                 if let Some(child) = self.child.as_mut() {
                     let _ = child.try_wait();
                 }
+
                 thread::sleep(Duration::from_millis(10));
             }
+
             let _ = killpg(group, Signal::SIGKILL);
         }
+
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
         }
+
         if let Some(output) = self.output.as_mut() {
             let _ = output.drain(self.name);
+
             if let Some(mut log) = output.log.take() {
                 let _ = log.write_all(&output.stdout_bytes);
                 let _ = log.write_all(&output.stderr_bytes);
@@ -523,6 +569,7 @@ impl ManagedChild {
         }
     }
 }
+
 impl Drop for ManagedChild {
     fn drop(&mut self) {
         self.terminate();
@@ -538,6 +585,7 @@ pub(super) fn wait_for_x_socket(
         return Path::new(&format!("/tmp/.X11-unix/X{}", lease.number)).exists();
     });
 }
+
 pub(super) fn wait_for_file(
     path: &Path,
     process: &mut ManagedChild,
@@ -545,30 +593,36 @@ pub(super) fn wait_for_file(
 ) -> Result<()> {
     return wait_until(process, timeout, || return path.is_file());
 }
+
 pub(super) fn wait_for_json<T: DeserializeOwned>(
     path: &Path,
     process: &mut ManagedChild,
     timeout: Duration,
 ) -> Result<T> {
     let deadline = Instant::now() + timeout;
+
     loop {
         if path.is_file()
             && let Ok(value) = read_json(path)
         {
             return Ok(value);
         }
+
         if let Some(status) = process.try_wait()? {
             return Err(status_error(process.name, status));
         }
+
         if Instant::now() >= deadline {
             return Err(Error::ExternalCommand {
                 operation: process.name.to_owned(),
                 reason: format!("timed out waiting for JSON handshake `{}`", path.display()),
             });
         }
+
         thread::sleep(Duration::from_millis(20));
     }
 }
+
 pub(super) fn wait_for_playback_handshake(
     timing: &Path,
     failure: &Path,
@@ -576,6 +630,7 @@ pub(super) fn wait_for_playback_handshake(
     timeout: Duration,
 ) -> Result<PlaybackTiming> {
     let deadline = Instant::now() + timeout;
+
     loop {
         if failure.is_file()
             && let Ok(value) = read_json::<PlaybackFailure>(failure)
@@ -584,69 +639,84 @@ pub(super) fn wait_for_playback_handshake(
                 reason: format!("playback child failed before capture: {}", value.message),
             });
         }
+
         if timing.is_file()
             && let Ok(value) = read_json(timing)
         {
             return Ok(value);
         }
+
         if let Some(status) = process.try_wait()? {
             return Err(status_error(process.name, status));
         }
+
         if Instant::now() >= deadline {
             return Err(Error::ExternalCommand {
                 operation: process.name.to_owned(),
                 reason: "timed out waiting for playback handshake".to_owned(),
             });
         }
+
         thread::sleep(Duration::from_millis(20));
     }
 }
+
 fn wait_until(
     process: &mut ManagedChild,
     timeout: Duration,
     mut condition: impl FnMut() -> bool,
 ) -> Result<()> {
     let deadline = Instant::now() + timeout;
+
     loop {
         if condition() {
             return Ok(());
         }
+
         if let Some(status) = process.try_wait()? {
             return Err(process.failure(status));
         }
+
         if Instant::now() >= deadline {
             return Err(Error::ExternalCommand {
                 operation: process.name.to_owned(),
                 reason: format!("timed out after {} ms", timeout.as_millis()),
             });
         }
+
         thread::sleep(Duration::from_millis(20));
     }
 }
+
 pub(super) fn wait_for_success(
     process: &mut ManagedChild,
     timeout: Duration,
     staging: &Path,
 ) -> Result<()> {
     let deadline = Instant::now() + timeout;
+
     loop {
         if let Some(status) = process.try_wait()? {
             process.terminate();
+
             return if status.success() {
                 Ok(())
             } else {
                 Err(status_error_with_logs(process.name, status, staging))
             };
         }
+
         if Instant::now() >= deadline {
             return Err(Error::ExternalCommand {
                 operation: process.name.to_owned(),
                 reason: "timed out while waiting for clean exit".to_owned(),
             });
         }
+
         thread::sleep(Duration::from_millis(20));
     }
 }
+
 pub(super) fn stop_ffmpeg(
     process: &mut ManagedChild,
     timeout: Duration,
@@ -669,8 +739,10 @@ pub(super) fn stop_ffmpeg(
         })?
         .write_all(b"q\n")
         .map_err(|error| return external_error(process.name, error))?;
+
     return wait_for_success(process, timeout, staging);
 }
+
 fn status_error(program: &str, status: ExitStatus) -> Error {
     return Error::ExternalCommand {
         operation: program.to_owned(),
@@ -702,6 +774,7 @@ mod ownership_tests {
         .expect("launch process group");
         wait_for_success(&mut child, Duration::from_secs(2), directory.path())
             .expect("launcher exits successfully");
+
         thread::sleep(Duration::from_millis(600));
         assert!(
             !marker.exists(),
@@ -721,6 +794,7 @@ mod ownership_tests {
                 .stderr(Stdio::null()),
         )
         .expect("launch stalled child");
+
         let started = Instant::now();
         let result = wait_for_success(&mut child, Duration::from_millis(30), directory.path());
         assert!(result.is_err());

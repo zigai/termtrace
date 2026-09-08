@@ -2,7 +2,7 @@ use std::{
     ffi::{OsStr, OsString},
     fs::File,
     io::Write as _,
-    os::unix::fs::{PermissionsExt as _, symlink},
+    os::unix::fs::{symlink, PermissionsExt as _},
 };
 
 use nix::{fcntl::OFlag, sys::stat::Mode};
@@ -14,7 +14,7 @@ use termtrace_model::value::ByteString;
 use uuid::Uuid;
 
 use super::secure_fs::{
-    SecureWriteStage, open_file_at, open_parent_directory, write_secure_with_failure,
+    open_file_at, open_parent_directory, write_secure_with_failure, SecureWriteStage,
 };
 use super::*;
 
@@ -23,6 +23,7 @@ fn prefix_catalog_authenticates_old_source_after_growth_and_rejects_wrong_byte_c
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("session");
     create_private_directory(&session).expect("private session");
+
     let clock = SessionClock::now().expect("clock");
     let manifest_hash = blake3::hash(b"test manifest").to_hex().to_string();
     let header = EventLogHeader::new(
@@ -35,6 +36,7 @@ fn prefix_catalog_authenticates_old_source_after_growth_and_rejects_wrong_byte_c
         480,
         "xterm-ghostty",
     );
+
     let mut writer =
         EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("writer");
     writer
@@ -53,6 +55,7 @@ fn prefix_catalog_authenticates_old_source_after_growth_and_rejects_wrong_byte_c
         })
         .expect("later output");
     let final_hash = writer.current_hash();
+
     for (index, count) in [3_u64, 4].into_iter().enumerate() {
         let artifact = session.join(format!("artifact-{index}"));
         create_private_directory(&artifact).expect("artifact directory");
@@ -64,6 +67,7 @@ fn prefix_catalog_authenticates_old_source_after_growth_and_rejects_wrong_byte_c
         };
         let bytes = serde_json::to_vec(&manifest).expect("manifest JSON");
         write_secure(&artifact.join("manifest.json"), &bytes).expect("manifest");
+
         let mut commitment = prefix.clone();
         commitment.output_bytes = count;
         append_artifact_prefix_root(
@@ -75,7 +79,9 @@ fn prefix_catalog_authenticates_old_source_after_growth_and_rejects_wrong_byte_c
             &commitment,
         )
         .expect("prefix root");
+
         let verified = verify_session_artifacts(&session, &manifest_hash, Some(&final_hash));
+
         if index == 0 {
             assert_eq!(verified.expect("old prefix verifies"), 1);
         } else {
@@ -94,6 +100,7 @@ fn generation_budget_rejects_before_writing_excess_bytes() {
         writer.write_all(b"de").expect("exact remaining allowance");
         assert!(writer.write_all(b"f").is_err());
     }
+
     assert_eq!(bytes, b"abcde");
 }
 
@@ -118,6 +125,7 @@ fn parallel_member_hashing_preserves_canonical_path_order() {
     let temporary = TempDir::new().expect("temporary directory");
     let artifact = temporary.path().join("artifact");
     fs_err::create_dir(&artifact).expect("artifact directory");
+
     for name in ["z.txt", "a.txt", "m.txt", "b.txt", "y.txt", "c.txt"] {
         fs_err::write(artifact.join(name), name.as_bytes()).expect("artifact member");
     }
@@ -169,6 +177,7 @@ fn member_collection_rejects_symlinks() {
     let temporary = TempDir::new().expect("temporary directory");
     let artifact = temporary.path().join("artifact");
     fs_err::create_dir(&artifact).expect("artifact directory");
+
     fs_err::write(temporary.path().join("outside"), b"secret").expect("outside file");
     symlink(temporary.path().join("outside"), artifact.join("linked")).expect("payload symlink");
     assert!(collect_artifact_members(&artifact).is_err());
@@ -180,6 +189,7 @@ fn secure_outputs_create_missing_owner_only_parent_directories() {
     let nested = temporary.path().join("missing/private/artifact");
     create_private_directory(&nested).expect("nested artifact directory");
     write_secure(&nested.join("report.json"), b"{}\n").expect("nested artifact file");
+
     for path in [
         temporary.path().join("missing"),
         temporary.path().join("missing/private"),
@@ -199,6 +209,7 @@ fn secure_outputs_do_not_follow_a_missing_parent_symlink() {
     let temporary = TempDir::new().expect("temporary directory");
     let outside = temporary.path().join("outside");
     fs_err::create_dir(&outside).expect("outside directory");
+
     let link = temporary.path().join("linked-parent");
     symlink(&outside, &link).expect("parent symlink");
 
@@ -212,6 +223,7 @@ fn secure_outputs_reject_symlinks_before_existing_parent_components() {
     let outside = temporary.path().join("outside");
     fs_err::create_dir(&outside).expect("outside directory");
     fs_err::create_dir(outside.join("existing")).expect("existing outside descendant");
+
     let link = temporary.path().join("linked-parent");
     symlink(&outside, &link).expect("parent symlink");
 
@@ -225,11 +237,14 @@ fn retained_parent_descriptor_prevents_create_redirection() {
     let parent = temporary.path().join("parent");
     let moved = temporary.path().join("moved-parent");
     let outside = temporary.path().join("outside");
+
     create_private_directory(&parent).expect("private parent");
+
     create_private_directory(&outside).expect("outside directory");
 
     let target = parent.join("artifact.json");
     let parent_fd = open_parent_directory(&target, false).expect("retain parent descriptor");
+
     fs_err::rename(&parent, &moved).expect("replace pathname after validation");
     symlink(&outside, &parent).expect("redirect original pathname");
 
@@ -241,6 +256,7 @@ fn retained_parent_descriptor_prevents_create_redirection() {
         &target,
     )
     .expect("descriptor-relative create");
+
     File::from(fd).write_all(b"safe").expect("write artifact");
 
     assert_eq!(
@@ -255,6 +271,7 @@ fn secure_write_is_never_partially_published_at_injected_failure_boundaries() {
     let temporary = TempDir::new().expect("temporary directory");
     let directory = temporary.path().join("atomic-writes");
     create_private_directory(&directory).expect("private output directory");
+
     let payload = b"complete authoritative payload";
 
     for stage in [SecureWriteStage::Created, SecureWriteStage::DataSynced] {
@@ -289,6 +306,7 @@ fn artifact_catalog_rejects_session_lock_and_catalog_symlinks() {
 
     let real_session = temporary.path().join("real-session");
     create_private_directory(&real_session).expect("real session");
+
     let linked_session = temporary.path().join("linked-session");
     symlink(&real_session, &linked_session).expect("session symlink");
     let error = append_artifact_root(
@@ -305,21 +323,20 @@ fn artifact_catalog_rejects_session_lock_and_catalog_symlinks() {
 
     let lock_session = temporary.path().join("lock-session");
     create_private_directory(&lock_session).expect("lock session");
+
     let outside_lock = outside.join("lock");
     fs_err::write(&outside_lock, b"sentinel").expect("outside lock");
     symlink(&outside_lock, lock_session.join(ARTIFACT_ROOT_LOCK)).expect("lock symlink");
-    assert!(
-        append_artifact_root(
-            &lock_session,
-            &lock_session.join("derived"),
-            "semantic_index",
-            b"{}",
-            &"0".repeat(64),
-            None,
-            None,
-        )
-        .is_err()
-    );
+    assert!(append_artifact_root(
+        &lock_session,
+        &lock_session.join("derived"),
+        "semantic_index",
+        b"{}",
+        &"0".repeat(64),
+        None,
+        None,
+    )
+    .is_err());
     assert_eq!(
         fs_err::read(&outside_lock).expect("unchanged lock"),
         b"sentinel"
@@ -327,21 +344,20 @@ fn artifact_catalog_rejects_session_lock_and_catalog_symlinks() {
 
     let catalog_session = temporary.path().join("catalog-session");
     create_private_directory(&catalog_session).expect("catalog session");
+
     let outside_catalog = outside.join("catalog");
     fs_err::write(&outside_catalog, b"sentinel").expect("outside catalog");
     symlink(&outside_catalog, catalog_session.join(ARTIFACT_ROOT_LOG)).expect("catalog symlink");
-    assert!(
-        append_artifact_root(
-            &catalog_session,
-            &catalog_session.join("derived"),
-            "semantic_index",
-            b"{}",
-            &"0".repeat(64),
-            None,
-            None,
-        )
-        .is_err()
-    );
+    assert!(append_artifact_root(
+        &catalog_session,
+        &catalog_session.join("derived"),
+        "semantic_index",
+        b"{}",
+        &"0".repeat(64),
+        None,
+        None,
+    )
+    .is_err());
     assert_eq!(
         fs_err::read(&outside_catalog).expect("unchanged catalog"),
         b"sentinel"

@@ -8,6 +8,7 @@ fn session_recovery_preserves_context_and_never_claims_completion() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("source.termtrace");
     let recovered = temporary.path().join("recovered.termtrace");
+
     Command::cargo_bin("termtrace")
         .expect("binary")
         .args(["record", "--no-input", "--out"])
@@ -15,6 +16,7 @@ fn session_recovery_preserves_context_and_never_claims_completion() {
         .args(["--", "/bin/echo", "RECOVERED-CONTEXT"])
         .assert()
         .success();
+
     let log_path = session.join("events.jsonl");
     fs::OpenOptions::new()
         .append(true)
@@ -22,7 +24,9 @@ fn session_recovery_preserves_context_and_never_claims_completion() {
         .expect("source log")
         .write_all(b"{\"partial\"")
         .expect("damage tail");
+
     let original = fs_err::read(&log_path).expect("original bytes");
+
     Command::cargo_bin("termtrace")
         .expect("binary")
         .args(["integrity", "recover", "--session"])
@@ -50,6 +54,7 @@ fn session_recovery_preserves_context_and_never_claims_completion() {
         .assert()
         .success()
         .stdout(predicate::str::contains("RECOVERED-CONTEXT"));
+
     Command::cargo_bin("termtrace")
         .expect("binary")
         .args(["integrity", "recover", "--session"])
@@ -58,7 +63,9 @@ fn session_recovery_preserves_context_and_never_claims_completion() {
         .arg(&recovered)
         .assert()
         .failure();
+
     fs_err::write(session.join("session.json"), b"{}").expect("damage manifest");
+
     let invalid = temporary.path().join("invalid.termtrace");
     Command::cargo_bin("termtrace")
         .expect("binary")
@@ -108,6 +115,7 @@ fn tmux_help_exposes_setup_audit_and_pane_commands() {
         .get_output()
         .stdout
         .clone();
+
     let help = String::from_utf8(output).expect("UTF-8 help");
     for subcommand in ["config", "enable", "disable", "status", "scope", "run"] {
         assert!(
@@ -116,6 +124,7 @@ fn tmux_help_exposes_setup_audit_and_pane_commands() {
             "tmux help omitted `{subcommand}`: {help}"
         );
     }
+
     assert!(
         !help.contains("guard"),
         "hidden guard leaked into help: {help}"
@@ -180,6 +189,7 @@ fn top_level_video_exposes_complete_manifested_workflow() {
         .get_output()
         .stdout
         .clone();
+
     let help = String::from_utf8(output).expect("UTF-8 help");
     assert!(help.contains("Usage: termtrace video [OPTIONS]"));
     for option in [
@@ -204,6 +214,7 @@ fn top_level_video_exposes_complete_manifested_workflow() {
             "video help omitted `{option}`:\n{help}"
         );
     }
+
     assert!(help.contains("docs"));
     assert!(help.contains("social"));
     assert!(help.contains("lossless"));
@@ -254,6 +265,7 @@ fn top_level_video_never_falls_back_from_native_to_semantic() {
         "native failure must not publish a semantic sidecar"
     );
 }
+
 #[test]
 fn complex_selector_help_stays_within_one_hundred_columns() {
     for (arguments, synopsis, headings) in [
@@ -311,6 +323,7 @@ fn complex_selector_help_stays_within_one_hundred_columns() {
             .get_output()
             .stdout
             .clone();
+
         let help = String::from_utf8(output).expect("UTF-8 help");
         assert!(
             help.contains(synopsis),
@@ -319,6 +332,7 @@ fn complex_selector_help_stays_within_one_hundred_columns() {
         for heading in headings {
             assert!(help.contains(heading), "missing `{heading}` in:\n{help}");
         }
+
         for line in help.lines() {
             assert!(
                 line.chars().count() <= 100,
@@ -416,6 +430,7 @@ fn doctor_is_the_only_top_level_capability_inventory_command() {
         .get_output()
         .stdout
         .clone();
+
     let root_help = String::from_utf8(output).expect("UTF-8 help");
     assert!(
         root_help
@@ -468,6 +483,7 @@ fn doctor_reports_capability_boundaries_and_enforces_requirements() {
         .get_output()
         .stdout
         .clone();
+
     let version_json: serde_json::Value =
         serde_json::from_slice(&version_output).expect("version JSON");
     assert_eq!(version_json["termtrace_version"], "0.1.0");
@@ -482,8 +498,10 @@ fn doctor_reports_capability_boundaries_and_enforces_requirements() {
         .get_output()
         .stdout
         .clone();
+
     let doctor_json: serde_json::Value =
         serde_json::from_slice(&semantic_output).expect("doctor JSON");
+
     let capabilities = doctor_json["capabilities"]
         .as_array()
         .expect("capabilities array");
@@ -530,6 +548,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .args(["/bin/sh", "-c", "printf SEMANTIC"])
         .assert()
         .success();
+
     let log = EventLog::read(session.join("events.jsonl")).expect("event log");
     let end = log.events.last().expect("final event").monotonic_ns;
     fs::write(
@@ -560,6 +579,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .get_output()
         .stdout
         .clone();
+
     let plan: serde_json::Value =
         serde_json::from_slice(&plan_output).expect("semantic video plan JSON");
     assert_eq!(plan["version"], 2);
@@ -602,6 +622,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .get_output()
         .stdout
         .clone();
+
     let supersampled_plan: serde_json::Value =
         serde_json::from_slice(&supersampled_output).expect("supersampled video plan JSON");
     assert_eq!(
@@ -765,12 +786,14 @@ fn retained_native_video_exports_without_native_capture_tools() {
         .args(["--", "/bin/sh", "-c", "printf RETAINED_NATIVE; sleep 0.25"])
         .assert()
         .success();
+
     Command::cargo_bin("termtrace")
         .expect("binary should build")
         .args(["analyze", "index", "--session"])
         .arg(&session)
         .assert()
         .success();
+
     Command::cargo_bin("termtrace")
         .expect("binary should build")
         .args(["artifact", "capture", "--session"])
@@ -778,29 +801,34 @@ fn retained_native_video_exports_without_native_capture_tools() {
         .args(["--fps", "24"])
         .assert()
         .success();
+
     let retained_manifest = fs::read(session.join("visual/manifest.json"))
         .expect("retained verified native capture manifest");
 
     let presentation_tools = temporary.path().join("presentation-tools");
     fs::create_dir_all(&presentation_tools).expect("isolated presentation tool directory");
+
     let search_path = env::var_os("PATH").expect("host executable search path");
     for name in ["ffmpeg", "ffprobe"] {
         let executable = env::split_paths(&search_path)
             .map(|directory| return directory.join(name))
             .find(|path| return path.is_file())
             .expect("required presentation executable");
+
         symlink(
             fs::canonicalize(executable).expect("absolute presentation executable"),
             presentation_tools.join(name),
         )
         .expect("expose only presentation tools");
     }
+
     Command::cargo_bin("termtrace")
         .expect("binary should build")
         .env("PATH", &presentation_tools)
         .args(["doctor", "--require", "native-video"])
         .assert()
         .code(1);
+
     Command::cargo_bin("termtrace")
         .expect("binary should build")
         .env("PATH", &presentation_tools)
@@ -821,6 +849,7 @@ fn retained_native_video_exports_without_native_capture_tools() {
         .get_output()
         .stdout
         .clone();
+
     let report: serde_json::Value = serde_json::from_slice(&output).expect("video result JSON");
     assert_eq!(report["renderer"], "native");
     assert!(
@@ -877,6 +906,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
     let temporary = TempDir::new().expect("temporary directory");
     fs_err::set_permissions(temporary.path(), Permissions::from_mode(0o700))
         .expect("owner-only temporary directory");
+
     let session = temporary.path().join("result-session");
     let mut record = Command::cargo_bin("termtrace").expect("binary should build");
     record
@@ -898,6 +928,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         .get_output()
         .stdout
         .clone();
+
     let result = compact_json_line(&output);
     assert_eq!(result["kind"], "asciicast");
     assert!(result["output"].is_string());
@@ -912,6 +943,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         .expect("open damaged fixture")
         .write_all(b"{\"partial\"")
         .expect("append partial tail");
+
     let recovered = temporary.path().join("recovered-events.jsonl");
     let mut recover = Command::cargo_bin("termtrace").expect("binary should build");
     let output = recover
@@ -924,6 +956,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         .get_output()
         .stdout
         .clone();
+
     let result = compact_json_line(&output);
     assert_eq!(result["source"], damaged.display().to_string());
     assert_eq!(result["recovered"], recovered.display().to_string());
@@ -940,6 +973,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         .get_output()
         .stdout
         .clone();
+
     let first = compact_json_line(&first);
     assert_eq!(first["kind"], "schema_generation");
     assert!(first["directory"].is_string());
@@ -947,11 +981,9 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         first["directory_display"],
         schema_directory.display().to_string()
     );
-    assert!(
-        first["file_count"]
-            .as_u64()
-            .is_some_and(|count| return count > 50)
-    );
+    assert!(first["file_count"]
+        .as_u64()
+        .is_some_and(|count| return count > 50));
     assert_eq!(first["replaced_existing_files"], false);
 
     let mut second = Command::cargo_bin("termtrace").expect("binary should build");
@@ -963,6 +995,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         .get_output()
         .stdout
         .clone();
+
     let second = compact_json_line(&second);
     assert_eq!(second["kind"], "schema_generation");
     assert_eq!(second["file_count"], first["file_count"]);
@@ -986,6 +1019,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
 fn assert_no_entry_with_prefix(directory: &Path, prefix: &str) {
     let entries = fs_err::read_dir(directory)
         .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()));
+
     let matching = entries
         .map(|entry| return entry.expect("directory entry").file_name())
         .filter(|name| return name.as_bytes().starts_with(prefix.as_bytes()))
