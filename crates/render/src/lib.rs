@@ -5,11 +5,10 @@
 pub mod diff;
 mod error;
 pub mod font;
-pub mod raster;
-pub mod semantic_svg;
-
 #[cfg(test)]
 mod quality_corpus;
+pub mod raster;
+pub mod semantic_svg;
 
 pub use diff::{render_diff_png, render_diff_svg, SEMANTIC_DIFF_SVG_RENDERER};
 pub use error::{Error, Result};

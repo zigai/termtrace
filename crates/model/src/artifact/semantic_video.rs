@@ -1,10 +1,9 @@
 //! Deterministic semantic-state video scheduling and source materialization.
 
-use std::path::PathBuf;
-
 use crate::artifact::save::{SemanticFontResource, SemanticRasterProfile};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Current semantic-video source format.

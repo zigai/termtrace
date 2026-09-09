@@ -1,14 +1,11 @@
 //! Explicit, fallible application instrumentation over authenticated local IPC.
 
-use std::{collections::BTreeMap, process, time::Instant};
-
+use crate::{Client, Error, Result};
 use serde_json::Value;
+use std::{collections::BTreeMap, process, time::Instant};
+pub use termtrace_model::execution::application::{ApplicationEvent, ApplicationEventKind};
 use termtrace_model::protocol::control::ControlCommand;
 use uuid::Uuid;
-
-pub use termtrace_model::execution::application::{ApplicationEvent, ApplicationEventKind};
-
-use crate::{Client, Error, Result};
 
 /// One emitting process instance and its monotonic clock origin.
 ///
@@ -57,7 +54,6 @@ impl Instrumentation {
             parent_span_id,
             attributes,
         )?;
-
         return Ok(span_id);
     }
 
@@ -107,7 +103,6 @@ impl Instrumentation {
         })?;
 
         self.client.request(ControlCommand::Application { data })?;
-
         return Ok(());
     }
 }

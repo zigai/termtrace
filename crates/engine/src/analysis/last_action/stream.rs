@@ -1,6 +1,13 @@
-use std::{fmt::Display, path::Path, sync::atomic::AtomicBool};
-
+use super::{bounded_action_findings, finish_analysis, task_error, ActionAnalysisInputs};
+use crate::{
+    analysis::diagnostics::diagnose_session,
+    diff::diff_inspections_with_semantic_states,
+    replay::{trust::SourceIdentity, visit_session_states_while, StateInspection},
+    timeline::stream::TokenCursor,
+    Result,
+};
 use rusqlite::{params, Connection, OptionalExtension as _};
+use std::{fmt::Display, path::Path, sync::atomic::AtomicBool};
 use termtrace_evidence::{
     event_log::EventLogCursor,
     request_journal::{MutationJournalCursor, MUTATION_JOURNAL_NAME},
@@ -15,15 +22,6 @@ use termtrace_model::{
     },
 };
 use uuid::Uuid;
-
-use super::{bounded_action_findings, finish_analysis, task_error, ActionAnalysisInputs};
-use crate::{
-    analysis::diagnostics::diagnose_session,
-    diff::diff_inspections_with_semantic_states,
-    replay::{trust::SourceIdentity, visit_session_states_while, StateInspection},
-    timeline::stream::TokenCursor,
-    Result,
-};
 
 /// Analyze the latest input request without retaining canonical event or state history.
 ///
@@ -46,6 +44,7 @@ pub fn analyze_last_action_session(
     let mut before = None;
     let mut after = None;
     let mut presentation_eligible_states = 0_u64;
+
     visit_session_states_while(session, &AtomicBool::new(false), |record, state| {
         if record
             .event_seq
@@ -63,7 +62,6 @@ pub fn analyze_last_action_session(
             record: record.clone(),
             state: state.clone(),
         });
-
         return Ok(true);
     })?;
 
@@ -85,8 +83,8 @@ pub fn analyze_last_action_session(
         event_count: 0,
         byte_count: 0,
     };
-
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+
     while let Some(record) = cursor.next_record()? {
         if record.seq > action.intent_event_seq
             && let Event::Output { data } = record.event
@@ -147,6 +145,7 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
     let directory = tempfile::tempdir().map_err(index_error)?;
     let connection =
         Connection::open(directory.path().join("actions.sqlite3")).map_err(index_error)?;
+
     connection
         .execute_batch(
             "PRAGMA cache_size=-8192; PRAGMA temp_store=FILE;
@@ -158,6 +157,7 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
 
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
     let mut last_intent_seq = None;
+
     {
         let mut intent_insert = connection
             .prepare("INSERT INTO intents VALUES (?1, ?2, ?3)")
@@ -268,6 +268,7 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
         bytes_written: 0,
         error_code: None,
     };
+
     while let Some(row) = rows.next().map_err(index_error)? {
         let seq = u64::from_be_bytes(row.get::<_, [u8; 8]>(0).map_err(index_error)?);
         let operation: String = row.get(1).map_err(index_error)?;
@@ -278,7 +279,6 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
             .map(u64::from_be_bytes)
             .filter(|result| return *result > seq)
             .ok_or_else(|| return task_error("input intent has no canonical input result"))?;
-
         let result: Vec<u8> = row.get(4).map_err(index_error)?;
         let (status, written, error): (OperationStatus, u64, Option<String>) =
             serde_json::from_slice(&result).map_err(index_error)?;
@@ -290,7 +290,6 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
         action
             .operation_ids
             .push(Uuid::parse_str(&operation).map_err(index_error)?);
-
         action.intended_bytes = action.intended_bytes.saturating_add(bytes);
         action.bytes_written = action.bytes_written.saturating_add(written);
         action.result_event_seq = result_seq;
@@ -305,6 +304,5 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
     }
 
     action.atom_count = u32::try_from(action.operation_ids.len()).unwrap_or(u32::MAX);
-
     return Ok(action);
 }

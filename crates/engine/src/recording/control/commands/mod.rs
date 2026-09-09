@@ -1,18 +1,33 @@
 //! Recording-actor control admission and command execution.
 
-use std::{
-    sync::mpsc,
-    time::{Duration, Instant},
+use super::super::{
+    actor::SessionActor,
+    input::{
+        apply_input, apply_resize, interpolate_cell, mode_hash, mouse_button_name, prepare_bytes,
+        prepare_key, prepare_paste, InputSequenceExecution,
+    },
+    model::TerminalGeometry,
+    presentation::{find_text_regions, resize_semantic, LiveTerminal},
+    runtime::HOST_SIGNAL_GRACE_PERIOD,
+    support::{
+        actor_boundaries, control_error_response, control_rejected, finish_with_cleanup,
+        terminal_error, validate_control_input,
+    },
 };
-
+use super::screen::{
+    compile_screen_predicate, evaluate_screen_predicate, presented_state_hash, valid_blake3_hash,
+    CompiledScreenPredicate, ScreenWaiter, MAX_SCREEN_WAITERS,
+};
+use crate::{Error, Result};
 use nix::{
     errno::Errno,
     sys::signal::{killpg, Signal},
     unistd::Pid,
 };
-use uuid::Uuid;
-use zstd::stream::encode_all;
-
+use std::{
+    sync::mpsc,
+    time::{Duration, Instant},
+};
 use termtrace_evidence::event_log::EventLogWriter;
 use termtrace_model::{
     execution::event::{Event, InputDescriptor, InputKind, InputSource, OperationStatus},
@@ -34,26 +49,8 @@ use termtrace_terminal::{
     encode_focus, project_screen_frame, semantic_state_hash, semantic_viewport_text,
     supported_geometry_cell_count, validate_screen_region,
 };
-
-use super::super::{
-    actor::SessionActor,
-    input::{
-        apply_input, apply_resize, interpolate_cell, mode_hash, mouse_button_name, prepare_bytes,
-        prepare_key, prepare_paste, InputSequenceExecution,
-    },
-    model::TerminalGeometry,
-    presentation::{find_text_regions, resize_semantic, LiveTerminal},
-    runtime::HOST_SIGNAL_GRACE_PERIOD,
-    support::{
-        actor_boundaries, control_error_response, control_rejected, finish_with_cleanup,
-        terminal_error, validate_control_input,
-    },
-};
-use super::screen::{
-    compile_screen_predicate, evaluate_screen_predicate, presented_state_hash, valid_blake3_hash,
-    CompiledScreenPredicate, ScreenWaiter, MAX_SCREEN_WAITERS,
-};
-use crate::{Error, Result};
+use uuid::Uuid;
+use zstd::stream::encode_all;
 
 mod action;
 mod admission;

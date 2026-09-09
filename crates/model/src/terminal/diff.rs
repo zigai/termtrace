@@ -1,14 +1,13 @@
 //! Stable deterministic semantic endpoint comparison contracts.
 
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
 use crate::{
     terminal::observation::StatePoint,
     terminal::state::{
         CellState, CellStyle, ColorState, CursorState, DirtyState, ModeState, TerminalMetadata,
     },
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Stable identity for one semantic diff endpoint.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

@@ -1,9 +1,8 @@
 //! Stable ordered timeline contracts.
 
+use crate::{execution::event::Event, terminal::state::DirtyState, terminal::vt::VtToken};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use crate::{execution::event::Event, terminal::state::DirtyState, terminal::vt::VtToken};
 
 /// One ordered, source-bound timeline item.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

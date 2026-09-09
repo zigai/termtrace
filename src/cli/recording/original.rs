@@ -1,16 +1,14 @@
-use std::sync::{atomic::AtomicBool, Arc};
-
+use super::*;
 use signal_hook::{
     consts::{SIGINT, SIGTERM},
     flag, low_level,
 };
+use std::sync::{atomic::AtomicBool, Arc};
 use termtrace_evidence::session::read_completion;
 use termtrace_media::native_capture::{
     capture_original_with_backend, CaptureKind, CaptureOptions, OriginalCaptureBackend,
 };
 use termtrace_model::{execution::session::CaptureTarget, terminal::replay::StateSelection};
-
-use super::*;
 
 struct CancellationSignals(Vec<signal_hook::SigId>);
 
@@ -72,8 +70,8 @@ pub(super) fn run_original(
 
     arguments.recording.geometry = GeometryMode::Inherit;
     arguments.recording.viewport = None;
-    let cancelled = Arc::new(AtomicBool::new(false));
 
+    let cancelled = Arc::new(AtomicBool::new(false));
     let mut signals = CancellationSignals(Vec::new());
     for signal in [SIGINT, SIGTERM] {
         signals
@@ -95,6 +93,7 @@ pub(super) fn run_original(
     };
 
     let provenance = serde_json::to_string(&profile.provenance).into_diagnostic()?;
+
     let captured = capture_original_with_backend(
         &env::current_exe().into_diagnostic()?,
         &options,
@@ -118,7 +117,6 @@ pub(super) fn run_original(
                     OsString::from(&provenance),
                 ],
             );
-
             return args;
         },
     )
@@ -133,11 +131,9 @@ pub(super) fn run_original(
     )?;
 
     let completion = read_completion(&session).into_diagnostic()?;
-
     if completion.resource_limit.is_some() || completion.failure.is_some() {
         return Ok(ExitCode::FAILURE);
     }
-
     return Ok(match (completion.exit_code, completion.signal_name) {
         (Some(code), None) => u8::try_from(code).map_or(ExitCode::FAILURE, ExitCode::from),
         _ => ExitCode::FAILURE,

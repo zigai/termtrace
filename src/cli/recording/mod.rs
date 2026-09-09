@@ -2,6 +2,20 @@ use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
 
+use crate::cli::{
+    output::{response_output, write_json_line},
+    recording::args::{
+        ColorPolicyArg, DurabilityModeArg, GeometryMode, GeometryProbeArgs, ProvenancePolicyArg,
+        RecordArgs, RecordingArgs, RestartArgs, RestartOverrides, StartArgs,
+    },
+};
+use miette::{IntoDiagnostic as _, Result};
+use nix::{
+    errno::Errno,
+    poll::{poll, PollFd, PollFlags, PollTimeout},
+    sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg},
+    unistd::read,
+};
 use std::{
     env,
     ffi::{OsStr, OsString},
@@ -19,14 +33,6 @@ use std::{
     result::Result as StdResult,
     thread,
     time::{Duration, Instant},
-};
-
-use miette::{IntoDiagnostic as _, Result};
-use nix::{
-    errno::Errno,
-    poll::{poll, PollFd, PollFlags, PollTimeout},
-    sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg},
-    unistd::read,
 };
 use termtrace_engine::{
     analysis::profile::{builtin_terminal_colors, terminal_colors_for_profile},
@@ -63,17 +69,8 @@ use termtrace_model::{
 };
 use termtrace_sdk::{request, send_request, wait_for_screen};
 
-use crate::cli::{
-    output::{response_output, write_json_line},
-    recording::args::{
-        ColorPolicyArg, DurabilityModeArg, GeometryMode, GeometryProbeArgs, ProvenancePolicyArg,
-        RecordArgs, RecordingArgs, RestartArgs, RestartOverrides, StartArgs,
-    },
-};
-
 const DEFAULT_DURABILITY_MAX_INTERVAL_MS: u64 = 50;
 const DEFAULT_DURABILITY_MAX_UNCOMMITTED_BYTES: u64 = 65_536;
-
 const GEOMETRY_QUERY_TIMEOUT: Duration = Duration::from_secs(3);
 
 mod geometry;
@@ -83,10 +80,9 @@ mod restart;
 mod start;
 
 use geometry::resolve_record_geometry;
-use record::durability_policy_for;
-use restart::restarted_record_options;
-
 pub(super) use geometry::run_geometry_probe;
+use record::durability_policy_for;
 pub(super) use record::run_record;
+use restart::restarted_record_options;
 pub(super) use restart::run_restart;
 pub(super) use start::{open_detached_log, run_start};

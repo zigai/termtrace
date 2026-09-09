@@ -1,10 +1,5 @@
 //! Edited presentation plan, manifest, and report contracts.
 
-use std::path::PathBuf;
-
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
 use crate::{
     artifact::{
         metadata::ArtifactMember, save::SemanticRasterProfile,
@@ -13,6 +8,9 @@ use crate::{
     terminal::replay::SourceRange,
     value::geometry::TerminalGeometryReport,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Current edit-plan format version.
 pub const EDIT_PLAN_VERSION: u32 = 1;

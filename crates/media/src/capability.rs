@@ -1,16 +1,14 @@
 //! Bounded capability probes owned by the media layer.
 
+use crate::native_capture::process::probe_output;
 use std::{
     env, ffi::OsStr, os::unix::fs::PermissionsExt as _, path::PathBuf, process::Command,
     result::Result as StdResult, time::Duration,
 };
-
 use termtrace_model::protocol::capability::{
     Capability, CapabilityStatus, PRESENTATION_CAPABILITY, SEMANTIC_VIDEO_CAPABILITY,
 };
 use termtrace_terminal::GhosttyVt;
-
-use crate::native_capture::process::probe_output;
 
 const DEPENDENCY_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -192,6 +190,5 @@ fn availability(value: bool) -> &'static str {
     if value {
         return "available";
     }
-
     return "unavailable";
 }

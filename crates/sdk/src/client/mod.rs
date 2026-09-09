@@ -1,5 +1,20 @@
 //! High-level blocking Rust facade over canonical sessions and actor controls.
 
+use crate::{
+    actions::{ActionCompletion, ActionCondition, ActionOptions, ActionResult, InputAtom},
+    error::RetrySafety,
+    protocol::{
+        control_endpoint_is_reachable, exchange, send_request, send_request_response,
+        wait_for_screen, ExchangeTiming,
+    },
+    screen::StableCaptureOptions,
+    Error, Result,
+};
+use nix::{
+    errno::Errno,
+    sys::signal::{killpg, Signal},
+    unistd::Pid,
+};
 use std::{
     ffi::OsString,
     fs::OpenOptions,
@@ -10,14 +25,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-
-use nix::{
-    errno::Errno,
-    sys::signal::{killpg, Signal},
-    unistd::Pid,
-};
-use uuid::Uuid;
-
 use termtrace_engine::observation::{project_screen_frame, resolved_screen_state_for_session};
 use termtrace_engine::{
     analysis::diagnostics::{diagnose_session, explain_session},
@@ -67,17 +74,7 @@ use termtrace_model::{
     terminal::timeline::TimelineEntry,
     value::ByteString,
 };
-
-use crate::{
-    actions::{ActionCompletion, ActionCondition, ActionOptions, ActionResult, InputAtom},
-    error::RetrySafety,
-    protocol::{
-        control_endpoint_is_reachable, exchange, send_request, send_request_response,
-        wait_for_screen, ExchangeTiming,
-    },
-    screen::StableCaptureOptions,
-    Error, Result,
-};
+use uuid::Uuid;
 
 mod builder;
 mod capabilities;

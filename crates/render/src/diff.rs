@@ -1,16 +1,14 @@
 //! Deterministic semantic before/after diff rendering.
 
-use std::fmt::Write;
-
-use termtrace_model::terminal::diff::SemanticDiff;
-use termtrace_model::terminal::state::SemanticState;
-
 use crate::error::Result;
 use crate::font::{semantic_font_set, SEMANTIC_RASTER_TEXT_FONT_FAMILY, SEMANTIC_TEXT_FONT_FAMILY};
 use crate::raster::{rasterize_svg, validate_geometry};
 use crate::semantic_svg::{
     write_font_faces, write_scene_content, SEMANTIC_CELL_HEIGHT, SEMANTIC_CELL_WIDTH,
 };
+use std::fmt::Write;
+use termtrace_model::terminal::diff::SemanticDiff;
+use termtrace_model::terminal::state::SemanticState;
 
 /// Stable semantic diff SVG renderer identity.
 pub const SEMANTIC_DIFF_SVG_RENDERER: &str = "termtrace-semantic-diff-svg-v4";
@@ -37,13 +35,14 @@ fn render_diff_scene(
     const CELL_WIDTH: u32 = SEMANTIC_CELL_WIDTH as u32;
     const CELL_HEIGHT: u32 = SEMANTIC_CELL_HEIGHT as u32;
     const HEADER: u32 = 30;
+
     let before_width = u32::from(before.cols).saturating_mul(CELL_WIDTH);
     let after_width = u32::from(after.cols).saturating_mul(CELL_WIDTH);
     let height = u32::from(before.rows.max(after.rows))
         .saturating_mul(CELL_HEIGHT)
         .saturating_add(HEADER);
-
     let width = before_width.saturating_add(after_width);
+
     let mut svg = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" data-truth-layer=\"semantic_rendering\" data-renderer=\"{SEMANTIC_DIFF_SVG_RENDERER}\">\n"
     );
@@ -51,7 +50,6 @@ fn render_diff_scene(
     let font_set = semantic_font_set()?;
     let label_font = if embed_font {
         write_font_faces(&mut svg, font_set);
-
         SEMANTIC_TEXT_FONT_FAMILY
     } else {
         SEMANTIC_RASTER_TEXT_FONT_FAMILY
@@ -88,7 +86,6 @@ fn render_diff_scene(
     }
 
     svg.push_str("</svg>\n");
-
     return Ok(svg.into_bytes());
 }
 
@@ -105,6 +102,5 @@ pub fn render_diff_png(
 ) -> Result<Vec<u8>> {
     validate_geometry(before.cols, before.rows, "before semantic state")?;
     validate_geometry(after.cols, after.rows, "after semantic state")?;
-
     return rasterize_svg(&render_diff_scene(before, after, difference, false)?);
 }

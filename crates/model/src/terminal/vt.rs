@@ -1,9 +1,8 @@
 //! Stable lossless VT token contracts.
 
+use crate::value::ByteString;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use crate::value::ByteString;
 
 /// Stable VT token family. This is framing, not terminal interpretation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

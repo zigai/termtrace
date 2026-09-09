@@ -1,3 +1,10 @@
+use crate::storage::{
+    event_log::EventLogCursor,
+    identifier_index::{index_error, IdentifierSet, RequestIndex, RequestPosition},
+    Error, Result,
+};
+use rusqlite::{params, Connection, OptionalExtension as _};
+use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     io::{
@@ -7,9 +14,9 @@ use std::{
     path::{Path, PathBuf},
     str,
 };
-
-use rusqlite::{params, Connection, OptionalExtension as _};
-use serde::{Deserialize, Serialize};
+pub use termtrace_model::execution::request_journal::{
+    MUTATION_JOURNAL_FORMAT, MUTATION_JOURNAL_NAME, MUTATION_JOURNAL_VERSION,
+};
 use termtrace_model::{
     execution::event::Event,
     execution::request_journal::MutationJournalRecord,
@@ -19,16 +26,6 @@ use termtrace_model::{
     terminal::observation::ActorBoundaries,
 };
 use uuid::Uuid;
-
-use crate::storage::{
-    event_log::EventLogCursor,
-    identifier_index::{index_error, IdentifierSet, RequestIndex, RequestPosition},
-    Error, Result,
-};
-
-pub use termtrace_model::execution::request_journal::{
-    MUTATION_JOURNAL_FORMAT, MUTATION_JOURNAL_NAME, MUTATION_JOURNAL_VERSION,
-};
 
 const MAX_MUTATION_JOURNAL_BYTES: u64 = 64 * MAX_CONTROL_MESSAGE_BYTES;
 const MAX_MUTATION_JOURNAL_RECORD_BYTES: u64 = 3 * MAX_CONTROL_MESSAGE_BYTES;
@@ -170,7 +167,6 @@ impl MutationJournal {
                 "mutation journal does not match its committed index",
             ));
         }
-
         return Ok(Some(record));
     }
 
@@ -232,6 +228,7 @@ impl MutationJournal {
             event_hash,
             response,
         };
+
         let mut encoded = serde_json::to_vec(&record).map_err(|source| {
             return Error::InvalidJson {
                 path: self.path.clone(),
@@ -240,6 +237,7 @@ impl MutationJournal {
             };
         })?;
         encoded.push(b'\n');
+
         let record_bytes = u64::try_from(encoded.len()).unwrap_or(u64::MAX);
 
         if record_bytes > MAX_MUTATION_JOURNAL_RECORD_BYTES
@@ -274,7 +272,6 @@ impl MutationJournal {
             .ok_or_else(|| return Error::invalid("mutation journal sequence overflow"))?;
 
         self.previous_hash.clone_from(&record.hash);
-
         return Ok(record);
     }
 }
@@ -338,6 +335,7 @@ pub fn read_mutation_journal(path: &Path) -> Result<Vec<MutationJournalRecord>> 
 
     for (index, line) in reader.lines().enumerate() {
         let line = line.map_err(|source| return Error::filesystem(path, source))?;
+
         if u64::try_from(line.len()).unwrap_or(u64::MAX) > MAX_MUTATION_JOURNAL_RECORD_BYTES {
             return Err(Error::invalid(
                 "mutation journal record exceeds its byte limit",
@@ -391,6 +389,7 @@ impl MutationJournalCursor {
         let Some(reader) = self.reader.as_mut() else {
             return Ok(None);
         };
+
         let mut line = Vec::new();
         let bytes = reader
             .by_ref()
@@ -419,7 +418,6 @@ impl MutationJournalCursor {
             .ok_or_else(|| return Error::invalid("mutation journal sequence overflow"))?;
 
         self.previous_hash.clone_from(&record.hash);
-
         return Ok(Some(record));
     }
 }
@@ -445,8 +443,8 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
 
     let mut identifiers = IdentifierSet::default();
     let mut count = 0_u64;
-
     let mut final_hash = String::new();
+
     while let Some(record) = journal.next_record()? {
         if !identifiers.insert(record.request_id)? {
             return Err(Error::invalid(
@@ -482,6 +480,7 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
     database
         .execute("UPDATE boundaries SET hash=?1 WHERE seq=0", [&header_hash])
         .map_err(index_error)?;
+
     {
         let mut boundary = database
             .prepare("UPDATE boundaries SET hash=?1 WHERE seq=?2")
@@ -504,6 +503,7 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
     }
 
     let _pending = cursor.finish()?;
+
     let mut journal = MutationJournalCursor::open(&path)?;
     let mut verified_count = 0;
     let mut verified_hash = String::new();
@@ -518,6 +518,7 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
             .optional()
             .map_err(index_error)?
             .flatten();
+
         if expected_hash.as_ref() != Some(&record.event_hash) {
             return Err(Error::invalid(
                 "mutation journal event hash does not match the canonical boundary",
@@ -533,13 +534,14 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
                 .map_err(index_error)?;
 
             let mut previous = None;
-
             let mut actual_count = 0;
+
             while let Some(row) = rows.next().map_err(index_error)? {
                 let bytes: Vec<u8> = row.get(0).map_err(index_error)?;
                 let id = Uuid::from_slice(&bytes).map_err(|_| {
                     return Error::invalid("canonical operation identifier index is invalid");
                 })?;
+
                 if previous == Some(id) {
                     continue;
                 }
@@ -583,7 +585,6 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
             "mutation journal changed during verification",
         ));
     }
-
     return Ok(count);
 }
 
@@ -686,7 +687,6 @@ fn decode_record(
             "mutation journal record hash does not match",
         ));
     }
-
     return Ok(record);
 }
 
@@ -698,7 +698,6 @@ fn hash_body(body: &MutationJournalBody<'_>, path: &Path) -> Result<String> {
             source,
         };
     })?;
-
     return Ok(blake3::hash(&bytes).to_hex().to_string());
 }
 
@@ -710,17 +709,14 @@ fn sync_parent_directory(path: &Path) -> Result<()> {
     File::open(parent)
         .and_then(|directory| return directory.sync_all())
         .map_err(|source| return Error::filesystem(parent, source))?;
-
     return Ok(());
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
-    use termtrace_model::protocol::control::CONTROL_PROTOCOL_VERSION;
-
     use super::*;
+    use std::fs;
+    use termtrace_model::protocol::control::CONTROL_PROTOCOL_VERSION;
 
     fn error_response(request_id: Uuid, message: String) -> ControlResponse {
         return ControlResponse {
@@ -789,6 +785,7 @@ mod tests {
             .lookup(first_id)
             .expect("lookup")
             .expect("first record");
+
         assert_eq!(found.response, first_response);
     }
 
@@ -799,7 +796,6 @@ mod tests {
         let request_id = Uuid::now_v7();
         let oversized =
             "x".repeat(usize::try_from(MAX_MUTATION_JOURNAL_RECORD_BYTES).expect("record limit"));
-
         let error = journal
             .append(
                 request_id,

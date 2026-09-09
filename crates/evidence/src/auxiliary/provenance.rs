@@ -1,3 +1,5 @@
+use nix::unistd::{getegid, geteuid, getgid, getuid};
+use rustix::system::uname;
 use std::{
     collections::BTreeMap,
     env,
@@ -6,9 +8,6 @@ use std::{
     os::unix::{ffi::OsStrExt as _, fs::PermissionsExt as _},
     path::{Path, PathBuf},
 };
-
-use nix::unistd::{getegid, geteuid, getgid, getuid};
-use rustix::system::uname;
 use termtrace_model::{
     execution::provenance::{
         ContentIdentityStatus, EnvironmentProvenance, ExecutionProvenance, FileProvenance,
@@ -173,17 +172,18 @@ fn resolve_executable(
     child_environment: &EffectiveEnvironment,
 ) -> Option<PathBuf> {
     let requested_path = Path::new(requested);
+
     if requested.as_bytes().contains(&b'/') {
         let candidate = if requested_path.is_absolute() {
             requested_path.to_path_buf()
         } else {
             working_directory.join(requested_path)
         };
-
         return canonical_executable(candidate);
     }
 
     let search = child_environment.get(OsStr::new("PATH"))?;
+
     for directory in env::split_paths(search) {
         let directory = if directory.as_os_str().is_empty() {
             working_directory.to_path_buf()
@@ -206,7 +206,6 @@ fn canonical_executable(path: PathBuf) -> Option<PathBuf> {
     if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
         return None;
     }
-
     return path.canonicalize().ok();
 }
 
@@ -239,7 +238,6 @@ fn discover_invoked_file(
     if !candidate.metadata().ok()?.is_file() {
         return None;
     }
-
     return Some((argument.clone(), candidate.canonicalize().ok()?));
 }
 
@@ -247,7 +245,6 @@ fn hash_file(path: &Path) -> Option<String> {
     let mut file = File::open(path).ok()?;
     let mut hasher = blake3::Hasher::new();
     hasher.update_reader(&mut file).ok()?;
-
     return Some(hasher.finalize().to_hex().to_string());
 }
 
@@ -256,7 +253,6 @@ fn read_process_umask() -> Option<u32> {
     let value = status
         .lines()
         .find_map(|line| return line.strip_prefix("Umask:").map(str::trim))?;
-
     return u32::from_str_radix(value, 8).ok();
 }
 
@@ -282,6 +278,7 @@ fn effective_rules(
                 ("TERM".to_owned(), ProvenanceCapture::Value),
                 ("TZ".to_owned(), ProvenanceCapture::Value),
             ]);
+
             for name in child_environment
                 .keys()
                 .filter_map(|name| return name.to_str())
@@ -336,9 +333,8 @@ fn is_public_configuration(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::Permissions, os::unix::fs::PermissionsExt as _};
-
     use super::*;
+    use std::{fs::Permissions, os::unix::fs::PermissionsExt as _};
 
     fn recorder() -> RecorderBuildIdentity<'static> {
         return RecorderBuildIdentity {
@@ -359,6 +355,7 @@ mod tests {
             Path::new("/"),
             recorder(),
         );
+
         assert_eq!(
             collected.environment.get("TERM").and_then(|item| {
                 return item.value.as_ref().map(|value| return value.as_bytes());
@@ -395,8 +392,8 @@ mod tests {
             Path::new("/"),
             recorder(),
         );
-
         let item = collected.environment.get("PRIVATE_TOKEN").expect("item");
+
         assert_eq!(item.capture, ProvenanceCapture::Hash);
         assert_eq!(
             item.sensitivity,
@@ -426,8 +423,8 @@ mod tests {
             Path::new("/"),
             recorder(),
         );
-
         let item = collected.environment.get("PRIVATE_TOKEN").expect("item");
+
         assert_eq!(item.capture, ProvenanceCapture::Hash);
         assert!(item.value.is_none());
         assert!(item.value_hash.is_some());
@@ -452,11 +449,14 @@ mod tests {
             temporary.path(),
             recorder(),
         );
+
         assert_eq!(
             collected.executable.content_identity,
             ContentIdentityStatus::Captured
         );
+
         let invoked = collected.invoked_file.expect("invoked script");
+
         assert_eq!(invoked.content_identity, ContentIdentityStatus::Captured);
         assert_eq!(
             invoked.content_hash.as_deref(),
@@ -483,6 +483,7 @@ mod tests {
             Path::new("/"),
             recorder(),
         );
+
         assert_eq!(
             collected
                 .executable

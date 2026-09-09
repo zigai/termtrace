@@ -1,3 +1,15 @@
+use crate::{
+    auxiliary::bundle::{
+        collect_regular_files, create_private_directory, create_private_parents,
+        open_regular_nofollow, secure_file, sync_parent, verify, BundleIdentity,
+        MAX_ARCHIVE_EXPANDED_BYTES, MAX_BUNDLE_MANIFEST_BYTES, MAX_BUNDLE_MEMBERS,
+    },
+    storage::{Error, Result},
+};
+use nix::{
+    errno::Errno,
+    fcntl::{renameat2, RenameFlags},
+};
 use std::{
     cell::RefCell,
     collections::BTreeSet,
@@ -8,23 +20,9 @@ use std::{
     rc::Rc,
     str,
 };
-
-use nix::{
-    errno::Errno,
-    fcntl::{renameat2, RenameFlags},
-};
 use tar_archive::{Archive, Builder, EntryType, Header};
 use termtrace_model::artifact::bundle::BundleManifest;
 use uuid::Uuid;
-
-use crate::{
-    auxiliary::bundle::{
-        collect_regular_files, create_private_directory, create_private_parents,
-        open_regular_nofollow, secure_file, sync_parent, verify, BundleIdentity,
-        MAX_ARCHIVE_EXPANDED_BYTES, MAX_BUNDLE_MANIFEST_BYTES, MAX_BUNDLE_MEMBERS,
-    },
-    storage::{Error, Result},
-};
 
 /// Verify a bundle directory and publish it as a deterministic compressed tar archive.
 ///
@@ -90,7 +88,6 @@ pub fn archive(
     let destination_name = destination
         .file_name()
         .ok_or_else(|| return Error::invalid("archive path has no basename"))?;
-
     let parent_file =
         File::open(parent).map_err(|source| return Error::filesystem(parent, source))?;
     renameat2(
@@ -106,14 +103,11 @@ pub fn archive(
                 path: destination.to_path_buf(),
             };
         }
-
         return Error::filesystem(destination, io::Error::from_raw_os_error(error as i32));
     })?;
 
     sync_parent(destination)?;
-
     cleanup.disarm();
-
     return Ok(());
 }
 
@@ -171,7 +165,6 @@ impl Drop for Cleanup {
 
         if self.directory {
             let _ = fs_err::remove_dir_all(&self.path);
-
             return;
         }
 
@@ -209,12 +202,12 @@ fn write_tar_file<W: io::Write>(
     builder
         .append(&header, &mut contents)
         .map_err(|source_error| return Error::filesystem(&source, source_error))?;
+
     let copied = read_limit.saturating_sub(contents.limit());
 
     if copied != size {
         return Err(Error::invalid("bundle member changed while archiving"));
     }
-
     return Ok(());
 }
 
@@ -236,12 +229,10 @@ impl TarReadTracker {
         let padding_start = file_position
             .checked_add(size)
             .ok_or_else(|| return Error::invalid("bundle archive size overflow"))?;
-
         let padded_size = size
             .checked_add(511)
             .ok_or_else(|| return Error::invalid("bundle archive size overflow"))?
             & !511;
-
         let padding_end = file_position
             .checked_add(padded_size)
             .ok_or_else(|| return Error::invalid("bundle archive size overflow"))?;
@@ -251,12 +242,12 @@ impl TarReadTracker {
         }
 
         let mut state = self.0.borrow_mut();
+
         if state.padding.is_some() || state.position > padding_start {
             return Err(Error::invalid("tar archive member positions are invalid"));
         }
 
         state.padding = Some(padding_start..padding_end);
-
         return Ok(());
     }
 }
@@ -285,6 +276,7 @@ impl<R: io::Read> io::Read for PaddingCheckedReader<R> {
         };
         let overlap_start = read_start.max(padding.start);
         let overlap_end = read_end.min(padding.end);
+
         if overlap_start < overlap_end {
             let start = usize::try_from(overlap_start - read_start).map_err(|source| {
                 return io::Error::new(io::ErrorKind::InvalidData, source);
@@ -328,6 +320,7 @@ pub(super) fn extract_archive(archive: &Path, destination: &Path) -> Result<()> 
     let mut tar_archive = Archive::new(reader);
     let mut paths: BTreeSet<PathBuf> = BTreeSet::new();
     let mut total_size = 0_u64;
+
     {
         let entries = tar_archive
             .entries()
@@ -342,6 +335,7 @@ pub(super) fn extract_archive(archive: &Path, destination: &Path) -> Result<()> 
             let mut entry = entry.map_err(|source| {
                 return Error::invalid(format!("tar archive is invalid: {source}"));
             })?;
+
             if !entry.header().entry_type().is_file() {
                 return Err(Error::invalid(
                     "bundle archive contains a non-regular member",
@@ -360,6 +354,7 @@ pub(super) fn extract_archive(archive: &Path, destination: &Path) -> Result<()> 
             }
 
             let size = entry.size();
+
             if path == Path::new("manifest.json") && size > MAX_BUNDLE_MANIFEST_BYTES {
                 return Err(Error::invalid("bundle manifest exceeds its byte limit"));
             }
@@ -367,6 +362,7 @@ pub(super) fn extract_archive(archive: &Path, destination: &Path) -> Result<()> 
             total_size = total_size
                 .checked_add(size)
                 .ok_or_else(|| return Error::invalid("bundle archive size overflow"))?;
+
             if total_size > MAX_ARCHIVE_EXPANDED_BYTES {
                 return Err(Error::invalid("bundle archive expands beyond 8 GiB"));
             }
@@ -376,6 +372,7 @@ pub(super) fn extract_archive(archive: &Path, destination: &Path) -> Result<()> 
             let mut writer = secure_file(&target)?;
             let copied = io::copy(&mut entry, &mut writer)
                 .map_err(|source| return Error::filesystem(&target, source))?;
+
             if copied != size {
                 return Err(Error::invalid("bundle archive member is truncated"));
             }
@@ -406,7 +403,6 @@ pub(super) fn extract_archive(archive: &Path, destination: &Path) -> Result<()> 
             "tar archive contains trailing decoded content",
         ));
     }
-
     return Ok(());
 }
 
@@ -418,6 +414,5 @@ fn validate_archive_path(path: &Path) -> Result<()> {
     {
         return Err(Error::invalid("bundle archive member path is unsafe"));
     }
-
     return Ok(());
 }

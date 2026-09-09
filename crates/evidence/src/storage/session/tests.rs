@@ -1,8 +1,16 @@
+use super::validation::{
+    validate_completion_format, validate_manifest, validate_replay_profile_file,
+};
+use super::*;
+use crate::{
+    event_log::{EventLog, EventLogWriter, SessionClock},
+    provenance::{collect_execution_provenance, RecorderBuildIdentity},
+    Error,
+};
 use std::{
     collections::BTreeMap, ffi::OsString, fs::Permissions, os::unix::fs::PermissionsExt as _,
     path::Path,
 };
-
 use tempfile::TempDir;
 use termtrace_model::{
     execution::environment::ChildEnvironmentPolicy,
@@ -13,16 +21,6 @@ use termtrace_model::{
     value::ByteString,
 };
 use uuid::Uuid;
-
-use super::validation::{
-    validate_completion_format, validate_manifest, validate_replay_profile_file,
-};
-use super::*;
-use crate::{
-    event_log::{EventLog, EventLogWriter, SessionClock},
-    provenance::{collect_execution_provenance, RecorderBuildIdentity},
-    Error,
-};
 
 fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
     let temporary = TempDir::new().expect("temporary directory");
@@ -84,6 +82,7 @@ fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
     };
     let manifest_bytes = canonical_manifest_bytes(&manifest).expect("manifest JSON");
     fs_err::write(session.join("session.json"), &manifest_bytes).expect("write manifest");
+
     let manifest_hash = manifest_hash(&manifest_bytes);
     let header = EventLogHeader::new(
         session_id,
@@ -95,7 +94,6 @@ fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
         432,
         "xterm-ghostty",
     );
-
     let header_bytes = serde_json::to_vec(&header).expect("header JSON");
 
     let mut writer =
@@ -134,7 +132,6 @@ fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
     .expect("write completion");
 
     let log = EventLog::read(session.join("events.jsonl")).expect("read event log");
-
     return (temporary, log);
 }
 
@@ -164,7 +161,6 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
 
     let mut missing_target = fitted.clone();
     missing_target.geometry_provenance.capture_target = None;
-
     assert!(matches!(
         validate_manifest(&missing_target),
         Err(Error::InvalidEvidence { .. })
@@ -172,7 +168,6 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
 
     let mut missing_profile = fitted;
     missing_profile.ghostty_visual = None;
-
     assert!(matches!(
         validate_manifest(&missing_profile),
         Err(Error::InvalidEvidence { .. })
@@ -230,7 +225,6 @@ fn completed_content_validation_binds_the_replay_profile_file() {
         replay_profile_hash: blake3::hash(profile_bytes).to_hex().to_string(),
         effective_config_hash: "0".repeat(64),
     });
-
     validate_replay_profile_file(&session, &manifest).expect("matching replay profile");
 
     fs_err::write(&profile_path, b"font-size = 14\n").expect("tampered replay profile");
@@ -250,6 +244,7 @@ fn completed_validation_requires_terminal_exit() {
     let error = validate_completed_log(&temporary.path().join("session"), &log)
         .expect_err("nonterminal completion must fail");
     assert!(matches!(error, Error::InvalidEvidence { .. }));
+
     let report = verify_session(temporary.path().join("session"), VerificationLevel::Content);
     assert!(!report.valid);
     assert_eq!(report.findings[0].code, "terminal_exit_missing");
@@ -279,6 +274,7 @@ fn completed_validation_rejects_pending_mutation() {
     let error = validate_completed_log(&temporary.path().join("session"), &log)
         .expect_err("pending mutation must fail");
     assert!(matches!(error, Error::InvalidEvidence { .. }));
+
     let report = verify_session(temporary.path().join("session"), VerificationLevel::Content);
     assert!(!report.valid);
     assert_eq!(report.findings[0].code, "pending_mutation_intents");
@@ -304,6 +300,7 @@ fn persisted_format_readers_reject_version_corpus_without_compatibility_fallback
         "../../../../../fixtures/conformance/protocol/rejected-versions.json"
     ))
     .expect("rejected version corpus");
+
     assert_eq!(corpus.format, "termtrace-rejected-version-corpus");
     assert_eq!(corpus.version, 1);
 
@@ -313,7 +310,6 @@ fn persisted_format_readers_reject_version_corpus_without_compatibility_fallback
         let expected_error = case.expected_error.as_str();
         let (temporary, _) = completed_fixture(Vec::new());
         let session = temporary.path().join("session");
-
         let error = match surface {
             "event_log" => {
                 let path = session.join("events.jsonl");
@@ -324,31 +320,28 @@ fn persisted_format_readers_reject_version_corpus_without_compatibility_fallback
                 let mut rejected = serde_json::to_vec(&header).expect("rejected event header");
                 rejected.push(b'\n');
                 fs_err::write(&path, rejected).expect("write rejected event header");
-
                 EventLog::read(&path).expect_err("old event version must be rejected")
             }
             "session_manifest" => {
                 let mut manifest = read_manifest(&session).expect("session manifest");
                 manifest.version = rejected_version;
-
                 validate_manifest(&manifest).expect_err("old session version must be rejected")
             }
             "completion_manifest" => {
                 let mut completion = read_completion(&session).expect("completion manifest");
                 completion.version = rejected_version;
-
                 validate_completion_format(&completion)
                     .expect_err("old completion version must be rejected")
             }
             "completion_validation" => {
                 let mut completion = read_completion(&session).expect("completion manifest");
                 completion.validation_version = rejected_version;
-
                 validate_completion_format(&completion)
                     .expect_err("old completion validation version must be rejected")
             }
             other => panic!("unknown rejected-version surface `{other}`"),
         };
+
         assert!(
             error.to_string().contains(expected_error),
             "{surface} emitted unexpected rejection: {error}"

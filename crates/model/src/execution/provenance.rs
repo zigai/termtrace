@@ -1,11 +1,9 @@
 //! Sensitivity-aware execution provenance value contracts.
 
-use std::collections::BTreeMap;
-
+use crate::value::ByteString;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use crate::value::ByteString;
+use std::collections::BTreeMap;
 
 /// Built-in execution-provenance collection policy.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

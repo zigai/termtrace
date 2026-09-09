@@ -1,9 +1,14 @@
+use super::{
+    super::{invalid_replay, json_error},
+    source::IndexSource,
+    write_json_line,
+};
+use crate::{Error, Result};
 use std::{
     fs::File,
     io::{BufWriter, Write as _},
     path::{Path, PathBuf},
 };
-
 use termtrace_evidence::artifact::{finish_writer, secure_writer};
 use termtrace_model::{
     execution::event::Event,
@@ -13,13 +18,6 @@ use termtrace_model::{
     },
 };
 use termtrace_terminal::VtFramer;
-
-use super::{
-    super::{invalid_replay, json_error},
-    source::IndexSource,
-    write_json_line,
-};
-use crate::{Error, Result};
 
 pub(super) fn write_control_index(
     directory: &Path,
@@ -39,6 +37,7 @@ pub(super) fn write_control_index(
     };
 
     let mut framer = VtFramer::default();
+
     for record in source.records()? {
         let record = record?;
 
@@ -58,7 +57,6 @@ pub(super) fn write_control_index(
     }
 
     finish_writer(output.writer, &output.path)?;
-
     return finish_writer(output.sources, &output.source_path).map_err(Error::from);
 }
 
@@ -123,7 +121,6 @@ impl ControlWriter {
             .checked_add(u64::try_from(encoded.len()).unwrap_or(u64::MAX))
             .and_then(|offset| return offset.checked_add(1))
             .ok_or_else(|| return invalid_replay("control index byte offset overflow"))?;
-
         return Ok(());
     }
 }

@@ -1,18 +1,16 @@
 //! Deterministic PNG and opaque RGBA rasterization.
 
-use std::{io::Write, sync::Arc};
-
+use crate::error::{render_error, Result};
+use crate::font::semantic_font_set;
+use crate::semantic_svg::render_svg_scene;
 use resvg::tiny_skia::{Color, FilterQuality, Pixmap, PixmapPaint, Transform};
 use resvg::usvg::{Options, Tree};
+use std::{io::Write, sync::Arc};
 use termtrace_model::artifact::save::SemanticRasterProfile;
 use termtrace_model::terminal::state::{
     Rgb, SemanticState, MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS,
 };
 use termtrace_terminal::supported_geometry_cell_count;
-
-use crate::error::{render_error, Result};
-use crate::font::semantic_font_set;
-use crate::semantic_svg::render_svg_scene;
 
 /// Stable semantic PNG rasterizer identity.
 pub const SEMANTIC_PNG_RENDERER: &str = "termtrace-semantic-png-resvg-v4";
@@ -40,7 +38,6 @@ pub fn render_png_with_profile(
 ) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     write_png(state, profile, &mut bytes)?;
-
     return Ok(bytes);
 }
 
@@ -57,15 +54,18 @@ pub fn write_png(
     validate_geometry(state.cols, state.rows, "semantic state")?;
     let svg = render_svg_scene(state, state.cols, state.rows, false)?;
     let pixmap = rasterize_svg_pixmap(&svg, profile, Some(state.colors.background))?;
+
     let mut encoder = png::Encoder::new(writer, pixmap.width(), pixmap.height());
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
+
     let mut png = encoder
         .write_header()
         .map_err(|error| return render_error(format!("encode semantic PNG: {error}")))?;
     let mut stream = png
         .stream_writer()
         .map_err(|error| return render_error(format!("encode semantic PNG: {error}")))?;
+
     stream
         .write_all(pixmap.data())
         .map_err(|error| return render_error(format!("write semantic PNG: {error}")))?;
@@ -96,8 +96,8 @@ pub fn render_video_rgba(
     profile: SemanticRasterProfile,
 ) -> Result<Vec<u8>> {
     validate_geometry(state.cols, state.rows, "semantic state")?;
-
     validate_canvas_geometry(canvas_cols, canvas_rows)?;
+
     if canvas_cols < state.cols || canvas_rows < state.rows {
         return Err(render_error(format!(
             "semantic video canvas {canvas_cols}x{canvas_rows} is smaller than state {}x{}",
@@ -132,11 +132,11 @@ fn rasterize_svg_pixmap(
     let tree = Tree::from_data(svg, &options)
         .map_err(|error| return render_error(format!("parse deterministic SVG: {error}")))?;
     let size = tree.size().to_int_size();
+
     if profile == SemanticRasterProfile::Direct {
         let mut pixmap = Pixmap::new(size.width(), size.height())
             .ok_or_else(|| return render_error("allocate semantic PNG surface"))?;
         resvg::render(&tree, Transform::default(), &mut pixmap.as_mut());
-
         return Ok(pixmap);
     }
 
@@ -150,6 +150,7 @@ fn rasterize_svg_pixmap(
         .ok_or_else(|| return render_error("allocate semantic PNG surface"))?;
     let mut intermediate = Pixmap::new(width, height)
         .ok_or_else(|| return render_error("allocate semantic PNG surface"))?;
+
     resvg::render(
         &tree,
         Transform::from_scale(2.0, 2.0),
@@ -158,6 +159,7 @@ fn rasterize_svg_pixmap(
 
     let mut target = Pixmap::new(size.width(), size.height())
         .ok_or_else(|| return render_error("allocate semantic PNG surface"))?;
+
     if let Some(background) = opaque_background {
         target.fill(Color::from_rgba8(
             background.r,
@@ -179,7 +181,6 @@ fn rasterize_svg_pixmap(
         Transform::from_scale(0.5, 0.5),
         None,
     );
-
     return Ok(target);
 }
 
@@ -189,7 +190,6 @@ pub(super) fn validate_geometry(cols: u16, rows: u16, label: &str) -> Result<()>
             "{label} geometry {cols}x{rows} exceeds terminal rendering bounds"
         )));
     }
-
     return Ok(());
 }
 
@@ -199,7 +199,6 @@ fn validate_canvas_geometry(cols: u16, rows: u16) -> Result<()> {
             "semantic video canvas geometry {cols}x{rows} exceeds terminal rendering bounds"
         )));
     }
-
     return Ok(());
 }
 
@@ -234,6 +233,7 @@ mod tests {
         terminal.write("──\x1b[2;1H│\x1b[3;1H│\x1b[4;1H██".as_bytes());
         let mut state = terminal.snapshot().expect("snapshot graphics terminal");
         state.cursor.visible = false;
+
         let pixmap = rasterize_state(&state);
         let background = state.colors.background;
 
@@ -264,6 +264,7 @@ mod tests {
         terminal.write(" ".as_bytes());
         let mut state = terminal.snapshot().expect("snapshot symbols terminal");
         state.cursor.visible = false;
+
         let pixmap = rasterize_state(&state);
         let background = state.colors.background;
         let painted_rows: Vec<u32> = (0..pixmap.height())
@@ -275,7 +276,6 @@ mod tests {
                 });
             })
             .collect();
-
         let first = painted_rows.first().copied().expect("icons paint pixels");
         let last = painted_rows.last().copied().expect("icons paint pixels");
 
@@ -293,9 +293,9 @@ mod tests {
         state.cursor.column = Some(0);
         state.cursor.row = Some(0);
         state.cursor.wide_tail = Some(false);
-
         state.cursor.style = CursorStyle::HollowBlock;
         let hollow = rasterize_state(&state);
+
         state.cursor.visible = false;
         let hidden = rasterize_state(&state);
 

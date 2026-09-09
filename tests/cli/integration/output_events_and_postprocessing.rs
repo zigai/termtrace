@@ -1,8 +1,7 @@
 //! output events and postprocessing CLI integration tests.
 
-use std::{process::Child, sync::mpsc::channel};
-
 use crate::support::*;
+use std::{process::Child, sync::mpsc::channel};
 use termtrace_engine::timeline::resolve_session_prefix_source_selection;
 
 #[test]
@@ -24,6 +23,7 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
 
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
     let expected = canonical_output_bytes(&log);
+
     assert_eq!(expected, b"A\x1b[?1049h\x1b[31mB\x1b[0m\xffC");
 
     let mut output = Command::cargo_bin("termtrace").expect("binary should build");
@@ -76,6 +76,7 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
         ));
 
     let projection = fs_err::read_to_string(projection_manifest).expect("projection report");
+
     assert!(projection.contains(r#""projection_quality": "unsuitable_for_full_screen""#));
     assert!(projection.contains(r#""alternate_screen_observed": true"#));
 }
@@ -114,18 +115,23 @@ fn output_follow_emits_each_durable_prefix_once_until_completion() {
 
     let recorder_output = recorder.wait_with_output().expect("wait for recorder");
     assert!(recorder_output.status.success(), "{recorder_output:?}");
+
     let followed = follower.wait_with_output().expect("wait for follower");
     assert!(followed.status.success(), "{followed:?}");
+
     let log = EventLog::read(session.join("events.jsonl")).expect("completed event log");
     let expected = canonical_output_bytes(&log);
+
     assert_eq!(expected, b"A\x1b[31mB\xff");
     assert_eq!(followed.stdout, expected);
+
     let stripped = StdCommand::new(binary)
         .args(["analyze", "output"])
         .arg(&session)
         .args(["--strip-controls", "--follow"])
         .output()
         .expect("follow completed stripped output");
+
     assert!(stripped.status.success(), "{stripped:?}");
     assert_eq!(stripped.stdout, b"AB\xff");
     assert!(String::from_utf8_lossy(&stripped.stderr).contains("lossy_line_oriented"));
@@ -153,23 +159,30 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
         .get_output()
         .stdout
         .clone();
+
     assert!(!output
         .windows(b"secret-bytes".len())
         .any(|w| return w == b"secret-bytes"));
+
     let mut byte_count = 0;
+
     for line in output
         .split(|byte| return *byte == b'\n')
         .filter(|line| return !line.is_empty())
     {
         let record: serde_json::Value = serde_json::from_slice(line).expect("metadata event JSON");
+
         assert_eq!(record["event_type"], "output");
         assert_eq!(record["metadata_only"], true);
         assert!(record["event"].is_null());
+
         let payloads = record["byte_payloads"]
             .as_array()
             .expect("byte payload metadata");
+
         assert_eq!(payloads.len(), 1);
         assert_eq!(payloads[0]["field"], "data");
+
         byte_count += payloads[0]["byte_count"]
             .as_u64()
             .expect("output byte count");
@@ -187,14 +200,13 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
         .get_output()
         .stdout
         .clone();
-
     let exact_line = exact_output
         .split(|byte| return *byte == b'\n')
         .find(|line| return !line.is_empty())
         .expect("exact event JSON line");
-
     let exact_record: serde_json::Value =
         serde_json::from_slice(exact_line).expect("exact event JSON");
+
     assert_eq!(exact_record["metadata_only"], false);
     assert_eq!(exact_record["event_type"], "output");
     assert_eq!(exact_record["event"]["type"], "output");
@@ -237,8 +249,10 @@ fn events_follow_resumes_filtered_durable_records_without_duplicates() {
         .expect("wait for recorder")
         .status
         .success());
+
     let followed = follower.wait_with_output().expect("wait for follower");
     assert!(followed.status.success(), "{followed:?}");
+
     let projected = followed
         .stdout
         .split(|byte| return *byte == b'\n')
@@ -253,11 +267,11 @@ fn events_follow_resumes_filtered_durable_records_without_duplicates() {
         .filter(|record| return matches!(record.event, Event::Output { .. }))
         .map(|record| return record.seq)
         .collect::<Vec<_>>();
-
     let projected_sequences = projected
         .iter()
         .map(|value| return value["seq"].as_u64().expect("sequence"))
         .collect::<Vec<_>>();
+
     assert_eq!(projected_sequences, expected_sequences);
     assert!(projected.iter().all(|value| {
         return value["event_type"] == "output" && value["metadata_only"] == true;
@@ -283,7 +297,6 @@ fn start_event_follow_recorder(session: &Path) -> Child {
     let recorder = command.spawn().expect("spawn recorder");
 
     wait_for_control(session);
-
     return recorder;
 }
 
@@ -304,7 +317,6 @@ fn follow_test_marker(session: &Path, label: &str) -> u64 {
     let ControlData::Marked { event_seq, .. } = data else {
         panic!("unexpected marker response");
     };
-
     return event_seq;
 }
 
@@ -338,6 +350,7 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
     };
     let resume = boundaries.durable.next_event_seq;
     let race_marker = follow_test_marker(&session, "between-status-and-follow");
+
     let ControlData::EventCursor {
         start: Some(start),
         durable,
@@ -352,6 +365,7 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
     else {
         panic!("recent cursor must survive writer advancement");
     };
+
     assert_eq!(start.next_event_seq, resume);
     assert!(start.file_offset > 1_000_000);
     assert!(durable.next_event_seq > start.next_event_seq);
@@ -365,13 +379,16 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
         .expect("historical cursor"),
         ControlData::EventCursor { start: None, .. }
     ));
+
     let historical = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
         .args(["--response", "full", "analyze", "events"])
         .arg(&session)
         .args(["--follow", "--from-event-seq", "0", "--to-event-seq", "1"])
         .output()
         .expect("historical follow");
+
     assert!(historical.status.success(), "{historical:?}");
+
     let first: serde_json::Value = serde_json::from_slice(&historical.stdout).expect("first event");
     assert_eq!(first["seq"], 0);
 
@@ -391,6 +408,7 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
         .expect("spawn follower");
     let stdout = follower.stdout.take().expect("follower stdout");
     let (sender, receiver) = channel();
+
     let reader = thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
             let value: serde_json::Value =
@@ -405,20 +423,28 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
     let raced = receiver
         .recv_timeout(Duration::from_secs(10))
         .expect("retained marker delivery");
+
     assert_eq!(raced["seq"], race_marker);
+
     let fresh = follow_test_marker(&session, "fresh-after-follow-start");
     let delivered = receiver
         .recv_timeout(Duration::from_secs(10))
         .expect("new durable marker delivery");
+
     assert_eq!(delivered["seq"], fresh);
+
     send_request(&session, &ControlRequest::new(ControlCommand::Stop)).expect("stop recorder");
 
     let recorded = recorder.wait_with_output().expect("recorder completion");
     assert!(recorded.status.success(), "{recorded:?}");
+
     let followed = follower.wait_with_output().expect("follow completion");
     assert!(followed.status.success(), "{followed:?}");
+
     reader.join().expect("reader completion");
+
     assert!(receiver.try_iter().next().is_none(), "no duplicate markers");
+
     validate_completed_log(
         &session,
         &EventLog::read(session.join("events.jsonl")).expect("log"),
@@ -436,6 +462,7 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
     let recorder = start_event_follow_recorder(&session);
     let resume = follow_test_marker(&session, "prior") + 1;
     follow_test_marker(&session, "genuine");
+
     let ControlData::EventCursor {
         start: Some(start), ..
     } = send_request(
@@ -448,6 +475,7 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
     else {
         panic!("retained cursor");
     };
+
     let path = session.join("events.jsonl");
     let mut source = File::open(&path).expect("open canonical source");
     source
@@ -458,11 +486,13 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
     BufReader::new(source)
         .read_line(&mut line)
         .expect("read marker");
+
     let mut record: EventRecord = serde_json::from_str(&line).expect("marker record");
     let Event::Marker { label, .. } = &mut record.event else {
         panic!("marker event");
     };
     *label = "forgery".to_owned();
+
     let body = serde_json::to_vec(&EventBody {
         observed_monotonic_ns: record.observed_monotonic_ns,
         seq: record.seq,
@@ -479,9 +509,12 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
     );
     hasher.update(&body);
     record.hash = hasher.finalize().to_hex().to_string();
+
     let mut changed = serde_json::to_vec(&record).expect("forged record");
     changed.push(b'\n');
+
     assert_eq!(changed.len(), line.len(), "overwrite without truncation");
+
     let mut writer = fs::OpenOptions::new()
         .write(true)
         .open(&path)
@@ -504,12 +537,14 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
         ])
         .output()
         .expect("follow tampered suffix");
+
     assert!(!followed.status.success(), "{followed:?}");
     assert!(
         followed.stdout.is_empty(),
         "untrusted suffix must not escape staging"
     );
     assert!(String::from_utf8_lossy(&followed.stderr).contains("trusted boundary"));
+
     // Restore canonical bytes so recorder shutdown is independent of the attack.
     writer
         .seek(SeekFrom::Start(start.file_offset))
@@ -532,6 +567,7 @@ fn events_follow_rejects_replaced_actor_source_descriptor() {
     let recorder = start_event_follow_recorder(&session);
     let resume = follow_test_marker(&session, "prior") + 1;
     follow_test_marker(&session, "genuine");
+
     let path = session.join("events.jsonl");
     let original = session.join("original-events.jsonl");
     fs::rename(&path, &original).expect("move actor file");
@@ -549,9 +585,11 @@ fn events_follow_rejects_replaced_actor_source_descriptor() {
         ])
         .output()
         .expect("follow replaced source");
+
     assert!(!followed.status.success(), "{followed:?}");
     assert!(followed.stdout.is_empty());
     assert!(String::from_utf8_lossy(&followed.stderr).contains("source identity"));
+
     fs::rename(&original, &path).expect("restore actor descriptor path");
 
     send_request(&session, &ControlRequest::new(ControlCommand::Stop)).expect("stop");
@@ -612,6 +650,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
         index_session_with_options(&session, IndexOptions::default()),
         Err(termtrace_engine::Error::SessionIncomplete { .. })
     ));
+
     let snapshot = index_session_with_options(
         &session,
         IndexOptions {
@@ -621,6 +660,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
         },
     )
     .expect("explicit live snapshot");
+
     assert!(!snapshot.source_complete);
     assert!(snapshot
         .directory
@@ -628,10 +668,12 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
         .expect("snapshot basename")
         .to_string_lossy()
         .contains("snapshot-"));
+
     let snapshot_manifest: ReplayManifest = serde_json::from_slice(
         &fs_err::read(snapshot.directory.join("manifest.json")).expect("snapshot manifest"),
     )
     .expect("snapshot manifest JSON");
+
     assert!(!snapshot_manifest.source_complete);
     assert_eq!(snapshot_manifest.state_selection, StateSelection::Presented);
 
@@ -707,23 +749,22 @@ fn marker_listing_distinguishes_each_repeated_label_occurrence() {
         .get_output()
         .stdout
         .clone();
-
     let markers: Vec<serde_json::Value> =
         serde_json::from_slice(&markers).expect("marker listing JSON");
+
     assert_eq!(markers.len(), 2);
     assert!(markers
         .iter()
         .all(|marker| return marker["occurrence_count"] == 2));
     assert_eq!(markers[0]["occurrence_index"], 1);
     assert_eq!(markers[1]["occurrence_index"], 2);
+
     let first_seq = markers[0]["event_seq"]
         .as_u64()
         .expect("first marker event");
-
     let first_time = markers[0]["monotonic_ns"]
         .as_u64()
         .expect("first marker time");
-
     let selected = resolve_session_prefix_source_selection(
         &session,
         Some(first_seq + 1),
@@ -734,6 +775,7 @@ fn marker_listing_distinguishes_each_repeated_label_occurrence() {
     )
     .expect("later duplicate excluded by finite prefix")
     .expect("selected range");
+
     assert_eq!(selected.start_monotonic_ns, first_time);
     assert_eq!(selected.end_monotonic_ns, first_time + 1);
     assert!(resolve_session_prefix_source_selection(

@@ -16,13 +16,11 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
 
     let hello_id = "019f0000-0000-7000-8000-000000000001";
     let attach_id = "019f0000-0000-7000-8000-000000000002";
-
     let hello = serde_json::json!({
         "version": 5,
         "request_id": hello_id,
         "method": { "method": "hello" }
     });
-
     let attach = serde_json::json!({
         "version": 5,
         "request_id": attach_id,
@@ -49,6 +47,7 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
     let [first, second, third] = responses.as_slice() else {
         panic!("expected three driver responses");
     };
+
     assert_eq!(first, second);
     assert_eq!(first["result"]["data"]["kind"], "hello");
     assert_eq!(first["result"]["data"]["driver_protocol_version"], 5);
@@ -149,6 +148,7 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
         .arg(temporary.path().join("python-sync-evidence"))
         .status()
         .expect("run sync Python client");
+
     assert!(sync.success());
 
     let async_code = r#"import asyncio, json, sys
@@ -221,6 +221,7 @@ asyncio.run(main())
         .arg(temporary.path().join("python-async-evidence"))
         .status()
         .expect("run async Python client");
+
     assert!(asynchronous.success());
 }
 
@@ -316,6 +317,7 @@ if (!existsSync(`${retainedPath}/completion.json`)) throw new Error("driver clos
         .arg(temporary.path().join("typescript-evidence"))
         .output()
         .expect("run TypeScript client");
+
     assert!(
         output.status.success(),
         "stdout:\n{}\nstderr:\n{}",
@@ -341,7 +343,6 @@ fn managed_client_runners_leave_the_callers_worktree_untouched() {
         br#"{"name":"@termtrace/test","type":"module","exports":{".":"./lib/index.js"}}"#,
     )
     .expect("TypeScript fixture package");
-
     fs_err::write(
         typescript.join("lib/index.js"),
         b"export const managedRunnerMarker = 'typescript-managed';\n",
@@ -380,12 +381,12 @@ fn managed_client_runners_leave_the_callers_worktree_untouched() {
         "export const localMarker = 'local-import';\n",
     )
     .expect("TypeScript helper");
-
     fs_err::write(
         source.join("client.ts"),
         "import { managedRunnerMarker } from '@termtrace/test';\nimport { localMarker } from './helper.ts';\nconsole.log(`${managedRunnerMarker}:${localMarker}`);\n",
     )
     .expect("TypeScript client file");
+
     let mut typescript_file = Command::cargo_bin("termtrace").expect("binary should build");
     typescript_file
         .env("TERMTRACE_CLIENT_ASSETS", &assets)

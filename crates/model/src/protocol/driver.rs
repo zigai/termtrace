@@ -1,11 +1,5 @@
 //! Versioned newline-framed process driver contracts.
 
-use std::path::PathBuf;
-
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::{
     artifact::bundle::{BundleManifest, BundleProfile},
     execution::environment::EnvironmentSpec,
@@ -22,6 +16,10 @@ use crate::{
     terminal::timeline::TimelineEntry,
     value::ByteString,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use uuid::Uuid;
 
 /// Current JSONL driver protocol version.
 pub const DRIVER_PROTOCOL_VERSION: u32 = 5;

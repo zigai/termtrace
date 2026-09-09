@@ -67,6 +67,7 @@ fn quota_removes_oldest_first_and_reports_protected_excess() {
         let output = command.assert().success();
         let report: serde_json::Value =
             serde_json::from_slice(&output.get_output().stdout).expect("quota report");
+
         assert_eq!(report["candidates"].as_array().map(Vec::len), Some(1));
         assert_eq!(
             report["candidates"][0]["session"],
@@ -105,10 +106,10 @@ fn retention_never_terminates_an_authenticated_idle_recorder() {
 
     let response: serde_json::Value =
         serde_json::from_slice(&started.get_output().stdout).expect("start response");
-
     let canonical: ByteString =
         serde_json::from_value(response["canonical_session"].clone()).expect("session path");
     let session = PathBuf::from(OsString::from_vec(canonical.into_bytes()));
+
     File::open(session.join("events.jsonl"))
         .expect("event log")
         .set_modified(SystemTime::UNIX_EPOCH)
@@ -135,10 +136,12 @@ fn retention_never_terminates_an_authenticated_idle_recorder() {
         .args(["status", "idle"])
         .assert()
         .success();
+
     assert_eq!(
         compact_json_line(&status.get_output().stdout)["lifecycle"],
         "live"
     );
+
     Command::cargo_bin("termtrace")
         .expect("binary")
         .env("TERMTRACE_STATE_DIR", &state)
@@ -153,9 +156,7 @@ fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomple
     let state = temporary.path().join("state");
     let sessions = state.join("sessions");
     fs_err::create_dir_all(&sessions).expect("managed session directory");
-
     fs_err::set_permissions(&state, Permissions::from_mode(0o700)).expect("private state root");
-
     fs_err::set_permissions(&sessions, Permissions::from_mode(0o700))
         .expect("private managed session directory");
 
@@ -218,21 +219,25 @@ fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomple
 
     let dry_run: serde_json::Value =
         serde_json::from_slice(&dry_run.get_output().stdout).expect("GC dry-run report");
+
     assert_eq!(dry_run["changes_applied"], false);
     assert!(dry_run.get("applied").is_none());
+
     let envelope: CliResponseEnvelope =
         serde_json::from_value(dry_run.clone()).expect("GC response envelope");
+
     assert_eq!(
         envelope.fields.get("changes_applied"),
         Some(&serde_json::Value::Bool(false))
     );
+
     let round_trip = serde_json::to_value(envelope).expect("round-trip GC response envelope");
     let schema: serde_json::Value = serde_json::from_slice(include_bytes!(
         "../../../../schemas/cli-response.schema.json"
     ))
     .expect("CLI response schema");
-
     let validator = jsonschema::validator_for(&schema).expect("CLI response schema validator");
+
     assert!(
         validator.is_valid(&round_trip),
         "round-tripped GC response must satisfy the CLI response schema"
@@ -261,6 +266,7 @@ fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomple
         .success()
         .stdout(predicate::str::contains(r#""removed_sessions":1"#))
         .stdout(predicate::str::contains(r#""removed_supervisor_files":2"#));
+
     assert!(!eligible.exists());
     assert!(registered.is_dir());
     assert!(incomplete.is_dir());
@@ -274,9 +280,7 @@ fn corrupt_registry_entries_do_not_poison_listing_or_unsafe_garbage_collection()
     let state = temporary.path().join("state");
     let sessions = state.join("sessions");
     fs_err::create_dir_all(&sessions).expect("managed session directory");
-
     fs_err::set_permissions(&state, Permissions::from_mode(0o700)).expect("private state root");
-
     fs_err::set_permissions(&sessions, Permissions::from_mode(0o700))
         .expect("private managed session directory");
 
@@ -325,6 +329,7 @@ fn corrupt_registry_entries_do_not_poison_listing_or_unsafe_garbage_collection()
 
     let report: serde_json::Value =
         serde_json::from_slice(&output.get_output().stdout).expect("GC isolation report");
+
     assert_eq!(report["skipped_corrupt_registry_entries"], 1);
     assert_eq!(report["removed_sessions"], 0);
     assert!(
@@ -341,14 +346,10 @@ fn stale_aliases_with_exited_recorder_are_reaped_by_garbage_collection() {
     let registry = state.join("registry");
 
     fs_err::create_dir_all(&sessions).expect("managed session directory");
-
     fs_err::create_dir_all(&registry).expect("managed registry directory");
-
     fs_err::set_permissions(&state, Permissions::from_mode(0o700)).expect("private state root");
-
     fs_err::set_permissions(&sessions, Permissions::from_mode(0o700))
         .expect("private managed session directory");
-
     fs_err::set_permissions(&registry, Permissions::from_mode(0o700))
         .expect("private registry directory");
 
@@ -391,7 +392,6 @@ fn stale_aliases_with_exited_recorder_are_reaped_by_garbage_collection() {
         serde_json::to_vec_pretty(&entry).expect("entry JSON"),
     )
     .expect("write entry");
-
     fs_err::set_permissions(&alias_file, Permissions::from_mode(0o600))
         .expect("private alias record");
 
@@ -412,6 +412,7 @@ fn stale_aliases_with_exited_recorder_are_reaped_by_garbage_collection() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&output.get_output().stdout).expect("GC report");
+
     assert_eq!(report["removed_stale_aliases"], 1);
     assert!(!alias_file.exists(), "stale alias file was not removed");
 }

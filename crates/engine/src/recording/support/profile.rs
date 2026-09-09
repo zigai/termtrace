@@ -1,18 +1,4 @@
-use std::{
-    env::temp_dir,
-    os::unix::ffi::OsStrExt as _,
-    path::{Path, PathBuf},
-    process::{Command, Output},
-};
-
-use termtrace_evidence::artifact::{create_private_directory, write_secure};
-use termtrace_model::{
-    execution::event::TerminalColors,
-    execution::session::{GhosttyVisualOverrides, GhosttyVisualProvenance},
-    value::ByteString,
-};
-use uuid::Uuid;
-
+use super::finish_with_cleanup;
 use crate::{
     analysis::profile::{
         builtin_terminal_colors, escape_config_string, resolve_profile, restore_profile,
@@ -20,8 +6,19 @@ use crate::{
     },
     Error, Result,
 };
-
-use super::finish_with_cleanup;
+use std::{
+    env::temp_dir,
+    os::unix::ffi::OsStrExt as _,
+    path::{Path, PathBuf},
+    process::{Command, Output},
+};
+use termtrace_evidence::artifact::{create_private_directory, write_secure};
+use termtrace_model::{
+    execution::event::TerminalColors,
+    execution::session::{GhosttyVisualOverrides, GhosttyVisualProvenance},
+    value::ByteString,
+};
+use uuid::Uuid;
 
 /// Resolve a custom Ghostty config and focused overrides into one canonical profile.
 ///
@@ -96,7 +93,6 @@ pub fn resolved_terminal_colors() -> Result<TerminalColors> {
 
         return Ok(colors);
     }
-
     return terminal_colors_from_config(&output.stdout);
 }
 
@@ -105,7 +101,6 @@ fn materialize_profile(root: &Path, config: &[u8]) -> Result<PathBuf> {
     let ghostty = root.join("ghostty");
     create_private_directory(&ghostty)?;
     write_secure(&ghostty.join("config.ghostty"), config)?;
-
     return Ok(root.to_path_buf());
 }
 
@@ -149,7 +144,6 @@ fn checked_config_output(output: Output, operation: &'static str) -> Result<Vec<
             String::from_utf8_lossy(&output.stderr).trim()
         )));
     }
-
     return Ok(output.stdout);
 }
 

@@ -30,7 +30,6 @@ pub(in crate::cli) fn run_geometry_probe(arguments: GeometryProbeArgs) -> Result
     serde_json::to_writer(&mut output, &report).into_diagnostic()?;
     output.write_all(b"\n").into_diagnostic()?;
     output.sync_all().into_diagnostic()?;
-
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -44,6 +43,7 @@ pub(super) fn query_terminal_geometry() -> Result<TerminalGeometryReport> {
 
     let stdin = io::stdin();
     let deadline = Instant::now() + GEOMETRY_QUERY_TIMEOUT;
+
     let mut bytes: Vec<u8> = Vec::with_capacity(128);
     let mut buffer = [0_u8; 128];
 
@@ -90,8 +90,8 @@ pub(super) fn query_terminal_geometry() -> Result<TerminalGeometryReport> {
 pub(super) fn parse_terminal_geometry(bytes: &[u8]) -> Result<Option<TerminalGeometryReport>> {
     let mut text_size = None;
     let mut cell_size = None;
-
     let mut grid_size = None;
+
     for sequence in String::from_utf8_lossy(bytes).split('\x1b').skip(1) {
         let Some(body) = sequence.strip_prefix('[') else {
             continue;
@@ -104,7 +104,6 @@ pub(super) fn parse_terminal_geometry(bytes: &[u8]) -> Result<Option<TerminalGeo
             .map(str::parse::<u16>)
             .collect::<StdResult<Vec<u16>, _>>()
             .into_diagnostic()?;
-
         let Some((kind, dimensions)) = values.split_first() else {
             continue;
         };
@@ -125,6 +124,7 @@ pub(super) fn parse_terminal_geometry(bytes: &[u8]) -> Result<Option<TerminalGeo
     else {
         return Ok(None);
     };
+
     if cols == 0 || rows == 0 || cell_width == 0 || cell_height == 0 {
         return Err(miette::miette!(
             "terminal reported a zero geometry dimension"
@@ -151,7 +151,6 @@ pub(super) fn resolve_record_geometry(
                 .cols
                 .checked_mul(arguments.cell_width)
                 .ok_or_else(|| miette::miette!("manual terminal width overflow"))?;
-
             let pixel_height = arguments
                 .rows
                 .checked_mul(arguments.cell_height)
@@ -186,7 +185,6 @@ pub(super) fn resolve_record_geometry(
             let target = arguments.viewport.ok_or_else(|| {
                 return miette::miette!("--geometry fit requires --viewport WIDTHxHEIGHT");
             })?;
-
             let profile = ghostty_profile.ok_or_else(|| {
                 return miette::miette!("fitted geometry requires a resolved Ghostty profile");
             })?;

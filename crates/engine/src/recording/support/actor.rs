@@ -1,3 +1,4 @@
+use crate::{Error, Result};
 use nix::poll::{PollFd, PollFlags};
 use termtrace_evidence::event_log::EventLogWriter;
 use termtrace_model::{
@@ -5,8 +6,6 @@ use termtrace_model::{
     terminal::observation::ActorBoundaries,
 };
 use uuid::Uuid;
-
-use crate::{Error, Result};
 
 pub(in crate::recording) fn poll_ready(descriptor: &PollFd<'_>) -> bool {
     return descriptor
@@ -41,7 +40,6 @@ pub(in crate::recording) fn validate_control_input(
             "input intent must not exceed 1024 UTF-8 bytes",
         ));
     }
-
     return Ok(());
 }
 

@@ -40,7 +40,6 @@ pub(super) fn pagination_projection(value: &serde_json::Value) -> Option<serde_j
     {
         return None;
     }
-
     return Some(serde_json::Value::Object(projection));
 }
 
@@ -50,9 +49,7 @@ pub(super) fn raw_pagination_projection(output: &[u8]) -> Option<serde_json::Val
         .lines()
         .rev()
         .find_map(|line| return line.strip_prefix("page: "))?;
-
     let page = serde_json::from_str::<serde_json::Value>(line).ok()?;
-
     return Some(serde_json::json!({ "page": page }));
 }
 

@@ -19,7 +19,6 @@ pub(super) fn capture_failure_artifacts(
     }
 
     let bundle = attempt_directory.join("debug-bundle");
-
     match session.evidence().bundle(&bundle, BundleProfile::Debug) {
         Ok(_) => verified_artifacts.push(bundle),
         Err(error) => {
@@ -77,6 +76,7 @@ pub(super) fn write_evidence_manifest(
     write_secure(&path, &bytes)?;
 
     let (mut file, byte_count) = open_regular_file_nofollow(&path)?;
+
     if byte_count != u64::try_from(bytes.len()).unwrap_or(u64::MAX) {
         return Err(testing_error("test evidence manifest byte count changed"));
     }
@@ -101,7 +101,6 @@ pub(super) fn write_evidence_manifest(
             "test evidence manifest failed post-write verification",
         ));
     }
-
     return Ok(path);
 }
 
@@ -115,7 +114,6 @@ fn relative_evidence_path(root: &Path, path: &Path) -> Result<String> {
             "test artifact path resolved to the attempt root",
         ));
     }
-
     return relative
         .to_str()
         .map(str::to_owned)

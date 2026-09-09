@@ -1,5 +1,6 @@
 use crate::cli::output::ResponseWriter;
-
+use crate::cli::{analysis::args::TimeRangeArgs, output::write_json_line};
+use miette::{IntoDiagnostic as _, Result};
 use std::{
     ffi::OsString,
     os::unix::ffi::{OsStrExt as _, OsStringExt as _},
@@ -7,8 +8,6 @@ use std::{
     process::ExitCode,
     str,
 };
-
-use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::{
     registry::SessionRegistry,
     timeline::{resolve_session_prefix_source_selection, resolve_session_source_selection},
@@ -20,8 +19,6 @@ use termtrace_model::{
     value::ByteString,
 };
 use termtrace_sdk::{control_endpoint_is_reachable, request};
-
-use crate::cli::{analysis::args::TimeRangeArgs, output::write_json_line};
 
 pub(super) struct ResolvedSessionRef {
     pub(super) path: PathBuf,
@@ -37,7 +34,6 @@ pub(super) fn resolve_session(target: PathBuf) -> Result<ResolvedSessionRef> {
         }
 
         let path = PathBuf::from(OsString::from_vec(path.to_vec()));
-
         return Ok(resolve_path_lifecycle(path));
     }
 
@@ -83,7 +79,6 @@ pub(super) fn resolve_session_path(target: PathBuf) -> Result<PathBuf> {
         if path.is_empty() {
             return Err(miette::miette!("path: session reference is empty"));
         }
-
         return Ok(PathBuf::from(OsString::from_vec(path.to_vec())));
     }
 
@@ -132,7 +127,6 @@ pub(super) fn write_session_lifecycle(
             "diagnostic": resolved.diagnostic,
         }),
     )?;
-
     return Ok(exit_code);
 }
 
@@ -197,7 +191,6 @@ pub(super) fn resolve_cli_range(
             }
             Err(error) => {
                 tracing::debug!(%error, "marker selection has no responsive control boundary");
-
                 None
             }
         }

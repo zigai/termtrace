@@ -27,14 +27,12 @@ impl Command {
     pub(crate) fn cargo_bin<S: AsRef<str>>(name: S) -> Result<Self, CargoError> {
         let mut command = AssertCommand::cargo_bin(name)?;
         command.env_remove("TERMTRACE_RESPONSE");
-
         return Ok(Self(command));
     }
 
     pub(crate) fn new<S: AsRef<OsStr>>(program: S) -> Self {
         let mut command = AssertCommand::new(program);
         command.env_remove("TERMTRACE_RESPONSE");
-
         return Self(command);
     }
 }
@@ -60,7 +58,6 @@ impl StdCommand {
     pub(crate) fn new<S: AsRef<OsStr>>(program: S) -> Self {
         let mut command = ProcessCommand::new(program.as_ref());
         command.env_remove("TERMTRACE_RESPONSE");
-
         return Self(command);
     }
 }
@@ -88,7 +85,6 @@ impl TempDir {
             env::var_os("TERMTRACE_CI_EVIDENCE_ROOT").map_or_else(tempfile::TempDir::new, |root| {
                 return tempfile::TempDir::new_in(root);
             });
-
         return directory.map(Self);
     }
 
@@ -164,7 +160,6 @@ pub(crate) fn canonical_output_bytes(log: &EventLog) -> Vec<u8> {
 
 pub(crate) fn wait_for_control(session: &Path) {
     let deadline = Instant::now() + Duration::from_secs(5);
-
     while !control_endpoint_is_reachable(session) {
         assert!(
             Instant::now() < deadline,
@@ -222,23 +217,21 @@ pub(crate) fn assert_late_checkpoint_inspection(session: &Path) {
 
     let entries =
         fs_err::read_to_string(session.join("derived/state-index.jsonl")).expect("state index");
-
     let entries = entries
         .lines()
         .map(|line| return serde_json::from_str::<serde_json::Value>(line).expect("index entry"))
         .collect::<Vec<_>>();
-
     let late_state = entries
         .last()
         .and_then(|entry| return entry["state_id"].as_u64())
         .expect("late state id");
-
     let checkpoint = entries
         .iter()
         .filter(|entry| return entry["checkpoint"] == true)
         .filter_map(|entry| return entry["state_id"].as_u64())
         .max()
         .expect("periodic checkpoint");
+
     assert!(
         checkpoint > 0 && checkpoint <= late_state,
         "late inspection requires a nonzero checkpoint: checkpoint={checkpoint} late={late_state}"
@@ -268,7 +261,6 @@ pub(crate) fn assert_late_checkpoint_inspection(session: &Path) {
 pub(crate) fn validate_json_file(schema: &str, instance: &Path) {
     let value = serde_json::from_slice(&fs_err::read(instance).expect("instance file"))
         .expect("instance JSON");
-
     validate_json_value(schema, &value);
 }
 
@@ -305,7 +297,6 @@ pub(crate) fn read_zstd_text(path: &Path) -> String {
 )]
 pub(crate) fn validate_json_lines_text(schema: &str, text: &str) {
     let validator = compile_schema(schema);
-
     for (index, line) in text.lines().enumerate() {
         let value = serde_json::from_str(line).expect("JSONL value");
 
@@ -323,7 +314,6 @@ pub(crate) fn compile_schema(schema: &str) -> jsonschema::Validator {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("schemas")
         .join(schema);
-
     let schema_value: serde_json::Value =
         serde_json::from_slice(&fs_err::read(path).expect("schema file")).expect("schema JSON");
 

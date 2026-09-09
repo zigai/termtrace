@@ -1,12 +1,11 @@
 //! Stable agent-facing inspection outcome contracts.
 
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
 use crate::{
     protocol::control::{ScreenPredicate, ScreenWaitQuality},
     terminal::screen::ScreenFrame,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Successful raw-output wait evidence.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

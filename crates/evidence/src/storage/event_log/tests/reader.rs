@@ -1,13 +1,3 @@
-use std::{fs::OpenOptions, io::Write, os::unix::fs::PermissionsExt as _};
-
-use tempfile::TempDir;
-use uuid::Uuid;
-
-use termtrace_model::execution::event::{
-    Event, InputDescriptor, InputKind, InputSource, OperationStatus,
-};
-use termtrace_model::value::ByteString;
-
 use crate::{
     event_log::{
         EventLog, EventLogCursor, EventLogSummary, EventLogWriter, OperationKind, PendingOperation,
@@ -15,6 +5,13 @@ use crate::{
     },
     Error,
 };
+use std::{fs::OpenOptions, io::Write, os::unix::fs::PermissionsExt as _};
+use tempfile::TempDir;
+use termtrace_model::execution::event::{
+    Event, InputDescriptor, InputKind, InputSource, OperationStatus,
+};
+use termtrace_model::value::ByteString;
+use uuid::Uuid;
 
 #[test]
 fn finite_snapshot_excludes_later_appends_and_partial_records() {
@@ -43,6 +40,7 @@ fn finite_snapshot_excludes_later_appends_and_partial_records() {
             },
         )
         .expect("later output");
+
     assert_eq!(
         snapshot
             .next_record()
@@ -62,6 +60,7 @@ fn finite_snapshot_excludes_later_appends_and_partial_records() {
             .event_count,
         2
     );
+
     drop(writer);
 
     OpenOptions::new()
@@ -70,6 +69,7 @@ fn finite_snapshot_excludes_later_appends_and_partial_records() {
         .expect("append partial record")
         .write_all(b"{\"unfinished\":")
         .expect("partial bytes");
+
     assert_eq!(
         EventLogSummary::snapshot(&path)
             .expect("complete prefix")
@@ -77,15 +77,18 @@ fn finite_snapshot_excludes_later_appends_and_partial_records() {
         2
     );
     assert!(EventLogSummary::read(&path).is_err());
+
     let page = EventLog::read_page(&path, 1, 1).expect("bounded prefix page");
     assert_eq!(page.len(), 1);
     assert_eq!(page.first().expect("paged event").monotonic_ns, 20);
+
     OpenOptions::new()
         .append(true)
         .open(&path)
         .expect("terminate corrupt record")
         .write_all(b"\n")
         .expect("terminator");
+
     assert!(
         EventLog::read_page(&path, 0, 1).is_err(),
         "a valid selected page cannot hide later corruption"
@@ -144,6 +147,7 @@ fn live_suffix_crosses_pending_operation_without_claiming_full_verification() {
         .expect("full verification")
         .pending_operations
         .is_empty());
+
     // The old intent is outside the requested suffix. Corrupting it makes any
     // hidden prefix scan fail, while the actor-anchored result remains authentic.
     let (header_position, _) = writer.follow_cursors(0);
@@ -165,9 +169,11 @@ fn live_suffix_crosses_pending_operation_without_claiming_full_verification() {
         .expect("actor seed");
     let record = cursor.next_record().expect("read suffix").expect("result");
     assert!(matches!(record.event, Event::InputResult { .. }));
+
     cursor
         .validate_live_boundary(&durable)
         .expect("actor endpoint");
+
     assert!(cursor.next_record().expect("eof").is_none());
     assert!(matches!(
         cursor.finish(),
@@ -207,7 +213,6 @@ fn round_trip_preserves_binary_events_and_integrity_chain() {
 
     let clock = SessionClock::now().expect("valid clock");
     let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("create log");
-
     writer
         .append_at(
             10,
@@ -216,6 +221,7 @@ fn round_trip_preserves_binary_events_and_integrity_chain() {
             },
         )
         .expect("append output");
+
     let input_id = Uuid::now_v7();
     writer
         .append_at(
@@ -246,8 +252,10 @@ fn round_trip_preserves_binary_events_and_integrity_chain() {
     drop(writer);
 
     let recording = EventLog::read(&path).expect("read valid recording");
+
     assert_eq!(recording.events.len(), 3);
     assert!(recording.pending_operations.is_empty());
+
     let encoded = fs_err::read_to_string(&path).expect("event log bytes");
     for (line, record) in encoded.lines().skip(1).zip(&recording.events) {
         assert_eq!(
@@ -263,16 +271,19 @@ fn round_trip_preserves_binary_events_and_integrity_chain() {
         &recording.events[0].event,
         Event::Output { data } if data.as_bytes() == b"\x1b[31m\xff"
     ));
+
     let prefix = EventLog::read_prefix(&path, 2).expect("validated live prefix");
     assert_eq!(prefix.events.len(), 2);
     assert_eq!(prefix.pending_operations.len(), 1);
     assert!(EventLog::read_prefix(&path, 4).is_err());
+
     OpenOptions::new()
         .append(true)
         .open(&path)
         .expect("append simulated concurrent tail")
         .write_all(b"{\"partial\"")
         .expect("write simulated concurrent tail");
+
     assert_eq!(
         EventLog::read_prefix(&path, 3)
             .expect("prefix ignores later partial append")
@@ -287,7 +298,6 @@ fn round_trip_preserves_binary_events_and_integrity_chain() {
         .permissions()
         .mode()
         & 0o777;
-
     let file_mode = fs_err::metadata(&path)
         .expect("file metadata")
         .permissions()
@@ -317,6 +327,7 @@ fn live_cursor_reads_each_appended_event_once() {
             },
         )
         .expect("append first output");
+
     assert!(matches!(
         cursor.next_record().expect("first cursor event"),
         Some(record)
@@ -332,6 +343,7 @@ fn live_cursor_reads_each_appended_event_once() {
             },
         )
         .expect("append second output");
+
     assert!(matches!(
         cursor.next_record().expect("second cursor event"),
         Some(record)
@@ -367,6 +379,7 @@ fn reports_intent_without_result_as_uncertain() {
     drop(writer);
 
     let recording = EventLog::read(&path).expect("read interrupted recording");
+
     assert_eq!(
         recording.pending_operations,
         vec![PendingOperation {

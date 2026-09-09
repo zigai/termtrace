@@ -1,5 +1,11 @@
 //! Terminal input encoding, validation, and ordered event application.
 
+use super::{
+    model::TerminalGeometry,
+    support::{control_rejected, finish_with_cleanup, terminal_error, validate_control_input},
+};
+use crate::{Error, Result};
+use portable_pty::MasterPty;
 use std::{
     borrow::Cow,
     collections::HashSet,
@@ -7,10 +13,6 @@ use std::{
     mem::take,
     time::{Duration, Instant},
 };
-
-use portable_pty::MasterPty;
-use uuid::Uuid;
-
 use termtrace_evidence::event_log::EventLogWriter;
 use termtrace_model::{
     execution::event::{Event, InputDescriptor, InputKind, InputSource, OperationStatus},
@@ -19,12 +21,7 @@ use termtrace_model::{
     value::ByteString,
 };
 use termtrace_terminal::GhosttyVt;
-
-use super::{
-    model::TerminalGeometry,
-    support::{control_rejected, finish_with_cleanup, terminal_error, validate_control_input},
-};
-use crate::{Error, Result};
+use uuid::Uuid;
 
 pub(super) struct InputApplication {
     pub(super) bytes_written: u64,
@@ -63,6 +60,7 @@ pub(super) fn semantic_key_name(key: NamedKey) -> String {
 
 pub(super) fn semantic_key_input(key: NamedKey, modifiers: KeyModifiers) -> String {
     let mut parts: Vec<&str> = Vec::with_capacity(5);
+
     if modifiers.control {
         parts.push("ctrl");
     }
@@ -81,7 +79,6 @@ pub(super) fn semantic_key_input(key: NamedKey, modifiers: KeyModifiers) -> Stri
 
     let key = semantic_key_name(key);
     parts.push(&key);
-
     return parts.join("+");
 }
 
@@ -99,7 +96,6 @@ pub(super) fn interpolate_cell(start: u16, end: u16, step: u32, steps: u32) -> u
     let start = i64::from(start);
     let delta = i64::from(end) - start;
     let rounded = start + (delta * i64::from(step) + i64::from(steps) / 2) / i64::from(steps);
-
     return u16::try_from(rounded).unwrap_or(end);
 }
 
@@ -122,7 +118,6 @@ pub(super) fn encode_paste(data: &[u8], bracketed: bool) -> Result<Vec<u8>> {
         encoded.extend_from_slice(b"\x1b[200~");
         encoded.extend_from_slice(data);
         encoded.extend_from_slice(b"\x1b[201~");
-
         return Ok(encoded);
     }
 
@@ -172,7 +167,6 @@ pub(super) fn apply_input(
 
     let Some(error) = write_error else {
         let result_event_seq = result_write?;
-
         return Ok(InputApplication {
             bytes_written,
             intent_event_seq,
@@ -311,9 +305,9 @@ impl InputSequenceExecution {
             }
             Err(error) => return Err(error),
         };
+
         self.first_intent_event_seq
             .get_or_insert(applied.intent_event_seq);
-
         self.last_result_event_seq = Some(applied.result_event_seq);
         self.total_bytes_written = self
             .total_bytes_written
@@ -330,9 +324,9 @@ impl InputSequenceExecution {
         }
 
         self.next_atom_index = self.next_atom_index.saturating_add(1);
+
         if self.next_atom_index < self.atoms.len() {
             self.next_deadline = Instant::now() + Duration::from_nanos(self.pace_ns);
-
             return Ok(None);
         }
 
@@ -376,6 +370,7 @@ fn validate_input_sequence(atoms: &[InputSequenceAtom], pace_ns: u64) -> Result<
     }
 
     let mut operation_ids = HashSet::with_capacity(atoms.len());
+
     for atom in atoms {
         if !operation_ids.insert(input_sequence_operation_id(atom)) {
             return Err(control_rejected(
@@ -514,7 +509,6 @@ pub(super) fn mode_hash(modes: &ModeState, operation: &'static str) -> Result<St
     let mode_bytes = serde_json::to_vec(modes).map_err(|error| {
         return terminal_error(operation, error.to_string());
     })?;
-
     return Ok(blake3::hash(&mode_bytes).to_hex().to_string());
 }
 
@@ -546,6 +540,7 @@ pub(super) fn apply_resize(
     } else {
         OperationStatus::Failed
     };
+
     let result_write: Result<()> = event_log
         .append(Event::ResizeResult {
             operation_id,
@@ -570,6 +565,7 @@ pub(super) fn apply_resize(
 
 fn write_input(writer: &mut dyn Write, data: &[u8]) -> (u64, Option<IoError>) {
     let mut offset = 0_usize;
+
     while offset < data.len() {
         let Some(remaining) = data.get(offset..) else {
             return (

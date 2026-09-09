@@ -1,15 +1,18 @@
+use crate::cli::{
+    output::{write_json_line, ResponseWriter},
+    tooling::require_cli_capability,
+};
+use miette::{IntoDiagnostic as _, Result};
+use signal_hook::{
+    consts::{SIGINT, SIGTERM},
+    flag, low_level,
+};
 use std::{
     env,
     path::Path,
     process::ExitCode,
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
-};
-
-use miette::{IntoDiagnostic as _, Result};
-use signal_hook::{
-    consts::{SIGINT, SIGTERM},
-    flag, low_level,
 };
 use termtrace_media::native_capture::{native_capture_target, NativeReplayWorker};
 use termtrace_model::{
@@ -19,11 +22,6 @@ use termtrace_model::{
         control::{ControlCommand, ControlData},
     },
     terminal::observation::StatePoint,
-};
-
-use crate::cli::{
-    output::{write_json_line, ResponseWriter},
-    tooling::require_cli_capability,
 };
 
 struct CancellationSignals(Vec<signal_hook::SigId>);
@@ -67,7 +65,6 @@ pub(super) fn run(
     };
 
     let cancelled = Arc::new(AtomicBool::new(false));
-
     let mut signals = CancellationSignals(Vec::new());
     for signal in [SIGINT, SIGTERM] {
         signals
@@ -80,6 +77,7 @@ pub(super) fn run(
     let mut worker =
         NativeReplayWorker::start(&helper, session, target, cancelled, Duration::from_secs(30))
             .into_diagnostic()?;
+
     if points.len() > 1 {
         let captures = worker
             .capture_batch(points, destination)

@@ -109,6 +109,7 @@ impl Session {
     /// Apply input and evaluate its postcondition under one actor ordering point.
     pub fn act(&self, atoms: &[InputAtom], options: ActionOptions) -> Result<ActionResult> {
         validate_action_options(atoms, &options)?;
+
         let request_id = options.request_id.unwrap_or_else(Uuid::now_v7);
         let wire_atoms = atoms
             .iter()
@@ -130,10 +131,10 @@ impl Session {
             projection: options.projection,
         });
         request.request_id = request_id;
-
         request
             .expected_presented_state_hash
             .clone_from(&options.if_state);
+
         let response = send_request_response(&self.path, &request)?;
         let data = match response.result {
             ControlResult::Ok { data } => data,
@@ -195,7 +196,6 @@ impl Session {
                 result: Box::new(result),
             });
         }
-
         return Ok(result);
     }
 
@@ -206,7 +206,6 @@ impl Session {
         if let Some(timeout) = timeout {
             return self.complete(timeout).map(Some);
         }
-
         return Ok(None);
     }
 
@@ -227,6 +226,7 @@ impl Session {
         let Some(mut child) = self.recorder.take() else {
             return Ok(());
         };
+
         let process_group_result = self
             .recorded_process_group
             .take()
@@ -255,9 +255,7 @@ impl Session {
         });
 
         process_group_result?;
-
         recorder_kill_result?;
-
         return recorder_wait_result;
     }
 
@@ -269,6 +267,7 @@ impl Session {
     /// reaped, or the canonical session tree cannot be removed durably.
     pub fn discard_completed(mut self) -> Result<()> {
         validate_completed_session(&self.path)?;
+
         if let Some(mut child) = self.recorder.take() {
             child.wait().map_err(|source| {
                 return Error::Filesystem {
@@ -296,6 +295,7 @@ impl Session {
     /// Detach without stopping the independently valid recording.
     pub fn detach(self) -> PathBuf {
         let (path, recorder) = self.into_detached_parts();
+
         if let Some(mut child) = recorder {
             thread::spawn(move || {
                 if let Err(error) = child.wait() {
@@ -303,7 +303,6 @@ impl Session {
                 }
             });
         }
-
         return path;
     }
 

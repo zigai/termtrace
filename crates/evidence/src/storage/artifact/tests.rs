@@ -1,22 +1,19 @@
+use super::secure_fs::{
+    open_file_at, open_parent_directory, write_secure_with_failure, SecureWriteStage,
+};
+use super::*;
+use crate::event_log::{CanonicalBoundary, EventLogWriter, SessionClock};
+use nix::{fcntl::OFlag, sys::stat::Mode};
 use std::{
     ffi::{OsStr, OsString},
     fs::File,
     io::Write as _,
     os::unix::fs::{symlink, PermissionsExt as _},
 };
-
-use nix::{fcntl::OFlag, sys::stat::Mode};
-
-use crate::event_log::{CanonicalBoundary, EventLogWriter, SessionClock};
 use tempfile::TempDir;
 use termtrace_model::execution::event::{Event, EventLogHeader};
 use termtrace_model::value::ByteString;
 use uuid::Uuid;
-
-use super::secure_fs::{
-    open_file_at, open_parent_directory, write_secure_with_failure, SecureWriteStage,
-};
-use super::*;
 
 #[test]
 fn prefix_catalog_authenticates_old_source_after_growth_and_rejects_wrong_byte_count() {
@@ -93,10 +90,12 @@ fn prefix_catalog_authenticates_old_source_after_growth_and_rejects_wrong_byte_c
 #[test]
 fn generation_budget_rejects_before_writing_excess_bytes() {
     let mut bytes = Vec::new();
+
     {
         let mut writer = BudgetWriter::new(&mut bytes, 5);
         writer.write_all(b"abc").expect("first bounded write");
         assert!(writer.write_all(b"def").is_err());
+
         writer.write_all(b"de").expect("exact remaining allowance");
         assert!(writer.write_all(b"f").is_err());
     }
@@ -115,6 +114,7 @@ fn member_verification_rejects_extra_and_changed_payloads() {
 
     fs_err::write(artifact.join("extra.log"), b"unmanifested").expect("extra member");
     assert!(verify_artifact_members(&artifact, &members).is_err());
+
     fs_err::remove_file(artifact.join("extra.log")).expect("remove extra member");
     fs_err::write(artifact.join("final.txt"), b"changed").expect("change member");
     assert!(verify_artifact_members(&artifact, &members).is_err());
@@ -131,6 +131,7 @@ fn parallel_member_hashing_preserves_canonical_path_order() {
     }
 
     let members = collect_artifact_members(&artifact).expect("collect members");
+
     assert_eq!(
         members
             .iter()
@@ -180,6 +181,7 @@ fn member_collection_rejects_symlinks() {
 
     fs_err::write(temporary.path().join("outside"), b"secret").expect("outside file");
     symlink(temporary.path().join("outside"), artifact.join("linked")).expect("payload symlink");
+
     assert!(collect_artifact_members(&artifact).is_err());
 }
 
@@ -200,6 +202,7 @@ fn secure_outputs_create_missing_owner_only_parent_directories() {
             .permissions()
             .mode()
             & 0o777;
+
         assert_eq!(mode, 0o700);
     }
 }
@@ -239,7 +242,6 @@ fn retained_parent_descriptor_prevents_create_redirection() {
     let outside = temporary.path().join("outside");
 
     create_private_directory(&parent).expect("private parent");
-
     create_private_directory(&outside).expect("outside directory");
 
     let target = parent.join("artifact.json");
@@ -256,7 +258,6 @@ fn retained_parent_descriptor_prevents_create_redirection() {
         &target,
     )
     .expect("descriptor-relative create");
-
     File::from(fd).write_all(b"safe").expect("write artifact");
 
     assert_eq!(
@@ -278,6 +279,7 @@ fn secure_write_is_never_partially_published_at_injected_failure_boundaries() {
         let destination = directory.join(format!("before-rename-{stage:?}.json"));
         write_secure_with_failure(&destination, payload, stage)
             .expect_err("injected pre-rename failure");
+
         assert!(
             !destination.exists(),
             "pre-rename failure exposed a destination at {stage:?}"
@@ -287,14 +289,17 @@ fn secure_write_is_never_partially_published_at_injected_failure_boundaries() {
     let destination = directory.join("after-rename.json");
     write_secure_with_failure(&destination, payload, SecureWriteStage::Renamed)
         .expect_err("injected directory-sync failure");
+
     assert_eq!(
         fs_err::read(&destination).expect("fully renamed payload"),
         payload
     );
+
     let entries: Vec<_> = fs_err::read_dir(&directory)
         .expect("atomic write directory")
         .map(|entry| return entry.expect("atomic write entry").file_name())
         .collect();
+
     assert_eq!(entries, [OsString::from("after-rename.json")]);
 }
 

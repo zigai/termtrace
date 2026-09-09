@@ -1,9 +1,8 @@
 pub(crate) mod artifact;
-pub(crate) mod event_log;
-pub(crate) mod session;
-
 mod error;
+pub(crate) mod event_log;
 pub(crate) mod identifier_index;
+pub(crate) mod session;
 
 pub(crate) use error::{CompletionIntegrityError, CompletionIntegrityKind};
 pub use error::{Error, Result};

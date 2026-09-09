@@ -1,10 +1,10 @@
+use super::runtime::Driver;
 use std::{
     env,
     path::Path,
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
-
 use termtrace_engine::observation::{replay_endpoint_for_prefix, replay_endpoint_for_session};
 use termtrace_engine::Error as EngineError;
 use termtrace_media::native_capture::{native_capture_target, CaptureOutcome, NativeReplayWorker};
@@ -15,8 +15,6 @@ use termtrace_model::{
 };
 use termtrace_sdk::{request, Error, Result};
 use uuid::Uuid;
-
-use super::runtime::Driver;
 
 /// Keep at most one private terminal per language-driver process.
 pub(super) struct DriverNativeWorker {
@@ -81,8 +79,8 @@ impl Driver {
                     source,
                 };
             })?;
-
             let (target, _) = native_capture_target(&helper, session, viewport)?;
+
             let worker = NativeReplayWorker::start(
                 &helper,
                 session,
@@ -90,6 +88,7 @@ impl Driver {
                 cancelled,
                 Duration::from_secs(30),
             )?;
+
             self.native = Some(DriverNativeWorker {
                 handle,
                 viewport,
@@ -112,12 +111,10 @@ impl Driver {
         match captured {
             Ok(capture) => {
                 active.last = endpoint;
-
                 return Ok(capture);
             }
             Err(error) => {
                 self.native = None;
-
                 return Err(error.into());
             }
         }

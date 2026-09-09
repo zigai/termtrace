@@ -1,19 +1,17 @@
 //! Full lifecycle history with a bounded recent tail in the aggregate snapshot.
 
+use crate::{tmux_catalog::TmuxCatalog, Error, Result};
+use nix::libc::{O_NOFOLLOW, O_NONBLOCK};
+use serde::{Deserialize, Serialize};
 use std::{
     fs::OpenOptions,
     io::{self, BufRead as _, BufReader, Read as _, Seek as _, SeekFrom, Write as _},
     os::unix::fs::OpenOptionsExt as _,
     path::Path,
 };
-
-use nix::libc::{O_NOFOLLOW, O_NONBLOCK};
-use serde::{Deserialize, Serialize};
 use termtrace_model::artifact::tmux::{
     TmuxJournalBoundary, TmuxLifecycleEvent, TmuxRecordingManifest,
 };
-
-use crate::{tmux_catalog::TmuxCatalog, Error, Result};
 
 /// Journal filename relative to an aggregate recording directory.
 pub const JOURNAL_NAME: &str = "lifecycle.jsonl";
@@ -31,7 +29,6 @@ pub(crate) struct Record {
 pub(crate) fn record_hash(previous: &str, event: &TmuxLifecycleEvent) -> Result<String> {
     let bytes = serde_json::to_vec(&(previous, event))
         .map_err(|error| return json_error(Path::new(JOURNAL_NAME), error))?;
-
     return Ok(blake3::hash(&bytes).to_hex().to_string());
 }
 
@@ -82,6 +79,7 @@ pub fn append(directory: &Path, manifest: &mut TmuxRecordingManifest) -> Result<
         .map_err(|error| return Error::filesystem(&path, error))?;
 
     let mut indexed = Vec::new();
+
     for event in &manifest.events {
         if event.sequence <= boundary.sequence {
             continue;
@@ -102,6 +100,7 @@ pub fn append(directory: &Path, manifest: &mut TmuxRecordingManifest) -> Result<
         bytes.push(b'\n');
         let count = u64::try_from(bytes.len())
             .map_err(|_| return Error::invalid("tmux lifecycle record is too large"))?;
+
         if count > MAX_RECORD_BYTES {
             return Err(Error::invalid(
                 "tmux lifecycle record exceeds its frame limit",
@@ -136,7 +135,6 @@ pub fn append(directory: &Path, manifest: &mut TmuxRecordingManifest) -> Result<
     manifest
         .coverage_gaps
         .retain(|gap| return gap.resolved_unix_ns.is_none());
-
     return Ok(());
 }
 
@@ -168,9 +166,9 @@ fn seed_catalog_history(manifest: &mut TmuxRecordingManifest) -> Result<()> {
             pane_id,
             value: Some(value),
         });
-
         return Ok(());
     };
+
     for track in manifest.track_history.values() {
         append(
             "pane_track_linked",
@@ -248,6 +246,7 @@ pub(crate) fn visit_records(
             .take(MAX_RECORD_BYTES + 1)
             .read_until(b'\n', &mut bytes)
             .map_err(|error| return Error::filesystem(path, error))?;
+
         if count == 0 {
             break;
         }
@@ -262,6 +261,7 @@ pub(crate) fn visit_records(
 
         let record: Record =
             serde_json::from_slice(&bytes).map_err(|error| return json_error(path, error))?;
+
         if sequence.checked_add(1) != Some(record.event.sequence)
             || record.previous_hash != hash
             || record.hash != record_hash(&hash, &record.event)?
@@ -274,7 +274,6 @@ pub(crate) fn visit_records(
 
         let count = u64::try_from(count)
             .map_err(|_| return Error::invalid("tmux record length overflow"))?;
-
         visitor(&record, offset, count)?;
         offset = offset
             .checked_add(count)
@@ -284,7 +283,6 @@ pub(crate) fn visit_records(
     if sequence != boundary.sequence || hash != boundary.hash {
         return Err(Error::invalid("tmux lifecycle journal boundary differs"));
     }
-
     return Ok(());
 }
 
@@ -295,12 +293,14 @@ pub fn copy_committed(
     boundary: &TmuxJournalBoundary,
 ) -> Result<()> {
     visit(source, boundary, |_| return Ok(()))?;
+
     let mut input = OpenOptions::new()
         .read(true)
         .custom_flags(O_NOFOLLOW | O_NONBLOCK)
         .open(source)
         .map_err(|error| return Error::filesystem(source, error))?
         .take(boundary.bytes);
+
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)

@@ -1,9 +1,13 @@
+use crate::cli::{
+    analysis::args::{ShowArgs, ShowFormat},
+    output::{stable_enum_label, write_json_line, write_stdout, ResponseWriter},
+    session_helpers::{resolve_session_path, resolve_state_point},
+};
+use miette::{IntoDiagnostic as _, Result};
 use std::{
     io::{self, Write as _},
     process::ExitCode,
 };
-
-use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::observation::{
     observe_completed_with_formats, observe_validated_prefix, CaptureQuality, Observation,
 };
@@ -13,12 +17,6 @@ use termtrace_model::{
 };
 use termtrace_sdk::{observe_session_with_options, wait_for_screen};
 use termtrace_terminal::Format as GhosttyFormat;
-
-use crate::cli::{
-    analysis::args::{ShowArgs, ShowFormat},
-    output::{stable_enum_label, write_json_line, write_stdout, ResponseWriter},
-    session_helpers::{resolve_session_path, resolve_state_point},
-};
 
 pub(in crate::cli) fn run_show(
     response: &mut ResponseWriter,
@@ -56,6 +54,7 @@ pub(in crate::cli) fn run_show(
     }
 
     let mut stable_hash: Option<String> = None;
+
     if !arguments.stable_for.is_zero() && !session.join("completion.json").is_file() {
         if point != StatePoint::LatestPresented || arguments.include_hidden {
             return Err(miette::miette!(
@@ -99,7 +98,6 @@ pub(in crate::cli) fn run_show(
                 &[format],
             )
             .into_diagnostic()?;
-
             let formatted = rendered
                 .into_iter()
                 .next()
@@ -114,6 +112,7 @@ pub(in crate::cli) fn run_show(
             None,
         ),
     };
+
     if let Some(state_hash) = stable_hash {
         if observation.state_hash != state_hash {
             return Err(miette::miette!(

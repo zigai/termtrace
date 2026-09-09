@@ -1,9 +1,5 @@
 //! Versioned, bounded client protocol for controlling a live recording.
 
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 pub use crate::terminal::observation::ActorBoundaries;
 use crate::{
     execution::{application::ApplicationEvent, event::InputKind},
@@ -15,6 +11,9 @@ use crate::{
     },
     value::ByteString,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// A system monotonic clock bracket around a session-relative clock sample.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -36,7 +35,6 @@ pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 1024 * 1024;
 /// Derive an input atom's operation identity from its request and zero-based index.
 pub fn derive_input_operation_id(request_id: Uuid, index: usize) -> Uuid {
     let name = format!("termtrace/input-atom/v1/{request_id}/{index}");
-
     return Uuid::new_v5(&Uuid::NAMESPACE_URL, name.as_bytes());
 }
 
@@ -239,6 +237,7 @@ impl StableCaptureQuality {
         };
     }
 }
+
 /// Why an exact actor-side screen predicate operation returned.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -442,7 +441,6 @@ impl ControlRequest {
     #[must_use]
     pub fn with_expected_presented_state_hash(mut self, hash: impl Into<String>) -> Self {
         self.expected_presented_state_hash = Some(hash.into());
-
         return self;
     }
 }
@@ -891,11 +889,14 @@ mod tests {
         let mut encoded = serde_json::to_value(&request).expect("ping request serializes");
         let decoded = serde_json::from_value::<ControlRequest>(encoded.clone())
             .expect("unmodified ping request is accepted");
+
         assert_eq!(decoded, request);
+
         encoded
             .as_object_mut()
             .expect("control request serializes as an object")
             .insert("extra".to_owned(), serde_json::Value::Bool(true));
+
         assert!(serde_json::from_value::<ControlRequest>(encoded).is_err());
     }
 }

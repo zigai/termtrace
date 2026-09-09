@@ -1,3 +1,13 @@
+use clap::Args;
+use miette::{IntoDiagnostic as _, Result};
+use nix::{
+    sys::signal::{killpg, Signal},
+    unistd::Pid,
+};
+use signal_hook::{
+    consts::{SIGHUP, SIGINT, SIGTERM},
+    flag, low_level,
+};
 use std::{
     ffi::OsString,
     fs,
@@ -9,17 +19,6 @@ use std::{
     },
     thread,
     time::{Duration, Instant},
-};
-
-use clap::Args;
-use miette::{IntoDiagnostic as _, Result};
-use nix::{
-    sys::signal::{killpg, Signal},
-    unistd::Pid,
-};
-use signal_hook::{
-    consts::{SIGHUP, SIGINT, SIGTERM},
-    flag, low_level,
 };
 
 #[derive(Debug, Args)]
@@ -98,10 +97,10 @@ pub(super) fn run(arguments: OwnedProcessArgs) -> Result<ExitCode> {
         Err(error) => {
             let _ = child.kill();
             let _ = child.wait();
-
             return Err(error).into_diagnostic();
         }
     };
+
     let mut owned = OwnedGroup { child, group };
 
     loop {
@@ -131,11 +130,12 @@ fn parent_alive(pid: u32, start_ticks: u64) -> bool {
     let Some((_, suffix)) = stat.rsplit_once(')') else {
         return false;
     };
+
     let mut fields = suffix.split_whitespace();
+
     if matches!(fields.next(), None | Some("Z" | "X")) {
         return false;
     }
-
     return fields
         .nth(18)
         .and_then(|ticks| return ticks.parse::<u64>().ok())

@@ -1,8 +1,7 @@
 //! live session control CLI integration tests.
 
-use std::os::unix::net::{SocketAddr, UnixListener};
-
 use crate::support::*;
+use std::os::unix::net::{SocketAddr, UnixListener};
 use termtrace_evidence::session::{read_completion, read_manifest};
 use termtrace_model::{
     protocol::control::PointerOperation, terminal::observation::CaptureQuality,
@@ -69,7 +68,6 @@ fn assert_control_events(recording: &EventLog, session: &Path) {
             _ => return None,
         })
         .expect("resize intent");
-
     let resize_result_time = recording
         .events
         .iter()
@@ -90,6 +88,7 @@ fn assert_control_events(recording: &EventLog, session: &Path) {
         .lines()
         .map(|line| return serde_json::from_str::<StateRecord>(line).expect("state JSON"))
         .collect::<Vec<_>>();
+
     assert!(ranged_states
         .iter()
         .any(|state| return state.delta.geometry == Some((100, 30))));

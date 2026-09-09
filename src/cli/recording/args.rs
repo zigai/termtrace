@@ -1,19 +1,16 @@
-use termtrace_model::execution::session::RecordingFailurePolicy;
-
-use std::{ffi::OsString, path::PathBuf, time::Duration};
-
+use crate::cli::parsers::{
+    parse_capture_target, parse_font_size, parse_provenance_rule, parse_rgb_color,
+    parse_stability_duration, parse_wait_deadline_duration,
+};
 use clap::{Args, ValueEnum};
+use std::{ffi::OsString, path::PathBuf, time::Duration};
+use termtrace_model::execution::session::RecordingFailurePolicy;
 use termtrace_model::{
     execution::environment::ColorPolicy,
     execution::event_log::{DurabilityMode, DurabilityPolicy},
     execution::provenance::{ProvenanceCapture, ProvenancePolicyKind},
     execution::session::CaptureTarget,
     value::ByteString,
-};
-
-use crate::cli::parsers::{
-    parse_capture_target, parse_font_size, parse_provenance_rule, parse_rgb_color,
-    parse_stability_duration, parse_wait_deadline_duration,
 };
 
 #[derive(Debug, Args)]

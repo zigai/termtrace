@@ -32,7 +32,6 @@ impl SessionActor<'_> {
             );
 
             let _ = response_sender.send(response);
-
             return Ok(());
         }
 
@@ -54,9 +53,9 @@ impl SessionActor<'_> {
                 &request.command,
                 request.expected_presented_state_hash.as_deref(),
             )?;
+
             if let Some(response) = prior {
                 let _ = response_sender.send(response);
-
                 return Ok(());
             }
 
@@ -68,7 +67,6 @@ impl SessionActor<'_> {
                 );
 
                 let _ = response_sender.send(response);
-
                 return Ok(());
             }
 
@@ -87,7 +85,6 @@ impl SessionActor<'_> {
             );
 
             let _ = response_sender.send(response);
-
             return Ok(());
         }
 
@@ -105,7 +102,6 @@ impl SessionActor<'_> {
                 {
                     return Err("invalid screen wait duration".to_owned());
                 }
-
                 return Ok(predicate);
             });
             let Ok(predicate) = predicate else {
@@ -116,7 +112,6 @@ impl SessionActor<'_> {
                 );
 
                 let _ = response_sender.send(response);
-
                 return Ok(());
             };
 
@@ -134,7 +129,6 @@ impl SessionActor<'_> {
                 );
 
                 let _ = response_sender.send(response);
-
                 return Ok(());
             }
 
@@ -146,7 +140,6 @@ impl SessionActor<'_> {
                 );
 
                 let _ = response_sender.send(response);
-
                 return Ok(());
             }
 
@@ -159,7 +152,6 @@ impl SessionActor<'_> {
                 projection: *projection,
                 response: response_sender,
             });
-
             return Ok(());
         }
 
@@ -181,7 +173,6 @@ impl SessionActor<'_> {
                 );
 
                 let _ = response_sender.send(response);
-
                 return Ok(());
             }
 
@@ -199,7 +190,6 @@ impl SessionActor<'_> {
                 );
 
                 let _ = response_sender.send(response);
-
                 return Ok(());
             }
 
@@ -211,7 +201,6 @@ impl SessionActor<'_> {
                 );
 
                 let _ = response_sender.send(response);
-
                 return Ok(());
             }
 
@@ -224,7 +213,6 @@ impl SessionActor<'_> {
                 projection: *projection,
                 response: response_sender,
             });
-
             return Ok(());
         }
 
@@ -236,7 +224,6 @@ impl SessionActor<'_> {
             );
 
             let _ = response_sender.send(response);
-
             return Ok(());
         }
 
@@ -246,8 +233,8 @@ impl SessionActor<'_> {
         let stale = guard.is_some_and(|hash| {
             return valid_blake3_hash(hash) && hash != current_state_hash;
         });
-
         let invalid_guard = guard.is_some_and(|hash| return !valid_blake3_hash(hash));
+
         if !invalid_guard && !stale {
             let sequence = match &request.command {
                 ControlCommand::InputSequence {
@@ -299,7 +286,6 @@ impl SessionActor<'_> {
 
                     self.mutation_history
                         .reserve_command(request.request_id, &request.command)?;
-
                     return Ok((execution, action));
                 });
 
@@ -317,7 +303,6 @@ impl SessionActor<'_> {
                             event_start_seq,
                             phase: action::InputSequencePhase::Applying { execution, action },
                         });
-
                         return Ok(());
                     }
                     Err(error) => {
@@ -335,6 +320,7 @@ impl SessionActor<'_> {
                                 error.to_string(),
                             ),
                         };
+
                         if let Some(command_hash) = command_hash {
                             self.mutation_history.remember(
                                 request.request_id,
@@ -379,6 +365,7 @@ impl SessionActor<'_> {
                     return self.execute_control_command(request.request_id, &request.command);
                 })
         };
+
         let response = match (&outcome, stale) {
             (Err(Error::ControlRejected { code, message }), true) => ControlResponse {
                 version: CONTROL_PROTOCOL_VERSION,

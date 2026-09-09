@@ -1,13 +1,11 @@
 use super::*;
-
-use uuid::Uuid;
-
 use crate::replay::{
     reset_test_replay_output_bytes, test_replay_output_bytes, write_index, StateSelection,
 };
 use termtrace_evidence::artifact::create_private_directory;
 use termtrace_model::execution::event::{EventLogHeader, EventRecord};
 use termtrace_model::value::ByteString;
+use uuid::Uuid;
 
 fn ranged_timeline_log() -> EventLog {
     let session_id = Uuid::now_v7();
@@ -73,8 +71,10 @@ fn ranged_timeline_pages_from_a_replay_baseline() {
     let first = build_timeline_page(&log, false, false, range, 0, 1).expect("first timeline page");
     assert_eq!(first.entries.len(), 1);
     assert_eq!(first.next_offset, Some(1));
+
     let second =
         build_timeline_page(&log, false, false, range, 1, 8).expect("remaining timeline page");
+
     assert!(!second.entries.is_empty());
     assert_eq!(second.next_offset, None);
     assert!(first
@@ -145,8 +145,8 @@ fn late_control_pages_and_ranges_seek_auxiliary_output() {
         5,
     )
     .expect("late control page");
-
     let (offset_bytes, offset_events, offset_first_event) = test_auxiliary_scan();
+
     assert!(
         offset_first_event > 0,
         "late page scanned controls from event zero"
@@ -180,8 +180,8 @@ fn late_control_pages_and_ranges_seek_auxiliary_output() {
 
     let ranged =
         build_timeline_page(&log, true, true, range, 0, 10_000).expect("late ranged control page");
-
     let (range_bytes, range_events, range_first_event) = test_auxiliary_scan();
+
     assert!(
         range_first_event >= 348,
         "late range began auxiliary framing at event {range_first_event}"
@@ -233,7 +233,6 @@ fn indexed_range_preserves_control_spanning_output_events() {
 
     let page =
         build_timeline_page(&log, true, true, range, 0, 10_000).expect("indexed spanning range");
-
     let (bytes, events, first_event) = test_auxiliary_scan();
 
     assert_eq!(page.entries, expected);
@@ -246,6 +245,7 @@ fn indexed_range_preserves_control_spanning_output_events() {
 #[test]
 fn unindexed_range_preserves_csi_spanning_output_events() {
     let mut log = ranged_timeline_log();
+
     for (event, data) in
         log.events
             .iter_mut()
@@ -293,6 +293,7 @@ fn streaming_pages_match_full_timeline_with_controls() {
             2,
         )
         .expect("streamed page");
+
         assert_eq!(
             page.entries,
             full.iter()
@@ -343,11 +344,11 @@ fn late_page_uses_checkpoint_and_retains_only_requested_entries() {
     write_index(&directory, &log, None, true, StateSelection::All).expect("checkpointed index");
 
     reset_test_replay_output_bytes();
-
     reset_test_max_page_entries();
 
     let page = build_timeline_page(&log, true, false, None, 1_090, 3).expect("late timeline page");
     let replayed_bytes = test_replay_output_bytes();
+
     assert!(
         replayed_bytes < 100,
         "late page replayed {replayed_bytes} bytes instead of a checkpoint suffix"
@@ -355,6 +356,7 @@ fn late_page_uses_checkpoint_and_retains_only_requested_entries() {
     assert_eq!(page.entries.len(), 3);
     assert_eq!(test_max_page_entries(), 3);
     assert_eq!(page.next_offset, Some(1_093));
+
     log.source_path = None;
     let full = build_timeline(&log, true, false, None).expect("canonical full timeline");
     assert_eq!(

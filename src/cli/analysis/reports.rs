@@ -1,5 +1,18 @@
 use crate::cli::output::ResponseWriter;
-
+use crate::cli::{
+    analysis::args::{
+        DiagnoseArgs, DiagnoseFacadeArgs, DiffArgs, DiffFormat, ExplainArgs, ExplainFormat,
+        InspectFacadeArgs, TimelineArgs,
+    },
+    output::{
+        id_list, optional_display, paginate, quoted_text, stable_enum_label, write_json_line,
+        write_stdout,
+    },
+    session_helpers::{
+        resolve_session, resolve_session_path, resolve_state_point, write_session_lifecycle,
+    },
+};
+use miette::{IntoDiagnostic as _, Result};
 use std::{
     fmt::Write as _,
     io::{BufRead as _, BufReader, BufWriter, Seek as _, SeekFrom, Write as _},
@@ -7,8 +20,6 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
 };
-
-use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::{
     analysis::{
         diagnostics::{diagnose_session, explain_session},
@@ -32,20 +43,6 @@ use termtrace_model::{
     value::pagination::OutputPage,
 };
 use termtrace_render::{render_diff_png, render_diff_svg};
-
-use crate::cli::{
-    analysis::args::{
-        DiagnoseArgs, DiagnoseFacadeArgs, DiffArgs, DiffFormat, ExplainArgs, ExplainFormat,
-        InspectFacadeArgs, TimelineArgs,
-    },
-    output::{
-        id_list, optional_display, paginate, quoted_text, stable_enum_label, write_json_line,
-        write_stdout,
-    },
-    session_helpers::{
-        resolve_session, resolve_session_path, resolve_state_point, write_session_lifecycle,
-    },
-};
 
 pub(in crate::cli) fn run_timeline(
     response: &mut ResponseWriter,
@@ -82,7 +79,6 @@ pub(in crate::cli) fn run_timeline(
         let next_offset = timeline_page
             .next_offset
             .and_then(|offset| return usize::try_from(offset).ok());
-
         let truncated = next_offset.is_some();
         let returned = timeline_page.entries.len();
         let total = (!truncated && (arguments.page.offset == 0 || returned > 0))
@@ -147,8 +143,10 @@ fn run_all_timeline(
 ) -> Result<ExitCode> {
     let mut staged = tempfile::tempfile().into_diagnostic()?;
     let mut total = 0_usize;
+
     {
         let mut writer = BufWriter::new(&mut staged);
+
         visit_session_timeline_while(
             session,
             arguments.all_states,
@@ -172,7 +170,6 @@ fn run_all_timeline(
                 }
 
                 total = total.saturating_add(1);
-
                 return Ok(true);
             },
         )
@@ -235,7 +232,6 @@ pub(in crate::cli) fn run_diff(
         arguments.from_at,
         arguments.from_marker,
     )?;
-
     let to = diff_point(
         arguments.to_state,
         arguments.to_state_hash,
@@ -247,6 +243,7 @@ pub(in crate::cli) fn run_diff(
     let (difference, before_state, after_state) =
         diff_session_states_with_semantic_states(&session, from, to).into_diagnostic()?;
     let changed = difference.changed;
+
     let _output_status = match arguments.format {
         DiffFormat::Text => write_stdout(response, diff_text(&difference)?)?,
         DiffFormat::Json => write_stdout(
@@ -270,7 +267,6 @@ pub(in crate::cli) fn run_diff(
     if arguments.expect_no_change && changed {
         return Ok(ExitCode::FAILURE);
     }
-
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -292,7 +288,6 @@ pub(in crate::cli) fn run_explain(
     let (states, states_page, states_partial) = paginate(take(&mut report.states), &arguments.page);
     let (findings, findings_page, findings_partial) =
         paginate(take(&mut report.findings), &arguments.page);
-
     report.tokens = tokens;
     report.states = states;
     report.findings = findings;
@@ -307,6 +302,7 @@ pub(in crate::cli) fn run_explain(
     return match arguments.format {
         ExplainFormat::Text => {
             let mut output = explain_text(&report)?;
+
             if partial {
                 writeln!(
                     output,
@@ -352,10 +348,12 @@ pub(in crate::cli) fn run_diagnose(
     let (findings, page, partial) = paginate(take(&mut report.findings), &arguments.page);
     report.findings = findings;
     report.output_page = partial.then_some(page.clone());
+
     if arguments.json {
         write_json_line(response, &report)?;
     } else {
         let mut output = diagnose_text(&report)?;
+
         if partial {
             writeln!(
                 output,
@@ -371,7 +369,6 @@ pub(in crate::cli) fn run_diagnose(
     if arguments.fail_on_finding && has_findings {
         return Ok(ExitCode::FAILURE);
     }
-
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -428,6 +425,7 @@ fn explain_text(report: &ExplainReport) -> Result<String> {
         report.tokens.len(),
         report.states.len(),
     );
+
     for token in &report.tokens {
         let source = token.source.first().map_or_else(
             || return "event - bytes -".to_owned(),
@@ -470,6 +468,7 @@ fn diagnose_text(report: &DiagnoseReport) -> Result<String> {
         report.findings.len(),
         report.source_final_event_hash,
     );
+
     for finding in &report.findings {
         writeln!(
             output,
@@ -532,17 +531,18 @@ fn diff_text(difference: &SemanticDiff) -> Result<String> {
         difference.rows.len(),
         changed_cells,
     );
+
     for row in &difference.rows {
         for cell in &row.cells {
             let before = cell
                 .before
                 .as_ref()
                 .map_or("∅", |value| return value.grapheme.as_str());
-
             let after = cell
                 .after
                 .as_ref()
                 .map_or("∅", |value| return value.grapheme.as_str());
+
             writeln!(
                 output,
                 "  ({},{}) {} -> {}",
@@ -626,7 +626,6 @@ fn canonical_event_text(event: &Event) -> Result<String> {
                 Some(value) => format!(" semantic_input={}", quoted_text(value)?),
                 None => String::new(),
             };
-
             let intent = match caller_intent {
                 Some(value) => format!(" caller_intent={}", quoted_text(value)?),
                 None => String::new(),

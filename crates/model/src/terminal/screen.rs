@@ -1,11 +1,5 @@
 //! Bounded, versioned rich projections of authoritative semantic terminal state.
 
-use std::{error::Error as StdError, fmt};
-
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::{
     execution::event_log::CanonicalBoundary,
     terminal::observation::ActorBoundaries,
@@ -15,6 +9,10 @@ use crate::{
     },
     terminal::state::{CellStyle, ColorState, CursorState, ModeState, Rgb, WideKind},
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::{error::Error as StdError, fmt};
+use uuid::Uuid;
 
 /// Rich screen projection format version.
 pub const SCREEN_FRAME_VERSION: u32 = 1;
@@ -300,6 +298,7 @@ pub struct ScreenFrame {
     /// Projection identity in the `termtrace-screen-frame-v1` hash domain.
     pub frame_hash: String,
 }
+
 impl ScreenFrame {
     /// Visit every exact cell represented by span or cell detail without allocation.
     ///

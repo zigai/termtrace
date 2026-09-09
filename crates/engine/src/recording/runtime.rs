@@ -1,27 +1,5 @@
 //! Runtime orchestration for one-shot PTY recording.
 
-use termtrace_model::execution::session::RecordingFailurePolicy;
-
-use std::{
-    io,
-    mem::{replace, take},
-    path::PathBuf,
-    sync::mpsc::{self, RecvTimeoutError},
-    time::{Duration, Instant},
-};
-
-use portable_pty::ExitStatus;
-use signal_hook::iterator::Signals;
-use uuid::Uuid;
-
-use termtrace_model::{
-    execution::event::{Event, InputDescriptor, InputKind, InputSource, LifecycleKind},
-    execution::session::{ResourceLimitKind, ResourceLimitOutcome},
-    protocol::control::ProcessSignal,
-    terminal::state::SemanticState,
-    value::ByteString,
-};
-
 use super::{
     actor::SessionActor,
     control::apply_signal,
@@ -32,6 +10,24 @@ use super::{
     support::terminal_error,
 };
 use crate::{Error, Result};
+use portable_pty::ExitStatus;
+use signal_hook::iterator::Signals;
+use std::{
+    io,
+    mem::{replace, take},
+    path::PathBuf,
+    sync::mpsc::{self, RecvTimeoutError},
+    time::{Duration, Instant},
+};
+use termtrace_model::execution::session::RecordingFailurePolicy;
+use termtrace_model::{
+    execution::event::{Event, InputDescriptor, InputKind, InputSource, LifecycleKind},
+    execution::session::{ResourceLimitKind, ResourceLimitOutcome},
+    protocol::control::ProcessSignal,
+    terminal::state::SemanticState,
+    value::ByteString,
+};
+use uuid::Uuid;
 
 const DESCENDANT_GRACE_PERIOD: Duration = Duration::from_millis(250);
 const DESCENDANT_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -75,7 +71,6 @@ pub(super) fn consume_runtime(
             terminate_process_group(actor.spawned.pid);
             let _ = actor.spawned.child.kill();
             let _ = actor.spawned.child.wait();
-
             return Err(error);
         }
     };
@@ -106,6 +101,7 @@ pub(super) fn consume_runtime(
             match receiver.recv_timeout(receive_timeout) {
                 Ok(message) => {
                     received_output = matches!(&message, RuntimeMessage::Output { .. });
+
                     if matches!(
                         &message,
                         RuntimeMessage::Output { .. }
@@ -143,7 +139,6 @@ pub(super) fn consume_runtime(
             actor.advance_input_sequence(child_exited, actor.progress.output_closed)?;
             actor.event_log.flush_due()?;
             actor.evaluate_screen_waiters(child_exited, actor.progress.output_closed)?;
-
             actor.enforce_resource_limits(started_at, last_activity_at)?;
 
             if received_output && actor.exit_status.is_some() && !actor.progress.output_closed {
@@ -175,6 +170,7 @@ pub(super) fn consume_runtime(
                         "child did not exit after output-budget termination; process group was killed",
                     ),
                 };
+
                 actor.event_log.append(Event::HostError {
                     code: code.to_owned(),
                     message: message.to_owned(),
@@ -362,6 +358,7 @@ impl SessionActor<'_> {
         let Some((outcome, code, message)) = detected else {
             return Ok(());
         };
+
         self.event_log.append(Event::HostError {
             code: code.to_owned(),
             message,
@@ -379,7 +376,6 @@ impl SessionActor<'_> {
 
         self.progress.resource_limit = Some(outcome);
         self.resource_kill_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
-
         return Ok(());
     }
 
@@ -422,7 +418,6 @@ impl SessionActor<'_> {
                     Ok(sequence) => sequence,
                     Err(error) => {
                         self.progress.unrecorded_output = data;
-
                         return Err(error.into());
                     }
                 };
@@ -439,14 +434,15 @@ impl SessionActor<'_> {
                     &mut self.mutation_history,
                     &data,
                 )?;
+
                 let mirrored = if self.live.suppress_mirrored_queries {
                     take(&mut self.live.mirror_output)
                 } else {
                     data
                 };
                 self.mirror_bytes(&mirrored)?;
-                let latest = self.live.semantic.snapshot()?;
 
+                let latest = self.live.semantic.snapshot()?;
                 if !latest.modes.synchronized_output {
                     self.live.presented = latest;
                 }
@@ -461,8 +457,8 @@ impl SessionActor<'_> {
                         &mut self.mutation_history,
                         &pending,
                     )?;
-                    let latest = self.live.semantic.snapshot()?;
 
+                    let latest = self.live.semantic.snapshot()?;
                     if !latest.modes.synchronized_output {
                         self.live.presented = latest;
                     }
@@ -517,7 +513,6 @@ impl SessionActor<'_> {
                 resize_semantic(&mut self.live.semantic, geometry)?;
                 self.live.geometry = geometry;
                 let latest = self.live.semantic.snapshot()?;
-
                 if !latest.modes.synchronized_output {
                     self.live.presented = latest;
                 }

@@ -1,9 +1,8 @@
 //! Shared public-SDK atomic-action conformance matrix.
 
-use std::thread;
-
 use crate::support::*;
 use serde::Deserialize;
+use std::thread;
 use termtrace_model::{
     protocol::control::{ScreenPostconditionQuality, StableCaptureQuality},
     terminal::observation::CaptureQuality,
@@ -65,13 +64,11 @@ struct SdkSummary {
 fn shared_fixture_matches_through_every_public_sdk_facade() {
     let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("fixtures/conformance/actions/atomic-action.json");
-
     let fixture: Fixture =
         serde_json::from_slice(&fs_err::read(&fixture_path).expect("shared atomic-action fixture"))
             .expect("shared atomic-action fixture JSON");
 
     let temporary = TempDir::new().expect("temporary directory");
-
     let rust = rust_summary(&fixture, temporary.path());
     let python_sync = python_summary(&fixture_path, temporary.path(), false);
     let python_async = python_summary(&fixture_path, temporary.path(), true);
@@ -86,6 +83,7 @@ fn shared_fixture_matches_through_every_public_sdk_facade() {
         stable_quality: true,
         actor_boundaries: true,
     };
+
     assert_eq!(rust, expected, "Rust conformance outcomes");
     assert_eq!(python_sync, expected, "Python sync conformance outcomes");
     assert_eq!(python_async, expected, "Python async conformance outcomes");
@@ -114,7 +112,6 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
 
     wait_for_output(session.path(), b"READY", Duration::from_secs(5))
         .expect("oversized action fixture ready");
-
     let initial = session
         .screen()
         .frame(ScreenProjectionRequest::default())
@@ -151,10 +148,10 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
         },
         ..ActionOptions::default()
     };
+
     let error = session
         .act(&atoms, options.clone())
         .expect_err("oversized action projection must fail loudly");
-
     let Error::ActionTerminatingFrame {
         request_id,
         retry_safety,
@@ -164,16 +161,17 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
     else {
         panic!("unexpected oversized action error: {error:?}");
     };
+
     assert_eq!(
         *request_id,
         options.request_id.expect("fixed action request ID")
     );
     assert_eq!(*retry_safety, RetrySafety::SameRequestOnly);
     assert_eq!(*limit, ScreenFrameLimitKind::SerializedBytes);
+
     let retry = session
         .act(&atoms, options)
         .expect_err("cached oversized action retry must retain its failure");
-
     let Error::ActionTerminatingFrame {
         request_id: retry_request_id,
         retry_safety: retry_safety_retry,
@@ -185,18 +183,21 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
     else {
         panic!("unexpected retry action error: {retry:?}");
     };
+
     assert_eq!(retry_request_id, request_id);
     assert_eq!(retry_safety_retry, retry_safety);
     assert_eq!(retry_limit, limit);
+
     wait_for_output(session.path(), b"COUNT:1:once", Duration::from_secs(5))
         .expect("first action input reached the fixture");
-
     let frame = session
         .screen()
         .frame(ScreenProjectionRequest::default())
         .expect("post-error screen frame");
+
     assert!(frame_contains(&frame, "COUNT:1:once"));
     assert!(!frame_contains(&frame, "COUNT:2:once"));
+
     session
         .stop(Some(Duration::from_secs(5)))
         .expect("stop oversized action fixture");
@@ -221,7 +222,6 @@ fn action_termination_frame_remains_live_actor_evidence() {
 
     wait_for_output(session.path(), b"READY", Duration::from_secs(5))
         .expect("action quality fixture ready");
-
     let result = session
         .act(
             &[
@@ -243,7 +243,6 @@ fn action_termination_frame_remains_live_actor_evidence() {
             },
         )
         .expect("child-terminated action result");
-
     let ActionCompletion::Screen {
         quality:
             ScreenPostconditionQuality::ChildCompleted | ScreenPostconditionQuality::OutputClosed,
@@ -258,6 +257,7 @@ fn action_termination_frame_remains_live_actor_evidence() {
         CaptureQuality::Live,
         "actor-owned action frame is not validated completed evidence"
     );
+
     session
         .complete(Duration::from_secs(5))
         .expect("complete action quality fixture");
@@ -336,7 +336,6 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
         Duration::from_secs(5),
     )
     .expect("Rust fixture ready");
-
     let initial = session
         .screen()
         .frame(ScreenProjectionRequest::default())
@@ -375,14 +374,13 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
         },
         ..ActionOptions::default()
     };
+
     let result = session
         .act(&atoms, options.clone())
         .expect("Rust atomic action");
-
     let retry = session
         .act(&atoms, options)
         .expect("idempotent Rust action retry");
-
     let stable = session
         .screen()
         .capture_stable(StableCaptureOptions {
@@ -401,13 +399,11 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
                 | ScreenPostconditionQuality::MatchedUnsettled,
         }
     ) && frame_contains(&result.frame, &fixture.expected_text);
-
     let actor_boundaries = matches!(
         &result.frame.source,
         ScreenFrameSource::Actor { boundaries, .. }
             if boundaries == &result.boundaries
     );
-
     let summary = SdkSummary {
         state_hash_valid: result.frame.state_hash.len() == 64,
         atom_count: result.input.atom_count,
@@ -432,6 +428,7 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
 fn python_summary(fixture: &Path, temporary: &Path, asynchronous: bool) -> SdkSummary {
     let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/python");
     let code = if asynchronous { PYTHON_ASYNC_CONFORMANCE } else { PYTHON_SYNC_CONFORMANCE };
+
     let output = StdCommand::new("uv")
         .args(["run", "--isolated", "--project"])
         .arg(package)
@@ -462,6 +459,7 @@ fn python_summary(fixture: &Path, temporary: &Path, asynchronous: bool) -> SdkSu
 )]
 fn typescript_summary(fixture: &Path, temporary: &Path) -> SdkSummary {
     let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/typescript/src/index.ts");
+
     let output = StdCommand::new("bun")
         .arg("-e")
         .arg(TYPESCRIPT_CONFORMANCE)
@@ -515,7 +513,6 @@ session.close()
 terminal.close()
 print(json.dumps(summary, sort_keys=True))
 "#;
-
 const PYTHON_ASYNC_CONFORMANCE: &str = r#"import asyncio, json, sys
 from pathlib import Path
 from termtrace import ActionOptions, AsyncTerminal, Duration, FrameRequest, KeyAtom, Region, ScreenPostcondition, StableOptions, TextAtom
@@ -539,7 +536,6 @@ async def main():
     print(json.dumps(summary, sort_keys=True))
 asyncio.run(main())
 "#;
-
 const TYPESCRIPT_CONFORMANCE: &str = r#"const { readFileSync } = await import("node:fs")
 const { Duration, Termtrace } = await import(process.argv[1])
 const fixture = JSON.parse(readFileSync(process.argv[3], "utf8"))

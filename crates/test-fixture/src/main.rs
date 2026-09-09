@@ -1,5 +1,7 @@
 //! Deterministic canonical fixture generator for acceptance benchmarks.
 
+use clap::{Args, Parser, Subcommand};
+use miette::{IntoDiagnostic as _, Result};
 use std::{
     env,
     ffi::OsString,
@@ -8,9 +10,6 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
 };
-
-use clap::{Args, Parser, Subcommand};
-use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::recording::{control_socket_name, EffectiveEnvironment};
 use termtrace_evidence::{
     artifact::write_secure,
@@ -73,7 +72,6 @@ fn main() -> Result<ExitCode> {
     match cli.command {
         Command::Large(arguments) => generate(arguments)?,
     }
-
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -166,7 +164,9 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         resource_limits: ResourceLimits::default(),
     };
     let manifest_bytes = canonical_manifest_bytes(&manifest).into_diagnostic()?;
+
     write_secure(&arguments.out.join("session.json"), &manifest_bytes).into_diagnostic()?;
+
     let session_manifest_hash = manifest_hash(&manifest_bytes);
     let header = EventLogHeader::new(
         session_id,
@@ -178,8 +178,8 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         geometry.pixel_height,
         "xterm-ghostty",
     );
-
     let header_bytes = serde_json::to_vec(&header).into_diagnostic()?;
+
     let mut writer = EventLogWriter::create_with_policy(
         arguments.out.join("events.jsonl"),
         &header,
@@ -187,6 +187,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         durability,
     )
     .into_diagnostic()?;
+
     write_output_events(&mut writer, arguments.events - 1, arguments.output_bytes)
         .into_diagnostic()?;
     let terminal_event_seq = writer
@@ -196,6 +197,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
             signal_name: None,
         })
         .into_diagnostic()?;
+
     let completion = SessionCompletion {
         format: SESSION_COMPLETION_FORMAT.to_owned(),
         version: SESSION_COMPLETION_VERSION,
@@ -229,7 +231,6 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         completion.output_bytes,
         arguments.out.display()
     );
-
     return Ok(());
 }
 
@@ -269,7 +270,6 @@ fn create_session_directory(path: &Path) -> Result<()> {
         .into_diagnostic()?;
 
     fs::set_permissions(path, Permissions::from_mode(0o700)).into_diagnostic()?;
-
     return Ok(());
 }
 
@@ -281,6 +281,7 @@ mod tests {
     fn small_fixture_has_exact_counts_and_valid_completion() {
         let temporary = tempfile::tempdir().expect("temporary directory");
         let session = temporary.path().join("small.termtrace");
+
         generate(LargeArgs {
             events: 128,
             output_bytes: 65_536,
@@ -291,6 +292,7 @@ mod tests {
         .expect("generate fixture");
 
         let completion = validate_completed_session(&session).expect("validate fixture");
+
         assert_eq!(completion.event_count, 128);
         assert_eq!(completion.output_bytes, 65_536);
         assert_eq!(completion.terminal_event_seq, 127);

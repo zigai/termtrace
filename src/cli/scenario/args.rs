@@ -1,8 +1,6 @@
-use std::path::PathBuf;
-
-use clap::Args;
-
 use crate::cli::parsers::{parse_positive_usize, parse_scenario_jobs};
+use clap::Args;
+use std::path::PathBuf;
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct TestArgs {

@@ -22,6 +22,7 @@ fn index_replays_every_distinct_state_deterministically() {
 
     let event_log = EventLog::read(session.join("events.jsonl")).expect("valid event log");
     let manifest = read_manifest(&session).expect("session manifest");
+
     assert_eq!(
         (
             manifest.geometry.cols,
@@ -32,6 +33,7 @@ fn index_replays_every_distinct_state_deterministically() {
         (160, 45, 1920, 1080),
         "default recording geometry must retain a 1080p 16:9 semantic canvas"
     );
+
     let cast = temporary.path().join("session.cast");
     let mut export = Command::cargo_bin("termtrace").expect("binary should build");
     export
@@ -46,10 +48,13 @@ fn index_replays_every_distinct_state_deterministically() {
     let mut cast_lines = cast_text.lines();
     let cast_header: serde_json::Value =
         serde_json::from_str(cast_lines.next().expect("cast header")).expect("cast header JSON");
+
     assert_eq!(cast_header["version"], 2);
     assert!(cast_lines.next().is_some(), "cast should contain output");
+
     let first = replay(&event_log).expect("first replay");
     let second = replay(&event_log).expect("second replay");
+
     assert_eq!(first, second, "replay must be deterministic");
     assert!(first.states.iter().any(|state| return !state.presented));
     assert!(first.states.iter().any(|state| {
@@ -84,6 +89,7 @@ fn index_replays_every_distinct_state_deterministically() {
         &fs_err::read(presented_directory.join("manifest.json")).expect("presented manifest"),
     )
     .expect("presented manifest JSON");
+
     assert_eq!(
         presented_manifest.state_selection,
         StateSelection::Presented
@@ -92,11 +98,13 @@ fn index_replays_every_distinct_state_deterministically() {
         presented_manifest.state_count < presented_manifest.semantic_state_count,
         "fixture should suppress synchronized-output internals"
     );
+
     let presented_states = read_zstd_text(&presented_directory.join("states.jsonl.zst"));
     let presented_states = presented_states
         .lines()
         .map(|line| return serde_json::from_str::<StateRecord>(line).expect("presented state"))
         .collect::<Vec<_>>();
+
     assert!(presented_states.iter().all(|state| return state.presented));
     assert!(presented_states.iter().enumerate().all(|(index, state)| {
         return state.state_id == u64::try_from(index).unwrap_or(u64::MAX);
@@ -108,6 +116,7 @@ fn index_replays_every_distinct_state_deterministically() {
         Some((160, 45)),
         "first retained state must be independently reconstructable"
     );
+
     let mut inspect_text = Command::cargo_bin("termtrace").expect("binary should build");
     inspect_text
         .args(["analyze", "inspect", "--session"])
@@ -197,7 +206,9 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
     let event_log = EventLog::read(session.join("events.jsonl")).expect("valid event log");
     let range_start = output_timestamp_containing(&event_log, b"RANGE");
     let range_end = output_timestamp_containing(&event_log, b"AFTER");
+
     assert!(range_start < range_end, "fixture outputs must be separated");
+
     let source_range = SourceRange {
         start_monotonic_ns: range_start,
         end_monotonic_ns: range_end,
@@ -235,17 +246,16 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
         &fs_err::read(derived.join("manifest.json")).expect("range manifest"),
     )
     .expect("range manifest JSON");
+
     assert_eq!(manifest.source_range, Some(source_range));
     validate_json_file(
         "replay-manifest.schema.json",
         &derived.join("manifest.json"),
     );
-
     validate_json_lines_text(
         "state-record.schema.json",
         &read_zstd_text(&derived.join("states.jsonl.zst")),
     );
-
     validate_json_lines(
         "state-index-entry.schema.json",
         &derived.join("state-index.jsonl"),
@@ -255,6 +265,7 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
         .lines()
         .map(|line| return serde_json::from_str::<StateRecord>(line).expect("state JSON"))
         .collect::<Vec<_>>();
+
     assert!(!states.is_empty(), "range must include a baseline");
     assert_eq!(states[0].state_id, 0);
     assert_eq!(states[0].event_seq, None);
@@ -263,7 +274,9 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
         return state.monotonic_ns >= range_start && state.monotonic_ns < range_end;
     }));
     assert!(states.iter().any(|state| return !state.presented));
+
     let final_text = fs_err::read_to_string(derived.join("final.txt")).expect("range final text");
+
     assert!(final_text.contains("BEFORERANGE"));
     assert!(!final_text.contains("AFTER"));
 
@@ -272,6 +285,7 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
         .arg(&session)
         .assert()
         .success();
+
     assert!(session.join("derived").is_dir());
     assert!(derived.is_dir(), "range index must coexist with full index");
 
@@ -335,7 +349,9 @@ fn inspect_exits_cleanly_when_downstream_closes_the_pipe() {
     let mut reader = BufReader::new(stdout);
     let mut first_line = String::new();
     reader.read_line(&mut first_line).expect("first JSON line");
+
     assert_eq!(first_line, "{\n");
+
     drop(reader);
 
     let output = inspect.wait_with_output().expect("wait for inspection");
@@ -385,6 +401,7 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
             & 0o777,
         0o700
     );
+
     for file in [
         "states.jsonl.zst",
         "checkpoints.jsonl.zst",
@@ -408,12 +425,15 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
 
     let states = read_zstd_text(&derived.join("states.jsonl.zst"));
     let lines = states.lines().count();
+
     assert_eq!(u64::try_from(lines).unwrap(), expected_states);
+
     let text = fs_err::read_to_string(derived.join("final.txt")).expect("final text");
     assert!(text.contains("AB界"));
     assert!(!fs_err::read(derived.join("final.vt"))
         .expect("final VT")
         .is_empty());
+
     let html = fs_err::read_to_string(derived.join("final.html")).expect("final HTML");
     assert!(html.contains('A') && html.contains('B'));
 
@@ -423,14 +443,11 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
         "replay-manifest.schema.json",
         &derived.join("manifest.json"),
     );
-
     validate_json_lines_text("state-record.schema.json", &states);
-
     validate_json_lines(
         "state-index-entry.schema.json",
         &derived.join("state-index.jsonl"),
     );
-
     validate_json_lines_text(
         "semantic-replay-checkpoint.schema.json",
         &read_zstd_text(&derived.join("checkpoints.jsonl.zst")),
@@ -438,6 +455,7 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
 
     let event_log = fs_err::read_to_string(session.join("events.jsonl")).expect("event log");
     let mut event_lines = event_log.lines();
+
     validate_json_value(
         "event-log-header.schema.json",
         &serde_json::from_str(event_lines.next().expect("event header")).expect("header JSON"),
@@ -479,7 +497,6 @@ fn playback_does_not_echo_terminal_query_responses() {
     let clock = SessionClock::now().expect("session clock");
     let environment = EffectiveEnvironment::resolve(&EnvironmentSpec::default(), "xterm-ghostty")
         .expect("environment");
-
     let header = EventLogHeader::new(
         Uuid::now_v7(),
         "0000000000000000000000000000000000000000000000000000000000000000",
@@ -572,6 +589,7 @@ fn playback_does_not_echo_terminal_query_responses() {
     let error_file = temporary.path().join("playback-error.json");
     let geometry_file = temporary.path().join("geometry.json");
     let ready_file = temporary.path().join("ready");
+
     command.args([
         "playback",
         "--session",
@@ -591,13 +609,15 @@ fn playback_does_not_echo_terminal_query_responses() {
     ]);
     let mut child = pty.slave.spawn_command(command).expect("spawn playback");
     drop(pty.slave);
+
     let mut reader = pty.master.try_clone_reader().expect("clone PTY reader");
     let (query_tx, query_rx) = mpsc::channel();
+
     let reader_thread = thread::spawn(move || {
         let mut output = Vec::new();
         let mut buffer = [0_u8; 128];
-
         let mut observed_query = false;
+
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => break,

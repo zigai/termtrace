@@ -1,12 +1,10 @@
 //! Canonical event-log durability and persistence contracts.
 
-use std::path::PathBuf;
-
+use crate::error::ModelValidationError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use uuid::Uuid;
-
-use crate::error::ModelValidationError;
 
 /// Output persistence behavior selected for one canonical recording.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -65,7 +63,6 @@ impl DurabilityPolicy {
         if !valid {
             return Err(ModelValidationError::InvalidDurabilityPolicy);
         }
-
         return Ok(());
     }
 }

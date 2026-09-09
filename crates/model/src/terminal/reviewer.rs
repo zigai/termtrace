@@ -1,9 +1,8 @@
 //! Read-only semantic forensic reviewer with safe terminal rendering.
 
-use std::path::PathBuf;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Stable scriptable reviewer command inventory.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

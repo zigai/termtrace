@@ -1,3 +1,5 @@
+use super::{Error, Result};
+use serde::de::DeserializeOwned;
 use std::{
     fs,
     io::Read as _,
@@ -6,11 +8,7 @@ use std::{
     process::{Command, ExitStatus},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-
-use serde::de::DeserializeOwned;
 use termtrace_model::artifact::visual::{CaptureKind, CaptureOutcome};
-
-use super::{Error, Result};
 
 pub(super) fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let bytes = fs::read(path).map_err(|source| {
@@ -40,7 +38,6 @@ pub(super) fn status_error_with_logs(program: &str, status: ExitStatus, staging:
     let mut stderr = String::new();
     let _ = fs::File::open(staging.join(format!("{program}.stderr.log")))
         .and_then(|file| return file.take(2048).read_to_string(&mut stderr));
-
     return Error::ExternalCommand {
         operation: program.to_owned(),
         reason: format!("exited with {status}: {}", stderr.trim()),

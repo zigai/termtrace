@@ -1,3 +1,5 @@
+use super::terminal::{query_terminal, resize_and_query, RawTerminalGuard, TerminalInputDrain};
+use crate::{error::finish_with_cleanup, Error, Result};
 use std::{
     collections::HashMap,
     io,
@@ -5,7 +7,6 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-
 use termtrace_engine::timeline::resolve_source_range;
 use termtrace_evidence::artifact::write_secure;
 use termtrace_evidence::{
@@ -18,9 +19,6 @@ use termtrace_model::{
     execution::session::GeometrySource,
     terminal::replay::SourceRange,
 };
-
-use super::terminal::{query_terminal, resize_and_query, RawTerminalGuard, TerminalInputDrain};
-use crate::{error::finish_with_cleanup, Error, Result};
 
 /// Configuration for replaying canonical events into a native terminal.
 #[derive(Clone, Debug)]
@@ -69,7 +67,6 @@ pub fn playback(options: &PlaybackOptions) -> Result<()> {
                     cleanup: Box::new(cleanup),
                 });
             }
-
             return Err(error);
         }
     }
@@ -83,6 +80,7 @@ fn playback_inner(options: &PlaybackOptions) -> Result<()> {
         let manifest = read_manifest(&options.session_directory)?;
         let expected = manifest.geometry;
         let reported = resize_and_query(expected.cols, expected.rows)?;
+
         if (reported.cols, reported.rows) != (expected.cols, expected.rows) {
             return Err(Error::InvalidReplay {
                 reason: format!(
@@ -108,7 +106,6 @@ fn playback_inner(options: &PlaybackOptions) -> Result<()> {
         }
 
         write_create_new_json(&options.geometry_file, &reported)?;
-
         return playback_events(options, raw.is_active());
     })();
 
@@ -129,7 +126,6 @@ fn validate_options(options: &PlaybackOptions) -> Result<()> {
             reason: "exact playback endpoints cannot be combined with time ranges".to_owned(),
         });
     }
-
     return Ok(());
 }
 
@@ -139,7 +135,6 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
         .terminal
         .as_ref()
         .map_or(0, |record| return record.monotonic_ns);
-
     let source_range = resolve_source_range(
         options.start_monotonic_ns,
         options.end_monotonic_ns,
@@ -147,6 +142,7 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
     )?;
 
     let mut resize_intents: HashMap<uuid::Uuid, (u16, u16)> = HashMap::new();
+
     if let Some(range) = source_range {
         let manifest = read_manifest(&options.session_directory)?;
         let mut grid = (manifest.geometry.cols, manifest.geometry.rows);
@@ -190,10 +186,8 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
     finish_with_cleanup(result, drain.stop())?;
 
     query_terminal()?;
-
     write_secure(&options.ready_file, b"ready\n")?;
     thread::sleep(options.final_hold);
-
     return Ok(());
 }
 
@@ -236,6 +230,7 @@ fn timed_playback(
     validate_playback_header(&cursor, log)?;
 
     let mut endpoint_seen = false;
+
     while let Some(record) = cursor.next_record()? {
         if record.seq >= log.event_count {
             return Err(changed_source());
@@ -298,12 +293,12 @@ fn validate_playback_header(cursor: &EventLogCursor, source: &EventLogSummary) -
     if cursor.header() != &source.header {
         return Err(changed_source());
     }
-
     return Ok(());
 }
 
 fn validate_playback_boundary(cursor: &EventLogCursor, source: &EventLogSummary) -> Result<()> {
     cursor.validate_source_identity()?;
+
     if let Some(terminal) = &source.terminal {
         cursor.validate_boundary(source.event_count, &terminal.hash)?;
     } else if cursor.next_event_seq() != 0 {
@@ -344,11 +339,11 @@ pub(super) fn emit_endpoint(
                 reason: "output endpoint byte offset exceeds the canonical event".to_owned(),
             };
         })?;
+
         output
             .write_all(prefix)
             .and_then(|()| return output.flush())
             .map_err(output_error)?;
-
         return Ok(());
     }
 
@@ -357,7 +352,6 @@ pub(super) fn emit_endpoint(
             reason: "only output endpoints accept a byte offset".to_owned(),
         });
     }
-
     return emit_event(output, resize_intents, event, None);
 }
 
@@ -425,7 +419,6 @@ fn write_create_new_json(path: &Path, value: &impl serde::Serialize) -> Result<(
             source,
         };
     })?;
-
     return write_secure(path, &encoded).map_err(Error::from);
 }
 

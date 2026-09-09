@@ -1,7 +1,7 @@
 //! Deterministic byte-granular replay and semantic state indexing.
 
+use crate::Error;
 use std::path::PathBuf;
-
 pub use termtrace_model::terminal::replay::{
     CollectedReplay, IndexOptions, IndexOutcome, ReplayArtifacts, ReplayManifest, RowDiff,
     SemanticReplayCheckpoint, SourceRange, StateDelta, StateIndexEntry, StateInspection,
@@ -9,8 +9,6 @@ pub use termtrace_model::terminal::replay::{
     STATE_FORMAT_VERSION,
 };
 use termtrace_model::{execution::event::Event, terminal::state::SemanticState};
-
-use crate::Error;
 
 mod delta;
 mod engine;

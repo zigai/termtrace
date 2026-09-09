@@ -1,15 +1,5 @@
 //! Aggregate exports with a bounded manifest and a streamed track inventory.
 
-use std::{
-    io::{BufRead as _, BufReader, Read as _, Write as _},
-    path::Path,
-};
-
-use termtrace_evidence::artifact::{
-    finish_writer, hash_regular_file, open_regular_file_nofollow, secure_writer,
-};
-use termtrace_model::artifact::tmux::TmuxStreamingBundleManifest;
-
 use super::{
     bundle, commit_directory, create_private_directory, parse_aggregate, read_regular_bounded,
     sync_directory, tmux_journal, track_directory, validate_aggregate, validate_destination,
@@ -18,6 +8,14 @@ use super::{
     MAX_AGGREGATE_MANIFEST_BYTES,
 };
 use std::os::unix::ffi::OsStrExt as _;
+use std::{
+    io::{BufRead as _, BufReader, Read as _, Write as _},
+    path::Path,
+};
+use termtrace_evidence::artifact::{
+    finish_writer, hash_regular_file, open_regular_file_nofollow, secure_writer,
+};
+use termtrace_model::artifact::tmux::TmuxStreamingBundleManifest;
 
 const FORMAT: &str = "termtrace-tmux-streaming-bundle";
 const VERSION: u32 = 1;
@@ -37,7 +35,6 @@ pub fn create(
 ) -> Result<TmuxStreamingBundleManifest> {
     let aggregate_manifest = aggregate_manifest.as_ref();
     let destination = destination.as_ref();
-
     if destination.exists() {
         return Err(Error::invalid("tmux export destination already exists"));
     }
@@ -47,11 +44,10 @@ pub fn create(
         MAX_AGGREGATE_MANIFEST_BYTES,
         "aggregate manifest",
     )?;
-
     let aggregate = parse_aggregate(aggregate_manifest, &bytes)?;
     validate_aggregate(&aggregate)?;
-
     validate_destination(destination, aggregate_manifest, &[])?;
+
     // Validate every source before creating a destination that might lie inside it.
     visit_source_tracks(aggregate_manifest, &aggregate, |source| {
         return validate_destination(destination, aggregate_manifest, &[source]);
@@ -60,11 +56,11 @@ pub fn create(
     let parent = destination
         .parent()
         .ok_or_else(|| return Error::invalid("export destination has no parent"))?;
-
     let staging = parent.join(format!(".tmux-export-{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
     let cleanup = DirectoryCleanup::new(staging.clone());
     write_secure(&staging.join("aggregate-recording-manifest.json"), &bytes)?;
+
     if let Some(boundary) = &aggregate.lifecycle_journal {
         let source = aggregate_manifest
             .parent()
@@ -81,6 +77,7 @@ pub fn create(
     let inventory_path = staging.join(INVENTORY);
     let mut writer = secure_writer(&inventory_path)?;
     let mut count = 0_usize;
+
     visit_source_tracks(aggregate_manifest, &aggregate, |source| {
         let directory = track_directory(count, source.pane_id.as_deref());
         let nested = bundle::create(
@@ -121,7 +118,6 @@ pub fn create(
         count = count
             .checked_add(1)
             .ok_or_else(|| return Error::invalid("tmux track count overflow"))?;
-
         return Ok(());
     })?;
 
@@ -149,9 +145,7 @@ pub fn create(
     verify_contents(&staging, aggregate_manifest, &bytes, &aggregate)?;
     sync_directory(&staging)?;
     commit_directory(parent, &staging, destination)?;
-
     cleanup.disarm();
-
     return Ok(manifest);
 }
 
@@ -233,6 +227,7 @@ fn verify_contents(
     let mut reader = BufReader::new(file);
     let mut count = 0_usize;
     let mut hasher = blake3::Hasher::new();
+
     visit_source_tracks(aggregate_path, aggregate, |source| {
         let mut row = Vec::new();
         reader
@@ -268,6 +263,7 @@ fn verify_contents(
         }
 
         let nested_path = directory.join(&expected);
+
         if !fs_err::symlink_metadata(&nested_path)
             .map_err(|error| return Error::filesystem(&nested_path, error))?
             .is_dir()
@@ -291,9 +287,9 @@ fn verify_contents(
         count = count
             .checked_add(1)
             .ok_or_else(|| return Error::invalid("tmux track count overflow"))?;
-
         return Ok(());
     })?;
+
     if !reader
         .fill_buf()
         .map_err(|error| return Error::filesystem(&inventory, error))?
@@ -311,7 +307,6 @@ fn verify_contents(
         aggregate.lifecycle_journal.is_some(),
         manifest.track_count,
     )?;
-
     return Ok(manifest);
 }
 
@@ -340,12 +335,13 @@ fn verify_directory_entries(directory: &Path, journal: bool, track_count: u64) -
     }
 
     let tracks = directory.join("tracks");
-
     let mut count = 0_u64;
+
     for entry in
         fs_err::read_dir(&tracks).map_err(|error| return Error::filesystem(&tracks, error))?
     {
         let entry = entry.map_err(|error| return Error::filesystem(&tracks, error))?;
+
         if !entry
             .file_type()
             .map_err(|error| return Error::filesystem(entry.path(), error))?
@@ -366,18 +362,16 @@ fn verify_directory_entries(directory: &Path, journal: bool, track_count: u64) -
             "aggregate export contains extra or missing track directories",
         ));
     }
-
     return Ok(());
 }
 
 #[cfg(test)]
 mod directory_tests {
+    use super::verify_directory_entries;
     use std::{
         fs,
         os::unix::{fs::symlink, net::UnixListener},
     };
-
-    use super::verify_directory_entries;
 
     #[test]
     fn aggregate_entries_require_regular_files() {
@@ -393,11 +387,12 @@ mod directory_tests {
         let target = tempfile::NamedTempFile::new().expect("external regular file");
         symlink(target.path(), &manifest).expect("manifest symlink");
         assert!(verify_directory_entries(root.path(), false, 0).is_err());
+
         fs::remove_file(&manifest).expect("remove symlink");
 
         let _socket = UnixListener::bind(&manifest).expect("manifest socket");
-
         assert!(verify_directory_entries(root.path(), false, 0).is_err());
+
         fs::remove_file(&manifest).expect("remove socket path");
 
         fs::create_dir_all(&manifest).expect("manifest directory");

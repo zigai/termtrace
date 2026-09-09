@@ -1,10 +1,8 @@
-use crate::cli::artifacts::args::BundleVerifyArgs;
-use std::path::PathBuf;
-
-use clap::{Args, Subcommand, ValueEnum};
-use termtrace_model::execution::session::VerificationLevel;
-
 use crate::cli::analysis::args::PageArgs;
+use crate::cli::artifacts::args::BundleVerifyArgs;
+use clap::{Args, Subcommand, ValueEnum};
+use std::path::PathBuf;
+use termtrace_model::execution::session::VerificationLevel;
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct IntegrityArgs {

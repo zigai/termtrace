@@ -1,11 +1,19 @@
+use super::{
+    analysis_error, detect_cursor_jumps, detect_dirty_discrepancies, detect_redundant_full_redraw,
+    detect_transients, native_correlations_for_state, ValidatedVisualManifest,
+};
+use crate::{
+    replay::{trust::SourceIdentity, visit_recording_states_range_while},
+    timeline::stream::TokenCursor,
+    Result,
+};
+use rusqlite::{params, Connection, OptionalExtension as _, Statement};
 use std::{
     collections::VecDeque,
     path::{Path, PathBuf},
     slice,
     sync::atomic::AtomicBool,
 };
-
-use rusqlite::{params, Connection, OptionalExtension as _, Statement};
 use tempfile::TempDir;
 use termtrace_evidence::{
     event_log::{EventLogCursor, EventLogSummary},
@@ -23,16 +31,6 @@ use termtrace_model::{
     },
 };
 
-use super::{
-    analysis_error, detect_cursor_jumps, detect_dirty_discrepancies, detect_redundant_full_redraw,
-    detect_transients, native_correlations_for_state, ValidatedVisualManifest,
-};
-use crate::{
-    replay::{trust::SourceIdentity, visit_recording_states_range_while},
-    timeline::stream::TokenCursor,
-    Result,
-};
-
 /// Diagnose a completed source with a disk-backed intermediate index.
 ///
 /// Replay history and VT tokens are not retained in memory. The returned findings
@@ -47,7 +45,6 @@ pub fn diagnose_session(
     visual_evidence: &[ValidatedVisualManifest],
 ) -> Result<DiagnoseReport> {
     validate_completed_session(session)?;
-
     return diagnose_recording(session, true, checks, broad_change_percent, visual_evidence);
 }
 
@@ -133,6 +130,7 @@ fn diagnose_recording(
             if record.presented {
                 presented.push_back(record.clone());
                 let recent = presented.make_contiguous();
+
                 if checks.contains(&DiagnosticCheck::FullRedraw) {
                     let mut candidates = Vec::new();
                     detect_redundant_full_redraw(recent, &mut candidates);
@@ -158,6 +156,7 @@ fn diagnose_recording(
     )?;
 
     drop(state_insert);
+
     if !hidden.is_empty() {
         let count = hidden.len();
         findings.push(finding(
@@ -334,6 +333,7 @@ impl DiagnosticStore {
         })?;
         let connection =
             Connection::open(directory.path().join("diagnostics.sqlite3")).map_err(sql_error)?;
+
         connection.execute_batch("PRAGMA cache_size=-8192; PRAGMA temp_store=FILE;
             CREATE TABLE states (id INTEGER PRIMARY KEY, event INTEGER, offset INTEGER, presented INTEGER NOT NULL, changed INTEGER NOT NULL, cols INTEGER, rows INTEGER);
             CREATE INDEX states_event ON states(event, id);
@@ -354,6 +354,7 @@ impl DiagnosticStore {
 
         let cols = state.delta.geometry.map(|geometry| return geometry.0);
         let rows = state.delta.geometry.map(|geometry| return geometry.1);
+
         statement
             .execute(params![
                 state.state_id,
@@ -395,6 +396,7 @@ impl DiagnosticStore {
                 )
                 .optional()
                 .map_err(sql_error)?;
+
             findings.push(finding(
                 "full_viewport_clear",
                 FindingConfidence::High,
@@ -409,6 +411,7 @@ impl DiagnosticStore {
             let Some(event) = event else {
                 continue;
             };
+
             let mut cols = initial_cols;
             let mut rows = initial_rows;
             let mut changed = 0_u64;
@@ -428,7 +431,6 @@ impl DiagnosticStore {
                 }
 
                 let candidate: u64 = state.get(1).map_err(sql_error)?;
-
                 if candidate > 0 {
                     changed = changed.saturating_add(candidate);
                     ids.push(state.get(0).map_err(sql_error)?);
@@ -448,6 +450,7 @@ impl DiagnosticStore {
                     .collect::<rusqlite::Result<Vec<_>>>()
                     .map_err(sql_error)?;
                 token_ids.push(token_id);
+
                 findings.push(finding(
                     "clear_then_repaint",
                     FindingConfidence::High,
@@ -472,6 +475,7 @@ impl DiagnosticStore {
             .map_err(sql_error)?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(sql_error)?;
+
         if !ids.is_empty() {
             findings.push(finding(
                 "clear_scrollback",

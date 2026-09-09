@@ -1,25 +1,3 @@
-use std::{
-    collections::HashMap,
-    fs::{symlink_metadata, Metadata, OpenOptions},
-    io::{BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write},
-    os::unix::fs::{MetadataExt as _, OpenOptionsExt as _},
-    path::{Path, PathBuf},
-};
-
-use blake3::Hash;
-use termtrace_model::{
-    execution::event::{Event, EventBody, EventLogHeader, EventRecord},
-    execution::event_log::{
-        OperationKind, PendingOperation, PendingOperationReport, RecoveryIssue, RecoveryReport,
-    },
-    protocol::control::LiveEventCursor,
-};
-use uuid::Uuid;
-
-use crate::storage::{
-    artifact::sync_parent_directory, identifier_index::IdentifierSet, Error, Result,
-};
-
 use super::{
     operations::validate_operation_transition,
     segments::{canonical_source_fingerprint, CanonicalLogFile, SegmentWriter},
@@ -29,6 +7,25 @@ use super::{
         validate_header, validate_parent_directory, MAX_LINE_BYTES, OWNER_FILE_MODE,
     },
 };
+use crate::storage::{
+    artifact::sync_parent_directory, identifier_index::IdentifierSet, Error, Result,
+};
+use blake3::Hash;
+use std::{
+    collections::HashMap,
+    fs::{symlink_metadata, Metadata, OpenOptions},
+    io::{BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write},
+    os::unix::fs::{MetadataExt as _, OpenOptionsExt as _},
+    path::{Path, PathBuf},
+};
+use termtrace_model::{
+    execution::event::{Event, EventBody, EventLogHeader, EventRecord},
+    execution::event_log::{
+        OperationKind, PendingOperation, PendingOperationReport, RecoveryIssue, RecoveryReport,
+    },
+    protocol::control::LiveEventCursor,
+};
+use uuid::Uuid;
 
 const MAX_EVENT_COUNT: u64 = 1_000_000;
 const MAX_EVENT_LOG_ENCODED_BYTES: u64 = 512 * 1024 * 1024;
@@ -99,8 +96,8 @@ impl EventLog {
         let mut records = Vec::new();
         let mut bytes = 0_u64;
         let mut previous_position = cursor.position_offset();
-
         let mut full = false;
+
         while let Some(record) = cursor.next_record()? {
             let position = cursor.position_offset();
             let record_bytes = position.saturating_sub(previous_position);
@@ -119,7 +116,6 @@ impl EventLog {
         }
 
         let _pending = cursor.finish_snapshot()?;
-
         return Ok(records);
     }
 
@@ -195,6 +191,7 @@ struct LogValidation {
 impl LogValidation {
     fn validate_record(&mut self, path: &Path, line: u64, bytes: &[u8]) -> Result<EventRecord> {
         let record: EventRecord = parse_json_line(path, line, bytes)?;
+
         if record
             .observed_monotonic_ns
             .is_some_and(|observed| return observed > record.monotonic_ns)
@@ -203,6 +200,7 @@ impl LogValidation {
         }
 
         validate_event_geometry(path, line, &record.event)?;
+
         if record.seq != self.expected_seq {
             return Err(invalid_log(
                 path,
@@ -262,7 +260,6 @@ impl LogValidation {
             .expected_seq
             .checked_add(1)
             .ok_or_else(|| return invalid_log(path, line, "event sequence overflow"))?;
-
         return Ok(record);
     }
 }
@@ -381,6 +378,7 @@ impl EventLogCursor {
         header_hash: &str,
     ) -> Result<()> {
         self.validate_live_source(device, inode, header_hash)?;
+
         if self.validation.expected_seq != 0 || position.file_offset < self.encoded_bytes {
             return Err(invalid_log(
                 &self.path,
@@ -410,7 +408,6 @@ impl EventLogCursor {
         self.encoded_bytes = position.file_offset;
         self.buffer.clear();
         self.buffer_start = 0;
-
         return Ok(());
     }
 
@@ -426,7 +423,6 @@ impl EventLogCursor {
                 "live event source identity does not match actor",
             ));
         }
-
         return self.validate_source_identity();
     }
 
@@ -456,7 +452,6 @@ impl EventLogCursor {
                 "event source was replaced or truncated",
             ));
         }
-
         return Ok(());
     }
 
@@ -474,6 +469,7 @@ impl EventLogCursor {
     /// Require the validated suffix to end at an independently trusted actor position.
     pub fn validate_live_boundary(&self, boundary: &LiveEventCursor) -> Result<()> {
         self.validate_boundary(boundary.next_event_seq, &boundary.event_hash)?;
+
         if self.position_offset() != boundary.file_offset
             || self.validation.previous_time != boundary.monotonic_ns
         {
@@ -483,13 +479,13 @@ impl EventLogCursor {
                 "live event cursor offset or timestamp differs from actor",
             ));
         }
-
         return Ok(());
     }
 
     /// Compare a validated chain endpoint with a separately validated authority.
     pub fn validate_boundary(&self, next_event_seq: u64, event_hash: &str) -> Result<()> {
         self.validate_source_identity()?;
+
         if self.validation.expected_seq != next_event_seq
             || self.validation.previous_hash.to_hex().as_str() != event_hash
         {
@@ -499,7 +495,6 @@ impl EventLogCursor {
                 "event suffix does not match trusted boundary",
             ));
         }
-
         return Ok(());
     }
 
@@ -513,6 +508,7 @@ impl EventLogCursor {
             let buffered = self.buffer.get(self.buffer_start..).ok_or_else(|| {
                 return invalid_log(&self.path, self.line_number, "invalid cursor");
             })?;
+
             if let Some(relative_end) = buffered.iter().position(|byte| return *byte == b'\n') {
                 let line_end = self.buffer_start.saturating_add(relative_end);
 
@@ -639,7 +635,6 @@ impl EventLogCursor {
         self.validate_source_identity()?;
         let mut pending: Vec<_> = self.validation.pending_operations.into_values().collect();
         pending.sort_by_key(|operation| return operation.intent_seq);
-
         return Ok(pending);
     }
 
@@ -685,6 +680,7 @@ impl EventLogCursor {
                 metadata.ctime_nsec(),
             );
         };
+
         if identity(&self.opened_metadata) != identity(&finished)
             || identity(&finished) != identity(&current)
             || self.opened_fingerprint
@@ -704,7 +700,6 @@ impl EventLogCursor {
 
         let mut pending: Vec<_> = self.validation.pending_operations.into_values().collect();
         pending.sort_by_key(|operation| return operation.intent_seq);
-
         return Ok(pending);
     }
 
@@ -760,12 +755,14 @@ impl EventLogSummary {
             pending_operations: Vec::new(),
             resource_triggers: [false; 3],
         };
+
         loop {
             check()?;
 
             let Some(record) = cursor.next_record()? else {
                 break;
             };
+
             summary.event_count += 1;
 
             match &record.event {
@@ -787,7 +784,6 @@ impl EventLogSummary {
 
         summary.pending_operations =
             if snapshot { cursor.finish_snapshot()? } else { cursor.finish()? };
-
         return Ok(summary);
     }
 }
@@ -877,11 +873,13 @@ pub(super) fn parse_event_log_with_limits(
             }
             Err(error) => return Err(error),
         };
+
         encoded_bytes = encoded_bytes.saturating_add(
             u64::try_from(line.len())
                 .unwrap_or(u64::MAX)
                 .saturating_add(1),
         );
+
         if encoded_bytes > limits.encoded_bytes {
             let error = invalid_log(
                 path,
@@ -891,7 +889,6 @@ pub(super) fn parse_event_log_with_limits(
                     limits.encoded_bytes
                 ),
             );
-
             return Err(error);
         }
 
@@ -901,7 +898,6 @@ pub(super) fn parse_event_log_with_limits(
                 line_number,
                 format!("event log exceeds {} event limit", limits.event_count),
             );
-
             return Err(error);
         }
 
@@ -909,6 +905,7 @@ pub(super) fn parse_event_log_with_limits(
             let record = validation.validate_record(path, line_number, &line)?;
             decoded_payload_bytes =
                 decoded_payload_bytes.saturating_add(record.event.decoded_payload_bytes());
+
             if decoded_payload_bytes > limits.decoded_payload_bytes {
                 let error = invalid_log(
                     path,
@@ -918,7 +915,6 @@ pub(super) fn parse_event_log_with_limits(
                         limits.decoded_payload_bytes
                     ),
                 );
-
                 return Err(error);
             }
 
@@ -998,6 +994,7 @@ fn recover_stream(source: &Path, recovered: &Path) -> Result<Option<RecoveryIssu
             Ok(None) => break None,
             Err(error) => break Some(recovery_issue(&error, line_number)),
         };
+
         if let Err(error) = validation.validate_record(source, line_number, &line) {
             break Some(recovery_issue(&error, line_number));
         }
@@ -1011,12 +1008,12 @@ fn recover_stream(source: &Path, recovered: &Path) -> Result<Option<RecoveryIssu
             .checked_add(1)
             .ok_or_else(|| return invalid_log(source, line_number, "line number overflow"))?;
     };
+
     writer
         .flush()
         .and_then(|()| return writer.get_ref().sync_data())
         .map_err(|error| return Error::filesystem(recovered, error))?;
 
     sync_parent_directory(recovered)?;
-
     return Ok(issue);
 }

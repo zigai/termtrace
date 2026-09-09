@@ -1,3 +1,9 @@
+use crate::{
+    document::{expand_matrix, read},
+    error::{invalid, operation},
+    execution::run_validated,
+    Error, Result,
+};
 use std::{
     collections::VecDeque,
     path::{Path, PathBuf},
@@ -5,19 +11,10 @@ use std::{
     sync::{mpsc, Arc, Mutex},
     thread,
 };
-
 use termtrace_evidence::artifact::write_secure;
-
 use termtrace_model::scenario::{
     Scenario, ScenarioAttemptReport, ScenarioCaseReport, ScenarioStatus, ScenarioSuiteReport,
     ScenarioSuiteStatus,
-};
-
-use crate::{
-    document::{expand_matrix, read},
-    error::{invalid, operation},
-    execution::run_validated,
-    Error, Result,
 };
 
 /// Execution and selection settings for a deterministic scenario suite.
@@ -52,9 +49,9 @@ pub fn run_suite(
     paths.dedup();
 
     let mut expanded: Vec<(PathBuf, Scenario)> = Vec::new();
+
     for path in paths {
         let scenario = read(&path)?;
-
         for (label, scenario) in expand_matrix(scenario)? {
             let identity = if label.is_empty() {
                 path.clone()
@@ -97,13 +94,11 @@ pub fn run_suite(
                         Ok(guard) => guard,
                         Err(poisoned) => poisoned.into_inner(),
                     };
-
                     guard.pop_front()
                 };
                 let Some((path, scenario)) = task else {
                     return;
                 };
-
                 let result =
                     run_case(path, scenario, &options).map_err(|error| return error.to_string());
 
@@ -133,7 +128,6 @@ pub fn run_suite(
 
     let mut cases: Vec<ScenarioCaseReport> = cases.into_iter().flatten().collect();
     cases.sort_by(|left, right| return left.scenario.cmp(&right.scenario));
-
     let status = if cases.iter().all(|case| {
         return case
             .attempts
@@ -191,9 +185,7 @@ fn run_case(
             &options.failure_root,
             options.update_snapshots,
         )?;
-
         let passed = report.status == ScenarioStatus::Passed;
-
         attempts.push(ScenarioAttemptReport { attempt, report });
 
         if passed {
@@ -253,7 +245,6 @@ pub fn scenario_junit(report: &ScenarioSuiteReport) -> String {
     }
 
     w.end_element();
-
     return w.end_document();
 }
 
@@ -261,6 +252,5 @@ pub fn scenario_junit(report: &ScenarioSuiteReport) -> String {
 pub fn write_scenario_junit(path: impl AsRef<Path>, report: &ScenarioSuiteReport) -> Result<()> {
     write_secure(path.as_ref(), scenario_junit(report).as_bytes())
         .map_err(|error| return operation("write JUnit report", error))?;
-
     return Ok(());
 }

@@ -1,9 +1,7 @@
+use crate::cli::output::ResponseWriter;
+use miette::Result;
 use std::process::ExitCode;
 use std::time::Duration;
-
-use miette::Result;
-
-use crate::cli::output::ResponseWriter;
 
 mod aggregate;
 mod args;
@@ -24,7 +22,6 @@ pub(super) use supervisor::{run_tmux_guard, run_tmux_status, run_tmux_supervisor
 const TMUX_INTEGRATION_VERSION: &str = "1";
 const TMUX_HOOK_INDEX: u16 = 991;
 const TMUX_WRAPPER_BINARY_ENV: &str = "TERMTRACE_TMUX_BINARY";
-
 const OPTION_VERSION: &str = "@termtrace-recording-version";
 const OPTION_TERMTRACE: &str = "@termtrace-executable";
 const OPTION_TMUX: &str = "@termtrace-tmux-executable";

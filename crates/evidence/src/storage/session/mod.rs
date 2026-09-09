@@ -1,10 +1,9 @@
 mod io;
 mod recovery;
-mod validation;
-mod verification;
-
 #[cfg(test)]
 mod tests;
+mod validation;
+mod verification;
 
 pub use io::{canonical_manifest_bytes, manifest_hash, read_completion, read_manifest};
 pub use recovery::{recover_session, SessionSnapshot};

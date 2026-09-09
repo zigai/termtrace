@@ -1,13 +1,20 @@
+use super::{
+    frame_from_state, frame_hash, load_checkpoint, observation_error, publish_checkpoint,
+    publish_endpoint_checkpoint, CachedSemanticState,
+};
+use crate::replay::{
+    inspect_latest_presented_prefix, inspect_latest_presented_stream, inspect_prefix_stream,
+    inspect_session_stream, inspect_session_stream_with_formats,
+    trust::{check_cancelled, SourceIdentity},
+    EndpointInspection, RenderedStateFormats,
+};
+use crate::{Error, Result};
 use std::{
     io::Read as _,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     sync::atomic::AtomicBool,
 };
-
-use uuid::Uuid;
-use zstd::stream::read::Decoder;
-
 use termtrace_evidence::{
     event_log::{CanonicalBoundary, EventLogCursor, EventLogSummary},
     session::{
@@ -29,18 +36,8 @@ use termtrace_model::{
     value::ByteString,
 };
 use termtrace_terminal::Format;
-
-use super::{
-    frame_from_state, frame_hash, load_checkpoint, observation_error, publish_checkpoint,
-    publish_endpoint_checkpoint, CachedSemanticState,
-};
-use crate::replay::{
-    inspect_latest_presented_prefix, inspect_latest_presented_stream, inspect_prefix_stream,
-    inspect_session_stream, inspect_session_stream_with_formats,
-    trust::{check_cancelled, SourceIdentity},
-    EndpointInspection, RenderedStateFormats,
-};
-use crate::{Error, Result};
+use uuid::Uuid;
+use zstd::stream::read::Decoder;
 
 const MAX_LIVE_SEMANTIC_STATE_BYTES: u64 = 32 * 1024 * 1024;
 
@@ -173,7 +170,6 @@ pub fn observe_session_with_options(
             "session is live; engine observation requires completed evidence or explicit validated-prefix observation",
         ));
     }
-
     return observe_completed(&canonical, manifest.session_id, state_point, include_hidden);
 }
 
@@ -214,6 +210,7 @@ pub fn observe_completed_with_formats(
         presented: inspection.record.presented,
         state: inspection.state,
     };
+
     let observation = completed_observation_from_cached(
         &canonical,
         manifest.session_id,
@@ -223,7 +220,6 @@ pub fn observe_completed_with_formats(
         include_hidden,
         ObservationResolution::CanonicalReplay,
     )?;
-
     return Ok((observation, rendered));
 }
 
@@ -264,6 +260,7 @@ pub fn observation_from_live_snapshot(
             "actor returned an unexpected observation",
         ));
     };
+
     let frame = ObservationFrame {
         viewport_text,
         cols,
@@ -462,9 +459,9 @@ fn resolve_completed_state(
     check_cancelled(cancelled)?;
 
     let source = SourceIdentity::capture(session)?;
+
     if let Some(state) = load_checkpoint(session, point, completion)? {
         source.check(session)?;
-
         return Ok((state, ObservationResolution::ValidatedCheckpoint));
     }
 
@@ -476,7 +473,6 @@ fn resolve_completed_state(
         )
     {
         source.check(session)?;
-
         return Ok((state, ObservationResolution::ValidatedCheckpoint));
     }
 
@@ -487,15 +483,16 @@ fn resolve_completed_state(
             };
         });
     })?;
-
     validate_completion_summary_candidate(session, &summary, completion)?;
     source.check(session)?;
+
     if matches!(
         point,
         StatePoint::LatestPresented | StatePoint::StateHash { .. }
     ) {
         let endpoint = inspect_latest_presented_stream(&session.join("events.jsonl"), cancelled)?;
         source.check(session)?;
+
         if let Err(error) = publish_endpoint_checkpoint(
             session,
             &StatePoint::LatestPresented,
@@ -523,6 +520,7 @@ fn resolve_completed_state(
     let selector = state_selector_for_session(session, point, cancelled)?;
     let inspection = inspect_session_stream(session, selector, cancelled)?;
     source.check(session)?;
+
     if let Err(error) =
         publish_checkpoint(session, point, completion, &inspection, &source, cancelled)
     {
@@ -620,6 +618,7 @@ pub fn state_selector_for_session(
             StatePoint::Marker { .. } => return Err(observation_error("invalid marker selector")),
         });
     };
+
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
     let mut found = None;
 
@@ -652,7 +651,6 @@ pub fn semantic_state_for_session(
     include_hidden: bool,
 ) -> Result<SemanticState> {
     let (state, _) = semantic_state_with_hash_for_session(session, point, include_hidden)?;
-
     return Ok(state);
 }
 
@@ -716,7 +714,6 @@ fn semantic_state_with_hash_for_session_inner(
             "selected semantic state is hidden; pass explicit hidden-state permission",
         ));
     }
-
     return Ok((state.state, state.state_hash));
 }
 
@@ -762,21 +759,18 @@ pub fn semantic_state_from_live_snapshot(snapshot: ControlData) -> Result<(Seman
             source,
         };
     })?;
-
     return Ok((state, state_hash));
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::io::{repeat, Read as _};
-
     use termtrace_model::{
         execution::event_log::CanonicalBoundary, terminal::observation::ActorBoundaries,
         terminal::state::ModeState, value::ByteString,
     };
     use zstd::stream::encode_all;
-
-    use super::*;
 
     #[test]
     fn live_snapshot_decompression_stops_at_decoded_limit() {
@@ -810,7 +804,6 @@ mod tests {
                 observed: boundary,
             },
         };
-
         let error = semantic_state_from_live_snapshot(snapshot)
             .expect_err("oversized live semantic state must be rejected");
         assert!(error

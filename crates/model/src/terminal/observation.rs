@@ -1,16 +1,15 @@
 //! Stable contracts for truth-labeled terminal observations.
 
-use std::path::PathBuf;
-
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::{
     execution::event_log::CanonicalBoundary,
     terminal::state::{ModeState, SemanticState},
     value::ByteString,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use uuid::Uuid;
+
 /// Durable and latest actor-processed positions returned by live operations.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

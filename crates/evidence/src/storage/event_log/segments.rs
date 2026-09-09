@@ -4,16 +4,15 @@
 //! sibling directory. Sealed chunks have independently verifiable BLAKE3 digests;
 //! the canonical event hash chain continues across every physical boundary.
 
+use blake3::Hasher;
+use nix::libc::O_NOFOLLOW;
+use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, Metadata, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _},
     path::{Path, PathBuf},
 };
-
-use blake3::Hasher;
-use nix::libc::O_NOFOLLOW;
-use serde::{Deserialize, Serialize};
 use zstd::stream::{read::Decoder, write::Encoder};
 
 const DEFAULT_SEGMENT_BYTES: u64 = 16 * 1024 * 1024;
@@ -37,7 +36,6 @@ struct Seal {
 fn directory(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(".segments");
-
     return PathBuf::from(name);
 }
 
@@ -45,7 +43,6 @@ fn chunk_path(path: &Path, index: u64, extension: &str) -> PathBuf {
     if index == 0 && extension == "jsonl" {
         return path.to_path_buf();
     }
-
     return directory(path).join(format!("{index:020}.{extension}"));
 }
 
@@ -62,7 +59,6 @@ fn open_regular(path: &Path) -> io::Result<File> {
     if !file.metadata()?.is_file() {
         return Err(invalid("canonical segment must be a regular file"));
     }
-
     return Ok(file);
 }
 
@@ -81,7 +77,6 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> io::Result<T> {
     if bytes.len() > 8192 {
         return Err(invalid("segment metadata exceeds 8 KiB"));
     }
-
     return serde_json::from_slice(&bytes).map_err(io::Error::other);
 }
 
@@ -104,7 +99,6 @@ fn layout(path: &Path) -> io::Result<Option<Layout>> {
     if value.version != 1 || !(1024..=MAX_SEGMENT_BYTES).contains(&value.segment_bytes) {
         return Err(invalid("unsupported canonical segment layout"));
     }
-
     return Ok(Some(value));
 }
 
@@ -121,7 +115,6 @@ fn publish_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
         .ok_or_else(|| return invalid("segment has no directory"))?;
 
     File::open(parent)?.sync_all()?;
-
     return Ok(());
 }
 
@@ -168,6 +161,7 @@ impl SegmentWriter {
     fn rotate(&mut self) -> io::Result<()> {
         self.active.sync_all()?;
         let parent = directory(&self.path);
+
         if self.index == 0 {
             fs::DirBuilder::new().mode(0o700).create(&parent)?;
             publish_json(&parent.join("layout.json"), &self.layout)?;
@@ -219,7 +213,6 @@ impl SegmentWriter {
         self.index = next;
         self.bytes = 0;
         self.hash = Hasher::new();
-
         return Ok(());
     }
 }
@@ -236,7 +229,6 @@ impl Write for SegmentWriter {
 
         let remaining =
             usize::try_from(self.layout.segment_bytes - self.bytes).map_err(io::Error::other)?;
-
         let selected = buf
             .get(..buf.len().min(remaining))
             .ok_or_else(|| return invalid("invalid segment write range"))?;
@@ -248,7 +240,6 @@ impl Write for SegmentWriter {
         );
 
         self.bytes += u64::try_from(written).map_err(io::Error::other)?;
-
         return Ok(written);
     }
 
@@ -286,6 +277,7 @@ impl CanonicalLogFile {
             index: 0,
             position: 0,
         };
+
         if result.layout.is_some() {
             result.active = result.open_chunk(0)?;
         }
@@ -303,6 +295,7 @@ impl CanonicalLogFile {
         let Some(layout) = layout(&self.path)? else {
             return Ok(self.root.metadata()?.len());
         };
+
         let index = last_index(&self.path)?;
         let bytes = match read_json::<Seal>(&chunk_path(&self.path, index, "seal")) {
             Ok(seal) => seal.bytes,
@@ -317,7 +310,6 @@ impl CanonicalLogFile {
         if bytes > layout.segment_bytes {
             return Err(invalid("canonical chunk exceeds its declared size"));
         }
-
         return index
             .checked_mul(layout.segment_bytes)
             .and_then(|offset| return offset.checked_add(bytes))
@@ -352,6 +344,7 @@ impl CanonicalLogFile {
         } else {
             let compressed = open_regular(&chunk_path(&self.path, index, "zst"))?;
             let mut decoder = Decoder::new(compressed)?.take(seal.bytes + 1);
+
             let mut inflated = tempfile::tempfile()?;
             let count = io::copy(&mut decoder, &mut inflated)?;
 
@@ -372,7 +365,6 @@ impl CanonicalLogFile {
         }
 
         file.seek(SeekFrom::Start(0))?;
-
         return Ok(file);
     }
 }
@@ -390,7 +382,6 @@ impl Read for CanonicalLogFile {
                     .position
                     .checked_add(u64::try_from(count).map_err(io::Error::other)?)
                     .ok_or_else(|| return invalid("canonical position overflow"))?;
-
                 return Ok(count);
             }
 
@@ -398,10 +389,12 @@ impl Read for CanonicalLogFile {
             let Some(layout) = self.layout else {
                 return Ok(0);
             };
+
             let next = self
                 .index
                 .checked_add(1)
                 .ok_or_else(|| return invalid("segment index overflow"))?;
+
             if self.position
                 != next
                     .checked_mul(layout.segment_bytes)
@@ -421,7 +414,6 @@ impl Read for CanonicalLogFile {
                             "canonical segment is missing before the active tail",
                         ));
                     }
-
                     return Ok(0);
                 }
                 Err(error) => return Err(error),
@@ -450,6 +442,7 @@ impl Seek for CanonicalLogFile {
         let (mut index, mut offset) = self.layout.map_or((0, target), |layout| {
             return (target / layout.segment_bytes, target % layout.segment_bytes);
         });
+
         if index != self.index {
             match self.open_chunk(index) {
                 Ok(file) => self.active = file,
@@ -473,7 +466,6 @@ impl Seek for CanonicalLogFile {
 
         self.active.seek(SeekFrom::Start(offset))?;
         self.position = target;
-
         return Ok(target);
     }
 }
@@ -502,7 +494,6 @@ fn last_index(path: &Path) -> io::Result<u64> {
     if last > entries {
         return Err(invalid("canonical segment inventory contains an index gap"));
     }
-
     return Ok(last);
 }
 
@@ -575,11 +566,14 @@ mod tests {
         let mut writer = writer(&path);
         writer.write_all(&bytes).expect("write all chunks");
         writer.sync_data().expect("sync");
+
         assert_eq!(fs::metadata(&path).expect("root metadata").len(), 1024);
         assert!(chunk_path(&path, 1, "zst").is_file());
         assert!(!chunk_path(&path, 1, "jsonl").exists());
+
         let mut reader = CanonicalLogFile::open(&path).expect("reader");
         assert_eq!(reader.len().expect("logical length"), 6500);
+
         let mut actual = Vec::new();
         reader.read_to_end(&mut actual).expect("complete read");
         assert_eq!(actual, bytes);
@@ -608,6 +602,7 @@ mod tests {
         let mut actual = Vec::new();
         reader.read_to_end(&mut actual).expect("initial read");
         assert_eq!(actual.len(), 1024);
+
         reader
             .seek(SeekFrom::Start(1024))
             .expect("seek EOF before rotation");
@@ -621,6 +616,7 @@ mod tests {
             .read_to_end(&mut actual)
             .expect("follow later chunks");
         assert_eq!(actual, [b'b'; 2048]);
+
         reader
             .seek(SeekFrom::Start(3072))
             .expect("seek EOF after rotation");
@@ -640,12 +636,15 @@ mod tests {
 
         let fingerprint = canonical_source_fingerprint(&path).expect("fingerprint");
         fs::write(chunk_path(&path, 1, "zst"), b"corrupt").expect("tamper");
+
         assert_ne!(
             fingerprint,
             canonical_source_fingerprint(&path).expect("changed fingerprint")
         );
+
         let mut reader = CanonicalLogFile::open(&path).expect("reader");
         assert!(reader.read_to_end(&mut Vec::new()).is_err());
+
         fs::remove_file(chunk_path(&path, 1, "zst")).expect("remove chunk");
         let mut reader = CanonicalLogFile::open(&path).expect("reader");
         assert!(reader.read_to_end(&mut Vec::new()).is_err());

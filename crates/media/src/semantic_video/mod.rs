@@ -1,5 +1,6 @@
 //! Deterministic semantic-state video scheduling and source materialization.
 
+use crate::{capability::probe_semantic_video_encode, Error, Result};
 use std::{
     collections::HashMap,
     io::{self, Write},
@@ -7,8 +8,6 @@ use std::{
     process::{Command, Stdio},
     sync::atomic::AtomicBool,
 };
-
-use crate::{capability::probe_semantic_video_encode, Error, Result};
 use termtrace_engine::{replay::visit_session_states_while, Error as EngineError};
 use termtrace_evidence::{
     artifact::{finish_writer, hash_regular_file, secure_file, secure_writer, write_secure},
@@ -91,7 +90,6 @@ pub fn plan_session(
     visit_session_states_while(session, &AtomicBool::new(false), |_, state| {
         maximum.0 = maximum.0.max(state.cols);
         maximum.1 = maximum.1.max(state.rows);
-
         return Ok(true);
     })?;
 
@@ -198,6 +196,7 @@ pub fn materialize(
     validate_source_plan(source)?;
 
     let directory = directory.as_ref();
+
     let completion = validate_completed_session(&source.session)?;
 
     if completion.session_id != source.session_id
@@ -228,9 +227,9 @@ pub fn materialize(
     let Some(mut stdin) = child.stdin.take() else {
         let _ = child.kill();
         let _ = child.wait();
-
         return Err(video_error("FFmpeg semantic source stdin was not created"));
     };
+
     let summary = match render_semantic_frames(source, &mut stdin, &mut |span| {
         return write_frame_span(&spans_path, &mut spans_writer, span);
     }) {
@@ -240,7 +239,6 @@ pub fn materialize(
 
             let _ = child.kill();
             let _ = child.wait();
-
             return Err(error);
         }
     };
@@ -258,6 +256,7 @@ pub fn materialize(
     }
 
     let completion_after = validate_completed_session(&source.session)?;
+
     if completion_after.session_id != completion.session_id
         || completion_after.final_event_hash != completion.final_event_hash
     {
@@ -295,7 +294,6 @@ pub fn materialize(
     })?;
 
     write_secure(&manifest_path, &bytes)?;
-
     return Ok((output, manifest));
 }
 
@@ -310,6 +308,7 @@ fn render_semantic_frames(
 
     let mut scheduler = SemanticFrameScheduler::new(source, output, expected_bytes, span_sink);
     let mut pending: Option<(StateRecord, SemanticState)> = None;
+
     visit_session_states_while(&source.session, &AtomicBool::new(false), |record, state| {
         if !record.presented || record.monotonic_ns < source.start_monotonic_ns {
             if record.presented {
@@ -335,7 +334,6 @@ fn render_semantic_frames(
         }
 
         pending = Some((record.clone(), state.clone()));
-
         return Ok(true);
     })?;
 
@@ -345,7 +343,6 @@ fn render_semantic_frames(
         ));
     };
     scheduler.emit(&final_record, &final_state, source.frame_count)?;
-
     return scheduler.finish();
 }
 
@@ -383,11 +380,11 @@ impl<'scheduler, W: Write> SemanticFrameScheduler<'scheduler, W> {
 
     fn emit(&mut self, record: &StateRecord, state: &SemanticState, end_frame: u64) -> Result<()> {
         self.presented_state_count = self.presented_state_count.saturating_add(1);
+
         let end_frame = end_frame.min(self.source.frame_count);
 
         if end_frame <= self.next_frame {
             self.suppressed_state_count = self.suppressed_state_count.saturating_add(1);
-
             return Ok(());
         }
 
@@ -423,7 +420,6 @@ impl<'scheduler, W: Write> SemanticFrameScheduler<'scheduler, W> {
         self.next_frame = end_frame;
         self.rendered_state_count = self.rendered_state_count.saturating_add(1);
         (self.span_sink)(&span)?;
-
         return Ok(());
     }
 
@@ -452,8 +448,8 @@ struct FrameSummary {
 
 fn maximum_applied_geometry(log: &EventLog) -> (u16, u16) {
     let mut maximum = (log.header.cols, log.header.rows);
-
     let mut intents = HashMap::new();
+
     for record in &log.events {
         match &record.event {
             Event::ResizeIntent {
@@ -517,7 +513,6 @@ fn validate_source_plan(source: &SemanticVideoSourcePlan) -> Result<()> {
     {
         return Err(video_error("semantic video source plan is invalid"));
     }
-
     return Ok(());
 }
 
@@ -533,7 +528,6 @@ fn frame_ceil(monotonic_ns: u64, fps: u16) -> u64 {
     let scaled = u128::from(monotonic_ns).saturating_mul(u128::from(fps));
     let frames =
         scaled.saturating_add(u128::from(NANOS_PER_SECOND - 1)) / u128::from(NANOS_PER_SECOND);
-
     return u64::try_from(frames).unwrap_or(u64::MAX);
 }
 
@@ -584,7 +578,6 @@ fn write_frame_span(path: &Path, writer: &mut impl Write, span: &SemanticFrameSp
             source,
         };
     })?;
-
     return Ok(());
 }
 
@@ -623,7 +616,6 @@ fn command_version(command: &str) -> Result<String> {
             ),
         });
     }
-
     return Ok(String::from_utf8_lossy(&output.stdout)
         .lines()
         .next()
@@ -654,7 +646,6 @@ fn probe_video(path: &Path) -> Result<serde_json::Value> {
             ),
         });
     }
-
     return serde_json::from_slice(&output.stdout).map_err(|source_error| {
         return Error::InvalidJson {
             path: PathBuf::from("<ffprobe-semantic-source>"),
@@ -754,13 +745,13 @@ mod tests {
         let mut spans = Vec::new();
         let mut collect_span = |span: &SemanticFrameSpan| {
             spans.push(span.clone());
-
             return Ok(());
         };
         let mut scheduler =
             SemanticFrameScheduler::new(&source, &mut bytes, frame_bytes, &mut collect_span);
         scheduler.emit(&record, &state, 2).expect("schedule span");
         let summary = scheduler.finish().expect("finish schedule");
+
         let mut supersampled_source = source.clone();
         supersampled_source.raster_profile = SemanticRasterProfile::Supersampled2x;
         let mut supersampled_bytes = Vec::new();

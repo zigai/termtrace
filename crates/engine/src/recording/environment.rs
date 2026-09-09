@@ -1,5 +1,7 @@
 //! Deterministic child-environment resolution for the recording process.
 
+use super::support::terminal_error;
+use crate::{Error, Result};
 use std::{
     collections::BTreeMap,
     env,
@@ -7,13 +9,9 @@ use std::{
     os::unix::ffi::{OsStrExt as _, OsStringExt as _},
     path::Path,
 };
-
 use termtrace_model::execution::environment::{
     ChildEnvironmentPolicy, ColorPolicy, EnvironmentBase, EnvironmentSpec,
 };
-
-use super::support::terminal_error;
-use crate::{Error, Result};
 
 /// Exact child environment and its persisted derivation policy.
 #[derive(Clone, Debug)]
@@ -39,12 +37,12 @@ impl EffectiveEnvironment {
                 source,
             };
         })?;
+
         self.variables.insert(
             OsString::from("TERMTRACE_SESSION"),
             canonical.into_os_string(),
         );
         self.policy.effective_digest = digest_variables(&self.variables);
-
         return Ok(());
     }
 
@@ -66,7 +64,6 @@ impl EffectiveEnvironment {
         term: &str,
     ) -> Result<Self> {
         let ambient: BTreeMap<OsString, OsString> = env::vars_os().collect();
-
         return Self::resolve_from_snapshot(spec, term, &ambient);
     }
 
@@ -178,6 +175,7 @@ fn digest_variables(variables: &BTreeMap<OsString, OsString>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::{
         array,
         collections::{BTreeMap, BTreeSet},
@@ -185,8 +183,6 @@ mod tests {
         sync::Arc,
         thread,
     };
-
-    use super::*;
     use termtrace_model::{execution::environment::EnvironmentBase, value::ByteString};
 
     #[test]
@@ -198,6 +194,7 @@ mod tests {
             ..EnvironmentSpec::default()
         };
         let effective = EffectiveEnvironment::resolve(&spec, "xterm-test").expect("resolve");
+
         assert_eq!(
             effective.variables().get(OsStr::new("HOME")),
             Some(&OsString::from("/tmp/home"))
@@ -234,6 +231,7 @@ mod tests {
         let inherited =
             EffectiveEnvironment::resolve_from_snapshot(&inherited_spec, "xterm-test", &ambient)
                 .expect("inherit resolution");
+
         assert_eq!(
             inherited.variables().get(OsStr::new("PATH")),
             Some(&OsString::from("/host/bin"))
@@ -258,6 +256,7 @@ mod tests {
         let cleared =
             EffectiveEnvironment::resolve_from_snapshot(&cleared_spec, "xterm-test", &ambient)
                 .expect("clear resolution");
+
         assert_eq!(
             cleared.variables().get(OsStr::new("PATH")),
             Some(&OsString::from("/host/bin"))
@@ -286,12 +285,12 @@ mod tests {
             .policy()
             .effective_digest
             .clone();
-
         let expected_b = EffectiveEnvironment::resolve(&spec_b, "xterm-test")
             .expect("resolve b")
             .policy()
             .effective_digest
             .clone();
+
         assert_ne!(expected_a, expected_b);
 
         let workers: [_; 16] = array::from_fn(|i| {
@@ -304,6 +303,7 @@ mod tests {
             return thread::spawn(move || {
                 let resolved = EffectiveEnvironment::resolve(&spec, "xterm-test")
                     .expect("parallel resolution");
+
                 assert_eq!(resolved.policy().effective_digest, expected);
                 assert!(resolved.variables().contains_key(OsStr::new(present)));
                 assert!(!resolved.variables().contains_key(OsStr::new(absent)));

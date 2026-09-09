@@ -1,9 +1,4 @@
-use std::process::ExitCode;
-
-use miette::Result;
-
 use crate::cli::command::Command;
-
 use crate::cli::{
     analysis::{
         dispatch as dispatch_analyze, run_diagnose_facade, run_inspect_facade, run_playback,
@@ -25,6 +20,8 @@ use crate::cli::{
     tmux::dispatch as dispatch_tmux,
     tooling::{dispatch as dispatch_tooling, run_doctor, run_driver, run_version},
 };
+use miette::Result;
+use std::process::ExitCode;
 
 pub(super) fn dispatch(response: &mut ResponseWriter, command: Command) -> Result<ExitCode> {
     return match command {

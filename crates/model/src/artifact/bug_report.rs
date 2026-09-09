@@ -1,12 +1,11 @@
 //! Bounded, redacted bug-report evidence contracts.
 
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::{
     artifact::metadata::ArtifactMember, execution::session::SessionGeometry, value::ByteString,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Redacted session metadata included in a bug report.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

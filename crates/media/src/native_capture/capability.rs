@@ -1,13 +1,3 @@
-use std::{
-    env, fs,
-    os::unix::fs::PermissionsExt as _,
-    path::Path,
-    process::{Command, Stdio},
-    result::Result as StdResult,
-    thread,
-    time::{Duration, Instant},
-};
-
 use super::{
     media::{validate_screenshot_probe, validate_video_probe},
     process::{
@@ -16,6 +6,15 @@ use super::{
     },
     util::external_error,
     Result,
+};
+use std::{
+    env, fs,
+    os::unix::fs::PermissionsExt as _,
+    path::Path,
+    process::{Command, Stdio},
+    result::Result as StdResult,
+    thread,
+    time::{Duration, Instant},
 };
 use termtrace_evidence::artifact::{create_private_directory, write_secure};
 use termtrace_model::protocol::capability::{
@@ -53,13 +52,11 @@ fn native_capabilities_with(
 
     let screenshot_missing = screenshot
         .then(|| return missing(&["ghostty", "Xvfb", "dbus-run-session", "import", "ffprobe"]));
-
     let video_missing = video
         .then(|| return missing(&["ghostty", "Xvfb", "dbus-run-session", "ffmpeg", "ffprobe"]));
 
     let probe_screenshot =
         cfg!(target_os = "linux") && screenshot_missing.as_ref().is_some_and(Vec::is_empty);
-
     let probe_video =
         cfg!(target_os = "linux") && video_missing.as_ref().is_some_and(Vec::is_empty);
 
@@ -146,13 +143,11 @@ fn operational_probe(screenshot: bool, video: bool) -> [ProbeResult; 2] {
     if let Err(error) = cleanup {
         return failed_probes(external_error("native probe cleanup", error));
     }
-
     return result.unwrap_or_else(failed_probes);
 }
 
 fn failed_probes(error: super::Error) -> [ProbeResult; 2] {
     let detail: String = error.to_string().chars().take(2048).collect();
-
     return [Err(detail.clone()), Err(detail)];
 }
 
@@ -185,6 +180,7 @@ fn probe_staged(
     let mut ghostty = ManagedChild::spawn_group("ghostty", &mut command)?;
     wait_for_file(&ready, &mut ghostty, remaining(deadline)?)?;
     ghostty.check_running()?;
+
     let screenshot_result = if screenshot {
         probe_capture(staging, &display, deadline, false).map_err(|error| return error.to_string())
     } else {
@@ -192,6 +188,7 @@ fn probe_staged(
     };
     ghostty.check_running()?;
     xvfb.check_running()?;
+
     let video_result = if video {
         probe_capture(staging, &display, deadline, true).map_err(|error| return error.to_string())
     } else {
@@ -199,9 +196,9 @@ fn probe_staged(
     };
     ghostty.check_running()?;
     xvfb.check_running()?;
+
     ghostty.terminate();
     xvfb.terminate();
-
     return Ok([screenshot_result, video_result]);
 }
 
@@ -265,6 +262,7 @@ fn wait_for_painted_frame(display: &str, deadline: Instant, video: bool) -> Resu
                 deadline,
             )?
         };
+
         if sample == [0x10, 0x20, 0x30] {
             return Ok(());
         }
@@ -282,6 +280,7 @@ fn wait_for_painted_frame(display: &str, deadline: Instant, video: bool) -> Resu
 
 fn probe_capture(staging: &Path, display: &str, deadline: Instant, video: bool) -> Result<()> {
     wait_for_painted_frame(display, deadline, video)?;
+
     let path = staging.join(if video { "probe.mkv" } else { "probe.png" });
     let bytes = if video {
         run_probe(
@@ -353,6 +352,7 @@ fn probe_capture(staging: &Path, display: &str, deadline: Instant, video: bool) 
 
     if video {
         validate_video_probe(&report, FPS, WIDTH, HEIGHT)?;
+
         if report
             .pointer("/streams/0/codec_name")
             .and_then(|value| return value.as_str())

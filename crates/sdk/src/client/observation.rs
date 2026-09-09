@@ -30,6 +30,7 @@ fn request_snapshot_across_completion(session: &Path) -> Result<Option<ControlDa
                 }
 
                 let now = Instant::now();
+
                 if now >= deadline {
                     return Err(error);
                 }
@@ -103,7 +104,6 @@ pub fn semantic_state_for_session(
     include_hidden: bool,
 ) -> Result<SemanticState> {
     let (state, _) = semantic_state_with_hash_for_session(session, point, include_hidden)?;
-
     return Ok(state);
 }
 

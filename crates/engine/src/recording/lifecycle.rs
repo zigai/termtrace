@@ -1,5 +1,26 @@
 //! Runtime orchestration for one-shot PTY recording.
 
+use super::{
+    actor::SessionActor,
+    control::control_socket_name,
+    environment::EffectiveEnvironment,
+    model::{RecordOptions, RecordOutcome, TerminalGeometry},
+    presentation::{geometry_cell_size, LiveTerminal},
+    process::{
+        create_session_directory, invalid_geometry, register_host_signals,
+        resolve_working_directory, spawn_command,
+    },
+    raw_terminal::RawTerminalGuard,
+    support::{finish_with_cleanup, terminal_error},
+};
+use crate::{
+    observation::publish_endpoint_checkpoint,
+    replay::{trust::SourceIdentity, EndpointInspection},
+    Error, Result,
+};
+use portable_pty::PtySize;
+#[cfg(test)]
+use std::cell::Cell;
 use std::{
     env::consts::{ARCH, OS},
     ffi::OsStr,
@@ -7,13 +28,6 @@ use std::{
     os::unix::ffi::OsStrExt as _,
     path::Path,
 };
-
-#[cfg(test)]
-use std::cell::Cell;
-
-use portable_pty::PtySize;
-use uuid::Uuid;
-
 use termtrace_evidence::{
     artifact::write_secure,
     event_log::{CanonicalBoundary, EventLogSummary, EventLogWriter, SessionClock},
@@ -36,25 +50,7 @@ use termtrace_terminal::{
     semantic_state_hash, supported_geometry_cell_count, GhosttyVt, PresentationTracker,
     QueryTracker,
 };
-
-use super::{
-    actor::SessionActor,
-    control::control_socket_name,
-    environment::EffectiveEnvironment,
-    model::{RecordOptions, RecordOutcome, TerminalGeometry},
-    presentation::{geometry_cell_size, LiveTerminal},
-    process::{
-        create_session_directory, invalid_geometry, register_host_signals,
-        resolve_working_directory, spawn_command,
-    },
-    raw_terminal::RawTerminalGuard,
-    support::{finish_with_cleanup, terminal_error},
-};
-use crate::{
-    observation::publish_endpoint_checkpoint,
-    replay::{trust::SourceIdentity, EndpointInspection},
-    Error, Result,
-};
+use uuid::Uuid;
 
 const MUTATION_CACHE_CAPACITY: usize = 256;
 const SESSION_FAILURE_FORMAT: &str = "termtrace-session-failure";
@@ -96,7 +92,6 @@ pub(super) struct IncompleteSessionDiagnosticRecord {
 /// the canonical event log cannot be durably committed.
 pub fn record(options: &RecordOptions) -> Result<RecordOutcome> {
     let mut stdout = io::stdout();
-
     return record_with_output(options, &mut stdout);
 }
 
@@ -111,7 +106,6 @@ pub fn record_with_output(
 ) -> Result<RecordOutcome> {
     let mut terminal_mode = RawTerminalGuard::enter(options.forward_stdin)?;
     let result = record_to(options, output);
-
     return finish_with_cleanup(result, terminal_mode.restore());
 }
 
@@ -187,7 +181,6 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     let actor_state: Result<(LiveTerminal, MutationJournal)> = (|| {
         let live = initialize_live_terminal(TerminalGeometry::from(pty_size), &options.colors)?;
         let journal = MutationJournal::create(&options.output_directory)?;
-
         return Ok((live, journal));
     })();
     let (live, journal) = match actor_state {
@@ -209,6 +202,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
             return finish_with_cleanup(Err(error), closure_result);
         }
     };
+
     let spawned = match spawn_command(
         options,
         &working_directory,
@@ -233,6 +227,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
             return finish_with_cleanup(Err(error), closure_result);
         }
     };
+
     let startup_error = event_log
         .append(Event::Lifecycle {
             lifecycle_kind: LifecycleKind::Spawned,
@@ -253,6 +248,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     );
     actor.failure_policy = options.failure_policy;
     actor.live.suppress_mirrored_queries = options.forward_stdin;
+
     let runtime = match consume_runtime(
         &mut actor,
         options.forward_stdin,
@@ -279,6 +275,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
             return finish_with_cleanup(Err(error), closure_result);
         }
     };
+
     let SessionActor {
         spawned,
         mut event_log,
@@ -332,6 +329,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     let source = SourceIdentity::capture_candidate(&options.output_directory)?;
     publish_session_completion(options, &completion)?;
     let source = source.completed(&options.output_directory)?;
+
     match semantic_state_hash(&runtime.final_presented) {
         Ok(final_state_hash) => {
             let endpoint = EndpointInspection {
@@ -427,8 +425,8 @@ fn write_session_manifest(
     };
     let encoded = canonical_manifest_bytes(&manifest)?;
     let hash = manifest_hash(&encoded);
-    write_secure(&options.output_directory.join("session.json"), &encoded)?;
 
+    write_secure(&options.output_directory.join("session.json"), &encoded)?;
     return Ok(hash);
 }
 
@@ -438,7 +436,6 @@ fn publish_session_completion(
 ) -> Result<()> {
     let validation_result = (|| {
         let log = EventLogSummary::read(options.output_directory.join("events.jsonl"))?;
-
         return validate_completion_summary_candidate(&options.output_directory, &log, completion);
     })();
 
@@ -493,7 +490,6 @@ fn close_failed_recording(
                         path: options.output_directory.join("events.jsonl"),
                     });
                 }
-
                 return Ok(());
             })?;
 
@@ -519,6 +515,7 @@ fn close_failed_recording(
             return finish_with_cleanup(Err(error), diagnostic_result);
         }
     };
+
     let completion = SessionCompletion {
         format: SESSION_COMPLETION_FORMAT.to_owned(),
         version: SESSION_COMPLETION_VERSION,
@@ -580,7 +577,6 @@ fn write_json_secure(path: &Path, value: &impl serde::Serialize) -> Result<()> {
     })?;
 
     write_secure(path, &encoded).map_err(Error::from)?;
-
     return Ok(());
 }
 

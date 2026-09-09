@@ -1,10 +1,8 @@
 //! Presented rich-screen observations and stable capture.
 
-use std::time::Duration;
-
-use termtrace_model::terminal::screen::ScreenProjectionRequest;
-
 pub use crate::client::{Screen, StableScreenCapture};
+use std::time::Duration;
+use termtrace_model::terminal::screen::ScreenProjectionRequest;
 
 /// Options for one exact stable rich-screen capture.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

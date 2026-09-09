@@ -1,5 +1,5 @@
+use crate::{Error, Result};
 use std::{io::Write as _, path::Path};
-
 use termtrace_evidence::artifact::{finish_writer, secure_writer};
 use termtrace_model::{
     artifact::presentation::{
@@ -7,8 +7,6 @@ use termtrace_model::{
     },
     artifact::semantic_video::SemanticFrameSpan,
 };
-
-use crate::{Error, Result};
 
 pub(super) fn write_presentation_map(
     path: &Path,
@@ -80,6 +78,7 @@ pub(super) fn write_presentation_map(
                 }),
                 cursor_mask_state_id: cursor_mask.map(|mask| return mask.state_id),
             };
+
             serde_json::to_writer(&mut writer, &entry).map_err(|source| {
                 return Error::InvalidJson {
                     path: path.to_path_buf(),
@@ -142,6 +141,7 @@ pub(super) fn semantic_change_states_at(plan: &PresentationPlan, output_frame: u
 
 pub(super) fn mapped_source_frame(clip: &NormalizedClip, output_frame: u64) -> (u64, &'static str) {
     let offset = output_frame - clip.output_start_frame;
+
     if offset < clip.retimed_frame_count {
         let source_offset = offset.saturating_mul(u64::from(clip.speed.numerator))
             / u64::from(clip.speed.denominator);
@@ -153,7 +153,6 @@ pub(super) fn mapped_source_frame(clip: &NormalizedClip, output_frame: u64) -> (
             "source",
         );
     }
-
     return (clip.source_end_frame.saturating_sub(1), "hold");
 }
 
@@ -181,11 +180,13 @@ fn frame_transform_names(
         })
         .map(transform_name)
         .collect::<Vec<_>>();
+
     if plan.layout.branding.is_some() {
         names.push("branding".to_owned());
     }
 
     let semantic_states = semantic_change_states_at(plan, output_frame);
+
     if !semantic_states.is_empty()
         || plan.change_visualization.as_ref().is_some_and(|change| {
             return change.source == ChangeSource::EncodedPixels && output_frame > 0;

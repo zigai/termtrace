@@ -1,12 +1,10 @@
 //! Lossless streaming framing of VT output bytes.
 
+use crate::{Error, Result};
 use std::mem;
-
 use termtrace_model::execution::event::{Event, EventRecord};
 pub use termtrace_model::terminal::vt::{VtSourceSegment, VtToken, VtTokenKind};
 use termtrace_model::value::ByteString;
-
-use crate::{Error, Result};
 
 const DEFAULT_MAX_TOKEN_BYTES: usize = 1_048_576;
 
@@ -116,6 +114,7 @@ impl VtFramer {
     /// Returns an error only if the configured token size is zero and data was buffered.
     pub fn finish(mut self) -> Result<Vec<VtToken>> {
         let mut emitted = Vec::new();
+
         if !self.token.is_empty() {
             let kind = if self.state == FramerState::Ground {
                 VtTokenKind::Printable
@@ -124,7 +123,6 @@ impl VtFramer {
             };
             emitted.push(self.emit(kind));
         }
-
         return Ok(emitted);
     }
 
@@ -156,13 +154,11 @@ impl VtFramer {
         if self.printable_utf8_remaining > 0 {
             if (0x80..=0xbf).contains(&byte.value) {
                 self.printable_utf8_remaining -= 1;
-
                 return self.push(byte);
             }
 
             self.printable_utf8_remaining = 0;
             self.flush_printable(emitted);
-
             return self.consume_ground(byte, emitted);
         }
 
@@ -285,7 +281,6 @@ impl VtFramer {
             VtTokenKind::Csi => FramerState::Csi,
             _ => FramerState::Ground,
         };
-
         return Ok(());
     }
 
@@ -299,7 +294,6 @@ impl VtFramer {
         self.flush_printable(emitted);
         self.push(byte)?;
         self.state = FramerState::String { kind, osc };
-
         return Ok(());
     }
 
@@ -351,7 +345,6 @@ impl VtFramer {
         };
 
         self.next_token_id = self.next_token_id.saturating_add(1);
-
         return token;
     }
 }
@@ -363,7 +356,6 @@ impl VtFramer {
 /// Returns an error when a token exceeds the one-MiB default bound.
 pub fn frame_event_records(records: &[EventRecord]) -> Result<Vec<VtToken>> {
     let mut framer = VtFramer::default();
-
     let mut tokens = Vec::new();
     for record in records {
         if let Event::Output { data } = &record.event {
@@ -372,7 +364,6 @@ pub fn frame_event_records(records: &[EventRecord]) -> Result<Vec<VtToken>> {
     }
 
     tokens.extend(framer.finish()?);
-
     return Ok(tokens);
 }
 
@@ -429,6 +420,7 @@ mod tests {
         );
         tokens.extend(framer.feed(8, 30, b"\\\xe7\x95\x8c").expect("third read"));
         tokens.extend(framer.finish().expect("finish"));
+
         assert_eq!(
             tokens
                 .iter()
@@ -444,10 +436,12 @@ mod tests {
         assert_eq!(tokens[1].description, "erase display (all)");
         assert_eq!(tokens[1].source.len(), 2);
         assert_eq!(tokens[2].source.len(), 2);
+
         let recombined = tokens
             .iter()
             .flat_map(|token| return token.raw.as_bytes().iter().copied())
             .collect::<Vec<_>>();
+
         assert_eq!(recombined, b"A\x1b[2J\x1b]0;title\x1b\\\xe7\x95\x8c");
     }
 
@@ -471,6 +465,7 @@ mod tests {
         let [token] = tokens.as_slice() else {
             panic!("printable stream must emit one token");
         };
+
         assert_eq!(token.raw.as_bytes(), b"ABCDE");
         assert_eq!(
             token.source,
@@ -510,6 +505,7 @@ mod tests {
             .feed(1, 0, b"\x1b]unterminated")
             .expect("feed")
             .is_empty());
+
         let token = incomplete.finish().expect("finish").remove(0);
         assert_eq!(token.kind, VtTokenKind::Incomplete);
 
@@ -524,6 +520,7 @@ mod tests {
             .feed(1, 0, b"\xc2\x9b\x9b2J\x90data\x9c\x9fapp\x9c\xff\n")
             .expect("feed mixed stream");
         tokens.extend(framer.finish().expect("finish"));
+
         assert_eq!(
             tokens
                 .iter()
@@ -539,10 +536,12 @@ mod tests {
             ]
         );
         assert_eq!(tokens[1].description, "erase display (all)");
+
         let recombined = tokens
             .iter()
             .flat_map(|token| return token.raw.as_bytes().iter().copied())
             .collect::<Vec<_>>();
+
         assert_eq!(recombined, b"\xc2\x9b\x9b2J\x90data\x9c\x9fapp\x9c\xff\n");
     }
 }

@@ -2,21 +2,18 @@ use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
 
-use args::IntegritySubcommand;
-
-use std::{fmt::Write as _, mem::take, process::ExitCode};
-
-use miette::{IntoDiagnostic as _, Result};
-use termtrace_evidence::{
-    event_log::EventLog,
-    receipt::create_ssh_receipt,
-    session::{recover_session, verify_session_with_trust},
-};
-
 use crate::cli::{
     artifacts::run_bundle_verify,
     integrity::args::{RecoverArgs, SignArgs, VerifyArgs, VerifyLevelArg},
     output::{paginate, stable_enum_label, write_json_line, write_stdout},
+};
+use args::IntegritySubcommand;
+use miette::{IntoDiagnostic as _, Result};
+use std::{fmt::Write as _, mem::take, process::ExitCode};
+use termtrace_evidence::{
+    event_log::EventLog,
+    receipt::create_ssh_receipt,
+    session::{recover_session, verify_session_with_trust},
 };
 
 pub(super) fn run_verify(response: &mut ResponseWriter, arguments: VerifyArgs) -> Result<ExitCode> {
@@ -37,13 +34,13 @@ pub(super) fn run_verify(response: &mut ResponseWriter, arguments: VerifyArgs) -
     let (findings, page, partial) = paginate(take(&mut report.findings), &arguments.page);
     report.findings = findings;
     report.output_page = partial.then_some(page.clone());
+
     if arguments.json {
         write_json_line(response, &report)?;
     } else {
         let status = if valid { "valid" } else { "invalid" };
         let level = stable_enum_label(&report.level)?;
         let mut output = format!("{status}: {} ({level})\n", report.session.display(),);
-
         for finding in &report.findings {
             writeln!(output, "{}: {}", finding.code, finding.message).into_diagnostic()?;
         }
@@ -63,7 +60,6 @@ pub(super) fn run_verify(response: &mut ResponseWriter, arguments: VerifyArgs) -
     if valid {
         return Ok(ExitCode::SUCCESS);
     }
-
     return Ok(ExitCode::FAILURE);
 }
 
@@ -94,7 +90,6 @@ pub(super) fn run_recover(
             "recovery requires --session or --event-log"
         ));
     };
-
     return write_json_line(response, &report);
 }
 

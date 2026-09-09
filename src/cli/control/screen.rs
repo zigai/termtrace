@@ -5,6 +5,7 @@ pub(in crate::cli) fn run_screen(
     arguments: ScreenArgs,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session)?;
+
     if !matches!(
         resolved.lifecycle,
         RegistryLifecycle::Live | RegistryLifecycle::Completed
@@ -51,7 +52,6 @@ pub(in crate::cli) fn run_screen(
             let since = arguments
                 .since
                 .ok_or_else(|| miette::miette!("--screen diff requires --since STATE_HASH"))?;
-
             let point = StatePoint::StateHash {
                 state_hash: since.clone(),
             };
@@ -127,11 +127,9 @@ pub(super) fn sparse_screen(viewport_text: &str) -> serde_json::Value {
         .enumerate()
         .filter_map(|(row, text)| {
             let text = text.trim_end();
-
             return (!text.is_empty()).then(|| return (row, text));
         })
         .collect();
-
     let total_rows = viewport_text.lines().count();
     let response = SparseScreenResponse {
         encoding: "rows",
@@ -154,7 +152,6 @@ pub(super) fn diff_screen(before: &str, after: &str, since: String) -> serde_jso
         .filter_map(|row| {
             let old = before_rows.get(row).copied().unwrap_or_default();
             let new = after_rows.get(row).copied().unwrap_or_default();
-
             return (old != new).then(|| return (row, new.trim_end()));
         })
         .collect();

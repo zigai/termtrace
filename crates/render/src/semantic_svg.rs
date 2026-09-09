@@ -1,19 +1,17 @@
 //! Deterministic semantic-state SVG scene construction.
 
-use std::fmt::{self, Display, Formatter, Write};
-use std::mem;
-
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
-use termtrace_model::artifact::save::SemanticFontRole;
-use termtrace_model::terminal::state::{
-    CellState, CellStyle, ColorSpec, CursorStyle, Rgb, SemanticState, WideKind,
-};
-
 use crate::error::Result;
 use crate::font::{
     semantic_font_set, SemanticFontSet, SEMANTIC_RASTER_SYMBOLS_FONT_FAMILY,
     SEMANTIC_RASTER_TEXT_FONT_FAMILY, SEMANTIC_SYMBOLS_FONT_FAMILY, SEMANTIC_TEXT_FONT_FAMILY,
+};
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+use std::fmt::{self, Display, Formatter, Write};
+use std::mem;
+use termtrace_model::artifact::save::SemanticFontRole;
+use termtrace_model::terminal::state::{
+    CellState, CellStyle, ColorSpec, CursorStyle, Rgb, SemanticState, WideKind,
 };
 
 /// Stable semantic SVG renderer identity.
@@ -48,8 +46,10 @@ pub(super) fn render_svg_scene(
 ) -> Result<Vec<u8>> {
     const CELL_WIDTH: u32 = SEMANTIC_CELL_WIDTH as u32;
     const CELL_HEIGHT: u32 = SEMANTIC_CELL_HEIGHT as u32;
+
     let width = u32::from(canvas_cols).saturating_mul(CELL_WIDTH);
     let height = u32::from(canvas_rows).saturating_mul(CELL_HEIGHT);
+
     let mut svg = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" role=\"img\" data-truth-layer=\"semantic_rendering\" data-renderer=\"{SEMANTIC_SVG_RENDERER}\">\n"
     );
@@ -62,7 +62,6 @@ pub(super) fn render_svg_scene(
 
     write_scene_content(&mut svg, state, font_set, embed_font);
     svg.push_str("</svg>\n");
-
     return Ok(svg.into_bytes());
 }
 
@@ -125,12 +124,12 @@ fn resolve_cell<'cell>(
         state.colors.foreground,
         &state.colors.palette,
     );
-
     let mut background = resolve_color(
         cell.style.background,
         state.colors.background,
         &state.colors.palette,
     );
+
     if cell.style.inverse {
         mem::swap(&mut foreground, &mut background);
     }
@@ -297,12 +296,12 @@ fn write_cursor(
     let (Some(column), Some(row)) = (state.cursor.column, state.cursor.row) else {
         return;
     };
+
     let is_wide_tail = state.cursor.wide_tail == Some(true);
     let column = if is_wide_tail {
         let Some(lead_column) = column.checked_sub(1) else {
             return;
         };
-
         lead_column
     } else {
         column
@@ -325,6 +324,7 @@ fn write_cursor(
     let Some(resolved) = resolve_cell(state, font_set, row, cell, embed_font) else {
         return;
     };
+
     let cursor_color = state.colors.cursor.unwrap_or(state.colors.foreground);
 
     match state.cursor.style {
@@ -356,6 +356,7 @@ fn write_cursor(
             } else {
                 u32::from(SEMANTIC_CELL_WIDTH)
             };
+
             let _ = writeln!(
                 svg,
                 "<rect x=\"{}\" y=\"{}\" width=\"{span}\" height=\"{}\" fill=\"{}\"/>",
@@ -392,13 +393,13 @@ fn is_terminal_graphic(grapheme: &str) -> bool {
     if characters.next().is_some() {
         return false;
     }
-
     return ('\u{2500}'..='\u{257f}').contains(&character)
         || ('\u{2580}'..='\u{259f}').contains(&character);
 }
 
 pub(super) fn write_font_faces(svg: &mut String, font_set: &SemanticFontSet) {
     svg.push_str("<style>");
+
     for resource in font_set.resources() {
         let role = resource.role;
         let (family, weight, style) = font_attributes(role, true);
@@ -435,7 +436,6 @@ pub(super) fn select_font_role(
     if font_set.supports_grapheme(SemanticFontRole::SymbolsFallback, grapheme) {
         return SemanticFontRole::SymbolsFallback;
     }
-
     return primary;
 }
 
@@ -443,7 +443,6 @@ fn font_geometry(role: SemanticFontRole) -> (u16, u16) {
     if role == SemanticFontRole::SymbolsFallback {
         return (SEMANTIC_SYMBOLS_FONT_SIZE, SEMANTIC_SYMBOLS_BASELINE);
     }
-
     return (SEMANTIC_FONT_SIZE, SEMANTIC_TEXT_BASELINE);
 }
 
@@ -566,6 +565,7 @@ mod tests {
             select_font_role(font_set, &bold_italic, "A"),
             SemanticFontRole::BoldItalic
         );
+
         for icon in ["\u{f322}", "\u{f0c3}"] {
             assert_eq!(
                 select_font_role(font_set, &bold_italic, icon),
@@ -594,13 +594,15 @@ mod tests {
 
         let first_svg = render_svg(&state).expect("render first SVG");
         let second_svg = render_svg(&state).expect("render second SVG");
-        assert_eq!(first_svg, second_svg);
-        let svg = String::from_utf8(first_svg).expect("semantic SVG is UTF-8");
 
+        assert_eq!(first_svg, second_svg);
+
+        let svg = String::from_utf8(first_svg).expect("semantic SVG is UTF-8");
         assert_eq!(svg.matches("@font-face").count(), 5);
 
         let first_png = render_png(&state).expect("render first PNG");
         let second_png = render_png(&state).expect("render second PNG");
+
         assert_eq!(first_png, second_png);
     }
 
@@ -609,25 +611,24 @@ mod tests {
         let font_set = semantic_font_set().expect("load font set");
         let regular =
             ttf_parser::Face::parse(font_set.regular_face_bytes(), 0).expect("parse regular font");
-
         let advance = regular
             .glyph_index('A')
             .and_then(|g| return regular.glyph_hor_advance(g))
             .expect("glyph advance");
-
         let scaled_advance = (f32::from(advance) * (SEMANTIC_FONT_SIZE as f32)
             / f32::from(regular.units_per_em()))
         .round() as u16;
+
         assert_eq!(scaled_advance, SEMANTIC_CELL_WIDTH);
 
         let symbols =
             ttf_parser::Face::parse(font_set.face_bytes(SemanticFontRole::SymbolsFallback), 0)
                 .expect("parse symbols font");
-
         let symbols_height = (f32::from(symbols.ascender() - symbols.descender())
             * (SEMANTIC_SYMBOLS_FONT_SIZE as f32)
             / f32::from(symbols.units_per_em()))
         .round() as u16;
+
         assert!(symbols_height <= SEMANTIC_CELL_HEIGHT);
     }
 

@@ -1,16 +1,14 @@
 //! Linux abstract-socket framing and actor response deadlines.
 
+use crate::{Error, Result};
 use std::{
     os::{linux::net::SocketAddrExt as _, unix::net::SocketAddr},
     time::Duration,
 };
-
 use termtrace_model::protocol::control::{
     ActionPostcondition, ControlCommand, InputSequenceAtom, MAX_CONTROL_MESSAGE_BYTES,
 };
 use uuid::Uuid;
-
-use crate::{Error, Result};
 
 const CONTROL_SOCKET_PREFIX: &str = "termtrace-control-";
 const DEFAULT_CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -70,22 +68,19 @@ pub(super) fn validate_frame(encoded: &[u8]) -> Result<()> {
                 .to_owned(),
         });
     }
-
     return Ok(());
 }
 
 fn input_sequence_response_timeout(atoms: &[InputSequenceAtom], pace_ns: u64) -> Duration {
     let gaps = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
     let pacing = Duration::from_nanos(pace_ns.saturating_mul(gaps)).min(MAX_INPUT_SEQUENCE_PACING);
-
     return DEFAULT_CONTROL_TIMEOUT.saturating_add(pacing);
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
+    use std::time::Duration;
     use termtrace_model::{
         execution::event::InputKind,
         protocol::control::{ControlCommand, InputSequenceAtom},
@@ -95,6 +90,7 @@ mod tests {
     #[test]
     fn rejects_unterminated_and_oversized_frames() {
         assert!(validate_frame(br#"{"version":1}"#).is_err());
+
         let mut oversized = vec![b'x'; usize::try_from(MAX_CONTROL_MESSAGE_BYTES).unwrap()];
         oversized.push(b'\n');
         assert!(validate_frame(&oversized).is_err());

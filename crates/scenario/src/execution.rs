@@ -1,3 +1,9 @@
+use crate::{
+    artifact::{publish_failure, snapshot_path, write_json},
+    document::{to_environment_spec, validate},
+    error::{invalid, operation},
+    Result,
+};
 use std::{
     collections::BTreeSet,
     ffi::OsString,
@@ -6,7 +12,6 @@ use std::{
     sync::atomic::AtomicBool,
     time::Duration,
 };
-
 use termtrace_engine::{
     analysis::diagnostics::diagnose_snapshot,
     observation::{observe_session_with_options, state_text, StatePoint},
@@ -16,6 +21,10 @@ use termtrace_engine::{
 use termtrace_evidence::{
     event_log::EventLogCursor,
     session::{validate_completed_session, SessionSnapshot},
+};
+use termtrace_model::scenario::{
+    Scenario, ScenarioFailure, ScenarioFrameSnapshot, ScenarioInput, ScenarioReport,
+    ScenarioStatus, ScenarioStep, ScenarioStepResult, ScenarioTimelineAssertion, SCENARIO_VERSION,
 };
 use termtrace_model::{
     execution::event::{Event, InputKind},
@@ -27,17 +36,6 @@ use termtrace_model::{
 };
 use termtrace_sdk::{send_request, Session, StableCaptureOptions, Terminal};
 use uuid::Uuid;
-
-use crate::{
-    artifact::{publish_failure, snapshot_path, write_json},
-    document::{to_environment_spec, validate},
-    error::{invalid, operation},
-    Result,
-};
-use termtrace_model::scenario::{
-    Scenario, ScenarioFailure, ScenarioFrameSnapshot, ScenarioInput, ScenarioReport,
-    ScenarioStatus, ScenarioStep, ScenarioStepResult, ScenarioTimelineAssertion, SCENARIO_VERSION,
-};
 
 /// Execute a scenario in a fresh canonical session.
 pub fn run(
@@ -66,7 +64,6 @@ pub(crate) fn run_validated(
     update_snapshots: bool,
 ) -> Result<ScenarioReport> {
     let failure_root = failure_root.into();
-
     let terminal = Terminal::new(binary, evidence_root);
     let command = scenario.launch.command.iter().map(OsString::from);
 
@@ -75,6 +72,7 @@ pub(crate) fn run_validated(
         .geometry(scenario.launch.geometry.cols, scenario.launch.geometry.rows)
         .startup_timeout(Duration::from_millis(scenario.launch.timeout_ms))
         .environment(to_environment_spec(&scenario.launch.environment)?);
+
     if let Some(limit) = scenario.launch.output_byte_budget {
         builder = builder.output_byte_budget(limit);
     }
@@ -109,10 +107,8 @@ pub(crate) fn run_validated(
                     &ControlRequest::new(ControlCommand::Snapshot),
                 )
                 .ok();
-
                 let _stop_result =
                     session.stop(Some(Duration::from_millis(scenario.launch.timeout_ms)));
-
                 let failure_artifacts = failure_root.join(session.session_id().to_string());
 
                 let report = ScenarioReport {
@@ -132,7 +128,6 @@ pub(crate) fn run_validated(
                     &report,
                     final_snapshot.as_ref(),
                 )?;
-
                 return Ok(report);
             }
         }
@@ -164,7 +159,6 @@ pub(crate) fn run_validated(
         };
 
         publish_failure(&failure_artifacts, scenario, &report, None)?;
-
         return Ok(report);
     }
 
@@ -223,7 +217,6 @@ fn validate_replay_closure(session: &Path, steps: &[ScenarioStepResult]) -> Resu
     if page.entries.is_empty() {
         return Err(invalid("replay closure produced an empty timeline page"));
     }
-
     return Ok(());
 }
 
@@ -236,7 +229,6 @@ fn execute_step(
     update_snapshots: bool,
 ) -> StdResult<ScenarioStepResult, ScenarioFailure> {
     let mut request_ids: Vec<Uuid> = Vec::new();
-
     let state_hash = match step {
         ScenarioStep::WaitScreen(wait) => {
             let predicate = match (&wait.contains, &wait.absent) {
@@ -260,7 +252,6 @@ fn execute_step(
                     Duration::from_millis(wait.timeout_ms.unwrap_or(scenario.launch.timeout_ms)),
                 )
                 .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
-
             let wait_satisfied = matched.matched
                 && if wait.stable_for_ms == 0 {
                     matched.quality == ScreenWaitQuality::MatchedUnsettled
@@ -321,7 +312,6 @@ fn execute_step(
             session.send(&request).map_err(|error| {
                 return step_failure(index, step, request_ids.clone(), error.to_string());
             })?;
-
             None
         }
 
@@ -397,7 +387,6 @@ fn execute_step(
         ScenarioStep::AssertTimeline(assertion) => {
             assert_timeline(session.path(), assertion)
                 .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
-
             None
         }
 
@@ -480,7 +469,6 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
 
     let snapshot = SessionSnapshot::capture(session, None)
         .map_err(|error| return operation("snapshot timeline assertion", error))?;
-
     let marker_time = |label: &str| -> Result<u64> {
         let mut cursor = EventLogCursor::open(snapshot.path().join("events.jsonl"))
             .map_err(|error| return operation("read timeline assertion", error))?;
@@ -503,7 +491,6 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
                 "timeline marker `{label}` must occur exactly once, found {count}"
             )));
         }
-
         return Ok(time);
     };
 

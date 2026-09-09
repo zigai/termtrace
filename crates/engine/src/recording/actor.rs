@@ -1,19 +1,17 @@
 //! Explicit single-owner state for one live recording session.
 
-use std::{io::Write, time::Instant};
-
-use portable_pty::ExitStatus;
-use termtrace_evidence::{event_log::EventLogWriter, request_journal::MutationJournal};
-use termtrace_model::execution::session::{
-    RecordingFailurePolicy, ResourceLimitOutcome, ResourceLimits,
-};
-use uuid::Uuid;
-
 use super::{
     control::{MutationHistory, PendingInputSequence, ScreenWaiter},
     model::SpawnedCommand,
     presentation::LiveTerminal,
 };
+use portable_pty::ExitStatus;
+use std::{io::Write, time::Instant};
+use termtrace_evidence::{event_log::EventLogWriter, request_journal::MutationJournal};
+use termtrace_model::execution::session::{
+    RecordingFailurePolicy, ResourceLimitOutcome, ResourceLimits,
+};
+use uuid::Uuid;
 
 pub(super) struct RuntimeProgress {
     pub(super) output_closed: bool,

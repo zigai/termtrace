@@ -1,14 +1,12 @@
+use crate::storage::{Error, Result};
 use std::{
     path::PathBuf,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
-
 use termtrace_model::{
     execution::event::{Event, EventLogHeader, EventRecord},
     execution::event_log::PendingOperation,
 };
-
-use crate::storage::{Error, Result};
 
 /// Shared wall-clock and monotonic origins for one recording session.
 #[derive(Clone, Debug)]
@@ -28,7 +26,6 @@ impl SessionClock {
             .duration_since(UNIX_EPOCH)
             .map_err(|_| return Error::ClockBeforeEpoch)?
             .as_nanos();
-
         return Ok(Self {
             monotonic_origin: Instant::now(),
             started_unix_ns,
@@ -99,6 +96,7 @@ impl From<&EventLog> for EventLogSummary {
             pending_operations: log.pending_operations.clone(),
             resource_triggers: [false; 3],
         };
+
         for record in &log.events {
             match &record.event {
                 Event::Output { data } => {

@@ -1,18 +1,4 @@
-use std::{
-    fs::{self, Permissions},
-    os::unix::fs::PermissionsExt as _,
-    thread,
-    time::{Duration, Instant},
-};
-
-use proptest::{collection, prelude::*};
-use tempfile::TempDir;
-use uuid::Uuid;
-
-use termtrace_model::{
-    execution::event::Event, terminal::state::MAX_TERMINAL_COLUMNS, value::ByteString,
-};
-
+use super::support::{header, secure_directory};
 use crate::{
     event_log::{
         DurabilityMode, DurabilityPolicy, EventLog, EventLogCursor, EventLogSummary,
@@ -20,8 +6,18 @@ use crate::{
     },
     Error,
 };
-
-use super::support::{header, secure_directory};
+use proptest::{collection, prelude::*};
+use std::{
+    fs::{self, Permissions},
+    os::unix::fs::PermissionsExt as _,
+    thread,
+    time::{Duration, Instant},
+};
+use tempfile::TempDir;
+use termtrace_model::{
+    execution::event::Event, terminal::state::MAX_TERMINAL_COLUMNS, value::ByteString,
+};
+use uuid::Uuid;
 
 #[test]
 fn canonical_validation_and_live_resume_cross_compressed_segments() {
@@ -32,6 +28,7 @@ fn canonical_validation_and_live_resume_cross_compressed_segments() {
     let clock = SessionClock::now().expect("clock");
     let mut writer = EventLogWriter::create(&path, &header(&clock), clock).expect("writer");
     let payload = vec![b'x'; 48 * 1024];
+
     for _ in 0..620 {
         writer
             .append(Event::Output {
@@ -47,6 +44,7 @@ fn canonical_validation_and_live_resume_cross_compressed_segments() {
             signal_name: None,
         })
         .expect("exit");
+
     assert_eq!(
         fs::metadata(&path).expect("root metadata").len(),
         16 * 1024 * 1024
@@ -54,13 +52,16 @@ fn canonical_validation_and_live_resume_cross_compressed_segments() {
     assert!(session
         .join("events.jsonl.segments/00000000000000000001.zst")
         .is_file());
+
     let summary = EventLogSummary::read(&path).expect("validate all chunks");
+
     assert_eq!(summary.event_count, 621);
     assert_eq!(summary.output_bytes, 620 * 48 * 1024);
     assert_eq!(
         summary.terminal.expect("terminal record").hash,
         writer.current_hash()
     );
+
     let (start, end) = writer.follow_cursors(510);
     let (device, inode, hash) = writer.source_identity();
     let mut suffix = EventLogCursor::open(&path).expect("suffix cursor");
@@ -108,6 +109,7 @@ fn observation_time_survives_delayed_append_and_is_integrity_bound() {
     let log = EventLog::read(&path).expect("verify observation");
     assert_eq!(log.events[0].observed_monotonic_ns, Some(expected));
     assert!(log.events[0].monotonic_ns >= expected);
+
     let bytes = fs::read_to_string(&path).expect("read");
     fs::write(
         &path,
@@ -118,6 +120,7 @@ fn observation_time_survives_delayed_append_and_is_integrity_bound() {
         ),
     )
     .expect("tamper");
+
     assert!(
         EventLog::read(&path).is_err(),
         "observation time is covered by the event hash"
@@ -238,8 +241,10 @@ fn bounded_policy_flushes_an_idle_pending_prefix() {
         .expect("append buffered output");
 
     thread::sleep(Duration::from_millis(5));
+
     assert!(writer.flush_due().expect("flush due prefix"));
     assert_eq!(writer.durable_boundary(), writer.observed_boundary());
+
     let record = writer.durability_record();
     assert!(record.maximum_observed_uncommitted_ns >= 1_000_000);
     assert!(record.final_sync_completed);

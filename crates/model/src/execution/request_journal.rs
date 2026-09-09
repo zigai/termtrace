@@ -1,10 +1,9 @@
 //! Persistent mutation deduplication value contracts.
 
+use crate::protocol::control::ControlResponse;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use crate::protocol::control::ControlResponse;
 
 /// Relative persistent mutation journal path in a session.
 pub const MUTATION_JOURNAL_NAME: &str = "requests.jsonl";

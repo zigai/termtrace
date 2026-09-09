@@ -1,5 +1,13 @@
 use crate::cli::output::ResponseWriter;
-
+use crate::cli::{
+    analysis::args::{EventsArgs, OutputArgs},
+    output::{
+        projection_warning, response_output, write_follow_json_line, write_follow_stdout,
+        write_json_line, write_projection_warning,
+    },
+    session_helpers::resolve_session_path,
+};
+use miette::{IntoDiagnostic as _, Result};
 use std::{
     io::{self, BufRead as _, BufReader, BufWriter, Seek as _, SeekFrom, Write as _},
     path::Path,
@@ -7,8 +15,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-
-use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::timeline::resolve_session_source_selection;
 use termtrace_evidence::{
     artifact::write_secure, event_log::EventLogCursor, session::validate_completed_session,
@@ -21,20 +27,12 @@ use termtrace_model::{
 use termtrace_sdk::request;
 use termtrace_terminal::ControlStripper;
 
-use crate::cli::{
-    analysis::args::{EventsArgs, OutputArgs},
-    output::{
-        projection_warning, response_output, write_follow_json_line, write_follow_stdout,
-        write_json_line, write_projection_warning,
-    },
-    session_helpers::resolve_session_path,
-};
-
 pub(in crate::cli) fn run_output(
     response: &mut ResponseWriter,
     arguments: OutputArgs,
 ) -> Result<ExitCode> {
     let session = resolve_session_path(arguments.session)?;
+
     if arguments.follow {
         if arguments.manifest.is_some() {
             return Err(miette::miette!(
@@ -51,7 +49,6 @@ pub(in crate::cli) fn run_output(
                 "live output following currently supports event-sequence bounds only"
             ));
         }
-
         return follow_output(
             response,
             &session,
@@ -74,6 +71,7 @@ pub(in crate::cli) fn run_output(
     let event_count = completion.event_count;
     let from_event = arguments.from_event_seq.unwrap_or(0);
     let to_event = arguments.to_event_seq.unwrap_or(event_count);
+
     if from_event > to_event || to_event > event_count {
         return Err(miette::miette!(
             "output event range must satisfy 0 <= FROM <= TO <= {event_count}"
@@ -88,8 +86,10 @@ pub(in crate::cli) fn run_output(
     let mut source_bytes = 0_u64;
     let mut output_bytes = 0_u64;
     let mut stripper = ControlStripper::default();
+
     {
         let mut writer = BufWriter::new(&mut staged);
+
         while let Some(record) = cursor.next_record().into_diagnostic()? {
             if record.seq < from_event
                 || record.seq >= to_event
@@ -106,7 +106,6 @@ pub(in crate::cli) fn run_output(
                 let stripped;
                 let bytes = if arguments.strip_controls {
                     stripped = stripper.feed(data.as_bytes());
-
                     stripped.as_slice()
                 } else {
                     data.as_bytes()
@@ -125,7 +124,6 @@ pub(in crate::cli) fn run_output(
     cursor
         .validate_boundary(event_count, &completion.final_event_hash)
         .into_diagnostic()?;
-
     let _pending = cursor.finish().into_diagnostic()?;
     let alternate_screen = stripper.alternate_screen_observed();
     let quality = if !arguments.strip_controls {
@@ -171,7 +169,6 @@ pub(in crate::cli) fn run_output(
     staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
 
     let mut output = response_output(response);
-
     match io::copy(&mut staged, &mut output).and_then(|_| return output.flush()) {
         Ok(()) => return Ok(ExitCode::SUCCESS),
         Err(error) if error.kind() == io::ErrorKind::BrokenPipe => return Ok(ExitCode::SUCCESS),
@@ -198,12 +195,10 @@ fn follow_output(
                 let stripped;
                 let bytes = if strip_controls {
                     stripped = stripper.feed(data.as_bytes());
-
                     stripped.as_slice()
                 } else {
                     data.as_bytes()
                 };
-
                 return write_follow_stdout(response, bytes);
             }
 
@@ -232,6 +227,7 @@ pub(in crate::cli) fn run_events(
     arguments: EventsArgs,
 ) -> Result<ExitCode> {
     let session = resolve_session_path(arguments.session)?;
+
     if arguments.follow {
         if arguments.range.from_marker.is_some()
             || arguments.range.to_marker.is_some()
@@ -242,7 +238,6 @@ pub(in crate::cli) fn run_events(
                 "live event following currently supports event-sequence bounds only"
             ));
         }
-
         return follow_events(
             response,
             &session,
@@ -266,6 +261,7 @@ pub(in crate::cli) fn run_events(
     let event_count = completion.event_count;
     let from_event = arguments.from_event_seq.unwrap_or(0);
     let to_event = arguments.to_event_seq.unwrap_or(event_count);
+
     if from_event > to_event || to_event > event_count {
         return Err(miette::miette!(
             "event range must satisfy 0 <= FROM <= TO <= {event_count}"
@@ -277,10 +273,13 @@ pub(in crate::cli) fn run_events(
     let mut total = 0_usize;
     let mut returned = 0_usize;
     let mut next_event_seq = None;
+
     {
         let mut writer = BufWriter::new(&mut staged);
+
         while let Some(record) = cursor.next_record().into_diagnostic()? {
             let kind = event_type(&record.event);
+
             if record.seq < from_event
                 || record.seq >= to_event
                 || time_range.is_some_and(|range| return !range.contains(record.monotonic_ns))
@@ -316,19 +315,18 @@ pub(in crate::cli) fn run_events(
     cursor
         .validate_boundary(event_count, &completion.final_event_hash)
         .into_diagnostic()?;
-
     let _pending = cursor.finish().into_diagnostic()?;
 
     staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
     for line in BufReader::new(&mut staged).lines() {
         let value: EventProjection =
             serde_json::from_str(&line.into_diagnostic()?).into_diagnostic()?;
-
         write_json_line(response, &value)?;
     }
 
     let start = arguments.page.offset.min(total);
     let end = start.saturating_add(returned);
+
     if start != 0 || end < total {
         write_json_line(
             response,
@@ -399,7 +397,6 @@ fn follow_records(
             let data = match request(session, ControlCommand::EventCursor { next_event_seq }) {
                 Ok(data) => {
                     control_failure_since = None;
-
                     data
                 }
                 Err(_) if session.join("completion.json").is_file() => continue,
@@ -410,7 +407,6 @@ fn follow_records(
                     }
 
                     thread::sleep(Duration::from_millis(20));
-
                     continue;
                 }
             };
@@ -445,6 +441,7 @@ fn follow_records(
 
             (durable.next_event_seq, Some(durable), None)
         };
+
         if next_event_seq > available {
             return Err(miette::miette!(
                 "event resume cursor {next_event_seq} exceeds durable event count {available}"
@@ -457,14 +454,17 @@ fn follow_records(
         // is published until its endpoint matches the independent actor/completion.
         staged.set_len(0).into_diagnostic()?;
         staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
+
         {
             let mut staged_writer = BufWriter::new(&mut staged);
+
             while cursor.next_event_seq() < available {
                 let record = cursor.next_record().into_diagnostic()?.ok_or_else(|| {
                     return miette::miette!("durable event prefix is incomplete");
                 })?;
 
                 let kind = event_type(&record.event);
+
                 if record.seq < next_event_seq
                     || record.seq >= emit_end
                     || (!event_types.is_empty()
@@ -491,8 +491,10 @@ fn follow_records(
         staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
 
         let mut staged_reader = BufReader::new(&mut staged);
+
         loop {
             line.clear();
+
             if staged_reader
                 .read_until(b'\n', &mut line)
                 .into_diagnostic()?
@@ -509,6 +511,7 @@ fn follow_records(
         }
 
         next_event_seq = emit_end;
+
         if completion_exists && end_event_seq.is_some_and(|end| return end > available) {
             return Err(miette::miette!(
                 "event end cursor exceeds completed event count {available}"

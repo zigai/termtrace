@@ -1,16 +1,14 @@
 //! Stable evidence-backed analysis report contracts.
 
-use std::path::PathBuf;
-
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::{
     execution::event::OperationStatus, terminal::diff::ValueChange,
     terminal::observation::StatePoint, terminal::replay::StateRecord, terminal::state::CursorState,
     terminal::vt::VtToken, value::pagination::OutputPage,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use uuid::Uuid;
 
 /// Canonical request and intent/result boundaries defining one input action.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

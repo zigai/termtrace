@@ -1,10 +1,13 @@
+use super::{
+    filter_path_value, mapping::mapped_source_frame, plan_error, validation::validate_ass_resource,
+};
+use crate::{Error, Result};
 use std::{
     fmt::Write as _,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     str,
 };
-
 use termtrace_evidence::artifact::{secure_file, write_secure};
 use termtrace_model::artifact::presentation::{
     AnnotationAnchor, AnnotationPosition, CaptionLayout, ChangeMode, ChangeRegion, ChangeSource,
@@ -12,12 +15,6 @@ use termtrace_model::artifact::presentation::{
     PreviewOptions,
 };
 use termtrace_render::semantic_font_set;
-
-use crate::{Error, Result};
-
-use super::{
-    filter_path_value, mapping::mapped_source_frame, plan_error, validation::validate_ass_resource,
-};
 
 pub(super) fn render_contact_sheet(
     source: &Path,
@@ -30,7 +27,6 @@ pub(super) fn render_contact_sheet(
         .map(|frame| return format!("eq(n\\,{frame})"))
         .collect::<Vec<_>>()
         .join("+");
-
     let rows = selected_frames.len().div_ceil(usize::from(options.columns));
     let filter = format!(
         "select={selection},scale={}:-2:flags=lanczos,tile={}x{}:nb_frames={}:padding=4:margin=4:color=black",
@@ -56,13 +52,13 @@ pub(super) fn render_contact_sheet(
         })?;
 
     write_secure(&staging.join("contact-sheet.log"), &process.stderr)?;
+
     if !process.status.success() {
         return Err(plan_error(format!(
             "FFmpeg contact-sheet rendering failed with {}",
             process.status
         )));
     }
-
     return Ok(());
 }
 
@@ -105,13 +101,13 @@ pub(super) fn render_low_resolution_preview(
         })?;
 
     write_secure(&staging.join("preview.log"), &process.stderr)?;
+
     if !process.status.success() {
         return Err(plan_error(format!(
             "FFmpeg low-resolution preview failed with {}",
             process.status
         )));
     }
-
     return Ok(());
 }
 
@@ -154,11 +150,11 @@ fn append_semantic_change_visualization(
 
     let (base, mut prior) = if change.mode == ChangeMode::SideDiff {
         filters.push(format!("[{input}]split=2[changebase][changeinput]"));
-
         (Some("changebase"), "changeinput".to_owned())
     } else {
         (None, input.to_owned())
     };
+
     for (index, box_) in boxes.iter().enumerate() {
         let next = format!("change{index}");
         let (color, thickness) = match change.mode {
@@ -168,6 +164,7 @@ fn append_semantic_change_visualization(
             ChangeMode::BoundingBox => ("cyan@0.90", "3"),
             ChangeMode::Outline | ChangeMode::SideDiff => ("yellow@0.90", "2"),
         };
+
         filters.push(format!(
             "[{prior}]drawbox=x={}:y={}:w={}:h={}:color={color}:t={thickness}:enable='between(n,{},{})'[{next}]",
             box_.region.x,
@@ -183,10 +180,8 @@ fn append_semantic_change_visualization(
 
     if let Some(base) = base {
         filters.push(format!("[{base}][{prior}]hstack=inputs=2[changeoutput]"));
-
         return Ok("changeoutput".to_owned());
     }
-
     return Ok(prior);
 }
 
@@ -240,7 +235,6 @@ fn bounding_region(regions: &[ChangeRegion]) -> Option<ChangeRegion> {
     let mut left = first.x;
     let mut top = first.y;
     let mut right = first.x.saturating_add(first.width);
-
     let mut bottom = first.y.saturating_add(first.height);
     for region in regions.iter().skip(1) {
         left = left.min(region.x);
@@ -311,6 +305,7 @@ pub(super) fn append_pixel_transforms(
         u32::from(plan.source_height) + if presentation_has_footer(plan) { 48 } else { 0 };
 
     let mut sequence = 0_usize;
+
     for transform in &plan.transforms {
         match transform {
             PixelTransform::CursorMask => {
@@ -443,7 +438,6 @@ fn presentation_canvas_width_before_transforms(plan: &PresentationPlan) -> u32 {
     }) {
         return u32::from(plan.source_width) * 2;
     }
-
     return u32::from(plan.source_width);
 }
 
@@ -508,10 +502,10 @@ pub(super) fn prepare_subtitle_resources(
     }
 
     require_ass_filter()?;
-
     ensure_presentation_font(staging)?;
 
     let mut resources = Vec::new();
+
     if !plan.annotations.is_empty() {
         let generated = staging.join("annotations.ass");
         write_secure(&generated, generated_ass(plan)?.as_bytes())?;
@@ -527,6 +521,7 @@ pub(super) fn prepare_subtitle_resources(
                 source,
             };
         })?;
+
         if blake3::hash(&bytes).to_hex().as_str() != subtitle.resource_hash {
             return Err(plan_error(format!(
                 "ASS subtitle resource {} changed after planning",
@@ -561,7 +556,6 @@ fn require_ass_filter() -> Result<()> {
             "FFmpeg ASS/libass filter is required for annotations or subtitle tracks",
         ));
     }
-
     return Ok(());
 }
 
@@ -577,6 +571,7 @@ fn generated_ass(plan: &PresentationPlan) -> Result<String> {
         presentation_canvas_width(plan),
         canvas_height
     );
+
     for (index, annotation) in plan.annotations.iter().enumerate() {
         if plan
             .annotations
@@ -592,6 +587,7 @@ fn generated_ass(plan: &PresentationPlan) -> Result<String> {
             &annotation.style.background,
             annotation.style.background_opacity,
         )?;
+
         writeln!(
             &mut ass,
             "Style: A{},Fira Code,{},{foreground},&H00000000,{background},{background},0,0,0,0,100,100,0,0,3,{},0,7,0,0,0,1",
@@ -688,7 +684,6 @@ fn presentation_canvas_width(plan: &PresentationPlan) -> u16 {
     }) {
         return plan.source_width.saturating_mul(2);
     }
-
     return plan.source_width;
 }
 
@@ -796,7 +791,6 @@ pub(super) fn command_version(command: &str) -> Result<String> {
     if !output.status.success() {
         return Err(plan_error(format!("{command} -version failed")));
     }
-
     return String::from_utf8_lossy(&output.stdout)
         .lines()
         .next()
@@ -828,7 +822,6 @@ pub(super) fn probe_delivery_video(staging: &Path) -> Result<serde_json::Value> 
 
     if !output.status.success() {
         write_secure(&staging.join("ffprobe.log"), &output.stderr)?;
-
         return Err(plan_error("FFprobe rejected the presentation output"));
     }
 
@@ -839,7 +832,6 @@ pub(super) fn probe_delivery_video(staging: &Path) -> Result<serde_json::Value> 
             source,
         };
     })?;
-
     return Ok(value);
 }
 
@@ -878,6 +870,5 @@ pub(super) fn write_source_frame_hashes(source_video: &Path, staging: &Path) -> 
     if metadata.len() == 0 {
         return Err(plan_error("FFmpeg source-frame hash output was empty"));
     }
-
     return Ok(());
 }

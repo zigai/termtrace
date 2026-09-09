@@ -1,3 +1,7 @@
+use super::{invalid_replay, json_error};
+use crate::{registry::SessionRegistry, Error, Result};
+use nix::{libc::O_NOFOLLOW, unistd::geteuid};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
     io::{ErrorKind, Read as _, Write as _},
@@ -5,23 +9,16 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
 };
-
-use nix::{libc::O_NOFOLLOW, unistd::geteuid};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use termtrace_evidence::{
     artifact::{secure_file, sync_directory},
     event_log::canonical_source_fingerprint,
     session::read_manifest,
 };
 
-use super::{invalid_replay, json_error};
-use crate::{registry::SessionRegistry, Error, Result};
-
 pub(crate) fn check_cancelled(cancelled: Option<&AtomicBool>) -> Result<()> {
     if cancelled.is_some_and(|flag| return flag.load(Ordering::Relaxed)) {
         return Err(invalid_replay("semantic source query cancelled"));
     }
-
     return Ok(());
 }
 
@@ -44,12 +41,12 @@ impl SourceIdentity {
         source
             .0
             .push(file_identity(&session.join("completion.json"))?);
-
         return Ok(source);
     }
 
     pub(crate) fn capture_candidate(session: &Path) -> Result<Self> {
         let mut paths = vec![session.join("events.jsonl"), session.join("session.json")];
+
         if let Some(profile) = read_manifest(session)?.ghostty_visual {
             paths.push(session.join(profile.replay_profile));
         }
@@ -76,12 +73,12 @@ impl SourceIdentity {
         }
 
         let completed = Self::capture(session)?;
+
         if !completed.0.starts_with(&self.0) {
             return Err(invalid_replay(
                 "canonical source changed while publishing completion",
             ));
         }
-
         return Ok(completed);
     }
 
@@ -91,7 +88,6 @@ impl SourceIdentity {
                 "canonical source changed during verification or replay",
             ));
         }
-
         return Ok(());
     }
 }
@@ -173,7 +169,6 @@ pub(crate) fn decode<T: Serialize + DeserializeOwned>(session: &Path, bytes: &[u
     }
 
     authenticated.source.check(session)?;
-
     return Ok(authenticated.payload);
 }
 
@@ -186,6 +181,7 @@ fn verification_key(session: &Path) -> Result<[u8; 32]> {
             source,
         };
     })?;
+
     let canonical_root = root.canonicalize().map_err(|source| {
         return Error::Filesystem {
             path: root.to_path_buf(),
@@ -200,6 +196,7 @@ fn verification_key(session: &Path) -> Result<[u8; 32]> {
     }
 
     let path = root.join("verification-cache.key");
+
     if !path.try_exists().map_err(|source| {
         return Error::Filesystem {
             path: path.clone(),
@@ -227,6 +224,7 @@ fn verification_key(session: &Path) -> Result<[u8; 32]> {
                         source,
                     };
                 })?;
+
             match fs::hard_link(&temporary, &path) {
                 Ok(()) => sync_directory(root)?,
                 Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
@@ -297,6 +295,5 @@ fn verification_key(session: &Path) -> Result<[u8; 32]> {
             "local verification-cache key changed while reading",
         ));
     }
-
     return Ok(key);
 }

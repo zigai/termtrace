@@ -81,7 +81,6 @@ pub use protocol::{
 };
 #[cfg(feature = "in-process")]
 pub use screen::{Screen, StableCaptureOptions, StableScreenCapture};
-
 pub use termtrace_model::execution::environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec};
 pub use termtrace_model::protocol::control::{
     ControlCommand, ControlData, ControlRequest, ControlResponse, ControlResult, PointerOperation,

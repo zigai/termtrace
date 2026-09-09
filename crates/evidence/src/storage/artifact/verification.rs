@@ -1,28 +1,25 @@
+use super::{
+    json_error, read_artifact_roots,
+    secure_fs::{nix_filesystem, open_file_at, open_parent_directory, safe_file_name},
+    ARTIFACT_ROOT_LOG,
+};
+use crate::event_log::EventLogCursor;
+use crate::storage::{Error, Result};
+use nix::{
+    fcntl::OFlag,
+    sys::stat::{fstat, Mode, SFlag},
+};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     fs::{self, File},
     path::{Component, Path, PathBuf},
     thread,
 };
-
-use crate::event_log::EventLogCursor;
-use nix::{
-    fcntl::OFlag,
-    sys::stat::{fstat, Mode, SFlag},
-};
-use serde::{Deserialize, Serialize};
 use termtrace_model::artifact::metadata::{
     ArtifactMember, ArtifactSensitivity, ArtifactSourceRange,
 };
 use termtrace_model::execution::{event::Event, event_log::CanonicalBoundary};
-
-use crate::storage::{Error, Result};
-
-use super::{
-    json_error, read_artifact_roots,
-    secure_fs::{nix_filesystem, open_file_at, open_parent_directory, safe_file_name},
-    ARTIFACT_ROOT_LOG,
-};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct ArtifactMemberEnvelope {
@@ -46,7 +43,6 @@ pub fn collect_artifact_members(directory: &Path) -> Result<Vec<ArtifactMember>>
     let mut payloads: Vec<(PathBuf, String)> = Vec::with_capacity(paths.len());
     for relative in paths {
         let normalized = normalized_relative_path(&relative)?;
-
         if normalized != "manifest.json" {
             payloads.push((directory.join(relative), normalized));
         }
@@ -55,16 +51,19 @@ pub fn collect_artifact_members(directory: &Path) -> Result<Vec<ArtifactMember>>
     let worker_count = available_workers(payloads.len());
     let mut indexed = thread::scope(|scope| -> Result<Vec<(usize, ArtifactMember)>> {
         let mut handles = Vec::with_capacity(worker_count);
+
         for worker in 0..worker_count {
             let payloads = &payloads;
             handles.push(
                 scope.spawn(move || -> Result<Vec<(usize, ArtifactMember)>> {
                     let mut members: Vec<(usize, ArtifactMember)> = Vec::new();
+
                     for index in (worker..payloads.len()).step_by(worker_count) {
                         let (path, normalized) = payloads.get(index).ok_or_else(|| {
                             return Error::invalid("artifact hashing index is outside payloads");
                         })?;
                         let (byte_length, hash) = hash_regular_file(path)?;
+
                         members.push((
                             index,
                             ArtifactMember {
@@ -133,7 +132,6 @@ pub fn verify_artifact_members(directory: &Path, expected: &[ArtifactMember]) ->
             "artifact payload members do not match their whole-file manifest",
         ));
     }
-
     return Ok(());
 }
 
@@ -150,6 +148,7 @@ pub fn verify_session_artifacts(
     source_event_hash: Option<&str>,
 ) -> Result<u64> {
     let records = read_artifact_roots(&session.join(ARTIFACT_ROOT_LOG))?;
+
     for record in &records {
         if record.session_manifest_hash != session_manifest_hash
             || record.source_prefix.is_none()
@@ -180,6 +179,7 @@ pub fn verify_session_artifacts(
                 source,
             };
         })?;
+
         if blake3::hash(&manifest_bytes).to_hex().as_str() != record.manifest_hash {
             return Err(Error::invalid(
                 "artifact manifest hash does not match its catalog root",
@@ -188,6 +188,7 @@ pub fn verify_session_artifacts(
 
         let manifest: ArtifactMemberEnvelope = serde_json::from_slice(&manifest_bytes)
             .map_err(|source| return json_error(manifest_path, source))?;
+
         if manifest.source_range != record.source_range {
             return Err(Error::invalid(
                 "artifact catalog source range does not match its manifest",
@@ -212,6 +213,7 @@ fn validate_source_prefix(
     prefix: &CanonicalBoundary,
 ) -> Result<()> {
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+
     if cursor.header().session_manifest_hash != manifest_hash {
         return Err(Error::invalid(
             "artifact prefix has a different source manifest",
@@ -219,6 +221,7 @@ fn validate_source_prefix(
     }
 
     let mut output_bytes = 0_u64;
+
     while cursor.next_event_seq() < prefix.next_event_seq {
         let record = cursor
             .next_record()?
@@ -237,7 +240,6 @@ fn validate_source_prefix(
             "artifact prefix output byte count differs from canonical evidence",
         ));
     }
-
     return Ok(());
 }
 
@@ -259,6 +261,7 @@ fn collect_member_paths(root: &Path, directory: &Path, paths: &mut Vec<PathBuf>)
     }
 
     entries.sort_by_key(fs::DirEntry::file_name);
+
     for entry in entries {
         let path = entry.path();
         let metadata = fs::symlink_metadata(&path).map_err(|source| {
@@ -267,6 +270,7 @@ fn collect_member_paths(root: &Path, directory: &Path, paths: &mut Vec<PathBuf>)
                 source,
             };
         })?;
+
         if metadata.file_type().is_symlink() {
             return Err(Error::invalid("artifact payload contains a symlink"));
         }
@@ -307,7 +311,6 @@ pub(super) fn normalized_relative_path(path: &Path) -> Result<String> {
             "artifact member path uses a non-portable separator",
         ));
     }
-
     return Ok(normalized.to_owned());
 }
 
@@ -327,7 +330,6 @@ pub fn hash_regular_file(path: &Path) -> Result<(u64, String)> {
             source,
         };
     })?;
-
     return Ok((size, hasher.finalize().to_hex().to_string()));
 }
 

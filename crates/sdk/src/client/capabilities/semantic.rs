@@ -21,10 +21,8 @@ impl Semantic<'_> {
         let mut entries = Vec::new();
         visit_session_timeline_while(&self.session.path, all_states, controls, None, |entry| {
             entries.push(entry);
-
             return Ok(true);
         })?;
-
         return Ok(entries);
     }
 
@@ -32,7 +30,6 @@ impl Semantic<'_> {
     pub fn diff(&self, from: StatePoint, to: StatePoint) -> Result<SemanticDiff> {
         let (difference, _, _) =
             diff_session_states_with_semantic_states(&self.session.path, from, to)?;
-
         return Ok(difference);
     }
 

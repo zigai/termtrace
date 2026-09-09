@@ -1,13 +1,7 @@
-use std::{
-    env::temp_dir,
-    fs,
-    io::{self, Read as _, Write as _},
-    os::unix::fs::PermissionsExt as _,
-    path::{absolute, Path},
+use super::{
+    io::{manifest_hash, read_manifest},
+    validation::{validate_manifest, validate_replay_profile_file},
 };
-
-use termtrace_model::execution::event_log::RecoveryReport;
-
 use crate::storage::{
     artifact::{
         commit_directory, open_regular_file_nofollow, secure_file, sync_directory, write_secure,
@@ -15,11 +9,14 @@ use crate::storage::{
     event_log::{EventLog, EventLogCursor, EventLogSummary},
     Error, Result,
 };
-
-use super::{
-    io::{manifest_hash, read_manifest},
-    validation::{validate_manifest, validate_replay_profile_file},
+use std::{
+    env::temp_dir,
+    fs,
+    io::{self, Read as _, Write as _},
+    os::unix::fs::PermissionsExt as _,
+    path::{absolute, Path},
 };
+use termtrace_model::execution::event_log::RecoveryReport;
 
 /// Owned, verified disk snapshot of a finite canonical prefix, without a completion claim.
 pub struct SessionSnapshot {
@@ -51,7 +48,6 @@ impl SessionSnapshot {
                 &source.join(&profile.replay_profile),
                 &directory.path().join(&profile.replay_profile),
             )?;
-
             validate_replay_profile_file(directory.path(), &manifest)?;
         }
 
@@ -72,6 +68,7 @@ impl SessionSnapshot {
         let path = directory.path().join("events.jsonl");
         let mut output = io::BufWriter::new(secure_file(&path)?);
         write_snapshot_record(&path, &mut output, cursor.header())?;
+
         while event_count.is_none_or(|count| return cursor.next_event_seq() < count) {
             let Some(record) = cursor.next_record()? else {
                 break;
@@ -113,7 +110,6 @@ fn write_snapshot_record(
     output
         .write_all(b"\n")
         .map_err(|error| return Error::filesystem(path, error))?;
-
     return Ok(());
 }
 
@@ -131,7 +127,6 @@ fn write_snapshot_record(
 pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryReport> {
     let destination =
         absolute(destination).map_err(|error| return Error::filesystem(destination, error))?;
-
     let parent = destination
         .parent()
         .ok_or_else(|| return Error::invalid("recovery destination has no parent"))?;
@@ -155,7 +150,6 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
             &source.join(&profile.replay_profile),
             &staging.path().join(&profile.replay_profile),
         )?;
-
         validate_replay_profile_file(staging.path(), &manifest)?;
     }
 
@@ -196,7 +190,6 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
     })?;
 
     write_secure(&recovery_path, &bytes)?;
-
     sync_directory(staging.path())?;
     commit_directory(parent, staging.path(), &destination)?;
 
@@ -205,6 +198,7 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
 
 fn copy_context_file(source: &Path, destination: &Path) -> Result<()> {
     let (input, size) = open_regular_file_nofollow(source)?;
+
     if size > 4 * 1024 * 1024 {
         return Err(Error::invalid("recovery context file exceeds 4 MiB"));
     }
@@ -220,6 +214,5 @@ fn copy_context_file(source: &Path, destination: &Path) -> Result<()> {
     output
         .sync_all()
         .map_err(|error| return Error::filesystem(destination, error))?;
-
     return Ok(());
 }

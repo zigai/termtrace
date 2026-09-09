@@ -1,3 +1,9 @@
+use super::{
+    runtime::{emit_endpoint, emit_event},
+    terminal::{query_terminal, resize_and_query, RawTerminalGuard, TerminalInputDrain},
+};
+use crate::{error::finish_with_cleanup, Error, Result};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs,
@@ -10,8 +16,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-
-use serde::{Deserialize, Serialize};
 use termtrace_evidence::{
     artifact::write_secure,
     event_log::EventLogCursor,
@@ -22,12 +26,6 @@ use termtrace_model::{
     value::geometry::TerminalGeometryReport,
 };
 use uuid::Uuid;
-
-use super::{
-    runtime::{emit_endpoint, emit_event},
-    terminal::{query_terminal, resize_and_query, RawTerminalGuard, TerminalInputDrain},
-};
-use crate::{error::finish_with_cleanup, Error, Result};
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
@@ -65,7 +63,6 @@ struct PlaybackPosition {
 pub fn playback_worker(session: &Path, socket: &Path, geometry_file: &Path) -> Result<()> {
     let mut raw = RawTerminalGuard::enter(true)?;
     let result = run_worker(session, socket, geometry_file, raw.is_active());
-
     return finish_with_cleanup(result, raw.restore());
 }
 
@@ -126,6 +123,7 @@ fn run_worker(
             .take(64 * 1024 + 1)
             .read_until(b'\n', &mut line)
             .map_err(|source| return filesystem(socket, source))?;
+
         if count == 0 {
             return Ok(());
         }
@@ -139,7 +137,6 @@ fn run_worker(
         let endpoint = match request {
             WorkerRequest::Close => {
                 write_response(input.get_mut(), &WorkerResponse::Closed, socket)?;
-
                 return Ok(());
             }
             WorkerRequest::Advance { endpoint } => endpoint,
@@ -160,6 +157,7 @@ fn run_worker(
             &mut resizes,
             terminal_input,
         );
+
         match result {
             Ok((position, geometry)) => {
                 write_response(
@@ -178,7 +176,6 @@ fn run_worker(
                     },
                     socket,
                 )?;
-
                 return Err(error);
             }
         }
@@ -212,6 +209,7 @@ fn advance(
     let mut drain = TerminalInputDrain::start(terminal_input)?;
     let result = advance_events(session, endpoint, last, resizes);
     let position = finish_with_cleanup(result, drain.stop())?;
+
     let geometry = query_terminal()?;
 
     if (geometry.cols, geometry.rows) != (endpoint.cols, endpoint.rows) {
@@ -219,7 +217,6 @@ fn advance(
             "native replay endpoint grid differs from canonical semantics",
         ));
     }
-
     return Ok((position, geometry));
 }
 
@@ -230,6 +227,7 @@ fn advance_events(
     resizes: &mut HashMap<Uuid, (u16, u16)>,
 ) -> Result<PlaybackPosition> {
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+
     if cursor.header().session_id != endpoint.session_id
         || cursor.header().session_manifest_hash != endpoint.session_manifest_hash
     {
@@ -246,6 +244,7 @@ fn advance_events(
         let record = cursor
             .next_record()?
             .ok_or_else(|| return invalid("native replay source prefix is not available"))?;
+
         if let Event::Output { data } = &record.event {
             output_bytes = output_bytes
                 .saturating_add(u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX));
@@ -261,6 +260,7 @@ fn advance_events(
         let Some(target) = endpoint.event_seq else {
             continue;
         };
+
         if record.seq > target {
             continue;
         }
@@ -345,7 +345,6 @@ fn advance_events(
 fn write_response(stream: &mut UnixStream, response: &WorkerResponse, path: &Path) -> Result<()> {
     serde_json::to_writer(&mut *stream, response)
         .map_err(|source| return json_error(path, source))?;
-
     return stream
         .write_all(b"\n")
         .map_err(|source| return filesystem(path, source));

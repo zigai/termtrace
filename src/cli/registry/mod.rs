@@ -2,21 +2,18 @@ use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
 
-use args::RegistrySubcommand;
-
-use std::{
-    ffi::OsString, fmt::Write as _, os::unix::ffi::OsStringExt as _, path::PathBuf,
-    process::ExitCode,
-};
-
-use miette::{IntoDiagnostic as _, Result};
-use termtrace_engine::registry::SessionRegistry;
-use termtrace_model::registry::RegistryEntry;
-
 use crate::cli::{
     output::{write_json_line, write_stdout},
     registry::args::{GcArgs, ListArgs, RegisterArgs, RemoveArgs, ResolveArgs},
 };
+use args::RegistrySubcommand;
+use miette::{IntoDiagnostic as _, Result};
+use std::{
+    ffi::OsString, fmt::Write as _, os::unix::ffi::OsStringExt as _, path::PathBuf,
+    process::ExitCode,
+};
+use termtrace_engine::registry::SessionRegistry;
+use termtrace_model::registry::RegistryEntry;
 
 pub(super) fn run_register(
     response: &mut ResponseWriter,
@@ -58,7 +55,6 @@ pub(super) fn run_resolve(
 
     let mut path = entry.session_path().into_os_string().into_vec();
     path.push(b'\n');
-
     return write_stdout(response, path);
 }
 
@@ -89,11 +85,9 @@ pub(super) fn run_list(response: &mut ResponseWriter, arguments: ListArgs) -> Re
     let alias_width = rows
         .iter()
         .fold("ALIAS".len(), |width, row| return width.max(row.0.len()));
-
     let lifecycle_width = rows.iter().fold("LIFECYCLE".len(), |width, row| {
         return width.max(row.1.len());
     });
-
     let session_id_width = rows.iter().fold("SESSION ID".len(), |width, row| {
         return width.max(row.2.len());
     });

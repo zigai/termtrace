@@ -1,11 +1,3 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    io::Read as _,
-    path::Path,
-};
-
-use termtrace_model::{artifact::bundle::BundleManifest, artifact::metadata::ArtifactMember};
-
 use crate::{
     auxiliary::bundle::{
         collect_regular_files, hash_regular_file, open_regular_nofollow, validate_relative_path,
@@ -14,6 +6,12 @@ use crate::{
     },
     storage::{is_lowercase_blake3, Error, Result},
 };
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::Read as _,
+    path::Path,
+};
+use termtrace_model::{artifact::bundle::BundleManifest, artifact::metadata::ArtifactMember};
 
 /// Verify a bundle directory and return its validated manifest.
 ///
@@ -51,14 +49,15 @@ pub fn verify(directory: &Path, expected: Option<&BundleIdentity>) -> Result<Bun
     }
 
     verify_members(directory, &manifest.members)?;
-
     return Ok(manifest);
 }
 
 fn verify_members(directory: &Path, expected: &[ArtifactMember]) -> Result<()> {
     let mut by_path: BTreeMap<&str, &ArtifactMember> = BTreeMap::new();
+
     for member in expected {
         validate_relative_path(Path::new(&member.path))?;
+
         if member.media_type.is_empty()
             || member.relationship.is_empty()
             || !is_lowercase_blake3(&member.blake3)
@@ -115,6 +114,7 @@ fn verify_members(directory: &Path, expected: &[ArtifactMember]) -> Result<()> {
 
 pub(crate) fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
     let (mut file, size) = open_regular_nofollow(path)?;
+
     if size > maximum_bytes {
         return Err(Error::invalid(format!(
             "bundle member `{}` exceeds the {maximum_bytes} byte limit",
@@ -134,6 +134,5 @@ pub(crate) fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> Resu
             path.display()
         )));
     }
-
     return Ok(bytes);
 }

@@ -1,3 +1,11 @@
+use super::observation_error;
+use crate::replay::{
+    semantic_state_hash,
+    trust::{self, SourceIdentity},
+    EndpointInspection,
+};
+use crate::{Error, Result};
+use nix::libc::O_NOFOLLOW;
 use std::{
     fs::OpenOptions,
     io::{BufReader, ErrorKind, Read as _},
@@ -6,10 +14,6 @@ use std::{
     sync::atomic::AtomicBool,
     time::SystemTime,
 };
-
-use nix::libc::O_NOFOLLOW;
-use zstd::stream::{encode_all, read::Decoder};
-
 use termtrace_evidence::artifact::{create_private_directory, sync_directory, write_secure};
 use termtrace_evidence::event_log::{canonical_source_fingerprint, CanonicalLogFile};
 use termtrace_model::{
@@ -20,14 +24,7 @@ use termtrace_model::{
     terminal::replay::{StateInspection, GHOSTTY_REVISION, STATE_FORMAT_VERSION},
     terminal::state::SemanticState,
 };
-
-use super::observation_error;
-use crate::replay::{
-    semantic_state_hash,
-    trust::{self, SourceIdentity},
-    EndpointInspection,
-};
-use crate::{Error, Result};
+use zstd::stream::{encode_all, read::Decoder};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct CachedSemanticState {
@@ -84,6 +81,7 @@ pub(super) fn load_checkpoint(
         }
 
         let compressed_bytes = metadata.len();
+
         if compressed_bytes > MAX_REPLAY_CHECKPOINT_BYTES {
             return Err(observation_error(
                 "replay checkpoint exceeds its compressed size limit",
@@ -127,7 +125,6 @@ pub(super) fn load_checkpoint(
                 source,
             };
         })?;
-
         let state_blake3 = blake3::hash(&state_bytes).to_hex().to_string();
         let semantic_hash = semantic_state_hash(&checkpoint.state)?;
 
@@ -160,6 +157,7 @@ pub(super) fn load_checkpoint(
         Ok(state) => Ok(Some(state)),
         Err(error) => {
             tracing::warn!(path = %path.display(), %error, "rejected replay checkpoint");
+
             if let Err(remove_error) = fs_err::remove_file(&path) {
                 tracing::warn!(path = %path.display(), %remove_error, "could not remove rejected replay checkpoint");
             } else if let Some(directory) = path.parent()
@@ -190,7 +188,6 @@ pub(super) fn publish_checkpoint(
         presented: inspection.record.presented,
         state: inspection.state.clone(),
     };
-
     return publish_cached_checkpoint(session, point, completion, &state, source, cancelled);
 }
 
@@ -211,7 +208,6 @@ pub(crate) fn publish_endpoint_checkpoint(
         presented: inspection.presented,
         state: inspection.state.clone(),
     };
-
     return publish_cached_checkpoint(session, point, completion, &state, source, cancelled);
 }
 
@@ -224,8 +220,8 @@ fn publish_cached_checkpoint(
     cancelled: Option<&AtomicBool>,
 ) -> Result<()> {
     source.check(session)?;
-    let path = checkpoint_path(session, point, completion)?;
 
+    let path = checkpoint_path(session, point, completion)?;
     if path.exists() {
         return Ok(());
     }
@@ -290,7 +286,6 @@ fn publish_cached_checkpoint(
 
     write_secure(&path, &compressed)?;
     enforce_replay_cache_limits(session, Some(&path))?;
-
     return Ok(sync_directory(directory)?);
 }
 
@@ -306,9 +301,7 @@ fn checkpoint_path(
             source,
         };
     })?;
-
     let key = blake3::hash(&encoded).to_hex().to_string();
-
     return Ok(session.join("derived-cache").join(format!(
         "checkpoint-{}-{key}.json.zst",
         completion.final_event_hash
@@ -329,7 +322,6 @@ struct ReplayCacheEntry {
 pub fn replay_cache_status(session: &Path) -> Result<ReplayCacheStatus> {
     let directory = session.join("derived-cache");
     let entries = replay_cache_entries(&directory)?;
-
     return Ok(cache_status_from_entries(directory, &entries));
 }
 
@@ -380,10 +372,12 @@ fn enforce_replay_cache_limits(session: &Path, preserve: Option<&Path>) -> Resul
             .cmp(&right.modified)
             .then_with(|| return left.path.cmp(&right.path));
     });
+
     let mut count = u64::try_from(entries.len()).unwrap_or(u64::MAX);
     let mut bytes = entries.iter().fold(0_u64, |total, entry| {
         return total.saturating_add(entry.bytes);
     });
+
     for entry in entries {
         if count <= MAX_REPLAY_CACHE_ENTRIES && bytes <= MAX_REPLAY_CACHE_BYTES {
             break;
@@ -429,6 +423,7 @@ fn replay_cache_entries(directory: &Path) -> Result<Vec<ReplayCacheEntry>> {
     }
 
     let mut entries = Vec::new();
+
     for item in fs_err::read_dir(directory).map_err(|source| {
         return Error::Filesystem {
             path: directory.to_path_buf(),
@@ -443,7 +438,6 @@ fn replay_cache_entries(directory: &Path) -> Result<Vec<ReplayCacheEntry>> {
         })?;
 
         let name = item.file_name();
-
         if !name.as_encoded_bytes().starts_with(b"checkpoint-") {
             continue;
         }
@@ -455,6 +449,7 @@ fn replay_cache_entries(directory: &Path) -> Result<Vec<ReplayCacheEntry>> {
                 source,
             };
         })?;
+
         if !metadata.is_file() {
             return Err(observation_error(
                 "replay checkpoint cache contains a non-regular member",
@@ -506,7 +501,6 @@ fn ensure_private_cache_directory(path: &Path) -> Result<()> {
                     "replay checkpoint directory must be owner-only",
                 ));
             }
-
             return Ok(());
         }
         Err(error) if error.kind() == ErrorKind::NotFound => {
@@ -538,8 +532,8 @@ fn hash_file(path: &Path, cancelled: Option<&AtomicBool>) -> Result<(u64, String
     let mut reader = BufReader::new(file);
     let mut hasher = blake3::Hasher::new();
     let mut buffer = [0_u8; 16384];
-
     let mut bytes = 0_u64;
+
     loop {
         trust::check_cancelled(cancelled)?;
 
@@ -549,6 +543,7 @@ fn hash_file(path: &Path, cancelled: Option<&AtomicBool>) -> Result<(u64, String
                 source,
             };
         })?;
+
         if count == 0 {
             break;
         }
@@ -576,6 +571,5 @@ fn hash_file(path: &Path, cancelled: Option<&AtomicBool>) -> Result<(u64, String
             "canonical event log changed while hashing",
         ));
     }
-
     return Ok((bytes, hasher.finalize().to_hex().to_string()));
 }

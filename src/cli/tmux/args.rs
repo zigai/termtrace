@@ -1,11 +1,9 @@
-use std::{ffi::OsString, path::PathBuf};
-
-use clap::{Args, Subcommand, ValueEnum};
-
 use crate::cli::{
     artifacts::args::{VideoPresetArg, VideoSourceArg},
     parsers::parse_video_fps,
 };
+use clap::{Args, Subcommand, ValueEnum};
+use std::{ffi::OsString, path::PathBuf};
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct TmuxArgs {
@@ -89,6 +87,7 @@ impl TmuxGhosttyProfileMode {
         };
     }
 }
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub(in crate::cli) enum TmuxCoverageMode {

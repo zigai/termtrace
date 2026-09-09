@@ -1,5 +1,7 @@
 //! Deterministic profile planning, publication, and source-bound verification.
 
+use crate::{Error, Result};
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
     collections::BTreeSet,
     fs::File,
@@ -7,8 +9,6 @@ use std::{
     os::unix::fs::FileTypeExt as _,
     path::{Path, PathBuf},
 };
-
-use serde::{de::DeserializeOwned, Serialize};
 use termtrace_engine::observation::observe_session;
 use termtrace_evidence::{
     artifact::hash_regular_file,
@@ -30,8 +30,6 @@ use termtrace_model::{
     value::ByteString,
 };
 
-use crate::{Error, Result};
-
 const MAX_STRUCTURED_MEMBER_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_CANONICAL_MEMBERS: usize = 10_000;
 
@@ -50,6 +48,7 @@ pub fn plan(profile: BundleProfile) -> BundlePlan {
             "selected_observation",
         ),
     ];
+
     if matches!(profile, BundleProfile::Debug | BundleProfile::Forensic) {
         members.push(planned(
             "verification.json",
@@ -91,6 +90,7 @@ pub fn create(
     max_bytes: Option<u64>,
 ) -> Result<BundleManifest> {
     let trusted = TrustedSource::resolve(session)?;
+
     if destination.starts_with(&trusted.canonical) {
         return Err(Error::invalid(
             "evidence export destination must be outside the canonical session",
@@ -99,6 +99,7 @@ pub fn create(
 
     let identity = trusted.identity(profile);
     let mut draft = BundleDraft::create(destination, identity, max_bytes)?;
+
     let observation = observe_session(&trusted.canonical, StatePoint::LatestPresented)?;
     draft.add_member_bytes(
         "screen.txt",
@@ -176,7 +177,6 @@ pub fn verify_profile(
         {
             return Error::invalid(reason.clone());
         }
-
         return Error::invalid(format!(
             "bundle payload members or semantic metadata failed validation: {error}"
         ));
@@ -187,6 +187,7 @@ pub fn verify_profile(
 
     if policy.profile == BundleProfile::Forensic {
         let report = verify_session(directory.join("canonical"), VerificationLevel::Content);
+
         if !report.valid
             || report.session_id != Some(manifest.session_id)
             || report.final_event_hash.as_deref() != Some(manifest.source_final_event_hash.as_str())
@@ -230,10 +231,10 @@ impl TrustedSource {
 
     fn write_event_projection(&self, writer: &mut impl Write) -> Result<()> {
         let mut cursor = EventLogCursor::open(self.canonical.join("events.jsonl"))?;
+
         while let Some(record) = cursor.next_record()? {
             serde_json::to_writer(&mut *writer, &EventProjection::from_record(&record, true))
                 .map_err(|source| return Error::json("events-metadata.jsonl", source))?;
-
             writer
                 .write_all(b"\n")
                 .map_err(|source| return Error::filesystem("events-metadata.jsonl", source))?;
@@ -243,9 +244,7 @@ impl TrustedSource {
             self.completion.event_count,
             &self.completion.final_event_hash,
         )?;
-
         let _pending = cursor.finish()?;
-
         return Ok(());
     }
 
@@ -289,6 +288,7 @@ fn verify_bound_payloads(
     }
 
     let screen = read_bounded(&directory.join("screen.txt"), MAX_STRUCTURED_MEMBER_BYTES)?;
+
     if screen != observation.frame.viewport_text.as_bytes() {
         return Err(Error::invalid(
             "bundle screen text does not match its source-bound observation",
@@ -409,11 +409,13 @@ pub(super) fn verify_archived_manifest(
     verify_member_bytes(manifest, "screen.txt", screen)?;
 
     let mut observation_matches = false;
+
     for resolution in [
         ObservationResolution::CanonicalReplay,
         ObservationResolution::ValidatedCheckpoint,
     ] {
         observation.resolution = resolution;
+
         let bytes = encoded_json_member(&observation, "observation.json")?;
 
         if member_matches_bytes(manifest_member(manifest, "observation.json")?, &bytes) {
@@ -464,7 +466,6 @@ pub(super) fn verify_archived_manifest(
             .iter()
             .map(|name| format!("canonical/{name}"))
             .collect();
-
         let included: BTreeSet<String> = manifest
             .members
             .iter()
@@ -498,7 +499,6 @@ fn encoded_json_member(value: &impl Serialize, path: &str) -> Result<Vec<u8>> {
     let mut bytes =
         serde_json::to_vec_pretty(value).map_err(|source| return Error::json(path, source))?;
     bytes.push(b'\n');
-
     return Ok(bytes);
 }
 
@@ -513,7 +513,6 @@ fn verify_member_bytes(manifest: &BundleManifest, path: &str, bytes: &[u8]) -> R
             "archived member `{path}` does not match the expected canonical source"
         )));
     }
-
     return Ok(());
 }
 
@@ -523,7 +522,6 @@ fn require_member(paths: &BTreeSet<&str>, path: &str) -> Result<()> {
             "bundle is missing required member `{path}`"
         )));
     }
-
     return Ok(());
 }
 
@@ -537,7 +535,6 @@ fn verify_canonical_payload(
         .iter()
         .map(|name| format!("canonical/{name}"))
         .collect();
-
     let included: BTreeSet<String> = members
         .iter()
         .filter(|member| return canonical_member_name(&member.path).is_some())
@@ -579,6 +576,7 @@ fn verify_canonical_payload(
 
 fn top_level_regular_file_names(directory: &Path) -> Result<Vec<String>> {
     let mut names: Vec<String> = Vec::new();
+
     for entry in
         fs_err::read_dir(directory).map_err(|source| return Error::filesystem(directory, source))?
     {
@@ -586,6 +584,7 @@ fn top_level_regular_file_names(directory: &Path) -> Result<Vec<String>> {
         let file_type = entry
             .file_type()
             .map_err(|source| return Error::filesystem(entry.path(), source))?;
+
         if file_type.is_symlink() {
             return Err(Error::invalid(
                 "canonical session contains a top-level symlink",
@@ -619,7 +618,6 @@ fn top_level_regular_file_names(directory: &Path) -> Result<Vec<String>> {
     }
 
     names.sort();
-
     return Ok(names);
 }
 
@@ -677,7 +675,6 @@ fn planned(path: &str, sensitivity: ArtifactSensitivity, relationship: &str) -> 
 
 fn canonical_member_name(path: &str) -> Option<&str> {
     let name = path.strip_prefix("canonical/")?;
-
     return (!name.is_empty() && !name.contains('/')).then_some(name);
 }
 
@@ -702,7 +699,6 @@ fn media_type(path: &str) -> &'static str {
     if path.ends_with(".zst") {
         return "application/zstd";
     }
-
     return "text/plain";
 }
 
@@ -719,13 +715,11 @@ fn add_json_member(
         .write_all(b"\n")
         .map_err(|source| return Error::filesystem(path, source))?;
     writer.finish()?;
-
     return Ok(());
 }
 
 fn read_json_bounded<T: DeserializeOwned>(path: &Path, maximum: u64) -> Result<T> {
     let bytes = read_bounded(path, maximum)?;
-
     return serde_json::from_slice(&bytes).map_err(|source| return Error::json(path, source));
 }
 
@@ -755,7 +749,6 @@ fn read_bounded(path: &Path, maximum: u64) -> Result<Vec<u8>> {
             path.display()
         )));
     }
-
     return Ok(bytes);
 }
 
@@ -784,7 +777,6 @@ impl Write for HashingWriter {
         self.bytes = self
             .bytes
             .saturating_add(u64::try_from(buf.len()).unwrap_or(u64::MAX));
-
         return Ok(buf.len());
     }
 
@@ -795,9 +787,8 @@ impl Write for HashingWriter {
 
 #[cfg(test)]
 mod tests {
-    use tempfile::TempDir;
-
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn forensic_payload_must_match_the_complete_trusted_top_level_inventory() {
@@ -807,9 +798,7 @@ mod tests {
         let canonical = bundle.join("canonical");
 
         fs_err::create_dir(&source).expect("source directory");
-
         fs_err::create_dir(&bundle).expect("bundle directory");
-
         fs_err::create_dir(&canonical).expect("canonical directory");
 
         for (name, bytes) in [
@@ -855,6 +844,7 @@ mod tests {
             sensitivity: ArtifactSensitivity::SensitiveTerminalData,
             relationship: "canonical_evidence".to_owned(),
         });
+
         let inventory_error = verify_canonical_payload(&bundle, &injected_members, &source)
             .expect_err("attacker-added canonical member must be rejected");
         assert!(inventory_error.to_string().contains("source inventory"));

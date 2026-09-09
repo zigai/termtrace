@@ -29,7 +29,6 @@ fn mouse_encoder_uses_live_sgr_modes_and_zero_based_cells() {
             480,
         )
         .expect("mouse press");
-
     let release = terminal
         .encode_mouse(
             MouseAction::Release,
@@ -42,7 +41,6 @@ fn mouse_encoder_uses_live_sgr_modes_and_zero_based_cells() {
             480,
         )
         .expect("mouse release");
-
     let motion = terminal
         .encode_mouse(
             MouseAction::Motion,
@@ -67,12 +65,14 @@ fn key_encoder_tracks_live_cursor_mode_and_modifiers() {
     let normal = terminal
         .encode_key(NamedKey::ArrowUp, KeyModifiers::default())
         .expect("normal arrow");
+
     assert_eq!(normal.data.as_bytes(), b"\x1b[A");
 
     terminal.write(b"\x1b[?1h");
     let application = terminal
         .encode_key(NamedKey::ArrowUp, KeyModifiers::default())
         .expect("application arrow");
+
     assert_eq!(application.data.as_bytes(), b"\x1bOA");
 
     let control_c = terminal
@@ -84,7 +84,9 @@ fn key_encoder_tracks_live_cursor_mode_and_modifiers() {
             },
         )
         .expect("control c");
+
     assert_eq!(control_c.data.as_bytes(), b"\x03");
+
     let shift_tab = terminal
         .encode_key(
             NamedKey::Tab,
@@ -94,6 +96,7 @@ fn key_encoder_tracks_live_cursor_mode_and_modifiers() {
             },
         )
         .expect("shift tab");
+
     assert_eq!(shift_tab.data.as_bytes(), b"\x1b[Z");
 }
 
@@ -118,6 +121,7 @@ fn every_supported_symbolic_key_encodes_for_all_modifiers_and_keyboard_modes() {
 
     for mode_bits in 0_u8..16 {
         let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
+
         if mode_bits & 1 != 0 {
             terminal.write(b"\x1b[?1h");
         }
@@ -192,7 +196,9 @@ fn assert_supported_encoding(
     } else {
         "libghostty-key-encoder-v1"
     };
+
     assert_eq!(encoded.encoder, expected_encoder);
+
     if uses_extended_fallback
         && let NamedKey::Function(number) = key
         && let Some((_, _, expected)) = EXTENDED_FUNCTION_FIXTURES

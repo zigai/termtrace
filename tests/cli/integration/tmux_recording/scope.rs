@@ -4,12 +4,13 @@ use super::*;
 fn tmux_explicit_scope_records_only_forced_or_explicit_panes() {
     let temporary = TempDir::new().expect("temporary directory");
     let server = PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &["--explicit-only"]);
-
     server.wait_for_process_marker("%0", "@termtrace-excluded-pid");
+
     assert!(server.pane_option("%0", "@termtrace-session").is_empty());
 
     let ordinary = tmux_new_window(&server, &[]);
     server.wait_for_process_marker(&ordinary, "@termtrace-excluded-pid");
+
     assert!(
         server.pane_exists(&ordinary),
         "strict enforcement closed an intentionally excluded pane"
@@ -26,8 +27,11 @@ fn tmux_explicit_scope_records_only_forced_or_explicit_panes() {
         .args(["send-keys", "-t", forced.as_str(), "exit", "Enter"])
         .status()
         .expect("close forced recording");
+
     assert!(sent.success(), "forced pane did not accept input");
+
     wait_for_path(&recording.join("completion.json"));
+
     assert_eq!(
         read_manifest(&recording)
             .expect("forced pane manifest")
@@ -57,6 +61,7 @@ fn tmux_session_scope_records_only_the_selected_session() {
         .clone();
 
     let changed = compact_json_line(&changed);
+
     assert_eq!(changed["changed"], true);
     assert_eq!(changed["future_processes_only"], true);
     assert_eq!(changed["scope"]["mode"], "selected");
@@ -64,9 +69,9 @@ fn tmux_session_scope_records_only_the_selected_session() {
 
     let selected = tmux_new_window(&server, &[]);
     let recording = server.pane_session(&selected);
-
     let excluded = tmux_new_session(&server, "excluded", &[]);
     server.wait_for_process_marker(&excluded, "@termtrace-excluded-pid");
+
     assert!(server.pane_exists(&excluded));
     assert!(server
         .pane_option(&excluded, "@termtrace-session")
@@ -77,8 +82,11 @@ fn tmux_session_scope_records_only_the_selected_session() {
         .args(["send-keys", "-t", selected.as_str(), "exit", "Enter"])
         .status()
         .expect("close session-scoped recording");
+
     assert!(sent.success());
+
     wait_for_path(&recording.join("completion.json"));
+
     assert!(server.pane_exists(&excluded));
 }
 
@@ -102,6 +110,7 @@ fn tmux_pane_scope_records_that_pane_after_its_process_restarts() {
         .clone();
 
     let changed = compact_json_line(&changed);
+
     assert_eq!(changed["scope"]["mode"], "selected");
     assert_eq!(changed["scope"]["pane_ids"][0], "%0");
     assert!(
@@ -114,22 +123,29 @@ fn tmux_pane_scope_records_that_pane_after_its_process_restarts() {
         .args(["show-options", "-gv", "default-command"])
         .output()
         .expect("query managed default command");
+
     assert!(wrapper.status.success());
+
     let restarted = server
         .command()
         .args(["respawn-pane", "-k", "-t", "%0"])
         .arg(OsString::from_vec(trim_newline(wrapper.stdout)))
         .status()
         .expect("restart selected pane through managed wrapper");
+
     assert!(restarted.success());
+
     let recording = server.pane_session("%0");
     let sent = server
         .command()
         .args(["send-keys", "-t", "%0", "exit", "Enter"])
         .status()
         .expect("close pane-scoped recording");
+
     assert!(sent.success());
+
     wait_for_path(&recording.join("completion.json"));
+
     assert!(server.pane_exists(&other));
     assert!(server.pane_option(&other, "@termtrace-session").is_empty());
 }
@@ -152,6 +168,7 @@ fn tmux_window_scope_records_new_panes_only_in_that_window() {
         .clone();
 
     let changed = compact_json_line(&changed);
+
     assert_eq!(changed["scope"]["mode"], "selected");
     assert_eq!(changed["scope"]["window_ids"][0], "@0");
 
@@ -159,6 +176,7 @@ fn tmux_window_scope_records_new_panes_only_in_that_window() {
     let recording = server.pane_session(&selected);
     let excluded = tmux_new_window(&server, &[]);
     server.wait_for_process_marker(&excluded, "@termtrace-excluded-pid");
+
     assert!(server.pane_exists(&excluded));
 
     let sent = server
@@ -166,7 +184,10 @@ fn tmux_window_scope_records_new_panes_only_in_that_window() {
         .args(["send-keys", "-t", selected.as_str(), "exit", "Enter"])
         .status()
         .expect("close window-scoped recording");
+
     assert!(sent.success());
+
     wait_for_path(&recording.join("completion.json"));
+
     assert!(server.pane_exists(&excluded));
 }

@@ -2,15 +2,12 @@ use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
 
+use crate::cli::output::write_json_line;
 use args::TestArgs;
-
-use std::{env, process::ExitCode};
-
 use miette::{IntoDiagnostic as _, Result};
+use std::{env, process::ExitCode};
 use termtrace_model::scenario::ScenarioSuiteStatus;
 use termtrace_scenario::{run_suite, write_scenario_junit, ScenarioSuiteOptions};
-
-use crate::cli::output::write_json_line;
 
 pub(super) fn run_test(response: &mut ResponseWriter, arguments: TestArgs) -> Result<ExitCode> {
     let binary = env::current_exe().into_diagnostic()?;
@@ -24,6 +21,7 @@ pub(super) fn run_test(response: &mut ResponseWriter, arguments: TestArgs) -> Re
         update_snapshots: arguments.update_snapshots,
         reruns: arguments.reruns,
     };
+
     let report = run_suite(arguments.scenario, &options).into_diagnostic()?;
 
     if let Some(path) = arguments.junit {

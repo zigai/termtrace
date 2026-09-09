@@ -72,7 +72,6 @@ fn parse_clock_offset(value: &str) -> StdResult<u64, String> {
     let hours_ns = hours
         .checked_mul(NANOS_PER_HOUR)
         .ok_or_else(|| return format!("invalid time offset `{value}`: value overflows"))?;
-
     let minutes_ns = minutes
         .checked_mul(NANOS_PER_MINUTE)
         .ok_or_else(|| return format!("invalid time offset `{value}`: value overflows"))?;
@@ -110,7 +109,6 @@ fn parse_scaled_decimal(number: &str, scale: u64) -> StdResult<u64, String> {
     let numerator = parse_integer(fraction, "fraction")?;
     let exponent =
         u32::try_from(fraction.len()).map_err(|_| return "fraction is too precise".to_owned())?;
-
     let denominator = 10_u64
         .checked_pow(exponent)
         .ok_or_else(|| return "fraction is too precise".to_owned())?;

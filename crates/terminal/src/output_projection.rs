@@ -42,7 +42,6 @@ impl ControlStripper {
         self.output_byte_count = self
             .output_byte_count
             .saturating_add(u64::try_from(output.len()).unwrap_or(u64::MAX));
-
         return output;
     }
 
@@ -83,12 +82,10 @@ impl ControlStripper {
                     b'P' | b'_' | b'^' | b'X' => StripState::String,
                     0x18 | 0x1a => {
                         self.finish_control();
-
                         StripState::Ground
                     }
                     0x30..=0x7e => {
                         self.finish_control();
-
                         StripState::Ground
                     }
                     _ => StripState::Escape,
@@ -178,15 +175,15 @@ impl ControlStripper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::iter;
-
     use proptest::{collection, prelude::*};
+    use std::iter;
 
     #[test]
     fn strips_controls_across_chunks_and_flags_alternate_screen() {
         let mut stripper = ControlStripper::default();
         let mut output = stripper.feed(b"before\n\x1b[?104");
         output.extend(stripper.feed(b"9h\x1b[31mred\x1b[0m\n"));
+
         assert_eq!(output, b"before\nred\n");
         assert!(stripper.alternate_screen_observed());
         assert_eq!(stripper.source_byte_count(), 28);
@@ -229,7 +226,6 @@ mod tests {
         let mut sequence = b"\x1b[".to_vec();
         sequence.extend(iter::repeat_n(b'0', 4_091));
         sequence.extend_from_slice(b"?47h");
-
         let mut stripper = ControlStripper::default();
 
         assert!(stripper.feed(&sequence).is_empty());

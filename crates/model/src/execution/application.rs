@@ -1,10 +1,9 @@
 //! Application-reported diagnostics received independently of terminal bytes.
 
-use std::collections::BTreeMap;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 /// Maximum encoded application record, excluding the canonical envelope.
@@ -73,10 +72,10 @@ impl ApplicationEvent {
         }
 
         let bytes = serde_json::to_vec(self).map_err(|_| return "invalid application JSON")?;
+
         if bytes.len() > MAX_APPLICATION_EVENT_BYTES {
             return Err("application event exceeds 64 KiB");
         }
-
         return Ok(());
     }
 }

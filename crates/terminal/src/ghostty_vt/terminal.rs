@@ -1,12 +1,5 @@
 //! Terminal-handle lifecycle, bounded VT ingestion, and host resource policy.
 
-use std::{ffi::c_void, mem::take, ptr, slice};
-
-use termtrace_model::execution::event::TerminalColors;
-use termtrace_model::value::ByteString;
-
-use crate::{Error, Result};
-
 use super::{
     input, snapshot, sys,
     types::{
@@ -14,6 +7,10 @@ use super::{
         NamedKey, SemanticState,
     },
 };
+use crate::{Error, Result};
+use std::{ffi::c_void, mem::take, ptr, slice};
+use termtrace_model::execution::event::TerminalColors;
+use termtrace_model::value::ByteString;
 
 // Keep allocating control strings below the same ceiling as explanation framing.
 const MAX_OSC_SEQUENCE_BYTES: usize = 1024 * 1024;
@@ -147,7 +144,6 @@ impl VtInputLimiter {
     fn consume_osc(&mut self, byte: u8, emit: &mut impl FnMut(&[u8])) {
         let terminated =
             matches!(byte, 0x07 | 0x9c) || (self.state == VtInputState::OscEscape && byte == b'\\');
-
         let canceled = matches!(byte, 0x18 | 0x1a);
         let was_discarding = self.discarding;
         let overflowed = self.push_sequence(byte);
@@ -183,12 +179,10 @@ impl VtInputLimiter {
         if self.sequence.len() >= self.max_osc_bytes {
             self.sequence.clear();
             self.discarding = true;
-
             return true;
         }
 
         self.sequence.push(byte);
-
         return false;
     }
 
@@ -263,7 +257,6 @@ impl GhosttyVt {
 
         if let Err(error) = configure_terminal_resource_policy(terminal) {
             unsafe { sys::ghostty_terminal_free(terminal) };
-
             return Err(error);
         }
 
@@ -278,7 +271,6 @@ impl GhosttyVt {
             )
         }) {
             unsafe { sys::ghostty_terminal_free(terminal) };
-
             return Err(error);
         }
 
@@ -287,6 +279,7 @@ impl GhosttyVt {
             reason = "Ghostty's generic C option setter accepts callback pointers as void pointers"
         )]
         let callback = (write_pty_callback as *const ()).cast::<c_void>();
+
         if let Err(error) = check("set terminal write callback", unsafe {
             sys::ghostty_terminal_set(
                 terminal,
@@ -295,7 +288,6 @@ impl GhosttyVt {
             )
         }) {
             unsafe { sys::ghostty_terminal_free(terminal) };
-
             return Err(error);
         }
 
@@ -304,7 +296,6 @@ impl GhosttyVt {
             sys::ghostty_render_state_new(ptr::null(), &raw mut render)
         }) {
             unsafe { sys::ghostty_terminal_free(terminal) };
-
             return Err(error);
         }
 
@@ -390,7 +381,6 @@ impl GhosttyVt {
             colors.foreground,
             "set foreground color",
         )?;
-
         set_color_option(
             self.terminal,
             sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND,
@@ -449,7 +439,6 @@ impl GhosttyVt {
                 result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
             });
         }
-
         return check("resize terminal", unsafe {
             sys::ghostty_terminal_resize(self.terminal, cols, rows, cell_width_px, cell_height_px)
         });
@@ -463,7 +452,6 @@ impl GhosttyVt {
     pub fn snapshot(&mut self) -> Result<SemanticState> {
         let terminal = self.terminal;
         let render = self.render;
-
         return snapshot::Snapshot::new(terminal, render, &mut self.last_snapshot).snapshot();
     }
 
@@ -478,7 +466,6 @@ impl GhosttyVt {
     pub fn snapshot_if_changed(&mut self) -> Result<Option<SemanticState>> {
         let terminal = self.terminal;
         let render = self.render;
-
         return snapshot::Snapshot::new(terminal, render, &mut self.last_snapshot)
             .snapshot_if_changed();
     }
@@ -511,7 +498,6 @@ impl Drop for GhosttyVt {
     fn drop(&mut self) {
         unsafe {
             sys::ghostty_render_state_free(self.render);
-
             sys::ghostty_terminal_free(self.terminal);
         }
     }
@@ -536,7 +522,6 @@ fn configure_terminal_resource_policy(terminal: sys::GhosttyTerminal) -> Result<
     })?;
 
     let apc_max_bytes = MAX_APC_SEQUENCE_BYTES;
-
     return check("limit APC sequence buffering", unsafe {
         sys::ghostty_terminal_set(
             terminal,
@@ -557,7 +542,6 @@ fn set_color_option(
     operation: &'static str,
 ) -> Result<()> {
     let color = ffi_rgb(color);
-
     return check(operation, unsafe {
         sys::ghostty_terminal_set(terminal, option, (&raw const color).cast::<c_void>())
     });
@@ -605,7 +589,6 @@ mod tests {
     fn bounds_osc_strings_before_the_ffi_boundary() {
         let mut limiter = VtInputLimiter::new(12);
         let mut forwarded = Vec::new();
-
         for chunk in [
             b"before\x1b]52;0123456789abcdef".as_slice(),
             b"\x07after\x1b".as_slice(),
@@ -621,7 +604,6 @@ mod tests {
     fn preserves_utf8_continuations_that_match_c1_controls() {
         let mut limiter = VtInputLimiter::new(12);
         let mut forwarded = Vec::new();
-
         for byte in "ѝ".as_bytes() {
             limiter.write(slice::from_ref(byte), |bytes| {
                 forwarded.extend_from_slice(bytes);
@@ -643,6 +625,7 @@ mod tests {
             )
         })
         .expect("read Kitty storage policy");
+
         assert_eq!(kitty_storage_bytes, 0);
 
         terminal.write(b"\x1b");
@@ -665,11 +648,13 @@ mod tests {
             .format_replay_seed()
             .expect("initial replay seed")
             .is_some());
+
         terminal.write(b"ab");
         assert!(terminal
             .format_replay_seed()
             .expect("pending-wrap replay seed")
             .is_none());
+
         terminal.write(b"c");
         assert!(terminal
             .format_replay_seed()
@@ -684,6 +669,7 @@ mod tests {
         terminal.write(b"\x1b(");
         terminal.write(b"\x1b]52;0123456789abcdef\x07ok");
         let plain = terminal.format(Format::Plain).expect("plain format");
+
         assert!(plain.windows(2).any(|window| return window == b"ok"));
     }
 

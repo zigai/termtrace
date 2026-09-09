@@ -1,5 +1,13 @@
 //! Bounded synchronous access to every installed process-driver method.
 
+use crate::{Error, Result};
+use nix::{
+    errno::Errno,
+    fcntl::{fcntl, FcntlArg, OFlag},
+    poll::{poll, PollFd, PollFlags, PollTimeout},
+    sys::signal::{killpg, Signal},
+    unistd::Pid,
+};
 use std::{
     io::{self, Read as _, Write as _},
     os::{fd::AsFd, unix::process::CommandExt as _},
@@ -7,14 +15,6 @@ use std::{
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     thread,
     time::{Duration, Instant},
-};
-
-use nix::{
-    errno::Errno,
-    fcntl::{fcntl, FcntlArg, OFlag},
-    poll::{poll, PollFd, PollFlags, PollTimeout},
-    sys::signal::{killpg, Signal},
-    unistd::Pid,
 };
 use termtrace_model::protocol::{
     control::CONTROL_PROTOCOL_VERSION,
@@ -24,8 +24,6 @@ use termtrace_model::protocol::{
     },
 };
 use uuid::Uuid;
-
-use crate::{Error, Result};
 
 /// Owns an installed `termtrace agent` process without linking the recording engine.
 ///
@@ -59,13 +57,13 @@ impl Driver {
         };
         driver.input = driver.child.stdin.take();
         driver.output = driver.child.stdout.take();
+
         nonblocking(
             driver
                 .input
                 .as_ref()
                 .ok_or_else(|| return protocol("missing driver input pipe"))?,
         )?;
-
         nonblocking(
             driver
                 .output
@@ -74,6 +72,7 @@ impl Driver {
         )?;
 
         let response = driver.request(DriverMethod::Hello, Duration::from_secs(10))?;
+
         if !matches!(
             response.result,
             DriverResult::Ok {
@@ -86,7 +85,6 @@ impl Driver {
         ) {
             return Err(protocol("installed driver handshake is incompatible"));
         }
-
         return Ok(driver);
     }
 
@@ -116,6 +114,7 @@ impl Driver {
         let deadline = Instant::now()
             .checked_add(timeout)
             .ok_or_else(|| return protocol("driver timeout exceeds clock range"))?;
+
         let mut encoded = serde_json::to_vec(request)
             .map_err(|_| return protocol("could not encode driver request"))?;
         encoded.push(b'\n');
@@ -133,9 +132,9 @@ impl Driver {
             {
                 return Err(protocol("driver response version or request ID differs"));
             }
-
             return Ok(response);
         });
+
         if result.is_err() {
             // A late response must not be mistaken for the next request's result.
             let _cleanup = self.close(Duration::from_secs(5));
@@ -151,6 +150,7 @@ impl Driver {
             .ok_or_else(|| return protocol("driver input is closed"))?;
 
         let mut sent = 0;
+
         while let Some(remaining) = encoded
             .get(sent..)
             .filter(|remaining| return !remaining.is_empty())
@@ -192,7 +192,6 @@ impl Driver {
             ready(output, PollFlags::POLLIN, deadline, "read response", true)?;
 
             let mut chunk = [0_u8; 8192];
-
             match output.read(&mut chunk) {
                 Ok(0) => {
                     return Err(transport(
@@ -216,7 +215,6 @@ impl Driver {
                         if newline + 1 != response.len() {
                             return Err(protocol("driver sent unsolicited trailing response data"));
                         }
-
                         return Ok(response);
                     }
                 }
@@ -252,7 +250,6 @@ impl Driver {
                 if !status.success() {
                     return Err(protocol("driver exited unsuccessfully during cleanup"));
                 }
-
                 return Ok(());
             }
 
@@ -303,7 +300,6 @@ fn nonblocking(file: &impl AsFd) -> Result<()> {
             io::Error::from_raw_os_error(error as i32),
         );
     })?;
-
     return Ok(());
 }
 
@@ -325,7 +321,6 @@ fn ready(
             .map_err(|_| return protocol("invalid driver poll duration"))?;
 
         let mut descriptors = [PollFd::new(file.as_fd(), flags)];
-
         match poll(&mut descriptors, timeout) {
             Ok(0) | Err(Errno::EINTR) => {}
             Ok(_) => return Ok(()),

@@ -14,6 +14,7 @@ fn environment_values_never_enter_recorder_argv_or_manifest() {
         ..EnvironmentSpec::default()
     };
     let encoded = serde_json::to_vec(&spec).expect("environment JSON");
+
     let mut recorder = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
         .args(["record", "--no-input", "--out"])
         .arg(&session)
@@ -30,6 +31,7 @@ fn environment_values_never_enter_recorder_argv_or_manifest() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn recorder");
+
     recorder
         .stdin
         .take()
@@ -45,12 +47,15 @@ fn environment_values_never_enter_recorder_argv_or_manifest() {
     assert!(!argv
         .windows(secret.len())
         .any(|window| return window == secret));
+
     let manifest = fs_err::read(session.join("session.json")).expect("manifest");
     assert!(!manifest
         .windows(secret.len())
         .any(|window| return window == secret));
+
     let manifest: SessionManifest = serde_json::from_slice(&manifest).expect("manifest JSON");
     assert_eq!(manifest.resource_limits.output_bytes, Some(1_000_000));
+
     send_request(&session, &ControlRequest::new(ControlCommand::Stop)).expect("stop child");
 
     let recorder_output = recorder.wait_with_output().expect("recorder exit");
@@ -83,6 +88,7 @@ fn environment_values_never_enter_recorder_argv_or_manifest() {
         .get_output()
         .stderr
         .clone();
+
     assert!(!invalid_output
         .windows(invalid_secret.len())
         .any(|window| return window == invalid_secret));

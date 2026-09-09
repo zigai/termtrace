@@ -1,17 +1,15 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
-};
-
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::{
     execution::environment::{ColorPolicy, EnvironmentBase},
     terminal::state::NamedKey,
     value::ByteString,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
+use uuid::Uuid;
 
 /// Overall scenario disposition.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

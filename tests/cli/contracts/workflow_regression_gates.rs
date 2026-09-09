@@ -39,6 +39,7 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
     for fixture in &fixtures {
         assert_eq!(fixture.format, "termtrace-executable-regression-workflow");
         assert_eq!(fixture.version, 1);
+
         let session = temporary.path().join(&fixture.id);
         let child = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
             .args(["record", "--no-input", "--out"])
@@ -55,17 +56,22 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
 
         let full = wait_idle_output(&session, "full");
         assert!(full.status.success(), "full idle wait failed: {full:?}");
+
         let full_value: serde_json::Value =
             serde_json::from_slice(&full.stdout).expect("full idle wait JSON");
         assert!(contains_key(&full_value, "modes"));
+
         full_bytes = full_bytes.saturating_add(full.stdout.len());
 
         let agent = wait_idle_output(&session, "agent");
         assert!(agent.status.success(), "agent idle wait failed: {agent:?}");
+
         let agent_value = compact_json_line(&agent.stdout);
+
         assert_eq!(agent_value["ok"], true);
         assert!(!contains_key(&agent_value, "modes"));
         assert!(!contains_key(&agent_value, "terminal_modes"));
+
         agent_bytes = agent_bytes.saturating_add(agent.stdout.len());
 
         if fixture.reject_before_accept {
@@ -77,12 +83,15 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
                 }),
             )
             .expect("structured rejected input");
+
             assert!(matches!(
                 &rejected.result,
                 ControlResult::Error { code, .. } if code == "key_encoding_failed"
             ));
+
             send_request(&session, &ControlRequest::new(ControlCommand::Ping))
                 .expect("ping after rejected input");
+
             assert!(matches!(
                 send_request(&session, &ControlRequest::new(ControlCommand::Status)),
                 Ok(ControlData::Status { .. })
@@ -97,7 +106,9 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
             .output()
             .expect("act on accepted fixture input");
         assert!(action.status.success(), "accepted input failed: {action:?}");
+
         let action_value = compact_json_line(&action.stdout);
+
         assert_eq!(action_value["ok"], true);
         assert_eq!(
             action_value["input"]["applied"], "all",
@@ -106,6 +117,7 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
 
         let output = child.wait_with_output().expect("workflow completion");
         assert!(output.status.success(), "workflow child failed: {output:?}");
+
         wait_for_output(&session, fixture.done.as_bytes(), Duration::from_secs(5))
             .expect("workflow completion output");
 
@@ -117,10 +129,8 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
             .as_str()
             .expect("agent selected state hash")
             .to_owned();
-
         inspect_session(&session, StateSelector::StateHash(selected_hash))
             .expect("selected state inspection");
-
         inspect_session(&session, StateSelector::Final).expect("final state inspection");
 
         let mut timeline = Command::cargo_bin("termtrace").expect("binary should build");
@@ -168,8 +178,8 @@ fn wait_idle_output(session: &Path, response: &str) -> Output {
 fn assert_scenario_replayability(temporary: &TempDir, fixture: &WorkflowFixture) {
     let scenario = temporary.path().join("converted-pi-audit.termtrace.json");
     let artifacts = temporary.path().join("scenario-artifacts");
-
     let launch_program = format!("{}; import time; time.sleep(30)", fixture.program);
+
     fs_err::write(
         &scenario,
         serde_json::to_vec_pretty(&serde_json::json!({
@@ -202,9 +212,11 @@ fn assert_scenario_replayability(temporary: &TempDir, fixture: &WorkflowFixture)
         output.status.success(),
         "converted scenario failed: {output:?}"
     );
+
     let report: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("scenario report JSON");
     assert_eq!(report["status"], "passed");
+
     let attempt = &report["cases"][0]["attempts"][0]["report"];
     let canonical = PathBuf::from(
         attempt["canonical_session"]

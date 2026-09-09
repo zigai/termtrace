@@ -74,7 +74,6 @@ impl StateIndexCursor {
                     reason: "state index changed or does not match its manifest".to_owned(),
                 });
             }
-
             return Ok(None);
         }
 
@@ -128,7 +127,6 @@ pub(super) fn validate_replay_manifest(
             source,
         };
     })?;
-
     let manifest: ReplayManifest = serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path: path.clone(),
@@ -161,11 +159,11 @@ pub(super) fn validate_replay_manifest(
             })?
             .clone(),
     };
+
     let mut states = source.open()?;
     let mut count = 0_u64;
     let mut final_hash = None;
     let mut hidden = false;
-
     while let Some(state) = states.next_state()? {
         count = count.saturating_add(1);
         final_hash = Some(state.state_hash);
@@ -173,6 +171,7 @@ pub(super) fn validate_replay_manifest(
     }
 
     let expected_hash = log.terminal.as_ref().map(|event| return event.hash.clone());
+
     if manifest.version != STATE_FORMAT_VERSION
         || manifest.session_id != log.header.session_id
         || manifest.source_event_hash != expected_hash
@@ -186,7 +185,6 @@ pub(super) fn validate_replay_manifest(
     {
         return Err(Error::InvalidReplay { reason: "semantic index does not match the capture request; recreate the matching derived index".to_owned() });
     }
-
     return Ok(source);
 }
 
@@ -274,7 +272,6 @@ pub(super) fn validate_acquisition_frames(path: &Path, expected_count: u64) -> R
 
     let mut frames = AcquisitionFrames::new(BufReader::new(file).lines());
     let mut first = None;
-
     let mut count = 0;
     while let Some((_, acquired)) = frames.next_frame()? {
         first.get_or_insert(acquired);
@@ -288,7 +285,6 @@ pub(super) fn validate_acquisition_frames(path: &Path, expected_count: u64) -> R
             ),
         });
     }
-
     return first.ok_or_else(|| {
         return Error::InvalidReplay {
             reason: "native acquisition has no first frame".to_owned(),
@@ -364,6 +360,7 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
                     reason: format!("cannot read acquisition timestamps: {source}"),
                 };
             })?;
+
             if !line.contains("Parsed_showinfo_") {
                 continue;
             }
@@ -371,7 +368,6 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
             if let Some((_, rest)) = line.split_once("config in time_base: ") {
                 self.time_base = rest.split(',').next().and_then(|value| {
                     let (numerator, denominator) = value.trim().split_once('/')?;
-
                     return Some((numerator.parse().ok()?, denominator.parse().ok()?));
                 });
             }
@@ -379,6 +375,7 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
             let Some((_, rest)) = line.split_once(" n:") else {
                 continue;
             };
+
             let invalid = || {
                 return Error::InvalidReplay {
                     reason: "invalid or nonmonotonic native acquisition timestamp".to_owned(),
@@ -398,6 +395,7 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
                 .and_then(|value| return value.checked_mul(1_000_000_000))
                 .and_then(|value| return value.checked_div(denominator))
                 .ok_or_else(invalid)?;
+
             if self.previous.map_or(number != 0, |(previous, timestamp)| {
                 return number != previous + 1 || acquired < timestamp;
             }) {
@@ -405,7 +403,6 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
             }
 
             self.previous = Some((number, acquired));
-
             return Ok(self.previous);
         }
 
@@ -414,7 +411,6 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
                 reason: "native video has no acquisition timestamps".to_owned(),
             });
         }
-
         return Ok(None);
     }
 }
@@ -432,6 +428,7 @@ mod timing_tests {
         ];
         let mut frames =
             AcquisitionFrames::new(lines.into_iter().map(|line| return Ok(line.to_owned())));
+
         assert_eq!(
             frames.next_frame().unwrap(),
             Some((0, 1_700_000_000_123_456_000))
@@ -480,6 +477,7 @@ mod state_cursor_tests {
         bytes.push(b'\n');
         let source = source(directory.path(), &bytes);
         let mut first = source.open().expect("first cursor");
+
         assert_eq!(
             first
                 .next_state()
@@ -489,12 +487,14 @@ mod state_cursor_tests {
             1
         );
         assert!(first.next_state().expect("verified EOF").is_none());
+
         let mut changed = state;
         changed.state_id = 2;
         let mut changed = serde_json::to_vec(&changed).expect("changed JSON");
         changed.push(b'\n');
         fs::write(&source.path, changed).expect("replace index");
         let mut second = source.open().expect("second cursor");
+
         assert_eq!(
             second
                 .next_state()
@@ -518,6 +518,7 @@ mod state_cursor_tests {
             .expect("cursor")
             .next_state()
             .expect_err("oversized line");
+
         assert!(error.to_string().contains("64 KiB"));
     }
 }

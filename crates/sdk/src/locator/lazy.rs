@@ -1,5 +1,13 @@
 //! Lazy session-bound locators over pure rich-frame queries.
 
+use super::query::{
+    query_frame, LocatorSpec, QueryDescription, QueryError, QueryResult, ScreenMatch, StyleFilter,
+};
+use crate::{
+    client::{Screen, Session},
+    screen::StableCaptureOptions,
+};
+use regex::Regex;
 use std::{
     error::Error as StdError,
     fmt,
@@ -7,18 +15,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-
-use regex::Regex;
 use termtrace_model::terminal::screen::{
     FrameDetail, ScreenFrame, ScreenProjectionRequest, ScreenRegion,
-};
-
-use super::query::{
-    query_frame, LocatorSpec, QueryDescription, QueryError, QueryResult, ScreenMatch, StyleFilter,
-};
-use crate::{
-    client::{Screen, Session},
-    screen::StableCaptureOptions,
 };
 
 impl Screen<'_> {
@@ -164,7 +162,6 @@ impl<'session> Locator<'session> {
         })?;
 
         let mut matching_state: Option<(String, Instant)> = None;
-
         let mut last_frame: Option<Arc<ScreenFrame>> = None;
 
         loop {
@@ -212,6 +209,7 @@ impl<'session> Locator<'session> {
             }
 
             let result = query_frame(frame, self.spec.clone()).map_err(LocatorError::Query)?;
+
             let evaluated_at = Instant::now();
 
             if evaluated_at >= deadline {

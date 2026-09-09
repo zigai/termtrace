@@ -1,14 +1,11 @@
+use super::validation::invalid_log;
+use crate::storage::{identifier_index::IdentifierSet, Result};
 use std::{collections::HashMap, path::Path};
-
 use termtrace_model::{
     execution::event::{Event, EventRecord, OperationStatus},
     execution::event_log::{OperationKind, PendingOperation},
 };
 use uuid::Uuid;
-
-use crate::storage::{identifier_index::IdentifierSet, Result};
-
-use super::validation::invalid_log;
 
 pub(super) fn validate_operation_transition(
     path: &Path,
@@ -40,7 +37,6 @@ pub(super) fn validate_operation_transition(
                 expected_bytes,
             },
         );
-
         return Ok(());
     }
 
@@ -87,7 +83,6 @@ pub(super) fn validate_operation_transition(
             "input result byte count is inconsistent with its intent",
         ));
     }
-
     return Ok(());
 }
 

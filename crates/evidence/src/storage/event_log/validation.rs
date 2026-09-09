@@ -1,18 +1,16 @@
+use crate::storage::{Error, Result};
+use blake3::Hash;
+use nix::unistd::Uid;
 use std::{
     fs,
     io::{BufRead, Error as IoError, ErrorKind},
     os::unix::fs::{MetadataExt as _, PermissionsExt as _},
     path::Path,
 };
-
-use blake3::Hash;
-use nix::unistd::Uid;
 use termtrace_model::{
     execution::event::{Event, EventLogHeader, EVENT_LOG_FORMAT, EVENT_LOG_VERSION},
     terminal::state::{MAX_TERMINAL_CELLS, MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS},
 };
-
-use crate::storage::{Error, Result};
 
 pub(super) const OWNER_DIRECTORY_MODE: u32 = 0o700;
 pub(super) const OWNER_FILE_MODE: u32 = 0o600;
@@ -52,7 +50,6 @@ pub(super) fn validate_parent_directory(path: &Path) -> Result<()> {
             mode,
         });
     }
-
     return Ok(());
 }
 
@@ -70,6 +67,7 @@ pub(super) fn read_line(
                 source,
             };
         })?;
+
         if available.is_empty() {
             return if bytes.is_empty() {
                 Ok(None)
@@ -86,6 +84,7 @@ pub(super) fn read_line(
             .iter()
             .position(|byte| return *byte == b'\n')
             .map_or(available.len(), |position| return position + 1);
+
         if u64::try_from(bytes.len().saturating_add(consumed)).unwrap_or(u64::MAX) > MAX_LINE_BYTES
         {
             return Err(invalid_log(path, line, "line exceeds 64 MiB limit"));
@@ -93,14 +92,11 @@ pub(super) fn read_line(
 
         let (chunk, _) = available.split_at(consumed);
         bytes.extend_from_slice(chunk);
-
         let complete = chunk.last() == Some(&b'\n');
-
         reader.consume(consumed);
 
         if complete {
             bytes.pop();
-
             return Ok(Some(bytes));
         }
     }
@@ -111,11 +107,9 @@ where
     T: for<'de> serde::Deserialize<'de>,
 {
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-
     return serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
         let json_path = error.path().to_string();
         let source = error.into_inner();
-
         return Error::InvalidEventLog {
             path: path.to_path_buf(),
             line,
@@ -173,7 +167,6 @@ pub(super) fn validate_header(path: &Path, header: &EventLogHeader) -> Result<()
             "terminal palette must be empty or contain exactly 256 colors",
         ));
     }
-
     return Ok(());
 }
 
@@ -183,10 +176,10 @@ fn supported_geometry_cell_count(cols: u16, rows: u16) -> Option<usize> {
     }
 
     let cells = u32::from(cols).checked_mul(u32::from(rows))?;
+
     if cells > MAX_TERMINAL_CELLS {
         return None;
     }
-
     return usize::try_from(cells).ok();
 }
 
@@ -207,7 +200,6 @@ pub(super) fn validate_event_geometry(path: &Path, line: u64, event: &Event) -> 
     {
         return Err(invalid_log(path, line, geometry_limit_reason("resize")));
     }
-
     return Ok(());
 }
 
@@ -215,7 +207,6 @@ pub(super) fn chained_hash(previous: Hash, body: &[u8]) -> Hash {
     let mut hasher = blake3::Hasher::new();
     hasher.update(previous.as_bytes());
     hasher.update(body);
-
     return hasher.finalize();
 }
 

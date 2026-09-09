@@ -1,9 +1,11 @@
 [statement_spacing]
 schema_version = 1
+enable = ["layout"]
 
 [statement_spacing.grouping]
 bindings = "multiline"
 expressions = "multiline"
+join_related = true
 self_fields = "distinct"
 
 [statement_spacing.control_flow]

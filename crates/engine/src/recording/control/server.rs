@@ -1,5 +1,17 @@
 //! Authenticated control-socket transport and worker lifecycle.
 
+use super::super::{
+    model::RuntimeMessage,
+    support::{finish_with_cleanup, poll_ready, terminal_error},
+};
+use super::transport::{control_response_timeout, control_socket_address, validate_frame};
+use crate::{Error, Result};
+use nix::{
+    errno::Errno,
+    poll::{poll, PollFd, PollFlags, PollTimeout},
+    sys::socket::{getsockopt, sockopt::PeerCredentials},
+    unistd::{pipe, write as fd_write, Uid},
+};
 use std::{
     io::{BufRead as _, BufReader, ErrorKind, Read as _, Write as _},
     os::fd::{AsFd as _, OwnedFd},
@@ -12,14 +24,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-
-use nix::{
-    errno::Errno,
-    poll::{poll, PollFd, PollFlags, PollTimeout},
-    sys::socket::{getsockopt, sockopt::PeerCredentials},
-    unistd::{pipe, write as fd_write, Uid},
-};
-
 use termtrace_model::{
     protocol::control::{
         ActionPostconditionResult, ControlData, ControlErrorDetails, ControlRequest,
@@ -29,13 +33,6 @@ use termtrace_model::{
     terminal::observation::ActorBoundaries,
     terminal::screen::{FrameDetail, ScreenFrame, ScreenFrameData, ScreenFrameSource},
 };
-
-use super::super::{
-    model::RuntimeMessage,
-    support::{finish_with_cleanup, poll_ready, terminal_error},
-};
-use super::transport::{control_response_timeout, control_socket_address, validate_frame};
-use crate::{Error, Result};
 
 pub(in crate::recording) struct ControlWorker {
     stop_accepting: OwnedFd,
@@ -77,18 +74,21 @@ pub(in crate::recording) fn spawn_control_server(
     listener.set_nonblocking(true).map_err(|error| {
         return terminal_error("configure abstract control socket", error.to_string());
     })?;
+
     let (stop_accepting_read, stop_accepting) = pipe().map_err(|error| {
         return terminal_error(
             "create control listener cancellation pipe",
             error.to_string(),
         );
     })?;
+
     let (cancel_read, cancel) = pipe().map_err(|error| {
         return terminal_error(
             "create control request cancellation pipe",
             error.to_string(),
         );
     })?;
+
     let thread = thread::Builder::new()
         .name("termtrace-control-server".to_owned())
         .spawn(move || {
@@ -132,6 +132,7 @@ fn control_server_loop(
                 }
             }
         };
+
         if !listener_ready && stop_accepting_ready {
             return Ok(());
         }
@@ -147,6 +148,7 @@ fn control_server_loop(
                     else {
                         continue;
                     };
+
                     scope.spawn(move || {
                         let _permit = permit;
 
@@ -193,6 +195,7 @@ fn handle_control_connection(
         .map_err(|error| {
             return terminal_error("configure control connection", error.to_string());
         })?;
+
     let mut encoded = Vec::new();
     BufReader::new(stream.try_clone().map_err(|error| {
         return terminal_error("clone control connection", error.to_string());
@@ -214,6 +217,7 @@ fn handle_control_connection(
             source,
         };
     })?;
+
     if request.version != CONTROL_PROTOCOL_VERSION {
         return write_control_response(
             &mut stream,
@@ -239,7 +243,6 @@ fn handle_control_connection(
         request,
         response: response_sender,
     };
-
     let deadline = Instant::now() + response_timeout;
 
     loop {
@@ -299,7 +302,6 @@ fn handle_control_connection(
 
 fn cancellation_requested(cancel: &OwnedFd) -> Result<bool> {
     let mut descriptors = [PollFd::new(cancel.as_fd(), PollFlags::POLLIN)];
-
     match poll(&mut descriptors, PollTimeout::ZERO) {
         Ok(_) => return Ok(poll_ready(&descriptors[0])),
         Err(Errno::EINTR) => return Ok(false),
@@ -432,7 +434,6 @@ fn rich_response_context(
         }
         _ => return None,
     };
-
     return Some((frame, boundaries, scope));
 }
 
@@ -440,7 +441,6 @@ fn actor_frame_boundaries(frame: &ScreenFrame) -> Option<ActorBoundaries> {
     let ScreenFrameSource::Actor { boundaries, .. } = &frame.source else {
         return None;
     };
-
     return Some(boundaries.clone());
 }
 
@@ -472,7 +472,6 @@ impl ControlWorker {
             .map_err(|_| return terminal_error("join control server", "control thread panicked"));
 
         let result = finish_with_cleanup(stop_accepting_result, cancel_result);
-
         return finish_with_cleanup(result, join_result);
     }
 }
@@ -495,7 +494,6 @@ mod tests {
             event_hash: "a".repeat(64),
             output_bytes: 11,
         };
-
         return ActorBoundaries {
             durable: boundary.clone(),
             observed: boundary,
@@ -535,8 +533,10 @@ mod tests {
             oversized_response_error(&response, MAX_CONTROL_MESSAGE_BYTES + 37);
 
         assert_eq!(code, "screen_frame_resource_limit");
+
         let details = details.expect("rich response details");
         let screen = details.screen_frame.expect("screen-frame details");
+
         assert_eq!(screen.limit_kind.as_deref(), Some("response_bytes"));
         assert_eq!(screen.requested, Some(MAX_CONTROL_MESSAGE_BYTES + 37));
         assert_eq!(screen.maximum, Some(MAX_CONTROL_MESSAGE_BYTES));
@@ -564,10 +564,12 @@ mod tests {
     fn connection_limiter_never_oversubscribes_or_leaks() {
         let active = AtomicUsize::new(0);
         let barrier = Barrier::new(2);
+
         thread::scope(|scope| {
             let permit = ConnectionPermit::acquire(&active, 1).expect("first connection");
             scope.spawn(|| {
                 assert!(ConnectionPermit::acquire(&active, 1).is_none());
+
                 barrier.wait();
                 barrier.wait();
 

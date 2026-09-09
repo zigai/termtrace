@@ -1,3 +1,15 @@
+use super::{
+    client::{option_text, TmuxClient},
+    OPTION_OUTPUT_ROOT, OPTION_TERMTRACE, OPTION_VERSION, OPTION_WATCHDOG_PID, SUPERVISOR_INTERVAL,
+    TMUX_INTEGRATION_VERSION,
+};
+use miette::{IntoDiagnostic as _, Result};
+use nix::{
+    errno::Errno,
+    fcntl::{Flock, FlockArg},
+    libc::{O_NOFOLLOW, O_NONBLOCK, S_IFMT, S_IFREG},
+    unistd::geteuid,
+};
 use std::{
     ffi::{OsStr, OsString},
     fs::{File, OpenOptions},
@@ -9,21 +21,7 @@ use std::{
     process::{self, Command, ExitCode},
     thread,
 };
-
-use miette::{IntoDiagnostic as _, Result};
-use nix::{
-    errno::Errno,
-    fcntl::{Flock, FlockArg},
-    libc::{O_NOFOLLOW, O_NONBLOCK, S_IFMT, S_IFREG},
-    unistd::geteuid,
-};
 use termtrace_engine::registry::SessionRegistry;
-
-use super::{
-    client::{option_text, TmuxClient},
-    OPTION_OUTPUT_ROOT, OPTION_TERMTRACE, OPTION_VERSION, OPTION_WATCHDOG_PID, SUPERVISOR_INTERVAL,
-    TMUX_INTEGRATION_VERSION,
-};
 
 /// The guard lives for the whole observer lifetime. Kernel release on process
 /// death prevents a killed observer from permanently blocking its replacement.
@@ -33,7 +31,6 @@ pub(super) fn claim(client: &TmuxClient, role: &str) -> Result<Option<Flock<File
         "-p",
         "#{socket_path}",
     ])?));
-
     let metadata = fs_err::symlink_metadata(&socket).into_diagnostic()?;
     if !metadata.file_type().is_socket() || metadata.uid() != geteuid().as_raw() {
         return Err(miette::miette!(
@@ -48,7 +45,6 @@ pub(super) fn claim(client: &TmuxClient, role: &str) -> Result<Option<Flock<File
         SessionRegistry::open(PathBuf::from(OsString::from_vec(root)))
     }
     .into_diagnostic()?;
-
     let path = registry.state_root().join(format!(
         ".tmux-{}-{}-{role}.lock",
         metadata.dev(),
@@ -63,14 +59,13 @@ pub(super) fn claim(client: &TmuxClient, role: &str) -> Result<Option<Flock<File
         .custom_flags(O_NOFOLLOW | O_NONBLOCK)
         .open(path)
         .into_diagnostic()?;
-
     let metadata = file.metadata().into_diagnostic()?;
+
     if metadata.mode() & S_IFMT != S_IFREG || metadata.uid() != geteuid().as_raw() {
         return Err(miette::miette!(
             "observer lock must be a regular file owned by the current user"
         ));
     }
-
     return match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
         Ok(lock) => Ok(Some(lock)),
         Err((_, Errno::EWOULDBLOCK)) => Ok(None),
@@ -87,9 +82,11 @@ pub(super) fn run() -> Result<ExitCode> {
     let Some(_lock) = claim(&client, "watchdog")? else {
         return Ok(ExitCode::SUCCESS);
     };
+
     let executable = PathBuf::from(OsString::from_vec(client.option(OPTION_TERMTRACE)?));
     let pid = process::id().to_string();
     client.set_option(OPTION_WATCHDOG_PID, OsStr::new(&pid))?;
+
     while enabled(&client) {
         // Waiting owns and reaps the child; only one observer is spawned at a
         // time, and both roles hold independent crash-released locks.

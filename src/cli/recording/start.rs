@@ -51,16 +51,13 @@ pub(in crate::cli) fn run_start(
         Ok(stdout) => stdout,
         Err(error) => {
             release_start_reservation(&registry, &reservation);
-
             return Err(error);
         }
     };
-
     let stderr = match open_detached_log(&paths.stderr_log) {
         Ok(stderr) => stderr,
         Err(error) => {
             release_start_reservation(&registry, &reservation);
-
             return Err(error);
         }
     };
@@ -74,14 +71,15 @@ pub(in crate::cli) fn run_start(
         .stdin(if environment_stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
+
     let mut recorder = match command.spawn() {
         Ok(recorder) => recorder,
         Err(source) => {
             release_start_reservation(&registry, &reservation);
-
             return Err(source).into_diagnostic();
         }
     };
+
     if let Some(bytes) = environment_stdin {
         let mut stdin = recorder
             .stdin
@@ -92,6 +90,7 @@ pub(in crate::cli) fn run_start(
     }
 
     let deadline = Instant::now() + Duration::from_millis(startup_timeout_ms);
+
     let mut ready_since: Option<Instant> = None;
 
     loop {
@@ -109,7 +108,6 @@ pub(in crate::cli) fn run_start(
             && recorder_identity(&paths.session).is_some()
         {
             let ready_at = ready_since.get_or_insert_with(Instant::now);
-
             if ready_at.elapsed() >= Duration::from_millis(30) {
                 let entry = registry.promote(&reservation).map_err(|error| {
                     return miette::miette!(
@@ -119,7 +117,6 @@ pub(in crate::cli) fn run_start(
                         paths.stderr_log.display(),
                     );
                 })?;
-
                 return report_start_outcome(response, &entry, &paths, None, &synchronization);
             }
         }
@@ -199,7 +196,6 @@ fn promote_completed_start(
             paths.stderr_log.display(),
         );
     })?;
-
     return report_start_outcome(response, &entry, paths, Some(&completion), synchronization);
 }
 
@@ -235,6 +231,7 @@ fn report_start_outcome(
     });
 
     let mut synchronization_ok = true;
+
     if synchronization.requested() {
         let (matched, postcondition) = if completion.is_some() {
             (
@@ -296,7 +293,6 @@ fn start_postcondition(
             }),
         )
         .into_diagnostic()?;
-
         let ControlData::StableSnapshot { frame, quality, .. } = data else {
             return Err(miette::miette!(
                 "actor returned the wrong stable-capture payload"
@@ -376,6 +372,7 @@ pub(super) fn record_arguments(
         OsString::from("--out"),
         session.as_os_str().to_os_string(),
     ];
+
     if !forward_stdin {
         arguments.push(OsString::from("--no-input"));
     }
@@ -504,6 +501,7 @@ pub(super) fn record_arguments(
     } else {
         Duration::from_secs(15 * 60)
     });
+
     if !idle_timeout.is_zero() {
         push_record_option(
             &mut arguments,
@@ -564,7 +562,6 @@ pub(super) fn record_arguments(
 
     arguments.push(OsString::from("--"));
     arguments.extend(recording.command.iter().cloned());
-
     return arguments;
 }
 

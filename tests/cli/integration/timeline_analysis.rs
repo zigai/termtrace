@@ -21,9 +21,11 @@ fn streamed_diagnostic_detectors_match_materialized_reports() {
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
     let mut selections = vec![Vec::new()];
     selections.extend(DiagnosticCheck::all().into_iter().map(|check| vec![check]));
+
     for checks in selections {
         let expected = diagnose(&log, checks.clone(), 1, &[]).expect("materialized diagnostics");
         let actual = diagnose_session(&session, checks, 1, &[]).expect("streamed diagnostics");
+
         assert_eq!(
             serde_json::to_value(actual).expect("streamed report"),
             serde_json::to_value(expected).expect("materialized report")
@@ -34,26 +36,27 @@ fn streamed_diagnostic_detectors_match_materialized_reports() {
         let count = u64::try_from(count).expect("fixture count");
         let snapshot = SessionSnapshot::capture(&session, Some(count)).expect("finite snapshot");
         assert!(!snapshot.path().join("completion.json").exists());
+
         let prefix =
             EventLog::read_prefix(session.join("events.jsonl"), count).expect("legacy prefix");
-
         let expected =
             diagnose(&prefix, DiagnosticCheck::all(), 1, &[]).expect("legacy prefix diagnosis");
-
         let actual =
             diagnose_snapshot(&snapshot, DiagnosticCheck::all(), 1).expect("snapshot diagnosis");
+
         assert_eq!(
             serde_json::to_value(actual).expect("snapshot JSON"),
             serde_json::to_value(expected).expect("legacy JSON")
         );
+
         let expected = build_timeline(&prefix, true, true, None).expect("legacy prefix timeline");
         let mut actual = Vec::new();
         visit_snapshot_timeline_while(&snapshot, true, true, None, |entry| {
             actual.push(entry);
-
             return Ok(true);
         })
         .expect("snapshot timeline");
+
         assert_eq!(actual, expected);
     }
 }
@@ -93,6 +96,7 @@ fn timeline_streams_presented_states_and_canonical_operations() {
             return serde_json::from_slice::<serde_json::Value>(line).expect("timeline JSON");
         })
         .collect::<Vec<_>>();
+
     assert!(concise_entries.iter().any(|entry| {
         return entry.pointer("/item/kind") == Some(&serde_json::json!("canonical_event"));
     }));
@@ -135,9 +139,11 @@ fn timeline_streams_presented_states_and_canonical_operations() {
         .clone();
 
     let human = String::from_utf8(human).expect("timeline text");
+
     assert!(human.contains("lifecycle spawned pid="), "{human}");
     assert!(human.contains("exit code=0 signal=-"), "{human}");
     assert!(human.contains(" csi bytes="), "{human}");
+
     for leaked in ["Some(", "None", " Csi ", "Spawned"] {
         assert!(!human.contains(leaked), "leaked `{leaked}` in:\n{human}");
     }
@@ -146,9 +152,10 @@ fn timeline_streams_presented_states_and_canonical_operations() {
 
     for (hidden, controls) in [(false, false), (false, true), (true, true)] {
         let expected = build_timeline(&log, hidden, controls, None).expect("reference timeline");
-        let mut entries = Vec::new();
 
+        let mut entries = Vec::new();
         let mut offset = 0;
+
         loop {
             let page = build_session_timeline_page(&session, hidden, controls, None, offset, 3)
                 .expect("streamed page");
@@ -185,6 +192,7 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
         .expect("spawn recorder");
 
     wait_for_control(&session);
+
     for index in 0..205 {
         send_request(
             &session,
@@ -210,7 +218,9 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
 
     let timeline_lines = json_lines(&timeline.get_output().stdout);
     assert_eq!(timeline_lines.len(), 101);
+
     let timeline_page = timeline_lines.last().expect("timeline page marker");
+
     assert_eq!(timeline_page["kind"], "output_page");
     assert_eq!(timeline_page["page"]["returned"], 100);
     assert_eq!(timeline_page["page"]["next_offset"], 100);
@@ -225,7 +235,9 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
 
     let event_lines = json_lines(&events.get_output().stdout);
     assert_eq!(event_lines.len(), 101);
+
     let event_page = event_lines.last().expect("event page marker");
+
     assert_eq!(event_page["kind"], "output_page");
     assert_eq!(event_page["page"]["total"], 205);
     assert_eq!(event_page["page"]["next_offset"], 100);
@@ -248,6 +260,7 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
         .success();
 
     let resumed_lines = json_lines(&resume.get_output().stdout);
+
     assert_eq!(resumed_lines.len(), 6);
     assert_eq!(
         resumed_lines.last().expect("resumed page")["kind"],
@@ -311,7 +324,9 @@ fn diff_reports_complete_cell_changes_and_enforces_expectations() {
         .get_output()
         .stdout
         .clone();
+
     assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+
     let mut visual_svg = Command::cargo_bin("termtrace").expect("binary should build");
     visual_svg
         .args(["analyze", "diff"])
@@ -383,6 +398,7 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         .state_id;
 
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
+
     for target in [
         StatePoint::LatestPresented,
         StatePoint::StateId { state_id: 0 },
@@ -394,9 +410,9 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         for context in [0, 1, 8] {
             let expected =
                 explain(&log, target.clone(), context).expect("materialized explanation");
-
             let actual =
                 explain_session(&session, target.clone(), context).expect("streamed explanation");
+
             assert_eq!(
                 serde_json::to_value(actual).expect("streamed JSON"),
                 serde_json::to_value(expected).expect("materialized JSON"),
@@ -439,12 +455,14 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         .clone();
 
     let human = String::from_utf8(human).expect("explain text");
+
     assert!(
         human.contains(&format!("state {final_state} event=")),
         "{human}"
     );
     assert!(human.contains(" csi:"), "{human}");
     assert!(human.contains("[high]"), "{human}");
+
     for leaked in ["Some(", "None", " Csi", "[High]"] {
         assert!(!human.contains(leaked), "leaked `{leaked}` in:\n{human}");
     }
@@ -487,10 +505,12 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
     let expected = diagnose(&diagnostic_log, Vec::new(), 1, &[]).expect("materialized diagnostics");
     let actual =
         diagnose_session(&diagnostic_session, Vec::new(), 1, &[]).expect("streamed diagnostics");
+
     assert_eq!(
         serde_json::to_value(actual).expect("streamed report"),
         serde_json::to_value(expected).expect("materialized report")
     );
+
     let mut diagnose = Command::cargo_bin("termtrace").expect("binary should build");
     diagnose
         .args(["analyze", "diagnose"])
@@ -528,12 +548,14 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         .clone();
 
     let human = String::from_utf8(human).expect("diagnose text");
+
     assert!(human.contains("states="), "{human}");
     assert!(human.contains("tokens="), "{human}");
     assert!(
         human.contains("states=-") || human.contains("tokens=-"),
         "empty diagnostic references were not rendered as '-':\n{human}"
     );
+
     for leaked in ["states=[", "tokens=[", "Some(", "None", "[High]"] {
         assert!(!human.contains(leaked), "leaked `{leaked}` in:\n{human}");
     }

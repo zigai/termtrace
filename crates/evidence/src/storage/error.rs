@@ -1,5 +1,4 @@
 use std::{error::Error as StdError, fmt, io, path::PathBuf, result::Result as StdResult};
-
 use termtrace_model::error::ModelValidationError;
 
 #[derive(Clone, Copy, Debug)]

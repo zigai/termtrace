@@ -1,6 +1,5 @@
 use crate::support::*;
 use serde::Deserialize;
-
 use termtrace_model::artifact::tmux::{TmuxBundleTrack, TmuxStreamingBundleManifest};
 
 mod bundle;
@@ -87,6 +86,7 @@ impl PrivateTmux {
         let mut configuration = b"set-option -g default-terminal tmux-256color\n".to_vec();
         configuration.extend_from_slice(&generated);
         fs::write(&config, configuration).expect("write generated tmux config");
+
         let status = StdCommand::new(&binary)
             .args(["-L", socket.as_str(), "-f"])
             .arg(&config)
@@ -103,6 +103,7 @@ impl PrivateTmux {
             .env("SHELL", shell)
             .status()
             .expect("start private tmux server");
+
         assert!(status.success(), "private tmux server did not start");
 
         return Self {
@@ -140,6 +141,7 @@ impl PrivateTmux {
             .env("SHELL", shell)
             .status()
             .expect("start unmanaged private tmux server");
+
         assert!(status.success(), "private tmux server did not start");
 
         return Self {
@@ -181,6 +183,7 @@ impl PrivateTmux {
             .env("SHELL", shell)
             .output()
             .expect("start isolated default tmux server");
+
         assert!(
             output.status.success(),
             "isolated default tmux server did not start: {}",
@@ -246,11 +249,13 @@ impl PrivateTmux {
                 .args(["-L", self.socket.as_str()])
                 .output()
                 .expect("query tmux status");
+
             assert!(
                 output.status.success(),
                 "tmux status failed while waiting for {description}: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
+
             let status = compact_json_line(&output.stdout);
             if predicate(&status) {
                 return status;
@@ -270,6 +275,7 @@ impl PrivateTmux {
             .args(["show-options", "-pqv", "-t", pane, option])
             .output()
             .expect("query pane option");
+
         assert!(
             output.status.success(),
             "could not query {option} for {pane}: {}",
@@ -290,6 +296,7 @@ impl PrivateTmux {
                     .expect("query pane PID")
                     .stdout,
             );
+
             if self.pane_option(pane, option) == pid {
                 return;
             }
@@ -308,8 +315,8 @@ impl PrivateTmux {
             .args(["show-options", "-gqv", "@termtrace-executable"])
             .output()
             .expect("query configured Termtrace executable");
-        assert!(output.status.success());
 
+        assert!(output.status.success());
         return String::from_utf8(trim_newline(output.stdout)).expect("UTF-8 executable");
     }
 
@@ -340,12 +347,12 @@ impl PrivateTmux {
                 ])
                 .output()
                 .expect("diagnose pane list");
-
             let supervisor = self
                 .command()
                 .args(["show-options", "-gqv", "@termtrace-supervisor-pid"])
                 .output()
                 .expect("diagnose supervisor");
+
             panic!(
                 "unrecorded pane {pane} remained alive; panes={}; supervisor={}",
                 String::from_utf8_lossy(&panes.stdout),
@@ -384,6 +391,7 @@ fn wait_for_recorded_resize(session: &Path, cols: u16, rows: u16) {
             }
             Err(error) => format!("event log was not readable: {error}"),
         };
+
         assert!(
             Instant::now() < deadline,
             "recording {} did not observe resize {cols}x{rows}: {diagnostic}",
@@ -406,6 +414,7 @@ fn wait_for_tmux_server_exit(server_pid: u64) {
             .args(["-0", server_pid.as_str()])
             .output()
             .expect("probe original tmux server PID");
+
         if !output.status.success() {
             return;
         }
@@ -459,6 +468,7 @@ fn tmux_split_window(server: &PrivateTmux, target: &str) -> String {
         .args(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", target])
         .output()
         .expect("split tmux window");
+
     assert!(
         output.status.success(),
         "tmux window split failed: {}",
@@ -506,6 +516,7 @@ fn tmux_binary() -> PathBuf {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+
     assert!(
         status.as_ref().is_ok_and(|status| return status.success()),
         "tmux is required by the CLI integration suite: {status:?}"

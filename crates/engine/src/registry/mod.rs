@@ -1,5 +1,13 @@
 //! Secure owner-only named-session registry and managed-session retention.
 
+use crate::{Error, Result};
+use nix::{
+    fcntl::{Flock, FlockArg},
+    libc::O_NOFOLLOW,
+    sys::socket::{getsockopt, sockopt::PeerCredentials},
+    unistd::getuid,
+};
+use serde::de::{self, Deserialize, Deserializer};
 use std::{
     collections::HashSet,
     env,
@@ -16,15 +24,6 @@ use std::{
     result::Result as StdResult,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-
-use serde::de::{self, Deserialize, Deserializer};
-
-use nix::{
-    fcntl::{Flock, FlockArg},
-    libc::O_NOFOLLOW,
-    sys::socket::{getsockopt, sockopt::PeerCredentials},
-    unistd::getuid,
-};
 use termtrace_evidence::{
     artifact::write_secure,
     session::{read_completion, read_manifest},
@@ -40,8 +39,6 @@ use termtrace_model::{
     value::ByteString,
 };
 use uuid::Uuid;
-
-use crate::{Error, Result};
 
 const REGISTRY_DIRECTORY: &str = "registry";
 const REGISTRY_RESERVATION_FORMAT: &str = "termtrace-session-registry-reservation";
@@ -66,7 +63,6 @@ impl<'de> Deserialize<'de> for RegistryRecord {
                 .map(Self::Reservation)
                 .map_err(de::Error::custom);
         }
-
         return serde_json::from_value(value)
             .map(Self::Entry)
             .map_err(de::Error::custom);

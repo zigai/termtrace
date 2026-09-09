@@ -1,13 +1,11 @@
 //! Policy-bound deterministic evidence archives.
 
+use crate::{bundle, Result};
 use std::path::Path;
-
 use termtrace_evidence::bundle::{archive as create_archive, verify_archive};
 use termtrace_model::{
     artifact::bundle::BundleManifest, artifact::bundle::BundleVerificationPolicy,
 };
-
-use crate::{bundle, Result};
 
 /// Create a deterministic Zstandard-compressed USTAR evidence archive.
 ///
@@ -27,7 +25,6 @@ pub fn create(
     bundle::verify_profile(directory, policy)?;
     let identity = bundle::identity_for_policy(policy)?;
     create_archive(directory, destination.as_ref(), Some(&identity))?;
-
     return Ok(());
 }
 
@@ -48,6 +45,5 @@ pub fn verify(
     let identity = bundle::identity_for_policy(policy)?;
     let manifest = verify_archive(archive.as_ref(), Some(&identity))?;
     bundle::verify_archived_manifest(&manifest, policy)?;
-
     return Ok(manifest);
 }

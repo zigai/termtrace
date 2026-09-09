@@ -7,7 +7,6 @@ fn record_mirrors_output_persists_events_and_propagates_exit_code() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("session");
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-
     command
         .args(["record", "--out"])
         .arg(&session)
@@ -20,12 +19,15 @@ fn record_mirrors_output_persists_events_and_propagates_exit_code() {
 
     let event_log = session.join("events.jsonl");
     assert!(event_log.is_file(), "event log should be persisted");
+
     let recording = EventLog::read(event_log).expect("valid event log");
     assert!(matches!(
         recording.events.last().map(|record| return &record.event),
         Some(Event::Exit { code: Some(7), .. })
     ));
+
     let manifest = read_manifest(&session).expect("session manifest");
+
     assert_eq!(manifest.geometry_provenance.source, GeometrySource::Manual);
     assert_eq!(
         manifest.geometry_provenance.capture_target,
@@ -39,6 +41,7 @@ fn record_mirrors_output_persists_events_and_propagates_exit_code() {
 #[test]
 fn durability_thresholds_are_only_accepted_in_bounded_mode() {
     let temporary = TempDir::new().expect("temporary directory");
+
     for (mode, threshold, value) in [
         ("strict", "--durability-max-interval-ms", "1"),
         ("throughput", "--durability-max-uncommitted-bytes", "1024"),
@@ -52,6 +55,7 @@ fn durability_thresholds_are_only_accepted_in_bounded_mode() {
             .assert()
             .failure()
             .stderr(predicate::str::contains("require --durability bounded"));
+
         assert!(
             !session.exists(),
             "invalid durability options created evidence"
@@ -68,6 +72,7 @@ fn durability_thresholds_are_only_accepted_in_bounded_mode() {
         .success();
 
     let manifest = read_manifest(&session).expect("bounded manifest");
+
     assert_eq!(manifest.durability_policy.maximum_interval_ms, Some(50));
     assert_eq!(
         manifest.durability_policy.maximum_uncommitted_bytes,
@@ -101,6 +106,7 @@ fn output_budget_exhaustion_returns_failure_after_fast_child_exit() {
     let completion: serde_json::Value =
         serde_json::from_slice(&fs_err::read(session.join("completion.json")).expect("completion"))
             .expect("completion JSON");
+
     assert_eq!(completion["resource_limit"]["kind"], "output_bytes");
     assert_eq!(completion["resource_limit"]["limit"], 4095);
     assert!(completion["resource_limit"]["observed"]
@@ -122,8 +128,8 @@ fn agent_record_stdout_is_one_json_response() {
         .get_output()
         .stdout
         .clone();
-
     let response = compact_json_line(&output);
+
     assert_eq!(response["ok"], true);
     assert_eq!(response["type"], "record");
     assert_eq!(response["output"], "CHILD_OUTPUT");
@@ -143,6 +149,7 @@ fn semantic_record_without_ghostty_has_stable_nonwarning_stderr() {
         .success();
 
     let stderr = String::from_utf8_lossy(&recorded.get_output().stderr);
+
     assert!(
         stderr.contains("recording:"),
         "missing success diagnostic: {stderr}"
@@ -156,6 +163,7 @@ fn semantic_record_without_ghostty_has_stable_nonwarning_stderr() {
         !stderr.lines().any(has_rfc3339_log_prefix),
         "unexpected timestamped log line: {stderr}"
     );
+
     let log = EventLog::read(session.join("events.jsonl")).expect("event log");
     assert_eq!(log.header.colors.source, "libghostty_builtin");
 }
@@ -165,7 +173,6 @@ fn custom_provenance_policy_hashes_without_retaining_values() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("custom-provenance");
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-
     command
         .args([
             "record",
@@ -188,22 +195,26 @@ fn custom_provenance_policy_hashes_without_retaining_values() {
         manifest.execution_provenance.policy.kind,
         ProvenancePolicyKind::Custom
     );
+
     let terminal = manifest
         .execution_provenance
         .environment
         .get("TERM")
         .expect("TERM inventory");
+
     assert_eq!(terminal.capture, ProvenanceCapture::Hash);
     assert!(terminal.value.is_none());
     assert_eq!(
         terminal.value_hash.as_deref(),
         Some(blake3::hash(b"xterm-ghostty").to_hex().as_str())
     );
+
     let private = manifest
         .execution_provenance
         .environment
         .get("PRIVATE_TOKEN")
         .expect("private inventory");
+
     assert_eq!(private.capture, ProvenanceCapture::NotCaptured);
     assert_eq!(
         private.sensitivity,
@@ -220,7 +231,6 @@ fn record_inherits_and_persists_effective_working_directory() {
 
     let inherited_session = temporary.path().join("inherited-session");
     let mut inherited = Command::cargo_bin("termtrace").expect("binary should build");
-
     inherited
         .current_dir(&workspace)
         .args(["record", "--no-input", "--out"])

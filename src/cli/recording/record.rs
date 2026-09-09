@@ -1,7 +1,6 @@
+use super::*;
 use std::fs;
 use termtrace_model::execution::session::RecordingFailurePolicy;
-
-use super::*;
 
 pub(in crate::cli) fn run_record(
     response: &mut ResponseWriter,
@@ -119,6 +118,7 @@ pub(in crate::cli) fn run_record(
     }
 
     let durability_policy = durability_policy_for(&arguments)?;
+
     if !matches!(arguments.provenance, ProvenancePolicyArg::Custom)
         && !arguments.provenance_environment.is_empty()
     {
@@ -133,6 +133,7 @@ pub(in crate::cli) fn run_record(
     };
 
     let environment = supplied_environment.unwrap_or_default();
+
     let overrides = GhosttyVisualOverrides {
         font_family: arguments.font_family.clone(),
         font_size: arguments.font_size.clone(),
@@ -180,7 +181,6 @@ pub(in crate::cli) fn run_record(
         .pixel_width
         .checked_div(geometry.cols)
         .ok_or_else(|| miette::miette!("resolved terminal has no columns"))?;
-
     let cell_height_px = geometry
         .pixel_height
         .checked_div(geometry.rows)
@@ -250,7 +250,6 @@ pub(super) fn durability_policy_for(arguments: &RecordingArgs) -> Result<Durabil
     let interval = arguments
         .durability_max_interval_ms
         .unwrap_or(DEFAULT_DURABILITY_MAX_INTERVAL_MS);
-
     let bytes = arguments
         .durability_max_uncommitted_bytes
         .unwrap_or(DEFAULT_DURABILITY_MAX_UNCOMMITTED_BYTES);
@@ -260,7 +259,6 @@ pub(super) fn durability_policy_for(arguments: &RecordingArgs) -> Result<Durabil
             "bounded durability thresholds must be greater than zero"
         ));
     }
-
     return Ok(arguments.durability.policy(interval, bytes));
 }
 
@@ -269,16 +267,15 @@ pub(super) fn record_for_response(
     options: &RecordOptions,
 ) -> Result<RecordOutcome> {
     let mut output = response_output(response);
-
     return record_with_output(options, &mut output).into_diagnostic();
 }
 
 pub(super) fn report_record_outcome(outcome: RecordOutcome) -> Result<ExitCode> {
     writeln!(io::stderr(), "recording: {}", outcome.event_log.display()).into_diagnostic()?;
+
     if outcome.resource_limit.is_some() {
         return Ok(ExitCode::FAILURE);
     }
-
     return match (outcome.exit_code, outcome.signal_name) {
         (Some(code), None) => u8::try_from(code).map(ExitCode::from).into_diagnostic(),
         _ => Ok(ExitCode::FAILURE),

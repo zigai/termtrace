@@ -1,11 +1,5 @@
 //! Stable semantic replay records, selectors, and source ranges.
 
-use std::path::PathBuf;
-
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::{
     artifact::metadata::ArtifactMember,
     execution::event_log::CanonicalBoundary,
@@ -15,6 +9,10 @@ use crate::{
     },
     value::ByteString,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use uuid::Uuid;
 
 /// Pinned Ghostty source revision used by the semantic adapter.
 pub const GHOSTTY_REVISION: &str = "55a3e33ab26a23d75b274b23c7f76d837db00578";

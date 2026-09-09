@@ -1,11 +1,9 @@
 //! Private disk indexes; canonical JSONL remains authoritative.
 
-use std::{collections::HashSet, io, path::Path};
-
-use rusqlite::{params, Connection, OptionalExtension as _};
-use uuid::Uuid;
-
 use super::{Error, Result};
+use rusqlite::{params, Connection, OptionalExtension as _};
+use std::{collections::HashSet, io, path::Path};
+use uuid::Uuid;
 
 pub(crate) fn index_error(source: rusqlite::Error) -> Error {
     return Error::filesystem(Path::new("<identifier-index>"), io::Error::other(source));
@@ -29,6 +27,7 @@ impl IdentifierSet {
             // removed when this connection closes. Validation needs no durable index.
             let mut disk = Connection::open("").map_err(index_error)?;
             disk.execute_batch("PRAGMA cache_size=-1024; PRAGMA temp_store=FILE; PRAGMA journal_mode=OFF; CREATE TABLE ids (id BLOB PRIMARY KEY) WITHOUT ROWID;").map_err(index_error)?;
+
             {
                 let transaction = disk.transaction().map_err(index_error)?;
                 for existing in &self.memory {
@@ -89,6 +88,7 @@ impl RequestIndex {
 
     pub(crate) fn reserve(&mut self, ids: &[Uuid]) -> Result<bool> {
         let transaction = self.connection.transaction().map_err(index_error)?;
+
         for id in ids {
             let count = transaction
                 .execute(
@@ -104,7 +104,6 @@ impl RequestIndex {
         }
 
         transaction.commit().map_err(index_error)?;
-
         return Ok(true);
     }
 

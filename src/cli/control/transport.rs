@@ -150,7 +150,6 @@ pub(super) fn send_cli_control(
     operation: &'static str,
 ) -> Result<CliControlOutcome> {
     let control_response = send_request_response(session, request).into_diagnostic()?;
-
     match control_response.result {
         ControlResult::Ok { data } => return Ok(CliControlOutcome::Applied(Box::new(data))),
         ControlResult::Error {
@@ -191,11 +190,13 @@ pub(in crate::cli) fn run_control_guarded(
     }
 
     let mut control_request = ControlRequest::new(command);
+
     if let Some(request_id) = request_id {
         control_request.request_id = request_id;
     }
 
     control_request.expected_presented_state_hash = expected_presented_state_hash;
+
     let data = match send_cli_control(response, &resolved.path, &control_request, "control")? {
         CliControlOutcome::Applied(data) => *data,
         CliControlOutcome::Rejected(exit_code) => return Ok(exit_code),
@@ -211,6 +212,7 @@ pub(in crate::cli) fn run_status(
     let requested_session = arguments.session;
     let session_label = requested_session.display().to_string();
     let resolved = resolve_session(requested_session)?;
+
     if arguments.wait_complete || resolved.lifecycle == RegistryLifecycle::Completed {
         let completion =
             wait_for_completion(&resolved.path, Duration::from_millis(arguments.timeout_ms))
@@ -247,10 +249,8 @@ pub(in crate::cli) fn run_status(
             boundaries: boundaries.clone(),
             clock_sample,
         };
-
         return write_json_line(response, &status);
     }
-
     return Err(miette::miette!(
         "unexpected status response from recording actor"
     ));
@@ -289,11 +289,13 @@ pub(in crate::cli) fn run_stop(
     }
 
     let mut control_request = ControlRequest::new(ControlCommand::Stop);
+
     if let Some(request_id) = arguments.request_id {
         control_request.request_id = request_id;
     }
 
     control_request.expected_presented_state_hash = arguments.expected_presented_state_hash;
+
     let acknowledged = match send_cli_control(response, &resolved.path, &control_request, "stop")? {
         CliControlOutcome::Applied(data) => *data,
         CliControlOutcome::Rejected(exit_code) => return Ok(exit_code),

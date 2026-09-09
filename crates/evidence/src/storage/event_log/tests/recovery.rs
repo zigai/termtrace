@@ -1,14 +1,10 @@
+use super::support::{header, secure_directory};
+use crate::event_log::{EventLog, EventLogWriter, SessionClock};
 use std::{fs::OpenOptions, io::Write};
-
 use tempfile::TempDir;
-use uuid::Uuid;
-
 use termtrace_model::execution::event::{Event, InputDescriptor, InputKind, InputSource};
 use termtrace_model::value::ByteString;
-
-use crate::event_log::{EventLog, EventLogWriter, SessionClock};
-
-use super::support::{header, secure_directory};
+use uuid::Uuid;
 
 #[test]
 fn recovers_valid_prefix_and_reports_uncertain_intent() {

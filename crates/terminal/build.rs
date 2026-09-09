@@ -10,6 +10,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     let crate_root = PathBuf::from(manifest_dir);
     let repository_root = crate_root.join("../..");
+
     println!(
         "cargo:rerun-if-changed={}",
         repository_root.join("vendor/ghostty/.git").display()
@@ -35,6 +36,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             || return "unknown".to_owned(),
             |value| return value.trim().to_owned(),
         );
+
     println!("cargo:rustc-env=TERMTRACE_BUILD_REVISION={build_revision}");
 
     let external_prefix = env::var_os("TERMTRACE_GHOSTTY_PREFIX");
@@ -42,7 +44,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         || return repository_root.join("vendor/ghostty/zig-out"),
         PathBuf::from,
     );
-
     let header = prefix.join("include/ghostty/vt.h");
     let library = prefix.join("lib/libghostty-vt.a");
 
@@ -75,6 +76,5 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-link-lib=dylib=m");
     println!("cargo:rustc-link-lib=dylib=dl");
     println!("cargo:rustc-link-lib=dylib=pthread");
-
     return Ok(());
 }

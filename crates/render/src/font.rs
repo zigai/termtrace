@@ -1,16 +1,14 @@
 //! Identity, validation, and loading for bundled deterministic semantic fonts.
 
+use crate::error::{render_error, Result};
+use resvg::usvg::fontdb::{Database, Source};
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::ops::Range;
 use std::sync::{Arc, LazyLock};
-
-use resvg::usvg::fontdb::{Database, Source};
 use termtrace_model::artifact::save::{SemanticFontResource, SemanticFontRole};
 use ttf_parser::{name_id, Face};
 use zstd::stream::decode_all;
-
-use crate::error::{render_error, Result};
 
 /// Termtrace-scoped family for all JetBrains Mono text faces.
 pub const SEMANTIC_TEXT_FONT_FAMILY: &str = "Termtrace JetBrains Mono";
@@ -18,7 +16,6 @@ pub const SEMANTIC_TEXT_FONT_FAMILY: &str = "Termtrace JetBrains Mono";
 pub const SEMANTIC_SYMBOLS_FONT_FAMILY: &str = "Termtrace Symbols Nerd Font";
 pub(crate) const SEMANTIC_RASTER_TEXT_FONT_FAMILY: &str = "JetBrains Mono";
 pub(crate) const SEMANTIC_RASTER_SYMBOLS_FONT_FAMILY: &str = "Symbols Nerd Font";
-
 const FONT_SET_HASH_DOMAIN: &[u8] = b"termtrace-semantic-font-set-v1\0";
 const FONT_BUNDLE_MAGIC: &[u8; 8] = b"TTFONT01";
 const FONT_COUNT: u16 = 5;
@@ -96,7 +93,6 @@ impl SemanticFontSet {
     #[must_use]
     pub fn regular_face_bytes(&self) -> &[u8] {
         let [regular, ..] = &self.faces;
-
         return regular.bytes.bytes();
     }
 
@@ -136,6 +132,7 @@ impl SemanticFontSet {
 /// does not have the required family and style metadata.
 pub fn semantic_font_set() -> Result<&'static SemanticFontSet> {
     static FONT_SET: LazyLock<Result<SemanticFontSet>> = LazyLock::new(load_font_set);
+
     return match &*FONT_SET {
         Ok(font_set) => Ok(font_set),
         Err(error) => Err(error.clone()),
@@ -147,12 +144,12 @@ fn load_font_set() -> Result<SemanticFontSet> {
         bytes: bundle,
         ranges,
     } = decompress_font_bundle()?;
-
     let [regular_range, bold_range, italic_range, bold_italic_range, symbols_range] =
         ranges.as_slice()
     else {
         return Err(invalid_font_bundle());
     };
+
     let faces = [
         load_font(
             BundledFontSpec {
@@ -215,6 +212,7 @@ fn load_font_set() -> Result<SemanticFontSet> {
     hasher.update(FONT_SET_HASH_DOMAIN);
 
     let mut database = Database::new();
+
     for face in &faces {
         let role = face.resource.role.as_str().as_bytes();
         let role_length = u16::try_from(role.len())
@@ -283,7 +281,6 @@ fn load_font(
 
     let decompressed_size = u64::try_from(bytes.bytes().len())
         .map_err(|error| return render_error(format!("measure semantic font: {error}")))?;
-
     let resource = SemanticFontResource {
         role: spec.role,
         family: spec.family.to_owned(),
@@ -305,6 +302,7 @@ fn decompress_font_bundle() -> Result<DecompressedFontBundle> {
     })?;
 
     let mut cursor = 0;
+
     if take_bundle_bytes(&bundle, &mut cursor, FONT_BUNDLE_MAGIC.len())
         != Some(FONT_BUNDLE_MAGIC.as_slice())
         || read_bundle_u16(&bundle, &mut cursor) != Some(FONT_COUNT)
@@ -321,10 +319,11 @@ fn decompress_font_bundle() -> Result<DecompressedFontBundle> {
     }
 
     let mut ranges: Vec<Range<usize>> = Vec::with_capacity(lengths.len());
-
     let mut offset = cursor;
+
     for length in lengths {
         let end = offset.checked_add(length).ok_or_else(invalid_font_bundle)?;
+
         if end > bundle.len() {
             return Err(invalid_font_bundle());
         }
@@ -351,19 +350,16 @@ fn take_bundle_bytes<'bundle>(
     let end = cursor.checked_add(length)?;
     let bytes = bundle.get(*cursor..end)?;
     *cursor = end;
-
     return Some(bytes);
 }
 
 fn read_bundle_u16(bundle: &[u8], cursor: &mut usize) -> Option<u16> {
     let bytes: [u8; 2] = take_bundle_bytes(bundle, cursor, 2)?.try_into().ok()?;
-
     return Some(u16::from_le_bytes(bytes));
 }
 
 fn read_bundle_u64(bundle: &[u8], cursor: &mut usize) -> Option<u64> {
     let bytes: [u8; 8] = take_bundle_bytes(bundle, cursor, 8)?.try_into().ok()?;
-
     return Some(u64::from_le_bytes(bytes));
 }
 
@@ -400,7 +396,6 @@ fn validate_layout_metrics(role: SemanticFontRole, face: &Face<'_>) -> Result<()
             role.as_str()
         )));
     }
-
     return Ok(());
 }
 
@@ -414,6 +409,7 @@ mod tests {
         let font_set = semantic_font_set().expect("initialize bundled semantic font set");
         let cached = semantic_font_set().expect("reuse bundled semantic font set");
         assert!(eq(font_set, cached));
+
         let expected = [
             (
                 SemanticFontRole::Regular,
@@ -446,7 +442,9 @@ mod tests {
                 2_440_316,
             ),
         ];
+
         assert_eq!(font_set.resources().len(), expected.len());
+
         for (resource, (role, family, source, size)) in font_set.resources().zip(expected) {
             assert_eq!(resource.role, role);
             assert_eq!(resource.family, family);
@@ -459,10 +457,12 @@ mod tests {
             font_set.font_set_blake3(),
             "013d52d10b90498adec2d19598f4040731dc00cf1539e748f05d86d355f919ec"
         );
+
         let regular = font_set
             .resources()
             .next()
             .expect("ordered font set has a regular face");
+
         assert_eq!(
             blake3::hash(font_set.regular_face_bytes())
                 .to_hex()
@@ -483,6 +483,7 @@ mod tests {
 
         let symbols = Face::parse(font_set.face_bytes(SemanticFontRole::SymbolsFallback), 0)
             .expect("parse symbols bundled face");
+
         assert_eq!(symbols.units_per_em(), 2_048);
         assert_eq!(symbols.ascender(), 1_638);
         assert_eq!(symbols.descender(), -410);

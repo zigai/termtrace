@@ -1,12 +1,10 @@
+use crate::{error::invalid, Error, Result};
 use std::{collections::BTreeMap, path::Path};
-
 use termtrace_model::{
     execution::environment::EnvironmentSpec,
     scenario::{Scenario, ScenarioEnvironment, ScenarioStep, SCENARIO_VERSION},
     value::ByteString,
 };
-
-use crate::{error::invalid, Error, Result};
 
 /// Parse and validate one strict scenario JSON document.
 pub(super) fn read(path: impl AsRef<Path>) -> Result<Scenario> {
@@ -32,7 +30,6 @@ pub(super) fn read(path: impl AsRef<Path>) -> Result<Scenario> {
         })?;
 
     validate(&scenario)?;
-
     return Ok(scenario);
 }
 
@@ -106,6 +103,7 @@ pub(super) fn validate(scenario: &Scenario) -> Result<()> {
     }
 
     let mut combinations = 1_usize;
+
     for (key, values) in &scenario.matrix {
         if key.is_empty()
             || !key
@@ -136,6 +134,7 @@ pub(super) fn expand_matrix(document: Scenario) -> Result<Vec<(String, Scenario)
     }
 
     let mut variants: Vec<BTreeMap<String, String>> = vec![BTreeMap::new()];
+
     for (key, values) in &document.matrix {
         let mut expanded: Vec<BTreeMap<String, String>> = Vec::new();
         for variant in &variants {
@@ -193,7 +192,6 @@ fn substitute_matrix(value: &str, matrix: &BTreeMap<String, String>) -> Result<S
             "unresolved matrix token in command argument `{value}`"
         )));
     }
-
     return Ok(substituted);
 }
 
@@ -232,15 +230,13 @@ pub(crate) fn validate_snapshot_name(name: &str) -> Result<()> {
             "snapshot names accept 1 through 128 ASCII letters, digits, hyphens, or underscores",
         ));
     }
-
     return Ok(());
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn strict_scenario_parses_typed_steps() {
@@ -270,6 +266,7 @@ mod tests {
             "steps": [{ "stop": {} }]
         }))
         .expect("version one scenario JSON");
+
         assert!(validate(&scenario).is_err());
     }
 
@@ -282,6 +279,7 @@ mod tests {
             "steps": [{ "waitScreen": { "contains": "yes", "absent": "no" } }]
         }))
         .expect("scenario JSON");
+
         assert!(validate(&scenario).is_err());
     }
 
@@ -298,7 +296,9 @@ mod tests {
 
         let expanded = expand_matrix(scenario).expect("matrix expansion");
         assert_eq!(expanded.len(), 4);
+
         let first = expanded.first().expect("first matrix variant");
+
         assert_eq!(first.1.launch.command.get(1).expect("theme"), "dark");
         assert_eq!(first.1.launch.command.get(2).expect("width"), "80");
 
@@ -313,6 +313,7 @@ mod tests {
                 };
             })
             .collect::<BTreeSet<_>>();
+
         assert_eq!(names.len(), 4);
     }
 

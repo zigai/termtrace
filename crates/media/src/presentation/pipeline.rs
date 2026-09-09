@@ -1,22 +1,3 @@
-use std::{
-    fmt::Write as _,
-    path::{Path, PathBuf},
-    process::{Command, Stdio},
-    thread,
-};
-
-use termtrace_evidence::artifact::{
-    collect_artifact_members, commit_directory, create_private_directory, verify_artifact_members,
-    write_secure,
-};
-use termtrace_model::artifact::presentation::{
-    CaptionLayout, ChangeSource, PresentationManifest, PresentationOutcome, PresentationPlan,
-    PresentationPreviewManifest, PresentationPreviewOutcome, PresentationSource, PreviewOptions,
-    PRESENTATION_FORMAT_VERSION,
-};
-
-use crate::{Error, Result};
-
 use super::{
     ffmpeg::{
         append_change_visualization, append_pixel_transforms, command_version,
@@ -33,11 +14,26 @@ use super::{
     },
     NANOS_PER_SECOND,
 };
+use crate::{Error, Result};
+use std::{
+    fmt::Write as _,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    thread,
+};
+use termtrace_evidence::artifact::{
+    collect_artifact_members, commit_directory, create_private_directory, verify_artifact_members,
+    write_secure,
+};
+use termtrace_model::artifact::presentation::{
+    CaptionLayout, ChangeSource, PresentationManifest, PresentationOutcome, PresentationPlan,
+    PresentationPreviewManifest, PresentationPreviewOutcome, PresentationSource, PreviewOptions,
+    PRESENTATION_FORMAT_VERSION,
+};
 
 fn require_presentation_tools() -> Result<()> {
     command_version("ffmpeg")?;
     command_version("ffprobe")?;
-
     return Ok(());
 }
 
@@ -131,6 +127,7 @@ pub fn preview(
     let composed = parent.join(format!(".preview-source-{}.tmp", uuid::Uuid::now_v7()));
     let _composed_cleanup = DirectoryCleanup(composed.clone());
     let rendered = export_with_capability_check(plan, &composed, false)?;
+
     let staging = parent.join(format!(".preview-{}.tmp", uuid::Uuid::now_v7()));
     create_private_directory(&staging)?;
     let _staging_cleanup = DirectoryCleanup(staging.clone());
@@ -145,6 +142,7 @@ pub fn preview(
             };
         })?,
     )?;
+
     let normalized = serde_json::to_vec_pretty(plan).map_err(|source| {
         return Error::InvalidJson {
             path: staging.join("normalized-plan.json"),
@@ -152,7 +150,9 @@ pub fn preview(
             source,
         };
     })?;
+
     write_secure(&staging.join("normalized-plan.json"), &normalized)?;
+
     let source_manifest =
         fs_err::read(rendered.directory.join("manifest.json")).map_err(|source| {
             return Error::Filesystem {
@@ -160,6 +160,7 @@ pub fn preview(
                 source,
             };
         })?;
+
     write_secure(
         &staging.join("source-presentation-manifest.json"),
         &source_manifest,
@@ -169,7 +170,6 @@ pub fn preview(
         let contact_sheet = scope.spawn(|| {
             return render_contact_sheet(&rendered.video, &staging, &selected_frames, options);
         });
-
         let preview_video = scope.spawn(|| {
             return render_low_resolution_preview(&rendered.video, &staging, options.preview_width);
         });
@@ -249,7 +249,6 @@ pub(super) fn select_preview_frames(
                     .filter(|(start, end)| return start < end)
                     .collect::<Vec<_>>();
                 intervals.sort_unstable();
-
                 intervals
             }
             Some(_) => vec![(1, plan.output_frame_count)],
@@ -273,7 +272,6 @@ pub(super) fn select_preview_frames(
 
     let candidates: u64 = merged.iter().map(|(start, end)| return end - start).sum();
     let count = u64::from(options.max_frames).min(candidates);
-
     if count == 0 {
         return Err(plan_error("preview selection contains no frames"));
     }
@@ -281,8 +279,8 @@ pub(super) fn select_preview_frames(
     let mut selected = Vec::with_capacity(usize::from(options.max_frames));
     let mut intervals = merged.into_iter();
     let mut interval = intervals.next();
-
     let mut preceding = 0;
+
     for index in 0..count {
         let candidate_index = if count == 1 {
             0
@@ -293,6 +291,7 @@ pub(super) fn select_preview_frames(
 
         while let Some((start, end)) = interval {
             let length = end - start;
+
             if candidate_index - preceding < length {
                 selected.push(start + candidate_index - preceding);
                 break;
@@ -321,6 +320,7 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
             clip.speed.denominator,
             clip.speed.numerator,
         );
+
         if clip.hold_frame_count > 0 {
             write!(
                 &mut filter,
@@ -383,6 +383,7 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
     filters.push(format!("[{prior}]null[outv]"));
     let filter = format!("{};\n", filters.join(";\n"));
     write_secure(&filter_path, filter.as_bytes())?;
+
     if plan.change_visualization.as_ref().is_some_and(|change| {
         return change.source == ChangeSource::EncodedPixels;
     }) {
@@ -445,6 +446,7 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
         })?;
 
     write_secure(&staging.join("ffmpeg.log"), &process.stderr)?;
+
     if !process.status.success() {
         return Err(plan_error(format!(
             "FFmpeg presentation export failed with {}: {}",
@@ -467,10 +469,8 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
                         };
                     })?,
                 )?;
-
                 return Ok(output_probe);
             });
-
             let frame_map = scope.spawn(|| -> Result<()> {
                 let semantic_spans = if matches!(plan.source, PresentationSource::Semantic { .. }) {
                     read_semantic_frame_spans(&staging.join("semantic-source-map.jsonl"))?
@@ -484,7 +484,6 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
                     &semantic_spans,
                 );
             });
-
             let normalized_plan = scope.spawn(|| -> Result<()> {
                 let normalized = serde_json::to_vec_pretty(plan).map_err(|source| {
                     return Error::InvalidJson {
@@ -499,8 +498,8 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
                     &normalized,
                 )?);
             });
-
             let version = scope.spawn(|| return command_version("ffmpeg"));
+
             let output_probe = probe
                 .join()
                 .map_err(|_panic| return plan_error("output-probe worker panicked"))??;
@@ -545,6 +544,5 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
 
     write_secure(&staging.join("manifest.json"), &manifest_bytes)?;
     verify_artifact_members(staging, &manifest.members)?;
-
     return Ok(manifest);
 }

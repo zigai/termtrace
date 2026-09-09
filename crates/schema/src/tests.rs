@@ -1,10 +1,8 @@
-use std::{collections::BTreeSet, path::Path};
-
+use super::*;
 use jsonschema::meta::is_valid;
 use schemars::schema_for;
+use std::{collections::BTreeSet, path::Path};
 use termtrace_model::protocol::driver::DriverResponse;
-
-use super::*;
 
 #[test]
 fn checked_in_schemas_match_catalog() {
@@ -16,6 +14,7 @@ fn checked_in_schemas_match_catalog() {
         .collect();
 
     let mut checked_in: BTreeSet<String> = BTreeSet::new();
+
     for entry in fs_err::read_dir(&directory).expect("read schema directory") {
         let entry = entry.expect("read schema directory entry");
         if entry.file_type().expect("read schema file type").is_dir() {
@@ -41,6 +40,7 @@ fn checked_in_schemas_match_catalog() {
         let path = directory.join(generated.filename);
         let schema: serde_json::Value =
             serde_json::from_slice(&generated.json).expect("schema JSON");
+
         assert!(
             is_valid(&schema),
             "invalid JSON Schema {}",
@@ -64,6 +64,7 @@ fn acceptance_benchmark_instance_matches_schema() {
     let instance: serde_json::Value =
         serde_json::from_slice(include_bytes!("../../../benchmarks/acceptance-v1.json"))
             .expect("acceptance benchmark json");
+
     assert!(validator.is_valid(&instance));
 }
 
@@ -71,16 +72,15 @@ fn acceptance_benchmark_instance_matches_schema() {
 fn shared_driver_response_fixtures_match_the_rust_contract() {
     let schema = serde_json::to_value(schema_for!(DriverResponse)).expect("driver schema");
     let validator = jsonschema::validator_for(&schema).expect("driver validator");
+
     let fixtures: serde_json::Value = serde_json::from_slice(include_bytes!(
         "../../../fixtures/conformance/protocol/driver-responses.json"
     ))
     .expect("shared protocol fixtures");
-
     let valid = fixtures
         .get("valid")
         .and_then(serde_json::Value::as_array)
         .expect("valid fixture array");
-
     let invalid = fixtures
         .get("invalid")
         .and_then(serde_json::Value::as_array)

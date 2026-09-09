@@ -1,8 +1,8 @@
 //! Bounded, redacted bug-report evidence exports.
 
-use std::path::{Path, PathBuf};
-
+use crate::{Error, Result};
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 use termtrace_engine::{
     analysis::last_action::analyze_last_action_session, observation::observe_session,
     replay::inspect_completed_session,
@@ -24,8 +24,6 @@ use termtrace_model::{
 };
 use termtrace_render::render_png;
 use uuid::Uuid;
-
-use crate::{Error, Result};
 
 const MAX_BUG_REPORT_MEMBERS: usize = 16;
 
@@ -49,8 +47,8 @@ pub fn create(
 
     let completion = validate_completed_session(&canonical)?;
     let session_manifest = read_manifest(&canonical)?;
-    let mut cursor = EventLogCursor::open(canonical.join("events.jsonl"))?;
 
+    let mut cursor = EventLogCursor::open(canonical.join("events.jsonl"))?;
     let mut has_input = false;
     while let Some(record) = cursor.next_record()? {
         if matches!(record.event, Event::InputIntent { .. }) {
@@ -62,8 +60,8 @@ pub fn create(
     let analysis = has_input
         .then(|| return analyze_last_action_session(&canonical, 50))
         .transpose()?;
-
     let observation = observe_session(&canonical, StatePoint::LatestPresented)?;
+
     let parent = destination
         .parent()
         .ok_or_else(|| return Error::invalid("bug-report path has no parent"))?;
@@ -75,7 +73,6 @@ pub fn create(
     let name = destination
         .file_name()
         .ok_or_else(|| return Error::invalid("bug-report path has no basename"))?;
-
     let staging = parent.join(format!(
         ".{}.{}.tmp",
         name.to_string_lossy(),
@@ -134,6 +131,7 @@ pub fn create(
         }
 
         let mut members = collect_artifact_members(&staging)?;
+
         if members.len() > MAX_BUG_REPORT_MEMBERS {
             return Err(Error::invalid(format!(
                 "bug report exceeds {MAX_BUG_REPORT_MEMBERS} members"
@@ -167,25 +165,20 @@ pub fn create(
 
         write_json(&staging.join("manifest.json"), &manifest)?;
         sync_directory(&staging)?;
-
         return Ok(manifest);
     })();
-
     let manifest = match published {
         Ok(manifest) => manifest,
         Err(error) => {
             let _cleanup = fs_err::remove_dir_all(&staging);
-
             return Err(error);
         }
     };
 
     if let Err(error) = commit_directory(parent, &staging, destination) {
         let _cleanup = fs_err::remove_dir_all(&staging);
-
         return Err(error.into());
     }
-
     return Ok(manifest);
 }
 
@@ -211,6 +204,5 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
         .map_err(|source| return Error::json(PathBuf::from(path), source))?;
     bytes.push(b'\n');
     write_secure(path, &bytes)?;
-
     return Ok(());
 }

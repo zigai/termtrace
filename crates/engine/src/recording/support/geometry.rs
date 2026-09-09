@@ -1,9 +1,7 @@
-use std::io;
-
-use rustix::termios::tcgetwinsize;
-use termtrace_model::execution::session::SessionGeometry;
-
 use crate::{Error, Result};
+use rustix::termios::tcgetwinsize;
+use std::io;
+use termtrace_model::execution::session::SessionGeometry;
 
 /// Measure the controlling terminal through the kernel window-size record.
 ///
@@ -31,7 +29,6 @@ pub fn inherited_geometry(
         .checked_div(size.ws_col)
         .filter(|value| return *value > 0)
         .unwrap_or(fallback_cell_width);
-
     let cell_height = size
         .ws_ypixel
         .checked_div(size.ws_row)

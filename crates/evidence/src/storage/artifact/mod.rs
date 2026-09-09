@@ -1,16 +1,14 @@
+use crate::storage::Error;
 use std::{
     io::{self, Write},
     path::PathBuf,
 };
 
-use crate::storage::Error;
-
 mod roots;
 mod secure_fs;
-mod verification;
-
 #[cfg(test)]
 mod tests;
+mod verification;
 
 pub use roots::{append_artifact_prefix_root, append_artifact_root, read_artifact_roots};
 pub(crate) use secure_fs::sync_parent_directory;
@@ -68,7 +66,6 @@ impl<W: Write> Write for BudgetWriter<W> {
 
         let count = self.inner.write(buf)?;
         self.remaining -= u64::try_from(count).unwrap_or(u64::MAX);
-
         return Ok(count);
     }
 

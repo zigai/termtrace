@@ -31,17 +31,24 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     let ControlData::StableSnapshot { frame, quality, .. } = capture else {
         panic!("wrong stable capture payload");
     };
+
     assert_eq!(quality, StableCaptureQuality::Stable);
+
     let ScreenFrameData::Spans { rows } = &frame.data else {
         panic!("default projection should return spans");
     };
+
     assert!(rows.iter().any(|row| return row.text.contains("READY")));
+
     let state_hash = frame.state_hash.clone();
     assert_eq!(state_hash.len(), 64);
+
     let ScreenFrameSource::Actor { boundaries, .. } = &frame.source else {
         panic!("stable capture should be actor sourced");
     };
+
     assert_eq!(boundaries.observed.output_bytes, 5);
+
     let mut compact_idle = Command::cargo_bin("termtrace").expect("binary should build");
     let compact_output = compact_idle
         .arg("wait")
@@ -55,6 +62,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
 
     let compact: serde_json::Value =
         serde_json::from_slice(&compact_output).expect("compact idle response");
+
     assert_eq!(
         compact.pointer("/kind").and_then(serde_json::Value::as_str),
         Some("stable_snapshot")
@@ -68,6 +76,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     assert!(compact.pointer("/screen").is_some());
     assert!(compact.pointer("/boundary").is_none());
     assert!(compact.pointer("/semantic_state_zstd").is_none());
+
     let mut full_idle = Command::cargo_bin("termtrace").expect("binary should build");
     full_idle
         .args(["--response", "full", "wait"])
@@ -99,6 +108,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         .expect("spawn changing recorder");
 
     wait_for_control(&changing_session);
+
     let deadline = send_request(
         &changing_session,
         &ControlRequest::new(ControlCommand::CaptureStable {
@@ -108,6 +118,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         }),
     )
     .expect("typed deadline capture");
+
     assert!(matches!(
         deadline,
         ControlData::StableSnapshot {
@@ -115,6 +126,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
             ..
         }
     ));
+
     send_request(
         &changing_session,
         &ControlRequest::new(ControlCommand::Stop),
@@ -156,6 +168,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     let ControlData::StableSnapshot { quality, frame, .. } = completed else {
         panic!("unexpected completed-child outcome: {completed:?}");
     };
+
     assert!(matches!(
         quality,
         StableCaptureQuality::ChildCompleted | StableCaptureQuality::OutputClosed
@@ -165,6 +178,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         CaptureQuality::Live,
         "actor-owned termination is not validated completed evidence"
     );
+
     let _completed_status = completed_child.wait().expect("completed recorder exit");
 
     let closed_session = temporary.path().join("output-closed");
@@ -205,11 +219,13 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     else {
         panic!("unexpected output-closed outcome: {closed:?}");
     };
+
     assert_eq!(
         frame.capture_quality,
         CaptureQuality::Live,
         "actor-owned output closure is not validated completed evidence"
     );
+
     let mut strict_idle = Command::cargo_bin("termtrace").expect("binary should build");
     strict_idle
         .arg("wait")
@@ -256,6 +272,7 @@ fn locator_deadline_bounds_an_in_flight_actor_capture() {
 
     let mut manifest = read_manifest(&session_path).expect("read session manifest");
     manifest.control_socket = format!("{}-deadline", manifest.control_socket);
+
     let address = {
         use std::os::linux::net::SocketAddrExt as _;
 
@@ -287,7 +304,6 @@ fn locator_deadline_bounds_an_in_flight_actor_capture() {
     let error = locator
         .wait(Duration::from_millis(50), Duration::from_millis(5))
         .expect_err("stalled capture transport must honor the locator deadline");
-
     let elapsed = started_at.elapsed();
 
     assert!(

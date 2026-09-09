@@ -42,6 +42,7 @@ fn live_control_drives_and_audits_a_detached_session() {
         &fs_err::read(registry_state.join("registry/live-demo.json")).expect("registry entry"),
     )
     .expect("registry JSON");
+
     assert!(entry
         .pointer("/recorder_pid")
         .and_then(serde_json::Value::as_u64)
@@ -50,6 +51,7 @@ fn live_control_drives_and_audits_a_detached_session() {
         .pointer("/recorder_process_start_ticks")
         .and_then(serde_json::Value::as_u64)
         .is_some());
+
     let mut named_list = Command::cargo_bin("termtrace").expect("binary should build");
     named_list
         .env("TERMTRACE_STATE_DIR", &registry_state)
@@ -76,6 +78,7 @@ fn live_control_drives_and_audits_a_detached_session() {
             _ => None,
         }
         .expect("status response data");
+
     assert_eq!(first_boundary, second_boundary);
 
     let duplicate_request = ControlRequest::new(ControlCommand::Mark {
@@ -84,6 +87,7 @@ fn live_control_drives_and_audits_a_detached_session() {
 
     send_request(&session, &duplicate_request).expect("first marker request");
     send_request(&session, &duplicate_request).expect("duplicate should return cached response");
+
     let collision = ControlRequest {
         version: duplicate_request.version,
         request_id: duplicate_request.request_id,
@@ -92,6 +96,7 @@ fn live_control_drives_and_audits_a_detached_session() {
             label: "different".to_owned(),
         },
     };
+
     assert!(matches!(
         send_request(&session, &collision),
         Err(Error::ControlRejected { code, .. })
@@ -160,6 +165,7 @@ fn live_control_drives_and_audits_a_detached_session() {
 
     let recording = EventLog::read(session.join("events.jsonl")).expect("valid event log");
     assert_control_events(&recording, &session);
+
     let marker = recording
         .events
         .iter()
@@ -167,7 +173,6 @@ fn live_control_drives_and_audits_a_detached_session() {
             return matches!(&record.event, Event::Marker { label, .. } if label == "before-input");
         })
         .expect("before-input marker");
-
     let selectors = [
         vec!["--at-marker".to_owned(), "before-input".to_owned()],
         vec!["--event-seq".to_owned(), marker.seq.to_string()],
@@ -175,6 +180,7 @@ fn live_control_drives_and_audits_a_detached_session() {
     ];
 
     let mut selected_hashes = Vec::new();
+
     for selector in selectors {
         let mut show = Command::cargo_bin("termtrace").expect("binary should build");
         let shown = show
@@ -187,6 +193,7 @@ fn live_control_drives_and_audits_a_detached_session() {
 
         let observation: serde_json::Value =
             serde_json::from_slice(&shown.get_output().stdout).expect("selected observation");
+
         selected_hashes.push(
             observation
                 .pointer("/state_hash")
@@ -199,9 +206,11 @@ fn live_control_drives_and_audits_a_detached_session() {
     assert!(selected_hashes.windows(2).all(|pair| {
         return matches!(pair, [left, right] if left == right);
     }));
+
     let journal_path = session.join("requests.jsonl");
     validate_json_lines("mutation-journal-record.schema.json", &journal_path);
     let mutation_records = read_mutation_journal(&journal_path).expect("mutation journal");
+
     assert_eq!(
         mutation_records
             .iter()
@@ -210,6 +219,7 @@ fn live_control_drives_and_audits_a_detached_session() {
         1,
         "retried mutation must have one persistent outcome"
     );
+
     let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
     verify
         .args(["integrity", "verify"])
@@ -232,6 +242,7 @@ fn live_control_uses_a_bounded_endpoint_for_long_evidence_paths() {
     fs_err::create_dir(&evidence_root).expect("long evidence root");
     let session = evidence_root.join("session");
     assert!(session.as_os_str().as_bytes().len() > 108);
+
     let recorder = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
         .args(["record", "--no-input", "--out"])
         .arg(&session)
@@ -247,16 +258,19 @@ fn live_control_uses_a_bounded_endpoint_for_long_evidence_paths() {
         .expect("spawn recorder in long evidence root");
 
     wait_for_control(&session);
+
     assert!(matches!(
         send_request(&session, &ControlRequest::new(ControlCommand::Ping)),
         Ok(ControlData::Acknowledged { .. })
     ));
+
     send_request(&session, &ControlRequest::new(ControlCommand::Stop))
         .expect("stop long-path child");
 
     let output = recorder
         .wait_with_output()
         .expect("wait for long-path recorder");
+
     assert!(
         output.status.success(),
         "long-path recorder failed: {output:?}"

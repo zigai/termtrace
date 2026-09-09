@@ -1,3 +1,8 @@
+use super::{
+    process::{probe_output, probe_output_with_check, wait_for_success, ManagedChild},
+    util::{external_error, unix_now_ns},
+    Error, Result,
+};
 use std::{
     fs,
     path::Path,
@@ -5,15 +10,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-
 use termtrace_evidence::artifact::{secure_file, write_secure};
 use termtrace_model::artifact::visual::{CaptureOptions, NativeFrameSample};
-
-use super::{
-    process::{probe_output, probe_output_with_check, wait_for_success, ManagedChild},
-    util::{external_error, unix_now_ns},
-    Error, Result,
-};
 
 pub(super) fn spawn_video_ffmpeg(
     options: &CaptureOptions,
@@ -80,6 +78,7 @@ pub(super) fn capture_screenshot(
 ) -> Result<()> {
     let size = format!("{}x{}", options.width, options.height);
     let log = secure_file(&staging.join("ffmpeg-screenshot.log"))?;
+
     let mut child = ManagedChild::spawn_logged(
         "ffmpeg screenshot",
         Command::new("ffmpeg")
@@ -130,6 +129,7 @@ pub(super) fn capture_stable_x11_frame_with_check(
     mut check: impl FnMut() -> Result<()>,
 ) -> Result<Vec<NativeFrameSample>> {
     let deadline = Instant::now() + timeout;
+
     let mut samples: Vec<NativeFrameSample> = Vec::new();
     let mut previous_hash: Option<String> = None;
     let mut stable_run = 0_u8;
@@ -153,10 +153,10 @@ pub(super) fn capture_stable_x11_frame_with_check(
             remaining,
             &mut check,
         );
+
         if let Err(error) = output {
             log.extend_from_slice(error.to_string().as_bytes());
             write_secure(&staging.join("x11-screenshot.log"), &log)?;
-
             return Err(error);
         }
 
@@ -167,9 +167,11 @@ pub(super) fn capture_stable_x11_frame_with_check(
             };
         })?;
         fs::remove_file(&path).map_err(|source| return Error::Filesystem { path, source })?;
+
         let hash = blake3::hash(&bytes).to_hex().to_string();
         let same_as_previous = previous_hash.as_ref() == Some(&hash);
         stable_run = if same_as_previous { stable_run.saturating_add(1) } else { 1 };
+
         samples.push(NativeFrameSample {
             sample,
             captured_unix_ns: unix_now_ns()?,
@@ -182,7 +184,6 @@ pub(super) fn capture_stable_x11_frame_with_check(
         if stable_run >= 3 {
             write_secure(screenshot, &bytes)?;
             write_secure(&staging.join("x11-screenshot.log"), &log)?;
-
             return Ok(samples);
         }
 
@@ -205,7 +206,6 @@ pub(super) fn probe_video(
 ) -> Result<serde_json::Value> {
     let probe = ffprobe(path, &["-count_packets", "-show_streams", "-show_format"])?;
     validate_video_probe(&probe, fps, width, height)?;
-
     return Ok(probe);
 }
 
@@ -236,14 +236,12 @@ pub(super) fn validate_video_probe(
             reason: format!("video probe does not match {width}x{height} at {rate} with packets"),
         });
     }
-
     return Ok(());
 }
 
 pub(super) fn probe_screenshot(path: &Path, width: u16, height: u16) -> Result<serde_json::Value> {
     let probe = ffprobe(path, &["-show_streams"])?;
     validate_screenshot_probe(&probe, width, height)?;
-
     return Ok(probe);
 }
 
@@ -253,6 +251,7 @@ pub(super) fn validate_screenshot_probe(
     height: u16,
 ) -> Result<()> {
     let stream = first_stream(probe)?;
+
     if stream.get("width").and_then(serde_json::Value::as_u64) != Some(u64::from(width))
         || stream.get("height").and_then(serde_json::Value::as_u64) != Some(u64::from(height))
         || stream.get("codec_name").and_then(serde_json::Value::as_str) != Some("png")
@@ -261,7 +260,6 @@ pub(super) fn validate_screenshot_probe(
             reason: "screenshot dimensions or codec do not match".to_owned(),
         });
     }
-
     return Ok(());
 }
 
@@ -292,6 +290,7 @@ pub(super) fn probe_variable_video(
 ) -> Result<serde_json::Value> {
     let probe = ffprobe(path, &["-count_packets", "-show_streams", "-show_format"])?;
     let stream = first_stream(&probe)?;
+
     if stream.get("width").and_then(serde_json::Value::as_u64) != Some(u64::from(width))
         || stream.get("height").and_then(serde_json::Value::as_u64) != Some(u64::from(height))
         || stream
@@ -306,7 +305,6 @@ pub(super) fn probe_variable_video(
             "encoded stream has incorrect geometry or no frames",
         ));
     }
-
     return Ok(probe);
 }
 

@@ -1,9 +1,6 @@
 //! Immutable actor-ordered action requests and observation results.
 
 use std::time::Duration;
-
-use uuid::Uuid;
-
 use termtrace_model::{
     protocol::control::{
         ActionInputResult, ScreenPostconditionQuality, ScreenPredicate, StableCaptureQuality,
@@ -12,6 +9,7 @@ use termtrace_model::{
     terminal::screen::{ScreenFrame, ScreenProjectionRequest},
     terminal::state::{KeyModifiers, NamedKey},
 };
+use uuid::Uuid;
 
 /// One immutable user-intent atom accepted by `Session::act`.
 #[derive(Clone, Debug, Eq, PartialEq)]

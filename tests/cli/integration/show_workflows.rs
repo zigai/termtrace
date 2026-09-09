@@ -1,11 +1,10 @@
 //! show workflows CLI integration tests.
 
+use crate::support::*;
 use std::fs::{File, FileTimes};
 use termtrace_engine::replay::semantic_state_hash;
 use termtrace_model::{terminal::observation::ReplayCheckpoint, value::ByteString};
 use zstd::stream::{decode_all, encode_all};
-
-use crate::support::*;
 
 #[test]
 fn show_uses_actor_fast_path_and_validated_completed_replay() {
@@ -48,12 +47,14 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
 
     let live: serde_json::Value =
         serde_json::from_slice(&live.get_output().stdout).expect("live observation");
+
     assert_eq!(
         live.pointer("/source_kind")
             .and_then(serde_json::Value::as_str),
         Some("live_session")
     );
     assert_eq!(live["resolution"], "actor_snapshot");
+
     let mut stable_frame = Command::cargo_bin("termtrace").expect("binary should build");
     let stable = stable_frame
         .env("TERMTRACE_STATE_DIR", &state)
@@ -77,12 +78,14 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
 
     let frame: serde_json::Value =
         serde_json::from_slice(&stable.get_output().stdout).expect("stable frame JSON");
+
     assert_eq!(frame["version"], 1);
     assert_eq!(frame["capture_quality"], "stable");
     assert!(frame["frame"]["viewport_text"]
         .as_str()
         .is_some_and(|text| return text.contains("SHOWME")));
     assert_eq!(frame["frame_hash"].as_str().map(str::len), Some(64));
+
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
     stop.env("TERMTRACE_STATE_DIR", &state)
         .args(["stop", "demo", "--wait"])
@@ -123,6 +126,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
         .expect("checkpoint entry")
         .expect("checkpoint path")
         .path();
+
     assert_eq!(
         cache.extension().and_then(|value| return value.to_str()),
         Some("zst")
@@ -130,6 +134,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
     assert!(fs_err::read(&cache)
         .expect("compressed checkpoint")
         .starts_with(&[0x28, 0xb5, 0x2f, 0xfd]));
+
     let mut cache_status = Command::cargo_bin("termtrace").expect("binary should build");
     let status = cache_status
         .env("TERMTRACE_STATE_DIR", &state)
@@ -139,11 +144,13 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
 
     let status: serde_json::Value =
         serde_json::from_slice(&status.get_output().stdout).expect("cache status");
+
     assert_eq!(status["entries"], 1);
     assert!(status["compressed_bytes"]
         .as_u64()
         .is_some_and(|bytes| return bytes > 0));
     assert_eq!(status["maximum_entries"], 32);
+
     fs_err::write(&cache, b"{}\n").expect("tamper disposable checkpoint");
 
     let mut fallback = Command::cargo_bin("termtrace").expect("binary should build");
@@ -214,6 +221,7 @@ fn completed_cache_rejects_forged_state_and_same_length_source_tampering() {
             .to_string();
     envelope["payload"] = serde_json::to_value(checkpoint).expect("forged payload");
     let forged = serde_json::to_vec(&envelope).expect("forged envelope");
+
     fs_err::write(
         &cache,
         encode_all(forged.as_slice(), 3).expect("compress forged cache"),
@@ -222,17 +230,20 @@ fn completed_cache_rejects_forged_state_and_same_length_source_tampering() {
 
     let after_forgery: serde_json::Value =
         serde_json::from_slice(&observe()).expect("replayed observation");
+
     assert_eq!(after_forgery["state_hash"], original["state_hash"]);
 
     let events = session.join("events.jsonl");
     let before = fs_err::metadata(&events).expect("source metadata");
     let canonical = fs_err::read_to_string(&events).expect("source");
     let corrupted = canonical.replace("VFJVU1RFRA==", "Rk9SR0VEIQ==");
+
     assert_ne!(
         corrupted, canonical,
         "fixture output payload must be present"
     );
     assert_eq!(corrupted.len(), canonical.len());
+
     fs_err::write(&events, corrupted).expect("tamper canonical output");
     File::options()
         .write(true)
@@ -274,6 +285,7 @@ fn show_requires_explicit_permission_for_hidden_states() {
 
     let hidden = inspect_session(&session, StateSelector::Final).expect("hidden final state");
     assert!(!hidden.record.presented);
+
     let mut default_show = Command::cargo_bin("termtrace").expect("binary should build");
     default_show
         .arg("show")
@@ -290,6 +302,7 @@ fn show_requires_explicit_permission_for_hidden_states() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("hidden"));
+
     let mut included = Command::cargo_bin("termtrace").expect("binary should build");
     included
         .arg("show")
@@ -305,6 +318,7 @@ fn show_requires_explicit_permission_for_hidden_states() {
         .success()
         .stdout(predicate::str::contains(r#""presented":false"#))
         .stdout(predicate::str::contains("HIDDEN"));
+
     let mut native = Command::cargo_bin("termtrace").expect("binary should build");
     native
         .args(["screenshot"])
@@ -376,7 +390,6 @@ fn artifact_import_chains_ansi_files_and_stdin() {
     let provenance = imported_manifest
         .import_provenance
         .expect("chain-bound import provenance");
-
     let ansi_bytes = fs_err::read(&ansi).expect("ANSI source bytes");
 
     assert_eq!(provenance.source_kind, "ansi_stream");
@@ -385,6 +398,7 @@ fn artifact_import_chains_ansi_files_and_stdin() {
         provenance.blake3,
         blake3::hash(&ansi_bytes).to_hex().to_string()
     );
+
     let imported_log = EventLog::read(imported.join("events.jsonl")).expect("import event log");
     assert_eq!(canonical_output_bytes(&imported_log), ansi_bytes);
 
@@ -439,7 +453,6 @@ fn artifact_import_chains_ansi_files_and_stdin() {
 fn synchronization_commands_reject_incomplete_stability() {
     let temporary = TempDir::new().expect("temporary directory");
     let state = temporary.path().join("state");
-
     let mut idle_start = Command::cargo_bin("termtrace").expect("binary should build");
     let idle_output = idle_start
         .env("TERMTRACE_STATE_DIR", &state)
@@ -460,10 +473,11 @@ fn synchronization_commands_reject_incomplete_stability() {
         .get_output()
         .stdout
         .clone();
-
     let idle: serde_json::Value =
         serde_json::from_slice(&idle_output).expect("idle start response");
+
     assert_eq!(idle["postcondition"]["matched"], true);
+
     let mut stop_idle = Command::cargo_bin("termtrace").expect("binary should build");
     stop_idle
         .env("TERMTRACE_STATE_DIR", &state)

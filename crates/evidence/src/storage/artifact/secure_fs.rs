@@ -1,3 +1,10 @@
+use crate::storage::{Error, Result};
+use nix::{
+    errno::Errno,
+    fcntl::{open, openat2, renameat2, OFlag, OpenHow, RenameFlags, ResolveFlag},
+    sys::stat::{fstat, mkdirat, Mode, SFlag},
+    unistd::{fsync, unlinkat, Uid, UnlinkatFlags},
+};
 use std::{
     ffi::OsStr,
     fs::File,
@@ -5,16 +12,7 @@ use std::{
     os::fd::{AsFd, OwnedFd},
     path::{Component, Path, PathBuf},
 };
-
-use nix::{
-    errno::Errno,
-    fcntl::{open, openat2, renameat2, OFlag, OpenHow, RenameFlags, ResolveFlag},
-    sys::stat::{fstat, mkdirat, Mode, SFlag},
-    unistd::{fsync, unlinkat, Uid, UnlinkatFlags},
-};
 use uuid::Uuid;
-
-use crate::storage::{Error, Result};
 
 /// Create a new owner-only buffered artifact writer without replacing an existing file.
 ///
@@ -80,7 +78,6 @@ pub(super) fn open_parent_directory(path: &Path, create_missing: bool) -> Result
             source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
         };
     })?;
-
     return open_directory_path(parent, create_missing);
 }
 
@@ -94,6 +91,7 @@ pub(super) fn open_directory_path(path: &Path, create_missing: bool) -> Result<O
     .map_err(|error| return nix_filesystem(Path::new(starting_path), error))?;
 
     let mut traversed = PathBuf::from(starting_path);
+
     for component in path.components() {
         let name = match component {
             Component::RootDir | Component::CurDir => continue,
@@ -133,6 +131,7 @@ pub(super) fn open_directory_path(path: &Path, create_missing: bool) -> Result<O
             }
             Err(error) => return Err(error),
         };
+
         if created_or_raced {
             validate_private_directory_fd(&next, &traversed)?;
         }
@@ -193,7 +192,6 @@ pub(super) fn validate_private_directory_fd(directory: &OwnedFd, path: &Path) ->
             mode,
         });
     }
-
     return Ok(());
 }
 
@@ -201,6 +199,7 @@ pub(super) fn validate_private_regular_file_fd(file: &OwnedFd, path: &Path) -> R
     let stat = fstat(file).map_err(|error| return nix_filesystem(path, error))?;
     let kind = SFlag::from_bits_truncate(stat.st_mode);
     let mode = stat.st_mode & 0o777;
+
     if !kind.contains(SFlag::S_IFREG) || stat.st_uid != Uid::effective().as_raw() || mode != 0o600 {
         return Err(Error::Filesystem {
             path: path.to_path_buf(),
@@ -213,7 +212,6 @@ pub(super) fn validate_private_regular_file_fd(file: &OwnedFd, path: &Path) -> R
             ),
         });
     }
-
     return Ok(());
 }
 
@@ -243,7 +241,6 @@ pub fn finish_writer(mut writer: BufWriter<File>, path: &Path) -> Result<()> {
                 source,
             };
         })?;
-
     return sync_parent_directory(path);
 }
 
@@ -254,7 +251,6 @@ pub fn finish_writer(mut writer: BufWriter<File>, path: &Path) -> Result<()> {
 /// Returns an error when the directory path is unsafe, missing, or cannot be synced.
 pub fn sync_directory(path: &Path) -> Result<()> {
     let directory = open_directory_path(path, false)?;
-
     return sync_fd(&directory, path);
 }
 
@@ -299,7 +295,6 @@ pub fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> R
                 path: destination.to_path_buf(),
             };
         }
-
         return Error::Filesystem {
             path: destination.to_path_buf(),
             source: IoError::from_raw_os_error(error as i32),
@@ -353,6 +348,7 @@ fn write_secure_with_hook(
     validate_private_regular_file_fd(&staging, &staging_path)?;
     let mut staging = File::from(staging);
     let mut renamed = false;
+
     let result = (|| {
         after_stage(SecureWriteStage::Created)?;
         staging.write_all(bytes).map_err(|source| {
@@ -382,14 +378,12 @@ fn write_secure_with_hook(
                     path: path.to_path_buf(),
                 };
             }
-
             return nix_filesystem(path, error);
         })?;
 
         renamed = true;
 
         after_stage(SecureWriteStage::Renamed)?;
-
         return sync_fd(&parent, parent_path);
     })();
 
@@ -418,7 +412,6 @@ pub(super) fn write_secure_with_failure(
                 source: IoError::other(format!("injected secure-write failure after {stage:?}")),
             });
         }
-
         return Ok(());
     });
 }
@@ -432,6 +425,5 @@ pub(crate) fn sync_parent_directory(path: &Path) -> Result<()> {
     })?;
 
     let directory = open_directory_path(parent, false)?;
-
     return sync_fd(&directory, parent);
 }

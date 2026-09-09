@@ -1,35 +1,4 @@
-use termtrace_model::execution::session::RecordingFailurePolicy;
-
-use std::{
-    env,
-    ffi::OsString,
-    os::unix::{ffi::OsStringExt as _, process::CommandExt as _},
-    path::{Path, PathBuf},
-    process::{Command as ProcessCommand, ExitCode},
-    sync::mpsc,
-    thread,
-    time::Duration,
-};
-
 use super::args::TmuxGhosttyProfileMode;
-use miette::{IntoDiagnostic as _, Result};
-use termtrace_engine::{
-    analysis::profile::{builtin_terminal_colors, terminal_colors_for_profile},
-    recording::{inherited_geometry, record, resolve_ghostty_profile, RecordOptions},
-    registry::SessionRegistry,
-};
-use termtrace_evidence::event_log::DurabilityPolicy;
-use termtrace_model::{
-    execution::environment::EnvironmentSpec,
-    execution::provenance::ProvenancePolicy,
-    execution::session::{
-        GeometryProvenance, GeometrySource, GhosttyVisualOverrides, ResourceLimits,
-        TmuxPaneLaunchKind, TmuxPaneProvenance, TMUX_PANE_PROVENANCE_VERSION,
-    },
-    value::ByteString,
-};
-use termtrace_sdk::control_endpoint_is_reachable;
-
 use super::{
     args::TmuxRunArgs,
     client::{
@@ -41,6 +10,34 @@ use super::{
     OPTION_ORIGINAL_COMMAND, OPTION_ORIGINAL_SHELL, OPTION_OUTPUT_ROOT, OPTION_PANE_SESSION,
     OPTION_PROFILE_MODE, OPTION_TERM, OPTION_TERMTRACE, OPTION_VERSION, TMUX_INTEGRATION_VERSION,
 };
+use miette::{IntoDiagnostic as _, Result};
+use std::{
+    env,
+    ffi::OsString,
+    os::unix::{ffi::OsStringExt as _, process::CommandExt as _},
+    path::{Path, PathBuf},
+    process::{Command as ProcessCommand, ExitCode},
+    sync::mpsc,
+    thread,
+    time::Duration,
+};
+use termtrace_engine::{
+    analysis::profile::{builtin_terminal_colors, terminal_colors_for_profile},
+    recording::{inherited_geometry, record, resolve_ghostty_profile, RecordOptions},
+    registry::SessionRegistry,
+};
+use termtrace_evidence::event_log::DurabilityPolicy;
+use termtrace_model::execution::session::RecordingFailurePolicy;
+use termtrace_model::{
+    execution::environment::EnvironmentSpec,
+    execution::provenance::ProvenancePolicy,
+    execution::session::{
+        GeometryProvenance, GeometrySource, GhosttyVisualOverrides, ResourceLimits,
+        TmuxPaneLaunchKind, TmuxPaneProvenance, TMUX_PANE_PROVENANCE_VERSION,
+    },
+    value::ByteString,
+};
+use termtrace_sdk::control_endpoint_is_reachable;
 
 pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> {
     let pane = env::var("TMUX_PANE").map_err(|_| {
@@ -54,6 +51,7 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
     }
 
     let client = TmuxClient::inherited();
+
     if option_text(&client, OPTION_VERSION)? != TMUX_INTEGRATION_VERSION {
         return Err(miette::miette!(
             "tmux recording is not enabled for this server; run `termtrace tmux enable` or source a generated configuration"
@@ -73,24 +71,25 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
 
     let explicitly_selected = !arguments.pane_launch
         && (arguments.force || arguments.shell_command.is_some() || !arguments.command.is_empty());
-
     let (command, launch_kind) = tmux_child_command(&client, arguments)?;
     client.unset_pane_option(&pane, OPTION_PANE_SESSION)?;
+
     let scope = scope_from_options(&client)?;
 
     if !explicitly_selected && !pane_matches_scope(&client, &pane, &scope)? {
         mark_pane_scope_decision(&client, &pane, false)?;
-
         return exec_unrecorded_command(command);
     }
 
     mark_pane_scope_decision(&client, &pane, true)?;
+
     let mut tmux_pane = capture_tmux_pane(&client, &pane, launch_kind)?;
     let cell_width = parse_option::<u16>(&client, OPTION_CELL_WIDTH)?;
     let cell_height = parse_option::<u16>(&client, OPTION_CELL_HEIGHT)?;
     let geometry = inherited_geometry(cell_width, cell_height).into_diagnostic()?;
     tmux_pane.pane_width = geometry.cols;
     tmux_pane.pane_height = geometry.rows;
+
     let configured_term = option_text(&client, OPTION_TERM)?;
     let term = if configured_term.is_empty() {
         env::var("TERM").map_err(|_| {
@@ -126,7 +125,6 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
             Err(error) => return Err(error).into_diagnostic(),
         },
     };
-
     let colors = ghostty_profile
         .as_ref()
         .map_or_else(builtin_terminal_colors, terminal_colors_for_profile)
@@ -149,7 +147,6 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
         .ok_or_else(|| {
             return miette::miette!("inherited tmux pane has no terminal columns");
         })?;
-
     let cell_height_px = geometry
         .pixel_height
         .checked_div(geometry.rows)
@@ -190,7 +187,9 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
         provenance_policy: ProvenancePolicy::default(),
         resource_limits: ResourceLimits::default(),
     };
+
     let outcome = record(&options);
+
     let _cancelled = publication_cancel.try_send(());
     let publication = publication
         .join()
@@ -262,6 +261,7 @@ fn exec_unrecorded_command(command: Vec<OsString>) -> Result<ExitCode> {
     let program = arguments
         .next()
         .ok_or_else(|| return miette::miette!("tmux pane command is empty"))?;
+
     let error = ProcessCommand::new(&program)
         .args(arguments)
         .env_remove("TERMTRACE_RESPONSE")
@@ -287,7 +287,6 @@ fn tmux_child_command(
             OsString::from("--"),
         ];
         command.extend(arguments.command);
-
         return Ok((command, launch_kind));
     }
 
@@ -312,7 +311,6 @@ fn tmux_child_command(
         if shell.is_empty() {
             return Err(miette::miette!("saved tmux default shell is empty"));
         }
-
         return Ok((
             vec![
                 OsString::from_vec(shell),
@@ -327,7 +325,6 @@ fn tmux_child_command(
     if shell.is_empty() {
         return Err(miette::miette!("saved tmux default shell is empty"));
     }
-
     return Ok((
         vec![OsString::from_vec(shell), OsString::from("-l")],
         TmuxPaneLaunchKind::DefaultShell,
@@ -338,10 +335,10 @@ fn validate_pane_launch(arguments: &[OsString]) -> Result<TmuxPaneLaunchKind> {
     let [mode, shell, rest @ ..] = arguments else {
         return Err(miette::miette!("pane launch requires a mode and shell"));
     };
+
     if shell.is_empty() {
         return Err(miette::miette!("pane launch shell is empty"));
     }
-
     return match (mode.to_str(), rest.len()) {
         (Some("login"), 0) => Ok(TmuxPaneLaunchKind::DefaultShell),
         (Some("shell"), 1) => Ok(TmuxPaneLaunchKind::ShellCommand),
@@ -364,12 +361,12 @@ pub(super) fn exec_pane_launch(arguments: &[OsString]) -> Result<ExitCode> {
             };
             let mut command = ProcessCommand::new(program);
             command.args(arguments);
-
             command
         }
         TmuxPaneLaunchKind::DefaultShell | TmuxPaneLaunchKind::ShellCommand => {
             let basename = Path::new(shell).file_name().unwrap_or(shell);
             let mut command = ProcessCommand::new(shell);
+
             if kind == TmuxPaneLaunchKind::DefaultShell {
                 let mut argv0 = OsString::from("-");
                 argv0.push(basename);
@@ -387,6 +384,7 @@ pub(super) fn exec_pane_launch(arguments: &[OsString]) -> Result<ExitCode> {
             return Err(miette::miette!("unsupported pane launch kind"));
         }
     };
+
     let error = command.exec();
 
     return Err(miette::miette!(
@@ -413,6 +411,7 @@ fn capture_tmux_pane(
     let pane_pid = query_number(client, pane, "#{pane_pid}")?;
     let pane_width = query_number(client, pane, "#{pane_width}")?;
     let pane_height = query_number(client, pane, "#{pane_height}")?;
+
     if !valid_tmux_identifier(&session_id, b'$')
         || !valid_tmux_identifier(&window_id, b'@')
         || !valid_tmux_identifier(&pane_id, b'%')

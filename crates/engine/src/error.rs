@@ -1,7 +1,6 @@
 //! Failures produced while coordinating Termtrace engine operations.
 
 use std::{error::Error as StdError, fmt, io, path::PathBuf, result::Result as StdResult};
-
 use termtrace_model::{error::ModelValidationError, terminal::screen::ScreenFrameError};
 use uuid::Uuid;
 

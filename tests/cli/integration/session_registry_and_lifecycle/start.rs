@@ -25,6 +25,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
 
     let response: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("start response");
+
     assert_eq!(
         response
             .pointer("/ready")
@@ -35,6 +36,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         .pointer("/recorder_process_start_ticks")
         .and_then(serde_json::Value::as_u64)
         .is_some());
+
     let canonical: ByteString = serde_json::from_value(
         response
             .pointer("/canonical_session")
@@ -42,13 +44,15 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
             .clone(),
     )
     .expect("canonical path bytes");
-
     let session = PathBuf::from(OsString::from_vec(canonical.as_bytes().to_vec()));
+
     assert_eq!(
         response["canonical_session_display"],
         session.display().to_string()
     );
+
     let manifest = read_manifest(&session).expect("started manifest");
+
     assert_eq!(manifest.creation_alias.as_deref(), Some("demo"));
     assert_eq!((manifest.geometry.cols, manifest.geometry.rows), (90, 25));
 
@@ -60,11 +64,13 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         .success();
 
     let status = compact_json_line(&status.get_output().stdout);
+
     assert_eq!(status["type"], "status");
     assert_eq!(status["session"], "demo");
     assert_eq!(status["lifecycle"], "live");
     assert_eq!(status["session_state"], "live");
     assert!(status["pid"].as_u64().is_some());
+
     let session_count = fs_err::read_dir(state.join("sessions"))
         .expect("sessions")
         .count();
@@ -76,6 +82,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("alias is already"));
+
     assert_eq!(
         fs_err::read_dir(state.join("sessions"))
             .expect("sessions")
@@ -91,6 +98,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
                 .and_then(serde_json::Value::as_str)
                 .expect("diagnostic path"),
         );
+
         assert_eq!(
             fs_err::metadata(path)
                 .expect("diagnostic metadata")
@@ -106,6 +114,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         .args(["stop", "demo", "--wait"])
         .assert()
         .success();
+
     assert!(session.join("completion.json").is_file());
 
     let mut failed = Command::cargo_bin("termtrace").expect("binary should build");
@@ -124,10 +133,13 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         .clone();
 
     let failed = compact_json_line(&failed);
+
     assert_eq!(failed["startup_state"], "completed_failure");
     assert_eq!(failed["code"], "spawn_failed");
     assert_eq!(failed["session_state"], "ended");
+
     let failed_session = PathBuf::from(failed["path"].as_str().expect("failed session path"));
+
     assert!(failed_session.join("completion.json").is_file());
     assert!(
         state.join("registry/broken.json").is_file(),
@@ -139,7 +151,6 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
 fn start_promotes_fast_completion_and_reports_child_outcome() {
     let temporary = TempDir::new().expect("temporary directory");
     let state = temporary.path().join("state");
-
     let mut successful = Command::cargo_bin("termtrace").expect("binary should build");
     let successful = successful
         .env("TERMTRACE_STATE_DIR", &state)
@@ -151,6 +162,7 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
         .clone();
 
     let successful = compact_json_line(&successful);
+
     assert_eq!(successful["startup_state"], "completed_success");
     assert!(successful.get("ready").is_none());
     assert_eq!(successful["session_state"], "ended");
@@ -200,6 +212,7 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
         .clone();
 
     let unsuccessful = compact_json_line(&unsuccessful);
+
     assert_eq!(unsuccessful["startup_state"], "completed_failure");
     assert!(unsuccessful.get("ready").is_none());
     assert_eq!(unsuccessful["session_state"], "ended");
@@ -236,14 +249,18 @@ fn concurrent_start_reservation_launches_only_one_recorder() {
 
         return command;
     };
+
     let first = command().spawn().expect("first concurrent start");
     let second = command().spawn().expect("second concurrent start");
     let first = first.wait_with_output().expect("first start output");
     let second = second.wait_with_output().expect("second start output");
+
     assert_ne!(first.status.success(), second.status.success());
+
     let winner = if first.status.success() { &first } else { &second };
     let loser = if first.status.success() { &second } else { &first };
     let started = compact_json_line(&winner.stdout);
+
     assert_eq!(started["session"], "contended");
     assert!(
         String::from_utf8_lossy(&loser.stderr).contains("reserved or registered"),

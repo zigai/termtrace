@@ -16,13 +16,13 @@ pub(in crate::cli) fn run_wait(
     }
 
     let session = resolved.path;
+
     if let Some(output) = arguments.output {
         if !arguments.stable_for.is_zero() {
             return Err(miette::miette!(
                 "--stable-for applies only to screen predicates"
             ));
         }
-
         return write_json_line(
             response,
             &wait_for_output(session, output.as_bytes(), timeout).into_diagnostic()?,
@@ -41,7 +41,6 @@ pub(in crate::cli) fn run_wait(
         };
 
     write_json_line(response, &outcome)?;
-
     return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
 }
 
@@ -55,7 +54,6 @@ fn run_idle_wait(
         if arguments.require_live_stability {
             return write_session_lifecycle(response, &resolved, "wait", ExitCode::FAILURE);
         }
-
         return write_completed_stable_snapshot(response, &resolved, arguments.full_state);
     }
 
@@ -72,7 +70,6 @@ fn run_idle_wait(
         }),
     )
     .into_diagnostic()?;
-
     let ControlData::StableSnapshot {
         frame,
         first_observed_monotonic_ns,
@@ -86,6 +83,7 @@ fn run_idle_wait(
             "recording actor returned an unexpected stable-capture payload"
         ));
     };
+
     if !arguments.allow_incomplete && *quality != StableCaptureQuality::Stable {
         return Err(miette::miette!(
             "stable capture ended with {}; pass --allow-incomplete to receive the typed snapshot",
@@ -122,7 +120,6 @@ pub(super) fn compact_boundaries(boundaries: &ActorBoundaries) -> serde_json::Va
             "output_bytes": boundaries.observed.output_bytes,
         });
     }
-
     return serde_json::json!({
         "durable": false,
         "durable_boundary": boundaries.durable,
@@ -180,7 +177,6 @@ fn parse_screen_predicate(arguments: &WaitArgs) -> Result<ScreenPredicate> {
         }
 
         predicate = Some(pred?);
-
         return Ok(());
     };
 

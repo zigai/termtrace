@@ -1,3 +1,6 @@
+use super::{Error, Result};
+use nix::libc::{O_NOFOLLOW, O_NONBLOCK};
+use serde::de::DeserializeOwned;
 use std::{
     fs::{self, DirEntry, File, OpenOptions, ReadDir},
     io::{self, BufRead as _, BufReader, Read as _},
@@ -6,20 +9,13 @@ use std::{
     path::Path,
     sync::atomic::{AtomicBool, Ordering},
 };
-
-use nix::libc::{O_NOFOLLOW, O_NONBLOCK};
-use serde::de::DeserializeOwned;
-use termtrace_model::terminal::replay::ReplayEndpoint;
-
 use termtrace_engine::analysis::diagnostics::ValidatedVisualManifest;
 use termtrace_evidence::{event_log::EventLogSummary, session::read_manifest};
 use termtrace_model::artifact::visual::VideoMapEntry;
-
 use termtrace_model::artifact::visual::{
     VisualManifest, GHOSTTY_EFFECTIVE_CONFIG_NAME, VISUAL_MANIFEST_VERSION,
 };
-
-use super::{Error, Result};
+use termtrace_model::terminal::replay::ReplayEndpoint;
 
 /// Verify a persistent-worker screenshot and its exact canonical replay endpoint.
 ///
@@ -42,6 +38,7 @@ pub fn validate_replay_screenshot(
 
     let manifest: VisualManifest = bounded_json(&directory.join("manifest.json"))?;
     let endpoint: ReplayEndpoint = bounded_json(&directory.join("replay-endpoint.json"))?;
+
     if !manifest
         .members
         .iter()
@@ -53,7 +50,6 @@ pub fn validate_replay_screenshot(
     }
 
     verify_artifact_members(directory, &manifest.members)?;
-
     check_review_cancelled(cancelled)?;
 
     let canonical = read_manifest(session)?;
@@ -94,7 +90,6 @@ pub fn validate_replay_screenshot(
             "native screenshot does not match its canonical replay endpoint",
         ));
     }
-
     return Ok(endpoint);
 }
 
@@ -108,10 +103,10 @@ fn bounded_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
                 source,
             };
         })?;
+
     if bytes.len() > 1024 * 1024 {
         return Err(invalid("native artifact JSON exceeds 1 MiB"));
     }
-
     return serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
@@ -165,7 +160,6 @@ pub fn validate_visual_manifest(manifest: &VisualManifest) -> Result<()> {
             "native visual effective configuration hash does not match the `{GHOSTTY_EFFECTIVE_CONFIG_NAME}` member"
         )));
     }
-
     return Ok(());
 }
 
@@ -175,6 +169,7 @@ pub(crate) fn validate_visual_manifest_binding(
     color_source: &str,
 ) -> Result<()> {
     validate_visual_manifest(manifest)?;
+
     if let Some(expected) = recorded_profile_hash
         .or_else(|| return color_source.strip_prefix("ghostty_show_config_blake3:"))
         && manifest.effective_config_hash != expected
@@ -184,7 +179,6 @@ pub(crate) fn validate_visual_manifest_binding(
             manifest.effective_config_hash
         )));
     }
-
     return Ok(());
 }
 
@@ -223,6 +217,7 @@ pub fn validated_visual_manifests(
     entries.sort_unstable_by_key(|entry| return entry.file_name());
 
     let mut validated: Vec<ValidatedVisualManifest> = Vec::new();
+
     for entry in entries {
         let file_type = entry.file_type().map_err(|source| {
             return Error::Filesystem {
@@ -230,6 +225,7 @@ pub fn validated_visual_manifests(
                 source,
             };
         })?;
+
         if !file_type.is_dir() {
             continue;
         }
@@ -245,7 +241,6 @@ pub fn validated_visual_manifests(
                 source,
             };
         })?;
-
         let Ok(manifest) = serde_json::from_slice::<VisualManifest>(&manifest_bytes) else {
             continue;
         };
@@ -263,6 +258,7 @@ pub fn validated_visual_manifests(
 
         let map_path = entry.path().join("video-map.jsonl");
         let mut video_map: Vec<VideoMapEntry> = Vec::new();
+
         if map_path.is_file() {
             let reader = BufReader::new(File::open(&map_path).map_err(|source| {
                 return Error::Filesystem {
@@ -332,6 +328,7 @@ pub fn validated_visual_manifests_for_state(
     else {
         return Ok(Vec::new());
     };
+
     let canonical = EventLogCursor::open(session.join(&session_manifest.event_log))?;
     let expected_profile_hash = session_manifest
         .ghostty_visual
@@ -346,8 +343,8 @@ pub fn validated_visual_manifests_for_state(
     })?;
 
     let mut validated = Vec::new();
-
     let mut retained_bytes = 0_usize;
+
     for entry in directory {
         check_review_cancelled(cancelled)?;
 
@@ -357,6 +354,7 @@ pub fn validated_visual_manifests_for_state(
                 source,
             };
         })?;
+
         if !entry
             .file_type()
             .map_err(|source| {
@@ -404,6 +402,7 @@ pub fn validated_visual_manifests_for_state(
             .members
             .iter()
             .any(|member| return member.path == "replay-endpoint.json");
+
         if manifest.session_id != session_manifest.session_id
             || !replay_screenshot
                 && manifest.source_event_hash.as_deref()
@@ -430,6 +429,7 @@ pub fn validated_visual_manifests_for_state(
 
         let map_path = entry.path().join("video-map.jsonl");
         let mut video_map = Vec::new();
+
         match open_review_file(&map_path) {
             Ok(file) => {
                 let member = manifest
@@ -459,6 +459,7 @@ pub fn validated_visual_manifests_for_state(
                                 source,
                             };
                         })?;
+
                     if count == 0 {
                         break;
                     }
@@ -513,6 +514,7 @@ pub fn validated_visual_manifests_for_state(
         retained_bytes = retained_bytes
             .saturating_add(bytes.len())
             .saturating_add(video_map.len().saturating_mul(size_of::<VideoMapEntry>()));
+
         if validated.len() >= 256 || retained_bytes > 8 * 1024 * 1024 {
             return Err(invalid(
                 "selected native evidence exceeds reviewer retention budget",
@@ -527,6 +529,7 @@ pub fn validated_visual_manifests_for_state(
         let mut visual =
             ValidatedVisualManifest::new(relative.clone(), manifest, video_map, |_| return Ok(()))
                 .map_err(Error::from)?;
+
         if resolved_screenshot {
             visual.bind_screenshot_state(state_id, &selected_endpoint)?;
         }
@@ -549,7 +552,6 @@ pub fn validated_visual_manifests_for_state(
     }
 
     validated.sort_unstable_by(|(left, _), (right, _)| return left.cmp(right));
-
     return Ok(validated
         .into_iter()
         .map(|(_, visual)| return visual)
@@ -560,7 +562,6 @@ fn check_review_cancelled(cancelled: &AtomicBool) -> Result<()> {
     if cancelled.load(Ordering::Relaxed) {
         return Err(invalid("native reviewer query cancelled"));
     }
-
     return Ok(());
 }
 
@@ -621,7 +622,6 @@ fn open_review_file(path: &Path) -> io::Result<File> {
             "review evidence member must be a regular file",
         ));
     }
-
     return Ok(file);
 }
 
@@ -633,6 +633,7 @@ fn invalid(reason: impl Into<String>) -> Error {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use termtrace_model::{
         artifact::metadata::{ArtifactMember, ArtifactSensitivity},
         artifact::visual::VisualManifest,
@@ -640,8 +641,6 @@ mod tests {
         value::geometry::TerminalGeometryReport,
     };
     use uuid::Uuid;
-
-    use super::*;
 
     #[test]
     fn effective_configuration_commitment_is_strict() {
@@ -656,20 +655,18 @@ mod tests {
                 "ghostty_config_hash".to_owned(),
                 serde_json::json!("a".repeat(64)),
             );
+
         assert!(serde_json::from_value::<VisualManifest>(obsolete).is_err());
 
         manifest.version = VISUAL_MANIFEST_VERSION - 1;
-
         assert!(validate_visual_manifest(&manifest).is_err());
+
         manifest.version = VISUAL_MANIFEST_VERSION;
-
         manifest.effective_config_hash = "A".repeat(64);
-
         assert!(validate_visual_manifest(&manifest).is_err());
+
         manifest.effective_config_hash = "a".repeat(64);
-
         manifest.members[0].blake3 = "b".repeat(64);
-
         assert!(validate_visual_manifest(&manifest).is_err());
     }
 

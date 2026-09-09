@@ -40,7 +40,6 @@ impl PendingInputSequence {
                     timeout_ns,
                 } => {
                     let deadline = waiting.started_at + Duration::from_nanos(*timeout_ns);
-
                     waiting
                         .matching_state
                         .as_ref()
@@ -83,10 +82,10 @@ impl SessionActor<'_> {
                 ..
             })
         );
+
         if !screen_postcondition_ready && !output_closed && Instant::now() < pending.next_deadline()
         {
             self.pending_input_sequence = Some(pending);
-
             return Ok(());
         }
 
@@ -104,7 +103,6 @@ impl SessionActor<'_> {
                         Ok(None) => {
                             pending.phase = InputSequencePhase::Applying { execution, action };
                             self.pending_input_sequence = Some(pending);
-
                             return Ok(());
                         }
                         Ok(Some(input)) => {
@@ -150,7 +148,6 @@ impl SessionActor<'_> {
                         Ok(None) => {
                             pending.phase = InputSequencePhase::Waiting(waiting);
                             self.pending_input_sequence = Some(pending);
-
                             return Ok(());
                         }
                         Err(error) => break Err(error),
@@ -158,6 +155,7 @@ impl SessionActor<'_> {
                 }
             }
         };
+
         let current_state_hash = presented_state_hash(&self.live)?;
         let atom_count = match &pending.request.command {
             ControlCommand::InputSequence { atoms, .. } | ControlCommand::Act { atoms, .. } => {
@@ -187,6 +185,7 @@ impl SessionActor<'_> {
                 (response, Some(error))
             }
         };
+
         self.mutation_history.remember(
             pending.request.request_id,
             &pending.request.command,

@@ -1,8 +1,6 @@
-use std::process::ExitCode;
-
-use miette::Result;
-
 use crate::cli::output::ResponseWriter;
+use miette::Result;
+use std::process::ExitCode;
 
 pub(super) mod args;
 

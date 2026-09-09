@@ -1,19 +1,3 @@
-use crate::semantic_video;
-use termtrace_model::execution::session::RecordingFailurePolicy;
-
-use std::{
-    io,
-    path::{Path, PathBuf},
-    process::Command,
-};
-
-use termtrace_engine::recording::{record_with_output, RecordOptions};
-use termtrace_evidence::event_log::EventLog;
-use termtrace_model::{
-    artifact::save::SemanticRasterProfile, terminal::replay::SourceRange,
-    value::geometry::TerminalGeometryReport,
-};
-
 use super::{
     ffmpeg::{append_change_visualization, cursor_mask_ranges, probe_delivery_video},
     mapping::{semantic_change_states_at, write_presentation_map},
@@ -25,6 +9,19 @@ use super::{
     validation::{validate_ass_resource, validate_edit_plan, validate_edit_selector},
     *,
 };
+use crate::semantic_video;
+use std::{
+    io,
+    path::{Path, PathBuf},
+    process::Command,
+};
+use termtrace_engine::recording::{record_with_output, RecordOptions};
+use termtrace_evidence::event_log::EventLog;
+use termtrace_model::execution::session::RecordingFailurePolicy;
+use termtrace_model::{
+    artifact::save::SemanticRasterProfile, terminal::replay::SourceRange,
+    value::geometry::TerminalGeometryReport,
+};
 
 #[test]
 fn missing_native_capture_guides_capture_or_semantic_fallback() {
@@ -32,8 +29,8 @@ fn missing_native_capture_guides_capture_or_semantic_fallback() {
         Path::new("/evidence/session"),
         Path::new("/evidence/session/visual/manifest.json"),
     );
-
     let message = error.to_string();
+
     assert!(message.contains("/evidence/session/visual/manifest.json"));
     assert!(message.contains("termtrace artifact capture --session SESSION"));
     assert!(message.contains("--require native-video --explain"));
@@ -79,6 +76,7 @@ fn edit_plan_bounds_speed_caption_and_source_overlap() {
         clips: vec![clip],
         ..EditPlan::default()
     };
+
     assert!(validate_edit_plan(&edit).is_err());
     assert!(ranges_overlap(
         SourceRange {
@@ -143,6 +141,7 @@ fn presentation_map_distinguishes_retimed_and_hold_frames() {
             return serde_json::from_str::<PresentationMapEntry>(line).expect("map entry");
         })
         .collect::<Vec<_>>();
+
     assert_eq!(entries.len(), 8);
     assert_eq!(entries[5].source_frame, 20);
     assert_eq!(entries[6].operation, "hold");
@@ -183,7 +182,9 @@ fn failed_export_removes_its_staging_directory() {
     let destination = temporary.path().join("presentation");
     pipeline::export_with_capability_check(&plan, &destination, false)
         .expect_err("invalid source video should fail export");
+
     assert!(!destination.exists());
+
     let staging = fs_err::read_dir(temporary.path())
         .expect("temporary directory entries")
         .map(|entry| return entry.expect("temporary directory entry").file_name())
@@ -191,6 +192,7 @@ fn failed_export_removes_its_staging_directory() {
             return name.as_encoded_bytes().starts_with(b".presentation-");
         })
         .collect::<Vec<_>>();
+
     assert!(
         staging.is_empty(),
         "failed export leaked staging: {staging:?}"
@@ -218,6 +220,7 @@ fn exports_multi_clip_h264_presentation_atomically() {
         .status()
         .expect("run FFmpeg fixture");
     assert!(status.success());
+
     let plan = PresentationPlan {
         version: 1,
         edit_plan_hash: "a".repeat(64),
@@ -290,18 +293,21 @@ fn exports_multi_clip_h264_presentation_atomically() {
             .expect("read generated annotations")
             .contains("frame 7 source 11")
     );
+
     let probed = probe_delivery_video(&outcome.directory).expect("probe delivery video");
     assert_eq!(probed["streams"][0]["width"].as_u64(), Some(64));
     assert_eq!(probed["streams"][0]["height"].as_u64(), Some(64));
+
     let manifest_bytes =
         fs_err::read(outcome.directory.join("manifest.json")).expect("read manifest");
-
     let manifest: PresentationManifest =
         serde_json::from_slice(&manifest_bytes).expect("parse manifest");
+
     assert_eq!(manifest.plan.output_frame_count, plan.output_frame_count);
     assert!(!manifest.output_video_hash.is_empty());
     assert!(!manifest.members.is_empty());
     assert!(outcome.directory.join("branding.txt").is_file());
+
     let staged_regular = outcome.directory.join("fonts/JetBrainsMono-Regular.ttf");
     assert_eq!(
         fs_err::read(staged_regular).expect("read staged regular font"),
@@ -309,6 +315,7 @@ fn exports_multi_clip_h264_presentation_atomically() {
             .expect("semantic font set")
             .regular_face_bytes()
     );
+
     for unexpected in [
         "JetBrainsMono-Bold.ttf",
         "JetBrainsMono-Italic.ttf",
@@ -323,6 +330,7 @@ fn exports_multi_clip_h264_presentation_atomically() {
             .expect("read decoded source hashes")
             .contains("#format: frame checksums")
     );
+
     let preview_outcome = preview(
         &plan,
         temporary.path().join("preview"),
@@ -335,6 +343,7 @@ fn exports_multi_clip_h264_presentation_atomically() {
         },
     )
     .expect("render preview");
+
     assert!(preview_outcome.contact_sheet.is_file());
     assert!(preview_outcome.video.is_file());
     assert!(preview_outcome.directory.join("manifest.json").is_file());
@@ -411,14 +420,17 @@ fn semantic_change_filters_retain_state_provenance_and_hold() {
         "{}",
         String::from_utf8_lossy(&rendered.stderr)
     );
+
     let frames = rendered
         .stdout
         .chunks_exact(80 * 40 * 3)
         .collect::<Vec<_>>();
+
     assert_eq!(frames.len(), 6);
 
     for (index, frame) in frames.iter().enumerate() {
         let outline = &frame[(8 * 3)..(9 * 3)];
+
         assert_eq!(
             outline.iter().any(|component| return *component != 0),
             (2..=4).contains(&index),
@@ -452,10 +464,12 @@ fn transform_geometry_is_ordered_bounded_and_even() {
         ],
         ..EditPlan::default()
     };
+
     assert_eq!(
         validate_transform_geometry(&edit, 80, 40, false).expect("valid transforms"),
         (64, 48)
     );
+
     let invalid = EditPlan {
         transforms: vec![
             PixelTransform::Crop {
@@ -468,6 +482,7 @@ fn transform_geometry_is_ordered_bounded_and_even() {
         ],
         ..EditPlan::default()
     };
+
     assert!(validate_transform_geometry(&invalid, 80, 40, false).is_err());
 }
 
@@ -547,10 +562,12 @@ fn facade_render_configuration_survives_normalization() {
     };
 
     validate_edit_plan(&edit).expect("facade edit plan should validate");
+
     assert_eq!(
         validate_transform_geometry(&edit, 800, 600, false).expect("resize should be exact"),
         (1_920, 1_080)
     );
+
     let normalized = plan_with_source(
         &session,
         &edit,
@@ -571,6 +588,7 @@ fn facade_render_configuration_survives_normalization() {
     else {
         panic!("semantic source expected");
     };
+
     assert_eq!(*actual_source, expected_source);
     assert_eq!(normalized.render_config, edit.render_config);
     assert_eq!(
@@ -598,6 +616,7 @@ fn cursor_masks_coalesce_only_consecutive_identical_regions() {
             evidence_level: "semantic_scheduled_for_frame".to_owned(),
         };
     };
+
     assert_eq!(
         cursor_mask_ranges(&[make(0, 4), make(1, 4), make(2, 8)]),
         vec![
@@ -655,20 +674,23 @@ fn preview_selection_is_bounded_deterministic_and_change_aware() {
         },
     )
     .expect("select changes");
+
     assert_eq!(selected, vec![3, 4, 9]);
+
     let dense = PresentationPlan {
         output_frame_count: u64::MAX,
         ..PresentationPlan::default()
     };
-
     let options = PreviewOptions {
         max_frames: 3,
         ..PreviewOptions::default()
     };
+
     assert_eq!(
         select_preview_frames(&dense, options).expect("sample huge frame range"),
         vec![0, (u64::MAX - 1) / 2, u64::MAX - 1]
     );
+
     let encoded = PresentationPlan {
         change_visualization: Some(ChangeVisualization {
             source: ChangeSource::EncodedPixels,
@@ -678,6 +700,7 @@ fn preview_selection_is_bounded_deterministic_and_change_aware() {
         }),
         ..dense
     };
+
     assert_eq!(
         select_preview_frames(
             &encoded,

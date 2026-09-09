@@ -23,12 +23,10 @@ impl Events<'_> {
             from_event_seq,
             limit,
         )?;
-
         let events = records
             .iter()
             .map(|record| return EventProjection::from_record(record, metadata_only))
             .collect::<Vec<_>>();
-
         let next = events
             .last()
             .map_or(from_event_seq, |event| return event.seq.saturating_add(1));

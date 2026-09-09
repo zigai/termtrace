@@ -1,17 +1,14 @@
 //! Coherent errors exposed by the blocking SDK boundary.
 
+#[cfg(feature = "in-process")]
+use crate::{actions::ActionResult, client::StableScreenCapture};
 use std::{io::Error as IoError, path::PathBuf, result::Result as StdResult};
-
-use thiserror::Error;
-use uuid::Uuid;
-
 use termtrace_model::{
     protocol::control::InputSequenceFailureDetails,
     terminal::{observation::ActorBoundaries, screen::ScreenFrameError},
 };
-
-#[cfg(feature = "in-process")]
-use crate::{actions::ActionResult, client::StableScreenCapture};
+use thiserror::Error;
+use uuid::Uuid;
 
 /// Bounded retry fact attached to typed public actor failures.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

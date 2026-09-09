@@ -23,9 +23,10 @@ fn file_index_matches_memory_and_excludes_later_appends() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let session = temporary.path().join("session");
     create_private_directory(&session).expect("private directory");
-    let event_path = session.join("events.jsonl");
 
+    let event_path = session.join("events.jsonl");
     let mut writer = writer(&event_path);
+
     for bytes in [
         b"hello\x1b[".as_slice(),
         b"31mred\x1b]2;title".as_slice(),
@@ -58,7 +59,6 @@ fn file_index_matches_memory_and_excludes_later_appends() {
         let memory = session.join(format!("memory-{}", range.is_some()));
         let stream = session.join(format!("stream-{}", range.is_some()));
         create_private_directory(&memory).expect("memory directory");
-
         create_private_directory(&stream).expect("stream directory");
 
         write_index(&memory, &log, range, false, StateSelection::All).expect("memory index");
@@ -97,7 +97,6 @@ fn file_index_matches_memory_and_excludes_later_appends() {
 
     let mut wrong = summary;
     wrong.terminal.as_mut().expect("terminal").hash = "0".repeat(64);
-
     assert!(write_source_index(
         &invalid,
         &IndexSource::File(&event_path, &wrong),
@@ -114,9 +113,10 @@ fn streaming_index_exceeds_materializing_reader_event_limit() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let session = temporary.path().join("session");
     create_private_directory(&session).expect("private directory");
-    let event_path = session.join("events.jsonl");
 
+    let event_path = session.join("events.jsonl");
     let mut writer = writer(&event_path);
+
     for _ in 0..1_000_001 {
         writer
             .append(Event::HostError {
@@ -127,12 +127,15 @@ fn streaming_index_exceeds_materializing_reader_event_limit() {
     }
 
     drop(writer);
+
     assert!(
         EventLog::read(&event_path).is_err(),
         "materializing reader retains its allocation ceiling"
     );
+
     let summary = EventLogSummary::read(&event_path).expect("unbounded lifetime summary");
     assert_eq!(summary.event_count, 1_000_001);
+
     let derived = session.join("derived");
     create_private_directory(&derived).expect("derived directory");
     let (artifacts, retained) = write_source_index(
@@ -143,6 +146,7 @@ fn streaming_index_exceeds_materializing_reader_event_limit() {
         StateSelection::All,
     )
     .expect("streamed million-event index");
+
     assert_eq!(retained, 1);
     assert_eq!(artifacts.state_count, 1);
 }

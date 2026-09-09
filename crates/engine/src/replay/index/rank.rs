@@ -1,16 +1,14 @@
-use std::{
-    fs::File,
-    io::{BufRead as _, BufReader},
-    path::{Path, PathBuf},
-};
-
-use termtrace_model::terminal::{replay::SourceRange, vt::VtToken};
-
 use super::{
     super::{invalid_replay, json_error, timeline_event},
     source::Records,
 };
 use crate::{Error, Result};
+use std::{
+    fs::File,
+    io::{BufRead as _, BufReader},
+    path::{Path, PathBuf},
+};
+use termtrace_model::terminal::{replay::SourceRange, vt::VtToken};
 
 pub(super) type TimelineKey = (u64, u64, u8, u64);
 
@@ -54,12 +52,12 @@ impl<'source> TimelineRanks<'source> {
         };
         ranks.advance_canonical()?;
         ranks.advance_control()?;
-
         return Ok(ranks);
     }
 
     fn advance_canonical(&mut self) -> Result<()> {
         self.canonical_next = None;
+
         for record in self.canonical.by_ref() {
             let record = record?;
 
@@ -93,7 +91,6 @@ impl<'source> TimelineRanks<'source> {
 
         let token: VtToken = serde_json::from_str(&line)
             .map_err(|source| return json_error(self.controls_path.clone(), source))?;
-
         let first = token
             .source
             .first()
@@ -107,7 +104,6 @@ impl<'source> TimelineRanks<'source> {
             .control_offset
             .checked_add(u64::try_from(bytes).unwrap_or(u64::MAX))
             .ok_or_else(|| return invalid_replay("control index byte offset overflow"))?;
-
         return Ok(());
     }
 

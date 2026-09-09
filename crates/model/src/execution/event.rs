@@ -1,14 +1,12 @@
 //! Versioned events that make up the canonical terminal execution record.
 
+use super::application::ApplicationEvent;
+use crate::value::ByteString;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::application::ApplicationEvent;
-use crate::value::ByteString;
-
 /// Current on-disk event-log format version.
 pub const EVENT_LOG_VERSION: u32 = 6;
-
 /// Stable event-log format identifier.
 pub const EVENT_LOG_FORMAT: &str = "termtrace-events";
 
@@ -99,7 +97,6 @@ impl EventLogHeader {
     #[must_use]
     pub fn with_colors(mut self, colors: TerminalColors) -> Self {
         self.colors = colors;
-
         return self;
     }
 }

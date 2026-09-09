@@ -1,5 +1,17 @@
 //! Runner-neutral helpers for ordinary Rust tests.
 
+use crate::{
+    assertions::{
+        assert_cursor, assert_screen_text, normalized_snapshot, AssertionError,
+        AssertionFrameIdentity, ExpectationMismatch, SnapshotProfile,
+    },
+    client::{Screen, Session, Terminal},
+    locator::{Locator, LocatorSpec},
+    protocol::{exchange, ExchangeTiming},
+    Error, Result,
+};
+use nix::libc::{O_CLOEXEC, O_NOFOLLOW};
+use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
     ffi::OsString,
@@ -14,11 +26,6 @@ use std::{
     thread::panicking,
     time::{Duration, Instant},
 };
-
-use nix::libc::{O_CLOEXEC, O_NOFOLLOW};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use termtrace_evidence::artifact::{create_private_directory, sync_directory, write_secure};
 use termtrace_model::{
     artifact::bundle::BundleProfile,
@@ -28,17 +35,7 @@ use termtrace_model::{
     terminal::screen::{ScreenFrame, ScreenSnapshotOptions},
     terminal::state::CursorState,
 };
-
-use crate::{
-    assertions::{
-        assert_cursor, assert_screen_text, normalized_snapshot, AssertionError,
-        AssertionFrameIdentity, ExpectationMismatch, SnapshotProfile,
-    },
-    client::{Screen, Session, Terminal},
-    locator::{Locator, LocatorSpec},
-    protocol::{exchange, ExchangeTiming},
-    Error, Result,
-};
+use uuid::Uuid;
 
 const MAX_SECONDARY_FAILURE_CHARS: usize = 512;
 

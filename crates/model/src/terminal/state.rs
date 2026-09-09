@@ -1,9 +1,8 @@
 //! Stable Rust value types exposed by the Ghostty VT adapter.
 
+use crate::value::ByteString;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use crate::value::ByteString;
 
 /// Largest supported terminal width at any trusted or imported boundary.
 pub const MAX_TERMINAL_COLUMNS: u16 = 1_000;
@@ -169,6 +168,7 @@ pub struct CellStyle {
     /// Upstream SGR underline value (`0` through `5`).
     pub underline: i32,
 }
+
 /// Authoritative width role reported by Ghostty for one terminal cell.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

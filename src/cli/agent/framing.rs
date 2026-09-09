@@ -3,10 +3,8 @@ use std::{
     io::{BufRead, BufReader, Error as IoError, Read, Result as IoResult},
     path::PathBuf,
 };
-
-use termtrace_sdk::{Error, Result};
-
 use termtrace_model::protocol::driver::{DriverRequest, DRIVER_MAX_REQUEST_BYTES};
+use termtrace_sdk::{Error, Result};
 
 pub(super) enum DriverFrame {
     Request(Box<DriverRequest>),
@@ -43,6 +41,7 @@ pub(super) fn read_frame(input: &mut impl BufRead) -> Result<Option<DriverFrame>
     }
 
     frame.drain().map_err(driver_input_error)?;
+
     if frame.exceeded() {
         return Ok(Some(DriverFrame::TooLarge));
     }
@@ -135,7 +134,6 @@ impl<R: BufRead> Read for NewlineFrameReader<'_, R> {
             Ok(available) => available,
             Err(source) => {
                 self.input_error = Some(IoError::new(source.kind(), source.to_string()));
-
                 return Err(source);
             }
         };
@@ -171,7 +169,6 @@ impl<R: BufRead> Read for NewlineFrameReader<'_, R> {
         self.content_bytes = self.content_bytes.saturating_add(content_consumed);
         self.exceeded = self.content_bytes > maximum;
         self.terminated = newline.is_some_and(|index| return consumed > index);
-
         return Ok(consumed);
     }
 }

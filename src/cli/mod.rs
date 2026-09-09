@@ -1,8 +1,7 @@
 //! Command-line entry point for Termtrace.
 
-use std::{io, process::ExitCode};
-
 use clap::FromArgMatches as _;
+use std::{io, process::ExitCode};
 use tracing_subscriber::{
     fmt, layer::SubscriberExt, registry as tracing_registry, util::SubscriberInitExt, EnvFilter,
 };
@@ -70,6 +69,5 @@ pub(crate) fn run() -> ExitCode {
     }
 
     let result = dispatch::dispatch(&mut response, cli.command);
-
     return finish_response(response, result);
 }

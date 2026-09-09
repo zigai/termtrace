@@ -1,8 +1,6 @@
-use std::path::PathBuf;
-
-use termtrace_model::{terminal::observation::ObservationFrame, terminal::state::SemanticState};
-
 use crate::{Error, Result};
+use std::path::PathBuf;
+use termtrace_model::{terminal::observation::ObservationFrame, terminal::state::SemanticState};
 
 pub(super) fn frame_from_state(state: &SemanticState) -> ObservationFrame {
     return ObservationFrame {
@@ -29,7 +27,6 @@ pub(super) fn frame_hash(frame: &ObservationFrame) -> Result<String> {
             source,
         };
     })?;
-
     return Ok(blake3::hash(&bytes).to_hex().to_string());
 }
 

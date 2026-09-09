@@ -1,5 +1,10 @@
 //! Blocking client transport for the versioned live-session control protocol.
 
+use crate::{Error, Result};
+use nix::{
+    sys::socket::{getsockopt, sockopt::PeerCredentials},
+    unistd::getuid,
+};
 use std::{
     fs::File,
     io::{BufRead as _, BufReader, Error as IoError, ErrorKind, Read as _, Write as _},
@@ -11,12 +16,6 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-
-use nix::{
-    sys::socket::{getsockopt, sockopt::PeerCredentials},
-    unistd::getuid,
-};
-
 #[cfg(feature = "in-process")]
 use termtrace_engine::{
     inspection::wait_for_completion,
@@ -40,8 +39,6 @@ use termtrace_model::{
     terminal::{inspection::ScreenWaitOutcome, screen::ScreenProjectionRequest},
 };
 
-use crate::{Error, Result};
-
 const DEFAULT_CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_INPUT_SEQUENCE_PACING: Duration = Duration::from_secs(60);
 
@@ -60,6 +57,7 @@ fn read_control_manifest(session_directory: &Path) -> Result<SessionManifest> {
                 source,
             };
         })?;
+
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_CONTROL_MESSAGE_BYTES {
         return Err(Error::InvalidControlProtocol {
             reason: "session manifest exceeds the client transport limit".to_owned(),
@@ -119,7 +117,6 @@ pub(crate) fn connect_session_control(session_directory: &Path) -> Result<UnixSt
             ),
         });
     }
-
     return Ok(stream);
 }
 
@@ -153,6 +150,7 @@ pub fn wait_for_screen(
     let started_at = Instant::now();
     let stable_for_ns = u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX);
     let timeout_ns = u64::try_from(timeout.as_nanos()).unwrap_or(u64::MAX);
+
     let result = match request(
         session_directory,
         ControlCommand::WaitScreen {
@@ -180,10 +178,8 @@ pub fn wait_for_screen(
                 if session_directory.join("completion.json").is_file() {
                     return Err(completion_error.into());
                 }
-
                 return Err(error);
             }
-
             return completed_screen_wait(session_directory, predicate, stable_for_ns);
         }
         Err(error) => return Err(error),
@@ -271,7 +267,6 @@ pub fn send_request(
     request: &ControlRequest,
 ) -> Result<ControlData> {
     let response = send_request_response(session_directory, request)?;
-
     match response.result {
         ControlResult::Ok { data } => return Ok(data),
         ControlResult::Error { code, message, .. } => {
@@ -350,7 +345,6 @@ pub(crate) fn exchange(
     timing: ExchangeTiming,
 ) -> Result<ControlResponse> {
     let stream = connect_session_control(session_directory)?;
-
     return exchange_stream(session_directory, stream, request, timing);
 }
 
@@ -398,6 +392,7 @@ fn exchange_stream(
     stream.shutdown(Shutdown::Write).map_err(|source| {
         return control_transport_error(session_directory, "finish request", timeout, true, source);
     })?;
+
     let timeout = timing.remaining(session_directory, "read response", true)?;
     stream.set_read_timeout(Some(timeout)).map_err(|source| {
         return control_transport_error(
@@ -423,6 +418,7 @@ fn exchange_stream(
             );
         })?;
     validate_response_frame(session_directory, timeout, &encoded)?;
+
     let response: ControlResponse = serde_json::from_slice(&encoded).map_err(|source| {
         return Error::InvalidJson {
             path: socket,
@@ -436,7 +432,6 @@ fn exchange_stream(
             reason: "response version or request identifier does not match".to_owned(),
         });
     }
-
     return Ok(response);
 }
 
@@ -474,7 +469,6 @@ pub(crate) fn control_response_timeout(command: &ControlCommand, wait_slack: Dur
 fn input_sequence_response_timeout(atoms: &[InputSequenceAtom], pace_ns: u64) -> Duration {
     let gaps = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
     let pacing = Duration::from_nanos(pace_ns.saturating_mul(gaps)).min(MAX_INPUT_SEQUENCE_PACING);
-
     return DEFAULT_CONTROL_TIMEOUT.saturating_add(pacing);
 }
 
@@ -486,7 +480,6 @@ fn control_lifecycle_hint(session: &Path) -> String {
     if !session.join("session.json").is_file() {
         return "not_a_session".to_owned();
     }
-
     return "control_endpoint_unreachable_or_recorder_starting".to_owned();
 }
 
@@ -506,7 +499,6 @@ fn control_transport_error(
             source,
         };
     }
-
     return Error::ControlTransport {
         session: session.to_path_buf(),
         phase,
@@ -528,7 +520,6 @@ fn validate_response_frame(session: &Path, timeout: Duration, encoded: &[u8]) ->
             ),
         ));
     }
-
     return validate_frame(encoded);
 }
 
@@ -542,16 +533,14 @@ fn validate_frame(encoded: &[u8]) -> Result<()> {
                 .to_owned(),
         });
     }
-
     return Ok(());
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use tempfile::TempDir;
     use termtrace_model::protocol::control::ControlCommand;
-
-    use super::*;
 
     #[test]
     fn stop_request_obeys_the_supplied_deadline() {
@@ -564,6 +553,7 @@ mod tests {
             ExchangeTiming::deadline(Duration::from_millis(20)).expect("deadline"),
         )
         .expect_err("withheld stop response must time out");
+
         assert!(matches!(
             error,
             Error::ControlTimeout {
@@ -572,6 +562,7 @@ mod tests {
                 ..
             }
         ));
+
         drop(server);
     }
 
@@ -589,6 +580,7 @@ mod tests {
     fn empty_control_response_is_a_transport_failure() {
         let error = validate_response_frame(Path::new("/session"), Duration::from_secs(1), &[])
             .expect_err("empty response must be a transport failure");
+
         assert!(matches!(
             error,
             Error::ControlTransport {

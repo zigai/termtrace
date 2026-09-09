@@ -48,6 +48,7 @@ pub(super) fn validate_action_options(atoms: &[InputAtom], options: &ActionOptio
     }
 
     let atom_count = u64::try_from(atoms.len()).unwrap_or(u64::MAX);
+
     if pace_ns
         .checked_mul(atom_count)
         .is_none_or(|total| return total > 60_000_000_000)
@@ -59,6 +60,7 @@ pub(super) fn validate_action_options(atoms: &[InputAtom], options: &ActionOptio
     }
 
     validate_postcondition_durations(&options.postcondition)?;
+
     if matches!(options.projection.detail, FrameDetail::Cells)
         && options.projection.region.is_none()
     {
@@ -69,7 +71,6 @@ pub(super) fn validate_action_options(atoms: &[InputAtom], options: &ActionOptio
             reason: InvalidRegionReason::CellsRequireExplicitRegion,
         }));
     }
-
     return Ok(());
 }
 
@@ -106,7 +107,6 @@ pub(super) fn validate_postcondition_durations(postcondition: &ActionCondition) 
         }
         ActionCondition::Screen { timeout, .. } => {
             let timeout_ns = exact_duration_ns("timeout", *timeout)?;
-
             if timeout_ns == 0 || timeout_ns > 3_600_000_000_000 {
                 return Err(Error::InvalidDuration {
                     field: "timeout",
@@ -164,7 +164,6 @@ pub(super) fn validate_stable_options(options: StableCaptureOptions) -> Result<(
             reason: InvalidRegionReason::CellsRequireExplicitRegion,
         }));
     }
-
     return Ok(());
 }
 
@@ -257,7 +256,6 @@ pub(super) fn public_control_error(
                 rows,
                 reason,
             };
-
             return public_screen_frame_error(request_id, details, source);
         }
 
@@ -284,7 +282,6 @@ pub(super) fn public_control_error(
                 detail,
                 region,
             };
-
             return public_screen_frame_error(request_id, details, source);
         }
     }
@@ -308,7 +305,6 @@ pub(super) fn public_screen_frame_error(
             source,
         };
     }
-
     return Error::ScreenFrame(source);
 }
 
@@ -369,7 +365,6 @@ mod tests {
             Some(request_id),
             None,
         );
-
         let Error::ActionTerminatingFrame {
             request_id: actual_request_id,
             boundaries: actual_boundaries,
@@ -380,6 +375,7 @@ mod tests {
         else {
             panic!("expected typed action terminating-frame failure");
         };
+
         assert_eq!(actual_request_id, request_id);
         assert_eq!(*actual_boundaries, boundaries);
         assert!(input_fully_applied);

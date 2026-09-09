@@ -27,6 +27,7 @@ impl SessionActor<'_> {
             } => {
                 validate_control_input(data.as_bytes(), caller_intent.as_deref())?;
                 let input = prepare_bytes(data.as_bytes(), *input_kind, &mut self.live.semantic)?;
+
                 let applied = apply_input(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
@@ -58,6 +59,7 @@ impl SessionActor<'_> {
             }
             ControlCommand::Key { key, modifiers } => {
                 let input = prepare_key(*key, *modifiers, &mut self.live.semantic, Error::from)?;
+
                 let applied = apply_input(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
@@ -84,6 +86,7 @@ impl SessionActor<'_> {
             ControlCommand::Paste { data } => {
                 validate_control_input(data.as_bytes(), Some("paste"))?;
                 let input = prepare_paste(data.as_bytes(), &mut self.live.semantic)?;
+
                 let applied = apply_input(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
@@ -122,7 +125,6 @@ impl SessionActor<'_> {
                             "the application has not enabled DEC focus reporting mode 1004",
                         ));
                     }
-
                     return Ok(ControlData::InputNoop {
                         input_kind: InputKind::Focus,
                         reason: "focus_reporting_disabled".to_owned(),
@@ -133,6 +135,7 @@ impl SessionActor<'_> {
 
                 let encoded =
                     encode_focus(if *focused { FocusEvent::In } else { FocusEvent::Out })?;
+
                 let applied = apply_input(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
@@ -191,7 +194,6 @@ impl SessionActor<'_> {
                             "the application has not enabled a DEC mouse tracking mode",
                         ));
                     }
-
                     return Ok(ControlData::InputNoop {
                         input_kind: InputKind::Pointer,
                         reason: "pointer_reporting_disabled".to_owned(),
@@ -301,8 +303,8 @@ impl SessionActor<'_> {
                         for step in 1..=step_count {
                             let drag_column =
                                 interpolate_cell(*column, *to_column, step, step_count);
-
                             let drag_row = interpolate_cell(*row, *to_row, step, step_count);
+
                             encoded.extend_from_slice(
                                 self.live
                                     .semantic
@@ -354,6 +356,7 @@ impl SessionActor<'_> {
 
                         let button =
                             if *lines < 0 { MouseButton::WheelUp } else { MouseButton::WheelDown };
+
                         for _ in 0..lines.unsigned_abs() {
                             encoded.extend_from_slice(
                                 self.live
@@ -383,7 +386,6 @@ impl SessionActor<'_> {
                             "the current tracking mode suppressed this pointer operation",
                         ));
                     }
-
                     return Ok(ControlData::InputNoop {
                         input_kind: InputKind::Pointer,
                         reason: "pointer_has_no_output".to_owned(),
@@ -463,7 +465,6 @@ impl SessionActor<'_> {
                     } else {
                         "activation_text_concealed"
                     };
-
                     return Err(control_rejected(
                         code,
                         "activation requires a visible row-contained text match",
@@ -491,14 +492,12 @@ impl SessionActor<'_> {
                 let region = visible.first().ok_or_else(|| {
                     return control_rejected("activation_text_not_found", "no match");
                 })?;
-
                 let target_column = region
                     .start_column
                     .saturating_add(region.end_column.saturating_sub(region.start_column + 1) / 2);
 
                 let terminal_modes_hash =
                     mode_hash(&semantic_state.modes, "serialize activation modes")?;
-
                 let reporting_enabled = semantic_state.modes.values.iter().any(|mode| {
                     return !mode.ansi
                         && matches!(mode.number, 9 | 1000 | 1002 | 1003)
@@ -512,7 +511,6 @@ impl SessionActor<'_> {
                             "the application has not enabled a DEC mouse tracking mode",
                         ));
                     }
-
                     return Ok(ControlData::InputNoop {
                         input_kind: InputKind::Pointer,
                         reason: "pointer_reporting_disabled".to_owned(),
@@ -522,6 +520,7 @@ impl SessionActor<'_> {
                 }
 
                 let mut encoded = Vec::new();
+
                 for action in [MouseAction::Press, MouseAction::Release] {
                     encoded.extend_from_slice(
                         self.live
@@ -547,7 +546,6 @@ impl SessionActor<'_> {
                             "the current tracking mode suppressed the activation click",
                         ));
                     }
-
                     return Ok(ControlData::InputNoop {
                         input_kind: InputKind::Pointer,
                         reason: "pointer_has_no_output".to_owned(),
@@ -607,8 +605,8 @@ impl SessionActor<'_> {
                     pixel_width: *pixel_width,
                     pixel_height: *pixel_height,
                 };
-
                 validate_control_geometry(geometry)?;
+
                 apply_resize(
                     self.spawned.master.as_mut(),
                     &mut self.event_log,
@@ -619,7 +617,6 @@ impl SessionActor<'_> {
                 resize_semantic(&mut self.live.semantic, geometry)?;
                 self.live.geometry = geometry;
                 let latest = self.live.semantic.snapshot()?;
-
                 if !latest.modes.synchronized_output {
                     self.live.presented = latest;
                 }
@@ -636,7 +633,6 @@ impl SessionActor<'_> {
                     *signal,
                     false,
                 )?;
-
                 return Ok(ControlData::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),
                 });
@@ -650,7 +646,6 @@ impl SessionActor<'_> {
                     operation_id: request_id,
                     data: data.clone(),
                 })?;
-
                 return Ok(ControlData::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),
                 });
@@ -719,7 +714,6 @@ fn validate_control_geometry(geometry: TerminalGeometry) -> Result<()> {
             "terminal geometry exceeds the supported row, column, or cell limit, or has zero pixels",
         ));
     }
-
     return Ok(());
 }
 
@@ -741,12 +735,12 @@ pub(in crate::recording) fn apply_signal(
         .and_then(|value| return i32::try_from(value).ok())
         .ok_or(Errno::ESRCH)
         .and_then(|value| return killpg(Pid::from_raw(value), signal));
-
     let status = if signal_result.is_ok() {
         OperationStatus::Applied
     } else {
         OperationStatus::Failed
     };
+
     let result_write: Result<()> = event_log
         .append(Event::SignalResult {
             operation_id,

@@ -130,7 +130,6 @@ pub(super) fn evaluate_action_postcondition(
             let stable = waiting.matching_state.as_ref().is_some_and(|(_, since)| {
                 return since.elapsed() >= Duration::from_nanos(*stable_for_ns);
             });
-
             let deadline = !child_exited && now >= started_at + Duration::from_nanos(*timeout_ns);
 
             if !stable && !child_completed && !output_closed && !deadline {
@@ -146,7 +145,6 @@ pub(super) fn evaluate_action_postcondition(
             } else {
                 StableCaptureQuality::Deadline
             };
-
             let capture_quality = if stable {
                 CaptureQuality::Stable
             } else if deadline {
@@ -178,7 +176,6 @@ pub(super) fn evaluate_action_postcondition(
             let viewport_text = semantic_viewport_text(&live.presented);
             let matched =
                 evaluate_screen_predicate(predicate, &live.presented, &viewport_text, &state_hash);
-
             let deadline = !child_exited && now >= started_at + Duration::from_nanos(*timeout_ns);
 
             if !matched && !child_completed && !output_closed && !deadline {
@@ -194,7 +191,6 @@ pub(super) fn evaluate_action_postcondition(
             } else {
                 ScreenPostconditionQuality::Deadline
             };
-
             let capture_quality = if deadline && !matched {
                 CaptureQuality::Incomplete
             } else {
@@ -232,7 +228,6 @@ pub(super) fn actor_screen_frame(
         boundaries,
         observed_monotonic_ns: event_log.elapsed_ns(),
     };
-
     return project_screen_frame(&live.presented, projection, source, true, capture_quality)
         .map_err(Error::ScreenFrame);
 }
@@ -250,7 +245,6 @@ impl SessionActor<'_> {
             ControlCommand::EventCursor { next_event_seq } => {
                 let (device, inode, header_hash) = self.event_log.source_identity();
                 let (start, durable) = self.event_log.follow_cursors(*next_event_seq);
-
                 Ok(ControlData::EventCursor {
                     device,
                     inode,
@@ -309,7 +303,6 @@ impl SessionActor<'_> {
             }
             ControlCommand::ScreenFrame { projection } => {
                 let boundaries = actor_boundaries(&self.event_log);
-
                 actor_screen_frame(
                     self.session_id,
                     &self.event_log,

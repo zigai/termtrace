@@ -1,7 +1,3 @@
-use std::{env, fmt::Write as _};
-
-use clap::{CommandFactory as _, Parser, Subcommand, ValueEnum as _};
-
 use crate::cli::{
     analysis::args::{
         AnalyzeArgs, AnalyzeSubcommand, DiagnoseFacadeArgs, InspectFacadeArgs, PlaybackArgs,
@@ -21,6 +17,8 @@ use crate::cli::{
     tmux::{TmuxArgs, TmuxSubcommand},
     tooling::args::{ClientCommand, DoctorArgs, ToolingArgs, ToolingSubcommand, VersionArgs},
 };
+use clap::{CommandFactory as _, Parser, Subcommand, ValueEnum as _};
+use std::{env, fmt::Write as _};
 
 const ROOT_HELP_TEMPLATE: &str = "\
 {about-with-newline}
@@ -29,7 +27,6 @@ const ROOT_HELP_TEMPLATE: &str = "\
 Options:
 {options}
 ";
-
 const ROOT_COMMAND_GROUPS: &[(&str, &[&str])] = &[
     (
         "Sessions",
@@ -204,6 +201,7 @@ pub(super) fn root_command() -> clap::Command {
     }
 
     let mut grouped_help = String::from("Commands:\n");
+
     for (heading, names) in ROOT_COMMAND_GROUPS {
         let command_width = names
             .iter()
@@ -243,10 +241,12 @@ pub(super) fn requested_response_mode() -> ResponseMode {
         .unwrap_or(ResponseMode::Auto);
 
     let mut arguments = env::args_os().skip(1);
+
     while let Some(argument) = arguments.next() {
         let Some(argument) = argument.to_str() else {
             continue;
         };
+
         if let Some(value) = argument.strip_prefix("--response=") {
             if let Some(selected) = response_mode_name(value) {
                 mode = selected;
@@ -277,7 +277,6 @@ fn response_mode_name(value: &str) -> Option<ResponseMode> {
 
 pub(super) fn command_contract(matches: &clap::ArgMatches) -> (String, bool) {
     let mut command_type = "termtrace";
-
     let mut current = matches;
     while let Some((name, subcommand)) = current.subcommand() {
         command_type = name;

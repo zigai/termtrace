@@ -7,13 +7,13 @@ pub(super) fn human_screen_summary(value: &serde_json::Value) -> String {
         .and_then(|size| return size.first())
         .and_then(serde_json::Value::as_u64)
         .unwrap_or_default();
-
     let rows = size
         .and_then(|size| return size.get(1))
         .and_then(serde_json::Value::as_u64)
         .unwrap_or_default();
 
     let quality = value_string(value, "quality").unwrap_or_else(|| return "unknown".to_owned());
+
     if value
         .get("unchanged")
         .and_then(serde_json::Value::as_bool)
@@ -25,6 +25,7 @@ pub(super) fn human_screen_summary(value: &serde_json::Value) -> String {
     let Some(screen) = value.get("screen") else {
         return format!("Viewport state {state} ({cols}×{rows}, {quality}); content omitted\n");
     };
+
     if let Some(viewport) = screen.as_str() {
         return format!(
             "Viewport state {state} ({cols}×{rows}, {quality})\n{}\n",
@@ -55,7 +56,6 @@ pub(super) fn human_screen_summary(value: &serde_json::Value) -> String {
 
     if changed_rows == 0 {
         output.push_str("  (no nonblank or changed rows)\n");
-
         return output;
     }
 
@@ -68,11 +68,11 @@ pub(super) fn human_screen_summary(value: &serde_json::Value) -> String {
                 .first()
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or_default();
-
             let text = row
                 .get(1)
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default();
+
             let _ = writeln!(output, "  row {number}: {text}");
         }
     }
@@ -97,15 +97,15 @@ pub(super) fn human_failure_summary(
     );
 
     let mut summary = format!("[{code}] {message}");
+
     if state.mutating {
         let applied = nested_string(last, "applied").unwrap_or_else(|| {
             return if last.is_some() { "unknown" } else { "none" }.to_owned();
         });
-
         let retry = nested_string(last, "retry")
             .unwrap_or_else(|| return retry_for_applied(&applied).to_owned());
-
         let current_state = session_state(last, &state.command_type, false);
+
         let _ = write!(
             summary,
             "\nmutation: applied={applied}, retry={retry}, session_state={current_state}"
@@ -124,6 +124,7 @@ pub(super) fn human_failure_summary(
         let status = value_string(postcondition, "state")
             .or_else(|| return value_string(postcondition, "quality"))
             .unwrap_or_else(|| return "unknown".to_owned());
+
         let _ = write!(
             summary,
             "\npostcondition: matched={matched}, status={status}"
@@ -145,16 +146,14 @@ pub(super) fn human_action_summary(value: &serde_json::Value) -> String {
     let applied = value_string(input, "applied").unwrap_or_else(|| return "unknown".to_owned());
     let atoms = value_u64(input, "atoms");
     let bytes = value_u64(input, "bytes");
+
     let postcondition = value
         .get("postcondition")
         .unwrap_or(&serde_json::Value::Null);
-
     let postcondition_kind =
         value_string(postcondition, "kind").unwrap_or_else(|| return "unknown".to_owned());
-
     let outcome =
         value_string(postcondition, "outcome").unwrap_or_else(|| return "unknown".to_owned());
-
     let matched = postcondition
         .get("matched")
         .and_then(serde_json::Value::as_bool)
@@ -184,7 +183,6 @@ pub(super) fn human_inspect_summary(value: &serde_json::Value) -> String {
         .get("rows_changed")
         .and_then(serde_json::Value::as_array)
         .map_or(0, Vec::len);
-
     let warnings = value
         .get("warnings")
         .and_then(serde_json::Value::as_array)
@@ -254,7 +252,6 @@ pub(super) fn human_artifact_summary(
         "video" => {
             let renderer =
                 value_string(value, "renderer").unwrap_or_else(|| return "unknown".to_owned());
-
             let fps = value_u64(value, "fps");
             let width = value_u64(value, "width");
             let height = value_u64(value, "height");
@@ -332,7 +329,6 @@ pub(super) fn human_summary(value: &serde_json::Value, command_type: &str) -> St
         let path = value_string(value, "canonical_session_display")
             .or_else(|| return value_string(value, "path"))
             .unwrap_or_default();
-
         return format!("Started {name} — {path}\n");
     }
 
@@ -345,7 +341,6 @@ pub(super) fn human_summary(value: &serde_json::Value, command_type: &str) -> St
             .and_then(|geometry| return geometry.get("cols"))
             .and_then(serde_json::Value::as_u64)
             .unwrap_or_default();
-
         let rows = geometry
             .and_then(|geometry| return geometry.get("rows"))
             .and_then(serde_json::Value::as_u64)
@@ -359,18 +354,15 @@ pub(super) fn human_summary(value: &serde_json::Value, command_type: &str) -> St
             .get("atom_count")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or_default();
-
         let bytes = value
             .get("bytes_written")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or_default();
-
         return format!("Sent {atoms} inputs, {bytes} bytes\n");
     }
 
     if kind == "completed" {
         return "Session completed\n".to_owned();
     }
-
     return format!("{} succeeded\n", kind.replace('_', " "));
 }

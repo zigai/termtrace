@@ -1,10 +1,15 @@
 //! Task-oriented analysis of the most recent canonical input action.
 
+use crate::{
+    analysis::diagnostics::diagnose_states,
+    diff::diff_inspections_with_semantic_states,
+    replay::{visit_states, StateInspection},
+    Error, Result,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
 };
-
 use termtrace_evidence::{
     event_log::EventLog,
     request_journal::{MutationJournalCursor, MUTATION_JOURNAL_NAME},
@@ -23,13 +28,6 @@ use termtrace_model::{
 };
 use termtrace_terminal::frame_event_records;
 use uuid::Uuid;
-
-use crate::{
-    analysis::diagnostics::diagnose_states,
-    diff::diff_inspections_with_semantic_states,
-    replay::{visit_states, StateInspection},
-    Error, Result,
-};
 
 mod stream;
 
@@ -90,9 +88,7 @@ pub fn analyze_last_action(
             record: record.clone(),
             state: state.clone(),
         });
-
         states.push(record.clone());
-
         return Ok(());
     })?;
 
@@ -186,6 +182,7 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
         findings,
         findings_truncated,
     } = inputs;
+
     let (warnings, warning_limit_reached) = action_warnings(
         &difference.rows,
         &before,
@@ -196,12 +193,13 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
         &findings,
     );
     let warnings_truncated = warning_limit_reached || findings_truncated;
+
     let rows_changed = difference.rows.iter().map(|row| return row.row).collect();
     let cells_changed = difference.rows.iter().fold(0_u64, |total, row| {
         return total.saturating_add(u64::try_from(row.cells.len()).unwrap_or(u64::MAX));
     });
-
     let mode_changes = changed_modes(difference.modes.as_ref());
+
     let inspection = LastActionReport {
         format: "termtrace-last-action".to_owned(),
         version: 1,
@@ -241,7 +239,6 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
 
 fn last_input_action(session: &Path, log: &EventLog) -> Result<LastActionBoundary> {
     let mut journal = MutationJournalCursor::open(&session.join(MUTATION_JOURNAL_NAME))?;
-
     let mut last_action = None;
     while let Some(request) = journal.next_record()? {
         if let Some(action) = journaled_input_action(log, &request)? {
@@ -252,7 +249,6 @@ fn last_input_action(session: &Path, log: &EventLog) -> Result<LastActionBoundar
     if let Some(action) = last_action {
         return Ok(action);
     }
-
     return unjournaled_input_action(log);
 }
 
@@ -344,6 +340,7 @@ fn action_boundary(
                 _ => return None,
             })
             .ok_or_else(|| return task_error("input intent has no canonical input result"))?;
+
         bytes_written = bytes_written.saturating_add(*atom_bytes_written);
         last_result_event_seq = Some(result_seq);
 
@@ -414,7 +411,6 @@ fn changed_modes(change: Option<&ValueChange<ModeState>>) -> Vec<ActionModeChang
         .filter_map(|(ansi, number)| {
             let before = before.get(&(ansi, number)).copied().unwrap_or(false);
             let after = after.get(&(ansi, number)).copied().unwrap_or(false);
-
             return (before != after).then_some(ActionModeChange {
                 number,
                 ansi,
@@ -452,7 +448,6 @@ fn bounded_action_findings(
         .collect::<Vec<_>>();
 
     let truncated = selected.len() > MAX_ACTION_FINDINGS;
-
     selected.truncate(MAX_ACTION_FINDINGS);
 
     for finding in &mut selected {
@@ -477,11 +472,11 @@ fn action_warnings(
     let changed_cells = rows.iter().fold(0_u64, |total, row| {
         return total.saturating_add(u64::try_from(row.cells.len()).unwrap_or(u64::MAX));
     });
-
     let total_cells = u64::from(after.cols.max(before.cols))
         .saturating_mul(u64::from(after.rows.max(before.rows)));
 
     let mut warnings = Vec::new();
+
     if total_cells > 0
         && changed_cells.saturating_mul(100)
             >= total_cells.saturating_mul(u64::from(broad_change_percent))
@@ -530,6 +525,7 @@ fn action_warnings(
             "hidden_transient" => "synchronized_output_misuse",
             _ => finding.code.as_str(),
         };
+
         if warnings.iter().any(|warning| return warning.code == code) {
             continue;
         }
@@ -548,6 +544,5 @@ fn action_warnings(
 
     let truncated = warnings.len() > MAX_ACTION_WARNINGS;
     warnings.truncate(MAX_ACTION_WARNINGS);
-
     return (warnings, truncated);
 }

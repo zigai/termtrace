@@ -1,15 +1,13 @@
 //! Bundle manifest, profile, and verification policy contracts.
 
-use std::path::PathBuf;
-
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::{
     artifact::metadata::{ArtifactMember, ArtifactSensitivity},
     value::ByteString,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use uuid::Uuid;
 
 /// Reserved manifest filename at a bundle root.
 pub const BUNDLE_MANIFEST_NAME: &str = "manifest.json";

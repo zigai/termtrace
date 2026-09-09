@@ -26,7 +26,6 @@ fn semantic_fixture() -> SemanticState {
     let mut terminal = GhosttyVt::new(6, 2, 0).expect("create terminal");
     terminal.write(b"\x1b[38;2;1;2;3mA");
     terminal.write("界".as_bytes());
-
     return terminal.snapshot().expect("semantic snapshot");
 }
 
@@ -36,6 +35,7 @@ fn exact_cells_require_strict_explicit_region() {
         detail: FrameDetail::Cells,
         region: None,
     };
+
     assert!(matches!(
         validate_screen_region(&missing, 80, 24),
         Err(ScreenFrameError::InvalidRegion {
@@ -43,6 +43,7 @@ fn exact_cells_require_strict_explicit_region() {
             ..
         })
     ));
+
     let empty = ScreenProjectionRequest {
         detail: FrameDetail::Spans,
         region: Some(ScreenRegion {
@@ -52,6 +53,7 @@ fn exact_cells_require_strict_explicit_region() {
             bottom: 1,
         }),
     };
+
     assert!(matches!(
         validate_screen_region(&empty, 80, 24),
         Err(ScreenFrameError::InvalidRegion {
@@ -59,6 +61,7 @@ fn exact_cells_require_strict_explicit_region() {
             ..
         })
     ));
+
     let out_of_bounds = ScreenProjectionRequest {
         detail: FrameDetail::Spans,
         region: Some(ScreenRegion {
@@ -68,6 +71,7 @@ fn exact_cells_require_strict_explicit_region() {
             bottom: 24,
         }),
     };
+
     assert!(matches!(
         validate_screen_region(&out_of_bounds, 80, 24),
         Err(ScreenFrameError::InvalidRegion {
@@ -88,6 +92,7 @@ fn region_cell_limit_is_typed_and_never_clipped() {
             bottom: 100,
         }),
     };
+
     assert_eq!(
         validate_screen_region(&request, 200, 100),
         Err(ScreenFrameError::ResourceLimit {
@@ -106,10 +111,10 @@ fn spans_expand_losslessly_and_keep_trailing_blank_cells() {
     let request = ScreenProjectionRequest::default();
     let frame = project_screen_frame(&state, &request, source(1), true, CaptureQuality::Live)
         .expect("project spans");
-
     let ScreenFrameData::Spans { rows } = &frame.data else {
         panic!("span detail");
     };
+
     assert_eq!(rows.len(), 2);
     assert_eq!(
         rows[0]
@@ -120,10 +125,12 @@ fn spans_expand_losslessly_and_keep_trailing_blank_cells() {
         6
     );
     assert_eq!(rows[0].spans.last().expect("trailing span").end_column, 6);
+
     let mut projected: Vec<(u16, String, WideKind)> = Vec::new();
     frame.for_each_cell(|_, column, grapheme, wide_kind, _| {
         projected.push((column, grapheme.to_owned(), wide_kind));
     });
+
     assert_eq!(projected.len(), 12);
     assert!(projected.iter().any(|(_, text, kind)| {
         return text == "界" && *kind == WideKind::Wide;
@@ -187,7 +194,6 @@ fn snapshot_normalization_omits_volatile_source_identity() {
         CaptureQuality::Live,
     )
     .expect("first");
-
     let second = project_screen_frame(
         &state,
         &ScreenProjectionRequest::default(),
@@ -196,6 +202,7 @@ fn snapshot_normalization_omits_volatile_source_identity() {
         CaptureQuality::Live,
     )
     .expect("second");
+
     assert_eq!(
         normalize_screen_frame_spans(&first, ScreenSnapshotOptions::default())
             .expect("normalize first"),
@@ -217,6 +224,7 @@ fn serialized_byte_limit_returns_bounded_error() {
         CaptureQuality::Live,
     )
     .expect_err("oversized projection");
+
     assert!(matches!(
         error,
         ScreenFrameError::ResourceLimit {
@@ -236,6 +244,7 @@ fn escaped_projection_strings_are_bounded_before_projection_clones() {
     let region =
         validate_screen_region(&ScreenProjectionRequest::default(), state.cols, state.rows)
             .expect("region");
+
     assert!(matches!(
         validate_projection_clone_bytes(&state, region, FrameDetail::Spans),
         Err(ScreenFrameError::ResourceLimit {
@@ -259,10 +268,10 @@ fn span_boundaries_preserve_complete_selection_appearance() {
         CaptureQuality::Live,
     )
     .expect("span frame");
-
     let ScreenFrameData::Spans { rows } = frame.data else {
         panic!("span detail");
     };
+
     assert!(rows[0].spans.iter().any(|span| {
         return span.start_column == 1 && span.end_column == 2 && span.appearance.selected;
     }));
@@ -297,6 +306,7 @@ fn common_viewport_projection_metrics() {
                     let bytes = serde_json::to_vec(&frame)
                         .expect("serialize benchmark projection")
                         .len();
+
                     assert!(
                         u64::try_from(bytes).unwrap_or(u64::MAX) <= MAX_SCREEN_FRAME_JSON_BYTES
                     );

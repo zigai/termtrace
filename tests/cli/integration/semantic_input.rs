@@ -102,6 +102,7 @@ fn send_writes_text_file_and_stdin_bytes_directly() {
 
         let response: serde_json::Value =
             serde_json::from_slice(&output).expect("direct send response");
+
         assert_eq!(response["bytes_written"], byte_count);
     }
 
@@ -117,6 +118,7 @@ fn send_writes_text_file_and_stdin_bytes_directly() {
 
     let output = child.wait_with_output().expect("direct input completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
+
     wait_for_output(
         &session,
         b"GOT:616c70686100427461696c",
@@ -255,6 +257,7 @@ fn focus_events_are_mode_gated_encoded_and_audited() {
             _ => return None,
         })
         .collect::<Vec<_>>();
+
     assert!(matches!(
         focus_events.as_slice(),
         [(true, "libghostty-focus-encoder-v1", first_hash, b"\x1b[I"),
@@ -308,6 +311,7 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
     let output = child
         .wait_with_output()
         .expect("pointer fixture completion");
+
     assert!(output.status.success(), "fixture failed: {output:?}");
 
     let log = EventLog::read(session.join("events.jsonl")).expect("event log");
@@ -375,6 +379,7 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
     else {
         panic!("missing pointer intent");
     };
+
     assert_eq!(operation, "click");
     assert_eq!(button, "left");
     assert_eq!((lines, column, row), (0, 2, 3));
@@ -441,6 +446,7 @@ fn pointer_scroll_accepts_separated_and_equals_negative_values() {
     let output = child
         .wait_with_output()
         .expect("pointer fixture completion");
+
     assert!(output.status.success(), "fixture failed: {output:?}");
 
     let log = EventLog::read(session.join("events.jsonl")).expect("event log");
@@ -475,6 +481,7 @@ fn pointer_scroll_accepts_separated_and_equals_negative_values() {
             _ => return None,
         })
         .collect::<Vec<_>>();
+
     assert_eq!(
         scrolls,
         [
@@ -551,6 +558,7 @@ fn activate_resolves_visible_text_rejects_ambiguity_and_records_region() {
     let output = child
         .wait_with_output()
         .expect("activation fixture completion");
+
     assert!(output.status.success(), "fixture failed: {output:?}");
 
     let log = EventLog::read(session.join("events.jsonl")).expect("event log");
@@ -589,6 +597,7 @@ fn activate_resolves_visible_text_rejects_ambiguity_and_records_region() {
             _ => return None,
         })
         .collect::<Vec<_>>();
+
     assert!(matches!(
         activations.as_slice(),
         [(text, 0, 12, 0, 5, state_hash, encoder, modes_hash, data)]
@@ -637,6 +646,7 @@ fn paced_unicode_text_splits_only_at_scalar_boundaries() {
 
     let response: serde_json::Value =
         serde_json::from_slice(&sent.get_output().stdout).expect("sequence response");
+
     assert_eq!(
         response
             .pointer("/input/outcomes")
@@ -644,8 +654,10 @@ fn paced_unicode_text_splits_only_at_scalar_boundaries() {
             .map(Vec::len),
         Some(3)
     );
+
     let output = child.wait_with_output().expect("paced fixture completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
+
     let log = EventLog::read(session.join("events.jsonl")).expect("event log");
     let text_chunks = log
         .events
@@ -659,6 +671,7 @@ fn paced_unicode_text_splits_only_at_scalar_boundaries() {
             _ => return None,
         })
         .collect::<Vec<_>>();
+
     assert_eq!(text_chunks, vec!["é".as_bytes(), "界".as_bytes()]);
     assert!(text_chunks
         .iter()
@@ -701,6 +714,7 @@ fn semantic_paste_uses_live_bracketed_mode_and_records_wrappers() {
 
     let output = child.wait_with_output().expect("paste fixture completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
+
     let log = EventLog::read(session.join("events.jsonl")).expect("event log");
     assert!(log.events.iter().any(|record| matches!(
         &record.event,
@@ -761,6 +775,7 @@ fn paced_sequence_encodes_each_atom_after_pumping_mode_changes() {
 
     let response: serde_json::Value =
         serde_json::from_slice(&sent.get_output().stdout).expect("sequence response");
+
     assert_eq!(
         response
             .pointer("/request_id")
@@ -774,8 +789,10 @@ fn paced_sequence_encodes_each_atom_after_pumping_mode_changes() {
             .map(Vec::len),
         Some(2)
     );
+
     let output = child.wait_with_output().expect("paced mode fixture");
     assert!(output.status.success(), "fixture failed: {output:?}");
+
     wait_for_output(
         &session,
         b"SEQ:78:1b5b3230307e7a1b5b3230317e",
@@ -800,6 +817,7 @@ fn paced_sequence_encodes_each_atom_after_pumping_mode_changes() {
             _ => return None,
         })
         .collect::<Vec<_>>();
+
     assert_eq!(inputs.len(), 2);
     assert_eq!(inputs[0].1, "raw");
     assert_eq!(inputs[1].1, "paste");
@@ -845,7 +863,6 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
 
     let hidden = send_request(&session, &ControlRequest::new(ControlCommand::Snapshot))
         .expect("hidden snapshot");
-
     let hidden_snapshot = match hidden {
         ControlData::Snapshot {
             viewport_text,
@@ -855,8 +872,8 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         _ => None,
     }
     .expect("snapshot response");
-
     let (viewport_text, presented) = hidden_snapshot;
+
     assert!(presented);
     assert!(viewport_text.contains("VISIBLE"));
     assert!(!viewport_text.contains("HIDDEN"));
@@ -870,15 +887,17 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         .success();
 
     wait_for_output(&session, b"BUSY", Duration::from_secs(5)).expect("committed output");
+
     let committed = send_request(&session, &ControlRequest::new(ControlCommand::Snapshot))
         .expect("committed snapshot");
-
     let viewport_text = match committed {
         ControlData::Snapshot { viewport_text, .. } => Some(viewport_text),
         _ => None,
     }
     .expect("snapshot response");
+
     assert!(viewport_text.contains("BUSY"));
+
     let mut visible_wait = Command::cargo_bin("termtrace").expect("binary should build");
     visible_wait
         .arg("wait")
@@ -938,6 +957,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
     let output = child
         .wait_with_output()
         .expect("snapshot fixture completion");
+
     assert!(output.status.success(), "fixture failed: {output:?}");
 }
 
@@ -961,6 +981,7 @@ fn adjacent_request_atom_identities_close_with_valid_canonical_evidence() {
 
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("fixture ready");
+
     for (request_id, bytes) in [
         ("00000000-0000-4000-8000-000000000001", b"AB"),
         ("00000000-0000-4000-8000-000000000002", b"CD"),
@@ -983,6 +1004,7 @@ fn adjacent_request_atom_identities_close_with_valid_canonical_evidence() {
             include_atom_outcomes: true,
         });
         request.request_id = request_id;
+
         let response = send_request_response(&session, &request).expect("sequence response");
         assert!(matches!(&response.result, ControlResult::Ok { .. }));
         assert_eq!(
@@ -1003,8 +1025,10 @@ fn adjacent_request_atom_identities_close_with_valid_canonical_evidence() {
 
     let output = child.wait_with_output().expect("fixture completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
+
     let log = EventLog::read(session.join("events.jsonl")).expect("unique operation evidence");
     validate_completed_log(&session, &log).expect("closed canonical evidence validates");
+
     assert!(canonical_output_bytes(&log).windows(14).any(|bytes| {
         return bytes == b"GOT:4142434421";
     }));
@@ -1049,10 +1073,10 @@ fn raw_operation_collisions_reject_atomically_across_mutation_kinds() {
 
     let first_response = send_request_response(&session, &first).expect("first sequence");
     assert!(matches!(&first_response.result, ControlResult::Ok { .. }));
+
     let marker = ControlRequest::new(ControlCommand::Mark {
         label: "reserved-marker".to_owned(),
     });
-
     send_request(&session, &marker).expect("reserve non-input mutation identity");
 
     let mut scalar = ControlRequest::new(ControlCommand::Input {
@@ -1090,6 +1114,7 @@ fn raw_operation_collisions_reject_atomically_across_mutation_kinds() {
         send_request_response(&session, &first).expect("exact accepted retry"),
         first_response,
     );
+
     send_request(
         &session,
         &ControlRequest::new(ControlCommand::InputSequence {
@@ -1102,11 +1127,14 @@ fn raw_operation_collisions_reject_atomically_across_mutation_kinds() {
 
     let output = child.wait_with_output().expect("fixture completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
+
     let log = EventLog::read(session.join("events.jsonl")).expect("unique operation evidence");
     validate_completed_log(&session, &log).expect("closed canonical evidence validates");
+
     assert!(canonical_output_bytes(&log).windows(10).any(|bytes| {
         return bytes == b"GOT:414221";
     }));
+
     let input: Vec<u8> = log
         .events
         .iter()
@@ -1121,5 +1149,6 @@ fn raw_operation_collisions_reject_atomically_across_mutation_kinds() {
         .flatten()
         .copied()
         .collect();
+
     assert_eq!(input, b"AB!");
 }

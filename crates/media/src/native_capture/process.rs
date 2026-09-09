@@ -1,3 +1,14 @@
+use super::{
+    util::{external_error, read_json, status_error_with_logs},
+    Error, Result,
+};
+use nix::{
+    errno::Errno,
+    fcntl::{fcntl, FcntlArg, Flock, FlockArg, OFlag},
+    sys::signal::{killpg, Signal},
+    unistd::Pid,
+};
+use serde::de::DeserializeOwned;
 use std::{
     fs::{self, OpenOptions},
     io::{ErrorKind, Read, Write as _},
@@ -8,23 +19,10 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-
-use nix::{
-    errno::Errno,
-    fcntl::{fcntl, FcntlArg, Flock, FlockArg, OFlag},
-    sys::signal::{killpg, Signal},
-    unistd::Pid,
-};
-use serde::de::DeserializeOwned;
 use termtrace_evidence::artifact::secure_file;
 use termtrace_model::{
     artifact::playback::{PlaybackFailure, PlaybackTiming},
     artifact::visual::{CaptureKind, CaptureOptions},
-};
-
-use super::{
-    util::{external_error, read_json, status_error_with_logs},
-    Error, Result,
 };
 
 pub(super) struct ManagedChild {
@@ -52,7 +50,6 @@ impl ProbeOutput {
     fn drain(&mut self, name: &str) -> Result<()> {
         drain_pipe(&mut self.stdout, &mut self.stdout_bytes, 1_048_576, name)?;
         drain_pipe(&mut self.stderr, &mut self.stderr_bytes, 65_536, name)?;
-
         return Ok(());
     }
 }
@@ -104,6 +101,7 @@ pub(super) fn probe_output_with_check(
 
     loop {
         check()?;
+
         if let Some(status) = process.try_wait()? {
             if !status.success() {
                 return Err(process.failure(status));
@@ -113,7 +111,6 @@ pub(super) fn probe_output_with_check(
                 .output
                 .take()
                 .ok_or_else(|| return external_error(name, "probe output pipes are unavailable"))?;
-
             return Ok(output.stdout_bytes);
         }
 
@@ -157,6 +154,7 @@ pub(super) fn spawn_xvfb(
     } else {
         Command::new("Xvfb")
     };
+
     let mut process = ManagedChild::spawn_group(
         "Xvfb",
         command
@@ -173,6 +171,7 @@ pub(super) fn spawn_xvfb(
             ])
             .stdin(Stdio::null()),
     )?;
+
     if let Some(output) = process.output.as_mut() {
         output.log = Some(log);
     }
@@ -317,7 +316,6 @@ pub(super) fn owned_command(helper: &Path, program: &str) -> Result<Command> {
         "--",
         program,
     ]);
-
     return Ok(command);
 }
 
@@ -424,7 +422,6 @@ impl ManagedChild {
         managed.group = Some(Pid::from_raw(
             i32::try_from(child.id()).map_err(|error| return external_error(name, error))?,
         ));
-
         return Ok(managed);
     }
 
@@ -449,10 +446,10 @@ impl ManagedChild {
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
-
                 return Err(external_error(name, error));
             }
         };
+
         let mut managed = Self {
             name,
             child: Some(child),
@@ -483,7 +480,6 @@ impl ManagedChild {
             stderr_bytes: Vec::new(),
             log: None,
         });
-
         return Ok(managed);
     }
 
@@ -503,6 +499,7 @@ impl ManagedChild {
             })?
             .try_wait()
             .map_err(|error| return external_error(self.name, error))?;
+
         if status.is_some()
             && let Some(output) = self.output.as_mut()
         {
@@ -519,7 +516,6 @@ impl ManagedChild {
                 .take(2048)
                 .collect();
         });
-
         return external_error(
             self.name,
             format!("exited with {status}: {}", detail.trim()),
@@ -530,7 +526,6 @@ impl ManagedChild {
         if let Some(status) = self.try_wait()? {
             return Err(self.failure(status));
         }
-
         return Ok(());
     }
 
@@ -698,7 +693,6 @@ pub(super) fn wait_for_success(
     loop {
         if let Some(status) = process.try_wait()? {
             process.terminate();
-
             return if status.success() {
                 Ok(())
             } else {
@@ -776,6 +770,7 @@ mod ownership_tests {
             .expect("launcher exits successfully");
 
         thread::sleep(Duration::from_millis(600));
+
         assert!(
             !marker.exists(),
             "background child survived launcher cleanup"
@@ -798,6 +793,7 @@ mod ownership_tests {
         let started = Instant::now();
         let result = wait_for_success(&mut child, Duration::from_millis(30), directory.path());
         assert!(result.is_err());
+
         child.terminate();
         assert!(child.child.is_none());
         assert!(child.group.is_none());

@@ -1,18 +1,16 @@
-use std::collections::BTreeMap;
-
 use super::*;
+use std::collections::BTreeMap;
 
 pub(super) fn append_bounded_text(output: &mut String, value: &str) -> bool {
     let remaining = MAX_COMPACT_SCREEN_BYTES.saturating_sub(output.len());
+
     if value.len() <= remaining {
         output.push_str(value);
-
         return false;
     }
 
     let end = value.floor_char_boundary(remaining);
     output.push_str(value.get(..end).unwrap_or_default());
-
     return true;
 }
 
@@ -25,7 +23,6 @@ pub(super) fn bounded_screen_frame_text(
     {
         let mut output = String::new();
         let truncated = append_bounded_text(&mut output, viewport_text);
-
         return Some((output, truncated));
     }
 
@@ -36,11 +33,13 @@ pub(super) fn bounded_screen_frame_text(
         .and_then(serde_json::Value::as_array)?;
 
     let mut output = String::new();
+
     for (index, row) in rows.iter().enumerate() {
         let text = row
             .as_object()
             .and_then(|row| return row.get("text"))
             .and_then(serde_json::Value::as_str)?;
+
         if index != 0 && append_bounded_text(&mut output, "\n") {
             return Some((output, true));
         }
@@ -68,6 +67,7 @@ pub(super) fn bounded_screen_frame_projection(
     }
 
     copy_value(frame, &mut projection, "geometry", "geometry");
+
     if let Some((screen, truncated)) = bounded_screen_frame_text(frame) {
         projection.insert(
             "viewport_text".to_owned(),
@@ -124,6 +124,7 @@ pub(super) fn bounded_capture_projection(value: &serde_json::Value) -> Option<se
         let Some(nested) = source.get(key).and_then(serde_json::Value::as_object) else {
             continue;
         };
+
         if key == "frame"
             || (key == "observation"
                 && nested.contains_key("state_hash")
@@ -134,7 +135,6 @@ pub(super) fn bounded_capture_projection(value: &serde_json::Value) -> Option<se
         }
 
         let nested = scalar_fields(nested);
-
         if !nested.is_empty() {
             projection.insert(key.to_owned(), serde_json::Value::Object(nested));
         }
@@ -166,6 +166,7 @@ pub(super) fn compact_value_with_paths(
         }
         serde_json::Value::Object(values) => {
             let mut compact = serde_json::Map::new();
+
             for (key, value) in values {
                 let keep = match key.as_str() {
                     "details"
@@ -199,6 +200,7 @@ pub(super) fn compact_value_with_paths(
                     | "timestamps" => selected(fields, ResponseField::Timing),
                     _ => true,
                 };
+
                 if !keep {
                     continue;
                 }
@@ -321,7 +323,6 @@ pub(super) fn session_state(
     if success && matches!(command_type, "send" | "act") {
         return "live".to_owned();
     }
-
     return "unknown".to_owned();
 }
 
@@ -359,6 +360,7 @@ pub(super) fn compact_postcondition(
     }
 
     copy_value(source, &mut postcondition, "state_hash", "state");
+
     if include_screen {
         copy_value(source, &mut postcondition, "viewport_text", "screen");
         copy_value(source, &mut postcondition, "screen", "screen");
@@ -421,6 +423,7 @@ pub(super) fn compact_task_value(
     };
 
     let mut projected = serde_json::Map::new();
+
     match command_type {
         "start" => {
             copy_value(source, &mut projected, "alias", "session");
@@ -517,6 +520,7 @@ pub(super) fn compact_task_value(
             copy_value(source, &mut projected, "lifecycle", "lifecycle");
             copy_value(source, &mut projected, "geometry", "size");
             copy_value(source, &mut projected, "viewport_text", "screen");
+
             if !projected.contains_key("size")
                 && let (Some(cols), Some(rows)) = (source.get("cols"), source.get("rows"))
             {
@@ -717,6 +721,7 @@ pub(super) fn enforce_success_budget(
 
 pub(super) fn bounded_agent_response(response: serde_json::Value) -> Result<Vec<u8>> {
     let mut encoded = serde_json::to_vec(&response).into_diagnostic()?;
+
     if encoded.len() > MAX_AGENT_RESPONSE_BYTES {
         let response_bytes = encoded.len();
         let response_type =
@@ -839,6 +844,5 @@ pub(super) fn bounded_agent_response(response: serde_json::Value) -> Result<Vec<
     }
 
     encoded.push(b'\n');
-
     return Ok(encoded);
 }

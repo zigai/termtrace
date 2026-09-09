@@ -5,7 +5,6 @@
 
 mod auxiliary;
 mod storage;
-
 /// Indexed, bounded access to complete tmux recording and coverage history.
 pub mod tmux_catalog;
 /// Append-only aggregate tmux lifecycle history.

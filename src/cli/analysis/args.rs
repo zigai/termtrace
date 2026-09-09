@@ -1,8 +1,3 @@
-use std::{path::PathBuf, time::Duration};
-
-use clap::{ArgGroup, Args, Subcommand, ValueEnum};
-use termtrace_model::terminal::analysis::DiagnosticCheck;
-
 use crate::cli::{
     control::args::SessionArgs,
     parsers::{
@@ -10,7 +5,10 @@ use crate::cli::{
         parse_state_hash,
     },
 };
+use clap::{ArgGroup, Args, Subcommand, ValueEnum};
+use std::{path::PathBuf, time::Duration};
 use termtrace_engine::timeline::parse_time_offset_ns;
+use termtrace_model::terminal::analysis::DiagnosticCheck;
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct AnalyzeArgs {

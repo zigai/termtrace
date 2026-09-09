@@ -1,8 +1,7 @@
 //! Pure immutable rich-frame query model and evaluator.
 
-use std::{error::Error as StdError, fmt, ops::RangeInclusive, sync::Arc};
-
 use regex::Regex;
+use std::{error::Error as StdError, fmt, ops::RangeInclusive, sync::Arc};
 use termtrace_model::{
     terminal::screen::{
         ScreenAppearance, ScreenFrame, ScreenFrameData, ScreenRegion, MAX_SCREEN_FRAME_CELLS,
@@ -162,7 +161,6 @@ impl LocatorSpec {
                 reason: "literal text must not be empty".to_owned(),
             });
         }
-
         return Ok(Self {
             matcher: Some(TextMatcher::Literal {
                 text: Arc::from(text),
@@ -213,7 +211,6 @@ impl LocatorSpec {
     #[must_use]
     pub fn in_row(mut self, row: u16) -> Self {
         self.row = Some(row);
-
         return self;
     }
 
@@ -226,7 +223,6 @@ impl LocatorSpec {
         }
 
         self.region = Some(region);
-
         return Ok(self);
     }
 
@@ -234,7 +230,6 @@ impl LocatorSpec {
     #[must_use]
     pub fn with_style(mut self, style: StyleFilter) -> Self {
         self.style = Some(style);
-
         return self;
     }
 
@@ -242,7 +237,6 @@ impl LocatorSpec {
     #[must_use]
     pub fn across_soft_wraps(mut self, enabled: bool) -> Self {
         self.cross_soft_wraps = enabled;
-
         return self;
     }
 
@@ -290,6 +284,7 @@ impl LocatorSpec {
         }
 
         let row = self.row.or(other.row);
+
         if let (Some(row), Some(region)) = (row, region)
             && (row < region.top || row >= region.bottom)
         {
@@ -333,6 +328,7 @@ impl LocatorSpec {
 
 fn regex_can_match_zero_width(regex: &Regex) -> bool {
     const PROBES: [&str; 9] = ["", "a", "α", "_", "!", "\n", "\r\n", "a!", "!a"];
+
     return PROBES.iter().any(|probe| {
         return regex
             .find_iter(probe)
@@ -588,7 +584,6 @@ fn multiple_matches(
 
 fn bounded_text(text: &str) -> (String, bool) {
     let end = text.floor_char_boundary(MAX_DIAGNOSTIC_CHARS);
-
     return (
         text.get(..end).unwrap_or_default().to_owned(),
         end != text.len(),
@@ -622,18 +617,19 @@ struct QueryBudget {
 impl QueryBudget {
     fn charge_work(&mut self, cells: usize) -> Result<(), QueryError> {
         self.cell_work = self.cell_work.saturating_add(cells);
+
         if self.cell_work > MAX_QUERY_CELL_WORK {
             return Err(QueryError::ResourceLimit {
                 requested: self.cell_work,
                 maximum: MAX_QUERY_CELL_WORK,
             });
         }
-
         return Ok(());
     }
 
     fn charge_match(&mut self, cells: usize, text_bytes: usize) -> Result<(), QueryError> {
         self.matched_cells = self.matched_cells.saturating_add(cells);
+
         if self.matched_cells > MAX_QUERY_MATCHED_CELLS {
             return Err(QueryError::ResourceLimit {
                 requested: self.matched_cells,
@@ -642,13 +638,13 @@ impl QueryBudget {
         }
 
         self.text_bytes = self.text_bytes.saturating_add(text_bytes);
+
         if self.text_bytes > MAX_QUERY_TEXT_BYTES {
             return Err(QueryError::ResourceLimit {
                 requested: self.text_bytes,
                 maximum: MAX_QUERY_TEXT_BYTES,
             });
         }
-
         return Ok(());
     }
 }
@@ -769,6 +765,7 @@ fn evaluate_rows(
             })
             .map(|(index, _)| return index)
             .collect();
+
         if selected.is_empty() {
             continue;
         }
@@ -800,6 +797,7 @@ fn evaluate_rows(
 
 fn soft_wrap_groups(rows: Vec<LogicalRow>) -> Vec<LogicalRow> {
     let mut groups: Vec<LogicalRow> = Vec::new();
+
     for mut row in rows {
         if let Some(previous) = groups.last_mut()
             && previous.soft_wrapped
@@ -818,7 +816,6 @@ fn soft_wrap_groups(rows: Vec<LogicalRow>) -> Vec<LogicalRow> {
 
 fn selected_text(row: &LogicalRow, selected: &[usize]) -> (String, Vec<(usize, usize, usize)>) {
     let mut text = String::new();
-
     let mut boundaries: Vec<(usize, usize, usize)> = Vec::with_capacity(selected.len());
     for index in selected {
         if let Some(cell) = row.cells.get(*index) {
@@ -827,7 +824,6 @@ fn selected_text(row: &LogicalRow, selected: &[usize]) -> (String, Vec<(usize, u
             boundaries.push((start, text.len(), *index));
         }
     }
-
     return (text, boundaries);
 }
 
@@ -842,6 +838,7 @@ fn evaluate_literal(
     budget: &mut QueryBudget,
 ) -> Result<(), QueryError> {
     let (haystack, boundaries) = selected_text(row, selected);
+
     if kind == TextMatchKind::Exact {
         if haystack == needle {
             push_byte_match(
@@ -892,6 +889,7 @@ fn evaluate_regex(
     budget: &mut QueryBudget,
 ) -> Result<(), QueryError> {
     let (haystack, boundaries) = selected_text(row, selected);
+
     for regex_match in regex.find_iter(&haystack) {
         if regex_match.is_empty() {
             return Err(QueryError::InvalidQuery {
@@ -929,6 +927,7 @@ fn push_byte_match(
         return Ok(());
     };
     budget.charge_work(matched_boundaries.len())?;
+
     if !matched_boundaries.iter().all(|(_, _, index)| {
         return row
             .cells
@@ -945,7 +944,6 @@ fn push_byte_match(
             return total.saturating_add(cell.grapheme.len());
         });
     budget.charge_match(matched_boundaries.len(), text_bytes)?;
-
     let cells: Vec<&LogicalCell> = matched_boundaries
         .iter()
         .filter_map(|(_, _, index)| return row.cells.get(*index))
@@ -962,7 +960,6 @@ fn matched_boundary_range(
     let start_boundary = boundaries
         .binary_search_by_key(&start, |(cell_start, _, _)| return *cell_start)
         .ok();
-
     let end_boundary = boundaries
         .binary_search_by_key(&end, |(_, cell_end, _)| return *cell_end)
         .ok();
@@ -984,6 +981,7 @@ fn evaluate_style_ranges(
     budget: &mut QueryBudget,
 ) -> Result<(), QueryError> {
     let mut run: Vec<&LogicalCell> = Vec::new();
+
     for index in selected {
         let Some(cell) = row.cells.get(*index) else {
             continue;
@@ -994,6 +992,7 @@ fn evaluate_style_ranges(
         let contiguous = run
             .last()
             .is_none_or(|previous| return previous.end_column == cell.column);
+
         if style_matches(spec.style.as_ref(), cell) && contiguous {
             run.push(cell);
             continue;
@@ -1027,7 +1026,6 @@ fn charge_and_push_match(
         return total.saturating_add(cell.grapheme.len());
     });
     budget.charge_match(cells.len(), text_bytes)?;
-
     return push_match(output, make_match(frame, spec, cells));
 }
 
@@ -1040,7 +1038,6 @@ fn push_match(output: &mut Vec<ScreenMatch>, screen_match: ScreenMatch) -> Resul
     }
 
     output.push(screen_match);
-
     return Ok(());
 }
 
@@ -1059,6 +1056,7 @@ fn cell_in_region(cell: &LogicalCell, region: Option<ScreenRegion>) -> bool {
 
 fn make_match(frame: &Arc<ScreenFrame>, spec: &LocatorSpec, cells: &[&LogicalCell]) -> ScreenMatch {
     let mut ranges: Vec<MatchRange> = Vec::new();
+
     for cell in cells {
         if let Some(range) = ranges.last_mut()
             && range.row == cell.row
@@ -1080,7 +1078,6 @@ fn make_match(frame: &Arc<ScreenFrame>, spec: &LocatorSpec, cells: &[&LogicalCel
         .iter()
         .map(|cell| return cell.grapheme.as_str())
         .collect();
-
     let covered_cells: Vec<MatchedCell> = cells
         .iter()
         .take(MAX_COVERED_CELLS)
@@ -1114,6 +1111,7 @@ fn logical_rows(frame: &ScreenFrame) -> Result<Vec<LogicalRow>, QueryError> {
     }
 
     let mut rows: Vec<LogicalRow> = Vec::new();
+
     frame.for_each_cell(|metadata, column, grapheme, wide_kind, appearance| {
         if rows.last().is_none_or(|row| return row.row != metadata.row) {
             rows.push(LogicalRow {

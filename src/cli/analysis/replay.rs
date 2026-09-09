@@ -1,8 +1,15 @@
 use crate::cli::output::ResponseWriter;
-
-use std::{process::ExitCode, time::Duration};
-
+use crate::cli::{
+    analysis::args::{
+        CacheArgs, CacheCommand, IndexArgs, InspectArgs, InspectFormat, MarkersArgs, PlaybackArgs,
+        PlaybackWorkerArgs, ReviewArgs,
+    },
+    analysis::reviewer::run as run_reviewer,
+    output::{row_text, write_json_line, write_stdout},
+    session_helpers::{resolve_cli_range, resolve_session_path},
+};
 use miette::{IntoDiagnostic as _, Result};
+use std::{process::ExitCode, time::Duration};
 use termtrace_engine::{
     analysis::reviewer::{
         export_state as export_review_state, search as search_review, summarize as summarize_review,
@@ -19,22 +26,11 @@ use termtrace_media::{
 };
 use termtrace_model::terminal::{replay::StateSelection, reviewer::ReviewerCapabilities};
 
-use crate::cli::{
-    analysis::args::{
-        CacheArgs, CacheCommand, IndexArgs, InspectArgs, InspectFormat, MarkersArgs, PlaybackArgs,
-        PlaybackWorkerArgs, ReviewArgs,
-    },
-    analysis::reviewer::run as run_reviewer,
-    output::{row_text, write_json_line, write_stdout},
-    session_helpers::{resolve_cli_range, resolve_session_path},
-};
-
 pub(in crate::cli) fn run_markers(
     response: &mut ResponseWriter,
     arguments: MarkersArgs,
 ) -> Result<ExitCode> {
     let session = resolve_session_path(arguments.session)?;
-
     return write_json_line(
         response,
         &list_markers(session, arguments.fps).into_diagnostic()?,
@@ -52,7 +48,6 @@ pub(in crate::cli) fn run_review(
     let session = arguments.session.ok_or_else(|| {
         return miette::miette!("review requires SESSION unless --commands is used");
     })?;
-
     let session = resolve_session_path(session)?;
 
     if let (Some(destination), Some(state_id)) = (&arguments.export_state, arguments.state) {
@@ -183,6 +178,7 @@ pub(in crate::cli) fn run_inspect(
     };
 
     let inspection = inspect_session(arguments.session, selector).into_diagnostic()?;
+
     if let Some(row_number) = arguments.row {
         let row = inspection
             .state
@@ -247,12 +243,10 @@ pub(in crate::cli) fn run_cache(
     return match arguments.command {
         CacheCommand::Status(arguments) => {
             let session = resolve_session_path(arguments.session)?;
-
             write_json_line(response, &replay_cache_status(&session).into_diagnostic()?)
         }
         CacheCommand::Prune(arguments) => {
             let session = resolve_session_path(arguments.session)?;
-
             write_json_line(response, &prune_replay_cache(&session).into_diagnostic()?)
         }
     };

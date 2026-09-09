@@ -1,5 +1,6 @@
 //! Pure Ghostty replay-profile normalization and validation.
 
+use crate::{Error, Result};
 use termtrace_model::{
     execution::event::TerminalColors,
     execution::session::{
@@ -9,8 +10,6 @@ use termtrace_model::{
     value::ByteString,
 };
 use termtrace_terminal::GhosttyVt;
-
-use crate::{Error, Result};
 
 /// Canonical Ghostty configuration resolved for one recording.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -49,7 +48,6 @@ impl ResolvedGhosttyProfile {
                 "recorded Ghostty effective configuration hash does not match provenance",
             ));
         }
-
         return Ok(());
     }
 }
@@ -105,16 +103,13 @@ pub fn restore_profile(
         effective_config,
         provenance,
     };
-
     profile.validate()?;
-
     return Ok(profile);
 }
 
 /// Resolve terminal colors from a validated canonical Ghostty profile.
 pub fn terminal_colors_for_profile(profile: &ResolvedGhosttyProfile) -> Result<TerminalColors> {
     profile.validate()?;
-
     return terminal_colors_from_config(&profile.effective_config);
 }
 
@@ -122,7 +117,6 @@ pub(crate) fn terminal_colors_from_config(config: &[u8]) -> Result<TerminalColor
     let mut colors = builtin_terminal_colors()?;
     apply_config(&mut colors, config)?;
     colors.source = format!("ghostty_show_config_blake3:{}", hash(config));
-
     return Ok(colors);
 }
 
@@ -154,12 +148,12 @@ fn flatten_config(config: &[u8]) -> Vec<u8> {
             let name = line
                 .split_once('=')
                 .map_or_else(|| return line.trim(), |(name, _)| return name.trim());
-
             return name != "config-file" && name != "config-default-files";
         })
         .collect::<Vec<_>>()
         .join("\n")
         .into_bytes();
+
     if !flattened.is_empty() {
         flattened.push(b'\n');
     }
@@ -169,6 +163,7 @@ fn flatten_config(config: &[u8]) -> Vec<u8> {
 
 fn append_overrides(config: &mut Vec<u8>, overrides: &GhosttyVisualOverrides) {
     let mut lines: Vec<String> = Vec::new();
+
     if let Some(value) = &overrides.font_family {
         lines.push("font-family = \"\"".to_owned());
         lines.push(format!("font-family = \"{}\"", escape_config_string(value)));
@@ -208,6 +203,7 @@ pub(crate) fn escape_config_string(value: &str) -> String {
 
 fn apply_config(colors: &mut TerminalColors, config: &[u8]) -> Result<()> {
     let text = String::from_utf8_lossy(config);
+
     for line in text.lines() {
         let Some((name, value)) = line.split_once(" = ") else {
             continue;
@@ -246,15 +242,14 @@ fn parse_rgb(value: &str, field: &str) -> Result<[u8; 3]> {
             "{field} must be a six-digit RGB color, got `{value}`"
         )));
     };
+
     let component = |range| {
         let digits = hex
             .get(range)
             .ok_or_else(|| return profile_error(format!("invalid {field} color width")))?;
-
         return u8::from_str_radix(digits, 16)
             .map_err(|error| return profile_error(format!("invalid {field} color: {error}")));
     };
-
     return Ok([component(0..2)?, component(2..4)?, component(4..6)?]);
 }
 
@@ -285,6 +280,7 @@ mod tests {
             b"background = #000000\nforeground = #f2f2f2\ncursor-color = #cccccc\npalette = 1=#ff0080\n",
         )
         .expect("valid profile");
+
         assert_eq!(colors.background, [0, 0, 0]);
         assert_eq!(colors.foreground, [0xf2, 0xf2, 0xf2]);
         assert_eq!(colors.cursor, Some([0xcc, 0xcc, 0xcc]));
@@ -317,6 +313,7 @@ mod tests {
             },
         );
         let text = String::from_utf8(config).expect("valid UTF-8 config");
+
         assert!(text.ends_with(
             "font-family = \"\"\nfont-family = \"Example Mono\"\nfont-size = 15.5\nwindow-padding-x = 8\nwindow-padding-y = 6\nforeground = #f0f0f0\nbackground = #010203\n"
         ));
@@ -333,7 +330,6 @@ mod tests {
                     output.push(*byte);
                 }
             }
-
             return output;
         }
 
@@ -345,7 +341,6 @@ mod tests {
             |config| return Ok(escape_backslashes(config)),
         )
         .expect("valid replay profile");
-
         let second_generation = escape_backslashes(&profile.effective_config);
 
         assert_eq!(profile.replay_config, replay_config);
@@ -379,7 +374,6 @@ mod tests {
         let effective_config =
             b"config-file = /isolated/config\nconfig-default-files = false\nbackground = #000000"
                 .to_vec();
-
         let profile = resolve_profile(
             &replay_config,
             None,
@@ -404,7 +398,6 @@ mod tests {
             |config| {
                 let mut effective = config.to_vec();
                 effective.extend_from_slice(b"foreground = #ffffff\n");
-
                 return Ok(effective);
             },
         )
@@ -422,7 +415,6 @@ mod tests {
 
         let mut relocated = profile;
         relocated.provenance.replay_profile = "nested/profile.ghostty".to_owned();
-
         assert!(relocated.validate().is_err());
     }
 
@@ -438,12 +430,10 @@ mod tests {
 
         let mut tampered = profile.replay_config;
         tampered.extend_from_slice(b"foreground = #ffffff\n");
-
         let error = restore_profile(tampered, profile.provenance, |_| -> Result<Vec<u8>> {
             panic!("Ghostty query must not run for unauthenticated replay bytes");
         })
         .expect_err("tampered replay profile must fail");
-
         assert!(matches!(error, Error::TerminalOperation { .. }));
     }
 
@@ -462,7 +452,6 @@ mod tests {
             return Ok(b"background = #ffffff\n".to_vec());
         })
         .expect_err("changed effective output must fail");
-
         assert!(matches!(error, Error::TerminalOperation { .. }));
     }
 }

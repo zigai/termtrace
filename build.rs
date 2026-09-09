@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err(io::Error::other("CARGO_MANIFEST_DIR is not set").into());
     };
     let manifest_dir = PathBuf::from(manifest_dir);
+
     let build_revision = env::var("TERMTRACE_BUILD_REVISION")
         .ok()
         .filter(|value| return !value.trim().is_empty())
@@ -24,14 +25,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             if !output.status.success() {
                 return None;
             }
-
             return String::from_utf8(output.stdout).ok();
         })
         .map_or_else(
             || return "unknown".to_owned(),
             |value| return value.trim().to_owned(),
         );
-    println!("cargo:rustc-env=TERMTRACE_BUILD_REVISION={build_revision}");
 
+    println!("cargo:rustc-env=TERMTRACE_BUILD_REVISION={build_revision}");
     return Ok(());
 }

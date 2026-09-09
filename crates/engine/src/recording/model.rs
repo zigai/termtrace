@@ -1,5 +1,7 @@
 //! Recording options, actor messages, and terminal geometry.
 
+use crate::analysis::profile::ResolvedGhosttyProfile;
+use portable_pty::{Child, MasterPty, PtySize};
 use std::{
     ffi::OsString,
     io::{Read, Write},
@@ -7,9 +9,6 @@ use std::{
     sync::mpsc,
     time::Instant,
 };
-
-use crate::analysis::profile::ResolvedGhosttyProfile;
-use portable_pty::{Child, MasterPty, PtySize};
 use termtrace_evidence::event_log::DurabilityPolicy;
 use termtrace_model::{
     execution::environment::EnvironmentSpec,

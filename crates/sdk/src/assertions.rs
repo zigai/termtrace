@@ -1,9 +1,8 @@
 //! Runner-neutral expectation classification and deterministic frame snapshots.
 
-use std::{error::Error as StdError, fmt};
-
+use crate::locator::{QueryError, QueryResult, ScreenMatch, StyleFilter};
 use serde_json::Value;
-
+use std::{error::Error as StdError, fmt};
 use termtrace_engine::observation::{
     normalize_screen_frame_cells, normalize_screen_frame_spans, normalize_screen_frame_text,
 };
@@ -14,8 +13,6 @@ use termtrace_model::{
     },
     terminal::state::{ColorSpec, CursorState, WideKind},
 };
-
-use crate::locator::{QueryError, QueryResult, ScreenMatch, StyleFilter};
 
 const MAX_ASSERTION_CHARS: usize = 512;
 const MAX_EXCERPT_ROWS: usize = 8;
@@ -110,6 +107,7 @@ pub fn normalize_frame(
         SnapshotProfile::Spans => normalize_screen_frame_spans(&projected, options),
         SnapshotProfile::Cells => normalize_screen_frame_cells(&projected, options),
     }?;
+
     if let Value::Object(fields) = &mut value {
         fields.insert(
             "capture_quality".to_owned(),
@@ -127,7 +125,6 @@ pub fn normalized_snapshot(
     options: ScreenSnapshotOptions,
 ) -> Result<String, AssertionError> {
     let value = normalize_frame(frame, profile, options).map_err(AssertionError::Snapshot)?;
-
     return serde_json::to_string_pretty(&value)
         .map_err(|_| return AssertionError::Snapshot(ScreenFrameError::Serialization));
 }
@@ -194,6 +191,7 @@ fn data_for_profile(
 
 fn span_row_from_cells(row: &ScreenCellRow) -> ScreenSpanRow {
     let mut spans: Vec<ScreenSpan> = Vec::new();
+
     for cell in &row.cells {
         if let Some(span) = spans.last_mut()
             && span.appearance == cell.appearance
@@ -211,6 +209,7 @@ fn span_row_from_cells(row: &ScreenCellRow) -> ScreenSpanRow {
 
         let mut text = String::new();
         append_snapshot_grapheme(&mut text, &cell.grapheme, cell.wide_kind);
+
         spans.push(ScreenSpan {
             start_column: cell.column,
             end_column: cell.column.saturating_add(1),
@@ -268,7 +267,6 @@ fn append_snapshot_grapheme(text: &mut String, grapheme: &str, wide_kind: WideKi
 
     if grapheme.is_empty() {
         text.push(' ');
-
         return;
     }
 
@@ -280,7 +278,6 @@ pub fn assert_exists(result: &QueryResult) -> Result<(), ExpectationMismatch> {
     if result.count() > 0 {
         return Ok(());
     }
-
     return Err(mismatch(
         "exists",
         "at least one match",
@@ -294,7 +291,6 @@ pub fn assert_not_exists(result: &QueryResult) -> Result<(), ExpectationMismatch
     if result.count() == 0 {
         return Ok(());
     }
-
     return Err(mismatch(
         "not_exists",
         "0 matches",
@@ -308,7 +304,6 @@ pub fn assert_count(result: &QueryResult, expected: usize) -> Result<(), Expecta
     if result.count() == expected {
         return Ok(());
     }
-
     return Err(mismatch(
         "count",
         &format!("{expected} matches"),
@@ -320,10 +315,10 @@ pub fn assert_count(result: &QueryResult, expected: usize) -> Result<(), Expecta
 /// Require literal text to occur in the deterministic presented row stream.
 pub fn assert_screen_text(frame: &ScreenFrame, expected: &str) -> Result<(), ExpectationMismatch> {
     let text = frame_text(frame);
+
     if !expected.is_empty() && text.contains(expected) {
         return Ok(());
     }
-
     return Err(mismatch(
         "screen_text",
         &format!("screen contains {expected:?}"),
@@ -340,7 +335,6 @@ pub fn assert_match_text(
     if screen_match.text.as_ref() == expected {
         return Ok(());
     }
-
     return Err(mismatch(
         "match_text",
         &format!("text {expected:?}"),
@@ -356,6 +350,7 @@ pub fn assert_match_style(
 ) -> Result<(), ExpectationMismatch> {
     let mut covered = 0usize;
     let mut mismatched = 0usize;
+
     screen_match
         .frame
         .for_each_cell(|metadata, column, _, wide_kind, appearance| {
@@ -379,6 +374,7 @@ pub fn assert_match_style(
                 mismatched += 1;
             }
         });
+
     if covered > 0 && mismatched == 0 {
         return Ok(());
     }
@@ -399,7 +395,6 @@ pub fn assert_cursor(
     if &frame.cursor == expected {
         return Ok(());
     }
-
     return Err(mismatch(
         "cursor",
         &format!("{expected:?}"),
@@ -431,7 +426,6 @@ pub fn assert_no_wrapped_rows(frame: &ScreenFrame) -> Result<(), ExpectationMism
     if wrapped.is_empty() {
         return Ok(());
     }
-
     return Err(mismatch(
         "no_wrapped_rows",
         "no native wrapped rows",
@@ -461,6 +455,7 @@ pub fn assert_neutral_region(
     }
 
     let returned = frame.returned_region;
+
     if region.top < returned.top
         || region.left < returned.left
         || region.bottom > returned.bottom
@@ -481,6 +476,7 @@ pub fn assert_neutral_region(
 
     let mut checked = 0usize;
     let mut non_neutral = 0usize;
+
     frame.for_each_cell(|metadata, column, grapheme, wide_kind, appearance| {
         if metadata.row < region.top
             || metadata.row >= region.bottom
@@ -506,7 +502,6 @@ pub fn assert_neutral_region(
             && style.underline == 0;
 
         let neutral_grapheme = grapheme.is_empty() || grapheme == " ";
-
         let neutral_width = matches!(
             wide_kind,
             WideKind::Narrow | WideKind::SpacerHead | WideKind::SpacerTail
@@ -542,7 +537,6 @@ pub fn assert_no_presented_transient(frame: &ScreenFrame) -> Result<(), Expectat
     if frame.presented && !frame.modes.synchronized_output {
         return Ok(());
     }
-
     return Err(mismatch(
         "no_presented_transient",
         "presented=true and synchronized_output=false",
@@ -626,7 +620,6 @@ fn frame_excerpt(frame: &ScreenFrame) -> String {
 
 fn bounded(text: &str) -> (String, bool) {
     let end = text.floor_char_boundary(MAX_ASSERTION_CHARS);
-
     return (
         text.get(..end).unwrap_or_default().to_owned(),
         end != text.len(),

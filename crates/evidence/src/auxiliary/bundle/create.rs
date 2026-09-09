@@ -1,17 +1,3 @@
-use std::{
-    collections::BTreeSet,
-    fs::File,
-    io::{self, BufWriter, Write},
-    path::{Path, PathBuf},
-};
-
-use nix::{
-    errno::Errno,
-    fcntl::{renameat2, RenameFlags},
-};
-use termtrace_model::{artifact::bundle::BundleManifest, artifact::metadata::ArtifactMember};
-use uuid::Uuid;
-
 use crate::{
     artifact::BudgetWriter,
     auxiliary::bundle::{
@@ -21,6 +7,18 @@ use crate::{
     },
     storage::{Error, Result},
 };
+use nix::{
+    errno::Errno,
+    fcntl::{renameat2, RenameFlags},
+};
+use std::{
+    collections::BTreeSet,
+    fs::File,
+    io::{self, BufWriter, Write},
+    path::{Path, PathBuf},
+};
+use termtrace_model::{artifact::bundle::BundleManifest, artifact::metadata::ArtifactMember};
+use uuid::Uuid;
 
 /// Transactional builder for a new portable bundle directory.
 pub struct BundleDraft {
@@ -106,6 +104,7 @@ impl BundleDraft {
 
         let relative = relative.as_ref();
         let path = validate_relative_path(relative)?;
+
         if !self.paths.insert(path.clone()) {
             return Err(Error::invalid(format!(
                 "bundle contains duplicate member `{path}`"
@@ -118,7 +117,6 @@ impl BundleDraft {
             Ok(file) => BufWriter::new(file),
             Err(error) => {
                 self.paths.remove(&path);
-
                 return Err(error);
             }
         };
@@ -185,6 +183,7 @@ impl BundleDraft {
         let manifest = self.identity.manifest(self.members.clone());
         let manifest_path = self.staging.join(BUNDLE_MANIFEST_NAME);
         let mut manifest_file = secure_file(&manifest_path)?;
+
         {
             let mut writer = BudgetWriter::new(
                 &mut manifest_file,
@@ -236,7 +235,6 @@ impl BundleDraft {
                     path: self.destination.clone(),
                 };
             }
-
             return Error::filesystem(
                 &self.destination,
                 io::Error::from_raw_os_error(error as i32),
@@ -245,7 +243,6 @@ impl BundleDraft {
 
         sync_parent(&self.destination)?;
         self.committed = true;
-
         return Ok(manifest);
     }
 }
@@ -299,7 +296,6 @@ impl BundleMemberWriter<'_> {
         };
         self.draft.members.push(member.clone());
         self.finished = true;
-
         return Ok(member);
     }
 }
@@ -316,6 +312,7 @@ impl Write for BundleMemberWriter<'_> {
             .ok_or_else(|| return io::Error::other("bundle member writer is already finished"))?;
         let count = writer.write(buf)?;
         self.draft.remaining_bytes -= u64::try_from(count).unwrap_or(u64::MAX);
+
         let written = buf.get(..count).ok_or_else(|| {
             return io::Error::other("bundle member writer returned an invalid count");
         })?;
@@ -324,7 +321,6 @@ impl Write for BundleMemberWriter<'_> {
             .byte_length
             .checked_add(u64::try_from(count).unwrap_or(u64::MAX))
             .ok_or_else(|| return io::Error::other("bundle member size overflow"))?;
-
         return Ok(count);
     }
 

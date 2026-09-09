@@ -10,12 +10,11 @@
 //! Timeline, diff, inspection, analysis, and registry APIs build on those
 //! boundaries while internal checkpoint and replay coordination stays private.
 
-mod error;
-
 /// Evidence-backed semantic analysis and read-only review.
 pub mod analysis;
 /// Semantic differences between replayed terminal states.
 pub mod diff;
+mod error;
 /// Direct inspection and bounded waiting over canonical sessions.
 pub mod inspection;
 /// Truth-labeled terminal observations and replay-cache management.

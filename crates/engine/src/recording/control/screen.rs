@@ -1,15 +1,18 @@
 //! Presented-screen predicates, stable captures, and asynchronous waiters.
 
+use super::super::{
+    actor::SessionActor,
+    presentation::LiveTerminal,
+    support::{actor_boundaries, control_error_response, terminal_error},
+};
+use super::commands::screen_frame_error_response;
+use crate::Result;
 use std::{
     collections::BTreeMap,
     result::Result as StdResult,
     sync::mpsc,
     time::{Duration, Instant},
 };
-
-use uuid::Uuid;
-use zstd::stream::encode_all;
-
 use termtrace_model::{
     protocol::control::{
         ControlData, ControlResponse, ControlResult, ScreenMode, ScreenPredicate,
@@ -21,14 +24,8 @@ use termtrace_model::{
     value::ByteString,
 };
 use termtrace_terminal::{project_screen_frame, semantic_state_hash, semantic_viewport_text};
-
-use super::super::{
-    actor::SessionActor,
-    presentation::LiveTerminal,
-    support::{actor_boundaries, control_error_response, terminal_error},
-};
-use super::commands::screen_frame_error_response;
-use crate::Result;
+use uuid::Uuid;
+use zstd::stream::encode_all;
 
 pub(super) const MAX_SCREEN_WAITERS: usize = 128;
 
@@ -66,12 +63,11 @@ impl SessionActor<'_> {
 
         let state_hash =
             semantic_state_hash(&self.live.presented).map_err(crate::Error::ScreenFrame)?;
-
         let viewport_text = semantic_viewport_text(&self.live.presented);
         let observed_monotonic_ns = self.event_log.elapsed_ns();
         let now = Instant::now();
-
         let mut index = 0;
+
         while index < self.screen_waiters.len() {
             let Some(waiter) = self.screen_waiters.get_mut(index) else {
                 break;
@@ -84,6 +80,7 @@ impl SessionActor<'_> {
                     &state_hash,
                 );
             });
+
             if matched {
                 match &waiter.matching_state {
                     Some((prior_hash, _, _)) if prior_hash == &state_hash => {}
@@ -100,11 +97,9 @@ impl SessionActor<'_> {
                 .matching_state
                 .as_ref()
                 .is_some_and(|(_, since, _)| return since.elapsed() >= waiter.stable_for);
-
             let child_completed = child_exited && output_closed;
             let deadline = !child_exited && now >= waiter.deadline;
             let finished = stable || child_completed || output_closed || deadline;
-
             if !finished {
                 index += 1;
                 continue;
@@ -143,7 +138,6 @@ impl SessionActor<'_> {
                     );
 
                     let _ = waiter.response.send(response);
-
                     continue;
                 }
             };
@@ -194,7 +188,6 @@ impl SessionActor<'_> {
                 ControlData::StableSnapshot {
                     frame,
                     semantic_state_zstd: ByteString::from(compressed),
-
                     first_observed_monotonic_ns: waiter
                         .matching_state
                         .as_ref()
@@ -243,6 +236,7 @@ pub fn compile_screen_predicate(
         regexes: &mut BTreeMap<String, regex::Regex>,
     ) -> StdResult<(), String> {
         *nodes = nodes.saturating_add(1);
+
         if depth > 4 || *nodes > 32 {
             return Err("screen predicate composition is too deep or large".to_owned());
         }
@@ -397,7 +391,6 @@ fn screen_row_text(state: &SemanticState, row: u16) -> Option<String> {
     for cell in &row.cells {
         text.push_str(if cell.grapheme.is_empty() { " " } else { &cell.grapheme });
     }
-
     return Some(text.trim_end().to_owned());
 }
 
@@ -407,6 +400,7 @@ fn screen_region_text(state: &SemanticState, region: ScreenRegion) -> Option<Str
     }
 
     let mut text = String::new();
+
     for row_index in region.top..region.bottom {
         let row = state.grid.get(usize::from(row_index))?;
         for column in region.left..region.right {

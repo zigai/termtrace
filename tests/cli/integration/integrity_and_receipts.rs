@@ -26,6 +26,7 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
         .clone();
 
     let report: serde_json::Value = serde_json::from_slice(&output).expect("verify JSON");
+
     assert_eq!(report["valid"], true);
     assert_eq!(report["level"], "content");
 
@@ -42,13 +43,16 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&output).expect("verify durability JSON");
+
     assert_eq!(report["valid"], true);
     assert_eq!(report["level"], "durability_record");
 
     let manifest_path = session.join("session.json");
     let manifest = fs_err::read_to_string(&manifest_path).expect("session manifest");
     let tampered = manifest.replace("L2Jpbi9zaA==", "L2Jpbi9ueA==");
+
     assert_ne!(manifest, tampered, "fixture command should be replaced");
+
     fs_err::write(&manifest_path, tampered).expect("tamper session manifest");
 
     let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
@@ -63,6 +67,7 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
         .clone();
 
     let report: serde_json::Value = serde_json::from_slice(&output).expect("tampered verify JSON");
+
     assert_eq!(report["valid"], false);
     assert!(
         report["findings"]
@@ -87,6 +92,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
         .args(["--", "/bin/true"])
         .assert()
         .success();
+
     assert!(
         StdCommand::new("ssh-keygen")
             .args(["-q", "-t", "ed25519", "-N", "", "-f"])
@@ -96,10 +102,12 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
             .success(),
         "generate signing key"
     );
+
     let public = fs_err::read_to_string(key.with_extension("pub")).expect("public key");
     let mut fields = public.split_whitespace();
     let algorithm = fields.next().expect("public key algorithm");
     let encoded = fields.next().expect("public key value");
+
     fs_err::write(&allowed, format!("fixture-signer {algorithm} {encoded}\n"))
         .expect("allowed signers");
 
@@ -124,6 +132,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
         .clone();
 
     let verified: serde_json::Value = serde_json::from_slice(&output).expect("verify JSON");
+
     assert_eq!(verified["signature_cryptographic_valid"], true);
     assert_eq!(verified["signature_signer_trusted"], false);
     assert!(
@@ -150,6 +159,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
 
     let trusted_json: serde_json::Value =
         serde_json::from_slice(&trusted_output).expect("trusted JSON");
+
     assert_eq!(trusted_json["session_authenticity_established"], true);
     assert_eq!(trusted_json["signature_signer_trusted"], true);
 
@@ -161,6 +171,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
         .pointer_mut("/signature/value")
         .expect("signature value") = serde_json::to_value(ByteString::from(b"invalid".as_slice()))
         .expect("invalid signature value");
+
     fs_err::write(
         &receipt_path,
         serde_json::to_vec_pretty(&receipt).expect("tampered receipt JSON"),
@@ -181,6 +192,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
         .clone();
 
     let report: serde_json::Value = serde_json::from_slice(&output).expect("tampered verify JSON");
+
     assert_eq!(report["valid"], false);
     assert!(
         report["findings"]

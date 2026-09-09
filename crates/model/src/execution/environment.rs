@@ -1,11 +1,9 @@
 //! Deterministic child-environment policy value contracts.
 
-use std::collections::{BTreeMap, BTreeSet};
-
+use crate::{error::ModelValidationError, value::ByteString};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use crate::{error::ModelValidationError, value::ByteString};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Source environment used before explicit child overrides are applied.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -180,7 +178,6 @@ impl ChildEnvironmentPolicy {
         {
             return Err(ModelValidationError::InvalidEnvironmentDigest);
         }
-
         return Ok(());
     }
 }
@@ -200,7 +197,6 @@ fn validate_name(name: &str) -> Result<(), ModelValidationError> {
             name: name.to_owned(),
         });
     }
-
     return Ok(());
 }
 
@@ -234,6 +230,7 @@ mod tests {
             ..EnvironmentSpec::default()
         };
         assert!(reserved.validate().is_err());
+
         let conflict = EnvironmentSpec {
             set: BTreeMap::from([("HOME".to_owned(), ByteString::from(b"x".as_slice()))]),
             unset: BTreeSet::from(["HOME".to_owned()]),

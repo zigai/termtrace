@@ -1,12 +1,8 @@
-use std::{fs::Permissions, os::unix::fs::PermissionsExt as _, path::Path};
-
-use uuid::Uuid;
-
-use termtrace_model::execution::event::EventLogHeader;
-
-use crate::event_log::SessionClock;
-
 use super::super::validation::OWNER_DIRECTORY_MODE;
+use crate::event_log::SessionClock;
+use std::{fs::Permissions, os::unix::fs::PermissionsExt as _, path::Path};
+use termtrace_model::execution::event::EventLogHeader;
+use uuid::Uuid;
 
 pub(super) fn header(clock: &SessionClock) -> EventLogHeader {
     return EventLogHeader::new(

@@ -1,14 +1,12 @@
-use std::{path::PathBuf, time::Duration};
-
-use clap::{ArgGroup, Args, Subcommand, ValueEnum};
-use termtrace_model::{
-    protocol::control::{ProcessSignal, ScreenMode},
-    terminal::state::{CursorStyle, MouseButton},
-};
-
 use crate::cli::parsers::{
     parse_cell, parse_pace_duration, parse_stability_duration, parse_state_hash,
     parse_wait_deadline_duration,
+};
+use clap::{ArgGroup, Args, Subcommand, ValueEnum};
+use std::{path::PathBuf, time::Duration};
+use termtrace_model::{
+    protocol::control::{ProcessSignal, ScreenMode},
+    terminal::state::{CursorStyle, MouseButton},
 };
 
 #[derive(Debug, Args)]

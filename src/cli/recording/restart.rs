@@ -34,6 +34,7 @@ pub(in crate::cli) fn run_restart(
     let stdout = open_detached_log(&paths.stdout_log)?;
     let stderr = open_detached_log(&paths.stderr_log)?;
     let executable = env::current_exe().into_diagnostic()?;
+
     let mut recorder = ProcessCommand::new("setsid")
         .arg(executable)
         .args(restart_record_arguments(
@@ -57,6 +58,7 @@ pub(in crate::cli) fn run_restart(
             && recorder_identity(&paths.session).is_some()
         {
             let successor_manifest = read_manifest(&paths.session).into_diagnostic()?;
+
             if successor_manifest.lineage.as_ref() != Some(&expected_lineage) {
                 return Err(miette::miette!(
                     "successor lineage does not match the completed predecessor; alias remains unchanged; recoverable orphan: {}",
@@ -147,6 +149,7 @@ pub(super) fn restart_record_arguments(
         OsString::from("--restart-overrides"),
         OsString::from(overrides),
     ];
+
     if let Some(path) = environment_spec {
         arguments.push(OsString::from("--environment-spec"));
         arguments.push(path.as_os_str().to_os_string());
@@ -154,7 +157,6 @@ pub(super) fn restart_record_arguments(
 
     arguments.push(OsString::from("--"));
     arguments.push(OsString::from("/bin/true"));
-
     return arguments;
 }
 
@@ -197,7 +199,6 @@ pub(super) fn restarted_record_options(
                     provenance.replay_profile
                 ));
             }
-
             return fs_err::read(predecessor.join(GHOSTTY_REPLAY_PROFILE_NAME))
                 .map(|replay_profile| {
                     return restore_ghostty_profile(replay_profile, provenance.clone());
@@ -210,6 +211,7 @@ pub(super) fn restarted_record_options(
     let term = event_log.header.term.clone();
     let environment = if let Some(environment) = environment_override {
         let effective = EffectiveEnvironment::resolve(&environment, &term).into_diagnostic()?;
+
         if !overrides.allow_environment_change
             && !matches_predecessor_environment(effective, &manifest, predecessor)?
         {
@@ -280,6 +282,7 @@ pub(super) fn restarted_record_options(
             },
         },
     };
+
     apply_restart_overrides(&mut options, overrides)?;
 
     return Ok(options);
@@ -311,12 +314,12 @@ pub(super) fn restart_environment(
     }
 
     let effective = EffectiveEnvironment::resolve(&environment, term).into_diagnostic()?;
+
     if !matches_predecessor_environment(effective, manifest, predecessor)? {
         return Err(miette::miette!(
             "current environment does not match the predecessor's committed effective environment; exact restart refused"
         ));
     }
-
     return Ok(environment);
 }
 
@@ -402,6 +405,7 @@ pub(super) fn apply_restart_overrides(
     options.rows = overrides.rows.unwrap_or(options.rows);
     options.cell_width_px = overrides.cell_width.unwrap_or(options.cell_width_px);
     options.cell_height_px = overrides.cell_height.unwrap_or(options.cell_height_px);
+
     if options.cols == 0
         || options.rows == 0
         || options.cell_width_px == 0
@@ -446,7 +450,6 @@ pub(super) fn apply_restart_overrides(
             .durability_max_interval_ms
             .or(options.durability_policy.maximum_interval_ms)
             .unwrap_or(50);
-
         let bytes = overrides
             .durability_max_uncommitted_bytes
             .or(options.durability_policy.maximum_uncommitted_bytes)

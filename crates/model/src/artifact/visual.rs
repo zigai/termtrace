@@ -1,17 +1,15 @@
 //! Native visual artifact value and report contracts.
 
-use std::path::PathBuf;
-
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::{
     artifact::metadata::ArtifactMember,
     execution::session::CaptureTarget,
     terminal::replay::{SourceRange, StateSelection},
     value::geometry::TerminalGeometryReport,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use uuid::Uuid;
 
 /// Native visual artifact directory name.
 pub const VISUAL_DIRECTORY: &str = "visual";
@@ -200,7 +198,6 @@ pub fn visual_directory_name_for(
         StateSelection::All => VISUAL_DIRECTORY.to_owned(),
         StateSelection::Presented => format!("{VISUAL_DIRECTORY}-presented"),
     };
-
     return source_range.map_or_else(
         || return base.clone(),
         |range| return format!("{base}-{}", range.artifact_suffix()),

@@ -14,8 +14,8 @@ fn table_column_starts(line: &str) -> Vec<usize> {
     }
 
     let mut starts = vec![0];
-
     let mut separator_start = None;
+
     for (index, byte) in line.bytes().enumerate() {
         if byte == b' ' {
             if separator_start.is_none() {
@@ -37,7 +37,6 @@ fn table_cells<'line>(line: &'line str, starts: &[usize]) -> Vec<&'line str> {
         .enumerate()
         .map(|(index, start)| {
             let end = starts.get(index + 1).copied().unwrap_or(line.len());
-
             return line.get(*start..end).map_or("", str::trim);
         })
         .collect();

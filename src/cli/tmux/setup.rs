@@ -1,20 +1,3 @@
-use crate::cli::output::ResponseWriter;
-
-use std::{
-    env,
-    ffi::{OsStr, OsString},
-    fmt::Write as _,
-    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
-    path::PathBuf,
-    process::ExitCode,
-};
-
-use miette::{IntoDiagnostic as _, Result};
-use termtrace_engine::registry::SessionRegistry;
-use termtrace_model::value::ByteString;
-
-use crate::cli::output::{write_json_line, write_stdout};
-
 use super::{
     args::{
         TmuxConfigArgs, TmuxConnectionArgs, TmuxCoverageMode, TmuxEnableArgs,
@@ -35,6 +18,19 @@ use super::{
     OPTION_SCOPE, OPTION_TERM, OPTION_TERMTRACE, OPTION_TMUX, OPTION_VERSION, RESERVED_OPTIONS,
     TMUX_HOOK_INDEX, TMUX_INTEGRATION_VERSION, TMUX_WRAPPER_BINARY_ENV,
 };
+use crate::cli::output::ResponseWriter;
+use crate::cli::output::{write_json_line, write_stdout};
+use miette::{IntoDiagnostic as _, Result};
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    fmt::Write as _,
+    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
+    path::PathBuf,
+    process::ExitCode,
+};
+use termtrace_engine::registry::SessionRegistry;
+use termtrace_model::value::ByteString;
 
 #[derive(Clone, Debug)]
 pub(super) struct PreparedTmuxSetup {
@@ -57,7 +53,6 @@ pub(in crate::cli) fn run_tmux_config(
     arguments: TmuxConfigArgs,
 ) -> Result<ExitCode> {
     let setup = prepare_tmux_setup(arguments.setup, arguments.tmux)?;
-
     return write_stdout(response, tmux_config_fragment(&setup)?);
 }
 
@@ -68,6 +63,7 @@ pub(in crate::cli) fn run_tmux_enable(
     let client = TmuxClient::from_connection(arguments.connection.clone());
     let mut setup = prepare_tmux_setup(arguments.setup, arguments.connection.tmux)?;
     setup.scope = resolve_live_scope(&client, &setup.scope)?;
+
     let already_enabled = enable_prepared_tmux_setup(&client, &setup)?;
     let report = tmux_status_report(&client)?;
 
@@ -114,7 +110,6 @@ pub(super) fn enable_prepared_tmux_setup(
                 .as_ref()
                 .map_or_else(|| return OsStr::new(""), |path| return path.as_os_str()),
         )?;
-
         client.run_shell_background(supervisor_shell_command(setup).as_os_str())?;
 
         return Ok(true);
@@ -132,6 +127,7 @@ pub(super) fn enable_prepared_tmux_setup(
     }
 
     let hook_command = tmux_hook_command();
+
     for name in GUARDED_HOOKS {
         let existing = client.hook(name)?;
 
@@ -145,7 +141,6 @@ pub(super) fn enable_prepared_tmux_setup(
 
     if let Err(error) = apply_tmux_setup(client, setup, &original_command, &original_shell) {
         let _rollback = rollback_tmux_setup(client, &original_command);
-
         return Err(error);
     }
 
@@ -154,7 +149,6 @@ pub(super) fn enable_prepared_tmux_setup(
     }) {
         let _cleanup = clear_managed_pane_options(client);
         let _rollback = rollback_tmux_setup(client, &original_command);
-
         return Err(error);
     }
 
@@ -188,6 +182,7 @@ pub(in crate::cli) fn run_tmux_disable(
     let expected_setup = setup_from_options(&client, termtrace, tmux)?;
     let expected_wrapper = tmux_wrapper_command(&expected_setup);
     let current_command = client.option(launch_option(&expected_setup))?;
+
     if current_command != expected_wrapper.as_bytes() {
         return Err(miette::miette!(
             "tmux launch command changed after Termtrace was enabled; refusing to overwrite it"
@@ -195,6 +190,7 @@ pub(in crate::cli) fn run_tmux_disable(
     }
 
     let expected_hook = tmux_hook_command();
+
     for name in GUARDED_HOOKS {
         let current = client.hook(name)?;
 
@@ -269,11 +265,9 @@ pub(super) fn prepare_tmux_setup(setup: TmuxSetupArgs, tmux: PathBuf) -> Result<
         Some(root) => SessionRegistry::open(root).into_diagnostic()?,
         None => SessionRegistry::open_default().into_diagnostic()?,
     };
-
     let output_root = fs_err::canonicalize(registry.state_root()).into_diagnostic()?;
     let termtrace =
         fs_err::canonicalize(env::current_exe().into_diagnostic()?).into_diagnostic()?;
-
     let ghostty_config = setup
         .ghostty_config
         .map(fs_err::canonicalize)
@@ -341,6 +335,7 @@ set-option -gF @termtrace-original-default-command \"#{default-command}\"\n\
 set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
 %endif\n",
     );
+
     if setup.launch_hook {
         output.push_str("%if \"#{==:#{@termtrace-launch-hook},}\"\nset-option -gF @termtrace-original-pane-launch-command \"#{pane-launch-command}\"\n%endif\n");
     }
@@ -405,6 +400,7 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
     append_config_option(&mut output, OPTION_TERM, setup.term.as_bytes());
     append_config_option(&mut output, OPTION_SCOPE, &scope_bytes(&setup.scope)?);
     append_config_option(&mut output, launch_option(setup), wrapper.as_bytes());
+
     for name in GUARDED_HOOKS {
         let _ = writeln!(
             output,
@@ -442,7 +438,6 @@ pub(super) fn apply_tmux_setup(
         OPTION_LAUNCH_HOOK,
         OsStr::new(if setup.launch_hook { "1" } else { "0" }),
     )?;
-
     client.set_option(OPTION_ORIGINAL_COMMAND, OsStr::from_bytes(original_command))?;
     client.set_option(OPTION_ORIGINAL_SHELL, OsStr::from_bytes(original_shell))?;
     client.set_option(OPTION_TERMTRACE, setup.termtrace.as_os_str())?;
@@ -456,7 +451,6 @@ pub(super) fn apply_tmux_setup(
             .as_ref()
             .map_or_else(|| return OsStr::new(""), |path| return path.as_os_str()),
     )?;
-
     client.set_option(OPTION_COVERAGE, OsStr::new(setup.coverage.as_str()))?;
     client.set_option(
         OPTION_AGGREGATE_MANIFEST,
@@ -465,13 +459,11 @@ pub(super) fn apply_tmux_setup(
             .as_ref()
             .map_or_else(|| return OsStr::new(""), |path| return path.as_os_str()),
     )?;
-
     client.set_option(OPTION_CELL_WIDTH, OsStr::new(&setup.cell_width.to_string()))?;
     client.set_option(
         OPTION_CELL_HEIGHT,
         OsStr::new(&setup.cell_height.to_string()),
     )?;
-
     client.set_option(OPTION_TERM, OsStr::new(&setup.term))?;
     set_scope_policy(client, &setup.scope)?;
     client.set_option(OPTION_VERSION, OsStr::new(TMUX_INTEGRATION_VERSION))?;
@@ -481,7 +473,6 @@ pub(super) fn apply_tmux_setup(
     )?;
 
     let hook = tmux_hook_command();
-
     for name in GUARDED_HOOKS {
         client.set_hook(name, hook.as_os_str())?;
     }

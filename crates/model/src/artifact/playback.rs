@@ -1,9 +1,8 @@
 //! Timed canonical-event playback for the native Ghostty capture process.
 
+use crate::terminal::replay::SourceRange;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use crate::terminal::replay::SourceRange;
 
 /// Clock handshake written before playback begins.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

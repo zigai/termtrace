@@ -1,5 +1,10 @@
+use super::io::{canonical_manifest_bytes, manifest_hash, read_completion, read_manifest};
+use crate::storage::{
+    artifact::hash_regular_file,
+    event_log::{EventLog, EventLogSummary},
+    is_lowercase_blake3, CompletionIntegrityError, CompletionIntegrityKind, Error, Result,
+};
 use std::{fs, path::Path};
-
 use termtrace_model::{
     execution::event::Event,
     execution::request_journal::MUTATION_JOURNAL_NAME,
@@ -10,14 +15,6 @@ use termtrace_model::{
         TMUX_PANE_PROVENANCE_VERSION,
     },
 };
-
-use crate::storage::{
-    artifact::hash_regular_file,
-    event_log::{EventLog, EventLogSummary},
-    is_lowercase_blake3, CompletionIntegrityError, CompletionIntegrityKind, Error, Result,
-};
-
-use super::io::{canonical_manifest_bytes, manifest_hash, read_completion, read_manifest};
 
 const CONTROL_SOCKET_PREFIX: &str = "termtrace-control-";
 
@@ -38,7 +35,6 @@ pub fn validate_completed_log(
 
     let completion = read_completion(session_directory)?;
     validate_completion_candidate(session_directory, log, &completion)?;
-
     return Ok(completion);
 }
 
@@ -51,6 +47,7 @@ pub(super) fn validate_replay_profile_file(
     };
     let profile_path = session_directory.join(&profile.replay_profile);
     let (_, actual_hash) = hash_regular_file(&profile_path)?;
+
     if actual_hash != profile.replay_profile_hash {
         return Err(Error::InvalidEvidence {
             reason: format!(
@@ -59,7 +56,6 @@ pub(super) fn validate_replay_profile_file(
             ),
         });
     }
-
     return Ok(());
 }
 
@@ -95,7 +91,6 @@ pub fn validate_completed_session(session_directory: &Path) -> Result<SessionCom
     let completion = read_completion(session_directory)?;
     let summary = EventLogSummary::read(session_directory.join("events.jsonl"))?;
     validate_completion_summary_candidate(session_directory, &summary, &completion)?;
-
     return Ok(completion);
 }
 
@@ -119,7 +114,6 @@ pub fn validate_completion_summary_candidate(
 
     let manifest = read_manifest(session_directory)?;
     validate_manifest(&manifest)?;
-
     validate_completion_format(completion)?;
 
     return validate_completion_with_loaded(
@@ -152,7 +146,6 @@ pub(super) fn validate_completion_with_loaded(
         .terminal
         .as_ref()
         .map(|record| return record.hash.as_str());
-
     let event_count = log.event_count;
     let actual_manifest_hash = manifest_hash(manifest_bytes);
     let header_bytes = serde_json::to_vec(&log.header).map_err(|source| {
@@ -162,7 +155,6 @@ pub(super) fn validate_completion_with_loaded(
             source,
         };
     })?;
-
     let event_header_hash = blake3::hash(&header_bytes).to_hex().to_string();
 
     if manifest.session_id != log.header.session_id
@@ -281,6 +273,7 @@ pub(super) fn validate_completion_with_loaded(
     }
 
     let output_bytes = log.output_bytes;
+
     if completion.output_bytes != output_bytes {
         return Err(CompletionIntegrityError::new(
             CompletionIntegrityKind::OutputCount,
@@ -448,13 +441,11 @@ pub(super) fn validate_manifest(manifest: &SessionManifest) -> Result<()> {
             "invalid manifest child environment policy: {error}"
         ));
     })?;
-
     return Ok(());
 }
 
 fn valid_tmux_id(value: &str, prefix: u8) -> bool {
     let bytes = value.as_bytes();
-
     return bytes.first() == Some(&prefix)
         && bytes.len() > 1
         && bytes
@@ -483,6 +474,5 @@ pub(super) fn validate_completion_format(completion: &SessionCompletion) -> Resu
             completion.validation_version
         )));
     }
-
     return Ok(());
 }

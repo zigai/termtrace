@@ -1,5 +1,3 @@
-use std::{fs, path::Path, process::Command, sync::atomic::AtomicBool, thread, time::Duration};
-
 use super::{
     geometry::validate_capture_geometry,
     index::{
@@ -18,6 +16,7 @@ use super::{
     validate_visual_manifest, Error, Result,
 };
 use crate::error::finish_with_cleanup;
+use std::{fs, path::Path, process::Command, sync::atomic::AtomicBool, thread, time::Duration};
 use termtrace_engine::{replay::visit_session_states_while, timeline::resolve_source_range};
 use termtrace_evidence::{
     artifact::{
@@ -50,6 +49,7 @@ use termtrace_model::{
 /// native playback or capture fails, or the resulting artifacts cannot be verified and published.
 pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome> {
     validate_options(options)?;
+
     if !options.session_directory.join("completion.json").is_file() {
         return Err(Error::SessionIncomplete {
             session: options.session_directory.clone(),
@@ -67,7 +67,6 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
         .terminal
         .as_ref()
         .map_or(0, |record| return record.monotonic_ns);
-
     let range = resolve_source_range(
         options.start_monotonic_ns,
         options.end_monotonic_ns,
@@ -121,7 +120,6 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
                 source,
             };
         });
-
         return finish_with_cleanup(Err(Error::from(error)), cleanup);
     }
 
@@ -131,6 +129,7 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
             source,
         };
     })?;
+
     let canonical_session = fs::canonicalize(&options.session_directory).map_err(|source| {
         return Error::Filesystem {
             path: options.session_directory.clone(),
@@ -198,6 +197,7 @@ fn selected_states(
             }
 
             let mut selected = None;
+
             visit_session_states_while(
                 &options.session_directory,
                 &AtomicBool::new(false),
@@ -205,9 +205,11 @@ fn selected_states(
                     if record.state_id == *state_id {
                         selected = Some(record.clone());
                     }
+
                     return Ok(record.state_id < *state_id);
                 },
             )?;
+
             if selected.is_none_or(|record| {
                 return !record.presented
                     || record.state_hash != *state_hash
@@ -220,7 +222,6 @@ fn selected_states(
                             .to_owned(),
                 });
             }
-
             return Ok(None);
         }
     }
@@ -261,6 +262,7 @@ fn capture_staged(
 
         let path = options.session_directory.join(GHOSTTY_REPLAY_PROFILE_NAME);
         let replay = fs::read(&path).map_err(|source| return Error::Filesystem { path, source })?;
+
         if blake3::hash(&replay).to_hex().as_str() != provenance.replay_profile_hash {
             return Err(Error::InvalidReplay {
                 reason: "recorded Ghostty replay profile hash does not match session provenance"
@@ -340,9 +342,9 @@ fn capture_staged(
         &overrides,
         profile_root.as_deref(),
     )?;
+
     let geometry_report =
         super::process::wait_for_json(&geometry_path, &mut ghostty, Duration::from_secs(20))?;
-
     validate_capture_geometry(
         manifest.geometry,
         manifest.geometry_provenance.source,
@@ -425,6 +427,7 @@ fn capture_staged(
                         reason: "encoded frame count is missing".to_owned(),
                     };
                 })?;
+
             capture_started =
                 validate_acquisition_frames(&staging.join("ffmpeg-video.log"), packets)?;
             write_video_map(
@@ -452,6 +455,7 @@ fn capture_staged(
 
     secure_permissions(&screenshot)?;
     let screenshot_probe = probe_screenshot(&screenshot, options.width, options.height)?;
+
     for transient in [&timing_file, &ready_file] {
         fs::remove_file(transient).map_err(|source| {
             return Error::Filesystem {
@@ -534,7 +538,6 @@ fn capture_staged(
 
     verify_artifact_members(staging, &visual.members)?;
     sync_directory(staging)?;
-
     return Ok(());
 }
 
@@ -545,7 +548,6 @@ pub(super) fn validate_options(options: &CaptureOptions) -> Result<()> {
                 .to_owned(),
         });
     }
-
     return Ok(());
 }
 
@@ -580,7 +582,6 @@ pub(super) fn require_native_tools(kind: &CaptureKind) -> Result<()> {
                 .to_owned(),
         });
     }
-
     return Ok(());
 }
 
@@ -607,12 +608,12 @@ fn which(program: &str) -> Result<()> {
                 .to_owned(),
         });
     }
-
     return Ok(());
 }
 
 pub(super) fn preserve_failed(parent: &Path, staging: &Path, error: Error) -> Error {
     let evidence = parent.join(format!("visual-failed-{}", uuid::Uuid::now_v7()));
+
     match commit_directory(parent, staging, &evidence).and_then(|()| return sync_directory(parent))
     {
         Ok(()) => {
@@ -656,6 +657,7 @@ mod tests {
         for fps in [24, 30, 60] {
             validate_options(&options(fps)).expect("public native FPS should validate");
         }
+
         assert!(validate_options(&options(25)).is_err());
     }
 }

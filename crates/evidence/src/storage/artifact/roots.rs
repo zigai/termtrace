@@ -1,19 +1,3 @@
-use std::{
-    ffi::OsStr,
-    fs::File,
-    io::{BufRead as _, BufReader, Error as IoError, ErrorKind, Write as _},
-    path::Path,
-};
-
-use nix::fcntl::{Flock, FlockArg, OFlag};
-use nix::sys::stat::Mode;
-use serde::Serialize;
-use termtrace_model::artifact::metadata::{ArtifactRootRecord, ArtifactSourceRange};
-use termtrace_model::execution::event_log::CanonicalBoundary;
-use uuid::Uuid;
-
-use crate::storage::{Error, Result};
-
 use super::{
     json_error,
     secure_fs::{
@@ -23,6 +7,19 @@ use super::{
     verification::normalized_relative_path,
     ARTIFACT_ROOT_FORMAT, ARTIFACT_ROOT_LOCK, ARTIFACT_ROOT_LOG, ARTIFACT_ROOT_VERSION,
 };
+use crate::storage::{Error, Result};
+use nix::fcntl::{Flock, FlockArg, OFlag};
+use nix::sys::stat::Mode;
+use serde::Serialize;
+use std::{
+    ffi::OsStr,
+    fs::File,
+    io::{BufRead as _, BufReader, Error as IoError, ErrorKind, Write as _},
+    path::Path,
+};
+use termtrace_model::artifact::metadata::{ArtifactRootRecord, ArtifactSourceRange};
+use termtrace_model::execution::event_log::CanonicalBoundary;
+use uuid::Uuid;
 
 #[derive(Serialize)]
 struct ArtifactRootBody<'record> {
@@ -113,8 +110,8 @@ fn append_root(
     let directory_name = artifact_directory
         .strip_prefix(session)
         .map_err(|_| return Error::invalid("artifact directory is outside its source session"))?;
-
     let directory_name = normalized_relative_path(directory_name)?;
+
     let session_fd = open_directory_path(session, false)?;
     validate_private_directory_fd(&session_fd, session)?;
     let lock_path = session.join(ARTIFACT_ROOT_LOCK);
@@ -125,9 +122,7 @@ fn append_root(
         Mode::from_bits_truncate(0o600),
         &lock_path,
     )?;
-
     validate_private_regular_file_fd(&lock_fd, &lock_path)?;
-
     sync_fd(&session_fd, session)?;
 
     let lock =
@@ -146,13 +141,12 @@ fn append_root(
         Mode::from_bits_truncate(0o600),
         &catalog_path,
     )?;
-
     validate_private_regular_file_fd(&catalog_fd, &catalog_path)?;
-
     sync_fd(&session_fd, session)?;
 
     let mut catalog = File::from(catalog_fd);
     let records = read_artifact_roots_from(&mut catalog, &catalog_path)?;
+
     if records
         .iter()
         .any(|record| return record.artifact_directory == directory_name)
@@ -167,7 +161,6 @@ fn append_root(
         || return "0".repeat(64),
         |record| return record.hash.clone(),
     );
-
     let derivation_id = Uuid::now_v7();
     let manifest_hash = blake3::hash(manifest_bytes).to_hex().to_string();
     let body = ArtifactRootBody {
@@ -200,9 +193,11 @@ fn append_root(
         source_range: source.range,
         source_prefix: source.prefix.cloned(),
     };
+
     let mut encoded = serde_json::to_vec(&record)
         .map_err(|source| return json_error(catalog_path.clone(), source))?;
     encoded.push(b'\n');
+
     catalog
         .write_all(&encoded)
         .and_then(|()| return catalog.sync_data())
@@ -216,7 +211,6 @@ fn append_root(
     sync_fd(&session_fd, session)?;
 
     drop(lock);
-
     return Ok(record);
 }
 
@@ -243,7 +237,6 @@ pub fn read_artifact_roots(path: &Path) -> Result<Vec<ArtifactRootRecord>> {
         }
         Err(error) => return Err(error),
     };
-
     validate_private_regular_file_fd(&fd, path)?;
 
     return read_artifact_roots_from(&mut File::from(fd), path);
@@ -290,6 +283,7 @@ fn read_artifact_roots_from(file: &mut File, path: &Path) -> Result<Vec<Artifact
             source_range: record.source_range,
             source_prefix: record.source_prefix.as_ref(),
         };
+
         if record.hash != hash_artifact_root(&body, path)? {
             return Err(Error::invalid(
                 "artifact-root catalog record hash does not match",
@@ -306,6 +300,5 @@ fn read_artifact_roots_from(file: &mut File, path: &Path) -> Result<Vec<Artifact
 fn hash_artifact_root(body: &ArtifactRootBody<'_>, path: &Path) -> Result<String> {
     let bytes =
         serde_json::to_vec(body).map_err(|source| return json_error(path.to_path_buf(), source))?;
-
     return Ok(blake3::hash(&bytes).to_hex().to_string());
 }

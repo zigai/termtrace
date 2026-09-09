@@ -1,3 +1,10 @@
+use crate::{error::finish_with_cleanup, Error, Result};
+use nix::{
+    errno::Errno,
+    poll::{poll, PollFd, PollFlags, PollTimeout},
+    sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios},
+    unistd::{isatty, pipe, read, write},
+};
 use std::{
     io::{self, Write as _},
     os::fd::{AsFd as _, OwnedFd},
@@ -6,16 +13,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-
-use nix::{
-    errno::Errno,
-    poll::{poll, PollFd, PollFlags, PollTimeout},
-    sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios},
-    unistd::{isatty, pipe, read, write},
-};
 use termtrace_model::value::geometry::TerminalGeometryReport;
-
-use crate::{error::finish_with_cleanup, Error, Result};
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -31,6 +29,7 @@ pub(super) struct TerminalInputDrain {
 impl RawTerminalGuard {
     pub(super) fn enter(enabled: bool) -> Result<Self> {
         let stdin = io::stdin();
+
         if !enabled
             || !isatty(&stdin)
                 .map_err(|error| return terminal_error("inspect standard input", error))?
@@ -54,7 +53,6 @@ impl RawTerminalGuard {
         let Some(original) = self.original.take() else {
             return Ok(());
         };
-
         return tcsetattr(io::stdin(), SetArg::TCSANOW, &original)
             .map_err(|error| return terminal_error("restore terminal mode", error));
     }
@@ -87,6 +85,7 @@ impl TerminalInputDrain {
             .name("termtrace-playback-input".to_owned())
             .spawn(move || return drain_input(cancel_read, ready_sender))
             .map_err(|error| return terminal_error("spawn playback input drain", error))?;
+
         ready_receiver
             .recv()
             .map_err(|error| return terminal_error("start playback input drain", error))?;
@@ -155,6 +154,7 @@ pub(super) fn query_terminal() -> Result<TerminalGeometryReport> {
 
     let stdin = io::stdin();
     let deadline = Instant::now() + QUERY_TIMEOUT;
+
     let mut bytes: Vec<u8> = Vec::with_capacity(128);
     let mut buffer = [0_u8; 128];
 
@@ -217,7 +217,6 @@ fn parse_report(bytes: &[u8]) -> Result<Option<TerminalGeometryReport>> {
             .map(str::parse::<u16>)
             .collect::<StdResult<Vec<_>, _>>()
             .map_err(|error| return terminal_error("parse terminal geometry", error))?;
-
         let Some((kind, dimensions)) = values.split_first() else {
             continue;
         };
@@ -238,6 +237,7 @@ fn parse_report(bytes: &[u8]) -> Result<Option<TerminalGeometryReport>> {
     else {
         return Ok(None);
     };
+
     if cols == 0 || rows == 0 || cell_width == 0 || cell_height == 0 {
         return Err(terminal_error(
             "parse terminal geometry",
@@ -312,6 +312,7 @@ mod tests {
         let report = parse_report(b"\x1b[8;40;160t\x1b[4;720;1440t\x1b[6;18;9t")
             .expect("valid report")
             .expect("complete report");
+
         assert_eq!(
             report,
             TerminalGeometryReport {

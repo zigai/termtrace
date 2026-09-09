@@ -1,22 +1,20 @@
 //! Bounded, cancellable exact semantic pages for the interactive reviewer.
 
-use std::{
-    collections::VecDeque,
-    path::Path,
-    sync::atomic::{AtomicBool, Ordering},
-};
-
-use termtrace_evidence::event_log::EventLogCursor;
-use termtrace_model::{
-    execution::event::Event,
-    terminal::{observation::StatePoint, replay::StateRecord, state::SemanticState},
-};
-
 use super::review_error;
 use crate::{
     observation::{semantic_state_with_hash_for_session_cancellable, state_text},
     replay::{trust::SourceIdentity, visit_session_states_while},
     Result,
+};
+use std::{
+    collections::VecDeque,
+    path::Path,
+    sync::atomic::{AtomicBool, Ordering},
+};
+use termtrace_evidence::event_log::EventLogCursor;
+use termtrace_model::{
+    execution::event::Event,
+    terminal::{observation::StatePoint, replay::StateRecord, state::SemanticState},
 };
 
 /// Maximum distinct semantic entries retained by a reviewer page.
@@ -160,6 +158,7 @@ pub fn load_review_page(
             presented_only,
         } => {
             let mut target = None;
+
             visit_session_states_while(session, cancelled, |record, _| {
                 if cancelled.load(Ordering::Relaxed) {
                     return Ok(false);
@@ -168,7 +167,6 @@ pub fn load_review_page(
                 if *forward {
                     if record.state_id > *from && (!presented_only || record.presented) {
                         target = Some(record.state_id);
-
                         return Ok(false);
                     }
                 } else if record.state_id >= *from {
@@ -179,9 +177,9 @@ pub fn load_review_page(
 
                 return Ok(true);
             })?;
+
             if target.is_none() {
                 source.check(session)?;
-
                 return Ok(None);
             }
 
@@ -196,6 +194,7 @@ pub fn load_review_page(
 
             let mut target = None;
             let mut wrap = None;
+
             visit_session_states_while(session, cancelled, |record, state| {
                 if cancelled.load(Ordering::Relaxed) {
                     return Ok(false);
@@ -216,7 +215,6 @@ pub fn load_review_page(
 
                         if from.is_none_or(|id| return record.state_id > id) {
                             target = Some(record.state_id);
-
                             return Ok(false);
                         }
                     } else {
@@ -232,10 +230,8 @@ pub fn load_review_page(
             })?;
 
             let target = target.or(wrap);
-
             if target.is_none() {
                 source.check(session)?;
-
                 return Ok(None);
             }
 
@@ -244,9 +240,9 @@ pub fn load_review_page(
         ReviewQuery::Marker(_) | ReviewQuery::Event { .. } => {
             let Some(time) = event_target(session, query, cancelled)? else {
                 source.check(session)?;
-
                 return Ok(None);
             };
+
             let mut target = None;
             visit_session_states_while(session, cancelled, |record, _| {
                 if cancelled.load(Ordering::Relaxed) {
@@ -254,7 +250,6 @@ pub fn load_review_page(
                 }
 
                 target = Some(record.state_id);
-
                 return Ok(record.monotonic_ns < time);
             })?;
 
@@ -266,6 +261,7 @@ pub fn load_review_page(
     let end = target.map(|id| return id.saturating_add(32));
     let mut entries = VecDeque::<ReviewEntry>::new();
     let mut retained_bytes = 0_usize;
+
     visit_session_states_while(session, cancelled, |record, state| {
         if cancelled.load(Ordering::Relaxed) {
             return Ok(false);
@@ -316,17 +312,18 @@ pub fn load_review_page(
 
         retained_bytes = retained_bytes.saturating_add(bytes);
         entries.push_back(entry);
-
         return Ok(true);
     })?;
 
     source.check(session)?;
+
     let selected = target.or_else(|| return entries.back().map(|entry| return entry.state_id));
     let Some(selected) = selected else {
         return Err(review_error(
             "completed session contains no semantic states",
         ));
     };
+
     if !entries
         .iter()
         .any(|entry| return entry.state_id == selected)
@@ -335,7 +332,6 @@ pub fn load_review_page(
             "review state {selected} does not exist"
         )));
     }
-
     return Ok(Some(ReviewPage { entries, selected }));
 }
 
@@ -346,8 +342,8 @@ fn event_target(
 ) -> Result<Option<u64>> {
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
     let mut selected = None;
-
     let mut matches = 0_u64;
+
     while let Some(record) = cursor.next_record()? {
         if cancelled.load(Ordering::Relaxed) {
             return Err(review_error("review event query cancelled"));
@@ -400,6 +396,5 @@ fn event_target(
             "review marker `{label}` must occur exactly once, found {matches}"
         )));
     }
-
     return Ok(selected);
 }

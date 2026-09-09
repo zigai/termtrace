@@ -1,12 +1,10 @@
+use super::super::invalid_replay;
+use crate::{Error, Result};
 use std::{borrow::Cow, iter::from_fn, path::Path};
-
 #[cfg(test)]
 use termtrace_evidence::event_log::EventLog;
 use termtrace_evidence::event_log::{EventLogCursor, EventLogSummary};
 use termtrace_model::execution::event::{EventLogHeader, EventRecord};
-
-use super::super::invalid_replay;
-use crate::{Error, Result};
 
 pub(super) type Records<'source> =
     Box<dyn Iterator<Item = Result<Cow<'source, EventRecord>>> + 'source>;
@@ -50,6 +48,7 @@ impl IndexSource<'_> {
             }
             Self::File(path, summary) => {
                 let mut cursor = EventLogCursor::open(path)?;
+
                 if cursor.header() != &summary.header {
                     return Err(invalid_replay("index source header changed"));
                 }
@@ -71,26 +70,22 @@ impl IndexSource<'_> {
                                     .validate_boundary(summary.event_count, &terminal.hash);
                             },
                         );
-
                         return validation.err().map(|error| return Err(Error::from(error)));
                     }
 
                     match cursor.next_record() {
                         Ok(Some(record)) => {
                             read += 1;
-
                             return Some(Ok(Cow::Owned(record)));
                         }
                         Ok(None) => {
                             finished = true;
-
                             return Some(Err(invalid_replay(
                                 "index source ended before its validated boundary",
                             )));
                         }
                         Err(error) => {
                             finished = true;
-
                             return Some(Err(Error::from(error)));
                         }
                     }

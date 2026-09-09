@@ -1,12 +1,11 @@
 mod operations;
 mod reader;
 mod segments;
+#[cfg(test)]
+mod tests;
 mod types;
 mod validation;
 mod writer;
-
-#[cfg(test)]
-mod tests;
 
 pub use reader::EventLogCursor;
 pub use segments::{canonical_source_fingerprint, CanonicalLogFile};

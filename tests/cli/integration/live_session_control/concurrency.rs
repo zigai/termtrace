@@ -42,9 +42,9 @@ fn concurrent_client_launches_keep_environment_snapshots_isolated() {
                 session
                     .stop(Some(Duration::from_secs(5)))
                     .expect("concurrent stop");
+
                 let manifest = read_manifest(session.path()).expect("concurrent manifest");
                 assert_eq!(manifest.resource_limits.output_bytes, Some(1_000_000));
-
                 return manifest.child_environment.effective_digest;
             });
         })
@@ -54,6 +54,7 @@ fn concurrent_client_launches_keep_environment_snapshots_isolated() {
         .into_iter()
         .map(|worker| return worker.join().expect("launch worker"))
         .collect::<BTreeSet<_>>();
+
     assert_eq!(digests.len(), 8);
     assert!(fs_err::read_dir(&evidence)
         .expect("evidence entries")

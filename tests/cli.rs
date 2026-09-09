@@ -1,8 +1,5 @@
 //! End-to-end tests for the public command-line interface.
 
-#[path = "cli/support/mod.rs"]
-mod support;
-
 #[path = "cli/integration/adoption_surfaces.rs"]
 mod adoption_surfaces;
 #[path = "cli/integration/artifacts_and_bundles.rs"]
@@ -37,6 +34,8 @@ mod semantic_input;
 mod session_registry_and_lifecycle;
 #[path = "cli/integration/show_workflows.rs"]
 mod show_workflows;
+#[path = "cli/support/mod.rs"]
+mod support;
 #[path = "cli/integration/task_oriented_workflows.rs"]
 mod task_oriented_workflows;
 #[path = "cli/contracts/testing_adapters.rs"]

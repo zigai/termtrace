@@ -7,7 +7,6 @@ use std::{
     os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
     path::PathBuf,
 };
-
 use libfuzzer_sys::fuzz_target;
 use tempfile::TempDir;
 use termtrace_evidence::event_log::EventLog;
@@ -25,6 +24,7 @@ impl EventLogHarness {
             .expect("secure event-log fuzz directory");
         let source = temporary.path().join("events.jsonl");
         let recovered = temporary.path().join("recovered.jsonl");
+
         return Self {
             _temporary: temporary,
             source,

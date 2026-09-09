@@ -1,13 +1,11 @@
+use super::*;
 use std::collections::BTreeMap;
-
 use tempfile::TempDir;
 use termtrace_evidence::tmux_catalog::CATALOG_NAME;
 use termtrace_model::artifact::tmux::{
     TmuxCompositeTrack, TmuxPaneTrack, TmuxRecordingCoverage, TmuxRecordingLifecycle,
     TMUX_RECORDING_FORMAT, TMUX_RECORDING_VERSION,
 };
-
-use super::*;
 
 #[test]
 fn source_traversal_exceeds_the_legacy_limit_and_ignores_an_untrusted_index() {
@@ -45,6 +43,7 @@ fn source_traversal_exceeds_the_legacy_limit_and_ignores_an_untrusted_index() {
         lifecycle_journal: None,
         coverage_gaps: Vec::new(),
     };
+
     for index in 0..2500 {
         let id = Uuid::now_v7();
         aggregate.track_history.insert(
@@ -60,18 +59,21 @@ fn source_traversal_exceeds_the_legacy_limit_and_ignores_an_untrusted_index() {
 
     tmux_journal::append(&directory, &mut aggregate).expect("canonical history");
     assert_eq!(aggregate.track_history.len(), 128);
+
     fs_err::write(directory.join(CATALOG_NAME), b"untrusted derived index").expect("replace cache");
+
     let path = directory.join("manifest.json");
     let mut count = 0;
+
     visit_source_tracks(&path, &aggregate, |source| {
         if count == 1 {
             assert_eq!(source.session, Path::new("/source/pane-0"));
         }
 
         count += 1;
-
         return Ok(());
     })
     .expect("all sources from authoritative history");
+
     assert_eq!(count, 2501);
 }

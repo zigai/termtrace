@@ -53,6 +53,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
 
     let started: serde_json::Value =
         serde_json::from_slice(&output).expect("start response should be JSON");
+
     assert_eq!(started["postcondition"]["matched"], true);
     assert_eq!(started["postcondition"]["kind"], "screen");
 
@@ -81,6 +82,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
 
     let action: serde_json::Value =
         serde_json::from_slice(&output).expect("action response should be JSON");
+
     assert_eq!(action["request_id"], request_id);
     assert_eq!(action["input"]["applied"], "all");
     assert_eq!(action["input"]["atoms"], 1);
@@ -117,6 +119,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
 
     let retried_action: serde_json::Value =
         serde_json::from_slice(&retry_output).expect("retried action response should be JSON");
+
     assert_eq!(retried_action, action);
     assert_eq!(action["ended"], false);
 
@@ -142,6 +145,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
 
     let unmet: serde_json::Value =
         serde_json::from_slice(&output).expect("failed postcondition response should be JSON");
+
     assert_eq!(unmet["input"]["applied"], "all");
     assert_eq!(unmet["input"]["atoms"], 1);
     assert_eq!(unmet["input"]["bytes"], 1);
@@ -191,13 +195,14 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
 
     let observed: serde_json::Value =
         serde_json::from_slice(&output).expect("screen response should be JSON");
+
     assert_eq!(observed["screen"]["encoding"], "rows");
     assert_eq!(observed["lifecycle"], "live");
     assert!(observed["screen"]["rows"]
         .as_array()
         .is_some_and(|rows| return !rows.is_empty()));
-    let state_hash = observed["state"].as_str().expect("presented state hash");
 
+    let state_hash = observed["state"].as_str().expect("presented state hash");
     let mut unchanged = Command::cargo_bin("termtrace").expect("binary should build");
     unchanged
         .env("TERMTRACE_STATE_DIR", &state)
@@ -336,6 +341,7 @@ fn child_completed_wait_returns_the_output_drained_frame() {
             String::from_utf8_lossy(&result.stderr)
         );
     });
+
     assert_eq!(waited["quality"], "child_completed");
     assert!(
         String::from_utf8_lossy(output).contains("TAIL_SENTINEL"),
@@ -354,6 +360,7 @@ fn child_completed_wait_returns_the_output_drained_frame() {
 
     let completed: serde_json::Value =
         serde_json::from_slice(&output).expect("completed screen response");
+
     assert_eq!(waited["frame"]["state_hash"], completed["state"]);
     assert!(
         String::from_utf8_lossy(&output).contains("TAIL_SENTINEL"),
@@ -398,6 +405,7 @@ fn child_completed_wait_returns_the_output_drained_frame() {
 
     let action: serde_json::Value =
         serde_json::from_slice(&output).expect("child-completed action response");
+
     assert_eq!(action["postcondition"]["outcome"], "child_completed");
     assert!(
         String::from_utf8_lossy(&output).contains("ACTION_TAIL"),
@@ -458,13 +466,16 @@ fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
 
     let rejected: serde_json::Value =
         serde_json::from_slice(&rejected).expect("concurrent rejection JSON");
+
     assert_eq!(rejected["code"], "action_busy");
     assert_eq!(rejected["input"]["applied"], "none");
 
     let action_output = action.wait_with_output().expect("atomic action response");
     assert_eq!(action_output.status.code(), Some(1));
+
     let action: serde_json::Value =
         serde_json::from_slice(&action_output.stdout).expect("atomic action JSON");
+
     assert_eq!(action["input"]["applied"], "all");
     assert_eq!(action["input"]["atoms"], 1);
     assert_eq!(action["input"]["bytes"], 1);
@@ -487,6 +498,7 @@ fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
         child_output.status.success(),
         "atomic action fixture failed: {child_output:?}"
     );
+
     wait_for_output(&session, b"SECOND:42", Duration::from_secs(5))
         .expect("post-action input reached fixture");
 }
@@ -521,6 +533,7 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
 
     let inspection: serde_json::Value =
         serde_json::from_slice(&inspection_bytes).expect("last-action inspection JSON");
+
     assert_eq!(inspection["format"], "termtrace-last-action");
     assert!(inspection["rows_changed"]
         .as_array()
@@ -548,6 +561,7 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
 
     let diagnostics: serde_json::Value =
         serde_json::from_slice(&diagnostics_bytes).expect("last-action diagnostics JSON");
+
     assert_eq!(diagnostics["format"], "termtrace-last-action-diagnostics");
     assert_eq!(
         diagnostics["action"]["operation_ids"],
@@ -564,6 +578,7 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
         .arg(&screenshot)
         .assert()
         .success();
+
     assert!(fs_err::read(screenshot.join("screen.png"))
         .expect("screenshot bytes")
         .starts_with(b"\x89PNG\r\n\x1a\n"));
@@ -582,6 +597,7 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
         &fs_err::read(bundle.join("manifest.json")).expect("bundle manifest"),
     )
     .expect("bundle manifest JSON");
+
     assert_eq!(bundle_manifest["profile"], "screen");
     assert_eq!(bundle_manifest["includes_canonical_evidence"], false);
 
@@ -608,10 +624,12 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
 
     assert!(!bug_report.join("events.jsonl").exists());
     assert!(!bug_report.join("screenshot.png").exists());
+
     let report_manifest: serde_json::Value = serde_json::from_slice(
         &fs_err::read(bug_report.join("manifest.json")).expect("bug-report manifest"),
     )
     .expect("bug-report manifest JSON");
+
     assert_eq!(report_manifest["format"], "termtrace-bug-report");
     assert_eq!(report_manifest["includes_raw_streams"], false);
     assert_eq!(report_manifest["includes_screenshot"], false);
@@ -628,6 +646,7 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
         .arg("--screenshot")
         .assert()
         .success();
+
     assert!(
         fs_err::read(bug_report_with_screenshot.join("screenshot.png"))
             .expect("bug-report screenshot")
@@ -668,10 +687,12 @@ fn bug_report_supports_completed_sessions_without_input_actions() {
 
     assert!(!report.join("last-action.json").exists());
     assert!(!report.join("diagnostics.json").exists());
+
     let manifest: serde_json::Value = serde_json::from_slice(
         &fs_err::read(report.join("manifest.json")).expect("no-action bug-report manifest"),
     )
     .expect("no-action bug-report manifest JSON");
+
     assert_eq!(manifest["version"], 2);
     assert_eq!(manifest["includes_last_action"], false);
     assert_eq!(manifest["members"].as_array().map_or(0, Vec::len), 3);
@@ -749,9 +770,9 @@ fn last_action_uses_the_full_journaled_multi_atom_request_boundary() {
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical source");
     let legacy = last_action::analyze_last_action(&session, &log, 50)
         .expect("materialized last-action analysis");
-
     let streamed = last_action::analyze_last_action_session(&session, 50)
         .expect("streamed last-action analysis");
+
     assert_eq!(
         serde_json::to_value(&streamed).expect("streamed JSON"),
         serde_json::to_value(&legacy).expect("materialized JSON")
@@ -855,6 +876,7 @@ fn last_action_uses_the_full_journaled_multi_atom_action_boundary() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&output).expect("multi-atom action last-action report");
+
     assert_eq!(report["action"]["request_id"], request_id);
     assert_eq!(report["action"]["atom_count"], 2);
     assert_eq!(report["action"]["intended_bytes"], 6);

@@ -2,15 +2,22 @@
 
 mod stream;
 
-pub use stream::{diagnose_session, diagnose_snapshot};
-
+use crate::{
+    observation::state_selector_for_session,
+    replay::{
+        inspect_completed_session, replay, trust::SourceIdentity, visit_session_states_while,
+        visit_states,
+    },
+    timeline::stream::TokenCursor,
+    Error, Result,
+};
 use std::{
     collections::BTreeMap,
     iter,
     path::{Component, Path, PathBuf},
     sync::atomic::AtomicBool,
 };
-
+pub use stream::{diagnose_session, diagnose_snapshot};
 use termtrace_evidence::{event_log::EventLog, session::validate_completed_session};
 use termtrace_model::{
     artifact::visual::{VideoMapEntry, VisualManifest},
@@ -27,16 +34,6 @@ use termtrace_model::{
 };
 use termtrace_terminal::frame_event_records;
 use uuid::Uuid;
-
-use crate::{
-    observation::state_selector_for_session,
-    replay::{
-        inspect_completed_session, replay, trust::SourceIdentity, visit_session_states_while,
-        visit_states,
-    },
-    timeline::stream::TokenCursor,
-    Error, Result,
-};
 
 fn analysis_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
@@ -103,7 +100,6 @@ impl ValidatedVisualManifest {
         }
 
         self.screenshot_state_id = Some(state_id);
-
         return Ok(());
     }
 }
@@ -121,7 +117,6 @@ pub fn native_correlations(
             .or_default()
             .push(correlation);
     });
-
     return correlations;
 }
 
@@ -136,7 +131,6 @@ pub fn native_correlations_for_state(
     visit_native_correlations(session_id, Some(state_id), evidence, |correlation| {
         correlations.push(correlation);
     });
-
     return correlations;
 }
 
@@ -207,7 +201,6 @@ pub fn diagnose(
     let mut states = Vec::new();
     visit_states(log, |record, _| {
         states.push(record.clone());
-
         return Ok(());
     })?;
 
@@ -239,6 +232,7 @@ pub(super) fn diagnose_states(
     }
 
     let mut detected = Vec::new();
+
     if checks.contains(&DiagnosticCheck::FullRedraw) {
         detect_full_redraw(
             tokens,
@@ -264,11 +258,13 @@ pub(super) fn diagnose_states(
     }
 
     detect_churn(&checks, states, &mut detected);
+
     if checks.contains(&DiagnosticCheck::QueryLoop) {
         detect_query_loops(log, &mut detected);
     }
 
     let native = native_correlations(log, visual_evidence);
+
     for finding in &mut detected {
         for state_id in &finding.state_ids {
             if let Some(correlations) = native.get(state_id) {
@@ -329,9 +325,9 @@ pub fn explain_session(
     let target_event = target_state.event_seq.unwrap_or(0);
     let start_event = target_event.saturating_sub(context_events);
     let end_event = target_event.saturating_add(context_events);
+
     let mut cursor = TokenCursor::new(session, None)?;
     let mut tokens = Vec::new();
-
     while let Some(entry) = cursor.next()? {
         if let TimelineItem::VtToken { token } = entry.item
             && token.source.iter().any(|segment| {
@@ -390,6 +386,7 @@ pub fn explain(log: &EventLog, target: StatePoint, context_events: u64) -> Resul
     let target_event = target_state.event_seq.unwrap_or(0);
     let start_event = target_event.saturating_sub(context_events);
     let end_event = target_event.saturating_add(context_events);
+
     let tokens = frame_event_records(&log.events)?
         .into_iter()
         .filter(|token| {
@@ -537,6 +534,7 @@ fn detect_full_redraw(
         .iter()
         .filter(|token| return token.description == "erase display (all)")
         .collect::<Vec<_>>();
+
     for clear in clears {
         let event = clear.source.first().map(|segment| return segment.event_seq);
         let state = event.and_then(|event_seq| {
@@ -550,6 +548,7 @@ fn detect_full_redraw(
                     });
             });
         });
+
         findings.push(DiagnosticFinding {
             code: "full_viewport_clear".to_owned(),
             confidence: FindingConfidence::High,
@@ -565,6 +564,7 @@ fn detect_full_redraw(
         let Some(clear_event) = event else {
             continue;
         };
+
         let mut cols = initial_cols;
         let mut rows = initial_rows;
         let mut changed = 0_u64;
@@ -642,6 +642,7 @@ fn detect_transients(states: &[StateRecord], findings: &mut Vec<DiagnosticFindin
         .filter(|state| return !state.presented && !state.delta.rows.is_empty())
         .map(|state| return state.state_id)
         .collect::<Vec<_>>();
+
     if !hidden.is_empty() {
         findings.push(DiagnosticFinding {
             code: "hidden_transient".to_owned(),
@@ -671,6 +672,7 @@ fn detect_transients(states: &[StateRecord], findings: &mut Vec<DiagnosticFindin
             } else {
                 "ordered_transient_duration_unknown: boundaries share an event timestamp".to_owned()
             };
+
             findings.push(DiagnosticFinding {
                 code: "presented_transient".to_owned(),
                 confidence: FindingConfidence::High,
@@ -690,6 +692,7 @@ fn detect_transients(states: &[StateRecord], findings: &mut Vec<DiagnosticFindin
 fn detect_dirty_discrepancies(states: &[StateRecord], findings: &mut Vec<DiagnosticFinding>) {
     for state in states {
         let cell_changes = !state.delta.rows.is_empty();
+
         if state.ghostty_dirty != DirtyState::Clean && !cell_changes {
             findings.push(DiagnosticFinding {
                 code: "dirty_without_cell_change".to_owned(),
@@ -727,6 +730,7 @@ fn detect_cursor_jumps(states: &[StateRecord], findings: &mut Vec<DiagnosticFind
         let Some(cursor) = state.delta.cursor.as_ref() else {
             continue;
         };
+
         if let (Some(old), Some(old_column), Some(old_row), Some(column), Some(row)) = (
             previous,
             previous.and_then(|value| return value.column),
@@ -737,6 +741,7 @@ fn detect_cursor_jumps(states: &[StateRecord], findings: &mut Vec<DiagnosticFind
             let distance = old_column
                 .abs_diff(column)
                 .saturating_add(old_row.abs_diff(row));
+
             if distance >= 10 {
                 findings.push(DiagnosticFinding {
                     code: "cursor_jump".to_owned(),
@@ -797,6 +802,7 @@ fn detect_churn(
 
 fn detect_query_loops(log: &EventLog, findings: &mut Vec<DiagnosticFinding>) {
     let mut counts = BTreeMap::<(Vec<u8>, Vec<u8>), usize>::new();
+
     for record in &log.events {
         if let Event::QueryResponse {
             query, response, ..
@@ -826,6 +832,7 @@ fn detect_query_loops(log: &EventLog, findings: &mut Vec<DiagnosticFinding>) {
 
 fn findings(tokens: &[VtToken], states: &[StateRecord]) -> Vec<ExplainFinding> {
     let mut findings = Vec::new();
+
     for (description, code, fact) in [
         (
             "erase display (all)",
@@ -858,6 +865,7 @@ fn findings(tokens: &[VtToken], states: &[StateRecord]) -> Vec<ExplainFinding> {
         .iter()
         .filter(|state| return !state.presented && !state.delta.rows.is_empty())
         .collect::<Vec<_>>();
+
     if !hidden.is_empty() {
         findings.push(ExplainFinding {
             code: "hidden_transient".to_owned(),
@@ -873,16 +881,15 @@ fn findings(tokens: &[VtToken], states: &[StateRecord]) -> Vec<ExplainFinding> {
     let clear = findings
         .iter()
         .find(|finding| return finding.code == "full_viewport_clear");
-
     let printable_after_clear = clear.is_some_and(|finding| {
         let last_clear = finding.token_ids.iter().copied().max().unwrap_or(0);
-
         return tokens.iter().any(|token| {
             return token.token_id > last_clear
                 && token.description == "printable bytes"
                 && !token.raw.as_bytes().is_empty();
         });
     });
+
     if printable_after_clear {
         findings.push(ExplainFinding {
             code: "clear_then_repaint_candidate".to_owned(),

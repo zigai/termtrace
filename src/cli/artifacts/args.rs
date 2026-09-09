@@ -1,6 +1,9 @@
-use std::{path::PathBuf, time::Duration};
-
+use crate::cli::{
+    analysis::args::{ShowRenderer, TimeRangeArgs},
+    parsers::{parse_capture_target, parse_media_hold_duration, parse_state_hash, parse_video_fps},
+};
 use clap::{ArgGroup, Args, Subcommand, ValueEnum};
+use std::{path::PathBuf, time::Duration};
 use termtrace_engine::timeline::parse_time_offset_ns;
 use termtrace_model::{
     artifact::{
@@ -8,11 +11,6 @@ use termtrace_model::{
         save::{SaveFormat, SemanticRasterProfile},
     },
     execution::session::CaptureTarget,
-};
-
-use crate::cli::{
-    analysis::args::{ShowRenderer, TimeRangeArgs},
-    parsers::{parse_capture_target, parse_media_hold_duration, parse_state_hash, parse_video_fps},
 };
 
 #[derive(Debug, Args)]

@@ -1,10 +1,9 @@
 //! Detached, externally signed evidence-root receipt contracts.
 
+use crate::value::ByteString;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use crate::value::ByteString;
 
 /// Detached receipt relative path.
 pub const EVIDENCE_RECEIPT_NAME: &str = "evidence-receipt.json";

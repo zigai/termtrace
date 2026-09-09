@@ -3,8 +3,22 @@ use crate::cli::output::ResponseWriter;
 pub(super) mod args;
 mod native_screenshot;
 
+use crate::cli::{
+    analysis::args::ShowRenderer,
+    artifacts::args::{
+        BugReportFacadeArgs, BundleArgs, BundleVerifyArgs, CaptureArgs, ExportArgs, ImportArgs,
+        SaveArgs, ScreenshotArgs, ScreenshotFormat, SemanticRasterProfileArg, VideoCursorStyleArg,
+        VideoFacadeArgs, VideoPresetArg, VideoSourceArg,
+    },
+    output::{write_json_line, write_progress},
+    session_helpers::{
+        resolve_cli_range, resolve_session, resolve_session_path, resolve_state_point,
+        write_session_lifecycle,
+    },
+    tooling::require_cli_capability,
+};
 use args::ArtifactSubcommand;
-
+use miette::{IntoDiagnostic as _, Result};
 use std::{
     env,
     ffi::OsStr,
@@ -14,8 +28,6 @@ use std::{
     process::{Command as ProcessCommand, ExitCode, Stdio},
     time::Duration,
 };
-
-use miette::{IntoDiagnostic as _, Result};
 use termtrace_engine::{
     timeline::{resolve_session_source_selection, SourceRange},
     Error,
@@ -55,21 +67,6 @@ use termtrace_model::{
     value::ByteString,
 };
 
-use crate::cli::{
-    analysis::args::ShowRenderer,
-    artifacts::args::{
-        BugReportFacadeArgs, BundleArgs, BundleVerifyArgs, CaptureArgs, ExportArgs, ImportArgs,
-        SaveArgs, ScreenshotArgs, ScreenshotFormat, SemanticRasterProfileArg, VideoCursorStyleArg,
-        VideoFacadeArgs, VideoPresetArg, VideoSourceArg,
-    },
-    output::{write_json_line, write_progress},
-    session_helpers::{
-        resolve_cli_range, resolve_session, resolve_session_path, resolve_state_point,
-        write_session_lifecycle,
-    },
-    tooling::require_cli_capability,
-};
-
 pub(super) fn run_export_asciicast(
     response: &mut ResponseWriter,
     arguments: ExportArgs,
@@ -91,7 +88,6 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
     let bytes = if arguments.input == Path::new("-") {
         let mut bytes: Vec<u8> = Vec::new();
         io::stdin().read_to_end(&mut bytes).into_diagnostic()?;
-
         bytes
     } else {
         fs_err::read(&arguments.input).into_diagnostic()?
@@ -117,6 +113,7 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
     let input = parent.join(format!(".ansi-import-{}.tmp", uuid::Uuid::now_v7()));
     write_secure(&input, &bytes).into_diagnostic()?;
     let hash = blake3::hash(&bytes).to_hex().to_string();
+
     let process = ProcessCommand::new(env::current_exe().into_diagnostic()?)
         .env_remove("TERMTRACE_RESPONSE")
         .args(["record", "--no-input", "--out"])
@@ -149,6 +146,7 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
     let process = process.into_diagnostic()?;
 
     cleanup.into_diagnostic()?;
+
     if !process.status.success() {
         return Err(miette::miette!(
             "ANSI import recorder failed with {}: {}",
@@ -158,11 +156,14 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
     }
 
     validate_completed_session(&arguments.out).into_diagnostic()?;
+
     let mut cursor = EventLogCursor::open(arguments.out.join("events.jsonl")).into_diagnostic()?;
     let mut offset = 0_usize;
+
     while let Some(record) = cursor.next_record().into_diagnostic()? {
         if let Event::Output { data } = record.event {
             let end = offset.saturating_add(data.as_bytes().len());
+
             if bytes.get(offset..end) != Some(data.as_bytes()) {
                 return Err(miette::miette!(
                     "ANSI import canonical output does not match the exact source bytes"
@@ -180,6 +181,7 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
     }
 
     let manifest = read_manifest(&arguments.out).into_diagnostic()?;
+
     if manifest
         .import_provenance
         .as_ref()
@@ -239,6 +241,7 @@ pub(super) fn run_video_facade(
     }
 
     let session = resolved.path;
+
     if arguments.renderer == VideoSourceArg::Native && arguments.semantic_raster_profile.is_some() {
         return Err(miette::miette!(
             "--semantic-raster-profile configures semantic video only"
@@ -268,6 +271,7 @@ pub(super) fn run_video_facade(
 
     let hold_start = arguments.hold_start.unwrap_or(preset_config.hold_start);
     let hold_end = arguments.hold_end.unwrap_or(preset_config.hold_end);
+
     write_progress(
         response,
         format_args!("Planning video from {}...", session.display()),
@@ -275,7 +279,6 @@ pub(super) fn run_video_facade(
 
     let plan = if let Some(edit_path) = arguments.edit.as_ref() {
         let edit = read_edit_plan(edit_path).into_diagnostic()?;
-
         plan_presentation(&session, &edit, source).into_diagnostic()?
     } else {
         validate_completed_session(&session).into_diagnostic()?;
@@ -298,6 +301,7 @@ pub(super) fn run_video_facade(
             end_monotonic_ns: final_monotonic_ns,
         });
         selected.end_monotonic_ns = selected.end_monotonic_ns.min(final_monotonic_ns);
+
         if selected.start_monotonic_ns >= selected.end_monotonic_ns {
             return Err(miette::miette!(
                 "video range must contain positive recorded time"
@@ -339,6 +343,7 @@ pub(super) fn run_video_facade(
     }
 
     require_video_render_capabilities(source)?;
+
     if let Some(preview_out) = arguments.preview_out {
         let outcome = preview_presentation(
             &plan,
@@ -372,8 +377,8 @@ pub(super) fn run_video_facade(
     let output = arguments
         .out
         .ok_or_else(|| miette::miette!("video export requires --out"))?;
-
     let sidecar = sidecar.ok_or_else(|| miette::miette!("video export sidecar is missing"))?;
+
     write_progress(
         response,
         format_args!(
@@ -435,6 +440,7 @@ fn facade_edit_plan(
     let clips = video_clips(ranges, fps, hold_start_ms, hold_end_ms).into_diagnostic()?;
 
     let mut transforms: Vec<PixelTransform> = Vec::new();
+
     if arguments.cursor_style == VideoCursorStyleArg::Hidden {
         transforms.push(PixelTransform::CursorMask);
     }
@@ -575,13 +581,13 @@ fn video_sidecar_path(output: &Path) -> PathBuf {
     let mut sidecar = output.as_os_str().to_os_string();
     sidecar.push(".termtrace");
     let sidecar = PathBuf::from(sidecar);
+
     if sidecar
         .parent()
         .is_some_and(|parent| return !parent.as_os_str().is_empty())
     {
         return sidecar;
     }
-
     return Path::new(".").join(sidecar);
 }
 
@@ -599,6 +605,7 @@ fn video_render_capability_ids(
 
 fn require_video_render_capabilities(source: PresentationSourceRequest) -> Result<()> {
     let (source_capability, presentation_capability) = video_render_capability_ids(source);
+
     if let Some(source_capability) = source_capability {
         require_cli_capability(source_capability)?;
     }
@@ -753,7 +760,6 @@ pub(super) fn run_screenshot(
                 "native screenshots cannot render hidden synchronized-output states"
             ));
         }
-
         return native_screenshot::run(
             response,
             &session,
@@ -773,7 +779,6 @@ pub(super) fn run_screenshot(
         ScreenshotFormat::Svg => SaveFormat::Svg,
         ScreenshotFormat::Png => SaveFormat::Png,
     };
-
     let filename = match arguments.format {
         ScreenshotFormat::Svg => "screen.svg",
         ScreenshotFormat::Png => "screen.png",
@@ -863,11 +868,13 @@ pub(super) fn run_bug_report_facade(
 
 pub(super) fn run_bundle(response: &mut ResponseWriter, arguments: BundleArgs) -> Result<ExitCode> {
     let profile = arguments.profile.into();
+
     if arguments.dry_run {
         return write_json_line(response, &plan_bundle(profile));
     }
 
     let session = resolve_session_path(arguments.session)?;
+
     if arguments.archive {
         if arguments.out.exists() {
             return Err(Error::ArtifactExists {
@@ -880,7 +887,6 @@ pub(super) fn run_bundle(response: &mut ResponseWriter, arguments: BundleArgs) -
             .out
             .parent()
             .ok_or_else(|| return miette::miette!("bundle archive path has no parent"))?;
-
         let staging = parent.join(format!(".bundle-source-{}.tmp", uuid::Uuid::now_v7()));
         let manifest = create_bundle(&session, &staging, profile, None).into_diagnostic()?;
         let policy = BundleVerificationPolicy::new(&session, profile);

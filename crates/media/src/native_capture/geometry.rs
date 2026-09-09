@@ -1,5 +1,3 @@
-use std::{env::temp_dir, fs, path::Path, time::Duration};
-
 use super::{
     process::{
         ghostty_overrides, spawn_geometry_probe, spawn_xvfb, wait_for_json, wait_for_success,
@@ -8,6 +6,7 @@ use super::{
     profile::materialize_profile,
     Error, Result,
 };
+use std::{env::temp_dir, fs, path::Path, time::Duration};
 use termtrace_engine::{
     analysis::profile::ResolvedGhosttyProfile,
     recording::{resolve_ghostty_profile, restore_ghostty_profile},
@@ -62,7 +61,6 @@ pub fn native_capture_target(
 
         let path = session.join(GHOSTTY_REPLAY_PROFILE_NAME);
         let bytes = fs::read(&path).map_err(|source| return Error::Filesystem { path, source })?;
-
         restore_ghostty_profile(bytes, provenance.clone())?
     } else {
         resolve_ghostty_profile(None, GhosttyVisualOverrides::default())?
@@ -106,7 +104,6 @@ pub fn probe_ghostty_geometry(
                     source,
                 };
             })?;
-
             return Ok(fitted);
         }
         Err(source) => {
@@ -198,6 +195,7 @@ pub(super) fn solve_geometry_with(
             .ok_or_else(|| {
                 return solver_error(required_cols, required_rows, &attempts, "height overflowed");
             })?;
+
         target = CaptureTarget {
             width: width.max(320),
             height: height.max(200),
@@ -244,7 +242,6 @@ pub(super) fn validate_capture_geometry(
             ),
         });
     }
-
     return Ok(());
 }
 
@@ -277,10 +274,10 @@ fn probe_staged(
     )?;
     let report = wait_for_json(&report_path, &mut ghostty, Duration::from_secs(20))?;
     wait_for_success(&mut ghostty, Duration::from_secs(5), staging)?;
+
     xvfb.terminate();
 
     validate_report(report)?;
-
     return Ok(report);
 }
 
@@ -296,7 +293,6 @@ fn validate_report(report: TerminalGeometryReport) -> Result<()> {
             reason: "Ghostty reported inconsistent grid, cell, and text-area dimensions".to_owned(),
         });
     }
-
     return Ok(());
 }
 

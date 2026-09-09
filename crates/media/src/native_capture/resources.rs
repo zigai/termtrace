@@ -1,3 +1,11 @@
+use super::{
+    process::ManagedChild,
+    util::{external_error, unix_now_ns},
+    Error, Result,
+};
+#[cfg(target_os = "linux")]
+use nix::sys::stat::makedev;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, VecDeque},
     fs::{self, File},
@@ -8,18 +16,8 @@ use std::{
     str,
     sync::atomic::{AtomicBool, Ordering},
 };
-
-#[cfg(target_os = "linux")]
-use nix::sys::stat::makedev;
-use serde::{Deserialize, Serialize};
 use termtrace_evidence::artifact::write_secure;
 use termtrace_model::value::ByteString;
-
-use super::{
-    process::ManagedChild,
-    util::{external_error, unix_now_ns},
-    Error, Result,
-};
 
 const MAX_RESOURCE_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -59,6 +57,7 @@ pub(super) fn capture_resources(
         resources: Vec::new(),
         limitations: vec!["mapped_fonts_do_not_identify_per_glyph_resource_use".to_owned()],
     };
+
     match terminal_pid(process.id()) {
         Ok(Some((pid, executable))) => {
             report.terminal_pid = Some(pid);
@@ -164,6 +163,7 @@ fn mapped_fonts(pid: u32) -> StdResult<BTreeSet<(PathBuf, u64, Option<u64>)>, St
         .map_err(|_| return "process_maps_path_encoding_unavailable".to_owned())?;
 
     let mut paths = BTreeSet::new();
+
     for line in text.lines() {
         let Some(start) = line.find('/') else {
             continue;
@@ -199,6 +199,7 @@ fn mapped_fonts(pid: u32) -> StdResult<BTreeSet<(PathBuf, u64, Option<u64>)>, St
                 let _ = device;
                 None
             };
+
             paths.insert((path, inode, device));
         }
 
@@ -240,8 +241,8 @@ fn resource_identity(
     *budget = budget.saturating_sub(before.len());
     let mut hash = blake3::Hasher::new();
     let mut buffer = vec![0_u8; 65536].into_boxed_slice();
-
     let mut total = 0_u64;
+
     loop {
         if cancelled.load(Ordering::Relaxed) {
             return Err("native_resource_hash_cancelled".to_owned());
@@ -250,11 +251,13 @@ fn resource_identity(
         let count = file
             .read(&mut buffer)
             .map_err(|_| format!("{kind}_hash_unavailable"))?;
+
         if count == 0 {
             break;
         }
 
         total = total.saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
+
         if total > before.len() {
             return Err(format!("{kind}_changed_during_hashing"));
         }
@@ -293,18 +296,17 @@ fn read_bounded(path: &Path, limit: u64) -> StdResult<Vec<u8>, String> {
     File::open(path)
         .and_then(|file| return file.take(limit + 1).read_to_end(&mut bytes))
         .map_err(|_| return "native_resource_inventory_unavailable".to_owned())?;
+
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
         return Err("native_resource_inventory_exceeds_byte_budget".to_owned());
     }
-
     return Ok(bytes);
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, sync::atomic::AtomicBool};
-
     use super::resource_identity;
+    use std::{fs, sync::atomic::AtomicBool};
 
     #[test]
     fn resource_hash_preserves_chunk_boundaries_and_cancellation() {
@@ -325,8 +327,8 @@ mod tests {
                 &AtomicBool::new(false),
             )
             .expect("resource identity");
-
             let length = u64::try_from(length).expect("length fits u64");
+
             assert_eq!(identity.byte_length, length);
             assert_eq!(identity.blake3, blake3::hash(&bytes).to_hex().to_string());
             assert_eq!(budget, 200_000 - length);
@@ -342,6 +344,7 @@ mod tests {
         )
         .err()
         .expect("cancelled hashing");
+
         assert_eq!(error, "native_resource_hash_cancelled");
     }
 }

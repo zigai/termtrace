@@ -1,13 +1,17 @@
+use super::selection::range_error;
+use crate::replay::{
+    load_nearest_replay_seed, timeline_event, visit_states_range, visit_states_range_while,
+    visit_states_seeded_while, ReplaySeed,
+};
+use crate::{Error, Result};
+#[cfg(test)]
+use std::cell::Cell;
 use std::{
     collections::VecDeque,
     fs::{self, File},
     io::{BufRead, BufReader, ErrorKind, Seek, SeekFrom},
     path::PathBuf,
 };
-
-#[cfg(test)]
-use std::cell::Cell;
-
 use termtrace_evidence::event_log::EventLog;
 use termtrace_model::{
     execution::event::Event,
@@ -22,14 +26,6 @@ use termtrace_model::{
     terminal::timeline::{TimelineEntry, TimelineItem, TimelinePage},
 };
 use termtrace_terminal::{frame_event_records, VtFramer};
-
-use crate::replay::{
-    load_nearest_replay_seed, timeline_event, visit_states_range, visit_states_range_while,
-    visit_states_seeded_while, ReplaySeed,
-};
-use crate::{Error, Result};
-
-use super::selection::range_error;
 
 #[cfg(test)]
 thread_local! {
@@ -56,9 +52,7 @@ thread_local! {
 #[cfg(test)]
 fn reset_test_auxiliary_scan() {
     TEST_AUXILIARY_BYTES.set(0);
-
     TEST_AUXILIARY_EVENTS.set(0);
-
     TEST_AUXILIARY_FIRST_EVENT.set(u64::MAX);
 }
 
@@ -103,7 +97,6 @@ pub(super) fn semantic_timeline_entry(state: &StateRecord) -> TimelineEntry {
         .iter()
         .map(|row| return row.row)
         .collect::<Vec<_>>();
-
     let changed_cells = state.delta.rows.iter().fold(0_u64, |count, row| {
         return count.saturating_add(u64::try_from(row.cells.len()).unwrap_or(u64::MAX));
     });
@@ -136,6 +129,7 @@ impl<'log> CanonicalTimelineCursor<'log> {
     fn next(&mut self) -> Option<TimelineEntry> {
         while let Some(record) = self.log.events.get(self.index) {
             self.index = self.index.saturating_add(1);
+
             if self
                 .range
                 .is_some_and(|range| return !range.contains(record.monotonic_ns))
@@ -143,7 +137,6 @@ impl<'log> CanonicalTimelineCursor<'log> {
             {
                 continue;
             }
-
             return Some(TimelineEntry {
                 monotonic_ns: record.monotonic_ns,
                 event_seq: Some(record.seq),
@@ -202,6 +195,7 @@ impl<'log> TokenTimelineCursor<'log> {
                 self.pending.extend(framer.finish()?);
                 continue;
             };
+
             if self
                 .range
                 .is_some_and(|range| return record.monotonic_ns >= range.end_monotonic_ns)
@@ -276,8 +270,8 @@ impl IndexedTokenTimelineCursor {
         let Some(session) = source_path.parent() else {
             return Ok(None);
         };
-        let path = session.join(DERIVED_DIRECTORY).join("control-index.jsonl");
 
+        let path = session.join(DERIVED_DIRECTORY).join("control-index.jsonl");
         if !path.is_file() {
             return Ok(None);
         }
@@ -313,6 +307,7 @@ impl IndexedTokenTimelineCursor {
                     source,
                 };
             })?;
+
             if read == 0 {
                 return Ok(None);
             }
@@ -328,6 +323,7 @@ impl IndexedTokenTimelineCursor {
             let Some(first) = token.source.first() else {
                 continue;
             };
+
             if self
                 .range
                 .is_some_and(|range| return first.monotonic_ns >= range.end_monotonic_ns)
@@ -342,13 +338,11 @@ impl IndexedTokenTimelineCursor {
                         u64::try_from(token.raw.as_bytes().len()).unwrap_or(u64::MAX),
                     ),
                 );
-
                 TEST_AUXILIARY_EVENTS.set(
                     TEST_AUXILIARY_EVENTS
                         .get()
                         .saturating_add(u64::try_from(token.source.len()).unwrap_or(u64::MAX)),
                 );
-
                 TEST_AUXILIARY_FIRST_EVENT
                     .set(TEST_AUXILIARY_FIRST_EVENT.get().min(first.event_seq));
             }
@@ -361,7 +355,6 @@ impl IndexedTokenTimelineCursor {
             }) {
                 continue;
             }
-
             return Ok(Some(TimelineEntry {
                 monotonic_ns: first.monotonic_ns,
                 event_seq: Some(first.event_seq),
@@ -472,18 +465,19 @@ impl<'log> AuxiliaryTimelineCursor<'log> {
                 (Some(_), None) => true,
                 (None, _) => false,
             };
+
             let entry =
                 if take_canonical { self.next_canonical.take() } else { self.next_token.take() };
             let Some(entry) = entry else {
                 return Ok(None);
             };
+
             if self
                 .minimum_key
                 .is_some_and(|minimum| return timeline_key(&entry) < minimum)
             {
                 continue;
             }
-
             return Ok(Some(entry));
         }
     }
@@ -496,6 +490,7 @@ fn locate_range_control_offset(log: &EventLog, range: SourceRange) -> Result<Opt
     let Some(session) = source_path.parent() else {
         return Ok(None);
     };
+
     let directory = session.join(DERIVED_DIRECTORY);
     let controls_path = directory.join("control-index.jsonl");
     let source_index_path = directory.join("control-source-index.jsonl");
@@ -528,6 +523,7 @@ fn locate_range_control_offset(log: &EventLog, range: SourceRange) -> Result<Opt
                 };
             });
     };
+
     let file = File::open(&source_index_path).map_err(|source| {
         return Error::Filesystem {
             path: source_index_path.clone(),
@@ -551,6 +547,7 @@ fn locate_range_control_offset(log: &EventLog, range: SourceRange) -> Result<Opt
                 source,
             };
         })?;
+
         if entry.event_seq > last_event {
             break;
         }
@@ -595,7 +592,6 @@ fn locate_offset_checkpoint(
     let mut line = String::new();
     let mut hidden_before = 0_u64;
     let mut candidate = None;
-
     loop {
         line.clear();
         let read = reader.read_line(&mut line).map_err(|source| {
@@ -604,6 +600,7 @@ fn locate_offset_checkpoint(
                 source,
             };
         })?;
+
         if read == 0 {
             break;
         }
@@ -615,6 +612,7 @@ fn locate_offset_checkpoint(
                 source,
             };
         })?;
+
         if entry.checkpoint
             && let (Some(mut rank), Some(control_index_offset), Some(control_rank)) = (
                 entry.timeline_rank,
@@ -663,7 +661,6 @@ impl TimelinePageCollector {
     fn push(&mut self, entry: TimelineEntry) -> bool {
         if self.seen < self.offset {
             self.seen = self.seen.saturating_add(1);
-
             return true;
         }
 
@@ -672,7 +669,6 @@ impl TimelinePageCollector {
             #[cfg(test)]
             TEST_MAX_PAGE_ENTRIES.set(TEST_MAX_PAGE_ENTRIES.get().max(self.entries.len()));
             self.seen = self.seen.saturating_add(1);
-
             return true;
         }
 
@@ -704,7 +700,6 @@ pub fn build_timeline(
         }
 
         entries.push(semantic_timeline_entry(state));
-
         return Ok(());
     })?;
 
@@ -750,6 +745,7 @@ pub fn build_timeline(
                 let Some(first) = token.source.first() else {
                     continue;
                 };
+
                 if range.is_some_and(|range| {
                     return !token
                         .source
@@ -848,6 +844,7 @@ pub fn build_timeline_page(
             let Some(auxiliary_entry) = pending_auxiliary.as_ref() else {
                 break;
             };
+
             if minimum_key.is_some_and(|minimum| return timeline_key(auxiliary_entry) < minimum) {
                 pending_auxiliary.take();
                 continue;

@@ -1,3 +1,4 @@
+use crate::storage::{Error, Result};
 use nix::libc::{O_CLOEXEC, O_NOFOLLOW};
 use std::{
     fs::{File, OpenOptions, Permissions},
@@ -5,7 +6,6 @@ use std::{
     os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
     path::{Component, Path, PathBuf},
 };
-
 use termtrace_model::{
     artifact::{
         bundle::{
@@ -16,8 +16,6 @@ use termtrace_model::{
     value::ByteString,
 };
 use uuid::Uuid;
-
-use crate::storage::{Error, Result};
 
 mod create;
 mod tar;
@@ -76,7 +74,6 @@ impl BundleIdentity {
         {
             return Some("bundle manifest does not match the canonical source identity");
         }
-
         return None;
     }
 }
@@ -112,7 +109,6 @@ pub(crate) fn validate_relative_path(path: &Path) -> Result<String> {
             "manifest.json is reserved for the bundle manifest",
         ));
     }
-
     return Ok(path.to_owned());
 }
 
@@ -122,7 +118,6 @@ pub(crate) fn create_private_directory(path: &Path) -> Result<()> {
         .map_err(|source| return Error::filesystem(path, source))?;
 
     sync_parent(path)?;
-
     return Ok(());
 }
 
@@ -130,6 +125,7 @@ pub(crate) fn create_private_parents(root: &Path, relative: &Path) -> Result<()>
     let Some(parent) = relative.parent() else {
         return Ok(());
     };
+
     let mut current = root.to_path_buf();
 
     for component in parent.components() {
@@ -171,7 +167,6 @@ pub(crate) fn secure_file(path: &Path) -> Result<File> {
                     path: path.to_path_buf(),
                 };
             }
-
             return Error::filesystem(path, source);
         });
 }
@@ -192,7 +187,6 @@ pub(crate) fn open_regular_nofollow(path: &Path) -> Result<(File, u64)> {
             path.display()
         )));
     }
-
     return Ok((file, metadata.len()));
 }
 
@@ -221,7 +215,6 @@ pub(crate) fn sync_parent(path: &Path) -> Result<()> {
     File::open(parent)
         .and_then(|directory| return directory.sync_all())
         .map_err(|source| return Error::filesystem(parent, source))?;
-
     return Ok(());
 }
 
@@ -229,7 +222,6 @@ pub(crate) fn sync_directory(path: &Path) -> Result<()> {
     File::open(path)
         .and_then(|directory| return directory.sync_all())
         .map_err(|source| return Error::filesystem(path, source))?;
-
     return Ok(());
 }
 
@@ -245,15 +237,16 @@ pub(crate) fn collect_regular_files(
         let file_type = entry
             .file_type()
             .map_err(|source| return Error::filesystem(entry.path(), source))?;
+
         if file_type.is_dir() {
             collect_regular_files(root, &entry.path(), files)?;
-
             continue;
         }
 
         let entry_metadata = entry
             .metadata()
             .map_err(|source| return Error::filesystem(entry.path(), source))?;
+
         if !entry_metadata.is_file() {
             return Err(Error::invalid("bundle contains a symlink or special file"));
         }

@@ -1,5 +1,12 @@
+use super::{
+    build::{semantic_timeline_entry, timeline_key},
+    selection::range_error,
+};
+use crate::{
+    replay::{timeline_event, trust::SourceIdentity, visit_recording_states_range_while},
+    Result,
+};
 use std::{collections::VecDeque, path::Path, sync::atomic::AtomicBool};
-
 use termtrace_evidence::{
     event_log::EventLogCursor,
     session::{validate_completed_session, SessionSnapshot},
@@ -13,15 +20,6 @@ use termtrace_model::{
     },
 };
 use termtrace_terminal::VtFramer;
-
-use super::{
-    build::{semantic_timeline_entry, timeline_key},
-    selection::range_error,
-};
-use crate::{
-    replay::{timeline_event, trust::SourceIdentity, visit_recording_states_range_while},
-    Result,
-};
 
 /// Visit an ordered completed timeline with bounded canonical, VT, and semantic cursors.
 ///
@@ -98,10 +96,10 @@ fn visit_recording_timeline_while(
             (Some(_), None) => true,
             _ => false,
         };
+
         if use_canonical {
             let entry = canonical_next.take();
             canonical_next = next_canonical(&mut canonical, range)?;
-
             return Ok(entry);
         }
 
@@ -111,10 +109,10 @@ fn visit_recording_timeline_while(
             .map(TokenCursor::next)
             .transpose()?
             .flatten();
-
         return Ok(entry);
     };
     let mut pending = auxiliary()?;
+
     visit_recording_states_range_while(
         session,
         completed,
@@ -126,6 +124,7 @@ fn visit_recording_timeline_while(
             }
 
             let semantic = semantic_timeline_entry(record);
+
             while pending
                 .as_ref()
                 .is_some_and(|entry| return timeline_key(entry) <= timeline_key(&semantic))
@@ -133,9 +132,9 @@ fn visit_recording_timeline_while(
                 let entry = pending
                     .take()
                     .ok_or_else(|| return range_error("timeline cursor lost its pending entry"))?;
+
                 if !visitor(entry)? {
                     stopped = true;
-
                     return Ok(false);
                 }
 
@@ -144,13 +143,12 @@ fn visit_recording_timeline_while(
 
             if !visitor(semantic)? {
                 stopped = true;
-
                 return Ok(false);
             }
-
             return Ok(true);
         },
     )?;
+
     if !stopped {
         while let Some(entry) = pending.take() {
             if !visitor(entry)? {
@@ -166,7 +164,6 @@ fn visit_recording_timeline_while(
             "canonical source changed during timeline generation",
         ));
     }
-
     return Ok(());
 }
 
@@ -189,11 +186,11 @@ pub fn build_session_timeline_page(
     let mut entries = Vec::with_capacity(usize::from(limit));
     let mut seen = 0_u64;
     let mut more = false;
+
     visit_session_timeline_while(session, include_hidden, include_controls, range, |entry| {
         if seen >= offset {
             if entries.len() == usize::from(limit) {
                 more = true;
-
                 return Ok(false);
             }
 
@@ -201,7 +198,6 @@ pub fn build_session_timeline_page(
         }
 
         seen = seen.saturating_add(1);
-
         return Ok(true);
     })?;
 
@@ -282,6 +278,7 @@ impl TokenCursor {
             let Some(framer) = self.framer.as_mut() else {
                 return Ok(None);
             };
+
             if let Some(record) = self.output.as_ref()
                 && let Event::Output { data } = &record.event
                 && let Some(byte) = data.as_bytes().get(self.byte_offset)

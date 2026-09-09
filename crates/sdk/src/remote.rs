@@ -1,18 +1,16 @@
 //! Typed live-session control without linking the recorder or native renderer.
 
+use crate::{
+    protocol::{self, ExchangeTiming},
+    Error, Result,
+};
 use std::{
     env,
     path::{Path, PathBuf},
     time::Duration,
 };
-
 use termtrace_model::protocol::control::{
     ControlCommand, ControlData, ControlRequest, ControlResponse,
-};
-
-use crate::{
-    protocol::{self, ExchangeTiming},
-    Error, Result,
 };
 
 /// Lightweight connection configuration for a canonical live session.
@@ -35,7 +33,6 @@ impl Client {
                 reason: "TERMTRACE_SESSION is not set".to_owned(),
             };
         })?;
-
         return Ok(Self::new(session));
     }
 

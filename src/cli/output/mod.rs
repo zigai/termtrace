@@ -1,10 +1,12 @@
+use crate::cli::analysis::args::PageArgs;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use clap::{error::ErrorKind as ClapErrorKind, ValueEnum};
+use miette::{IntoDiagnostic as _, Result};
 use std::{
     fmt::{Display, Write as _},
     io::{self, IsTerminal as _, Write as _},
     process::ExitCode,
 };
-
-use miette::{IntoDiagnostic as _, Result};
 use termtrace_model::{
     protocol::{
         cli_response::{Applied, CliResponseEnvelope, Retry, SessionState, CLI_RESPONSE_VERSION},
@@ -13,11 +15,6 @@ use termtrace_model::{
     terminal::state::RowState,
     value::pagination::OutputPage,
 };
-
-use crate::cli::analysis::args::PageArgs;
-
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use clap::{error::ErrorKind as ClapErrorKind, ValueEnum};
 
 const MAX_AGENT_RESPONSE_BYTES: usize = 64 * 1024;
 const MAX_CAPTURE_BYTES: usize = 256 * 1024;
@@ -136,21 +133,20 @@ use envelope::{
     response_string_value, retry_for_applied, retry_from_str, session_state_from_str,
     typed_envelope,
 };
+pub(super) use helpers::{
+    id_list, optional_display, projection_warning, quoted_text, row_text, stable_enum_label,
+    write_projection_warning,
+};
 use human::{human_failure_summary, human_summary};
+pub(super) use io_core::write_progress;
 use io_core::{capture_json, capture_raw, direct_stderr, direct_stdout, report_message};
+pub(super) use pagination::paginate;
 use pagination::{pagination_projection, raw_pagination_projection};
 use projection::{
     bounded_agent_response, bounded_capture_projection, compact_task_value, copy_value,
     enforce_success_budget, failure_string, nested_string, response_type, session_state,
     value_string,
 };
-
-pub(super) use helpers::{
-    id_list, optional_display, projection_warning, quoted_text, row_text, stable_enum_label,
-    write_projection_warning,
-};
-pub(super) use io_core::write_progress;
-pub(super) use pagination::paginate;
 pub(super) use sink::{
     finish_response, response_output, write_clap_error, write_follow_json_line,
     write_follow_stdout, write_json_line, write_stdout,

@@ -1,10 +1,9 @@
 //! Compact, versioned CLI response protocol contracts.
 
-use std::{borrow::Cow, collections::BTreeMap};
-
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::{borrow::Cow, collections::BTreeMap};
 
 /// Current compact CLI response protocol version.
 pub const CLI_RESPONSE_VERSION: u32 = 1;

@@ -1,11 +1,9 @@
+use super::*;
+use super::{tar::extract_archive, verify::read_bounded_regular_file};
 use std::{io, path::Path};
-
 use tar_archive::{Builder, EntryType, Header};
 use tempfile::TempDir;
 use zstd::stream::encode_all;
-
-use super::*;
-use super::{tar::extract_archive, verify::read_bounded_regular_file};
 
 #[test]
 fn generation_budget_is_shared_by_members_and_manifest() {
@@ -33,11 +31,13 @@ fn generation_budget_is_shared_by_members_and_manifest() {
         .add_member_bytes("first.txt", metadata.clone(), b"abc")
         .expect("first member");
     let staging = draft.staging_path().to_path_buf();
+
     {
         let mut writer = draft
             .start_member("second.txt", metadata)
             .expect("second member");
         assert!(writer.write_all(b"def").is_err());
+
         writer.write_all(b"de").expect("remaining shared budget");
         writer.finish().expect("finished second member");
     }
@@ -89,6 +89,7 @@ fn direct_and_archived_manifests_share_the_byte_limit() {
     header.set_mtime(0);
     header.set_entry_type(EntryType::Regular);
     header.set_cksum();
+
     builder
         .append(&header, io::empty())
         .expect("archive member");
@@ -126,12 +127,12 @@ fn raw_tar_iteration_rejects_extension_headers_before_their_payload() {
         header.set_mtime(0);
         header.set_entry_type(entry_type);
         header.set_cksum();
+
         builder
             .append(&header, b"xy".as_slice())
             .expect("extension member");
         builder.finish().expect("finish tar archive");
         let tar_bytes = builder.into_inner().expect("finish tar builder");
-
         let archive = temporary.path().join(format!("extension-{index}.tar.zst"));
         write_compressed_tar(&archive, &tar_bytes);
         let destination = temporary.path().join(format!("extension-{index}"));
@@ -155,12 +156,12 @@ fn archive_rejects_nonzero_member_padding() {
     header.set_mtime(0);
     header.set_entry_type(EntryType::Regular);
     header.set_cksum();
+
     builder
         .append(&header, b"xy".as_slice())
         .expect("archive member with nonzero padding");
     builder.finish().expect("finish tar archive");
     let tar_bytes = builder.into_inner().expect("finish tar builder");
-
     let archive = temporary.path().join("nonzero-padding.tar.zst");
     write_compressed_tar(&archive, &tar_bytes);
 
@@ -196,7 +197,6 @@ fn identity_mismatch_rejects_before_member_validation() {
         sensitivity: ArtifactSensitivity::OperationalMetadata,
         relationship: "attacker_controlled".to_owned(),
     };
-
     let mut policy_mismatch = expected.manifest(vec![invalid_member.clone()]);
     policy_mismatch.profile = BundleProfile::Debug;
     fs_err::write(
@@ -204,7 +204,6 @@ fn identity_mismatch_rejects_before_member_validation() {
         serde_json::to_vec(&policy_mismatch).expect("policy mismatch manifest"),
     )
     .expect("write policy mismatch manifest");
-
     let policy_error = verify(temporary.path(), Some(&expected))
         .expect_err("profile mismatch must reject before invalid member metadata");
     assert!(policy_error
@@ -218,7 +217,6 @@ fn identity_mismatch_rejects_before_member_validation() {
         serde_json::to_vec(&canonical_mismatch).expect("canonical mismatch manifest"),
     )
     .expect("write canonical mismatch manifest");
-
     let canonical_error = verify(temporary.path(), Some(&expected))
         .expect_err("canonical mismatch must reject before invalid member metadata");
     assert!(canonical_error

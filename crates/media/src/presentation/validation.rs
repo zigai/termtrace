@@ -1,17 +1,14 @@
+use super::plan_error;
+use crate::{Error, Result};
 use std::{
     path::{Path, PathBuf},
     process::Command,
     str,
 };
-
 use termtrace_model::artifact::presentation::{
     AnnotationScope, ChangeMode, ChangeSource, ChangeVisualization, EditPlan, EditSelector,
     PixelTransform, PresentationSource, PreviewOptions, TextAnnotation, EDIT_PLAN_VERSION,
 };
-
-use crate::{Error, Result};
-
-use super::plan_error;
 
 /// Read and validate a JSON edit plan, resolving relative subtitle paths beside the plan.
 ///
@@ -27,7 +24,6 @@ pub fn read_edit_plan(path: impl AsRef<Path>) -> Result<EditPlan> {
             source,
         };
     })?;
-
     let mut plan: EditPlan = serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
@@ -44,7 +40,6 @@ pub fn read_edit_plan(path: impl AsRef<Path>) -> Result<EditPlan> {
     }
 
     validate_edit_plan(&plan)?;
-
     return Ok(plan);
 }
 
@@ -125,7 +120,6 @@ pub(super) fn validate_edit_plan(plan: &EditPlan) -> Result<()> {
     }) {
         return Err(plan_error("branding must contain 1-256 non-NUL characters"));
     }
-
     return Ok(());
 }
 
@@ -150,7 +144,6 @@ pub(super) fn validate_edit_selector(selector: &EditSelector) -> Result<()> {
     if selector.marker.as_deref().is_some_and(str::is_empty) {
         return Err(plan_error("edit marker must not be empty"));
     }
-
     return Ok(());
 }
 
@@ -203,7 +196,6 @@ fn validate_annotation(annotation: &TextAnnotation, clip_count: usize) -> Result
     {
         return Err(plan_error("annotation style is outside bounded values"));
     }
-
     return Ok(());
 }
 
@@ -229,7 +221,6 @@ fn validate_change_visualization(change: &ChangeVisualization) -> Result<()> {
     if change.hold_frames > 240 {
         return Err(plan_error("change overlay hold must not exceed 240 frames"));
     }
-
     return Ok(());
 }
 
@@ -289,7 +280,6 @@ pub(super) fn validate_preview_options(options: PreviewOptions) -> Result<()> {
             "preview dimensions or frame count are out of bounds",
         ));
     }
-
     return Ok(());
 }
 
@@ -353,7 +343,6 @@ pub(super) fn validate_ass_resource(path: &Path) -> Result<()> {
             source,
         };
     })?;
-
     str::from_utf8(&bytes).map_err(|error| {
         return plan_error(format!("ASS subtitle resource must be UTF-8: {error}"));
     })?;
@@ -386,18 +375,17 @@ pub(super) fn validate_ass_resource(path: &Path) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-
         return Err(plan_error(format!(
             "ASS subtitle resource failed FFmpeg validation: {}",
             stderr.trim()
         )));
     }
-
     return Ok(());
 }
 
 fn validate_annotation_template(template: &str) -> Result<()> {
     let mut token: Option<String> = None;
+
     for character in template.chars() {
         match (character, &mut token) {
             ('{', None) => token = Some(String::new()),
@@ -427,7 +415,6 @@ fn validate_annotation_template(template: &str) -> Result<()> {
     if token.is_some() {
         return Err(plan_error("annotation template has an unclosed token"));
     }
-
     return Ok(());
 }
 

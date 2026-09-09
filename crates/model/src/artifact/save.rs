@@ -1,12 +1,10 @@
 //! Atomic multi-format publication for one semantic observation.
 
-use std::path::PathBuf;
-
+use crate::{terminal::observation::StatePoint, value::ByteString};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use uuid::Uuid;
-
-use crate::{terminal::observation::StatePoint, value::ByteString};
 
 /// Semantic file recipe supported by `save`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -57,6 +55,7 @@ impl SemanticFontRole {
         }
     }
 }
+
 /// Deterministic semantic rasterization quality profile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]

@@ -22,7 +22,6 @@ impl SessionRegistry {
         let entry = self.entry_for(alias, session)?;
         let encoded = self.encode_entry(&entry)?;
         write_secure(&self.entry_path(alias), &encoded)?;
-
         return Ok(entry);
     }
 
@@ -95,7 +94,6 @@ impl SessionRegistry {
         };
         let encoded = self.encode_reservation(&reservation)?;
         write_secure(&path, &encoded)?;
-
         return Ok(reservation);
     }
 
@@ -144,12 +142,10 @@ impl SessionRegistry {
 
         if let Err(source) = fs::rename(&temporary, &path) {
             let _cleanup = fs::remove_file(&temporary);
-
             return Err(Error::Filesystem { path, source });
         }
 
         sync_parent_directory(&path)?;
-
         return Ok(entry);
     }
 
@@ -185,7 +181,6 @@ impl SessionRegistry {
         })?;
 
         sync_parent_directory(&path)?;
-
         return Ok(());
     }
 }
@@ -206,7 +201,6 @@ pub(super) fn validate_alias(alias: &str) -> Result<()> {
             "alias must be 1-64 ASCII letters, digits, '-' or '_', beginning with a letter or digit",
         ));
     }
-
     return Ok(());
 }
 

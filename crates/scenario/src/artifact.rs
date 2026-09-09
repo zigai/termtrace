@@ -1,3 +1,8 @@
+use crate::{
+    error::{invalid, operation},
+    Error, Result,
+};
+use serde::Serialize;
 use std::{
     fmt::Display,
     fs::Permissions,
@@ -5,8 +10,6 @@ use std::{
     os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
 };
-
-use serde::Serialize;
 use termtrace_engine::{
     analysis::diagnostics::diagnose_snapshot, timeline::visit_snapshot_timeline_while,
     Error as EngineError,
@@ -15,24 +18,17 @@ use termtrace_evidence::{
     artifact::{finish_writer, secure_writer},
     session::SessionSnapshot,
 };
+use termtrace_model::scenario::{Scenario, ScenarioReport};
 use termtrace_model::{
     protocol::control::ControlData, terminal::analysis::DiagnosticCheck,
     terminal::state::SemanticState, value::ByteString,
 };
 use zstd::stream::decode_all;
 
-use termtrace_model::scenario::{Scenario, ScenarioReport};
-
-use crate::{
-    error::{invalid, operation},
-    Error, Result,
-};
-
 pub(crate) fn snapshot_path(failure_root: &Path, name: &str) -> Result<PathBuf> {
     let artifact_root = failure_root
         .parent()
         .ok_or_else(|| return invalid("scenario failure root has no artifact parent"))?;
-
     return Ok(artifact_root
         .join("snapshots")
         .join(format!("{name}.frame.json")));
@@ -72,7 +68,6 @@ pub(crate) fn publish_failure(
     let publish_result = populate_failure(&temporary, scenario, report, final_snapshot);
     if let Err(error) = publish_result {
         let _remove = fs_err::remove_dir_all(&temporary);
-
         return Err(error);
     }
 
@@ -82,7 +77,6 @@ pub(crate) fn publish_failure(
             source,
         };
     })?;
-
     return Ok(());
 }
 
@@ -158,12 +152,12 @@ fn write_timeline(snapshot: &SessionSnapshot, path: &Path) -> Result<()> {
     let write = (|| -> Result<()> {
         let mut output =
             secure_writer(path).map_err(|error| return operation("create timeline", error))?;
-
         output
             .write_all(b"[\n")
             .map_err(|error| return operation("write timeline", error))?;
 
         let mut first = true;
+
         visit_snapshot_timeline_while(snapshot, true, true, None, |entry| {
             if !first {
                 output.write_all(b",\n").map_err(timeline_error)?;
@@ -171,7 +165,6 @@ fn write_timeline(snapshot: &SessionSnapshot, path: &Path) -> Result<()> {
 
             first = false;
             serde_json::to_writer(&mut output, &entry).map_err(timeline_error)?;
-
             return Ok(true);
         })
         .map_err(|error| return operation("derive timeline", error))?;
@@ -179,7 +172,6 @@ fn write_timeline(snapshot: &SessionSnapshot, path: &Path) -> Result<()> {
         output
             .write_all(b"\n]\n")
             .map_err(|error| return operation("write timeline", error))?;
-
         finish_writer(output, path).map_err(|error| return operation("finish timeline", error))?;
 
         return Ok(());
@@ -200,7 +192,6 @@ fn timeline_error(error: impl Display) -> EngineError {
 
 pub(crate) fn write_bytes(path: PathBuf, bytes: &[u8]) -> Result<()> {
     fs_err::write(&path, bytes).map_err(|source| return Error::Filesystem { path, source })?;
-
     return Ok(());
 }
 
@@ -213,6 +204,5 @@ pub(crate) fn write_json(path: PathBuf, value: &impl Serialize) -> Result<()> {
         };
     })?;
     encoded.push(b'\n');
-
     return write_bytes(path, &encoded);
 }

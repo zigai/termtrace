@@ -1,9 +1,7 @@
-use std::{ffi::OsString, path::PathBuf};
-
+use crate::cli::parsers::parse_capability_id;
 use clap::{Args, Subcommand};
 use clap_complete::Shell;
-
-use crate::cli::parsers::parse_capability_id;
+use std::{ffi::OsString, path::PathBuf};
 
 #[derive(Debug, Args)]
 #[command(disable_help_subcommand = true)]

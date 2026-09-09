@@ -1,24 +1,22 @@
 //! Preserve an interactive PTY after a recorder failure without claiming complete evidence.
 
+use super::{actor::SessionActor, model::RuntimeMessage};
+use crate::Error;
+use nix::{
+    sys::signal::{killpg, Signal},
+    unistd::Pid,
+};
 use std::{
     io::Write as _,
     mem::take,
     sync::mpsc::{Receiver, RecvTimeoutError},
     time::{Duration, Instant},
 };
-
-use nix::{
-    sys::signal::{killpg, Signal},
-    unistd::Pid,
-};
 use termtrace_evidence::{artifact::write_secure, event_log::CanonicalBoundary};
 use termtrace_model::protocol::control::{
     ControlResponse, ControlResult, ProcessSignal, CONTROL_PROTOCOL_VERSION,
 };
 use termtrace_model::{execution::event::Event, value::ByteString};
-
-use super::{actor::SessionActor, model::RuntimeMessage};
-use crate::Error;
 
 #[derive(serde::Serialize)]
 struct RecordingHealth {
@@ -46,6 +44,7 @@ pub(super) fn preserve_terminal(
         "recording_degraded",
         "recording failed; interactive PTY forwarding continues",
     );
+
     let degraded_started_monotonic_ns = actor.event_log.elapsed_ns();
     let _boundary = actor.event_log.append(Event::HostError {
         code: "recording_degraded".to_owned(),
@@ -60,8 +59,8 @@ pub(super) fn preserve_terminal(
 
     let mut unrecorded_output_bytes =
         u64::try_from(actor.progress.unrecorded_output.len()).unwrap_or(u64::MAX);
-
     let mut unrecorded_input_bytes = 0_u64;
+
     let unrecorded = take(&mut actor.progress.unrecorded_output);
     let _mirror = actor
         .output

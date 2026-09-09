@@ -17,7 +17,6 @@ pub const SEMANTIC_VIDEO_CAPABILITY: &str = "semantic-video";
 pub const PRESENTATION_CAPABILITY: &str = "presentation";
 /// SSH receipt-signing capability identifier.
 pub const RECEIPT_SIGNING_CAPABILITY: &str = "receipt-signing";
-
 /// Stable capability identifiers in report order.
 pub const CAPABILITY_IDS: &[&str] = &[
     CORE_CAPABILITY,
@@ -94,9 +93,8 @@ impl CapabilityReport {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn stable_capability_ids_include_semantic_video() {

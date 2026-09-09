@@ -38,6 +38,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .clone();
 
     let registered = compact_json_line(&registered);
+
     assert_eq!(registered["session_id"], manifest.session_id.to_string());
     assert_eq!(
         registered["canonical_session_display"],
@@ -77,6 +78,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
             & 0o777,
         0o600
     );
+
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
         .env("TERMTRACE_STATE_DIR", &state)
@@ -114,6 +116,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .expect("registry row");
 
     validate_json_value("registry-list-entry.schema.json", row);
+
     assert!(
         row.get("canonical_session_display").is_none(),
         "machine registry-list contract changed unexpectedly: {row}"
@@ -138,6 +141,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
         lines.next().is_none(),
         "unexpected registry table:\n{human}"
     );
+
     let starts = table_column_starts(header);
     assert_eq!(starts.len(), 4, "unexpected registry header: {human}");
     assert_eq!(
@@ -145,12 +149,14 @@ fn registry_binds_alias_to_canonical_session_identity() {
         ["ALIAS", "LIFECYCLE", "SESSION ID", "CANONICAL SESSION",]
     );
     assert_eq!(table_column_starts(row), starts, "misaligned row:\n{human}");
+
     let session_id = manifest.session_id.to_string();
     let canonical_display = session
         .canonicalize()
         .expect("canonical")
         .display()
         .to_string();
+
     assert_eq!(
         table_cells(row, &starts),
         [
@@ -172,6 +178,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .clone();
 
     let removed = compact_json_line(&removed);
+
     assert_eq!(removed["evidence_preserved"], true);
     assert_eq!(
         removed["canonical_session_display"],
@@ -267,6 +274,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
             .expect("registry entry JSON");
     entry["recorder_pid"] = serde_json::json!(u32::MAX);
     entry["recorder_process_start_ticks"] = serde_json::json!(1);
+
     fs_err::write(
         &entry_path,
         serde_json::to_vec_pretty(&entry).expect("updated registry entry"),

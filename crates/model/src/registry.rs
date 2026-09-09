@@ -1,12 +1,10 @@
 //! Owner-only named-session registry backed by canonical session identity.
 
-use std::{ffi::OsString, os::unix::ffi::OsStringExt as _, path::PathBuf};
-
+use crate::{execution::session::SessionGeometry, value::ByteString};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::{ffi::OsString, os::unix::ffi::OsStringExt as _, path::PathBuf};
 use uuid::Uuid;
-
-use crate::{execution::session::SessionGeometry, value::ByteString};
 
 /// Registry-entry format identifier.
 pub const REGISTRY_ENTRY_FORMAT: &str = "termtrace-session-registry-entry";

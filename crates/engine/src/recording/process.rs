@@ -1,17 +1,12 @@
 //! Child-process lifecycle, runtime workers, and session cleanup.
 
-use std::{
-    env,
-    fs::{DirBuilder, File, Permissions},
-    io::{self, ErrorKind, Read},
-    os::fd::{AsFd as _, OwnedFd},
-    os::unix::fs::{DirBuilderExt as _, PermissionsExt as _},
-    path::{Path, PathBuf},
-    sync::mpsc,
-    thread,
-    time::Instant,
+use super::{
+    control::{spawn_control_server, ControlWorker},
+    environment::EffectiveEnvironment,
+    model::{RecordOptions, RuntimeMessage, SpawnedCommand, TerminalGeometry},
+    support::{finish_with_cleanup, poll_ready, terminal_error},
 };
-
+use crate::{Error, Result};
 use nix::{
     errno::Errno,
     poll::{poll, PollFd, PollFlags, PollTimeout},
@@ -24,20 +19,21 @@ use signal_hook::{
     consts::signal::{SIGHUP, SIGINT, SIGTERM, SIGWINCH},
     iterator::{Handle, Signals},
 };
-
+use std::{
+    env,
+    fs::{DirBuilder, File, Permissions},
+    io::{self, ErrorKind, Read},
+    os::fd::{AsFd as _, OwnedFd},
+    os::unix::fs::{DirBuilderExt as _, PermissionsExt as _},
+    path::{Path, PathBuf},
+    sync::mpsc,
+    thread,
+    time::Instant,
+};
 use termtrace_model::protocol::control::ProcessSignal;
 use termtrace_terminal::supported_geometry_cell_count;
 
-use super::{
-    control::{spawn_control_server, ControlWorker},
-    environment::EffectiveEnvironment,
-    model::{RecordOptions, RuntimeMessage, SpawnedCommand, TerminalGeometry},
-    support::{finish_with_cleanup, poll_ready, terminal_error},
-};
-use crate::{Error, Result};
-
 const SESSION_DIRECTORY_MODE: u32 = 0o700;
-
 const READ_BUFFER_BYTES: usize = 16 * 1024;
 
 fn spawn_reader(
@@ -53,7 +49,6 @@ fn spawn_reader(
                 match reader.read(&mut buffer) {
                     Ok(0) => {
                         let _ = sender.send(RuntimeMessage::OutputClosed);
-
                         return;
                     }
                     Ok(length) => {
@@ -80,7 +75,6 @@ fn spawn_reader(
                         };
 
                         let _ = sender.send(message);
-
                         return;
                     }
                 }
@@ -95,6 +89,7 @@ fn spawn_input(sender: mpsc::SyncSender<RuntimeMessage>) -> Result<InputWorker> 
     let (cancel_read, cancel) = pipe().map_err(|error| {
         return terminal_error("create input cancellation pipe", error.to_string());
     })?;
+
     let thread = thread::Builder::new()
         .name("termtrace-stdin-reader".to_owned())
         .spawn(move || input_loop(&cancel_read, &sender))
@@ -108,6 +103,7 @@ fn spawn_resize(
     initial: TerminalGeometry,
 ) -> Result<Option<ResizeWorker>> {
     let stdin = io::stdin();
+
     if !isatty(&stdin)
         .map_err(|error| return terminal_error("inspect standard input", error.to_string()))?
     {
@@ -121,7 +117,6 @@ fn spawn_resize(
         .name("termtrace-resize-listener".to_owned())
         .spawn(move || {
             let stdin = io::stdin();
-
             let mut previous = initial;
 
             for _ in signals.forever() {
@@ -141,7 +136,6 @@ fn spawn_resize(
                     }
                     Err(error) => {
                         let _ = sender.send(RuntimeMessage::ResizeFailed(error.to_string()));
-
                         return;
                     }
                 }
@@ -215,12 +209,10 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
         Ok(terminal) => terminal,
         Err(Errno::EIO) => {
             let _ = sender.send(RuntimeMessage::TerminalInputClosed);
-
             return;
         }
         Err(error) => {
             let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
-
             return;
         }
     };
@@ -237,7 +229,6 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
             Err(Errno::EINTR) => continue,
             Err(error) => {
                 let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
-
                 return;
             }
         }
@@ -270,12 +261,10 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
             Err(Errno::EINTR) => {}
             Err(Errno::EIO) if terminal => {
                 let _ = sender.send(RuntimeMessage::TerminalInputClosed);
-
                 return;
             }
             Err(error) => {
                 let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
-
                 return;
             }
         }
@@ -314,6 +303,7 @@ pub(super) fn spawn_command(
     let pair = native_pty_system()
         .openpty(pty_size)
         .map_err(|error| return terminal_error("open PTY", error.to_string()))?;
+
     let (program, arguments) = options
         .command
         .split_first()
@@ -336,6 +326,7 @@ pub(super) fn spawn_command(
         .master
         .take_writer()
         .map_err(|error| return terminal_error("take PTY writer", error.to_string()))?;
+
     let child = pair
         .slave
         .spawn_command(command)
@@ -385,7 +376,6 @@ pub(super) fn resolve_working_directory(requested: Option<&Path>) -> Result<Path
             format!("`{}` is not a directory", resolved.display()),
         ));
     }
-
     return Ok(resolved);
 }
 
@@ -410,7 +400,6 @@ impl InputWorker {
 impl ResizeWorker {
     fn stop(self) -> Result<()> {
         self.handle.close();
-
         return self.thread.join().map_err(|_| {
             return terminal_error("join terminal-resize listener", "resize thread panicked");
         });
@@ -420,7 +409,6 @@ impl ResizeWorker {
 impl SignalWorker {
     fn stop(self) -> Result<()> {
         self.handle.close();
-
         return self.thread.join().map_err(|_| {
             return terminal_error("join recorder-signal listener", "signal thread panicked");
         });
@@ -442,7 +430,6 @@ impl RuntimeWorkers {
             Ok(worker) => worker,
             Err(error) => {
                 drop(receiver);
-
                 return finish_with_cleanup(Err(error), signals.stop());
             }
         };
@@ -453,7 +440,6 @@ impl RuntimeWorkers {
                 drop(receiver);
 
                 let cleanup = finish_with_cleanup(signals.stop(), control.stop());
-
                 return finish_with_cleanup(Err(error), cleanup);
             }
         };
@@ -469,7 +455,6 @@ impl RuntimeWorkers {
                 let cleanup =
                     finish_with_cleanup(resize.map_or(Ok(()), ResizeWorker::stop), control.stop());
                 let cleanup = finish_with_cleanup(cleanup, signals.stop());
-
                 return finish_with_cleanup(Err(error), cleanup);
             }
         };
@@ -483,10 +468,8 @@ impl RuntimeWorkers {
                     input.map_or(Ok(()), InputWorker::stop),
                     resize.map_or(Ok(()), ResizeWorker::stop),
                 );
-
                 let cleanup = finish_with_cleanup(cleanup, control.stop());
                 let cleanup = finish_with_cleanup(cleanup, signals.stop());
-
                 return finish_with_cleanup(Err(error), cleanup);
             }
         };
@@ -531,7 +514,6 @@ impl RuntimeWorkers {
         let result = finish_with_cleanup(result, input_stop);
         let result = finish_with_cleanup(result, resize_stop);
         let result = finish_with_cleanup(result, signals_stop);
-
         return finish_with_cleanup(result, reader_join);
     }
 }
@@ -552,7 +534,6 @@ pub(super) fn create_session_directory(path: &Path) -> Result<()> {
             )?;
 
             sync_parent_directory(path)?;
-
             return Ok(());
         }
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {
@@ -614,7 +595,6 @@ mod tests {
             self.0.send(()).map_err(io::Error::other)?;
 
             buf[0] = b'x';
-
             return Ok(1);
         }
     }
@@ -656,6 +636,7 @@ mod tests {
                 receiver,
                 Err(terminal_error("test actor failure", "stop consuming")),
             );
+
             assert!(matches!(
                 result,
                 Err(Error::TerminalOperation {
@@ -664,6 +645,7 @@ mod tests {
                 })
             ));
             assert!(sender.send(RuntimeMessage::OutputClosed).is_err());
+
             completed_sender.send(()).expect("report completed cleanup");
         });
 
@@ -688,6 +670,7 @@ mod tests {
         let blocked_sender = sender.clone();
         let producer = thread::spawn(move || {
             assert!(blocked_sender.send(RuntimeMessage::OutputClosed).is_err());
+
             completed_sender
                 .send(())
                 .expect("report disconnected producer");
@@ -707,7 +690,9 @@ mod tests {
             &"x".repeat(256),
             register_host_signals().expect("register host signals"),
         );
+
         assert!(started.is_err());
+
         completed
             .recv_timeout(Duration::from_secs(5))
             .expect("partial startup must release the blocked producer");

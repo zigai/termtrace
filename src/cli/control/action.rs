@@ -13,6 +13,7 @@ pub(in crate::cli) fn run_act(
     let request_id = arguments.request_id.unwrap_or_else(uuid::Uuid::now_v7);
 
     let mut atoms: Vec<InputSequenceAtom> = Vec::new();
+
     for atom in &arguments.atoms {
         if arguments.pace.is_zero() || !atom.starts_with("text:") {
             let operation_id = derive_input_operation_id(request_id, atoms.len());
@@ -25,7 +26,6 @@ pub(in crate::cli) fn run_act(
         }
 
         let text = atom.strip_prefix("text:").unwrap_or_default();
-
         for scalar in text.chars() {
             atoms.push(InputSequenceAtom::Bytes {
                 operation_id: derive_input_operation_id(request_id, atoms.len()),
@@ -52,6 +52,7 @@ pub(in crate::cli) fn run_act(
     });
     request.request_id = request_id;
     request.expected_presented_state_hash = arguments.expected_presented_state_hash;
+
     let control_response = match send_request_response(&resolved.path, &request) {
         Ok(control_response) => control_response,
         Err(error) => {
@@ -84,12 +85,10 @@ pub(in crate::cli) fn run_act(
             return Ok(ExitCode::FAILURE);
         }
     };
-
     match control_response.result {
         ControlResult::Ok { data } => {
             let (output, matched) = action_applied_response(control_response.request_id, &data)?;
             write_json_line(response, &output)?;
-
             return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
         }
         ControlResult::Error {
@@ -106,7 +105,6 @@ pub(in crate::cli) fn run_act(
             );
 
             write_json_line(response, &output)?;
-
             return Ok(ExitCode::FAILURE);
         }
     }
@@ -135,7 +133,6 @@ pub(super) fn action_postcondition(arguments: &ActArgs) -> ActionPostcondition {
             timeout_ns: u64::try_from(arguments.timeout.as_nanos()).unwrap_or(u64::MAX),
         };
     }
-
     return ActionPostcondition::None;
 }
 
@@ -212,6 +209,7 @@ pub(super) fn action_applied_response(
             "recording actor returned an unexpected action payload"
         ));
     };
+
     if input.sequence_id != request_id {
         return Err(miette::miette!(
             "recording actor returned an action input identifier that does not match the request"
@@ -386,8 +384,8 @@ pub(super) fn action_error_response(
             scope: &details.scope,
         };
     });
-
     let boundaries = details.map(|details| return &details.boundaries);
+
     let output = ActionErrorOutput {
         v: 1,
         ok: false,
@@ -425,23 +423,22 @@ pub(super) fn input_failure_application(details: Option<&ControlErrorDetails>) -
     let Some(sequence) = details.and_then(|details| return details.input_sequence.as_ref()) else {
         return "none";
     };
+
     if sequence.atoms_applied == 0 && sequence.failed_atom_bytes_written == 0 {
         return "none";
     }
-
     return "partial";
 }
 
 #[cfg(test)]
 mod action_response_tests {
+    use super::{action_applied_response, action_error_response, action_observation};
     use termtrace_model::{
         protocol::control::{ControlData, ControlErrorDetails},
         terminal::observation::{ActorBoundaries, CaptureQuality},
         terminal::screen::{ScreenFrameSource, ScreenProjectionRequest},
     };
     use termtrace_terminal::{project_screen_frame, GhosttyVt};
-
-    use super::{action_applied_response, action_error_response, action_observation};
 
     #[test]
     fn action_success_retains_input_observation_request_and_boundaries() {
@@ -507,6 +504,7 @@ mod action_response_tests {
 
         let (response, matched) =
             action_applied_response(request_id, &data).expect("action response");
+
         assert!(!matched);
         assert_eq!(response["request_id"], request_id.to_string());
         assert_eq!(response["input"]["applied"], "all");
@@ -567,6 +565,7 @@ mod action_response_tests {
             Some(&details),
             false,
         );
+
         assert_eq!(response["request_id"], request_id.to_string());
         assert_eq!(response["input"]["applied"], "partial");
         assert_eq!(response["input"]["atoms"], 1);
@@ -615,8 +614,8 @@ mod action_response_tests {
             CaptureQuality::Live,
         )
         .expect("rich frame");
-
         let value = action_observation(&frame).expect("observation JSON");
+
         assert_eq!(value["state"], frame.state_hash);
         assert_eq!(value["state_hash"], frame.state_hash);
         assert_eq!(value["version"], 1);

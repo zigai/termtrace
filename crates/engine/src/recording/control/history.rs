@@ -1,17 +1,14 @@
 //! Durable mutation replay and bounded in-memory retry caching.
 
-use std::collections::{HashMap, VecDeque};
-
-use uuid::Uuid;
-
-use termtrace_evidence::request_journal::{guarded_command_hash, MutationJournal};
-use termtrace_model::protocol::control::{ControlCommand, ControlResponse};
-
 use super::super::{
     input::input_sequence_operation_id,
     support::{control_error_response, control_rejected},
 };
 use crate::Result;
+use std::collections::{HashMap, VecDeque};
+use termtrace_evidence::request_journal::{guarded_command_hash, MutationJournal};
+use termtrace_model::protocol::control::{ControlCommand, ControlResponse};
+use uuid::Uuid;
 
 struct CachedMutation {
     command_hash: String,
@@ -42,9 +39,9 @@ impl MutationHistory {
         expected_presented_state_hash: Option<&str>,
     ) -> Result<(String, Option<ControlResponse>)> {
         let requested_hash = guarded_command_hash(command, expected_presented_state_hash)?;
+
         if let Some(cached) = self.cached.get(&request_id) {
             let response = mutation_retry_response(request_id, &requested_hash, cached);
-
             return Ok((requested_hash, Some(response)));
         }
 
@@ -58,7 +55,6 @@ impl MutationHistory {
         let response = mutation_retry_response(request_id, &requested_hash, &cached);
 
         self.cache(request_id, cached);
-
         return Ok((requested_hash, Some(response)));
     }
 
@@ -73,7 +69,6 @@ impl MutationHistory {
                 "operation identifier was already reserved by another mutation",
             ));
         }
-
         return Ok(());
     }
 
@@ -86,13 +81,13 @@ impl MutationHistory {
             command
         {
             let identifiers: Vec<_> = atoms.iter().map(input_sequence_operation_id).collect();
+
             if !self.journal.reserve_operations(&identifiers)? {
                 return Err(control_rejected(
                     "operation_id_collision",
                     "input sequence operation identifier was already reserved by another mutation",
                 ));
             }
-
             return Ok(());
         }
 
@@ -116,7 +111,6 @@ impl MutationHistory {
         {
             let attempted = usize::try_from(event_end_seq.saturating_sub(event_start_seq) / 2)
                 .unwrap_or(usize::MAX);
-
             atoms
                 .iter()
                 .take(attempted)
@@ -125,6 +119,7 @@ impl MutationHistory {
         } else {
             vec![request_id]
         };
+
         let record = self.journal.append(
             request_id,
             command_hash,
@@ -134,6 +129,7 @@ impl MutationHistory {
             event_hash,
             response,
         )?;
+
         self.cache(
             record.request_id,
             CachedMutation {
@@ -141,7 +137,6 @@ impl MutationHistory {
                 response: record.response,
             },
         );
-
         return Ok(());
     }
 
@@ -167,7 +162,6 @@ fn mutation_retry_response(
     if cached.command_hash == requested_hash {
         return cached.response.clone();
     }
-
     return control_error_response(
         request_id,
         "request_id_collision",
@@ -212,6 +206,7 @@ mod tests {
             history.reserve_command(Uuid::now_v7(), &command),
             Err(crate::Error::ControlRejected { code, .. }) if code == "operation_id_collision"
         ));
+
         history
             .reserve_operation(first)
             .expect("rejected batch did not reserve its first identifier");

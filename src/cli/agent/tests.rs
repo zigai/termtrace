@@ -1,6 +1,17 @@
+use super::{
+    operations::{
+        actor_failure_retry, control_command_mutates, driver_error, driver_failure_from_error,
+        driver_failure_with_retry, driver_response_is_cacheable,
+    },
+    runtime::{bounded_response, serialized_size, DRIVER_RESPONSE_CACHE_BYTES},
+    serve,
+};
 use std::{collections::BTreeMap, io::Cursor, path::PathBuf};
-
 use termtrace_engine::Error;
+use termtrace_model::protocol::driver::{
+    DriverData, DriverMethod, DriverRequest, DriverResponse, DriverResult,
+    DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
+};
 use termtrace_model::{
     execution::environment::EnvironmentSpec,
     execution::event::EVENT_LOG_VERSION,
@@ -13,19 +24,6 @@ use termtrace_model::{
 };
 use uuid::Uuid;
 
-use super::{
-    operations::{
-        actor_failure_retry, control_command_mutates, driver_error, driver_failure_from_error,
-        driver_failure_with_retry, driver_response_is_cacheable,
-    },
-    runtime::{bounded_response, serialized_size, DRIVER_RESPONSE_CACHE_BYTES},
-    serve,
-};
-use termtrace_model::protocol::driver::{
-    DriverData, DriverMethod, DriverRequest, DriverResponse, DriverResult,
-    DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
-};
-
 #[test]
 fn blocked_capability_retains_remediation_in_driver_protocol() {
     let result = driver_failure_from_error(
@@ -37,6 +35,7 @@ fn blocked_capability_retains_remediation_in_driver_protocol() {
         },
         None,
     );
+
     assert!(matches!(
         result.as_ref(),
         DriverResult::Error {
@@ -60,8 +59,8 @@ fn bounded_valid_frame_is_streamed_and_followed_by_another_request() {
         )]),
         ..EnvironmentSpec::default()
     };
-
     environment.validate().expect("valid environment");
+
     let large_request = serde_json::to_vec(&DriverRequest {
         version: DRIVER_PROTOCOL_VERSION,
         request_id: large_request_id,
@@ -76,6 +75,7 @@ fn bounded_valid_frame_is_streamed_and_followed_by_another_request() {
         },
     })
     .expect("large request JSON");
+
     assert!(large_request.len() > 1024 * 1024);
 
     let hello_request_id = Uuid::now_v7();
@@ -99,6 +99,7 @@ fn bounded_valid_frame_is_streamed_and_followed_by_another_request() {
         .filter(|line| return !line.is_empty())
         .map(|line| return serde_json::from_slice::<DriverResponse>(line).expect("response"))
         .collect::<Vec<_>>();
+
     assert_eq!(responses.len(), 2);
     assert_eq!(responses[0].request_id, large_request_id);
     assert!(matches!(
@@ -175,8 +176,8 @@ fn oversized_response_is_replaced_with_a_bounded_error() {
             },
         },
     };
-
     let bounded = bounded_response(response);
+
     assert_eq!(bounded.request_id, request_id);
     assert!(serialized_size(&bounded).expect("bounded size") < 1024);
     assert!(matches!(
@@ -238,14 +239,18 @@ fn response_cache_is_evicted_by_total_encoded_bytes() {
         .split(|byte| return *byte == b'\n')
         .filter(|line| return !line.is_empty())
         .collect::<Vec<_>>();
+
     assert_eq!(lines.len(), 9);
+
     let response_bytes = lines
         .iter()
         .take(6)
         .map(|line| return line.len())
         .sum::<usize>();
+
     assert!(response_bytes > DRIVER_RESPONSE_CACHE_BYTES);
     assert!(response_bytes - lines[0].len() <= DRIVER_RESPONSE_CACHE_BYTES);
+
     for line in lines.iter().take(6) {
         let response: DriverResponse = serde_json::from_slice(line).expect("launch response");
         assert!(matches!(
@@ -255,12 +260,14 @@ fn response_cache_is_evicted_by_total_encoded_bytes() {
     }
 
     assert_eq!(lines[1], lines[6]);
+
     let collision: DriverResponse = serde_json::from_slice(lines[7]).expect("collision response");
     assert_eq!(collision.request_id, Uuid::from_u128(2));
     assert!(matches!(
         collision.result,
         DriverResult::Error { code, .. } if code == "request_id_collision"
     ));
+
     let evicted: DriverResponse = serde_json::from_slice(lines[8]).expect("evicted response");
     assert_eq!(evicted.request_id, Uuid::from_u128(1));
     assert!(matches!(
@@ -281,10 +288,9 @@ fn malformed_frames_are_rejected_without_echoing_payload() {
     .expect("request JSON");
 
     let mut output = Vec::new();
-
     serve(Cursor::new(request), &mut output).expect("serve unterminated request");
-
     let response: DriverResponse = serde_json::from_slice(&output).expect("response JSONL");
+
     assert_eq!(response.request_id, Uuid::nil());
     assert!(matches!(
         response.result,
@@ -299,8 +305,8 @@ fn malformed_frames_are_rejected_without_echoing_payload() {
 
     let mut output = Vec::new();
     serve(Cursor::new(malformed), &mut output).expect("serve malformed request");
-
     let response: DriverResponse = serde_json::from_slice(&output).expect("response JSONL");
+
     assert_eq!(response.request_id, Uuid::nil());
     assert!(matches!(
         response.result,
@@ -325,6 +331,7 @@ fn retryable_transport_failures_are_not_cached_by_request_id() {
             None,
         ),
     };
+
     assert!(!driver_response_is_cacheable(&response));
 
     let actor_response = DriverResponse {
@@ -339,6 +346,7 @@ fn retryable_transport_failures_are_not_cached_by_request_id() {
             None,
         ),
     };
+
     assert!(driver_response_is_cacheable(&actor_response));
 
     let deterministic = driver_error(
@@ -347,6 +355,7 @@ fn retryable_transport_failures_are_not_cached_by_request_id() {
         "session handle is not attached",
         None,
     );
+
     assert!(driver_response_is_cacheable(&deterministic));
 }
 

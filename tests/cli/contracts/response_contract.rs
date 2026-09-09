@@ -10,7 +10,6 @@ fn agent_success_is_one_compact_versioned_object() {
         .args(["--response", "agent", "version"])
         .output()
         .expect("run version command");
-
     assert!(
         output.status.success(),
         "{}",
@@ -21,8 +20,10 @@ fn agent_success_is_one_compact_versioned_object() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+
     let response = compact_json_line(&output.stdout);
     validate_json_value("cli-response.schema.json", &response);
+
     assert_eq!(response["v"], 1);
     assert_eq!(response["ok"], true);
     assert_eq!(response["type"], "version");
@@ -40,8 +41,10 @@ fn explicit_agent_help_is_versioned_but_default_help_stays_readable() {
         .output()
         .expect("run agent help");
     assert!(agent.status.success());
+
     let response = compact_json_line(&agent.stdout);
     validate_json_value("cli-response.schema.json", &response);
+
     assert_eq!(response["v"], 1);
     assert_eq!(response["ok"], true);
     assert_eq!(response["type"], "help");
@@ -63,10 +66,11 @@ fn agent_argument_failure_keeps_stdout_strict() {
         .args(["--response", "agent", "not-a-command"])
         .output()
         .expect("run invalid command");
-
     assert!(!output.status.success());
+
     let response = compact_json_line(&output.stdout);
     validate_json_value("cli-response.schema.json", &response);
+
     assert_eq!(response["v"], 1);
     assert_eq!(response["ok"], false);
     assert_eq!(response["type"], "arguments");
@@ -86,7 +90,9 @@ fn environment_selects_agent_and_flag_takes_precedence() {
         .output()
         .expect("run agent version");
     assert!(agent.status.success());
+
     let response = compact_json_line(&agent.stdout);
+
     assert_eq!(response["v"], 1);
     assert_eq!(response["ok"], true);
     assert_eq!(response["type"], "version");
@@ -113,9 +119,10 @@ fn mutation_failure_has_retry_state_without_second_stdout_error() {
         ])
         .output()
         .expect("run missing-session action");
-
     assert!(!output.status.success());
+
     let response = compact_json_line(&output.stdout);
+
     assert_eq!(response["ok"], false);
     assert!(response["applied"].is_string());
     assert!(response["retry"].is_string());
@@ -137,7 +144,9 @@ fn full_preserves_legacy_forensic_payload_and_quiet_is_exit_only() {
         .output()
         .expect("run full version");
     assert!(full.status.success());
+
     let value = compact_json_line(&full.stdout);
+
     assert!(value.get("termtrace_version").is_some());
     assert!(value.get("ok").is_none());
 

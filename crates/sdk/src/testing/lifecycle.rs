@@ -151,7 +151,6 @@ impl TerminalTest {
         let LifecycleState::Open(session) = &self.state else {
             return None;
         };
-
         return Some(session);
     }
 
@@ -161,7 +160,6 @@ impl TerminalTest {
         let LifecycleState::Open(session) = &mut self.state else {
             return None;
         };
-
         return Some(session);
     }
 
@@ -177,7 +175,6 @@ impl TerminalTest {
         ) {
             return None;
         }
-
         return Some(&self.attempt_directory);
     }
 
@@ -235,7 +232,6 @@ impl TerminalTest {
         options: ScreenSnapshotOptions,
     ) -> StdResult<(), TerminalAssertionError> {
         let path = snapshot_path(&self.snapshot_root, name)?;
-
         return assert_snapshot_file(frame, &path, profile, options, self.update_snapshots);
     }
 
@@ -258,15 +254,14 @@ impl TerminalTest {
                 retained: true,
             };
             self.state = LifecycleState::Finalized(report.clone());
-
             return report;
         };
-
         let canonical_session = session.path().to_path_buf();
         let session_id = session.session_id();
         let body_passed = outcome == TestOutcome::Passed;
         let mut secondary_failures: Vec<SecondaryFailure> = Vec::new();
         let mut verified_artifacts: Vec<PathBuf> = Vec::new();
+
         let finalization_started = Instant::now();
         let stop_failure = stop_session_with_timeout(
             &session,
@@ -304,6 +299,7 @@ impl TerminalTest {
         };
 
         let mut failure_artifacts_captured = false;
+
         if completed && !body_passed {
             capture_failure_artifacts(
                 &session,
@@ -317,7 +313,6 @@ impl TerminalTest {
 
         if completed {
             let verification = session.evidence().verify(VerificationLevel::Content);
-
             if verification.valid {
                 verified_artifacts.push(canonical_session.clone());
             } else {
@@ -344,6 +339,7 @@ impl TerminalTest {
             EvidencePolicy::Always | EvidencePolicy::Manual => true,
             EvidencePolicy::OnFailure => !body_passed || !secondary_failures.is_empty(),
         };
+
         if !retained {
             let discard_failure = session
                 .discard_completed()
@@ -359,7 +355,6 @@ impl TerminalTest {
                     let Some(parent) = self.attempt_directory.parent() else {
                         return Ok(());
                     };
-
                     return Ok(sync_directory(parent)?);
                 })
                 .err();
@@ -378,6 +373,7 @@ impl TerminalTest {
             secondary_failures,
             retained,
         };
+
         if retained {
             match write_evidence_manifest(
                 &self.attempt_directory,
@@ -393,7 +389,6 @@ impl TerminalTest {
         }
 
         self.state = LifecycleState::Finalized(report.clone());
-
         return report;
     }
 }
@@ -439,12 +434,10 @@ pub fn run_terminal_test<T, E>(
             if report.secondary_failures.is_empty() {
                 return Ok(value);
             }
-
             return Err(TestFailure::Finalization(report));
         }
         Ok(Err(error)) => {
             let finalization = test.finalize(TestOutcome::Error);
-
             return Err(TestFailure::Body {
                 error,
                 finalization,
@@ -472,7 +465,6 @@ fn stop_session_with_timeout(session: &Session, timeout: Duration) -> StdResult<
     let timing = ExchangeTiming::deadline(timeout).map_err(|error| return error.to_string())?;
     let response =
         exchange(session.path(), &request, timing).map_err(|error| return error.to_string())?;
-
     match response.result {
         ControlResult::Ok { .. } => return Ok(()),
         ControlResult::Error { code, message, .. } => {
@@ -524,6 +516,7 @@ mod tests {
     fn snapshot_names_cannot_escape_the_reviewed_root() {
         let error = snapshot_path(Path::new("snapshots"), "../escape")
             .expect_err("path traversal must fail");
+
         assert!(error.to_string().contains("terminal_snapshot_name"));
     }
 }

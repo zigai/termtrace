@@ -1,9 +1,8 @@
 //! Terminal presentation parsing and semantic-state tracking.
 
+use super::{control::MutationHistory, input::apply_input, model::TerminalGeometry};
+use crate::{Error, Result};
 use std::{io::Write, mem::take, slice};
-
-use uuid::Uuid;
-
 use termtrace_evidence::event_log::EventLogWriter;
 use termtrace_model::{
     execution::event::{Event, InputDescriptor, InputKind, InputSource},
@@ -13,9 +12,7 @@ use termtrace_model::{
 use termtrace_terminal::{
     GhosttyVt, PresentationAction, PresentationTracker, PresentationTransition, QueryTracker,
 };
-
-use super::{control::MutationHistory, input::apply_input, model::TerminalGeometry};
-use crate::{Error, Result};
+use uuid::Uuid;
 
 pub(super) struct LiveTerminal {
     pub(super) semantic: GhosttyVt,
@@ -129,6 +126,7 @@ pub(super) fn process_semantic_bytes(
                     response: ByteString::from(response.as_slice()),
                     responder: "pinned-libghostty-vt".to_owned(),
                 })?;
+
                 apply_input(
                     writer,
                     event_log,
@@ -178,10 +176,11 @@ pub(super) struct TextRegion {
 
 pub(super) fn find_text_regions(state: &SemanticState, needle: &str) -> Vec<TextRegion> {
     let mut regions = Vec::new();
+
     for row in &state.grid {
         let mut text = String::new();
-
         let mut cells = Vec::with_capacity(row.cells.len());
+
         for cell in &row.cells {
             let start = text.len();
 
@@ -205,6 +204,7 @@ pub(super) fn find_text_regions(state: &SemanticState, needle: &str) -> Vec<Text
             let (last, concealed) = matching.fold((first, first.3), |(_, concealed), cell| {
                 return (cell, concealed || cell.3);
             });
+
             regions.push(TextRegion {
                 start_column: first.2,
                 end_column: last.2.saturating_add(1),

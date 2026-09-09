@@ -1,9 +1,7 @@
+use crate::{Error, Result};
 use std::path::Path;
-
 use termtrace_evidence::event_log::{EventLog, EventLogCursor};
 use termtrace_model::{execution::event::Event, terminal::replay::SourceRange};
-
-use crate::{Error, Result};
 
 /// Resolve optional CLI bounds against a canonical event-log endpoint.
 ///
@@ -32,6 +30,7 @@ pub fn resolve_source_range(
 
     let start = start.unwrap_or(0);
     let end = end.unwrap_or(source_end);
+
     if start >= end {
         return Err(range_error(format!(
             "source range must be non-empty with FROM < TO, got {start}..{end}"
@@ -49,7 +48,6 @@ pub fn resolve_source_range(
             "source range ends at {end} ns after the exclusive source endpoint {source_end} ns"
         )));
     }
-
     return Ok(Some(SourceRange {
         start_monotonic_ns: start,
         end_monotonic_ns: end,
@@ -88,7 +86,6 @@ pub fn resolve_source_selection(
         Some(label) => Some(resolve_marker(log, label)?),
         None => start,
     };
-
     let end = match to_marker {
         Some(label) => Some(resolve_marker(log, label)?),
         None => end,
@@ -243,7 +240,6 @@ fn resolve_cursor_source_selection(
         .map(|label| return resolve_found_marker(label, from))
         .transpose()?
         .or(start);
-
     let end = to_marker
         .map(|label| return resolve_found_marker(label, to))
         .transpose()?

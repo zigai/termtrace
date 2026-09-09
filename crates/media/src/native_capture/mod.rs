@@ -10,12 +10,11 @@ mod portal;
 pub(crate) mod process;
 mod profile;
 mod resources;
+#[cfg(test)]
+mod tests;
 mod util;
 mod validation;
 mod worker;
-
-#[cfg(test)]
-mod tests;
 
 pub use crate::{Error, Result};
 pub use capability::native_capabilities;

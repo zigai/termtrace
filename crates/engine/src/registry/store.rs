@@ -1,6 +1,5 @@
-use directories::BaseDirs;
-
 use super::*;
+use directories::BaseDirs;
 
 impl SessionRegistry {
     /// Open the default owner-only session registry.
@@ -13,7 +12,6 @@ impl SessionRegistry {
     /// is not an owner-only real directory.
     pub fn open_default() -> Result<Self> {
         let root = default_state_root()?;
-
         return Self::open(root);
     }
 
@@ -73,12 +71,10 @@ impl SessionRegistry {
 
         if let Err(source) = fs::rename(&temporary, &path) {
             let _cleanup = fs::remove_file(&temporary);
-
             return Err(Error::Filesystem { path, source });
         }
 
         sync_parent_directory(&path)?;
-
         return Ok(entry);
     }
 
@@ -92,14 +88,12 @@ impl SessionRegistry {
 
         let _lock = self.lock()?;
         let path = self.entry_path(alias);
-
         if path.exists() {
             return Err(registry_error(
                 "reserve session alias",
                 "alias is already reserved or registered",
             ));
         }
-
         return Ok(());
     }
 
@@ -151,13 +145,13 @@ impl SessionRegistry {
         }
 
         let manifest = read_manifest(&canonical)?;
+
         if manifest.session_id != entry.session_id {
             return Err(registry_error(
                 "resolve registry entry",
                 "session manifest identity no longer matches the registry binding",
             ));
         }
-
         return Ok(entry);
     }
 
@@ -216,6 +210,7 @@ impl SessionRegistry {
     /// securely. Broken session evidence is represented as a lifecycle row.
     pub fn list(&self, include_all: bool) -> Result<Vec<RegistryListEntry>> {
         let mut rows = Vec::new();
+
         for item in fs::read_dir(&self.directory).map_err(|source| {
             return Error::Filesystem {
                 path: self.directory.clone(),
@@ -230,7 +225,6 @@ impl SessionRegistry {
             })?;
 
             let path = item.path();
-
             if path.extension() != Some(OsStr::new("json")) {
                 continue;
             }
@@ -249,7 +243,6 @@ impl SessionRegistry {
         }
 
         rows.sort_by(|left, right| return left.alias.cmp(&right.alias));
-
         return Ok(rows);
     }
 
@@ -281,7 +274,6 @@ impl SessionRegistry {
         })?;
 
         sync_parent_directory(&path)?;
-
         return Ok(entry);
     }
 
@@ -297,8 +289,8 @@ impl SessionRegistry {
                 source,
             };
         })?;
-
         validate_owner_directory(&canonical)?;
+
         let manifest = read_manifest(&canonical)?;
 
         if manifest.format != SESSION_MANIFEST_FORMAT
@@ -363,7 +355,6 @@ impl SessionRegistry {
                     source,
                 };
             })?;
-
         validate_entry_file(&path, &file)?;
 
         return Flock::lock(file, FlockArg::LockExclusive).map_err(|(_, error)| {
@@ -385,6 +376,7 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         lifecycle: RegistryLifecycle::MissingEvidence,
         diagnostic: None,
     };
+
     if entry.format != REGISTRY_ENTRY_FORMAT
         || entry.version != REGISTRY_ENTRY_VERSION
         || entry.control_protocol_version != CONTROL_PROTOCOL_VERSION
@@ -393,14 +385,12 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         row.lifecycle = RegistryLifecycle::Incompatible;
         row.diagnostic =
             Some("registry format, protocol, or process identity is incompatible".to_owned());
-
         return row;
     }
 
     let session = entry.session_path();
     if let Err(error) = validate_owner_directory(&session) {
         row.diagnostic = Some(error.to_string());
-
         return row;
     }
 
@@ -408,35 +398,30 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         Ok(path) if path.as_os_str().as_bytes() == entry.canonical_session.as_bytes() => path,
         Ok(_) => {
             row.diagnostic = Some("canonical session path changed after registration".to_owned());
-
             return row;
         }
         Err(error) => {
             row.diagnostic = Some(error.to_string());
-
             return row;
         }
     };
+
     let manifest = match read_manifest(&canonical) {
         Ok(manifest) => manifest,
         Err(error) => {
             row.diagnostic = Some(error.to_string());
-
             return row;
         }
     };
     row.command = Some(manifest.command.clone());
-
     row.working_directory
         .clone_from(&manifest.working_directory);
-
     row.geometry = Some(manifest.geometry.clone());
     row.started_unix_ns = Some(manifest.started_unix_ns);
 
     if manifest.session_id != entry.session_id {
         row.lifecycle = RegistryLifecycle::IdentityMismatch;
         row.diagnostic = Some("manifest session ID differs from registry binding".to_owned());
-
         return row;
     }
 
@@ -445,26 +430,24 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         match read_completion(&canonical) {
             Ok(completion) if completion.session_id == entry.session_id => {
                 row.lifecycle = RegistryLifecycle::Completed;
-
                 return row;
             }
             Ok(_) => {
                 row.lifecycle = RegistryLifecycle::IdentityMismatch;
                 row.diagnostic =
                     Some("completion session ID differs from registry binding".to_owned());
-
                 return row;
             }
             Err(error) => {
                 row.lifecycle = RegistryLifecycle::MissingEvidence;
                 row.diagnostic = Some(error.to_string());
-
                 return row;
             }
         }
     }
 
     let responsive_identity = recorder_identity(&canonical);
+
     if let Some(identity) = entry.recorder_pid.zip(entry.recorder_process_start_ticks) {
         if responsive_identity == Some(identity) {
             row.lifecycle = RegistryLifecycle::Live;
@@ -531,7 +514,6 @@ pub(super) fn validate_owner_directory(path: &Path) -> Result<()> {
             source,
         };
     })?;
-
     let mode = metadata.mode() & 0o777;
 
     if metadata.file_type().is_symlink()
@@ -545,7 +527,6 @@ pub(super) fn validate_owner_directory(path: &Path) -> Result<()> {
             mode,
         });
     }
-
     return Ok(());
 }
 
@@ -560,7 +541,6 @@ pub(super) fn read_registry_record_nofollow(path: &Path) -> Result<RegistryRecor
                 source,
             };
         })?;
-
     validate_entry_file(path, &file)?;
 
     return serde_json::from_reader(file).map_err(|source| {
@@ -599,7 +579,6 @@ pub(super) fn validate_entry_file(path: &Path, file: &File) -> Result<()> {
             "entry must be an owner-owned regular file with mode 0600",
         ));
     }
-
     return Ok(());
 }
 
@@ -623,7 +602,6 @@ pub(super) fn sync_parent_directory(path: &Path) -> Result<()> {
     let parent = path.parent().ok_or_else(|| {
         return registry_error("sync registry parent", "path has no parent directory");
     })?;
-
     return sync_directory(parent);
 }
 

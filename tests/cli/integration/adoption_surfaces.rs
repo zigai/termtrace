@@ -29,7 +29,6 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("line fixture ready");
-
     wait_for_screen(
         line.path(),
         ScreenPredicate::All {
@@ -80,12 +79,14 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("structural screen predicate");
+
     let state_hash = match send_request(line.path(), &ControlRequest::new(ControlCommand::Snapshot))
         .expect("line snapshot")
     {
         ControlData::Snapshot { state_hash, .. } => state_hash,
         other => panic!("unexpected snapshot response: {other:?}"),
     };
+
     wait_for_screen(
         line.path(),
         ScreenPredicate::StateHash {
@@ -104,7 +105,6 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("line fixture output");
-
     line.complete(Duration::from_secs(5))
         .expect("line completion");
 
@@ -122,15 +122,12 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("alternate fixture ready");
-
     alternate
         .keyboard()
         .press(NamedKey::ArrowRight, KeyModifiers::default())
         .expect("mode-aware arrow");
-
     wait_for_output(alternate.path(), b"INPUT_HEX=", Duration::from_secs(5))
         .expect("alternate fixture input evidence");
-
     alternate
         .complete(Duration::from_secs(5))
         .expect("alternate completion");
@@ -153,11 +150,13 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("completed final state is stable");
+
     assert!(final_wait.matched);
     assert!(matches!(
         final_wait.quality,
         ScreenWaitQuality::ChildCompleted | ScreenWaitQuality::OutputClosed
     ));
+
     final_state
         .complete(Duration::from_secs(5))
         .expect("final-state completion");
@@ -190,14 +189,18 @@ fn agent_skill_discovery_uses_root_and_direct_help() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let skill = root.join("skills/termtrace");
     let instructions = fs_err::read_to_string(skill.join("SKILL.md")).expect("skill instructions");
+
     assert!(!instructions.trim().is_empty());
     assert!(instructions.contains("termtrace"));
+
     let root_help = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
         .arg("--help")
         .output()
         .expect("read live root help");
     assert!(root_help.status.success());
+
     let root_help = String::from_utf8_lossy(&root_help.stdout);
+
     assert!(!root_help.contains("commands --json"));
     assert!(root_help.contains("presented screen"));
     assert!(root_help.contains("canonical output"));
@@ -222,10 +225,12 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
         .expect("launch through Rust facade");
 
     wait_for_output(session.path(), b"READY", Duration::from_secs(5)).expect("ready output");
+
     let frame = session
         .screen()
         .frame(ScreenProjectionRequest::default())
         .expect("screen frame");
+
     assert_eq!(frame.geometry.cols, 90);
     assert_eq!(frame.geometry.rows, 25);
     assert!(session
@@ -235,6 +240,7 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
         .frame
         .viewport_text
         .contains("READY"));
+
     session
         .screen()
         .wait(
@@ -245,6 +251,7 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
             Duration::from_secs(5),
         )
         .expect("facade screen wait");
+
     assert_eq!(
         session
             .screen()
@@ -258,15 +265,17 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
             .quality,
         StableCaptureQuality::Stable
     );
+
     session
         .keyboard()
         .text("client\n")
         .expect("typed client input");
-
     wait_for_output(session.path(), b"<client>", Duration::from_secs(5)).expect("client output");
+
     let completion = session
         .complete(Duration::from_secs(5))
         .expect("completed client evidence");
+
     assert_eq!(completion.session_id, session.session_id());
     assert!(
         session
@@ -290,10 +299,12 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
             .expect("semantic diff")
             .changed
     );
+
     session
         .semantic()
         .diagnose(vec![DiagnosticCheck::Dirty], 50)
         .expect("semantic diagnosis");
+
     assert!(!session
         .events()
         .page(0, 32, true)
@@ -306,6 +317,7 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
 fn rust_facade_bridges_actor_shutdown_to_completion_publication() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("short-lived-session");
+
     Command::cargo_bin("termtrace")
         .expect("binary should build")
         .args(["record", "--no-input", "--out"])
@@ -324,13 +336,16 @@ fn rust_facade_bridges_actor_shutdown_to_completion_publication() {
     let listener = UnixListener::bind_addr(&address).expect("bind fake stopping control endpoint");
     let restore_source = pending_completion.clone();
     let restore_destination = completion.clone();
+
     let restore = thread::spawn(move || {
         let (mut connection, _) = listener.accept().expect("accept snapshot request");
         let mut request: Vec<u8> = Vec::new();
         connection
             .read_to_end(&mut request)
             .expect("read snapshot request");
+
         assert!(!request.is_empty(), "snapshot request was not dispatched");
+
         drop(connection);
 
         thread::sleep(Duration::from_millis(100));
@@ -343,11 +358,13 @@ fn rust_facade_bridges_actor_shutdown_to_completion_publication() {
             .expect("bridge observation across completion publication");
 
     restore.join().expect("join completion publisher");
+
     assert!(observation.source_completed);
 
     fs::rename(&completion, &pending_completion).expect("restage delayed completion");
     let restore_source = pending_completion;
     let restore_destination = completion;
+
     let restore = thread::spawn(move || {
         thread::sleep(Duration::from_millis(100));
 
@@ -362,6 +379,7 @@ fn rust_facade_bridges_actor_shutdown_to_completion_publication() {
     .expect("bridge semantic state across completion publication");
 
     restore.join().expect("join semantic completion publisher");
+
     assert_eq!(state_hash, observation.state_hash);
 }
 
@@ -384,6 +402,7 @@ fn rust_facade_attach_retains_the_canonical_session_path() {
     recording
         .complete(Duration::from_secs(5))
         .expect("complete recording");
+
     let canonical = recording
         .path()
         .canonicalize()
@@ -398,6 +417,7 @@ fn rust_facade_attach_retains_the_canonical_session_path() {
     symlink(temporary.path(), &reference).expect("retarget session link");
 
     assert_eq!(attached.path(), canonical);
+
     attached
         .semantic()
         .inspect(StatePoint::LatestPresented, false)

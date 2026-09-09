@@ -1,12 +1,10 @@
 //! Aggregate identity, lifecycle, and bundle contracts for full tmux recordings.
 
-use std::collections::BTreeMap;
-
+use crate::{artifact::metadata::ArtifactMember, value::ByteString};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use uuid::Uuid;
-
-use crate::{artifact::metadata::ArtifactMember, value::ByteString};
 
 /// Stable aggregate tmux recording manifest format.
 pub const TMUX_RECORDING_FORMAT: &str = "termtrace-tmux-recording";

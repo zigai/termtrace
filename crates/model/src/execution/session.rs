@@ -1,11 +1,5 @@
 //! Canonical session manifest, completion, and verification contracts.
 
-use std::path::PathBuf;
-
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::{
     execution::environment::ChildEnvironmentPolicy,
     execution::event_log::{DurabilityPolicy, DurabilityRecord},
@@ -13,6 +7,10 @@ use crate::{
     value::pagination::OutputPage,
     value::ByteString,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use uuid::Uuid;
 
 /// Session manifest format identifier.
 pub const SESSION_MANIFEST_FORMAT: &str = "termtrace-session";
@@ -467,6 +465,7 @@ mod tests {
             effective_config_hash: "effective-hash".to_owned(),
         };
         let encoded = serde_json::to_value(&provenance).expect("profile provenance JSON");
+
         assert_eq!(
             encoded.get("replay_profile"),
             Some(&serde_json::json!(GHOSTTY_REPLAY_PROFILE_NAME))
@@ -487,6 +486,7 @@ mod tests {
             "effective_config": "ghostty-config.txt",
             "effective_config_hash": "obsolete-overloaded-hash"
         });
+
         assert!(serde_json::from_value::<GhosttyVisualProvenance>(obsolete).is_err());
 
         let misspelled_override = serde_json::json!({
@@ -503,6 +503,7 @@ mod tests {
             "replay_profile_hash": "a".repeat(64),
             "effective_config_hash": "b".repeat(64)
         });
+
         assert!(serde_json::from_value::<GhosttyVisualProvenance>(misspelled_override).is_err());
     }
 
@@ -516,6 +517,7 @@ mod tests {
             }),
         };
         let encoded = serde_json::to_value(&provenance).expect("geometry provenance JSON");
+
         assert!(encoded.get("effective_config_hash").is_none());
         assert!(encoded.get("ghostty_config_hash").is_none());
 
@@ -528,6 +530,7 @@ mod tests {
                 obsolete_field.to_owned(),
                 serde_json::json!("obsolete-hash"),
             );
+
             assert!(serde_json::from_value::<GeometryProvenance>(obsolete).is_err());
         }
     }

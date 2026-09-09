@@ -7,7 +7,6 @@ fn fitted_geometry_requires_a_viewport() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("missing-viewport");
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-
     command
         .args(["record", "--geometry", "fit", "--out"])
         .arg(session)
@@ -59,7 +58,6 @@ fn record_forwards_and_audits_standard_input() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("interactive");
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-
     command
         .args(["record", "--out"])
         .arg(&session)
@@ -84,8 +82,8 @@ fn record_forwards_and_audits_standard_input() {
             } => return Some((*operation_id, data.as_bytes())),
             _ => return None,
         });
-
     let (operation_id, bytes) = input_intent.expect("input intent");
+
     assert_eq!(bytes, b"hello\n");
     assert!(recording.events.iter().any(|record| matches!(
         record.event,

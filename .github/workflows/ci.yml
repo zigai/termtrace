@@ -33,7 +33,7 @@ jobs:
       - name: Install cargo-statement-spacing
         run: |
           cargo install cargo-dylint dylint-link --version '=6.0.4' --locked
-          cargo install --git https://github.com/zigai/rust-statement-spacing.git cargo-statement-spacing --locked
+          cargo install --git https://github.com/zigai/rust-statement-spacing.git cargo-statement-spacing --tag v0.4.0 --locked
       - run: scripts/ci-run.sh rust scripts/ci-rust.sh
       - name: Upload Rust failure evidence
         if: failure()

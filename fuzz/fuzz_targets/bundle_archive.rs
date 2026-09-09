@@ -7,7 +7,6 @@ use std::{
     os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
     path::PathBuf,
 };
-
 use libfuzzer_sys::fuzz_target;
 use tempfile::TempDir;
 use termtrace_evidence::bundle::verify_archive;
@@ -39,6 +38,7 @@ impl BundleHarness {
             .expect("open bundle fuzz input");
         archive.write_all(bytes).expect("write bundle fuzz input");
         drop(archive);
+
         let _verification = verify_archive(&self.archive, None);
     }
 }

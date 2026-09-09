@@ -1,7 +1,7 @@
 //! Runtime capability composition and semantic-engine probing.
 
+use crate::{Error, Result};
 use std::{collections::BTreeMap, env};
-
 use termtrace_model::{
     protocol::capability::{
         Capability, CapabilityReport, CapabilityStatus, CAPABILITY_IDS, CORE_CAPABILITY,
@@ -10,8 +10,6 @@ use termtrace_model::{
     terminal::replay::GHOSTTY_REVISION,
 };
 use termtrace_terminal::GhosttyVt;
-
-use crate::{Error, Result};
 
 /// Require one capability from an exact bounded report.
 pub fn require(report: &CapabilityReport, id: &str) -> Result<()> {
@@ -81,6 +79,7 @@ pub fn probe_capabilities(external: impl IntoIterator<Item = Capability>) -> Cap
     };
 
     let mut capabilities: Vec<Capability> = Vec::with_capacity(CAPABILITY_IDS.len());
+
     for id in CAPABILITY_IDS {
         let capability = match *id {
             CORE_CAPABILITY => core.clone(),
@@ -94,6 +93,7 @@ pub fn probe_capabilities(external: impl IntoIterator<Item = Capability>) -> Cap
                 );
             }),
         };
+
         capabilities.push(capability);
     }
 
@@ -161,7 +161,6 @@ mod tests {
 
         let error =
             require(&report, NATIVE_VIDEO_CAPABILITY).expect_err("blocked capability must fail");
-
         let Error::CapabilityBlocked {
             id,
             code,
@@ -171,6 +170,7 @@ mod tests {
         else {
             panic!("unexpected error: {error}");
         };
+
         assert_eq!(id, NATIVE_VIDEO_CAPABILITY);
         assert_eq!(code, "native_video_dependency_missing");
         assert_eq!(detail, "missing tools: ffmpeg");

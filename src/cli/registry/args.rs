@@ -1,6 +1,5 @@
-use std::path::PathBuf;
-
 use clap::{Args, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct RegistryArgs {
