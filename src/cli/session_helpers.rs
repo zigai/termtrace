@@ -53,7 +53,7 @@ pub(super) fn resolve_session(target: PathBuf) -> Result<ResolvedSessionRef> {
         });
     }
 
-    if bytes.contains(&b'/') || bytes.starts_with(b".") {
+    if bytes.contains(&b'/') || bytes.starts_with(b".") || target.exists() {
         return Ok(resolve_path_lifecycle(target));
     }
 
@@ -94,7 +94,7 @@ pub(super) fn resolve_session_path(target: PathBuf) -> Result<PathBuf> {
         return Ok(entry.session_path());
     }
 
-    if bytes.contains(&b'/') || bytes.starts_with(b".") {
+    if bytes.contains(&b'/') || bytes.starts_with(b".") || target.exists() {
         return Ok(target);
     }
 
