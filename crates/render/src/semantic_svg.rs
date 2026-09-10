@@ -503,6 +503,13 @@ impl Display for HexColor {
     }
 }
 
+fn is_xml_10_char(ch: char) -> bool {
+    return matches!(
+        ch,
+        '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}'
+    );
+}
+
 struct EscapedXml<'text>(&'text str);
 
 impl Display for EscapedXml<'_> {
@@ -514,6 +521,7 @@ impl Display for EscapedXml<'_> {
                 '>' => f.write_str("&gt;")?,
                 '"' => f.write_str("&quot;")?,
                 '\'' => f.write_str("&apos;")?,
+                ch if !is_xml_10_char(ch) => f.write_char(' ')?,
                 _ => f.write_char(ch)?,
             }
         }
@@ -641,5 +649,20 @@ mod tests {
         for grapheme in ["A", "──", "▀\u{fe0f}", ""] {
             assert!(!is_terminal_graphic(grapheme));
         }
+    }
+
+    #[test]
+    fn control_characters_sanitize_to_valid_xml() {
+        let mut terminal = GhosttyVt::new(5, 1, 0).expect("create terminal");
+        terminal.write(b"A\x11\x12\x13B");
+        let state = terminal.snapshot().expect("snapshot terminal");
+        let svg = render_svg(&state).expect("render SVG with control characters");
+        let svg_str = String::from_utf8(svg).expect("valid UTF-8 SVG");
+
+        assert!(!svg_str.contains("\u{11}"));
+        assert!(!svg_str.contains("\u{12}"));
+        assert!(!svg_str.contains("\u{13}"));
+
+        let _png = render_png(&state).expect("render PNG parses deterministic SVG cleanly");
     }
 }
