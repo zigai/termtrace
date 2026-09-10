@@ -34,6 +34,7 @@ pub fn diff_session_states_with_semantic_states(
     from: StatePoint,
     to: StatePoint,
 ) -> Result<(SemanticDiff, SemanticState, SemanticState)> {
+    validate_diff_endpoints(&from, &to)?;
     let selectors = [
         state_selector_for_session(session, &from, None)?,
         state_selector_for_session(session, &to, None)?,
@@ -45,6 +46,13 @@ pub fn diff_session_states_with_semantic_states(
     let from_inspection = inspections
         .pop()
         .ok_or_else(|| return diff_error("missing earlier diff endpoint"))?;
+
+    if from_inspection.record.state_id > to_inspection.record.state_id {
+        return Err(diff_error(format!(
+            "inverted diff endpoints: earlier endpoint resolved to state {} but later endpoint resolved to state {}",
+            from_inspection.record.state_id, to_inspection.record.state_id
+        )));
+    }
 
     return Ok(diff_inspections_with_semantic_states(
         from,
@@ -64,6 +72,7 @@ pub fn diff_states_with_semantic_states(
     from: StatePoint,
     to: StatePoint,
 ) -> Result<(SemanticDiff, SemanticState, SemanticState)> {
+    validate_diff_endpoints(&from, &to)?;
     let mut inspections = inspect_points(log, &[from.clone(), to.clone()])?;
     let to_inspection = inspections
         .pop()
@@ -72,12 +81,49 @@ pub fn diff_states_with_semantic_states(
         .pop()
         .ok_or_else(|| return diff_error("missing earlier diff endpoint"))?;
 
+    if from_inspection.record.state_id > to_inspection.record.state_id {
+        return Err(diff_error(format!(
+            "inverted diff endpoints: earlier endpoint resolved to state {} but later endpoint resolved to state {}",
+            from_inspection.record.state_id, to_inspection.record.state_id
+        )));
+    }
+
     return Ok(diff_inspections_with_semantic_states(
         from,
         to,
         from_inspection,
         to_inspection,
     ));
+}
+
+fn validate_diff_endpoints(from: &StatePoint, to: &StatePoint) -> Result<()> {
+    match (from, to) {
+        (
+            StatePoint::EventSeq { event_seq: from_seq },
+            StatePoint::EventSeq { event_seq: to_seq },
+        ) if from_seq > to_seq => {
+            return Err(diff_error(format!(
+                "inverted diff range: from-event-seq ({from_seq}) > to-event-seq ({to_seq})"
+            )));
+        }
+        (
+            StatePoint::StateId { state_id: from_id },
+            StatePoint::StateId { state_id: to_id },
+        ) if from_id > to_id => {
+            return Err(diff_error(format!(
+                "inverted diff range: from-state ({from_id}) > to-state ({to_id})"
+            )));
+        }
+        (
+            StatePoint::MonotonicNs { monotonic_ns: from_ns },
+            StatePoint::MonotonicNs { monotonic_ns: to_ns },
+        ) if from_ns > to_ns => {
+            return Err(diff_error(format!(
+                "inverted diff range: from-at ({from_ns}) > to-at ({to_ns})"
+            )));
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Diff two already-replayed state inspections directly without re-reading or replaying the log.
