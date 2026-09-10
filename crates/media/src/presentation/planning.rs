@@ -714,6 +714,12 @@ pub(super) fn materialize_planned_source(
         }),
         PresentationSource::Semantic { plan } => {
             let (video, _manifest) = materialize_semantic_video(plan, staging)?;
+            let video = video.canonicalize().map_err(|source| {
+                return Error::Filesystem {
+                    path: video,
+                    source,
+                };
+            })?;
             Ok(video)
         }
     };
