@@ -676,9 +676,8 @@ impl SessionActor<'_> {
                     &mut self.event_log,
                     request_id,
                     ProcessSignal::Terminate,
-                    false,
+                    true,
                 )?;
-
                 if self.host_signal_kill_deadline.is_none() {
                     self.host_signal_kill_deadline =
                         Some(Instant::now() + HOST_SIGNAL_GRACE_PERIOD);

@@ -16,7 +16,16 @@ pub(in crate::cli) fn run_restart(
     let timeout = Duration::from_millis(arguments.timeout_ms);
 
     if !predecessor.join("completion.json").is_file() {
-        request(&predecessor, ControlCommand::Stop).into_diagnostic()?;
+        if let Err(error) = request(&predecessor, ControlCommand::Stop) {
+            if !matches!(
+                error,
+                termtrace_sdk::Error::ControlUnavailable { .. }
+                    | termtrace_sdk::Error::ControlTimeout { .. }
+                    | termtrace_sdk::Error::ControlTransport { .. }
+            ) {
+                return Err(error).into_diagnostic();
+            }
+        }
     }
 
     let completion = wait_for_completion(&predecessor, timeout).into_diagnostic()?;

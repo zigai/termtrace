@@ -34,7 +34,7 @@ use termtrace_model::{
     terminal::state::KeyModifiers,
     value::ByteString,
 };
-use termtrace_sdk::{send_request, Session, StableCaptureOptions, Terminal};
+use termtrace_sdk::{send_request, Error as SdkError, Session, StableCaptureOptions, Terminal};
 use uuid::Uuid;
 
 /// Execute a scenario in a fresh canonical session.
@@ -393,11 +393,22 @@ fn execute_step(
         ScenarioStep::Stop {} => {
             let request = ControlRequest::new(ControlCommand::Stop);
             request_ids.push(request.request_id);
+            let stopped_already = session.path().join("completion.json").is_file();
+
+            if !stopped_already {
+                match session.send(&request) {
+                    Ok(_) => {}
+                    Err(SdkError::ControlUnavailable { lifecycle, .. })
+                        if lifecycle == "completed"
+                            || session.path().join("completion.json").is_file() => {}
+                    Err(error) => {
+                        return Err(step_failure(index, step, request_ids.clone(), error.to_string()));
+                    }
+                }
+            }
+
             session
-                .send(&request)
-                .and_then(|_| {
-                    return session.complete(Duration::from_millis(scenario.launch.timeout_ms));
-                })
+                .complete(Duration::from_millis(scenario.launch.timeout_ms))
                 .map_err(|error| {
                     return step_failure(index, step, request_ids.clone(), error.to_string());
                 })?;
