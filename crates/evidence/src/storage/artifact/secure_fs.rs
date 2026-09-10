@@ -72,12 +72,16 @@ pub fn create_private_directory(path: &Path) -> Result<()> {
 }
 
 pub(super) fn open_parent_directory(path: &Path, create_missing: bool) -> Result<OwnedFd> {
-    let parent = path.parent().ok_or_else(|| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
-        };
-    })?;
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        Some(_) => Path::new("."),
+        None => {
+            return Err(Error::Filesystem {
+                path: path.to_path_buf(),
+                source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
+            });
+        }
+    };
     return open_directory_path(parent, create_missing);
 }
 
@@ -263,14 +267,33 @@ pub fn sync_directory(path: &Path) -> Result<()> {
 /// Returns an error when the paths violate the session boundary, the destination exists, or the
 /// rename and session-directory sync cannot be completed.
 pub fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> Result<()> {
-    if staging.parent() != Some(session) || destination.parent() != Some(session) {
+    let session_norm = if session.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        session
+    };
+    let staging_parent = staging.parent().map(|p| {
+        if p.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            p
+        }
+    });
+    let destination_parent = destination.parent().map(|p| {
+        if p.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            p
+        }
+    });
+    if staging_parent != Some(session_norm) || destination_parent != Some(session_norm) {
         return Err(Error::InvalidEvidence {
             reason: "staging and destination directories must be direct session children"
                 .to_owned(),
         });
     }
 
-    let directory = open_directory_path(session, false)?;
+    let directory = open_directory_path(session_norm, false)?;
     let staging_name = staging.file_name().ok_or_else(|| {
         return Error::InvalidEvidence {
             reason: "staging directory has no basename".to_owned(),
@@ -301,7 +324,7 @@ pub fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> R
         };
     })?;
 
-    return sync_fd(&directory, session);
+    return sync_fd(&directory, session_norm);
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -417,12 +440,16 @@ pub(super) fn write_secure_with_failure(
 }
 
 pub(crate) fn sync_parent_directory(path: &Path) -> Result<()> {
-    let parent = path.parent().ok_or_else(|| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
-        };
-    })?;
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        Some(_) => Path::new("."),
+        None => {
+            return Err(Error::Filesystem {
+                path: path.to_path_buf(),
+                source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
+            });
+        }
+    };
 
     let directory = open_directory_path(parent, false)?;
     return sync_fd(&directory, parent);

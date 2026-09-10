@@ -53,9 +53,11 @@ pub fn create(
         return validate_destination(destination, aggregate_manifest, &[source]);
     })?;
 
-    let parent = destination
-        .parent()
-        .ok_or_else(|| return Error::invalid("export destination has no parent"))?;
+    let parent = match destination.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        Some(_) => Path::new("."),
+        None => return Err(Error::invalid("export destination has no parent")),
+    };
     let staging = parent.join(format!(".tmux-export-{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
     let cleanup = DirectoryCleanup::new(staging.clone());

@@ -65,7 +65,11 @@ pub(super) fn export_with_capability_check(
     let parent = destination
         .parent()
         .ok_or_else(|| return plan_error("presentation destination must have a parent"))?;
-
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
     if check_capabilities {
         require_presentation_tools()?;
     }
@@ -115,7 +119,11 @@ pub fn preview(
     let parent = destination
         .parent()
         .ok_or_else(|| return plan_error("preview destination must have a parent"))?;
-
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
     require_presentation_tools()?;
     fs_err::create_dir_all(parent).map_err(|source| {
         return Error::Filesystem {

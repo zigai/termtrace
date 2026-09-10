@@ -43,9 +43,11 @@ impl BundleDraft {
         max_bytes: Option<u64>,
     ) -> Result<Self> {
         let destination = destination.into();
-        let parent = destination
-            .parent()
-            .ok_or_else(|| return Error::invalid("bundle path has no parent"))?;
+        let parent = match destination.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p,
+            Some(_) => Path::new("."),
+            None => return Err(Error::invalid("bundle path has no parent")),
+        };
         let name = destination
             .file_name()
             .ok_or_else(|| return Error::invalid("bundle path has no basename"))?;
@@ -207,10 +209,11 @@ impl BundleDraft {
 
         sync_directory(&self.staging)?;
 
-        let parent = self
-            .destination
-            .parent()
-            .ok_or_else(|| return Error::invalid("bundle path has no parent"))?;
+        let parent = match self.destination.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p,
+            Some(_) => Path::new("."),
+            None => return Err(Error::invalid("bundle path has no parent")),
+        };
         let staging_name = self
             .staging
             .file_name()

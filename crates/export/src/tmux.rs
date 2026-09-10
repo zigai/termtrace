@@ -63,9 +63,11 @@ pub fn create(
     let source_tracks = source_tracks(aggregate_manifest, &aggregate)?;
     validate_destination(destination, aggregate_manifest, &source_tracks)?;
 
-    let parent = destination
-        .parent()
-        .ok_or_else(|| return Error::invalid("tmux evidence export destination has no parent"))?;
+    let parent = match destination.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        Some(_) => Path::new("."),
+        None => return Err(Error::invalid("tmux evidence export destination has no parent")),
+    };
     let staging = parent.join(format!(".tmux-export-{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
     let cleanup = DirectoryCleanup::new(staging.clone());
@@ -331,9 +333,11 @@ fn validate_destination(
     aggregate_manifest: &Path,
     tracks: &[SourceTrack],
 ) -> Result<()> {
-    let parent = destination
-        .parent()
-        .ok_or_else(|| return Error::invalid("tmux evidence export destination has no parent"))?;
+    let parent = match destination.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        Some(_) => Path::new("."),
+        None => return Err(Error::invalid("tmux evidence export destination has no parent")),
+    };
     let parent = parent
         .canonicalize()
         .map_err(|source| return Error::filesystem(parent, source))?;

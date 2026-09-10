@@ -43,9 +43,11 @@ pub fn archive(
         });
     }
 
-    let parent = destination
-        .parent()
-        .ok_or_else(|| return Error::invalid("archive path has no parent"))?;
+    let parent = match destination.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        Some(_) => Path::new("."),
+        None => return Err(Error::invalid("archive path has no parent")),
+    };
 
     if !parent.is_dir() {
         return Err(Error::invalid("archive parent directory does not exist"));
@@ -117,10 +119,11 @@ pub fn archive(
 ///
 /// Returns an error when extraction exceeds safety limits or bundle verification fails.
 pub fn verify_archive(archive: &Path, expected: Option<&BundleIdentity>) -> Result<BundleManifest> {
-    let parent = archive
-        .parent()
-        .ok_or_else(|| return Error::invalid("archive path has no parent"))?;
-
+    let parent = match archive.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        Some(_) => Path::new("."),
+        None => return Err(Error::invalid("archive path has no parent")),
+    };
     let staging = parent.join(format!(".bundle-verify-{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
     let _cleanup = Cleanup::directory(staging.clone());

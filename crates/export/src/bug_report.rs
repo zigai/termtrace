@@ -62,10 +62,11 @@ pub fn create(
         .transpose()?;
     let observation = observe_session(&canonical, StatePoint::LatestPresented)?;
 
-    let parent = destination
-        .parent()
-        .ok_or_else(|| return Error::invalid("bug-report path has no parent"))?;
-
+    let parent = match destination.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        Some(_) => Path::new("."),
+        None => return Err(Error::invalid("bug-report path has no parent")),
+    };
     if !parent.is_dir() {
         return Err(Error::invalid("bug-report parent directory does not exist"));
     }

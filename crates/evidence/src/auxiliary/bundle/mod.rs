@@ -208,10 +208,11 @@ pub fn hash_regular_file(path: &Path) -> Result<(u64, String)> {
 }
 
 pub(crate) fn sync_parent(path: &Path) -> Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| return Error::invalid("path has no parent"))?;
-
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        Some(_) => Path::new("."),
+        None => return Err(Error::invalid("path has no parent")),
+    };
     File::open(parent)
         .and_then(|directory| return directory.sync_all())
         .map_err(|source| return Error::filesystem(parent, source))?;
