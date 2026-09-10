@@ -56,20 +56,26 @@ pub(in crate::cli) fn run_act(
     let control_response = match send_request_response(&resolved.path, &request) {
         Ok(control_response) => control_response,
         Err(error) => {
+            let (code, applied, retry) = match &error {
+                SdkError::InvalidControlProtocol { .. } => {
+                    ("invalid_payload", "none", "safe_new_request")
+                }
+                _ => ("control_transport_failed", "unknown", "same_request_id_only"),
+            };
             write_json_line(
                 response,
                 &serde_json::json!({
                     "v": 1,
                     "ok": false,
                     "type": "action",
-                    "code": "control_transport_failed",
+                    "code": code,
                     "message": error.to_string(),
                     "request_id": request.request_id,
                     "input": {
-                        "applied": "unknown",
+                        "applied": applied,
                         "atoms": serde_json::Value::Null,
                         "bytes": serde_json::Value::Null,
-                        "retry": "same_request_id_only",
+                        "retry": retry,
                     },
                     "postcondition": {
                         "kind": "not_started",

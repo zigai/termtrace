@@ -290,7 +290,7 @@ pub fn send_request_response(
         request,
         ExchangeTiming::Timeout(control_response_timeout(
             &request.command,
-            Duration::from_secs(2),
+            Duration::from_secs(3),
         )),
     );
 }

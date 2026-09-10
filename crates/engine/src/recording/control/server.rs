@@ -233,7 +233,8 @@ fn handle_control_connection(
         );
     }
 
-    let response_timeout = control_response_timeout(&request.command, Duration::from_secs(1));
+    let request_id = request.request_id;
+    let response_timeout = control_response_timeout(&request.command, Duration::from_secs(2));
     stream
         .set_write_timeout(Some(response_timeout))
         .map_err(|error| return terminal_error("configure wait response", error.to_string()))?;
@@ -254,6 +255,16 @@ fn handle_control_connection(
                 }
 
                 if Instant::now() >= deadline {
+                    let response = ControlResponse {
+                        version: CONTROL_PROTOCOL_VERSION,
+                        request_id,
+                        result: ControlResult::Error {
+                            code: "actor_unresponsive".to_owned(),
+                            message: "recording actor is unresponsive".to_owned(),
+                            details: None,
+                        },
+                    };
+                    let _ = write_control_response(&mut stream, &response);
                     return Err(terminal_error(
                         "dispatch control request",
                         "recording actor is unresponsive",
@@ -265,6 +276,16 @@ fn handle_control_connection(
                 thread::sleep(Duration::from_millis(10));
             }
             Err(mpsc::TrySendError::Disconnected(_)) => {
+                let response = ControlResponse {
+                    version: CONTROL_PROTOCOL_VERSION,
+                    request_id,
+                    result: ControlResult::Error {
+                        code: "actor_disconnected".to_owned(),
+                        message: "recording actor disconnected".to_owned(),
+                        details: None,
+                    },
+                };
+                let _ = write_control_response(&mut stream, &response);
                 return Err(terminal_error(
                     "dispatch control request",
                     "recording actor disconnected",
@@ -282,6 +303,16 @@ fn handle_control_connection(
                 }
 
                 if Instant::now() >= deadline {
+                    let response = ControlResponse {
+                        version: CONTROL_PROTOCOL_VERSION,
+                        request_id,
+                        result: ControlResult::Error {
+                            code: "actor_unresponsive".to_owned(),
+                            message: "recording actor is unresponsive".to_owned(),
+                            details: None,
+                        },
+                    };
+                    let _ = write_control_response(&mut stream, &response);
                     return Err(terminal_error(
                         "wait for control response",
                         "recording actor is unresponsive",
@@ -289,6 +320,16 @@ fn handle_control_connection(
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let response = ControlResponse {
+                    version: CONTROL_PROTOCOL_VERSION,
+                    request_id,
+                    result: ControlResult::Error {
+                        code: "actor_disconnected".to_owned(),
+                        message: "recording actor disconnected".to_owned(),
+                        details: None,
+                    },
+                };
+                let _ = write_control_response(&mut stream, &response);
                 return Err(terminal_error(
                     "wait for control response",
                     "recording actor disconnected",

@@ -100,19 +100,22 @@ impl SessionActor<'_> {
                     || *timeout_ns > 3_600_000_000_000
                     || *stable_for_ns > *timeout_ns
                 {
-                    return Err("invalid screen wait duration".to_owned());
+                    return Err("durations do not satisfy stable <= timeout <= 1h".to_owned());
                 }
                 return Ok(predicate);
             });
-            let Ok(predicate) = predicate else {
-                let response = control_error_response(
-                    request.request_id,
-                    "invalid_screen_wait",
-                    "screen predicate exceeds its text/regex/region/composition limits or durations do not satisfy stable <= timeout <= 1h",
-                );
+            let predicate = match predicate {
+                Ok(predicate) => predicate,
+                Err(reason) => {
+                    let response = control_error_response(
+                        request.request_id,
+                        "invalid_screen_wait",
+                        &reason,
+                    );
 
-                let _ = response_sender.send(response);
-                return Ok(());
+                    let _ = response_sender.send(response);
+                    return Ok(());
+                }
             };
 
             if let Err(error) = validate_screen_region(

@@ -71,15 +71,23 @@ pub(super) fn compile_action_postcondition(
         ActionPostcondition::Screen {
             predicate,
             timeout_ns,
-        } if *timeout_ns > 0 && *timeout_ns <= 3_600_000_000_000 => {
-            if let Ok(predicate) = compile_screen_predicate(predicate) {
-                return Ok(AdmittedPostcondition::Screen {
-                    predicate,
-                    timeout_ns: *timeout_ns,
-                });
+        } => {
+            if *timeout_ns == 0 || *timeout_ns > 3_600_000_000_000 {
+                return Err(control_rejected(
+                    "invalid_action_postcondition",
+                    "action postcondition timeout must satisfy 0 < timeout <= 1h",
+                ));
             }
+
+            let predicate = compile_screen_predicate(predicate).map_err(|reason| {
+                return control_rejected("invalid_action_postcondition", &reason);
+            })?;
+            return Ok(AdmittedPostcondition::Screen {
+                predicate,
+                timeout_ns: *timeout_ns,
+            });
         }
-        _ => {}
+        ActionPostcondition::Idle { .. } => {}
     }
 
     return Err(control_rejected(

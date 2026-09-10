@@ -51,15 +51,21 @@ pub(in crate::cli) fn run_send(
     let control_response = match send_request_response(&resolved.path, &request) {
         Ok(control_response) => control_response,
         Err(error) => {
+            let (code, applied, retry) = match &error {
+                SdkError::InvalidControlProtocol { .. } => {
+                    ("invalid_payload", "none", "safe_new_request")
+                }
+                _ => ("transport_lost", "unknown", "same_request_id_only"),
+            };
             write_json_line(
                 response,
                 &serde_json::json!({
                     "kind": "input_send_failed",
                     "request_id": request.request_id,
-                    "code": "transport_lost",
+                    "code": code,
                     "message": error.to_string(),
-                    "applied": "unknown",
-                    "retry": "same_request_id_only",
+                    "applied": applied,
+                    "retry": retry,
                     "session_state": "unknown",
                 }),
             )?;

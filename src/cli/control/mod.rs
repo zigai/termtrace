@@ -39,6 +39,7 @@ use termtrace_model::{
 };
 use termtrace_sdk::{
     observe_session_with_options, request, send_request, send_request_response, wait_for_screen,
+    Error as SdkError,
 };
 
 mod action;
