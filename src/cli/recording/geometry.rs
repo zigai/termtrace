@@ -147,6 +147,13 @@ pub(super) fn resolve_record_geometry(
 ) -> Result<(SessionGeometry, GeometryProvenance)> {
     match arguments.geometry {
         GeometryMode::Manual => {
+            if arguments.cell_width == 0 {
+                return Err(miette::miette!("resolved terminal has no cell width"));
+            }
+            if arguments.cell_height == 0 {
+                return Err(miette::miette!("resolved terminal has no cell height"));
+            }
+
             let pixel_width = arguments
                 .cols
                 .checked_mul(arguments.cell_width)
@@ -155,7 +162,6 @@ pub(super) fn resolve_record_geometry(
                 .rows
                 .checked_mul(arguments.cell_height)
                 .ok_or_else(|| miette::miette!("manual terminal height overflow"))?;
-
             return Ok((
                 SessionGeometry {
                     cols: arguments.cols,

@@ -613,6 +613,20 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
 
     options.environment.validate()?;
 
+    if options.cell_width_px == 0 {
+        return Err(terminal_error(
+            "validate geometry",
+            "resolved terminal cell width must be greater than zero",
+        ));
+    }
+
+    if options.cell_height_px == 0 {
+        return Err(terminal_error(
+            "validate geometry",
+            "resolved terminal cell height must be greater than zero",
+        ));
+    }
+
     let pixel_width = options
         .cols
         .checked_mul(options.cell_width_px)
@@ -622,10 +636,7 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
         .checked_mul(options.cell_height_px)
         .ok_or_else(|| return invalid_geometry(options))?;
 
-    if supported_geometry_cell_count(options.cols, options.rows).is_none()
-        || options.cell_width_px == 0
-        || options.cell_height_px == 0
-    {
+    if supported_geometry_cell_count(options.cols, options.rows).is_none() {
         return Err(invalid_geometry(options));
     }
 
