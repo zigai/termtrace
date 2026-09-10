@@ -147,6 +147,7 @@ fn populate_failure(
 
     return Ok(());
 }
+const MAX_SCENARIO_FAILURE_TIMELINE_ENTRIES: usize = 1_000;
 
 fn write_timeline(snapshot: &SessionSnapshot, path: &Path) -> Result<()> {
     let write = (|| -> Result<()> {
@@ -157,13 +158,19 @@ fn write_timeline(snapshot: &SessionSnapshot, path: &Path) -> Result<()> {
             .map_err(|error| return operation("write timeline", error))?;
 
         let mut first = true;
+        let mut entry_count = 0_usize;
 
         visit_snapshot_timeline_while(snapshot, true, true, None, |entry| {
+            if entry_count >= MAX_SCENARIO_FAILURE_TIMELINE_ENTRIES {
+                return Ok(false);
+            }
+
             if !first {
                 output.write_all(b",\n").map_err(timeline_error)?;
             }
 
             first = false;
+            entry_count = entry_count.saturating_add(1);
             serde_json::to_writer(&mut output, &entry).map_err(timeline_error)?;
             return Ok(true);
         })

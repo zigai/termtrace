@@ -91,6 +91,8 @@ fn diagnose_recording(
         .connection
         .prepare("INSERT INTO states VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)")
         .map_err(sql_error)?;
+    const MAX_DIAGNOSTIC_STATES: usize = 2_000;
+    let mut state_count = 0_usize;
 
     visit_recording_states_range_while(
         session,
@@ -98,8 +100,12 @@ fn diagnose_recording(
         None,
         &AtomicBool::new(false),
         |record, _| {
-            DiagnosticStore::insert_state(&mut state_insert, record)?;
+            state_count = state_count.saturating_add(1);
+            if state_count > MAX_DIAGNOSTIC_STATES {
+                return Ok(false);
+            }
 
+            DiagnosticStore::insert_state(&mut state_insert, record)?;
             if checks.contains(&DiagnosticCheck::Dirty) {
                 detect_dirty_discrepancies(slice::from_ref(record), &mut findings);
             }
