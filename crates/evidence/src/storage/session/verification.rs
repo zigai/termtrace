@@ -165,6 +165,17 @@ pub fn verify_session_with_trust(
             Err(error) => {
                 report.mutation_journal_status = MutationJournalStatus::Invalid;
                 report.mutation_journal_error = Some(error.to_string());
+                if matches!(
+                    level,
+                    VerificationLevel::DurabilityRecord | VerificationLevel::Signature
+                ) {
+                    finding(
+                        &mut report,
+                        "durability_record_invalid",
+                        format!("mutation journal validation failed: {error}"),
+                    );
+                    return report;
+                }
             }
         }
     }
