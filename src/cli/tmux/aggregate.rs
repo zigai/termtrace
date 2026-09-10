@@ -1351,8 +1351,14 @@ fn lock_tmux_manifest(path: &Path) -> Result<Flock<File>> {
     let directory = path
         .parent()
         .ok_or_else(|| return miette::miette!("tmux manifest has no parent directory"))?;
+    if !directory.is_dir() {
+        let name = directory
+            .file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_else(|| "unknown".into());
+        return Err(miette::miette!("tmux recording `{name}` was not found"));
+    }
     let lock_path = directory.join(".manifest.lock");
-
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -1392,6 +1398,14 @@ fn write_tmux_manifest(path: &Path, manifest: &mut TmuxRecordingManifest) -> Res
 }
 
 fn read_tmux_manifest(path: &Path) -> Result<TmuxRecordingManifest> {
+    if !path.is_file() {
+        let name = path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_else(|| "unknown".into());
+        return Err(miette::miette!("tmux recording `{name}` was not found"));
+    }
     let bytes = fs_err::read(path).into_diagnostic()?;
     let manifest: TmuxRecordingManifest = serde_json::from_slice(&bytes).into_diagnostic()?;
 
