@@ -208,7 +208,11 @@ fn report_start_outcome(
 ) -> Result<ExitCode> {
     let startup_state = match completion {
         None => "live",
-        Some(completion) if completion.exit_code == Some(0) && completion.signal_name.is_none() => {
+        Some(completion)
+            if completion.exit_code == Some(0)
+                && completion.signal_name.is_none()
+                && completion.resource_limit.is_none() =>
+        {
             "completed_success"
         }
         Some(_) => "completed_failure",
@@ -272,6 +276,10 @@ fn report_start_outcome(
     let Some(completion) = completion else {
         return Ok(ExitCode::SUCCESS);
     };
+
+    if completion.resource_limit.is_some() {
+        return Ok(ExitCode::FAILURE);
+    }
 
     return Ok(match (completion.exit_code, &completion.signal_name) {
         (Some(code), None) => u8::try_from(code).map_or(ExitCode::FAILURE, ExitCode::from),

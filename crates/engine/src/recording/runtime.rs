@@ -145,10 +145,21 @@ pub(super) fn consume_runtime(
                 actor.drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
             }
 
+            let runaway_output = actor
+                .progress
+                .resource_limit
+                .as_ref()
+                .is_some_and(|r| {
+                    return r.kind == ResourceLimitKind::OutputBytes
+                        && actor.progress.output_bytes
+                            >= r.limit.saturating_mul(2).max(r.limit.saturating_add(8 * 1024));
+                });
+
             if actor.exit_status.is_none()
-                && actor
-                    .resource_kill_deadline
-                    .is_some_and(|deadline| return Instant::now() >= deadline)
+                && (runaway_output
+                    || actor
+                        .resource_kill_deadline
+                        .is_some_and(|deadline| return Instant::now() >= deadline))
                 && !actor.process_group_killed
             {
                 let (code, message) = match actor
