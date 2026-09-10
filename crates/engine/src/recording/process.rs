@@ -524,16 +524,20 @@ pub(super) fn create_session_directory(path: &Path) -> Result<()> {
 
     match builder.create(path) {
         Ok(()) => {
-            fs_err::set_permissions(path, Permissions::from_mode(SESSION_DIRECTORY_MODE)).map_err(
-                |source| {
-                    return Error::Filesystem {
-                        path: path.to_path_buf(),
-                        source,
-                    };
-                },
-            )?;
+            if let Err(source) =
+                fs_err::set_permissions(path, Permissions::from_mode(SESSION_DIRECTORY_MODE))
+            {
+                let _ = fs_err::remove_dir(path);
+                return Err(Error::Filesystem {
+                    path: path.to_path_buf(),
+                    source,
+                });
+            }
 
-            sync_parent_directory(path)?;
+            if let Err(error) = sync_parent_directory(path) {
+                let _ = fs_err::remove_dir(path);
+                return Err(error);
+            }
             return Ok(());
         }
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {
@@ -551,7 +555,10 @@ pub(super) fn create_session_directory(path: &Path) -> Result<()> {
 }
 
 fn sync_parent_directory(path: &Path) -> Result<()> {
-    let parent = path.parent().unwrap_or_else(|| return Path::new("."));
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
     let directory = File::open(parent).map_err(|source| {
         return Error::Filesystem {
             path: parent.to_path_buf(),
