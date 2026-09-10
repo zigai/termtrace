@@ -15,7 +15,7 @@ use crate::cli::{
 use miette::{IntoDiagnostic as _, Result};
 use std::{
     fmt::Write as _,
-    io::{BufRead as _, BufReader, BufWriter, Seek as _, SeekFrom, Write as _},
+    io,
     mem::take,
     path::{Path, PathBuf},
     process::ExitCode,
@@ -141,54 +141,49 @@ fn run_all_timeline(
     arguments: &TimelineArgs,
     range: Option<SourceRange>,
 ) -> Result<ExitCode> {
-    let mut staged = tempfile::tempfile().into_diagnostic()?;
     let mut total = 0_usize;
 
-    {
-        let mut writer = BufWriter::new(&mut staged);
-
-        visit_session_timeline_while(
-            session,
-            arguments.all_states,
-            arguments.controls,
-            range,
-            |entry| {
-                if total >= arguments.page.offset {
-                    serde_json::to_writer(&mut writer, &entry).map_err(|source| {
-                        return EngineError::InvalidJson {
-                            path: PathBuf::from("<timeline-output>"),
-                            json_path: "$".to_owned(),
-                            source,
-                        };
-                    })?;
-                    writer.write_all(b"\n").map_err(|source| {
+    visit_session_timeline_while(
+        session,
+        arguments.all_states,
+        arguments.controls,
+        range,
+        |entry| {
+            if total >= arguments.page.offset {
+                if arguments.jsonl {
+                    write_json_line(response, &entry).map_err(|source| {
                         return EngineError::Filesystem {
                             path: PathBuf::from("<timeline-output>"),
-                            source,
+                            source: io::Error::other(source.to_string()),
+                        };
+                    })?;
+                } else {
+                    write_stdout(
+                        response,
+                        format!(
+                            "{}\n",
+                            timeline_text(&entry).map_err(|source| {
+                                return EngineError::Filesystem {
+                                    path: PathBuf::from("<timeline-output>"),
+                                    source: io::Error::other(source.to_string()),
+                                };
+                            })?
+                        ),
+                    )
+                    .map_err(|source| {
+                        return EngineError::Filesystem {
+                            path: PathBuf::from("<timeline-output>"),
+                            source: io::Error::other(source.to_string()),
                         };
                     })?;
                 }
+            }
 
-                total = total.saturating_add(1);
-                return Ok(true);
-            },
-        )
-        .into_diagnostic()?;
-
-        writer.flush().into_diagnostic()?;
-    }
-
-    staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
-    for line in BufReader::new(&mut staged).lines() {
-        let entry: TimelineEntry =
-            serde_json::from_str(&line.into_diagnostic()?).into_diagnostic()?;
-
-        if arguments.jsonl {
-            write_json_line(response, &entry)?;
-        } else {
-            write_stdout(response, format!("{}\n", timeline_text(&entry)?))?;
-        }
-    }
+            total = total.saturating_add(1);
+            return Ok(true);
+        },
+    )
+    .into_diagnostic()?;
 
     let offset = arguments.page.offset.min(total);
     if offset != 0 {
