@@ -5,6 +5,7 @@ use super::{
     model::SpawnedCommand,
     presentation::LiveTerminal,
 };
+use crate::Result;
 use portable_pty::ExitStatus;
 use std::{io::Write, time::Instant};
 use termtrace_evidence::{event_log::EventLogWriter, request_journal::MutationJournal};
@@ -42,6 +43,7 @@ pub(super) struct SessionActor<'runtime> {
     pub(super) resource_kill_deadline: Option<Instant>,
     pub(super) host_signal_kill_deadline: Option<Instant>,
     pub(super) process_group_killed: bool,
+    pub(super) live_needs_snapshot: bool,
     pub(super) resource_limits: ResourceLimits,
     pub(super) failure_policy: RecordingFailurePolicy,
 }
@@ -80,8 +82,24 @@ impl<'runtime> SessionActor<'runtime> {
             resource_kill_deadline: None,
             host_signal_kill_deadline: None,
             process_group_killed: false,
+            live_needs_snapshot: false,
             resource_limits,
             failure_policy: RecordingFailurePolicy::Stop,
         };
+    }
+
+    pub(super) fn ensure_presented_snapshot(&mut self) -> Result<()> {
+        if !self.live_needs_snapshot {
+            return Ok(());
+        }
+
+        let latest = self.live.semantic.snapshot()?;
+        if !latest.modes.synchronized_output {
+            self.live.replace_presented(latest);
+        }
+
+        self.live_needs_snapshot = false;
+
+        return Ok(());
     }
 }

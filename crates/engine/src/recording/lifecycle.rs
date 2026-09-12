@@ -21,6 +21,7 @@ use crate::{
 use portable_pty::PtySize;
 #[cfg(test)]
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::{
     env::consts::{ARCH, OS},
     ffi::OsStr,
@@ -92,6 +93,7 @@ pub(super) struct IncompleteSessionDiagnosticRecord {
 /// the canonical event log cannot be durably committed.
 pub fn record(options: &RecordOptions) -> Result<RecordOutcome> {
     let mut stdout = io::stdout();
+
     return record_with_output(options, &mut stdout);
 }
 
@@ -106,6 +108,7 @@ pub fn record_with_output(
 ) -> Result<RecordOutcome> {
     let mut terminal_mode = RawTerminalGuard::enter(options.forward_stdin)?;
     let result = record_to(options, output);
+
     return finish_with_cleanup(result, terminal_mode.restore());
 }
 
@@ -181,6 +184,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     let actor_state: Result<(LiveTerminal, MutationJournal)> = (|| {
         let live = initialize_live_terminal(TerminalGeometry::from(pty_size), &options.colors)?;
         let journal = MutationJournal::create(&options.output_directory)?;
+
         return Ok((live, journal));
     })();
     let (live, journal) = match actor_state {
@@ -248,7 +252,6 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     );
     actor.failure_policy = options.failure_policy;
     actor.live.suppress_mirrored_queries = options.forward_stdin;
-
     let runtime = match consume_runtime(
         &mut actor,
         options.forward_stdin,
@@ -427,6 +430,7 @@ fn write_session_manifest(
     let hash = manifest_hash(&encoded);
 
     write_secure(&options.output_directory.join("session.json"), &encoded)?;
+
     return Ok(hash);
 }
 
@@ -436,6 +440,7 @@ fn publish_session_completion(
 ) -> Result<()> {
     let validation_result = (|| {
         let log = EventLogSummary::read(options.output_directory.join("events.jsonl"))?;
+
         return validate_completion_summary_candidate(&options.output_directory, &log, completion);
     })();
 
@@ -577,6 +582,7 @@ fn write_json_secure(path: &Path, value: &impl serde::Serialize) -> Result<()> {
     })?;
 
     write_secure(path, &encoded).map_err(Error::from)?;
+
     return Ok(());
 }
 
@@ -639,7 +645,6 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
     if supported_geometry_cell_count(options.cols, options.rows).is_none() {
         return Err(invalid_geometry(options));
     }
-
     return Ok(PtySize {
         rows: options.rows,
         cols: options.cols,
@@ -666,6 +671,8 @@ fn initialize_live_terminal(
         semantic,
         presentation_tracker: PresentationTracker::new(presented.modes.synchronized_output),
         presented,
+        row_hashes: RefCell::new(Vec::new()),
+        cached_state_hash: RefCell::new(None),
         query_tracker: QueryTracker::default(),
         pending_query_responses: Vec::new(),
         source_event_seq: None,

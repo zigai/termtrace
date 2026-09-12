@@ -23,7 +23,7 @@ use termtrace_model::{
     terminal::state::SemanticState,
     value::ByteString,
 };
-use termtrace_terminal::{project_screen_frame, semantic_state_hash, semantic_viewport_text};
+use termtrace_terminal::{project_screen_frame, semantic_viewport_text};
 use uuid::Uuid;
 use zstd::stream::encode_all;
 
@@ -40,7 +40,7 @@ pub(in crate::recording) struct ScreenWaiter {
 }
 
 pub(super) fn presented_state_hash(live: &LiveTerminal) -> Result<String> {
-    return semantic_state_hash(&live.presented).map_err(crate::Error::ScreenFrame);
+    return live.presented_state_hash();
 }
 
 pub(super) fn valid_blake3_hash(hash: &str) -> bool {
@@ -49,6 +49,19 @@ pub(super) fn valid_blake3_hash(hash: &str) -> bool {
             .as_bytes()
             .iter()
             .all(|byte| return byte.is_ascii_digit() || (b'a'..=b'f').contains(byte));
+}
+
+fn predicate_needs_viewport_text(predicate: &ScreenPredicate) -> bool {
+    match predicate {
+        ScreenPredicate::Contains { .. }
+        | ScreenPredicate::Absent { .. }
+        | ScreenPredicate::MatchesRegex { .. }
+        | ScreenPredicate::ExcludesRegex { .. } => return true,
+        ScreenPredicate::All { predicates } | ScreenPredicate::Any { predicates } => {
+            return predicates.iter().any(predicate_needs_viewport_text);
+        }
+        _ => return false,
+    }
 }
 
 impl SessionActor<'_> {
@@ -61,22 +74,29 @@ impl SessionActor<'_> {
             return Ok(());
         }
 
-        let state_hash =
-            semantic_state_hash(&self.live.presented).map_err(crate::Error::ScreenFrame)?;
-        let viewport_text = semantic_viewport_text(&self.live.presented);
+        let state_hash = self.live.presented_state_hash()?;
+        let mut viewport_text: Option<String> = None;
         let observed_monotonic_ns = self.event_log.elapsed_ns();
         let now = Instant::now();
-        let mut index = 0;
 
+        let mut index = 0;
         while index < self.screen_waiters.len() {
             let Some(waiter) = self.screen_waiters.get_mut(index) else {
                 break;
             };
             let matched = waiter.predicate.as_ref().is_none_or(|predicate| {
+                let text = if predicate_needs_viewport_text(&predicate.predicate) {
+                    viewport_text
+                        .get_or_insert_with(|| return semantic_viewport_text(&self.live.presented))
+                        .as_str()
+                } else {
+                    ""
+                };
+
                 return evaluate_screen_predicate(
                     predicate,
                     &self.live.presented,
-                    &viewport_text,
+                    text,
                     &state_hash,
                 );
             });
@@ -97,9 +117,11 @@ impl SessionActor<'_> {
                 .matching_state
                 .as_ref()
                 .is_some_and(|(_, since, _)| return since.elapsed() >= waiter.stable_for);
+
             let child_completed = child_exited && output_closed;
             let deadline = !child_exited && now >= waiter.deadline;
             let finished = stable || child_completed || output_closed || deadline;
+
             if !finished {
                 index += 1;
                 continue;
@@ -138,6 +160,7 @@ impl SessionActor<'_> {
                     );
 
                     let _ = waiter.response.send(response);
+
                     continue;
                 }
             };
@@ -386,11 +409,12 @@ fn evaluate(
 
 fn screen_row_text(state: &SemanticState, row: u16) -> Option<String> {
     let row = state.grid.get(usize::from(row))?;
-
     let mut text = String::new();
+
     for cell in &row.cells {
         text.push_str(if cell.grapheme.is_empty() { " " } else { &cell.grapheme });
     }
+
     return Some(text.trim_end().to_owned());
 }
 
@@ -400,7 +424,6 @@ fn screen_region_text(state: &SemanticState, region: ScreenRegion) -> Option<Str
     }
 
     let mut text = String::new();
-
     for row_index in region.top..region.bottom {
         let row = state.grid.get(usize::from(row_index))?;
         for column in region.left..region.right {

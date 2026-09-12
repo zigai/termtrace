@@ -97,6 +97,70 @@ fn isolated_options(output_directory: PathBuf, command: Vec<OsString>) -> Record
 struct FailingOutput;
 
 #[test]
+fn actor_snapshot_refresh_invalidates_the_presented_hash() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let directory = temporary.path().join("actor-snapshot");
+    create_session_directory(&directory).expect("session directory");
+    let options = isolated_options(directory.clone(), vec![OsString::from("/bin/true")]);
+    let geometry = validate_options(&options).expect("valid geometry");
+    let environment = EffectiveEnvironment::resolve_validated(&options.environment, &options.term)
+        .expect("child environment");
+
+    let mut spawned =
+        spawn_command(&options, temporary.path(), geometry, &environment).expect("spawn fixture");
+    spawned.child.wait().expect("reap fixture");
+
+    let session_id = Uuid::now_v7();
+    let clock = SessionClock::now().expect("session clock");
+    let header = EventLogHeader::new(
+        session_id,
+        "0".repeat(64),
+        clock.started_unix_ns(),
+        geometry.cols,
+        geometry.rows,
+        geometry.pixel_width,
+        geometry.pixel_height,
+        &options.term,
+    );
+
+    let event_log =
+        EventLogWriter::create(directory.join("events.jsonl"), &header, clock).expect("event log");
+
+    let journal = MutationJournal::create(&directory).expect("mutation journal");
+    let live = initialize_live_terminal(geometry.into(), &options.colors).expect("live terminal");
+    let mut output = io::sink();
+    let mut actor = SessionActor::new(
+        spawned,
+        event_log,
+        session_id,
+        &mut output,
+        false,
+        live,
+        journal,
+        MUTATION_CACHE_CAPACITY,
+        ResourceLimits::default(),
+    );
+
+    let mut previous = actor.live.presented_state_hash().expect("initial hash");
+
+    for bytes in [b"READY".as_slice(), b"\rCHANGED".as_slice()] {
+        actor.live.semantic.write(bytes);
+        actor.live_needs_snapshot = true;
+        actor
+            .ensure_presented_snapshot()
+            .expect("refresh actor snapshot");
+        let current = actor.live.presented_state_hash().expect("updated hash");
+        assert_eq!(
+            current,
+            semantic_state_hash(&actor.live.presented).expect("uncached state hash")
+        );
+        assert_ne!(current, previous);
+
+        previous = current;
+    }
+}
+
+#[test]
 fn preserve_policy_keeps_the_application_alive_after_a_mirror_failure() {
     let temporary = TempDir::new().expect("temporary directory");
     let survived = temporary.path().join("survived");
@@ -123,7 +187,6 @@ fn preserve_policy_keeps_the_application_alive_after_a_mirror_failure() {
         &fs_err::read(session.join("recording-health.json")).expect("degraded health"),
     )
     .expect("health JSON");
-
     assert_eq!(health["complete_evidence"], false);
     assert_eq!(health["unrecorded_output_bytes"], 0);
 
@@ -138,7 +201,6 @@ fn preserve_policy_keeps_the_application_alive_after_a_mirror_failure() {
         .flatten()
         .copied()
         .collect();
-
     assert_eq!(output, b"triggerlater");
     assert!(read_completion(&session)
         .expect("failure completion")
@@ -177,7 +239,6 @@ fn fatal_actor_exit_writes_durable_failure_completion() {
 
     let completion = read_completion(&session).expect("failure completion");
     let failure = completion.failure.as_ref().expect("recorder failure");
-
     assert_eq!(failure.code, "recorder_actor_failed");
     assert!(completion.durability.final_sync_completed);
     assert!(!session.join(SESSION_FAILURE_NAME).exists());
@@ -193,7 +254,6 @@ fn fatal_actor_exit_writes_durable_failure_completion() {
         .flatten()
         .copied()
         .collect();
-
     assert_eq!(
         recorded_output, b"fatal-output",
         "a mirror failure must not discard observed bytes"
@@ -240,7 +300,6 @@ fn poisoned_terminal_exit_append_preserves_incomplete_failure_without_completion
         &fs_err::read(session.join(SESSION_FAILURE_NAME)).expect("failure diagnostic"),
     )
     .expect("failure diagnostic JSON");
-
     assert_eq!(diagnostic.lifecycle, "incomplete");
     assert_eq!(diagnostic.failure.code, "recorder_actor_failed");
     assert_eq!(
@@ -255,7 +314,6 @@ fn poisoned_terminal_exit_append_preserves_incomplete_failure_without_completion
         .durable_boundary
         .as_ref()
         .expect("durable boundary");
-
     assert!(!durable_boundary.event_hash.is_empty());
 
     let log = EventLog::read(session.join("events.jsonl")).expect("recoverable event prefix");
@@ -294,7 +352,6 @@ fn spawn_failure_after_manifest_creation_writes_valid_fatal_closure() {
             .map(|failure| return failure.code.as_str()),
         Some("spawn_failed")
     );
-
     let log = EventLog::read(session.join("events.jsonl")).expect("spawn failure event log");
     assert!(matches!(
         log.events.last().map(|record| return &record.event),
@@ -310,6 +367,7 @@ fn spawn_failure_after_manifest_creation_writes_valid_fatal_closure() {
     )));
 
     validate_completed_log(&session, &log).expect("valid spawn failure completion");
+
     assert!(!session.join(SESSION_FAILURE_NAME).exists());
 }
 
@@ -377,7 +435,6 @@ fn output_budget_retains_observed_bytes_and_records_termination() {
 
     let mut mirrored_output = Vec::new();
     let outcome = record_to(&options, &mut mirrored_output).expect("budgeted recording");
-
     assert!(outcome.output_bytes > 1024);
     assert_eq!(mirrored_output.len() as u64, outcome.output_bytes);
 
@@ -518,7 +575,6 @@ fn completed_output_burst_refreshes_the_pty_drain_deadline() {
 
     let mut mirrored_output: Vec<u8> = Vec::new();
     let outcome = record_to(&options, &mut mirrored_output).expect("completed burst recording");
-
     assert_eq!(outcome.exit_code, Some(0));
     assert!(mirrored_output.len() > 24_000);
 
@@ -550,7 +606,6 @@ fn spawn_and_provenance_share_the_effective_child_path() {
 
     let mut output = Vec::new();
     let outcome = record_to(&options, &mut output).expect("record child PATH command");
-
     assert_eq!(outcome.exit_code, Some(0));
     assert_eq!(output, b"CHILD_PATH");
 
@@ -614,7 +669,6 @@ fn evicted_mutation_outcomes_are_loaded_from_the_persistent_journal() {
     let (_, cached_retry) = history
         .lookup(second_id, &second_command, None)
         .expect("load cached mutation");
-
     assert!(cached_retry.is_some());
     assert!(
         history.lookup(first_id, &first_command, None).is_err(),
@@ -626,7 +680,6 @@ fn evicted_mutation_outcomes_are_loaded_from_the_persistent_journal() {
     let (_, retry) = history
         .lookup(first_id, &first_command, None)
         .expect("load evicted mutation");
-
     assert_eq!(retry, Some(first_response));
 }
 
@@ -643,7 +696,6 @@ fn records_exact_output_and_exit_after_output_close() {
     let options = isolated_options(session.clone(), command);
     let mut mirrored_output = Vec::new();
     let outcome = record_to(&options, &mut mirrored_output).expect("record command");
-
     assert_eq!(outcome.exit_code, Some(0));
     assert_eq!(
         fs_err::metadata(&session)
@@ -665,7 +717,6 @@ fn records_exact_output_and_exit_after_output_close() {
         .flatten()
         .copied()
         .collect::<Vec<_>>();
-
     assert_eq!(output, b"\x1b[31mhello\x1b[0m\xff");
     assert_eq!(mirrored_output, output);
     assert!(matches!(
@@ -686,7 +737,6 @@ fn records_exact_output_and_exit_after_output_close() {
             );
         })
         .expect("output closed event");
-
     assert!(output_closed_index < recording.events.len() - 1);
 
     let manifest: SessionManifest = serde_json::from_slice(
@@ -742,7 +792,6 @@ fn terminates_descendants_that_retain_the_slave_pty() {
     let started = Instant::now();
     let mut output = Vec::new();
     let outcome = record_to(&options, &mut output).expect("record command");
-
     assert_eq!(outcome.exit_code, Some(0));
     assert_eq!(output, b"done");
     assert!(
@@ -793,7 +842,6 @@ fn attached_mirror_suppresses_answered_split_queries_and_preserves_display_seque
         .flatten()
         .copied()
         .collect();
-
     assert!(original.windows(4).any(|bytes| return bytes == b"\x1b[6n"));
 }
 
@@ -837,7 +885,6 @@ fn answers_and_audits_terminal_queries() {
         .iter()
         .find(|record| return record.seq == query_source)
         .expect("source output");
-
     assert!(
         query_record.seq < log.events[reply_index].seq,
         "observed query precedes its reply"
@@ -903,6 +950,7 @@ fn graceful_control_shutdown_drains_an_inflight_request() {
 
         let mut response = Vec::new();
         stream.read_to_end(&mut response).expect("read response");
+
         return response;
     });
 
@@ -922,7 +970,6 @@ fn graceful_control_shutdown_drains_an_inflight_request() {
     let encoded = client.join().expect("join control client");
     let served: ControlResponse =
         serde_json::from_slice(&encoded).expect("decode drained response");
-
     assert_eq!(served.request_id, request.request_id);
 
     worker.stop().expect("finish control server");
@@ -973,5 +1020,6 @@ fn control_server_accepts_a_second_request_while_the_first_is_pending() {
     drop(second);
 
     first_client.join().expect("join first client");
+
     second_client.join().expect("join second client");
 }

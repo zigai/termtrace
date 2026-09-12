@@ -71,6 +71,7 @@ pub(super) fn consume_runtime(
             terminate_process_group(actor.spawned.pid);
             let _ = actor.spawned.child.kill();
             let _ = actor.spawned.child.wait();
+
             return Err(error);
         }
     };
@@ -138,6 +139,11 @@ pub(super) fn consume_runtime(
             let child_exited = actor.exit_status.is_some();
             actor.advance_input_sequence(child_exited, actor.progress.output_closed)?;
             actor.event_log.flush_due()?;
+
+            if actor.live_needs_snapshot {
+                actor.ensure_presented_snapshot()?;
+            }
+
             actor.evaluate_screen_waiters(child_exited, actor.progress.output_closed)?;
             actor.enforce_resource_limits(started_at, last_activity_at)?;
 
@@ -145,15 +151,13 @@ pub(super) fn consume_runtime(
                 actor.drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
             }
 
-            let runaway_output = actor
-                .progress
-                .resource_limit
-                .as_ref()
-                .is_some_and(|r| {
-                    return r.kind == ResourceLimitKind::OutputBytes
-                        && actor.progress.output_bytes
-                            >= r.limit.saturating_mul(2).max(r.limit.saturating_add(8 * 1024));
-                });
+            let runaway_output = actor.progress.resource_limit.as_ref().is_some_and(|r| {
+                return r.kind == ResourceLimitKind::OutputBytes
+                    && actor.progress.output_bytes
+                        >= r.limit
+                            .saturating_mul(2)
+                            .max(r.limit.saturating_add(8 * 1024));
+            });
 
             if actor.exit_status.is_none()
                 && (runaway_output
@@ -181,7 +185,6 @@ pub(super) fn consume_runtime(
                         "child did not exit after output-budget termination; process group was killed",
                     ),
                 };
-
                 actor.event_log.append(Event::HostError {
                     code: code.to_owned(),
                     message: message.to_owned(),
@@ -240,6 +243,10 @@ pub(super) fn consume_runtime(
             }
         }
 
+        if actor.live_needs_snapshot {
+            actor.ensure_presented_snapshot()?;
+        }
+
         actor.evaluate_screen_waiters(true, actor.progress.output_closed)?;
         actor.fail_screen_waiters(
             "child_completed",
@@ -263,6 +270,8 @@ pub(super) fn consume_runtime(
     }
 
     let status = workers.finish(receiver, result)?;
+
+    actor.ensure_presented_snapshot()?;
 
     return Ok(RuntimeOutcome {
         status,
@@ -369,7 +378,6 @@ impl SessionActor<'_> {
         let Some((outcome, code, message)) = detected else {
             return Ok(());
         };
-
         self.event_log.append(Event::HostError {
             code: code.to_owned(),
             message,
@@ -387,6 +395,7 @@ impl SessionActor<'_> {
 
         self.progress.resource_limit = Some(outcome);
         self.resource_kill_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
+
         return Ok(());
     }
 
@@ -429,6 +438,7 @@ impl SessionActor<'_> {
                     Ok(sequence) => sequence,
                     Err(error) => {
                         self.progress.unrecorded_output = data;
+
                         return Err(error.into());
                     }
                 };
@@ -445,7 +455,6 @@ impl SessionActor<'_> {
                     &mut self.mutation_history,
                     &data,
                 )?;
-
                 let mirrored = if self.live.suppress_mirrored_queries {
                     take(&mut self.live.mirror_output)
                 } else {
@@ -453,9 +462,11 @@ impl SessionActor<'_> {
                 };
                 self.mirror_bytes(&mirrored)?;
 
-                let latest = self.live.semantic.snapshot()?;
-                if !latest.modes.synchronized_output {
-                    self.live.presented = latest;
+                if self.screen_waiters.is_empty() && self.pending_input_sequence.is_none() {
+                    self.live_needs_snapshot = true;
+                } else {
+                    self.live_needs_snapshot = true;
+                    self.ensure_presented_snapshot()?;
                 }
             }
             RuntimeMessage::OutputClosed => {
@@ -469,11 +480,10 @@ impl SessionActor<'_> {
                         &pending,
                     )?;
 
-                    let latest = self.live.semantic.snapshot()?;
-                    if !latest.modes.synchronized_output {
-                        self.live.presented = latest;
-                    }
+                    self.live_needs_snapshot = true;
                 }
+
+                self.ensure_presented_snapshot()?;
 
                 if self.live.suppress_mirrored_queries {
                     self.live
@@ -524,8 +534,9 @@ impl SessionActor<'_> {
                 resize_semantic(&mut self.live.semantic, geometry)?;
                 self.live.geometry = geometry;
                 let latest = self.live.semantic.snapshot()?;
+
                 if !latest.modes.synchronized_output {
-                    self.live.presented = latest;
+                    self.live.replace_presented(latest);
                 }
             }
             RuntimeMessage::ResizeFailed(reason) => {
@@ -548,6 +559,7 @@ impl SessionActor<'_> {
                 )?;
             }
             RuntimeMessage::Control { request, response } => {
+                self.ensure_presented_snapshot()?;
                 self.handle_control_request(request, response)?;
             }
             RuntimeMessage::ControlServerFailed(reason) => {
