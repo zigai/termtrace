@@ -5,8 +5,6 @@ use crate::font::{
     semantic_font_set, SemanticFontSet, SEMANTIC_RASTER_SYMBOLS_FONT_FAMILY,
     SEMANTIC_RASTER_TEXT_FONT_FAMILY, SEMANTIC_SYMBOLS_FONT_FAMILY, SEMANTIC_TEXT_FONT_FAMILY,
 };
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
 use std::fmt::{self, Display, Formatter, Write};
 use std::mem;
 use termtrace_model::artifact::save::SemanticFontRole;
@@ -62,6 +60,7 @@ pub(super) fn render_svg_scene(
 
     write_scene_content(&mut svg, state, font_set, embed_font);
     svg.push_str("</svg>\n");
+
     return Ok(svg.into_bytes());
 }
 
@@ -124,6 +123,7 @@ fn resolve_cell<'cell>(
         state.colors.foreground,
         &state.colors.palette,
     );
+
     let mut background = resolve_color(
         cell.style.background,
         state.colors.background,
@@ -398,23 +398,7 @@ fn is_terminal_graphic(grapheme: &str) -> bool {
 }
 
 pub(super) fn write_font_faces(svg: &mut String, font_set: &SemanticFontSet) {
-    svg.push_str("<style>");
-
-    for resource in font_set.resources() {
-        let role = resource.role;
-        let (family, weight, style) = font_attributes(role, true);
-        let _ = write!(
-            svg,
-            "@font-face{{font-family:'{family}';src:url(data:font/ttf;base64,"
-        );
-        STANDARD.encode_string(font_set.face_bytes(role), svg);
-        let _ = write!(
-            svg,
-            ") format('truetype');font-weight:{weight};font-style:{style}}}"
-        );
-    }
-
-    svg.push_str("</style>\n");
+    svg.push_str(font_set.font_faces_css());
 }
 
 pub(super) fn select_font_role(
@@ -602,7 +586,6 @@ mod tests {
 
         let first_svg = render_svg(&state).expect("render first SVG");
         let second_svg = render_svg(&state).expect("render second SVG");
-
         assert_eq!(first_svg, second_svg);
 
         let svg = String::from_utf8(first_svg).expect("semantic SVG is UTF-8");
@@ -610,7 +593,6 @@ mod tests {
 
         let first_png = render_png(&state).expect("render first PNG");
         let second_png = render_png(&state).expect("render second PNG");
-
         assert_eq!(first_png, second_png);
     }
 
@@ -619,10 +601,12 @@ mod tests {
         let font_set = semantic_font_set().expect("load font set");
         let regular =
             ttf_parser::Face::parse(font_set.regular_face_bytes(), 0).expect("parse regular font");
+
         let advance = regular
             .glyph_index('A')
             .and_then(|g| return regular.glyph_hor_advance(g))
             .expect("glyph advance");
+
         let scaled_advance = (f32::from(advance) * (SEMANTIC_FONT_SIZE as f32)
             / f32::from(regular.units_per_em()))
         .round() as u16;
@@ -632,6 +616,7 @@ mod tests {
         let symbols =
             ttf_parser::Face::parse(font_set.face_bytes(SemanticFontRole::SymbolsFallback), 0)
                 .expect("parse symbols font");
+
         let symbols_height = (f32::from(symbols.ascender() - symbols.descender())
             * (SEMANTIC_SYMBOLS_FONT_SIZE as f32)
             / f32::from(symbols.units_per_em()))
@@ -658,7 +643,6 @@ mod tests {
         let state = terminal.snapshot().expect("snapshot terminal");
         let svg = render_svg(&state).expect("render SVG with control characters");
         let svg_str = String::from_utf8(svg).expect("valid UTF-8 SVG");
-
         assert!(!svg_str.contains("\u{11}"));
         assert!(!svg_str.contains("\u{12}"));
         assert!(!svg_str.contains("\u{13}"));
