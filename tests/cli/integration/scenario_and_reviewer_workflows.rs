@@ -108,11 +108,11 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("scenario report");
-
     assert_eq!(report["status"], "passed");
     assert_eq!(report["cases"].as_array().expect("cases").len(), 2);
 
     let attempt = &report["cases"][0]["attempts"][0]["report"];
+
     assert_eq!(attempt["steps"].as_array().expect("steps").len(), 8);
 
     let canonical = PathBuf::from(attempt["canonical_session"].as_str().expect("path"));
@@ -215,7 +215,6 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("failure report");
-
     assert_eq!(report["status"], "failed");
     assert_eq!(
         report["cases"][0]["attempts"]
@@ -226,10 +225,10 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
     );
 
     let attempt = &report["cases"][0]["attempts"][1]["report"];
+
     assert_eq!(attempt["failure"]["step_index"], 0);
 
     let failure = Path::new(attempt["failure_artifacts"].as_str().expect("failure path"));
-
     assert!(failure.join("scenario.json").is_file());
     assert!(failure.join("result.json").is_file());
     assert!(failure.join("final-screen.json").is_file());
@@ -240,7 +239,6 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
         &fs_err::read(failure.join("final-screen.json")).expect("final screen snapshot"),
     )
     .expect("final screen snapshot JSON");
-
     let ControlData::Snapshot {
         viewport_text,
         cols,
@@ -265,7 +263,6 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
             .as_str()
             .expect("canonical session"),
     );
-
     assert_eq!(
         read_manifest(canonical)
             .expect("scenario manifest")
@@ -300,6 +297,96 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn scenario_retry_stops_after_success_and_preserves_real_attempt_outcomes() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let scenario = temporary.path().join("retry.termtrace.json");
+    let artifacts = temporary.path().join("artifacts");
+    let counter = temporary.path().join("attempt-count");
+    fs_err::write(
+        &scenario,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "version": 2,
+            "name": "success on second attempt",
+            "launch": {
+                "command": [
+                    "/bin/sh", "-c",
+                    "attempt=0; if test -f \"$ATTEMPTS\"; then IFS= read -r attempt < \"$ATTEMPTS\"; fi; attempt=$((attempt + 1)); printf '%s\\n' \"$attempt\" > \"$ATTEMPTS\"; printf READY; IFS= read -r line; if test \"$attempt\" -eq 1; then printf BROKEN; exit 0; fi; printf '\\r\\nDONE:%s' \"$line\"; IFS= read -r line"
+                ],
+                "geometry": { "cols": 40, "rows": 4 },
+                "environment": { "base": "clear", "set": { "ATTEMPTS": counter } },
+                "timeoutMs": 3000
+            },
+            "steps": [
+                { "waitScreen": { "contains": "READY", "stableForMs": 10 } },
+                { "send": [{ "text": "go" }, { "key": "enter" }] },
+                { "waitScreen": { "contains": "DONE:go", "stableForMs": 10 } },
+                { "mark": "after-success" },
+                { "stop": {} }
+            ]
+        }))
+        .expect("scenario JSON"),
+    )
+    .expect("write retry scenario");
+
+    let assertion = Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .arg("test")
+        .arg(&scenario)
+        .arg("--artifacts")
+        .arg(&artifacts)
+        .args(["--reruns", "3"])
+        .assert()
+        .success();
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&assertion.get_output().stdout).expect("suite report");
+    assert_eq!(report["status"], "passed");
+    assert_eq!(
+        fs_err::read_to_string(&counter).expect("attempt count"),
+        "2\n"
+    );
+
+    let attempts = report["cases"][0]["attempts"].as_array().expect("attempts");
+    assert_eq!(attempts.len(), 2);
+
+    let failed = &attempts[0]["report"];
+    let passed = &attempts[1]["report"];
+
+    assert_eq!(failed["status"], "failed");
+    assert_eq!(
+        failed["steps"].as_array().expect("successful prefix").len(),
+        2
+    );
+    assert_eq!(failed["failure"]["step_index"], 2);
+    assert_eq!(passed["status"], "passed");
+    assert_eq!(
+        passed["steps"].as_array().expect("completed steps").len(),
+        5
+    );
+    assert_ne!(failed["session_id"], passed["session_id"]);
+    assert_ne!(failed["canonical_session"], passed["canonical_session"]);
+    assert_ne!(
+        passed["steps"][0]["state_hash"],
+        passed["steps"][2]["state_hash"]
+    );
+
+    for (attempt, expected_marker) in [(failed, false), (passed, true)] {
+        let path = Path::new(
+            attempt["canonical_session"]
+                .as_str()
+                .expect("canonical path"),
+        );
+
+        let log = EventLog::read(path.join("events.jsonl")).expect("canonical events");
+        validate_completed_log(path, &log).expect("valid attempt closure");
+        let contains_marker = log.events.iter().any(|record| {
+            return matches!(&record.event, Event::Marker { label, .. } if label == "after-success");
+        });
+        assert_eq!(contains_marker, expected_marker);
     }
 }
 
@@ -351,10 +438,10 @@ fn scenario_wait_requires_the_requested_stability_interval() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("scenario report");
-
     assert_eq!(report["status"], "failed");
 
     let attempt = &report["cases"][0]["attempts"][0]["report"];
+
     assert_eq!(attempt["failure"]["step_index"], 0);
     assert!(attempt["failure"]["message"]
         .as_str()
@@ -390,7 +477,6 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
 
     let summary: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("review summary");
-
     assert_eq!(
         summary["rendering_policy"],
         "semantic_cells_only_no_raw_replay"
@@ -412,7 +498,6 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
 
     let result: serde_json::Value =
         serde_json::from_slice(&searched.get_output().stdout).expect("review search");
-
     assert_eq!(result["query"], "SAFE");
     assert!(!result["matches"].as_array().expect("matches").is_empty());
     assert!(result["matches"][0]["selector"]
@@ -512,7 +597,6 @@ fn reviewer_pty_output(session: &Path, signal: Option<&str>) -> Vec<u8> {
 
             let chunk = buffer.iter().copied().take(count).collect::<Vec<_>>();
             output.extend_from_slice(&chunk);
-
             if chunk_sender.send(chunk).is_err() {
                 break;
             }
@@ -532,7 +616,6 @@ fn reviewer_pty_output(session: &Path, signal: Option<&str>) -> Vec<u8> {
         match chunk_receiver.recv_timeout(remaining) {
             Ok(chunk) => {
                 observed.extend_from_slice(&chunk);
-
                 if observed
                     .windows(b"\x1b[?1049h".len())
                     .any(|window| return window == b"\x1b[?1049h")
@@ -601,14 +684,12 @@ fn reviewer_restores_real_pty_after_quit_and_termination_signal() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = recorded_reviewer_session(&temporary, "reviewer-lifecycle");
     let quit_output = reviewer_pty_output(&session, None);
-
     assert!(
         quit_output
             .windows(b"\x1b[?25h".len())
             .any(|window| return window == b"\x1b[?25h"),
         "normal reviewer exit did not restore the cursor"
     );
-
     let _signal_output = reviewer_pty_output(&session, Some("TERM"));
 }
 
@@ -657,6 +738,7 @@ printf '\n__TERMTRACE_REVIEWER_ROLLBACK__=%s reviewer_status=%s\n' "$restored" "
     let reader_thread = thread::spawn(move || {
         let mut output = Vec::new();
         let _read_result = reader.read_to_end(&mut output);
+
         return output;
     });
 
@@ -666,7 +748,6 @@ printf '\n__TERMTRACE_REVIEWER_ROLLBACK__=%s reviewer_status=%s\n' "$restored" "
     drop(pty.master);
 
     let output = reader_thread.join().expect("join rollback PTY reader");
-
     assert!(
         output
             .windows(b"__TERMTRACE_REVIEWER_ROLLBACK__=yes".len())
@@ -711,6 +792,7 @@ fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
     let states = replay(&log)
         .expect("bounded fixture reference replay")
         .states;
+
     let hidden = states
         .iter()
         .find(|state| return !state.presented)
@@ -720,7 +802,6 @@ fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
     let page = load_review_page(&session, &ReviewQuery::State(hidden.state_id), &cancelled)
         .expect("exact hidden page")
         .expect("selected page");
-
     assert!(page.entries.len() <= REVIEW_PAGE_STATES);
 
     let selected = page
@@ -728,7 +809,6 @@ fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
         .iter()
         .find(|entry| return entry.state_id == page.selected)
         .expect("selected hidden state retained");
-
     assert_eq!(selected.state_hash, hidden.state_hash);
     assert_eq!(selected.event_seq, hidden.event_seq);
     assert_eq!(selected.event_byte_offset, hidden.event_byte_offset);
@@ -746,6 +826,7 @@ fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
         .iter()
         .find(|state| return state.state_id > hidden.state_id && state.presented)
         .expect("next presented state");
+
     let next = load_review_page(
         &session,
         &ReviewQuery::Move {
@@ -757,7 +838,6 @@ fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
     )
     .expect("presented navigation")
     .expect("next page");
-
     assert_eq!(next.selected, next_presented.state_id);
 
     let found = load_review_page(
@@ -899,10 +979,10 @@ fn reviewer_pages_resolve_marker_and_input_source_boundaries() {
             .find(|state| return state.monotonic_ns >= time)
             .or_else(|| return states.last())
             .expect("state at source boundary");
+
         let page = load_review_page(&session, &query, &cancelled)
             .expect("source boundary page")
             .expect("selected boundary");
-
         assert_eq!(page.selected, expected.state_id);
     }
 }
