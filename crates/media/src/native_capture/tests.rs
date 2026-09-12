@@ -32,8 +32,8 @@ fn capture_geometry_error_reports_actual_and_recorded_grids() {
         900,
     )
     .expect_err("mismatched grid must fail");
-    let message = error.to_string();
 
+    let message = error.to_string();
     assert!(message.contains("renders 230x56 cells"));
     assert!(message.contains("requires 180x50 cells"));
     assert!(message.contains("--geometry fit --viewport 1620x900"));
@@ -63,7 +63,6 @@ fn geometry_solver_converges_and_independently_verifies_exact_grid() {
         },
     )
     .expect("solve exact grid");
-
     assert_eq!(
         report.selected,
         CaptureTarget {
@@ -99,7 +98,6 @@ fn geometry_solver_reports_cycles_with_measured_candidates() {
         },
     )
     .expect_err("cycle must fail");
-
     assert!(error.to_string().contains("search cycled"));
     assert!(error.to_string().contains("800x400px=>99x24"));
 }
@@ -122,6 +120,7 @@ fn playback_failure_handshake_preempts_timeout() {
         .arg("5")
         .spawn()
         .expect("sleep process");
+
     let mut child = ManagedChild::new("playback-test", child);
     let error = wait_for_playback_handshake(
         &timing_path,
@@ -130,6 +129,5 @@ fn playback_failure_handshake_preempts_timeout() {
         Duration::from_secs(1),
     )
     .expect_err("failure handshake must win");
-
     assert!(error.to_string().contains("rendered 230x56"));
 }

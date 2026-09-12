@@ -41,7 +41,6 @@ pub(super) fn read_frame(input: &mut impl BufRead) -> Result<Option<DriverFrame>
     }
 
     frame.drain().map_err(driver_input_error)?;
-
     if frame.exceeded() {
         return Ok(Some(DriverFrame::TooLarge));
     }
@@ -49,7 +48,6 @@ pub(super) fn read_frame(input: &mut impl BufRead) -> Result<Option<DriverFrame>
     if !frame.terminated() {
         return Ok(Some(DriverFrame::Unterminated));
     }
-
     return Ok(Some(match parsed {
         Ok(request) => DriverFrame::Request(Box::new(request)),
         Err(error) => DriverFrame::Invalid {
@@ -134,6 +132,7 @@ impl<R: BufRead> Read for NewlineFrameReader<'_, R> {
             Ok(available) => available,
             Err(source) => {
                 self.input_error = Some(IoError::new(source.kind(), source.to_string()));
+
                 return Err(source);
             }
         };
@@ -169,6 +168,7 @@ impl<R: BufRead> Read for NewlineFrameReader<'_, R> {
         self.content_bytes = self.content_bytes.saturating_add(content_consumed);
         self.exceeded = self.content_bytes > maximum;
         self.terminated = newline.is_some_and(|index| return consumed > index);
+
         return Ok(consumed);
     }
 }

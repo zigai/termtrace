@@ -29,6 +29,7 @@ fn tmux_server_crash_closes_idle_recording_without_leaking_the_shell() {
         .args(["display-message", "-p", "#{pid}"])
         .output()
         .expect("server identity");
+
     let pid = String::from_utf8(output.stdout)
         .expect("PID text")
         .trim()
@@ -52,7 +53,6 @@ fn tmux_kill_pane_closes_canonical_recording() {
         .args(["kill-pane", "-t", "%0"])
         .status()
         .expect("kill pane");
-
     assert!(killed.success(), "tmux did not kill the pane");
 
     wait_for_path(&session.join("completion.json"));
@@ -83,9 +83,7 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
         ])
         .status()
         .expect("configure original tmux default command");
-
     assert!(configured.success(), "tmux default command was not set");
-
     let original_pid = trim_newline(
         server
             .command()
@@ -111,7 +109,6 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
         .clone();
 
     let enabled = compact_json_line(&enabled);
-
     assert_eq!(enabled["existing_panes"], 1);
     assert_eq!(enabled["existing_unrecorded_panes"], 1);
     assert_eq!(enabled["retroactive"], false);
@@ -125,7 +122,6 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
         .args(["send-keys", "-t", recorded_pane.as_str(), "exit", "Enter"])
         .status()
         .expect("close recorded pane");
-
     assert!(sent.success(), "recorded pane did not accept input");
 
     wait_for_path(&recording.join("completion.json"));
@@ -138,7 +134,6 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
             .expect("query grandfathered pane after recorded workflow")
             .stdout,
     );
-
     assert_eq!(surviving_pid, original_pid);
 
     let manifest = read_manifest(&recording).expect("default-command recording manifest");
@@ -149,10 +144,8 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
             .launch_kind,
         TmuxPaneLaunchKind::DefaultCommand
     );
-
     let log = EventLog::read(recording.join("events.jsonl")).expect("default-command event log");
     let output = canonical_output_bytes(&log);
-
     assert!(output
         .windows(b"TMUX_DEFAULT_COMMAND".len())
         .any(|window| return window == b"TMUX_DEFAULT_COMMAND"));
@@ -160,7 +153,6 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
     let status = server.wait_for_status("live-enable coverage to settle", |status| {
         return status["unrecorded_panes"] == 1;
     });
-
     assert_eq!(status["enabled"], true);
 
     let mut disable = Command::cargo_bin("termtrace").expect("binary should build");
@@ -173,13 +165,11 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
         .stdout(predicate::str::contains(
             r#""default_command_restored":true"#,
         ));
-
     let restored = server
         .command()
         .args(["show-options", "-gv", "default-command"])
         .output()
         .expect("query restored default command");
-
     assert!(restored.status.success());
     assert_eq!(
         trim_newline(restored.stdout),
@@ -237,16 +227,20 @@ fn tmux_new_recording_allocates_a_socket_instead_of_reusing_default_server() {
 
     let started: serde_json::Value =
         serde_json::from_slice(&output).expect("aggregate start response");
+
     let manifest_path = started["manifest"]
         .as_str()
         .map(PathBuf::from)
         .expect("aggregate manifest path");
+
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(manifest_path).expect("read aggregate manifest"))
             .expect("aggregate manifest JSON");
+
     let allocated_socket_bytes: ByteString =
         serde_json::from_value(manifest["socket_name"].clone())
             .expect("allocated socket name bytes");
+
     let allocated_socket = String::from_utf8(allocated_socket_bytes.into_bytes())
         .expect("UTF-8 allocated socket name");
 
@@ -334,6 +328,7 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
 
     let response: serde_json::Value =
         serde_json::from_slice(&started).expect("aggregate start response");
+
     let manifest_path = response["manifest"]
         .as_str()
         .map(PathBuf::from)
@@ -344,7 +339,6 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
         let value: serde_json::Value =
             serde_json::from_slice(&fs::read(&manifest_path).expect("read aggregate manifest"))
                 .expect("aggregate manifest JSON");
-
         if value["server_pid"].is_number() && value["server_socket_inode"].is_number() {
             break value;
         }
@@ -361,7 +355,6 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
         .args(["-L", socket.as_str(), "kill-server"])
         .status()
         .expect("stop original tmux server");
-
     assert!(killed.success());
 
     wait_for_tmux_server_exit(
@@ -385,7 +378,6 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
         ])
         .status()
         .expect("start replacement tmux server");
-
     assert!(replacement.success());
 
     Command::cargo_bin("termtrace")
@@ -398,7 +390,6 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
     let preserved: serde_json::Value =
         serde_json::from_slice(&fs::read(&manifest_path).expect("read preserved manifest"))
             .expect("preserved aggregate manifest JSON");
-
     assert_eq!(preserved["server_pid"], original["server_pid"]);
     assert_eq!(
         preserved["server_socket_inode"],

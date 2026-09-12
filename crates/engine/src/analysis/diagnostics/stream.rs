@@ -45,6 +45,7 @@ pub fn diagnose_session(
     visual_evidence: &[ValidatedVisualManifest],
 ) -> Result<DiagnoseReport> {
     validate_completed_session(session)?;
+
     return diagnose_recording(session, true, checks, broad_change_percent, visual_evidence);
 }
 
@@ -106,6 +107,7 @@ fn diagnose_recording(
             }
 
             DiagnosticStore::insert_state(&mut state_insert, record)?;
+
             if checks.contains(&DiagnosticCheck::Dirty) {
                 detect_dirty_discrepancies(slice::from_ref(record), &mut findings);
             }
@@ -310,7 +312,6 @@ fn diagnose_recording(
     if source != SourceIdentity::capture_candidate(session)? {
         return Err(analysis_error("canonical source changed during diagnosis"));
     }
-
     return Ok(DiagnoseReport {
         format: "termtrace-diagnose".to_owned(),
         version: 1,
@@ -360,7 +361,6 @@ impl DiagnosticStore {
 
         let cols = state.delta.geometry.map(|geometry| return geometry.0);
         let rows = state.delta.geometry.map(|geometry| return geometry.1);
-
         statement
             .execute(params![
                 state.state_id,
@@ -402,7 +402,6 @@ impl DiagnosticStore {
                 )
                 .optional()
                 .map_err(sql_error)?;
-
             findings.push(finding(
                 "full_viewport_clear",
                 FindingConfidence::High,
@@ -437,6 +436,7 @@ impl DiagnosticStore {
                 }
 
                 let candidate: u64 = state.get(1).map_err(sql_error)?;
+
                 if candidate > 0 {
                     changed = changed.saturating_add(candidate);
                     ids.push(state.get(0).map_err(sql_error)?);
@@ -456,7 +456,6 @@ impl DiagnosticStore {
                     .collect::<rusqlite::Result<Vec<_>>>()
                     .map_err(sql_error)?;
                 token_ids.push(token_id);
-
                 findings.push(finding(
                     "clear_then_repaint",
                     FindingConfidence::High,

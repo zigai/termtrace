@@ -175,6 +175,7 @@ impl Driver {
                         })?;
 
                     self.reap_recorder(handle, &path)?;
+
                     Ok(DriverData::Completion { completion })
                 }
                 DriverMethod::DiscardCompleted { handle } => {
@@ -422,10 +423,12 @@ impl Driver {
                             .map_err(|error| {
                                 return driver_failure_from_error(error, Some(path.clone()));
                             })?;
+
                     let events = records
                         .iter()
                         .map(|record| return EventProjection::from_record(record, *metadata_only))
                         .collect::<Vec<_>>();
+
                     let next_event_seq = events
                         .last()
                         .map_or(*from_event_seq, |event| return event.seq.saturating_add(1));
@@ -538,7 +541,6 @@ impl Driver {
                 DriverMethod::Detach { handle } => {
                     self.close_native(handle);
                     self.detach_recorder(handle);
-
                     if self.sessions.remove(handle).is_none() {
                         return Err(driver_failure(
                             "unknown_handle",
@@ -579,6 +581,7 @@ impl Driver {
     fn attach(&mut self, reference: &Path) -> StdResult<DriverData, Box<DriverResult>> {
         let path = resolve_reference(reference)
             .map_err(|error| return driver_failure_from_error(error, None))?;
+
         let canonical = path.canonicalize().map_err(|error| {
             return driver_failure("session_unavailable", error.to_string(), Some(path.clone()));
         })?;
@@ -623,6 +626,7 @@ impl Driver {
         let binary = env::current_exe().map_err(|error| {
             return driver_failure("launch_failed", error.to_string(), None);
         })?;
+
         let terminal = Terminal::new(binary, evidence_root);
         let command = command
             .iter()
@@ -650,7 +654,6 @@ impl Driver {
         let completed = session.path().join("completion.json").is_file();
         let (canonical_session, recorder) = session.into_detached_parts();
         let handle = Uuid::now_v7();
-
         self.sessions.insert(
             handle,
             super::runtime::AttachedSession {
@@ -684,6 +687,7 @@ impl Driver {
                 Some(path.to_path_buf()),
             );
         })?;
+
         return Ok(());
     }
 
@@ -807,6 +811,7 @@ pub(super) fn actor_failure_retry(
         let uncertain = details
             .and_then(|value| return value.input_sequence.as_ref())
             .is_some_and(|sequence| return sequence.failed_atom_bytes_written != 0);
+
         return ("safe_same_request_id", uncertain);
     }
 

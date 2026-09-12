@@ -52,7 +52,9 @@ thread_local! {
 #[cfg(test)]
 fn reset_test_auxiliary_scan() {
     TEST_AUXILIARY_BYTES.set(0);
+
     TEST_AUXILIARY_EVENTS.set(0);
+
     TEST_AUXILIARY_FIRST_EVENT.set(u64::MAX);
 }
 
@@ -270,8 +272,8 @@ impl IndexedTokenTimelineCursor {
         let Some(session) = source_path.parent() else {
             return Ok(None);
         };
-
         let path = session.join(DERIVED_DIRECTORY).join("control-index.jsonl");
+
         if !path.is_file() {
             return Ok(None);
         }
@@ -307,7 +309,6 @@ impl IndexedTokenTimelineCursor {
                     source,
                 };
             })?;
-
             if read == 0 {
                 return Ok(None);
             }
@@ -338,11 +339,13 @@ impl IndexedTokenTimelineCursor {
                         u64::try_from(token.raw.as_bytes().len()).unwrap_or(u64::MAX),
                     ),
                 );
+
                 TEST_AUXILIARY_EVENTS.set(
                     TEST_AUXILIARY_EVENTS
                         .get()
                         .saturating_add(u64::try_from(token.source.len()).unwrap_or(u64::MAX)),
                 );
+
                 TEST_AUXILIARY_FIRST_EVENT
                     .set(TEST_AUXILIARY_FIRST_EVENT.get().min(first.event_seq));
             }
@@ -490,7 +493,6 @@ fn locate_range_control_offset(log: &EventLog, range: SourceRange) -> Result<Opt
     let Some(session) = source_path.parent() else {
         return Ok(None);
     };
-
     let directory = session.join(DERIVED_DIRECTORY);
     let controls_path = directory.join("control-index.jsonl");
     let source_index_path = directory.join("control-source-index.jsonl");
@@ -547,7 +549,6 @@ fn locate_range_control_offset(log: &EventLog, range: SourceRange) -> Result<Opt
                 source,
             };
         })?;
-
         if entry.event_seq > last_event {
             break;
         }
@@ -592,6 +593,7 @@ fn locate_offset_checkpoint(
     let mut line = String::new();
     let mut hidden_before = 0_u64;
     let mut candidate = None;
+
     loop {
         line.clear();
         let read = reader.read_line(&mut line).map_err(|source| {
@@ -600,7 +602,6 @@ fn locate_offset_checkpoint(
                 source,
             };
         })?;
-
         if read == 0 {
             break;
         }
@@ -661,6 +662,7 @@ impl TimelinePageCollector {
     fn push(&mut self, entry: TimelineEntry) -> bool {
         if self.seen < self.offset {
             self.seen = self.seen.saturating_add(1);
+
             return true;
         }
 
@@ -669,6 +671,7 @@ impl TimelinePageCollector {
             #[cfg(test)]
             TEST_MAX_PAGE_ENTRIES.set(TEST_MAX_PAGE_ENTRIES.get().max(self.entries.len()));
             self.seen = self.seen.saturating_add(1);
+
             return true;
         }
 
@@ -700,6 +703,7 @@ pub fn build_timeline(
         }
 
         entries.push(semantic_timeline_entry(state));
+
         return Ok(());
     })?;
 
@@ -857,7 +861,6 @@ pub fn build_timeline_page(
             let entry = pending_auxiliary.take().ok_or_else(|| {
                 return range_error("timeline auxiliary cursor lost its pending entry");
             })?;
-
             if !collector.push(entry) {
                 return Ok(false);
             }

@@ -51,7 +51,6 @@ fn recovers_valid_prefix_and_reports_uncertain_intent() {
     file.sync_data().expect("sync damage");
 
     let report = EventLog::recover_prefix(&source, &recovered).expect("recover prefix");
-
     assert_eq!(report.valid_events, 2);
     assert_eq!(
         report

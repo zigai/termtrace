@@ -465,7 +465,6 @@ mod tests {
             effective_config_hash: "effective-hash".to_owned(),
         };
         let encoded = serde_json::to_value(&provenance).expect("profile provenance JSON");
-
         assert_eq!(
             encoded.get("replay_profile"),
             Some(&serde_json::json!(GHOSTTY_REPLAY_PROFILE_NAME))
@@ -517,7 +516,6 @@ mod tests {
             }),
         };
         let encoded = serde_json::to_value(&provenance).expect("geometry provenance JSON");
-
         assert!(encoded.get("effective_config_hash").is_none());
         assert!(encoded.get("ghostty_config_hash").is_none());
 

@@ -42,12 +42,12 @@ impl SessionSnapshot {
 
         let manifest = read_manifest(directory.path())?;
         validate_manifest(&manifest)?;
-
         if let Some(profile) = &manifest.ghostty_visual {
             copy_context_file(
                 &source.join(&profile.replay_profile),
                 &directory.path().join(&profile.replay_profile),
             )?;
+
             validate_replay_profile_file(directory.path(), &manifest)?;
         }
 
@@ -56,7 +56,6 @@ impl SessionSnapshot {
             .map_err(|error| return Error::filesystem(&manifest_path, error))?;
 
         let mut cursor = EventLogCursor::open_snapshot(source.join("events.jsonl"))?;
-
         if cursor.header().session_id != manifest.session_id
             || cursor.header().session_manifest_hash != manifest_hash(&manifest_bytes)
         {
@@ -110,6 +109,7 @@ fn write_snapshot_record(
     output
         .write_all(b"\n")
         .map_err(|error| return Error::filesystem(path, error))?;
+
     return Ok(());
 }
 
@@ -127,6 +127,7 @@ fn write_snapshot_record(
 pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryReport> {
     let destination =
         absolute(destination).map_err(|error| return Error::filesystem(destination, error))?;
+
     let parent = destination
         .parent()
         .ok_or_else(|| return Error::invalid("recovery destination has no parent"))?;
@@ -144,12 +145,12 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
 
     let manifest = read_manifest(staging.path())?;
     validate_manifest(&manifest)?;
-
     if let Some(profile) = &manifest.ghostty_visual {
         copy_context_file(
             &source.join(&profile.replay_profile),
             &staging.path().join(&profile.replay_profile),
         )?;
+
         validate_replay_profile_file(staging.path(), &manifest)?;
     }
 
@@ -190,6 +191,7 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
     })?;
 
     write_secure(&recovery_path, &bytes)?;
+
     sync_directory(staging.path())?;
     commit_directory(parent, staging.path(), &destination)?;
 
@@ -198,7 +200,6 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
 
 fn copy_context_file(source: &Path, destination: &Path) -> Result<()> {
     let (input, size) = open_regular_file_nofollow(source)?;
-
     if size > 4 * 1024 * 1024 {
         return Err(Error::invalid("recovery context file exceeds 4 MiB"));
     }
@@ -214,5 +215,6 @@ fn copy_context_file(source: &Path, destination: &Path) -> Result<()> {
     output
         .sync_all()
         .map_err(|error| return Error::filesystem(destination, error))?;
+
     return Ok(());
 }

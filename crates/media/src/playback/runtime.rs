@@ -80,7 +80,6 @@ fn playback_inner(options: &PlaybackOptions) -> Result<()> {
         let manifest = read_manifest(&options.session_directory)?;
         let expected = manifest.geometry;
         let reported = resize_and_query(expected.cols, expected.rows)?;
-
         if (reported.cols, reported.rows) != (expected.cols, expected.rows) {
             return Err(Error::InvalidReplay {
                 reason: format!(
@@ -106,6 +105,7 @@ fn playback_inner(options: &PlaybackOptions) -> Result<()> {
         }
 
         write_create_new_json(&options.geometry_file, &reported)?;
+
         return playback_events(options, raw.is_active());
     })();
 
@@ -135,6 +135,7 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
         .terminal
         .as_ref()
         .map_or(0, |record| return record.monotonic_ns);
+
     let source_range = resolve_source_range(
         options.start_monotonic_ns,
         options.end_monotonic_ns,
@@ -170,7 +171,6 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
         validate_playback_boundary(&cursor, &log)?;
 
         let reported = query_terminal()?;
-
         if (reported.cols, reported.rows) != grid {
             return Err(Error::InvalidReplay {
                 reason: format!(
@@ -186,8 +186,10 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
     finish_with_cleanup(result, drain.stop())?;
 
     query_terminal()?;
+
     write_secure(&options.ready_file, b"ready\n")?;
     thread::sleep(options.final_hold);
+
     return Ok(());
 }
 
@@ -230,7 +232,6 @@ fn timed_playback(
     validate_playback_header(&cursor, log)?;
 
     let mut endpoint_seen = false;
-
     while let Some(record) = cursor.next_record()? {
         if record.seq >= log.event_count {
             return Err(changed_source());
@@ -339,11 +340,11 @@ pub(super) fn emit_endpoint(
                 reason: "output endpoint byte offset exceeds the canonical event".to_owned(),
             };
         })?;
-
         output
             .write_all(prefix)
             .and_then(|()| return output.flush())
             .map_err(output_error)?;
+
         return Ok(());
     }
 
@@ -419,6 +420,7 @@ fn write_create_new_json(path: &Path, value: &impl serde::Serialize) -> Result<(
             source,
         };
     })?;
+
     return write_secure(path, &encoded).map_err(Error::from);
 }
 

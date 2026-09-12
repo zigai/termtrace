@@ -128,8 +128,10 @@ pub fn replay(log: &EventLog) -> Result<CollectedReplay> {
     let mut states = Vec::new();
     let artifacts = replay_with(log, None, |record, _, _| {
         states.push(record);
+
         return Ok(());
     })?;
+
     return Ok(CollectedReplay { states, artifacts });
 }
 
@@ -147,8 +149,10 @@ pub fn visit_states(
 ) -> Result<()> {
     replay_for_inspection(log, None, |record, state, _| {
         visitor(&record, state)?;
+
         return Ok(());
     })?;
+
     return Ok(());
 }
 
@@ -165,15 +169,19 @@ pub(crate) fn visit_states_range(
     {
         replay_with_seed(log, Some(range), seed, |record, state, _| {
             visitor(&record, state)?;
+
             return Ok(());
         })?;
+
         return Ok(());
     }
 
     replay_for_inspection(log, source_range, |record, state, _| {
         visitor(&record, state)?;
+
         return Ok(());
     })?;
+
     return Ok(());
 }
 
@@ -197,6 +205,7 @@ pub(crate) fn visit_states_range_while(
         seed,
         |record, state, _| return visitor(&record, state),
     )?;
+
     return Ok(());
 }
 
@@ -213,6 +222,7 @@ pub(crate) fn visit_states_seeded_while(
         Some(seed),
         |record, state, _| return visitor(&record, state),
     )?;
+
     return Ok(());
 }
 
@@ -302,6 +312,7 @@ pub(crate) fn inspect_latest_presented_stream(
         inspect_latest_presented_records(&header, records, INDEX_REPLAY_LIMITS, cancelled)?;
 
     let _pending = cursor.finish()?;
+
     return Ok(endpoint);
 }
 
@@ -376,7 +387,6 @@ fn inspect_latest_presented_records<'record>(
                 budget.charge_output(data.as_bytes().len())?;
 
                 let mut immediate_start = None;
-
                 for (offset, byte) in data.as_bytes().iter().enumerate() {
                     if offset % 4096 == 0 {
                         super::trust::check_cancelled(cancelled)?;
@@ -491,7 +501,6 @@ fn inspect_latest_presented_records<'record>(
                 let geometry = resize_intents.remove(operation_id).ok_or_else(|| {
                     return invalid_replay("applied resize result is missing its intent");
                 })?;
-
                 budget.set_geometry(geometry.cols, geometry.rows)?;
                 budget.charge_capture()?;
                 engine.resize(
@@ -500,7 +509,6 @@ fn inspect_latest_presented_records<'record>(
                     cell_size(geometry.pixel_width, geometry.cols),
                     cell_size(geometry.pixel_height, geometry.rows),
                 )?;
-
                 let latest = engine.snapshot()?;
                 synchronized_output = latest.modes.synchronized_output;
                 let _ = tracker.reconcile(synchronized_output);
@@ -589,6 +597,7 @@ pub fn format_state(log: &EventLog, selector: StateSelector, format: Format) -> 
 
         return Ok(());
     })?;
+
     return selected.ok_or_else(|| return invalid_replay("no semantic state matches the selector"));
 }
 
@@ -651,6 +660,7 @@ pub fn inspect_completed_session(
     selector: StateSelector,
 ) -> Result<StateInspection> {
     let (inspection, _) = inspect_completed_session_with_formats(session, selector, &[])?;
+
     return Ok(inspection);
 }
 
@@ -667,6 +677,7 @@ pub fn inspect_completed_session_with_formats(
     validate_completed_session(session)?;
     let inspection = inspect_session_stream_with_formats(session, selector, formats)?;
     source.check(session)?;
+
     return Ok(inspection);
 }
 
@@ -691,6 +702,7 @@ pub fn inspect_with_formats(
             });
 
             rendered.clear();
+
             for format in formats {
                 rendered.push((*format, engine.format(*format)?));
             }
@@ -701,6 +713,7 @@ pub fn inspect_with_formats(
 
     let inspection =
         selected.ok_or_else(|| return invalid_replay("no semantic state matches the selector"))?;
+
     return Ok((inspection, rendered));
 }
 
@@ -714,8 +727,8 @@ fn replay_seed_for_selector(
     let Some(session) = event_path.parent() else {
         return Ok(None);
     };
-
     let directory = session.join(DERIVED_DIRECTORY);
+
     if !directory.is_dir() {
         return Ok(None);
     }
@@ -813,6 +826,7 @@ pub(crate) fn inspect_session_stream_with_formats(
             });
 
             rendered.clear();
+
             for format in formats {
                 rendered.push((*format, engine.format(*format)?));
             }
@@ -823,6 +837,7 @@ pub(crate) fn inspect_session_stream_with_formats(
 
     let inspection =
         selected.ok_or_else(|| return invalid_replay("no semantic state matches the selector"))?;
+
     return Ok((inspection, rendered));
 }
 
@@ -849,6 +864,7 @@ pub(super) fn replay_for_index<'record>(
         None,
         |record, state, engine| {
             state_sink(record, state, engine)?;
+
             return Ok(true);
         },
     );
@@ -915,6 +931,7 @@ pub(super) fn replay_with_seed_and_limits(
 #[cfg(test)]
 pub(super) fn validate_replay_seed(log: &EventLog, seed: &ReplaySeed) -> Result<()> {
     drop(ReplayBuilder::from_seed(log, DEFAULT_REPLAY_LIMITS, seed)?);
+
     return Ok(());
 }
 
@@ -929,6 +946,7 @@ pub(super) fn validate_generated_replay_seed(
         DEFAULT_REPLAY_LIMITS,
         seed,
     )?);
+
     return Ok(());
 }
 
@@ -948,6 +966,7 @@ fn replay_with_limits_and_formats(
         seed,
         |record, state, engine| {
             state_sink(record, state, engine)?;
+
             return Ok(true);
         },
     );
@@ -1080,6 +1099,7 @@ fn visit_recording_states_with_engine(
     let records = from_fn(|| {
         let next = cursor.next_record().transpose();
         exhausted = next.is_none();
+
         return next;
     })
     .map(|record| return record.map(Cow::Owned).map_err(Error::from));
@@ -1117,6 +1137,7 @@ fn replay_records<'record>(
     mut state_sink: impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<bool>,
 ) -> Result<ReplayArtifacts> {
     let mut resize_intents = HashMap::new();
+
     let mut continue_replay = true;
 
     if source_range.is_none() {
@@ -1133,7 +1154,6 @@ fn replay_records<'record>(
 
     let mut emitted_range_baseline = false;
     let seed_record = seed.as_ref().map(|seed| return &seed.inspection.record);
-
     if let (Some(range), Some(record)) = (source_range, seed_record)
         && record.monotonic_ns > range.start_monotonic_ns
     {
@@ -1169,6 +1189,7 @@ fn replay_records<'record>(
             // event at the inclusive boundary remains an observable transition.
             continue_replay =
                 builder.capture_baseline(range.start_monotonic_ns, &mut state_sink)?;
+
             emitted_range_baseline = true;
 
             if !continue_replay {
@@ -1318,11 +1339,13 @@ fn source_byte_start(
 
     if record.seq < seed_event_seq {
         track_resize_control(record, resize_intents);
+
         return Ok(None);
     }
 
     let Some(offset) = seed.event_byte_offset else {
         track_resize_control(record, resize_intents);
+
         return Ok(None);
     };
 
@@ -1336,6 +1359,7 @@ fn source_byte_start(
         .checked_add(1)
         .and_then(|value| return usize::try_from(value).ok())
         .ok_or_else(|| return invalid_replay("replay checkpoint byte cursor overflow"))?;
+
     return Ok(Some(start));
 }
 
@@ -1357,7 +1381,6 @@ fn append_sgr_color(sequence: &mut String, prefix: u8, color: ColorSpec) -> Resu
 
 fn checkpoint_sgr(style: &CellStyle) -> Result<String> {
     let mut sequence = "\x1b[0".to_owned();
-
     for (enabled, code) in [
         (style.bold, 1),
         (style.faint, 2),
@@ -1383,6 +1406,7 @@ fn checkpoint_sgr(style: &CellStyle) -> Result<String> {
     append_sgr_color(&mut sequence, 48, style.background)?;
     append_sgr_color(&mut sequence, 58, style.underline_color)?;
     sequence.push('m');
+
     return Ok(sequence);
 }
 
@@ -1402,6 +1426,7 @@ fn restore_checkpoint_grid(
                     .grapheme
                     .chars()
                     .any(|character| return !character.is_ascii());
+
                 continue;
             }
 
@@ -1512,7 +1537,6 @@ impl ReplayBuilder {
                         "replay checkpoint byte cursor does not identify output",
                     ));
                 };
-
                 if offset >= u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX) {
                     return Err(invalid_replay(
                         "replay checkpoint byte cursor is outside its source event",
@@ -1542,7 +1566,6 @@ impl ReplayBuilder {
         engine.apply_terminal_colors(&header.colors)?;
         engine.write(&seed.engine_vt);
         drop(engine.take_responses());
-
         engine.write(b"\x1b]2;");
         engine.write(state.metadata.title.as_bytes());
         engine.write(b"\x1b\\");
@@ -1643,6 +1666,7 @@ impl ReplayBuilder {
         let restored_hash = builder.hash_state(&restored)?;
         builder.previous = Some(restored);
         builder.previous_hash = Some(restored_hash);
+
         return Ok(builder);
     }
 
@@ -1658,6 +1682,7 @@ impl ReplayBuilder {
         let Some(state) = self.engine.snapshot_if_changed()? else {
             return Ok(true);
         };
+
         return self.emit_state(state, event_seq, event_byte_offset, monotonic_ns, sink);
     }
 
@@ -1690,7 +1715,6 @@ impl ReplayBuilder {
         sink: &mut impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<bool>,
     ) -> Result<bool> {
         let hash = self.hash_state(&state)?;
-
         if self.previous_hash.as_ref() == Some(&hash) {
             return Ok(true);
         }
@@ -1718,6 +1742,7 @@ impl ReplayBuilder {
 
         self.previous = Some(state);
         self.previous_hash = Some(hash);
+
         return Ok(continue_replay);
     }
 
@@ -1805,6 +1830,7 @@ impl ReplayBudget {
             supported_geometry_cell_count(cols, rows)
                 .ok_or_else(|| return invalid_replay("resize geometry exceeds replay limits"))?,
         );
+
         return self.check_elapsed();
     }
 

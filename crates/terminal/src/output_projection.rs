@@ -33,8 +33,8 @@ impl ControlStripper {
         self.source_byte_count = self
             .source_byte_count
             .saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
-
         let mut output = Vec::with_capacity(bytes.len());
+
         for byte in bytes.iter().copied() {
             self.consume(byte, &mut output);
         }
@@ -42,6 +42,7 @@ impl ControlStripper {
         self.output_byte_count = self
             .output_byte_count
             .saturating_add(u64::try_from(output.len()).unwrap_or(u64::MAX));
+
         return output;
     }
 
@@ -195,7 +196,6 @@ mod tests {
         let mut stripper = ControlStripper::default();
         let output = stripper
             .feed(b"\x01\x7f\x80\x9b31mA\x9d0;title\x07B\x90payload\x1b\\C\x9fpayload\x1b\\D");
-
         assert_eq!(output, b"ABCD");
         assert!(!stripper.alternate_screen_observed());
     }
@@ -205,7 +205,6 @@ mod tests {
         let mut stripper = ControlStripper::default();
         let output = stripper
             .feed(b"\x1b]0;title\x07A\x1bPdata\x1b\\B\x1bcC\x1b]0;title\x1b\\D\x1b]0;a\x1bx\x07E");
-
         assert_eq!(output, b"ABCDE");
     }
 
@@ -226,8 +225,8 @@ mod tests {
         let mut sequence = b"\x1b[".to_vec();
         sequence.extend(iter::repeat_n(b'0', 4_091));
         sequence.extend_from_slice(b"?47h");
-        let mut stripper = ControlStripper::default();
 
+        let mut stripper = ControlStripper::default();
         assert!(stripper.feed(&sequence).is_empty());
         assert!(!stripper.alternate_screen_observed());
     }

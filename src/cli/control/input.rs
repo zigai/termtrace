@@ -47,7 +47,6 @@ pub(in crate::cli) fn run_send(
         include_atom_outcomes: false,
     });
     request.request_id = request_id;
-
     let control_response = match send_request_response(&resolved.path, &request) {
         Ok(control_response) => control_response,
         Err(error) => {
@@ -57,6 +56,7 @@ pub(in crate::cli) fn run_send(
                 }
                 _ => ("transport_lost", "unknown", "same_request_id_only"),
             };
+
             write_json_line(
                 response,
                 &serde_json::json!({
@@ -73,6 +73,7 @@ pub(in crate::cli) fn run_send(
             return Ok(ExitCode::FAILURE);
         }
     };
+
     let data = match control_response.result {
         ControlResult::Ok { data } => data,
         ControlResult::Error {
@@ -98,6 +99,7 @@ pub(in crate::cli) fn run_send(
             return Ok(ExitCode::FAILURE);
         }
     };
+
     let ControlData::InputSequenceApplied {
         sequence_id,
         bytes_written,
@@ -169,11 +171,10 @@ pub(super) fn input_sequence_atom_for_cli(
 
 pub(super) fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifiers)>> {
     let normalized = atom.to_ascii_lowercase().replace('+', "-");
-
     let mut remaining = normalized.as_str();
     let mut modifiers = KeyModifiers::default();
-    let mut modifier_count = 0_u8;
 
+    let mut modifier_count = 0_u8;
     loop {
         let (next, selected) = if let Some(next) = remaining.strip_prefix("ctrl-") {
             if modifiers.control {
@@ -221,7 +222,6 @@ pub(super) fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifie
         } else {
             (remaining, false)
         };
-
         if !selected {
             break;
         }
@@ -249,6 +249,7 @@ pub(super) fn parse_named_key(atom: &str) -> Result<Option<(NamedKey, KeyModifie
             let suffix = value
                 .strip_prefix('f')
                 .ok_or_else(|| miette::miette!("function key must be f1 through f24"))?;
+
             let number = suffix
                 .parse::<u8>()
                 .map_err(|_| miette::miette!("function key must be f1 through f24"))?;
@@ -311,6 +312,7 @@ pub(in crate::cli) fn run_resize(
         .pixel_width
         .or_else(|| return arguments.cols.checked_mul(12))
         .ok_or_else(|| miette::miette!("pixel width overflow; pass --pixel-width explicitly"))?;
+
     let pixel_height = arguments
         .pixel_height
         .or_else(|| return arguments.rows.checked_mul(24))
@@ -421,7 +423,6 @@ pub(in crate::cli) fn run_pointer(
     let Some(predicate) = predicate else {
         return write_json_line(response, &input);
     };
-
     let matched = wait_for_screen(
         &resolved.path,
         predicate,

@@ -55,7 +55,6 @@ fn enforces_aggregate_event_log_limits_before_retention() {
     )
     .expect_err("aggregate decoded payload must be bounded");
     assert!(matches!(payload_error, Error::InvalidEventLog { .. }));
-
     let summary =
         EventLogSummary::read(&path).expect("streaming validation is not a retention allocation");
     assert_eq!(summary.output_bytes, 6);
@@ -96,7 +95,6 @@ fn enforces_aggregate_event_log_limits_before_retention() {
     )
     .expect_err("prefix readers must share the count policy");
     assert!(matches!(prefix_error, Error::InvalidEventLog { .. }));
-
     let mut truncated = fs_err::read(&path).expect("canonical bytes");
     truncated.pop();
     fs_err::write(&path, truncated).expect("unterminated terminal line");

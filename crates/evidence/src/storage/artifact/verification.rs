@@ -51,19 +51,16 @@ pub fn collect_artifact_members(directory: &Path) -> Result<Vec<ArtifactMember>>
     let worker_count = available_workers(payloads.len());
     let mut indexed = thread::scope(|scope| -> Result<Vec<(usize, ArtifactMember)>> {
         let mut handles = Vec::with_capacity(worker_count);
-
         for worker in 0..worker_count {
             let payloads = &payloads;
             handles.push(
                 scope.spawn(move || -> Result<Vec<(usize, ArtifactMember)>> {
                     let mut members: Vec<(usize, ArtifactMember)> = Vec::new();
-
                     for index in (worker..payloads.len()).step_by(worker_count) {
                         let (path, normalized) = payloads.get(index).ok_or_else(|| {
                             return Error::invalid("artifact hashing index is outside payloads");
                         })?;
                         let (byte_length, hash) = hash_regular_file(path)?;
-
                         members.push((
                             index,
                             ArtifactMember {
@@ -179,7 +176,6 @@ pub fn verify_session_artifacts(
                 source,
             };
         })?;
-
         if blake3::hash(&manifest_bytes).to_hex().as_str() != record.manifest_hash {
             return Err(Error::invalid(
                 "artifact manifest hash does not match its catalog root",
@@ -188,7 +184,6 @@ pub fn verify_session_artifacts(
 
         let manifest: ArtifactMemberEnvelope = serde_json::from_slice(&manifest_bytes)
             .map_err(|source| return json_error(manifest_path, source))?;
-
         if manifest.source_range != record.source_range {
             return Err(Error::invalid(
                 "artifact catalog source range does not match its manifest",
@@ -213,7 +208,6 @@ fn validate_source_prefix(
     prefix: &CanonicalBoundary,
 ) -> Result<()> {
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
-
     if cursor.header().session_manifest_hash != manifest_hash {
         return Err(Error::invalid(
             "artifact prefix has a different source manifest",
@@ -221,7 +215,6 @@ fn validate_source_prefix(
     }
 
     let mut output_bytes = 0_u64;
-
     while cursor.next_event_seq() < prefix.next_event_seq {
         let record = cursor
             .next_record()?
@@ -270,7 +263,6 @@ fn collect_member_paths(root: &Path, directory: &Path, paths: &mut Vec<PathBuf>)
                 source,
             };
         })?;
-
         if metadata.file_type().is_symlink() {
             return Err(Error::invalid("artifact payload contains a symlink"));
         }
@@ -330,6 +322,7 @@ pub fn hash_regular_file(path: &Path) -> Result<(u64, String)> {
             source,
         };
     })?;
+
     return Ok((size, hasher.finalize().to_hex().to_string()));
 }
 

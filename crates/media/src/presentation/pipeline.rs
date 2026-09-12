@@ -34,6 +34,7 @@ use termtrace_model::artifact::presentation::{
 fn require_presentation_tools() -> Result<()> {
     command_version("ffmpeg")?;
     command_version("ffprobe")?;
+
     return Ok(());
 }
 
@@ -65,11 +66,9 @@ pub(super) fn export_with_capability_check(
     let parent = destination
         .parent()
         .ok_or_else(|| return plan_error("presentation destination must have a parent"))?;
-    let parent = if parent.as_os_str().is_empty() {
-        Path::new(".")
-    } else {
-        parent
-    };
+
+    let parent = if parent.as_os_str().is_empty() { Path::new(".") } else { parent };
+
     if check_capabilities {
         require_presentation_tools()?;
     }
@@ -100,7 +99,6 @@ pub fn preview(
     options: PreviewOptions,
 ) -> Result<PresentationPreviewOutcome> {
     validate_preview_options(options)?;
-
     if options.change_only && plan.change_visualization.is_none() {
         return Err(plan_error(
             "change-only preview requires change_visualization in the edit plan",
@@ -110,6 +108,7 @@ pub fn preview(
     validate_planned_source(&plan.source)?;
 
     let destination = destination.as_ref();
+
     if destination.exists() {
         return Err(Error::ArtifactExists {
             path: destination.to_path_buf(),
@@ -119,11 +118,8 @@ pub fn preview(
     let parent = destination
         .parent()
         .ok_or_else(|| return plan_error("preview destination must have a parent"))?;
-    let parent = if parent.as_os_str().is_empty() {
-        Path::new(".")
-    } else {
-        parent
-    };
+
+    let parent = if parent.as_os_str().is_empty() { Path::new(".") } else { parent };
     require_presentation_tools()?;
     fs_err::create_dir_all(parent).map_err(|source| {
         return Error::Filesystem {
@@ -135,7 +131,6 @@ pub fn preview(
     let composed = parent.join(format!(".preview-source-{}.tmp", uuid::Uuid::now_v7()));
     let _composed_cleanup = DirectoryCleanup(composed.clone());
     let rendered = export_with_capability_check(plan, &composed, false)?;
-
     let staging = parent.join(format!(".preview-{}.tmp", uuid::Uuid::now_v7()));
     create_private_directory(&staging)?;
     let _staging_cleanup = DirectoryCleanup(staging.clone());
@@ -185,6 +180,7 @@ pub fn preview(
         contact_sheet
             .join()
             .map_err(|_panic| return plan_error("contact-sheet rendering worker panicked"))??;
+
         preview_video
             .join()
             .map_err(|_panic| return plan_error("preview-video rendering worker panicked"))??;
@@ -280,6 +276,7 @@ pub(super) fn select_preview_frames(
 
     let candidates: u64 = merged.iter().map(|(start, end)| return end - start).sum();
     let count = u64::from(options.max_frames).min(candidates);
+
     if count == 0 {
         return Err(plan_error("preview selection contains no frames"));
     }
@@ -287,8 +284,8 @@ pub(super) fn select_preview_frames(
     let mut selected = Vec::with_capacity(usize::from(options.max_frames));
     let mut intervals = merged.into_iter();
     let mut interval = intervals.next();
-    let mut preceding = 0;
 
+    let mut preceding = 0;
     for index in 0..count {
         let candidate_index = if count == 1 {
             0
@@ -299,7 +296,6 @@ pub(super) fn select_preview_frames(
 
         while let Some((start, end)) = interval {
             let length = end - start;
-
             if candidate_index - preceding < length {
                 selected.push(start + candidate_index - preceding);
                 break;
@@ -477,6 +473,7 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
                         };
                     })?,
                 )?;
+
                 return Ok(output_probe);
             });
             let frame_map = scope.spawn(|| -> Result<()> {
@@ -511,12 +508,15 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
             let output_probe = probe
                 .join()
                 .map_err(|_panic| return plan_error("output-probe worker panicked"))??;
+
             frame_map
                 .join()
                 .map_err(|_panic| return plan_error("presentation-map worker panicked"))??;
+
             normalized_plan
                 .join()
                 .map_err(|_panic| return plan_error("normalized-plan worker panicked"))??;
+
             let ffmpeg_version = version
                 .join()
                 .map_err(|_panic| return plan_error("FFmpeg-version worker panicked"))??;
@@ -552,5 +552,6 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
 
     write_secure(&staging.join("manifest.json"), &manifest_bytes)?;
     verify_artifact_members(staging, &manifest.members)?;
+
     return Ok(manifest);
 }

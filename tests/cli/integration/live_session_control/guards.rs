@@ -80,7 +80,6 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
     ] {
         let output = command.assert().failure().get_output().stdout.clone();
         let rejection = compact_json_line(&output);
-
         assert_eq!(rejection["code"], "stale_observation");
         assert_eq!(rejection["applied"], "none");
         assert_eq!(rejection["retry"], "safe_new_request");
@@ -104,7 +103,6 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
     let output = child
         .wait_with_output()
         .expect("guarded fixture completion");
-
     assert!(output.status.success(), "fixture failed: {output:?}");
 
     let recording = EventLog::read(session.join("events.jsonl")).expect("event log");
@@ -120,7 +118,6 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
             _ => return None,
         })
         .collect::<Vec<_>>();
-
     assert_eq!(agent_inputs, vec![b"accepted\n".as_slice()]);
 }
 
@@ -180,12 +177,10 @@ fn rejected_control_requests_do_not_terminate_the_recorder_actor() {
     for (index, (command, expected_code)) in requests.into_iter().enumerate() {
         let response = send_request_response(&session, &ControlRequest::new(command))
             .expect("structured request rejection");
-
         assert!(matches!(
             &response.result,
             ControlResult::Error { code, .. } if code == expected_code
         ));
-
         send_request(&session, &ControlRequest::new(ControlCommand::Ping))
             .expect("ping after rejection");
 

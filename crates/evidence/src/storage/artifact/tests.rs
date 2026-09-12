@@ -7,7 +7,6 @@ use nix::{fcntl::OFlag, sys::stat::Mode};
 use std::{
     ffi::{OsStr, OsString},
     fs::File,
-    io::Write as _,
     os::unix::fs::{symlink, PermissionsExt as _},
 };
 use tempfile::TempDir;
@@ -95,7 +94,6 @@ fn generation_budget_rejects_before_writing_excess_bytes() {
         let mut writer = BudgetWriter::new(&mut bytes, 5);
         writer.write_all(b"abc").expect("first bounded write");
         assert!(writer.write_all(b"def").is_err());
-
         writer.write_all(b"de").expect("exact remaining allowance");
         assert!(writer.write_all(b"f").is_err());
     }
@@ -113,10 +111,12 @@ fn member_verification_rejects_extra_and_changed_payloads() {
     verify_artifact_members(&artifact, &members).expect("members should verify");
 
     fs_err::write(artifact.join("extra.log"), b"unmanifested").expect("extra member");
+
     assert!(verify_artifact_members(&artifact, &members).is_err());
 
     fs_err::remove_file(artifact.join("extra.log")).expect("remove extra member");
     fs_err::write(artifact.join("final.txt"), b"changed").expect("change member");
+
     assert!(verify_artifact_members(&artifact, &members).is_err());
 }
 
@@ -131,7 +131,6 @@ fn parallel_member_hashing_preserves_canonical_path_order() {
     }
 
     let members = collect_artifact_members(&artifact).expect("collect members");
-
     assert_eq!(
         members
             .iter()
@@ -242,6 +241,7 @@ fn retained_parent_descriptor_prevents_create_redirection() {
     let outside = temporary.path().join("outside");
 
     create_private_directory(&parent).expect("private parent");
+
     create_private_directory(&outside).expect("outside directory");
 
     let target = parent.join("artifact.json");
@@ -258,6 +258,7 @@ fn retained_parent_descriptor_prevents_create_redirection() {
         &target,
     )
     .expect("descriptor-relative create");
+
     File::from(fd).write_all(b"safe").expect("write artifact");
 
     assert_eq!(
@@ -299,7 +300,6 @@ fn secure_write_is_never_partially_published_at_injected_failure_boundaries() {
         .expect("atomic write directory")
         .map(|entry| return entry.expect("atomic write entry").file_name())
         .collect();
-
     assert_eq!(entries, [OsString::from("after-rename.json")]);
 }
 
@@ -332,6 +332,7 @@ fn artifact_catalog_rejects_session_lock_and_catalog_symlinks() {
     let outside_lock = outside.join("lock");
     fs_err::write(&outside_lock, b"sentinel").expect("outside lock");
     symlink(&outside_lock, lock_session.join(ARTIFACT_ROOT_LOCK)).expect("lock symlink");
+
     assert!(append_artifact_root(
         &lock_session,
         &lock_session.join("derived"),
@@ -353,6 +354,7 @@ fn artifact_catalog_rejects_session_lock_and_catalog_symlinks() {
     let outside_catalog = outside.join("catalog");
     fs_err::write(&outside_catalog, b"sentinel").expect("outside catalog");
     symlink(&outside_catalog, catalog_session.join(ARTIFACT_ROOT_LOG)).expect("catalog symlink");
+
     assert!(append_artifact_root(
         &catalog_session,
         &catalog_session.join("derived"),

@@ -41,6 +41,7 @@ pub(super) fn run_verify(response: &mut ResponseWriter, arguments: VerifyArgs) -
         let status = if valid { "valid" } else { "invalid" };
         let level = stable_enum_label(&report.level)?;
         let mut output = format!("{status}: {} ({level})\n", report.session.display(),);
+
         for finding in &report.findings {
             writeln!(output, "{}: {}", finding.code, finding.message).into_diagnostic()?;
         }
@@ -90,6 +91,7 @@ pub(super) fn run_recover(
             "recovery requires --session or --event-log"
         ));
     };
+
     return write_json_line(response, &report);
 }
 

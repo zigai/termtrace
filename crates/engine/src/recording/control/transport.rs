@@ -74,6 +74,7 @@ pub(super) fn validate_frame(encoded: &[u8]) -> Result<()> {
 fn input_sequence_response_timeout(atoms: &[InputSequenceAtom], pace_ns: u64) -> Duration {
     let gaps = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
     let pacing = Duration::from_nanos(pace_ns.saturating_mul(gaps)).min(MAX_INPUT_SEQUENCE_PACING);
+
     return DEFAULT_CONTROL_TIMEOUT.saturating_add(pacing);
 }
 
@@ -90,7 +91,6 @@ mod tests {
     #[test]
     fn rejects_unterminated_and_oversized_frames() {
         assert!(validate_frame(br#"{"version":1}"#).is_err());
-
         let mut oversized = vec![b'x'; usize::try_from(MAX_CONTROL_MESSAGE_BYTES).unwrap()];
         oversized.push(b'\n');
         assert!(validate_frame(&oversized).is_err());
@@ -118,7 +118,6 @@ mod tests {
             pace_ns: 11_000_000_000,
             include_atom_outcomes: false,
         };
-
         assert_eq!(
             control_response_timeout(&command, Duration::from_secs(2)),
             Duration::from_secs(21)

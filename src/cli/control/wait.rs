@@ -41,6 +41,7 @@ pub(in crate::cli) fn run_wait(
         };
 
     write_json_line(response, &outcome)?;
+
     return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
 }
 
@@ -70,6 +71,7 @@ fn run_idle_wait(
         }),
     )
     .into_diagnostic()?;
+
     let ControlData::StableSnapshot {
         frame,
         first_observed_monotonic_ns,
@@ -83,7 +85,6 @@ fn run_idle_wait(
             "recording actor returned an unexpected stable-capture payload"
         ));
     };
-
     if !arguments.allow_incomplete && *quality != StableCaptureQuality::Stable {
         return Err(miette::miette!(
             "stable capture ended with {}; pass --allow-incomplete to receive the typed snapshot",
@@ -94,7 +95,6 @@ fn run_idle_wait(
     if arguments.full_state {
         return write_json_line(response, &data);
     }
-
     return write_json_line(
         response,
         &serde_json::json!({
@@ -146,7 +146,6 @@ pub(super) fn write_completed_stable_snapshot(
             }),
         );
     }
-
     return write_json_line(
         response,
         &serde_json::json!({
@@ -177,6 +176,7 @@ fn parse_screen_predicate(arguments: &WaitArgs) -> Result<ScreenPredicate> {
         }
 
         predicate = Some(pred?);
+
         return Ok(());
     };
 

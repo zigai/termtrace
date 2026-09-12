@@ -29,7 +29,6 @@ pub(super) struct TerminalInputDrain {
 impl RawTerminalGuard {
     pub(super) fn enter(enabled: bool) -> Result<Self> {
         let stdin = io::stdin();
-
         if !enabled
             || !isatty(&stdin)
                 .map_err(|error| return terminal_error("inspect standard input", error))?
@@ -53,6 +52,7 @@ impl RawTerminalGuard {
         let Some(original) = self.original.take() else {
             return Ok(());
         };
+
         return tcsetattr(io::stdin(), SetArg::TCSANOW, &original)
             .map_err(|error| return terminal_error("restore terminal mode", error));
     }
@@ -154,7 +154,6 @@ pub(super) fn query_terminal() -> Result<TerminalGeometryReport> {
 
     let stdin = io::stdin();
     let deadline = Instant::now() + QUERY_TIMEOUT;
-
     let mut bytes: Vec<u8> = Vec::with_capacity(128);
     let mut buffer = [0_u8; 128];
 
@@ -217,6 +216,7 @@ fn parse_report(bytes: &[u8]) -> Result<Option<TerminalGeometryReport>> {
             .map(str::parse::<u16>)
             .collect::<StdResult<Vec<_>, _>>()
             .map_err(|error| return terminal_error("parse terminal geometry", error))?;
+
         let Some((kind, dimensions)) = values.split_first() else {
             continue;
         };
@@ -237,14 +237,12 @@ fn parse_report(bytes: &[u8]) -> Result<Option<TerminalGeometryReport>> {
     else {
         return Ok(None);
     };
-
     if cols == 0 || rows == 0 || cell_width == 0 || cell_height == 0 {
         return Err(terminal_error(
             "parse terminal geometry",
             "terminal reported a zero dimension",
         ));
     }
-
     return Ok(Some(TerminalGeometryReport {
         cols,
         rows,
@@ -312,7 +310,6 @@ mod tests {
         let report = parse_report(b"\x1b[8;40;160t\x1b[4;720;1440t\x1b[6;18;9t")
             .expect("valid report")
             .expect("complete report");
-
         assert_eq!(
             report,
             TerminalGeometryReport {

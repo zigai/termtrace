@@ -49,12 +49,12 @@ pub fn verify(directory: &Path, expected: Option<&BundleIdentity>) -> Result<Bun
     }
 
     verify_members(directory, &manifest.members)?;
+
     return Ok(manifest);
 }
 
 fn verify_members(directory: &Path, expected: &[ArtifactMember]) -> Result<()> {
     let mut by_path: BTreeMap<&str, &ArtifactMember> = BTreeMap::new();
-
     for member in expected {
         validate_relative_path(Path::new(&member.path))?;
 
@@ -92,7 +92,6 @@ fn verify_members(directory: &Path, expected: &[ArtifactMember]) -> Result<()> {
         .map(|path| return (*path).to_owned())
         .collect();
     expected_paths.insert(BUNDLE_MANIFEST_NAME.to_owned());
-
     if actual != expected_paths {
         return Err(Error::invalid(
             "bundle payload members do not match their whole-file manifest",
@@ -101,7 +100,6 @@ fn verify_members(directory: &Path, expected: &[ArtifactMember]) -> Result<()> {
 
     for (path, member) in by_path {
         let (byte_length, hash) = hash_regular_file(&directory.join(path))?;
-
         if byte_length != member.byte_length || hash != member.blake3 {
             return Err(Error::invalid(format!(
                 "bundle member `{path}` does not match its whole-file manifest"
@@ -114,7 +112,6 @@ fn verify_members(directory: &Path, expected: &[ArtifactMember]) -> Result<()> {
 
 pub(crate) fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
     let (mut file, size) = open_regular_nofollow(path)?;
-
     if size > maximum_bytes {
         return Err(Error::invalid(format!(
             "bundle member `{}` exceeds the {maximum_bytes} byte limit",

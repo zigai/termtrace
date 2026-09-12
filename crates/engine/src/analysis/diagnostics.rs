@@ -100,6 +100,7 @@ impl ValidatedVisualManifest {
         }
 
         self.screenshot_state_id = Some(state_id);
+
         return Ok(());
     }
 }
@@ -117,6 +118,7 @@ pub fn native_correlations(
             .or_default()
             .push(correlation);
     });
+
     return correlations;
 }
 
@@ -131,6 +133,7 @@ pub fn native_correlations_for_state(
     visit_native_correlations(session_id, Some(state_id), evidence, |correlation| {
         correlations.push(correlation);
     });
+
     return correlations;
 }
 
@@ -201,6 +204,7 @@ pub fn diagnose(
     let mut states = Vec::new();
     visit_states(log, |record, _| {
         states.push(record.clone());
+
         return Ok(());
     })?;
 
@@ -325,9 +329,9 @@ pub fn explain_session(
     let target_event = target_state.event_seq.unwrap_or(0);
     let start_event = target_event.saturating_sub(context_events);
     let end_event = target_event.saturating_add(context_events);
-
     let mut cursor = TokenCursor::new(session, None)?;
     let mut tokens = Vec::new();
+
     while let Some(entry) = cursor.next()? {
         if let TimelineItem::VtToken { token } = entry.item
             && token.source.iter().any(|segment| {
@@ -548,7 +552,6 @@ fn detect_full_redraw(
                     });
             });
         });
-
         findings.push(DiagnosticFinding {
             code: "full_viewport_clear".to_owned(),
             confidence: FindingConfidence::High,
@@ -672,7 +675,6 @@ fn detect_transients(states: &[StateRecord], findings: &mut Vec<DiagnosticFindin
             } else {
                 "ordered_transient_duration_unknown: boundaries share an event timestamp".to_owned()
             };
-
             findings.push(DiagnosticFinding {
                 code: "presented_transient".to_owned(),
                 confidence: FindingConfidence::High,
@@ -802,7 +804,6 @@ fn detect_churn(
 
 fn detect_query_loops(log: &EventLog, findings: &mut Vec<DiagnosticFinding>) {
     let mut counts = BTreeMap::<(Vec<u8>, Vec<u8>), usize>::new();
-
     for record in &log.events {
         if let Event::QueryResponse {
             query, response, ..
@@ -832,7 +833,6 @@ fn detect_query_loops(log: &EventLog, findings: &mut Vec<DiagnosticFinding>) {
 
 fn findings(tokens: &[VtToken], states: &[StateRecord]) -> Vec<ExplainFinding> {
     let mut findings = Vec::new();
-
     for (description, code, fact) in [
         (
             "erase display (all)",
@@ -881,8 +881,10 @@ fn findings(tokens: &[VtToken], states: &[StateRecord]) -> Vec<ExplainFinding> {
     let clear = findings
         .iter()
         .find(|finding| return finding.code == "full_viewport_clear");
+
     let printable_after_clear = clear.is_some_and(|finding| {
         let last_clear = finding.token_ids.iter().copied().max().unwrap_or(0);
+
         return tokens.iter().any(|token| {
             return token.token_id > last_clear
                 && token.description == "printable bytes"

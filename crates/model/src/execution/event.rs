@@ -97,6 +97,7 @@ impl EventLogHeader {
     #[must_use]
     pub fn with_colors(mut self, colors: TerminalColors) -> Self {
         self.colors = colors;
+
         return self;
     }
 }

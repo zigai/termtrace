@@ -39,7 +39,6 @@ pub fn semantic_video_capability() -> Capability {
             "the semantic engine and a bounded libx264rgb encode probe completed; native display tools are not required",
         );
     }
-
     return blocked(
         SEMANTIC_VIDEO_CAPABILITY,
         "semantic_video_dependency_missing",
@@ -69,7 +68,6 @@ pub fn presentation_capability() -> Capability {
             "FFmpeg/FFprobe, H.264 delivery encoding, and the ASS/libass filter were found",
         );
     }
-
     return blocked(
         PRESENTATION_CAPABILITY,
         "presentation_dependency_missing",

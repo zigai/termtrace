@@ -55,6 +55,7 @@ pub fn receipt_signing_capability() -> Capability {
 fn executable(command: impl AsRef<OsStr>) -> Option<PathBuf> {
     let command = command.as_ref();
     let path = env::var_os("PATH")?;
+
     return env::split_paths(&path)
         .map(|directory| return directory.join(command))
         .find(|candidate| return candidate.is_file());
@@ -81,6 +82,7 @@ pub fn create_ssh_receipt(session: &Path, key: &Path, signer_key_id: &str) -> Re
     let payload = build_payload(session, signer_key_id)?;
     let path = session.join(EVIDENCE_RECEIPT_NAME);
     sign_ssh_receipt(&path, payload, key)?;
+
     return Ok(path);
 }
 
@@ -119,7 +121,6 @@ pub(crate) fn receipt_payload(
     created_unix_ns: u128,
 ) -> Result<EvidenceReceiptPayload> {
     let available_count = u64::try_from(roots.len()).unwrap_or(u64::MAX);
-
     if artifact_root_count > available_count {
         return Err(Error::invalid(
             "artifact checkpoint exceeds the current root catalog",
@@ -193,10 +194,12 @@ fn sign_ssh_receipt(
         .arg(&temporary)
         .stdin(Stdio::null())
         .output();
+
     let output = match output {
         Ok(output) => output,
         Err(error) => {
             cleanup_temporary(&temporary, &signature_path);
+
             return Err(command_error("launch OpenSSH signer", error.to_string()));
         }
     };
@@ -243,6 +246,7 @@ fn sign_ssh_receipt(
 
     write_temporary(receipt_path, &bytes)?;
     sync_parent(receipt_path)?;
+
     return Ok(());
 }
 
@@ -262,6 +266,7 @@ pub fn read_receipt(receipt_path: &Path) -> Result<EvidenceReceipt> {
 
     let bytes = fs_err::read(receipt_path)
         .map_err(|source| return Error::filesystem(receipt_path, source))?;
+
     let receipt = serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path: receipt_path.to_path_buf(),
@@ -269,7 +274,9 @@ pub fn read_receipt(receipt_path: &Path) -> Result<EvidenceReceipt> {
             source,
         };
     })?;
+
     validate_envelope(&receipt)?;
+
     return Ok(receipt);
 }
 
@@ -287,7 +294,6 @@ pub fn verify_ssh_receipt(
     allowed_signers: Option<&Path>,
 ) -> Result<ReceiptVerification> {
     let receipt = read_receipt(receipt_path)?;
-
     if receipt.payload != *expected_payload {
         return Err(Error::invalid(
             "receipt payload does not match current canonical roots or artifact checkpoint",
@@ -352,7 +358,6 @@ fn validate_payload(payload: &EvidenceReceiptPayload) -> Result<()> {
 
 fn validate_envelope(receipt: &EvidenceReceipt) -> Result<()> {
     validate_payload(&receipt.payload)?;
-
     if receipt.format != EVIDENCE_RECEIPT_FORMAT
         || receipt.version != EVIDENCE_RECEIPT_VERSION
         || receipt.signature.scheme != "openssh"
@@ -401,7 +406,6 @@ fn run_ssh_verification(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| return command_error("launch OpenSSH verifier", error.to_string()))?;
-
     let write_result = child
         .stdin
         .take()
@@ -450,6 +454,7 @@ fn sync_parent(path: &Path) -> Result<()> {
     directory
         .sync_all()
         .map_err(|source| return Error::filesystem(parent, source))?;
+
     return Ok(());
 }
 

@@ -52,11 +52,13 @@ fn native_capabilities_with(
 
     let screenshot_missing = screenshot
         .then(|| return missing(&["ghostty", "Xvfb", "dbus-run-session", "import", "ffprobe"]));
+
     let video_missing = video
         .then(|| return missing(&["ghostty", "Xvfb", "dbus-run-session", "ffmpeg", "ffprobe"]));
 
     let probe_screenshot =
         cfg!(target_os = "linux") && screenshot_missing.as_ref().is_some_and(Vec::is_empty);
+
     let probe_video =
         cfg!(target_os = "linux") && video_missing.as_ref().is_some_and(Vec::is_empty);
 
@@ -148,6 +150,7 @@ fn operational_probe(screenshot: bool, video: bool) -> [ProbeResult; 2] {
 
 fn failed_probes(error: super::Error) -> [ProbeResult; 2] {
     let detail: String = error.to_string().chars().take(2048).collect();
+
     return [Err(detail.clone()), Err(detail)];
 }
 
@@ -199,6 +202,7 @@ fn probe_staged(
 
     ghostty.terminate();
     xvfb.terminate();
+
     return Ok([screenshot_result, video_result]);
 }
 
@@ -262,7 +266,6 @@ fn wait_for_painted_frame(display: &str, deadline: Instant, video: bool) -> Resu
                 deadline,
             )?
         };
-
         if sample == [0x10, 0x20, 0x30] {
             return Ok(());
         }
@@ -352,7 +355,6 @@ fn probe_capture(staging: &Path, display: &str, deadline: Instant, video: bool) 
 
     if video {
         validate_video_probe(&report, FPS, WIDTH, HEIGHT)?;
-
         if report
             .pointer("/streams/0/codec_name")
             .and_then(|value| return value.as_str())

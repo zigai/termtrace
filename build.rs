@@ -33,5 +33,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
 
     println!("cargo:rustc-env=TERMTRACE_BUILD_REVISION={build_revision}");
+
     return Ok(());
 }

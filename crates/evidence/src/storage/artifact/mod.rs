@@ -66,6 +66,7 @@ impl<W: Write> Write for BudgetWriter<W> {
 
         let count = self.inner.write(buf)?;
         self.remaining -= u64::try_from(count).unwrap_or(u64::MAX);
+
         return Ok(count);
     }
 

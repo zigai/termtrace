@@ -123,6 +123,7 @@ impl VtFramer {
             };
             emitted.push(self.emit(kind));
         }
+
         return Ok(emitted);
     }
 
@@ -154,11 +155,13 @@ impl VtFramer {
         if self.printable_utf8_remaining > 0 {
             if (0x80..=0xbf).contains(&byte.value) {
                 self.printable_utf8_remaining -= 1;
+
                 return self.push(byte);
             }
 
             self.printable_utf8_remaining = 0;
             self.flush_printable(emitted);
+
             return self.consume_ground(byte, emitted);
         }
 
@@ -281,6 +284,7 @@ impl VtFramer {
             VtTokenKind::Csi => FramerState::Csi,
             _ => FramerState::Ground,
         };
+
         return Ok(());
     }
 
@@ -294,6 +298,7 @@ impl VtFramer {
         self.flush_printable(emitted);
         self.push(byte)?;
         self.state = FramerState::String { kind, osc };
+
         return Ok(());
     }
 
@@ -345,6 +350,7 @@ impl VtFramer {
         };
 
         self.next_token_id = self.next_token_id.saturating_add(1);
+
         return token;
     }
 }
@@ -357,6 +363,7 @@ impl VtFramer {
 pub fn frame_event_records(records: &[EventRecord]) -> Result<Vec<VtToken>> {
     let mut framer = VtFramer::default();
     let mut tokens = Vec::new();
+
     for record in records {
         if let Event::Output { data } = &record.event {
             tokens.extend(framer.feed(record.seq, record.monotonic_ns, data.as_bytes())?);
@@ -364,6 +371,7 @@ pub fn frame_event_records(records: &[EventRecord]) -> Result<Vec<VtToken>> {
     }
 
     tokens.extend(framer.finish()?);
+
     return Ok(tokens);
 }
 
@@ -441,7 +449,6 @@ mod tests {
             .iter()
             .flat_map(|token| return token.raw.as_bytes().iter().copied())
             .collect::<Vec<_>>();
-
         assert_eq!(recombined, b"A\x1b[2J\x1b]0;title\x1b\\\xe7\x95\x8c");
     }
 
@@ -541,7 +548,6 @@ mod tests {
             .iter()
             .flat_map(|token| return token.raw.as_bytes().iter().copied())
             .collect::<Vec<_>>();
-
         assert_eq!(recombined, b"\xc2\x9b\x9b2J\x90data\x9c\x9fapp\x9c\xff\n");
     }
 }

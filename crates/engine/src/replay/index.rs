@@ -117,6 +117,7 @@ pub fn index_session_with_options(
         .terminal
         .as_ref()
         .map_or(0, |record| return record.monotonic_ns);
+
     let source_range = resolve_source_range(
         options.start_monotonic_ns,
         options.end_monotonic_ns,
@@ -195,7 +196,6 @@ pub fn index_session_with_options(
             final_state_hash: artifacts.final_state_hash,
         });
     });
-
     if let Err(primary) = result {
         if staging.exists()
             && let Err(source) = fs_err::remove_dir_all(&staging)
@@ -227,6 +227,7 @@ pub fn derived_directory_name_for(
         StateSelection::All => DERIVED_DIRECTORY.to_owned(),
         StateSelection::Presented => format!("{DERIVED_DIRECTORY}-presented"),
     };
+
     return source_range.map_or_else(
         || return base.clone(),
         |range| return format!("{base}-{}", range.artifact_suffix()),
@@ -277,7 +278,6 @@ pub(crate) fn load_nearest_replay_seed(
             })?;
 
             let mut target_state_id = None;
-
             for line in BufReader::new(file).lines() {
                 let line = line.map_err(|source| {
                     return Error::Filesystem {
@@ -287,7 +287,6 @@ pub(crate) fn load_nearest_replay_seed(
                 })?;
                 let entry: StateIndexEntry = serde_json::from_str(&line)
                     .map_err(|source| return json_error(index_path.clone(), source))?;
-
                 if entry.state_hash == *state_hash {
                     target_state_id = Some(entry.state_id);
                     break;
@@ -316,7 +315,6 @@ pub(crate) fn load_nearest_replay_seed(
     })?;
 
     let mut selected = None;
-
     for line in BufReader::new(decoder).lines() {
         let line = line.map_err(|source| {
             return Error::Filesystem {
@@ -326,7 +324,6 @@ pub(crate) fn load_nearest_replay_seed(
         })?;
         let checkpoint: SemanticReplayCheckpoint = serde_json::from_str(&line)
             .map_err(|source| return json_error(checkpoints_path.clone(), source))?;
-
         if checkpoint_precedes_selector(&checkpoint.inspection.record, &checkpoint_selector) {
             selected = Some(ReplaySeed {
                 inspection: checkpoint.inspection,
@@ -387,7 +384,6 @@ fn write_source_index(
 ) -> Result<(ReplayArtifacts, u64)> {
     write_control_index(directory, source, source_range)?;
     let mut ranks = TimelineRanks::new(directory, source.records()?, source_range)?;
-
     let states_path = directory.join("states.jsonl.zst");
     let states_file = secure_file(&states_path)?;
     let mut states = zstd::stream::write::Encoder::new(states_file, 3).map_err(|source| {
@@ -424,7 +420,6 @@ fn write_source_index(
     let mut final_retained_state_hash = None;
     let mut previous_retained_state = None;
     let mut records = source.records()?;
-
     let artifacts = replay_for_index(
         source.header(),
         records.by_ref(),
@@ -513,6 +508,7 @@ fn write_source_index(
             retained_state_count = retained_state_count
                 .checked_add(1)
                 .ok_or_else(|| return invalid_replay("retained semantic state count overflow"))?;
+
             return Ok(());
         },
     )?;
@@ -571,10 +567,10 @@ fn write_source_index(
     };
     let manifest_bytes = serde_json::to_vec_pretty(&manifest)
         .map_err(|source| return json_error(directory.join("manifest.json"), source))?;
-
     write_secure(&directory.join("manifest.json"), &manifest_bytes)?;
     verify_artifact_members(directory, &manifest.members)?;
     sync_directory(directory)?;
+
     return Ok((artifacts, retained_state_count));
 }
 

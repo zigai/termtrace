@@ -19,6 +19,7 @@ pub(super) fn capture_failure_artifacts(
     }
 
     let bundle = attempt_directory.join("debug-bundle");
+
     match session.evidence().bundle(&bundle, BundleProfile::Debug) {
         Ok(_) => verified_artifacts.push(bundle),
         Err(error) => {

@@ -64,6 +64,7 @@ struct SdkSummary {
 fn shared_fixture_matches_through_every_public_sdk_facade() {
     let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("fixtures/conformance/actions/atomic-action.json");
+
     let fixture: Fixture =
         serde_json::from_slice(&fs_err::read(&fixture_path).expect("shared atomic-action fixture"))
             .expect("shared atomic-action fixture JSON");
@@ -148,10 +149,10 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
         },
         ..ActionOptions::default()
     };
-
     let error = session
         .act(&atoms, options.clone())
         .expect_err("oversized action projection must fail loudly");
+
     let Error::ActionTerminatingFrame {
         request_id,
         retry_safety,
@@ -172,6 +173,7 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
     let retry = session
         .act(&atoms, options)
         .expect_err("cached oversized action retry must retain its failure");
+
     let Error::ActionTerminatingFrame {
         request_id: retry_request_id,
         retry_safety: retry_safety_retry,
@@ -194,7 +196,6 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
         .screen()
         .frame(ScreenProjectionRequest::default())
         .expect("post-error screen frame");
-
     assert!(frame_contains(&frame, "COUNT:1:once"));
     assert!(!frame_contains(&frame, "COUNT:2:once"));
 
@@ -243,6 +244,7 @@ fn action_termination_frame_remains_live_actor_evidence() {
             },
         )
         .expect("child-terminated action result");
+
     let ActionCompletion::Screen {
         quality:
             ScreenPostconditionQuality::ChildCompleted | ScreenPostconditionQuality::OutputClosed,
@@ -374,7 +376,6 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
         },
         ..ActionOptions::default()
     };
-
     let result = session
         .act(&atoms, options.clone())
         .expect("Rust atomic action");
@@ -399,11 +400,13 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
                 | ScreenPostconditionQuality::MatchedUnsettled,
         }
     ) && frame_contains(&result.frame, &fixture.expected_text);
+
     let actor_boundaries = matches!(
         &result.frame.source,
         ScreenFrameSource::Actor { boundaries, .. }
             if boundaries == &result.boundaries
     );
+
     let summary = SdkSummary {
         state_hash_valid: result.frame.state_hash.len() == 64,
         atom_count: result.input.atom_count,

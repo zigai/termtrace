@@ -26,6 +26,7 @@ pub fn encode_focus(event: FocusEvent) -> Result<ByteString> {
 
     let mut required = 0;
     let first = unsafe { sys::ghostty_focus_encode(event, ptr::null_mut(), 0, &raw mut required) };
+
     if first != sys::GhosttyResult_GHOSTTY_OUT_OF_SPACE && first != 0 {
         check("size encoded focus event", first)?;
     }
@@ -41,6 +42,7 @@ pub fn encode_focus(event: FocusEvent) -> Result<ByteString> {
         )
     })?;
     output.truncate(written);
+
     return Ok(ByteString::new(output));
 }
 
@@ -142,7 +144,6 @@ pub(super) fn encode_mouse(
 
     let cell_width = u32::from(pixel_width.checked_div(cols).unwrap_or(0).max(1));
     let cell_height = u32::from(pixel_height.checked_div(rows).unwrap_or(0).max(1));
-
     let mut encoder = ptr::null_mut();
     check("create mouse encoder", unsafe {
         sys::ghostty_mouse_encoder_new(ptr::null(), &raw mut encoder)
@@ -179,6 +180,7 @@ pub(super) fn encode_mouse(
         MouseAction::Release => sys::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_RELEASE,
         MouseAction::Motion => sys::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_MOTION,
     };
+
     let button = match button {
         MouseButton::Left => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_LEFT,
         MouseButton::Middle => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_MIDDLE,
@@ -218,6 +220,7 @@ pub(super) fn encode_mouse(
         )
     })?;
     output.truncate(written);
+
     return Ok(ByteString::new(output));
 }
 
@@ -281,6 +284,7 @@ fn physical_key(key: NamedKey) -> Result<(sys::GhosttyKey, Option<[u8; 1]>)> {
                     result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
                 };
             })?;
+
             return Ok((sys::GhosttyKey_GHOSTTY_KEY_A + index, Some([byte])));
         }
         NamedKey::Function(_) | NamedKey::Letter(_) => {

@@ -44,6 +44,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         || return repository_root.join("vendor/ghostty/zig-out"),
         PathBuf::from,
     );
+
     let header = prefix.join("include/ghostty/vt.h");
     let library = prefix.join("lib/libghostty-vt.a");
 
@@ -76,5 +77,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-link-lib=dylib=m");
     println!("cargo:rustc-link-lib=dylib=dl");
     println!("cargo:rustc-link-lib=dylib=pthread");
+
     return Ok(());
 }

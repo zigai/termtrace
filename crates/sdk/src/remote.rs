@@ -33,6 +33,7 @@ impl Client {
                 reason: "TERMTRACE_SESSION is not set".to_owned(),
             };
         })?;
+
         return Ok(Self::new(session));
     }
 

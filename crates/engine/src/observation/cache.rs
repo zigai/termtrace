@@ -81,7 +81,6 @@ pub(super) fn load_checkpoint(
         }
 
         let compressed_bytes = metadata.len();
-
         if compressed_bytes > MAX_REPLAY_CHECKPOINT_BYTES {
             return Err(observation_error(
                 "replay checkpoint exceeds its compressed size limit",
@@ -125,6 +124,7 @@ pub(super) fn load_checkpoint(
                 source,
             };
         })?;
+
         let state_blake3 = blake3::hash(&state_bytes).to_hex().to_string();
         let semantic_hash = semantic_state_hash(&checkpoint.state)?;
 
@@ -141,7 +141,6 @@ pub(super) fn load_checkpoint(
                 "replay checkpoint does not match exact canonical source bytes",
             ));
         }
-
         return Ok(CachedSemanticState {
             state_id: checkpoint.state_id,
             event_seq: checkpoint.event_seq,
@@ -188,6 +187,7 @@ pub(super) fn publish_checkpoint(
         presented: inspection.record.presented,
         state: inspection.state.clone(),
     };
+
     return publish_cached_checkpoint(session, point, completion, &state, source, cancelled);
 }
 
@@ -208,6 +208,7 @@ pub(crate) fn publish_endpoint_checkpoint(
         presented: inspection.presented,
         state: inspection.state.clone(),
     };
+
     return publish_cached_checkpoint(session, point, completion, &state, source, cancelled);
 }
 
@@ -222,6 +223,7 @@ fn publish_cached_checkpoint(
     source.check(session)?;
 
     let path = checkpoint_path(session, point, completion)?;
+
     if path.exists() {
         return Ok(());
     }
@@ -286,6 +288,7 @@ fn publish_cached_checkpoint(
 
     write_secure(&path, &compressed)?;
     enforce_replay_cache_limits(session, Some(&path))?;
+
     return Ok(sync_directory(directory)?);
 }
 
@@ -301,7 +304,9 @@ fn checkpoint_path(
             source,
         };
     })?;
+
     let key = blake3::hash(&encoded).to_hex().to_string();
+
     return Ok(session.join("derived-cache").join(format!(
         "checkpoint-{}-{key}.json.zst",
         completion.final_event_hash
@@ -322,6 +327,7 @@ struct ReplayCacheEntry {
 pub fn replay_cache_status(session: &Path) -> Result<ReplayCacheStatus> {
     let directory = session.join("derived-cache");
     let entries = replay_cache_entries(&directory)?;
+
     return Ok(cache_status_from_entries(directory, &entries));
 }
 
@@ -372,7 +378,6 @@ fn enforce_replay_cache_limits(session: &Path, preserve: Option<&Path>) -> Resul
             .cmp(&right.modified)
             .then_with(|| return left.path.cmp(&right.path));
     });
-
     let mut count = u64::try_from(entries.len()).unwrap_or(u64::MAX);
     let mut bytes = entries.iter().fold(0_u64, |total, entry| {
         return total.saturating_add(entry.bytes);
@@ -423,7 +428,6 @@ fn replay_cache_entries(directory: &Path) -> Result<Vec<ReplayCacheEntry>> {
     }
 
     let mut entries = Vec::new();
-
     for item in fs_err::read_dir(directory).map_err(|source| {
         return Error::Filesystem {
             path: directory.to_path_buf(),
@@ -449,7 +453,6 @@ fn replay_cache_entries(directory: &Path) -> Result<Vec<ReplayCacheEntry>> {
                 source,
             };
         })?;
-
         if !metadata.is_file() {
             return Err(observation_error(
                 "replay checkpoint cache contains a non-regular member",
@@ -532,8 +535,8 @@ fn hash_file(path: &Path, cancelled: Option<&AtomicBool>) -> Result<(u64, String
     let mut reader = BufReader::new(file);
     let mut hasher = blake3::Hasher::new();
     let mut buffer = [0_u8; 16384];
-    let mut bytes = 0_u64;
 
+    let mut bytes = 0_u64;
     loop {
         trust::check_cancelled(cancelled)?;
 
@@ -543,7 +546,6 @@ fn hash_file(path: &Path, cancelled: Option<&AtomicBool>) -> Result<(u64, String
                 source,
             };
         })?;
-
         if count == 0 {
             break;
         }

@@ -58,6 +58,7 @@ pub fn create(
         MAX_AGGREGATE_MANIFEST_BYTES,
         "aggregate tmux manifest",
     )?;
+
     let aggregate = parse_aggregate(aggregate_manifest, &aggregate_bytes)?;
     validate_aggregate(&aggregate)?;
     let source_tracks = source_tracks(aggregate_manifest, &aggregate)?;
@@ -66,8 +67,13 @@ pub fn create(
     let parent = match destination.parent() {
         Some(p) if !p.as_os_str().is_empty() => p,
         Some(_) => Path::new("."),
-        None => return Err(Error::invalid("tmux evidence export destination has no parent")),
+        None => {
+            return Err(Error::invalid(
+                "tmux evidence export destination has no parent",
+            ))
+        }
     };
+
     let staging = parent.join(format!(".tmux-export-{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
     let cleanup = DirectoryCleanup::new(staging.clone());
@@ -91,7 +97,6 @@ pub fn create(
     create_private_directory(&staging.join("tracks"))?;
 
     let mut tracks: Vec<TmuxBundleTrack> = Vec::with_capacity(source_tracks.len());
-
     for (index, source) in source_tracks.iter().enumerate() {
         let directory = track_directory(index, source.pane_id.as_deref());
         let nested = bundle::create(
@@ -100,7 +105,6 @@ pub fn create(
             BundleProfile::Forensic,
             None,
         )?;
-
         tracks.push(TmuxBundleTrack {
             role: source.role.to_owned(),
             pane_id: source.pane_id.clone(),
@@ -128,7 +132,6 @@ pub fn create(
     let mut manifest_bytes = serde_json::to_vec_pretty(&manifest)
         .map_err(|source| return Error::json(&manifest_path, source))?;
     manifest_bytes.push(b'\n');
-
     if u64::try_from(manifest_bytes.len()).unwrap_or(u64::MAX) > MAX_TMUX_BUNDLE_MANIFEST_BYTES {
         return Err(Error::invalid(format!(
             "tmux evidence export manifest exceeds {MAX_TMUX_BUNDLE_MANIFEST_BYTES} bytes"
@@ -147,7 +150,9 @@ pub fn create(
 
     sync_directory(&staging)?;
     commit_directory(parent, &staging, destination)?;
+
     cleanup.disarm();
+
     return Ok(manifest);
 }
 
@@ -168,6 +173,7 @@ pub fn verify(
         MAX_AGGREGATE_MANIFEST_BYTES,
         "aggregate tmux manifest",
     )?;
+
     let aggregate = parse_aggregate(aggregate_manifest, &aggregate_bytes)?;
     validate_aggregate(&aggregate)?;
     let source_tracks = source_tracks(aggregate_manifest, &aggregate)?;
@@ -206,6 +212,7 @@ fn source_tracks(
         }
 
         tracks.push(track);
+
         return Ok(());
     })?;
 
@@ -243,7 +250,6 @@ fn visit_source_tracks(
             .ok_or_else(|| return Error::invalid("aggregate manifest has no parent"))?;
 
         let catalog = TmuxCatalog::read_verified(directory, aggregate)?;
-
         let mut next = 0;
 
         loop {
@@ -336,8 +342,13 @@ fn validate_destination(
     let parent = match destination.parent() {
         Some(p) if !p.as_os_str().is_empty() => p,
         Some(_) => Path::new("."),
-        None => return Err(Error::invalid("tmux evidence export destination has no parent")),
+        None => {
+            return Err(Error::invalid(
+                "tmux evidence export destination has no parent",
+            ))
+        }
     };
+
     let parent = parent
         .canonicalize()
         .map_err(|source| return Error::filesystem(parent, source))?;
@@ -345,6 +356,7 @@ fn validate_destination(
     let name = destination
         .file_name()
         .ok_or_else(|| return Error::invalid("tmux evidence export destination has no basename"))?;
+
     let candidate = parent.join(name);
 
     let aggregate_root = aggregate_manifest
@@ -365,7 +377,6 @@ fn validate_destination(
             .session
             .canonicalize()
             .map_err(|source| return Error::filesystem(&track.session, source))?;
-
         if candidate.starts_with(&canonical) {
             return Err(Error::invalid(
                 "tmux evidence export destination must be outside every canonical track",
@@ -441,7 +452,6 @@ fn verify_contents(
 
     for (index, (track, source)) in manifest.tracks.iter().zip(source_tracks.iter()).enumerate() {
         let expected_directory = track_directory(index, source.pane_id.as_deref());
-
         if track.role != source.role
             || track.pane_id != source.pane_id
             || track.directory != expected_directory
@@ -454,7 +464,6 @@ fn verify_contents(
 
         let policy = BundleVerificationPolicy::new(&source.session, BundleProfile::Forensic);
         let nested = bundle::verify_profile(&directory.join(&track.directory), &policy)?;
-
         if track.session_id != source.session_id
             || track.session_id != nested.session_id
             || track.source_final_event_hash != nested.source_final_event_hash
@@ -471,6 +480,7 @@ fn verify_contents(
 fn ensure_bounded_tree(root: &Path, maximum: usize) -> Result<()> {
     let mut entries = 0_usize;
     count_tree_entries(root, root, &mut entries, maximum)?;
+
     return Ok(());
 }
 
@@ -484,7 +494,6 @@ fn count_tree_entries(
         fs_err::read_dir(directory).map_err(|source| return Error::filesystem(directory, source))?
     {
         let entry = entry.map_err(|source| return Error::filesystem(directory, source))?;
-
         if directory == root && entry.file_name() == "manifest.json" {
             continue;
         }
@@ -500,7 +509,6 @@ fn count_tree_entries(
         }
 
         let path = entry.path();
-
         if !path.starts_with(root) {
             return Err(Error::invalid(
                 "tmux evidence export traversal escaped its root",

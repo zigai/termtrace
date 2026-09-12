@@ -79,6 +79,7 @@ impl Driver {
                     source,
                 };
             })?;
+
             let (target, _) = native_capture_target(&helper, session, viewport)?;
 
             let worker = NativeReplayWorker::start(
@@ -88,7 +89,6 @@ impl Driver {
                 cancelled,
                 Duration::from_secs(30),
             )?;
-
             self.native = Some(DriverNativeWorker {
                 handle,
                 viewport,
@@ -111,10 +111,12 @@ impl Driver {
         match captured {
             Ok(capture) => {
                 active.last = endpoint;
+
                 return Ok(capture);
             }
             Err(error) => {
                 self.native = None;
+
                 return Err(error.into());
             }
         }

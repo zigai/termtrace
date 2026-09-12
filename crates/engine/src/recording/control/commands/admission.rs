@@ -32,6 +32,7 @@ impl SessionActor<'_> {
             );
 
             let _ = response_sender.send(response);
+
             return Ok(());
         }
 
@@ -53,9 +54,9 @@ impl SessionActor<'_> {
                 &request.command,
                 request.expected_presented_state_hash.as_deref(),
             )?;
-
             if let Some(response) = prior {
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
 
@@ -67,6 +68,7 @@ impl SessionActor<'_> {
                 );
 
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
 
@@ -85,6 +87,7 @@ impl SessionActor<'_> {
             );
 
             let _ = response_sender.send(response);
+
             return Ok(());
         }
 
@@ -104,16 +107,14 @@ impl SessionActor<'_> {
                 }
                 return Ok(predicate);
             });
+
             let predicate = match predicate {
                 Ok(predicate) => predicate,
                 Err(reason) => {
-                    let response = control_error_response(
-                        request.request_id,
-                        "invalid_screen_wait",
-                        &reason,
-                    );
-
+                    let response =
+                        control_error_response(request.request_id, "invalid_screen_wait", &reason);
                     let _ = response_sender.send(response);
+
                     return Ok(());
                 }
             };
@@ -132,6 +133,7 @@ impl SessionActor<'_> {
                 );
 
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
 
@@ -143,6 +145,7 @@ impl SessionActor<'_> {
                 );
 
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
 
@@ -155,6 +158,7 @@ impl SessionActor<'_> {
                 projection: *projection,
                 response: response_sender,
             });
+
             return Ok(());
         }
 
@@ -176,6 +180,7 @@ impl SessionActor<'_> {
                 );
 
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
 
@@ -193,6 +198,7 @@ impl SessionActor<'_> {
                 );
 
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
 
@@ -204,6 +210,7 @@ impl SessionActor<'_> {
                 );
 
                 let _ = response_sender.send(response);
+
                 return Ok(());
             }
 
@@ -216,6 +223,7 @@ impl SessionActor<'_> {
                 projection: *projection,
                 response: response_sender,
             });
+
             return Ok(());
         }
 
@@ -227,6 +235,7 @@ impl SessionActor<'_> {
             );
 
             let _ = response_sender.send(response);
+
             return Ok(());
         }
 
@@ -289,6 +298,7 @@ impl SessionActor<'_> {
 
                     self.mutation_history
                         .reserve_command(request.request_id, &request.command)?;
+
                     return Ok((execution, action));
                 });
 
@@ -306,6 +316,7 @@ impl SessionActor<'_> {
                             event_start_seq,
                             phase: action::InputSequencePhase::Applying { execution, action },
                         });
+
                         return Ok(());
                     }
                     Err(error) => {

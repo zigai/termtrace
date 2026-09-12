@@ -100,6 +100,7 @@ fn visit_recording_timeline_while(
         if use_canonical {
             let entry = canonical_next.take();
             canonical_next = next_canonical(&mut canonical, range)?;
+
             return Ok(entry);
         }
 
@@ -109,6 +110,7 @@ fn visit_recording_timeline_while(
             .map(TokenCursor::next)
             .transpose()?
             .flatten();
+
         return Ok(entry);
     };
     let mut pending = auxiliary()?;
@@ -132,9 +134,9 @@ fn visit_recording_timeline_while(
                 let entry = pending
                     .take()
                     .ok_or_else(|| return range_error("timeline cursor lost its pending entry"))?;
-
                 if !visitor(entry)? {
                     stopped = true;
+
                     return Ok(false);
                 }
 
@@ -143,6 +145,7 @@ fn visit_recording_timeline_while(
 
             if !visitor(semantic)? {
                 stopped = true;
+
                 return Ok(false);
             }
             return Ok(true);
@@ -191,6 +194,7 @@ pub fn build_session_timeline_page(
         if seen >= offset {
             if entries.len() == usize::from(limit) {
                 more = true;
+
                 return Ok(false);
             }
 
@@ -198,6 +202,7 @@ pub fn build_session_timeline_page(
         }
 
         seen = seen.saturating_add(1);
+
         return Ok(true);
     })?;
 

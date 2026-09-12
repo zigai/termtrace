@@ -16,11 +16,13 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
 
     let hello_id = "019f0000-0000-7000-8000-000000000001";
     let attach_id = "019f0000-0000-7000-8000-000000000002";
+
     let hello = serde_json::json!({
         "version": 5,
         "request_id": hello_id,
         "method": { "method": "hello" }
     });
+
     let attach = serde_json::json!({
         "version": 5,
         "request_id": attach_id,
@@ -148,7 +150,6 @@ with Terminal(binary_path=sys.argv[1]) as terminal:
         .arg(temporary.path().join("python-sync-evidence"))
         .status()
         .expect("run sync Python client");
-
     assert!(sync.success());
 
     let async_code = r#"import asyncio, json, sys
@@ -221,7 +222,6 @@ asyncio.run(main())
         .arg(temporary.path().join("python-async-evidence"))
         .status()
         .expect("run async Python client");
-
     assert!(asynchronous.success());
 }
 
@@ -317,7 +317,6 @@ if (!existsSync(`${retainedPath}/completion.json`)) throw new Error("driver clos
         .arg(temporary.path().join("typescript-evidence"))
         .output()
         .expect("run TypeScript client");
-
     assert!(
         output.status.success(),
         "stdout:\n{}\nstderr:\n{}",

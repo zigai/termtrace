@@ -38,7 +38,6 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .clone();
 
     let registered = compact_json_line(&registered);
-
     assert_eq!(registered["session_id"], manifest.session_id.to_string());
     assert_eq!(
         registered["canonical_session_display"],
@@ -156,7 +155,6 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .expect("canonical")
         .display()
         .to_string();
-
     assert_eq!(
         table_cells(row, &starts),
         [
@@ -178,7 +176,6 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .clone();
 
     let removed = compact_json_line(&removed);
-
     assert_eq!(removed["evidence_preserved"], true);
     assert_eq!(
         removed["canonical_session_display"],
@@ -274,7 +271,6 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
             .expect("registry entry JSON");
     entry["recorder_pid"] = serde_json::json!(u32::MAX);
     entry["recorder_process_start_ticks"] = serde_json::json!(1);
-
     fs_err::write(
         &entry_path,
         serde_json::to_vec_pretty(&entry).expect("updated registry entry"),

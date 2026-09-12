@@ -49,7 +49,6 @@ use termtrace_model::{
 /// native playback or capture fails, or the resulting artifacts cannot be verified and published.
 pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome> {
     validate_options(options)?;
-
     if !options.session_directory.join("completion.json").is_file() {
         return Err(Error::SessionIncomplete {
             session: options.session_directory.clone(),
@@ -67,6 +66,7 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
         .terminal
         .as_ref()
         .map_or(0, |record| return record.monotonic_ns);
+
     let range = resolve_source_range(
         options.start_monotonic_ns,
         options.end_monotonic_ns,
@@ -120,6 +120,7 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
                 source,
             };
         });
+
         return finish_with_cleanup(Err(Error::from(error)), cleanup);
     }
 
@@ -136,6 +137,7 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
             source,
         };
     })?;
+
     let canonical_destination = fs::canonicalize(&destination).map_err(|source| {
         return Error::Filesystem {
             path: destination.clone(),
@@ -262,7 +264,6 @@ fn capture_staged(
 
         let path = options.session_directory.join(GHOSTTY_REPLAY_PROFILE_NAME);
         let replay = fs::read(&path).map_err(|source| return Error::Filesystem { path, source })?;
-
         if blake3::hash(&replay).to_hex().as_str() != provenance.replay_profile_hash {
             return Err(Error::InvalidReplay {
                 reason: "recorded Ghostty replay profile hash does not match session provenance"
@@ -342,9 +343,9 @@ fn capture_staged(
         &overrides,
         profile_root.as_deref(),
     )?;
-
     let geometry_report =
         super::process::wait_for_json(&geometry_path, &mut ghostty, Duration::from_secs(20))?;
+
     validate_capture_geometry(
         manifest.geometry,
         manifest.geometry_provenance.source,
@@ -427,7 +428,6 @@ fn capture_staged(
                         reason: "encoded frame count is missing".to_owned(),
                     };
                 })?;
-
             capture_started =
                 validate_acquisition_frames(&staging.join("ffmpeg-video.log"), packets)?;
             write_video_map(
@@ -538,6 +538,7 @@ fn capture_staged(
 
     verify_artifact_members(staging, &visual.members)?;
     sync_directory(staging)?;
+
     return Ok(());
 }
 

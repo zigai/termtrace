@@ -79,6 +79,7 @@ pub(in crate::cli) fn run_timeline(
         let next_offset = timeline_page
             .next_offset
             .and_then(|offset| return usize::try_from(offset).ok());
+
         let truncated = next_offset.is_some();
         let returned = timeline_page.entries.len();
         let total = (!truncated && (arguments.page.offset == 0 || returned > 0))
@@ -180,6 +181,7 @@ fn run_all_timeline(
             }
 
             total = total.saturating_add(1);
+
             return Ok(true);
         },
     )
@@ -227,6 +229,7 @@ pub(in crate::cli) fn run_diff(
         arguments.from_at,
         arguments.from_marker,
     )?;
+
     let to = diff_point(
         arguments.to_state,
         arguments.to_state_hash,
@@ -283,6 +286,7 @@ pub(in crate::cli) fn run_explain(
     let (states, states_page, states_partial) = paginate(take(&mut report.states), &arguments.page);
     let (findings, findings_page, findings_partial) =
         paginate(take(&mut report.findings), &arguments.page);
+
     report.tokens = tokens;
     report.states = states;
     report.findings = findings;
@@ -533,11 +537,11 @@ fn diff_text(difference: &SemanticDiff) -> Result<String> {
                 .before
                 .as_ref()
                 .map_or("∅", |value| return value.grapheme.as_str());
+
             let after = cell
                 .after
                 .as_ref()
                 .map_or("∅", |value| return value.grapheme.as_str());
-
             writeln!(
                 output,
                 "  ({},{}) {} -> {}",
@@ -621,6 +625,7 @@ fn canonical_event_text(event: &Event) -> Result<String> {
                 Some(value) => format!(" semantic_input={}", quoted_text(value)?),
                 None => String::new(),
             };
+
             let intent = match caller_intent {
                 Some(value) => format!(" caller_intent={}", quoted_text(value)?),
                 None => String::new(),

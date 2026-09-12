@@ -72,6 +72,7 @@ fn main() -> Result<ExitCode> {
     match cli.command {
         Command::Large(arguments) => generate(arguments)?,
     }
+
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -164,7 +165,6 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         resource_limits: ResourceLimits::default(),
     };
     let manifest_bytes = canonical_manifest_bytes(&manifest).into_diagnostic()?;
-
     write_secure(&arguments.out.join("session.json"), &manifest_bytes).into_diagnostic()?;
 
     let session_manifest_hash = manifest_hash(&manifest_bytes);
@@ -178,6 +178,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         geometry.pixel_height,
         "xterm-ghostty",
     );
+
     let header_bytes = serde_json::to_vec(&header).into_diagnostic()?;
 
     let mut writer = EventLogWriter::create_with_policy(
@@ -187,7 +188,6 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         durability,
     )
     .into_diagnostic()?;
-
     write_output_events(&mut writer, arguments.events - 1, arguments.output_bytes)
         .into_diagnostic()?;
     let terminal_event_seq = writer
@@ -197,7 +197,6 @@ fn generate(arguments: LargeArgs) -> Result<()> {
             signal_name: None,
         })
         .into_diagnostic()?;
-
     let completion = SessionCompletion {
         format: SESSION_COMPLETION_FORMAT.to_owned(),
         version: SESSION_COMPLETION_VERSION,
@@ -231,6 +230,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         completion.output_bytes,
         arguments.out.display()
     );
+
     return Ok(());
 }
 
@@ -270,6 +270,7 @@ fn create_session_directory(path: &Path) -> Result<()> {
         .into_diagnostic()?;
 
     fs::set_permissions(path, Permissions::from_mode(0o700)).into_diagnostic()?;
+
     return Ok(());
 }
 
@@ -292,7 +293,6 @@ mod tests {
         .expect("generate fixture");
 
         let completion = validate_completed_session(&session).expect("validate fixture");
-
         assert_eq!(completion.event_count, 128);
         assert_eq!(completion.output_bytes, 65_536);
         assert_eq!(completion.terminal_event_seq, 127);

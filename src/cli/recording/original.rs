@@ -73,6 +73,7 @@ pub(super) fn run_original(
 
     let cancelled = Arc::new(AtomicBool::new(false));
     let mut signals = CancellationSignals(Vec::new());
+
     for signal in [SIGINT, SIGTERM] {
         signals
             .0
@@ -117,6 +118,7 @@ pub(super) fn run_original(
                     OsString::from(&provenance),
                 ],
             );
+
             return args;
         },
     )

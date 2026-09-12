@@ -66,6 +66,7 @@ fn thousands_of_incarnations_have_bounded_snapshots_and_rebuildable_pages() {
     }
 
     tmux_journal::append(&directory, &mut snapshot).expect("durable inventory");
+
     assert_eq!(snapshot.track_history.len(), 128);
     assert_eq!(snapshot.events.len(), 128);
     assert_eq!(snapshot.catalog.as_ref().expect("counts").tracks, 2500);
@@ -98,6 +99,7 @@ fn thousands_of_incarnations_have_bounded_snapshots_and_rebuildable_pages() {
         value: Some(first.to_string()),
     });
     tmux_journal::append(&directory, &mut snapshot).expect("append completion");
+
     assert_eq!(
         snapshot.catalog.as_ref().expect("counts").unfinished_tracks,
         2499
@@ -139,6 +141,7 @@ fn thousands_of_incarnations_have_bounded_snapshots_and_rebuildable_pages() {
     drop(rebuilt);
 
     tmux_journal::append(&directory, &mut snapshot).expect("writer rebuilds missing index");
+
     assert!(directory.join(CATALOG_NAME).is_file());
 }
 
@@ -149,7 +152,6 @@ fn resolved_coverage_intervals_leave_snapshot_but_remain_queryable() {
     create_private_directory(&directory).expect("private aggregate");
 
     let mut snapshot = manifest();
-
     for index in 0..300_u128 {
         snapshot.coverage_gaps.push(TmuxCoverageGap {
             pane_id: Some("%1".to_owned()),
@@ -162,6 +164,7 @@ fn resolved_coverage_intervals_leave_snapshot_but_remain_queryable() {
     }
 
     tmux_journal::append(&directory, &mut snapshot).expect("coverage history");
+
     assert!(snapshot.coverage_gaps.is_empty());
     assert_eq!(snapshot.events.len(), 128);
 

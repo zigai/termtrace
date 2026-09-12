@@ -75,7 +75,6 @@ impl TmuxCatalog {
             connection
                 .execute_batch("PRAGMA cache_size=-1024; BEGIN DEFERRED;")
                 .map_err(|error| return sql_error(&path, error))?;
-
             if let Some(head) = load_head(&connection, &path)?
                 && matches_manifest(&head, manifest)
             {
@@ -103,6 +102,7 @@ impl TmuxCatalog {
         let connection = Connection::open("").map_err(|error| return sql_error(&path, error))?;
         let mut catalog = Self::initialize(connection, directory)?;
         catalog.rebuild(manifest)?;
+
         return Ok(catalog);
     }
 
@@ -111,8 +111,8 @@ impl TmuxCatalog {
         let path = directory.join(CATALOG_NAME);
         checked_index_file(&path, true)?;
         let connection = Connection::open(&path).map_err(|error| return sql_error(&path, error))?;
-        let mut catalog = Self::initialize(connection, directory)?;
 
+        let mut catalog = Self::initialize(connection, directory)?;
         if !matches_manifest(&catalog.head, manifest) {
             catalog.rebuild(manifest)?;
         }
@@ -167,6 +167,7 @@ impl TmuxCatalog {
                     length,
                     &mut head.counts,
                 )?;
+
                 return Ok(());
             })?;
 
@@ -191,6 +192,7 @@ impl TmuxCatalog {
             .map_err(|error| return sql_error(&self.path, error))?;
 
         self.head = head;
+
         return Ok(());
     }
 
@@ -205,7 +207,6 @@ impl TmuxCatalog {
             .map_err(|error| return sql_error(&self.path, error))?;
 
         let mut counts = self.head.counts.clone();
-
         for (record, offset, length) in records {
             apply_record(
                 &transaction,
@@ -230,6 +231,7 @@ impl TmuxCatalog {
             .map_err(|error| return sql_error(&self.path, error))?;
 
         self.head = head;
+
         return Ok(self.head.counts.clone());
     }
 
@@ -290,8 +292,8 @@ impl TmuxCatalog {
             .map_err(|error| return sql_error(&self.path, error))?;
 
         let mut entries = Vec::new();
-        let mut bytes = 0_usize;
 
+        let mut bytes = 0_usize;
         for row in rows {
             let (sequence, value, completed) =
                 row.map_err(|error| return sql_error(&self.path, error))?;
@@ -333,8 +335,8 @@ impl TmuxCatalog {
             .map_err(|error| return sql_error(&self.path, error))?;
 
         let mut entries = Vec::new();
-        let mut bytes = 0_usize;
 
+        let mut bytes = 0_usize;
         for row in rows {
             let (sequence, value, latest) =
                 row.map_err(|error| return sql_error(&self.path, error))?;
@@ -347,7 +349,6 @@ impl TmuxCatalog {
             }
 
             let record = self.event(latest)?;
-
             if record.value.as_deref() != Some(value.as_str()) {
                 return Err(Error::invalid(
                     "tmux gap index differs from its journal record",
@@ -436,13 +437,11 @@ impl TmuxCatalog {
         completed: bool,
     ) -> Result<TmuxTrackCatalogEntry> {
         let record = self.event(sequence)?;
-
         if record.kind != "pane_track_linked" || record.value.as_deref() != Some(value) {
             return Err(Error::invalid(
                 "tmux track index differs from its canonical link",
             ));
         }
-
         return Ok(TmuxTrackCatalogEntry {
             sequence,
             track: decode(&self.path, value)?,
@@ -473,7 +472,6 @@ fn apply_record(
     match record.event.kind.as_str() {
         "pane_track_linked" if value.starts_with('{') => {
             let track: TmuxPaneTrack = decode(path, value)?;
-
             if record.event.pane_id.as_deref() != Some(track.pane_id.as_str()) {
                 return Err(Error::invalid(
                     "tmux track link has a different pane identity",
@@ -491,7 +489,6 @@ fn apply_record(
 
             if let Some(existing) = existing {
                 let previous: TmuxPaneTrack = decode(path, &existing)?;
-
                 if previous.pane_id != track.pane_id || previous.session != track.session {
                     return Err(Error::invalid("tmux recording identity was rebound"));
                 }

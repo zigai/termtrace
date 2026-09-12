@@ -75,6 +75,7 @@ impl TmuxClient {
         S: AsRef<OsStr>,
     {
         let _ = self.output(arguments)?;
+
         return Ok(());
     }
 
@@ -98,7 +99,6 @@ impl TmuxClient {
             .arg("-t")
             .arg(target)
             .arg(format);
-
         let output = process.output().map_err(|error| {
             return miette::miette!(
                 "could not run tmux executable {}: {error}",
@@ -119,6 +119,7 @@ impl TmuxClient {
     pub(super) fn set_option(&self, name: &str, value: &OsStr) -> Result<()> {
         let mut process = self.process();
         process.arg("set-option").arg("-gq").arg(name).arg(value);
+
         return checked_status(process, &self.executable);
     }
 
@@ -135,6 +136,7 @@ impl TmuxClient {
             .arg(pane)
             .arg(name)
             .arg(value);
+
         return checked_status(process, &self.executable);
     }
 
@@ -160,6 +162,7 @@ impl TmuxClient {
             .arg("-g")
             .arg(hook_name(name))
             .arg(command);
+
         return checked_status(process, &self.executable);
     }
 
@@ -170,6 +173,7 @@ impl TmuxClient {
     pub(super) fn run_shell_background(&self, command: &OsStr) -> Result<()> {
         let mut process = self.process();
         process.arg("run-shell").arg("-b").arg(command);
+
         return checked_status(process, &self.executable);
     }
 }
@@ -177,11 +181,13 @@ impl TmuxClient {
 pub(super) fn same_executable(left: &Path, right: &Path) -> bool {
     let left = fs_err::canonicalize(left).unwrap_or_else(|_| return left.to_path_buf());
     let right = fs_err::canonicalize(right).unwrap_or_else(|_| return right.to_path_buf());
+
     return left == right;
 }
 
 pub(super) fn option_text(client: &TmuxClient, name: &str) -> Result<String> {
     let bytes = client.option(name)?;
+
     return str::from_utf8(&bytes)
         .map(str::to_owned)
         .map_err(|error| return miette::miette!("tmux option {name} is not UTF-8: {error}"));
@@ -189,6 +195,7 @@ pub(super) fn option_text(client: &TmuxClient, name: &str) -> Result<String> {
 
 pub(super) fn option_path(client: &TmuxClient, name: &str) -> Result<Option<PathBuf>> {
     let bytes = client.option(name)?;
+
     return Ok((!bytes.is_empty()).then(|| return PathBuf::from(OsString::from_vec(bytes))));
 }
 
@@ -198,6 +205,7 @@ where
     T::Err: Display,
 {
     let value = option_text(client, name)?;
+
     return value
         .parse()
         .map_err(|error| return miette::miette!("invalid tmux option {name}: {error}"));
@@ -205,6 +213,7 @@ where
 
 pub(super) fn query_text(client: &TmuxClient, pane: &str, format: &str) -> Result<String> {
     let bytes = client.pane_format(pane, format)?;
+
     return str::from_utf8(&bytes)
         .map(str::to_owned)
         .map_err(|error| return miette::miette!("tmux format {format} is not UTF-8: {error}"));
@@ -216,6 +225,7 @@ where
     T::Err: Display,
 {
     let value = query_text(client, pane, format)?;
+
     return value
         .parse()
         .map_err(|error| return miette::miette!("invalid tmux format {format}: {error}"));
@@ -246,6 +256,7 @@ pub(super) fn trim_one_newline(mut bytes: Vec<u8>) -> Vec<u8> {
 pub(super) fn shell_quote(bytes: &[u8]) -> Vec<u8> {
     let mut quoted = Vec::with_capacity(bytes.len().saturating_add(2));
     quoted.push(b'\'');
+
     for byte in bytes {
         if *byte == b'\'' {
             quoted.extend_from_slice(b"'\\''");
@@ -255,6 +266,7 @@ pub(super) fn shell_quote(bytes: &[u8]) -> Vec<u8> {
     }
 
     quoted.push(b'\'');
+
     return quoted;
 }
 
@@ -265,6 +277,7 @@ pub(super) fn tmux_config_quote(bytes: &[u8]) -> String {
     }
 
     quoted.push('"');
+
     return quoted;
 }
 

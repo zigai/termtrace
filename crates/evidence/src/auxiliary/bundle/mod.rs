@@ -118,6 +118,7 @@ pub(crate) fn create_private_directory(path: &Path) -> Result<()> {
         .map_err(|source| return Error::filesystem(path, source))?;
 
     sync_parent(path)?;
+
     return Ok(());
 }
 
@@ -127,7 +128,6 @@ pub(crate) fn create_private_parents(root: &Path, relative: &Path) -> Result<()>
     };
 
     let mut current = root.to_path_buf();
-
     for component in parent.components() {
         let Component::Normal(name) = component else {
             return Err(Error::invalid("bundle member path is unsafe"));
@@ -213,9 +213,11 @@ pub(crate) fn sync_parent(path: &Path) -> Result<()> {
         Some(_) => Path::new("."),
         None => return Err(Error::invalid("path has no parent")),
     };
+
     File::open(parent)
         .and_then(|directory| return directory.sync_all())
         .map_err(|source| return Error::filesystem(parent, source))?;
+
     return Ok(());
 }
 
@@ -223,6 +225,7 @@ pub(crate) fn sync_directory(path: &Path) -> Result<()> {
     File::open(path)
         .and_then(|directory| return directory.sync_all())
         .map_err(|source| return Error::filesystem(path, source))?;
+
     return Ok(());
 }
 
@@ -238,16 +241,15 @@ pub(crate) fn collect_regular_files(
         let file_type = entry
             .file_type()
             .map_err(|source| return Error::filesystem(entry.path(), source))?;
-
         if file_type.is_dir() {
             collect_regular_files(root, &entry.path(), files)?;
+
             continue;
         }
 
         let entry_metadata = entry
             .metadata()
             .map_err(|source| return Error::filesystem(entry.path(), source))?;
-
         if !entry_metadata.is_file() {
             return Err(Error::invalid("bundle contains a symlink or special file"));
         }

@@ -51,7 +51,6 @@ pub(in crate::cli) fn serve(mut input: impl BufRead, output: impl Write) -> Resu
                 None,
             ))?,
         };
-
         output
             .write_all(&encoded)
             .and_then(|()| return output.write_all(b"\n"))
@@ -75,6 +74,7 @@ fn encode_driver_response(response: &DriverResponse) -> Result<Vec<u8>> {
             source,
         };
     })?;
+
     return Ok(bytes);
 }
 
@@ -115,7 +115,9 @@ impl Driver {
                     "driver request method could not be encoded",
                     None,
                 );
+
                 let bytes = serde_json::to_vec(&err).unwrap_or_default();
+
                 return bytes;
             }
         };
@@ -123,6 +125,7 @@ impl Driver {
         if let Some(cached) = self.cached.get(&request.request_id) {
             if cached.method_hash == method_hash {
                 let bytes = serde_json::to_vec(&cached.response).unwrap_or_default();
+
                 return bytes;
             }
 
@@ -132,7 +135,9 @@ impl Driver {
                 "driver request identifier was already used for a different method",
                 None,
             );
+
             let bytes = serde_json::to_vec(&err).unwrap_or_default();
+
             return bytes;
         }
 
@@ -195,10 +200,11 @@ pub(super) fn bounded_response_with_bytes(response: DriverResponse) -> (DriverRe
             "driver response could not be encoded",
             None,
         );
+
         let err_bytes = serde_json::to_vec(&err).unwrap_or_default();
+
         return (err, err_bytes);
     };
-
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) <= DRIVER_MAX_RESPONSE_BYTES {
         return (response, bytes);
     }
@@ -235,6 +241,7 @@ pub(super) fn bounded_response_with_bytes(response: DriverResponse) -> (DriverRe
         ),
     };
     let fallback_bytes = serde_json::to_vec(&fallback).unwrap_or_default();
+
     return (fallback, fallback_bytes);
 }
 

@@ -201,7 +201,6 @@ pub(super) fn root_command() -> clap::Command {
     }
 
     let mut grouped_help = String::from("Commands:\n");
-
     for (heading, names) in ROOT_COMMAND_GROUPS {
         let command_width = names
             .iter()
@@ -241,7 +240,6 @@ pub(super) fn requested_response_mode() -> ResponseMode {
         .unwrap_or(ResponseMode::Auto);
 
     let mut arguments = env::args_os().skip(1);
-
     while let Some(argument) = arguments.next() {
         let Some(argument) = argument.to_str() else {
             continue;
@@ -278,6 +276,7 @@ fn response_mode_name(value: &str) -> Option<ResponseMode> {
 pub(super) fn command_contract(matches: &clap::ArgMatches) -> (String, bool) {
     let mut command_type = "termtrace";
     let mut current = matches;
+
     while let Some((name, subcommand)) = current.subcommand() {
         command_type = name;
         current = subcommand;

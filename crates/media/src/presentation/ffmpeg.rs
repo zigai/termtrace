@@ -164,7 +164,6 @@ fn append_semantic_change_visualization(
             ChangeMode::BoundingBox => ("cyan@0.90", "3"),
             ChangeMode::Outline | ChangeMode::SideDiff => ("yellow@0.90", "2"),
         };
-
         filters.push(format!(
             "[{prior}]drawbox=x={}:y={}:w={}:h={}:color={color}:t={thickness}:enable='between(n,{},{})'[{next}]",
             box_.region.x,
@@ -180,6 +179,7 @@ fn append_semantic_change_visualization(
 
     if let Some(base) = base {
         filters.push(format!("[{base}][{prior}]hstack=inputs=2[changeoutput]"));
+
         return Ok("changeoutput".to_owned());
     }
     return Ok(prior);
@@ -236,6 +236,7 @@ fn bounding_region(regions: &[ChangeRegion]) -> Option<ChangeRegion> {
     let mut top = first.y;
     let mut right = first.x.saturating_add(first.width);
     let mut bottom = first.y.saturating_add(first.height);
+
     for region in regions.iter().skip(1) {
         left = left.min(region.x);
         top = top.min(region.y);
@@ -305,7 +306,6 @@ pub(super) fn append_pixel_transforms(
         u32::from(plan.source_height) + if presentation_has_footer(plan) { 48 } else { 0 };
 
     let mut sequence = 0_usize;
-
     for transform in &plan.transforms {
         match transform {
             PixelTransform::CursorMask => {
@@ -502,6 +502,7 @@ pub(super) fn prepare_subtitle_resources(
     }
 
     require_ass_filter()?;
+
     ensure_presentation_font(staging)?;
 
     let mut resources = Vec::new();
@@ -521,7 +522,6 @@ pub(super) fn prepare_subtitle_resources(
                 source,
             };
         })?;
-
         if blake3::hash(&bytes).to_hex().as_str() != subtitle.resource_hash {
             return Err(plan_error(format!(
                 "ASS subtitle resource {} changed after planning",
@@ -587,7 +587,6 @@ fn generated_ass(plan: &PresentationPlan) -> Result<String> {
             &annotation.style.background,
             annotation.style.background_opacity,
         )?;
-
         writeln!(
             &mut ass,
             "Style: A{},Fira Code,{},{foreground},&H00000000,{background},{background},0,0,0,0,100,100,0,0,3,{},0,7,0,0,0,1",
@@ -822,6 +821,7 @@ pub(super) fn probe_delivery_video(staging: &Path) -> Result<serde_json::Value> 
 
     if !output.status.success() {
         write_secure(&staging.join("ffprobe.log"), &output.stderr)?;
+
         return Err(plan_error("FFprobe rejected the presentation output"));
     }
 
@@ -832,6 +832,7 @@ pub(super) fn probe_delivery_video(staging: &Path) -> Result<serde_json::Value> 
             source,
         };
     })?;
+
     return Ok(value);
 }
 

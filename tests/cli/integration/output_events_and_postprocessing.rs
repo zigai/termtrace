@@ -23,7 +23,6 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
 
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
     let expected = canonical_output_bytes(&log);
-
     assert_eq!(expected, b"A\x1b[?1049h\x1b[31mB\x1b[0m\xffC");
 
     let mut output = Command::cargo_bin("termtrace").expect("binary should build");
@@ -76,7 +75,6 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
         ));
 
     let projection = fs_err::read_to_string(projection_manifest).expect("projection report");
-
     assert!(projection.contains(r#""projection_quality": "unsuitable_for_full_screen""#));
     assert!(projection.contains(r#""alternate_screen_observed": true"#));
 }
@@ -121,7 +119,6 @@ fn output_follow_emits_each_durable_prefix_once_until_completion() {
 
     let log = EventLog::read(session.join("events.jsonl")).expect("completed event log");
     let expected = canonical_output_bytes(&log);
-
     assert_eq!(expected, b"A\x1b[31mB\xff");
     assert_eq!(followed.stdout, expected);
 
@@ -131,7 +128,6 @@ fn output_follow_emits_each_durable_prefix_once_until_completion() {
         .args(["--strip-controls", "--follow"])
         .output()
         .expect("follow completed stripped output");
-
     assert!(stripped.status.success(), "{stripped:?}");
     assert_eq!(stripped.stdout, b"AB\xff");
     assert!(String::from_utf8_lossy(&stripped.stderr).contains("lossy_line_oriented"));
@@ -159,19 +155,16 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
         .get_output()
         .stdout
         .clone();
-
     assert!(!output
         .windows(b"secret-bytes".len())
         .any(|w| return w == b"secret-bytes"));
 
     let mut byte_count = 0;
-
     for line in output
         .split(|byte| return *byte == b'\n')
         .filter(|line| return !line.is_empty())
     {
         let record: serde_json::Value = serde_json::from_slice(line).expect("metadata event JSON");
-
         assert_eq!(record["event_type"], "output");
         assert_eq!(record["metadata_only"], true);
         assert!(record["event"].is_null());
@@ -179,7 +172,6 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
         let payloads = record["byte_payloads"]
             .as_array()
             .expect("byte payload metadata");
-
         assert_eq!(payloads.len(), 1);
         assert_eq!(payloads[0]["field"], "data");
 
@@ -200,13 +192,14 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
         .get_output()
         .stdout
         .clone();
+
     let exact_line = exact_output
         .split(|byte| return *byte == b'\n')
         .find(|line| return !line.is_empty())
         .expect("exact event JSON line");
+
     let exact_record: serde_json::Value =
         serde_json::from_slice(exact_line).expect("exact event JSON");
-
     assert_eq!(exact_record["metadata_only"], false);
     assert_eq!(exact_record["event_type"], "output");
     assert_eq!(exact_record["event"]["type"], "output");
@@ -267,11 +260,11 @@ fn events_follow_resumes_filtered_durable_records_without_duplicates() {
         .filter(|record| return matches!(record.event, Event::Output { .. }))
         .map(|record| return record.seq)
         .collect::<Vec<_>>();
+
     let projected_sequences = projected
         .iter()
         .map(|value| return value["seq"].as_u64().expect("sequence"))
         .collect::<Vec<_>>();
-
     assert_eq!(projected_sequences, expected_sequences);
     assert!(projected.iter().all(|value| {
         return value["event_type"] == "output" && value["metadata_only"] == true;
@@ -297,6 +290,7 @@ fn start_event_follow_recorder(session: &Path) -> Child {
     let recorder = command.spawn().expect("spawn recorder");
 
     wait_for_control(session);
+
     return recorder;
 }
 
@@ -317,6 +311,7 @@ fn follow_test_marker(session: &Path, label: &str) -> u64 {
     let ControlData::Marked { event_seq, .. } = data else {
         panic!("unexpected marker response");
     };
+
     return event_seq;
 }
 
@@ -386,7 +381,6 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
         .args(["--follow", "--from-event-seq", "0", "--to-event-seq", "1"])
         .output()
         .expect("historical follow");
-
     assert!(historical.status.success(), "{historical:?}");
 
     let first: serde_json::Value = serde_json::from_slice(&historical.stdout).expect("first event");
@@ -413,7 +407,6 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
         for line in BufReader::new(stdout).lines() {
             let value: serde_json::Value =
                 serde_json::from_str(&line.expect("follow line")).expect("projection");
-
             if sender.send(value).is_err() {
                 break;
             }
@@ -423,14 +416,12 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
     let raced = receiver
         .recv_timeout(Duration::from_secs(10))
         .expect("retained marker delivery");
-
     assert_eq!(raced["seq"], race_marker);
 
     let fresh = follow_test_marker(&session, "fresh-after-follow-start");
     let delivered = receiver
         .recv_timeout(Duration::from_secs(10))
         .expect("new durable marker delivery");
-
     assert_eq!(delivered["seq"], fresh);
 
     send_request(&session, &ControlRequest::new(ControlCommand::Stop)).expect("stop recorder");
@@ -486,7 +477,6 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
     BufReader::new(source)
         .read_line(&mut line)
         .expect("read marker");
-
     let mut record: EventRecord = serde_json::from_str(&line).expect("marker record");
     let Event::Marker { label, .. } = &mut record.event else {
         panic!("marker event");
@@ -509,7 +499,6 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
     );
     hasher.update(&body);
     record.hash = hasher.finalize().to_hex().to_string();
-
     let mut changed = serde_json::to_vec(&record).expect("forged record");
     changed.push(b'\n');
 
@@ -537,7 +526,6 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
         ])
         .output()
         .expect("follow tampered suffix");
-
     assert!(!followed.status.success(), "{followed:?}");
     assert!(
         followed.stdout.is_empty(),
@@ -585,7 +573,6 @@ fn events_follow_rejects_replaced_actor_source_descriptor() {
         ])
         .output()
         .expect("follow replaced source");
-
     assert!(!followed.status.success(), "{followed:?}");
     assert!(followed.stdout.is_empty());
     assert!(String::from_utf8_lossy(&followed.stderr).contains("source identity"));
@@ -660,7 +647,6 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
         },
     )
     .expect("explicit live snapshot");
-
     assert!(!snapshot.source_complete);
     assert!(snapshot
         .directory
@@ -673,7 +659,6 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
         &fs_err::read(snapshot.directory.join("manifest.json")).expect("snapshot manifest"),
     )
     .expect("snapshot manifest JSON");
-
     assert!(!snapshot_manifest.source_complete);
     assert_eq!(snapshot_manifest.state_selection, StateSelection::Presented);
 
@@ -749,9 +734,9 @@ fn marker_listing_distinguishes_each_repeated_label_occurrence() {
         .get_output()
         .stdout
         .clone();
+
     let markers: Vec<serde_json::Value> =
         serde_json::from_slice(&markers).expect("marker listing JSON");
-
     assert_eq!(markers.len(), 2);
     assert!(markers
         .iter()
@@ -765,6 +750,7 @@ fn marker_listing_distinguishes_each_repeated_label_occurrence() {
     let first_time = markers[0]["monotonic_ns"]
         .as_u64()
         .expect("first marker time");
+
     let selected = resolve_session_prefix_source_selection(
         &session,
         Some(first_seq + 1),
@@ -775,7 +761,6 @@ fn marker_listing_distinguishes_each_repeated_label_occurrence() {
     )
     .expect("later duplicate excluded by finite prefix")
     .expect("selected range");
-
     assert_eq!(selected.start_monotonic_ns, first_time);
     assert_eq!(selected.end_monotonic_ns, first_time + 1);
     assert!(resolve_session_prefix_source_selection(

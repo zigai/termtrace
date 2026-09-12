@@ -54,7 +54,6 @@ fn canonical_validation_and_live_resume_cross_compressed_segments() {
         .is_file());
 
     let summary = EventLogSummary::read(&path).expect("validate all chunks");
-
     assert_eq!(summary.event_count, 621);
     assert_eq!(summary.output_bytes, 620 * 48 * 1024);
     assert_eq!(
@@ -75,6 +74,7 @@ fn canonical_validation_and_live_resume_cross_compressed_segments() {
     }
 
     assert_eq!(count, 111);
+
     suffix
         .validate_live_boundary(&end)
         .expect("actor-bound logical offset");
@@ -152,6 +152,7 @@ fn distinguishes_observed_and_durable_boundaries() {
             data: ByteString::from(&b"x"[..]),
         })
         .expect("buffer output");
+
     assert_eq!(writer.observed_boundary().next_event_seq, 1);
     assert_eq!(writer.observed_boundary().output_bytes, 1);
     assert_eq!(writer.durable_boundary().next_event_seq, 0);
@@ -163,6 +164,7 @@ fn distinguishes_observed_and_durable_boundaries() {
             label: "flush".to_owned(),
         })
         .expect("durable marker");
+
     assert_eq!(writer.observed_boundary(), writer.durable_boundary());
     assert_eq!(writer.durable_boundary().next_event_seq, 2);
     assert_eq!(writer.durable_boundary().output_bytes, 1);

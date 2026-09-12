@@ -100,7 +100,6 @@ pub fn capture_original_with_backend(
     arguments: impl FnOnce(&Path) -> Vec<OsString>,
 ) -> Result<CaptureOutcome> {
     validate_options(options)?;
-
     if !matches!(options.kind, CaptureKind::Video)
         || options.start_monotonic_ns.is_some()
         || options.end_monotonic_ns.is_some()
@@ -149,6 +148,7 @@ pub fn capture_original_with_backend(
     let result = capture_staged(
         helper, options, profile, cancelled, backend, arguments, &staging,
     );
+
     let (manifest, completion) = match result {
         Ok(manifest) => manifest,
         Err(error) => {
@@ -199,6 +199,7 @@ pub fn capture_original_with_backend(
             source,
         };
     })?;
+
     let canonical_destination = fs::canonicalize(&destination).map_err(|source| {
         return Error::Filesystem {
             path: destination.clone(),
@@ -237,6 +238,7 @@ fn capture_staged(
 
     let ghostty_version =
         String::from_utf8_lossy(&command_output("ghostty", &["+version"])?).into_owned();
+
     let ffmpeg_version = String::from_utf8_lossy(&command_output("ffmpeg", &["-version"])?)
         .lines()
         .next()
@@ -256,6 +258,7 @@ fn capture_staged(
     let mut xvfb = if let Some(lease) = lease.as_ref() {
         let mut server = spawn_xvfb(Some(helper), lease, options.width, options.height, staging)?;
         wait_for_x_socket(lease, &mut server, Duration::from_secs(5))?;
+
         Some(server)
     } else {
         None
@@ -265,6 +268,7 @@ fn capture_staged(
     let mut ffmpeg = if let Some(display) = display.as_ref() {
         let mut capture = spawn_video_ffmpeg(options, staging, display, &video)?;
         wait_for_acquisition(&mut capture, staging, cancelled)?;
+
         Some(capture)
     } else {
         None
@@ -273,7 +277,6 @@ fn capture_staged(
     let finished = staging.join("recording-exit-status");
     let stderr = secure_file(&staging.join("ghostty.stderr.log"))?;
     let stdout = secure_file(&staging.join("ghostty.stdout.log"))?;
-
     let mut overrides = ghostty_overrides();
 
     if backend == OriginalCaptureBackend::WaylandPortal {
@@ -324,6 +327,7 @@ fn capture_staged(
     if backend == OriginalCaptureBackend::WaylandPortal {
         let mut capture = portal::spawn(helper, options, staging)?;
         portal::wait_for_acquisition(&mut capture, &mut ghostty, staging, cancelled)?;
+
         write_secure(&gate, b"ready\n")?;
 
         ffmpeg = Some(capture);
@@ -358,7 +362,6 @@ fn capture_staged(
         })?;
 
     validate_completion_summary_candidate(&options.session_directory, &summary, &completion)?;
-
     if completion.failure.is_some() {
         return Err(external_error(
             "original capture",
@@ -372,6 +375,7 @@ fn capture_staged(
             source,
         };
     })?;
+
     let recorder_status = status
         .trim()
         .parse::<u8>()
@@ -395,7 +399,6 @@ fn capture_staged(
     }
 
     let session = read_manifest(&options.session_directory)?;
-
     if session
         .ghostty_visual
         .as_ref()
@@ -537,6 +540,7 @@ fn capture_staged(
     })?;
 
     write_secure(&staging.join("manifest.json"), &bytes)?;
+
     return Ok((bytes, completion));
 }
 

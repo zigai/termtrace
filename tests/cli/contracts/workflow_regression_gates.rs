@@ -67,7 +67,6 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
         assert!(agent.status.success(), "agent idle wait failed: {agent:?}");
 
         let agent_value = compact_json_line(&agent.stdout);
-
         assert_eq!(agent_value["ok"], true);
         assert!(!contains_key(&agent_value, "modes"));
         assert!(!contains_key(&agent_value, "terminal_modes"));
@@ -83,12 +82,10 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
                 }),
             )
             .expect("structured rejected input");
-
             assert!(matches!(
                 &rejected.result,
                 ControlResult::Error { code, .. } if code == "key_encoding_failed"
             ));
-
             send_request(&session, &ControlRequest::new(ControlCommand::Ping))
                 .expect("ping after rejected input");
 
@@ -108,7 +105,6 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
         assert!(action.status.success(), "accepted input failed: {action:?}");
 
         let action_value = compact_json_line(&action.stdout);
-
         assert_eq!(action_value["ok"], true);
         assert_eq!(
             action_value["input"]["applied"], "all",
@@ -129,8 +125,10 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
             .as_str()
             .expect("agent selected state hash")
             .to_owned();
+
         inspect_session(&session, StateSelector::StateHash(selected_hash))
             .expect("selected state inspection");
+
         inspect_session(&session, StateSelector::Final).expect("final state inspection");
 
         let mut timeline = Command::cargo_bin("termtrace").expect("binary should build");
@@ -178,6 +176,7 @@ fn wait_idle_output(session: &Path, response: &str) -> Output {
 fn assert_scenario_replayability(temporary: &TempDir, fixture: &WorkflowFixture) {
     let scenario = temporary.path().join("converted-pi-audit.termtrace.json");
     let artifacts = temporary.path().join("scenario-artifacts");
+
     let launch_program = format!("{}; import time; time.sleep(30)", fixture.program);
 
     fs_err::write(

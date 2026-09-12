@@ -209,7 +209,6 @@ impl<'session> Locator<'session> {
             }
 
             let result = query_frame(frame, self.spec.clone()).map_err(LocatorError::Query)?;
-
             let evaluated_at = Instant::now();
 
             if evaluated_at >= deadline {

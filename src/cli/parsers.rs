@@ -11,6 +11,7 @@ pub(super) fn parse_row_predicate(value: &str) -> Result<(u16, String)> {
     let (row, text) = value
         .split_once(':')
         .ok_or_else(|| return miette::miette!("row predicate must use ROW:TEXT"))?;
+
     let row = row
         .parse::<u16>()
         .map_err(|_| return miette::miette!("row predicate ROW must be a zero-based integer"))?;
@@ -31,6 +32,7 @@ pub(super) fn parse_region_predicate(value: &str) -> Result<(ScreenRegion, Strin
             });
         })
         .collect::<Result<Vec<_>>>()?;
+
     let [left, top, right, bottom] = values.as_slice() else {
         return Err(miette::miette!(
             "region predicate requires exactly four bounds"
@@ -52,9 +54,11 @@ pub(super) fn parse_cursor_position(value: &str) -> Result<(u16, u16)> {
     let (column, row) = value
         .split_once(',')
         .ok_or_else(|| return miette::miette!("cursor position must use COLUMN,ROW"))?;
+
     let column = column
         .parse::<u16>()
         .map_err(|_| return miette::miette!("cursor COLUMN must be a zero-based integer"))?;
+
     let row = row
         .parse::<u16>()
         .map_err(|_| return miette::miette!("cursor ROW must be a zero-based integer"))?;
@@ -126,6 +130,7 @@ pub(super) fn parse_diagnostic_check(value: &str) -> StdResult<DiagnosticCheck, 
 fn parse_duration(value: &str, domain: &str) -> StdResult<Duration, String> {
     let nanoseconds =
         parse_time_offset_ns(value).map_err(|error| return format!("{domain} {error}"))?;
+
     return Ok(Duration::from_nanos(nanoseconds));
 }
 
@@ -187,9 +192,11 @@ pub(super) fn parse_cell(value: &str) -> StdResult<(u16, u16), String> {
     let (column, row) = value
         .split_once(',')
         .ok_or_else(|| return "cell must use zero-based COLUMN,ROW syntax".to_owned())?;
+
     let column = column
         .parse::<u16>()
         .map_err(|_| return "cell column must be an unsigned 16-bit integer".to_owned())?;
+
     let row = row
         .parse::<u16>()
         .map_err(|_| return "cell row must be an unsigned 16-bit integer".to_owned())?;
@@ -201,7 +208,6 @@ pub(super) fn parse_provenance_rule(value: &str) -> StdResult<(String, Provenanc
     let Some((name, capture)) = value.split_once('=') else {
         return Err("expected NAME=value|hash|name|not-captured".to_owned());
     };
-
     if name.is_empty()
         || !name
             .bytes()
@@ -228,6 +234,7 @@ pub(super) fn parse_capture_target(value: &str) -> StdResult<CaptureTarget, Stri
     let width = width
         .parse::<u16>()
         .map_err(|error| return format!("invalid viewport width: {error}"))?;
+
     let height = height
         .parse::<u16>()
         .map_err(|error| return format!("invalid viewport height: {error}"))?;
@@ -253,7 +260,6 @@ pub(super) fn parse_rgb_color(value: &str) -> StdResult<String, String> {
     let Some(hex) = value.strip_prefix('#') else {
         return Err("color must use #RRGGBB syntax".to_owned());
     };
-
     if hex.len() != 6 || !hex.bytes().all(|byte| return byte.is_ascii_hexdigit()) {
         return Err("color must use #RRGGBB syntax".to_owned());
     }

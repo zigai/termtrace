@@ -26,10 +26,12 @@ pub fn inspect_session(
     let session = session_directory.as_ref();
     if session.join("completion.json").is_file() {
         validate_completed_session(session)?;
+
         return inspect_session_stream(session, selector, None);
     }
 
     EventLogSummary::read(session.join("events.jsonl"))?;
+
     return inspect_prefix_stream(session, selector);
 }
 
@@ -47,7 +49,6 @@ pub fn wait_for_output(
     let event_path = session.join("events.jsonl");
     let completion_path = session.join("completion.json");
     let deadline = Instant::now() + timeout;
-
     let mut cursor = EventLogCursor::open(&event_path)?;
     let mut matcher = OutputMatcher::new(needle);
 
@@ -80,7 +81,6 @@ pub fn wait_for_output(
         }
 
         let now = Instant::now();
-
         if now >= deadline {
             return Err(wait_error("timed out before output matched"));
         }
@@ -125,8 +125,8 @@ impl<'needle> OutputMatcher<'needle> {
     )]
     fn new(needle: &'needle [u8]) -> Self {
         let mut prefix_lengths: Vec<usize> = vec![0; needle.len()];
-        let mut matched = 0;
 
+        let mut matched = 0;
         for index in 1..needle.len() {
             let byte = needle[index];
             while matched > 0 && needle[matched] != byte {

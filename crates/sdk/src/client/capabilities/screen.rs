@@ -68,6 +68,7 @@ impl Screen<'_> {
         let ControlData::ScreenFrame { frame } = data else {
             return Err(client_error("actor returned the wrong rich-screen payload"));
         };
+
         return Ok(frame);
     }
 
@@ -119,12 +120,12 @@ impl Screen<'_> {
             projection: options.projection,
         });
         request.request_id = Uuid::now_v7();
-
         let response = exchange(
             &self.session.path,
             &request,
             ExchangeTiming::deadline(options.timeout)?,
         )?;
+
         let data = match response.result {
             ControlResult::Ok { data } => data,
             ControlResult::Error {

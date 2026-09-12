@@ -21,7 +21,6 @@ pub(super) fn run_test(response: &mut ResponseWriter, arguments: TestArgs) -> Re
         update_snapshots: arguments.update_snapshots,
         reruns: arguments.reruns,
     };
-
     let report = run_suite(arguments.scenario, &options).into_diagnostic()?;
 
     if let Some(path) = arguments.junit {

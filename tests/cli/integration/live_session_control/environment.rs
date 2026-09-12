@@ -31,7 +31,6 @@ fn environment_values_never_enter_recorder_argv_or_manifest() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn recorder");
-
     recorder
         .stdin
         .take()
@@ -88,7 +87,6 @@ fn environment_values_never_enter_recorder_argv_or_manifest() {
         .get_output()
         .stderr
         .clone();
-
     assert!(!invalid_output
         .windows(invalid_secret.len())
         .any(|window| return window == invalid_secret));

@@ -15,7 +15,6 @@ pub(super) struct RawTerminalGuard {
 impl RawTerminalGuard {
     pub(super) fn enter(enabled: bool) -> Result<Self> {
         let stdin = io::stdin();
-
         if !enabled
             || !isatty(&stdin).map_err(|error| {
                 return terminal_error("inspect standard input", error.to_string());
@@ -40,6 +39,7 @@ impl RawTerminalGuard {
         let Some(original) = self.original.take() else {
             return Ok(());
         };
+
         return tcsetattr(io::stdin(), SetArg::TCSANOW, &original)
             .map_err(|error| return terminal_error("restore terminal mode", error.to_string()));
     }

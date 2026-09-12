@@ -38,6 +38,7 @@ pub(super) fn status_error_with_logs(program: &str, status: ExitStatus, staging:
     let mut stderr = String::new();
     let _ = fs::File::open(staging.join(format!("{program}.stderr.log")))
         .and_then(|file| return file.take(2048).read_to_string(&mut stderr));
+
     return Error::ExternalCommand {
         operation: program.to_owned(),
         reason: format!("exited with {status}: {}", stderr.trim()),

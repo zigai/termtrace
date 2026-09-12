@@ -41,6 +41,7 @@ impl SourceIdentity {
         source
             .0
             .push(file_identity(&session.join("completion.json"))?);
+
         return Ok(source);
     }
 
@@ -73,7 +74,6 @@ impl SourceIdentity {
         }
 
         let completed = Self::capture(session)?;
-
         if !completed.0.starts_with(&self.0) {
             return Err(invalid_replay(
                 "canonical source changed while publishing completion",
@@ -115,7 +115,6 @@ fn file_identity(path: &Path) -> Result<FileIdentity> {
             "canonical cache source must be a regular file",
         ));
     }
-
     return Ok(FileIdentity {
         device: metadata.dev(),
         inode: metadata.ino(),
@@ -169,6 +168,7 @@ pub(crate) fn decode<T: Serialize + DeserializeOwned>(session: &Path, bytes: &[u
     }
 
     authenticated.source.check(session)?;
+
     return Ok(authenticated.payload);
 }
 

@@ -72,17 +72,18 @@ pub fn verify_session_with_trust(
                 "session_manifest_unreadable",
                 error.to_string(),
             );
+
             return report;
         }
     };
 
     let actual_manifest_hash = manifest_hash(&manifest_bytes);
     report.session_manifest_hash = Some(actual_manifest_hash.clone());
-
     let manifest = match read_manifest(session_directory) {
         Ok(manifest) => manifest,
         Err(error) => {
             finding(&mut report, "session_manifest_invalid", error.to_string());
+
             return report;
         }
     };
@@ -90,6 +91,7 @@ pub fn verify_session_with_trust(
 
     if let Err(error) = validate_manifest(&manifest) {
         finding(&mut report, "session_format_unsupported", error.to_string());
+
         return report;
     }
 
@@ -97,6 +99,7 @@ pub fn verify_session_with_trust(
         Ok(log) => log,
         Err(error) => {
             finding(&mut report, "event_log_invalid", error.to_string());
+
             return report;
         }
     };
@@ -105,7 +108,6 @@ pub fn verify_session_with_trust(
         .terminal
         .as_ref()
         .map(|record| return record.hash.clone());
-
     let completion = match read_completion(session_directory) {
         Ok(completion) => completion,
         Err(error) => {
@@ -114,6 +116,7 @@ pub fn verify_session_with_trust(
                 "completion_invalid_or_missing",
                 error.to_string(),
             );
+
             return report;
         }
     };
@@ -124,11 +127,13 @@ pub fn verify_session_with_trust(
             "completion_format_unsupported",
             error.to_string(),
         );
+
         return report;
     }
 
     if level == VerificationLevel::Structure {
         report.valid = true;
+
         return report;
     }
 
@@ -141,6 +146,7 @@ pub fn verify_session_with_trust(
     ) {
         let code = content_finding_code(error.kind);
         finding(&mut report, code, error.error.to_string());
+
         return report;
     }
 
@@ -152,6 +158,7 @@ pub fn verify_session_with_trust(
         Ok(count) => report.artifact_roots_verified = count,
         Err(error) => {
             finding(&mut report, "artifact_integrity_invalid", error.to_string());
+
             return report;
         }
     }
@@ -174,6 +181,7 @@ pub fn verify_session_with_trust(
                         "durability_record_invalid",
                         format!("mutation journal validation failed: {error}"),
                     );
+
                     return report;
                 }
             }
@@ -205,6 +213,7 @@ fn verify_signature(
             "signature_receipt_missing",
             "no detached evidence receipt is available",
         );
+
         return;
     }
 
@@ -213,6 +222,7 @@ fn verify_signature(
         Ok(payload) => payload,
         Err(error) => {
             finding(report, "signature_receipt_invalid", error.to_string());
+
             return;
         }
     };

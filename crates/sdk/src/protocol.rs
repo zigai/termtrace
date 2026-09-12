@@ -63,7 +63,6 @@ fn read_control_manifest(session_directory: &Path) -> Result<SessionManifest> {
             reason: "session manifest exceeds the client transport limit".to_owned(),
         });
     }
-
     return serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path,
@@ -345,6 +344,7 @@ pub(crate) fn exchange(
     timing: ExchangeTiming,
 ) -> Result<ControlResponse> {
     let stream = connect_session_control(session_directory)?;
+
     return exchange_stream(session_directory, stream, request, timing);
 }
 
@@ -469,6 +469,7 @@ pub(crate) fn control_response_timeout(command: &ControlCommand, wait_slack: Dur
 fn input_sequence_response_timeout(atoms: &[InputSequenceAtom], pace_ns: u64) -> Duration {
     let gaps = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
     let pacing = Duration::from_nanos(pace_ns.saturating_mul(gaps)).min(MAX_INPUT_SEQUENCE_PACING);
+
     return DEFAULT_CONTROL_TIMEOUT.saturating_add(pacing);
 }
 
@@ -553,7 +554,6 @@ mod tests {
             ExchangeTiming::deadline(Duration::from_millis(20)).expect("deadline"),
         )
         .expect_err("withheld stop response must time out");
-
         assert!(matches!(
             error,
             Error::ControlTimeout {
@@ -580,7 +580,6 @@ mod tests {
     fn empty_control_response_is_a_transport_failure() {
         let error = validate_response_frame(Path::new("/session"), Duration::from_secs(1), &[])
             .expect_err("empty response must be a transport failure");
-
         assert!(matches!(
             error,
             Error::ControlTransport {

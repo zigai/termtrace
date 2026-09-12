@@ -82,6 +82,7 @@ pub(super) fn open_parent_directory(path: &Path, create_missing: bool) -> Result
             });
         }
     };
+
     return open_directory_path(parent, create_missing);
 }
 
@@ -95,7 +96,6 @@ pub(super) fn open_directory_path(path: &Path, create_missing: bool) -> Result<O
     .map_err(|error| return nix_filesystem(Path::new(starting_path), error))?;
 
     let mut traversed = PathBuf::from(starting_path);
-
     for component in path.components() {
         let name = match component {
             Component::RootDir | Component::CurDir => continue,
@@ -203,7 +203,6 @@ pub(super) fn validate_private_regular_file_fd(file: &OwnedFd, path: &Path) -> R
     let stat = fstat(file).map_err(|error| return nix_filesystem(path, error))?;
     let kind = SFlag::from_bits_truncate(stat.st_mode);
     let mode = stat.st_mode & 0o777;
-
     if !kind.contains(SFlag::S_IFREG) || stat.st_uid != Uid::effective().as_raw() || mode != 0o600 {
         return Err(Error::Filesystem {
             path: path.to_path_buf(),
@@ -245,6 +244,7 @@ pub fn finish_writer(mut writer: BufWriter<File>, path: &Path) -> Result<()> {
                 source,
             };
         })?;
+
     return sync_parent_directory(path);
 }
 
@@ -255,6 +255,7 @@ pub fn finish_writer(mut writer: BufWriter<File>, path: &Path) -> Result<()> {
 /// Returns an error when the directory path is unsafe, missing, or cannot be synced.
 pub fn sync_directory(path: &Path) -> Result<()> {
     let directory = open_directory_path(path, false)?;
+
     return sync_fd(&directory, path);
 }
 
@@ -267,25 +268,21 @@ pub fn sync_directory(path: &Path) -> Result<()> {
 /// Returns an error when the paths violate the session boundary, the destination exists, or the
 /// rename and session-directory sync cannot be completed.
 pub fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> Result<()> {
-    let session_norm = if session.as_os_str().is_empty() {
-        Path::new(".")
-    } else {
-        session
-    };
+    let session_norm = if session.as_os_str().is_empty() { Path::new(".") } else { session };
     let staging_parent = staging.parent().map(|p| {
         if p.as_os_str().is_empty() {
-            Path::new(".")
-        } else {
-            p
+            return Path::new(".");
         }
+        return p;
     });
+
     let destination_parent = destination.parent().map(|p| {
         if p.as_os_str().is_empty() {
-            Path::new(".")
-        } else {
-            p
+            return Path::new(".");
         }
+        return p;
     });
+
     if staging_parent != Some(session_norm) || destination_parent != Some(session_norm) {
         return Err(Error::InvalidEvidence {
             reason: "staging and destination directories must be direct session children"
@@ -299,6 +296,7 @@ pub fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> R
             reason: "staging directory has no basename".to_owned(),
         };
     })?;
+
     let destination_name = destination.file_name().ok_or_else(|| {
         return Error::InvalidEvidence {
             reason: "artifact directory has no basename".to_owned(),
@@ -407,6 +405,7 @@ fn write_secure_with_hook(
         renamed = true;
 
         after_stage(SecureWriteStage::Renamed)?;
+
         return sync_fd(&parent, parent_path);
     })();
 
@@ -452,5 +451,6 @@ pub(crate) fn sync_parent_directory(path: &Path) -> Result<()> {
     };
 
     let directory = open_directory_path(parent, false)?;
+
     return sync_fd(&directory, parent);
 }

@@ -167,6 +167,7 @@ pub fn load_review_page(
                 if *forward {
                     if record.state_id > *from && (!presented_only || record.presented) {
                         target = Some(record.state_id);
+
                         return Ok(false);
                     }
                 } else if record.state_id >= *from {
@@ -180,6 +181,7 @@ pub fn load_review_page(
 
             if target.is_none() {
                 source.check(session)?;
+
                 return Ok(None);
             }
 
@@ -215,6 +217,7 @@ pub fn load_review_page(
 
                         if from.is_none_or(|id| return record.state_id > id) {
                             target = Some(record.state_id);
+
                             return Ok(false);
                         }
                     } else {
@@ -232,6 +235,7 @@ pub fn load_review_page(
             let target = target.or(wrap);
             if target.is_none() {
                 source.check(session)?;
+
                 return Ok(None);
             }
 
@@ -240,6 +244,7 @@ pub fn load_review_page(
         ReviewQuery::Marker(_) | ReviewQuery::Event { .. } => {
             let Some(time) = event_target(session, query, cancelled)? else {
                 source.check(session)?;
+
                 return Ok(None);
             };
 
@@ -250,6 +255,7 @@ pub fn load_review_page(
                 }
 
                 target = Some(record.state_id);
+
                 return Ok(record.monotonic_ns < time);
             })?;
 
@@ -312,6 +318,7 @@ pub fn load_review_page(
 
         retained_bytes = retained_bytes.saturating_add(bytes);
         entries.push_back(entry);
+
         return Ok(true);
     })?;
 
@@ -342,8 +349,8 @@ fn event_target(
 ) -> Result<Option<u64>> {
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
     let mut selected = None;
-    let mut matches = 0_u64;
 
+    let mut matches = 0_u64;
     while let Some(record) = cursor.next_record()? {
         if cancelled.load(Ordering::Relaxed) {
             return Err(review_error("review event query cancelled"));

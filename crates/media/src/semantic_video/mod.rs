@@ -90,17 +90,16 @@ pub fn plan_session(
     visit_session_states_while(session, &AtomicBool::new(false), |_, state| {
         maximum.0 = maximum.0.max(state.cols);
         maximum.1 = maximum.1.max(state.rows);
+
         return Ok(true);
     })?;
 
     let verified = validate_completed_session(session)?;
-
     if verified.session_id != completion.session_id
         || verified.final_event_hash != completion.final_event_hash
     {
         return Err(video_error("semantic video source changed during planning"));
     }
-
     return finish_plan(
         session,
         fps,
@@ -145,6 +144,7 @@ fn finish_plan(
     let width = cols.checked_mul(SEMANTIC_CELL_WIDTH).ok_or_else(|| {
         return video_error("semantic video width exceeds the supported pixel range");
     })?;
+
     let height = rows.checked_mul(SEMANTIC_CELL_HEIGHT).ok_or_else(|| {
         return video_error("semantic video height exceeds the supported pixel range");
     })?;
@@ -196,7 +196,6 @@ pub fn materialize(
     validate_source_plan(source)?;
 
     let directory = directory.as_ref();
-
     let completion = validate_completed_session(&source.session)?;
 
     if completion.session_id != source.session_id
@@ -227,9 +226,9 @@ pub fn materialize(
     let Some(mut stdin) = child.stdin.take() else {
         let _ = child.kill();
         let _ = child.wait();
+
         return Err(video_error("FFmpeg semantic source stdin was not created"));
     };
-
     let summary = match render_semantic_frames(source, &mut stdin, &mut |span| {
         return write_frame_span(&spans_path, &mut spans_writer, span);
     }) {
@@ -239,6 +238,7 @@ pub fn materialize(
 
             let _ = child.kill();
             let _ = child.wait();
+
             return Err(error);
         }
     };
@@ -256,7 +256,6 @@ pub fn materialize(
     }
 
     let completion_after = validate_completed_session(&source.session)?;
-
     if completion_after.session_id != completion.session_id
         || completion_after.final_event_hash != completion.final_event_hash
     {
@@ -294,6 +293,7 @@ pub fn materialize(
     })?;
 
     write_secure(&manifest_path, &bytes)?;
+
     return Ok((output, manifest));
 }
 
@@ -334,6 +334,7 @@ fn render_semantic_frames(
         }
 
         pending = Some((record.clone(), state.clone()));
+
         return Ok(true);
     })?;
 
@@ -343,6 +344,7 @@ fn render_semantic_frames(
         ));
     };
     scheduler.emit(&final_record, &final_state, source.frame_count)?;
+
     return scheduler.finish();
 }
 
@@ -385,6 +387,7 @@ impl<'scheduler, W: Write> SemanticFrameScheduler<'scheduler, W> {
 
         if end_frame <= self.next_frame {
             self.suppressed_state_count = self.suppressed_state_count.saturating_add(1);
+
             return Ok(());
         }
 
@@ -420,6 +423,7 @@ impl<'scheduler, W: Write> SemanticFrameScheduler<'scheduler, W> {
         self.next_frame = end_frame;
         self.rendered_state_count = self.rendered_state_count.saturating_add(1);
         (self.span_sink)(&span)?;
+
         return Ok(());
     }
 
@@ -429,7 +433,6 @@ impl<'scheduler, W: Write> SemanticFrameScheduler<'scheduler, W> {
                 "semantic frame schedule did not cover the source",
             ));
         }
-
         return Ok(FrameSummary {
             presented_state_count: self.presented_state_count,
             rendered_state_count: self.rendered_state_count,
@@ -528,6 +531,7 @@ fn frame_ceil(monotonic_ns: u64, fps: u16) -> u64 {
     let scaled = u128::from(monotonic_ns).saturating_mul(u128::from(fps));
     let frames =
         scaled.saturating_add(u128::from(NANOS_PER_SECOND - 1)) / u128::from(NANOS_PER_SECOND);
+
     return u64::try_from(frames).unwrap_or(u64::MAX);
 }
 
@@ -578,6 +582,7 @@ fn write_frame_span(path: &Path, writer: &mut impl Write, span: &SemanticFrameSp
             source,
         };
     })?;
+
     return Ok(());
 }
 
@@ -745,13 +750,13 @@ mod tests {
         let mut spans = Vec::new();
         let mut collect_span = |span: &SemanticFrameSpan| {
             spans.push(span.clone());
+
             return Ok(());
         };
         let mut scheduler =
             SemanticFrameScheduler::new(&source, &mut bytes, frame_bytes, &mut collect_span);
         scheduler.emit(&record, &state, 2).expect("schedule span");
         let summary = scheduler.finish().expect("finish schedule");
-
         let mut supersampled_source = source.clone();
         supersampled_source.raster_profile = SemanticRasterProfile::Supersampled2x;
         let mut supersampled_bytes = Vec::new();

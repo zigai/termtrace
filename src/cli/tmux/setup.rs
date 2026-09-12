@@ -53,6 +53,7 @@ pub(in crate::cli) fn run_tmux_config(
     arguments: TmuxConfigArgs,
 ) -> Result<ExitCode> {
     let setup = prepare_tmux_setup(arguments.setup, arguments.tmux)?;
+
     return write_stdout(response, tmux_config_fragment(&setup)?);
 }
 
@@ -63,7 +64,6 @@ pub(in crate::cli) fn run_tmux_enable(
     let client = TmuxClient::from_connection(arguments.connection.clone());
     let mut setup = prepare_tmux_setup(arguments.setup, arguments.connection.tmux)?;
     setup.scope = resolve_live_scope(&client, &setup.scope)?;
-
     let already_enabled = enable_prepared_tmux_setup(&client, &setup)?;
     let report = tmux_status_report(&client)?;
 
@@ -130,7 +130,6 @@ pub(super) fn enable_prepared_tmux_setup(
 
     for name in GUARDED_HOOKS {
         let existing = client.hook(name)?;
-
         if !existing.is_empty() && existing != hook_command.as_bytes() {
             return Err(miette::miette!(
                 "tmux hook {} already uses reserved index {TMUX_HOOK_INDEX}",
@@ -141,6 +140,7 @@ pub(super) fn enable_prepared_tmux_setup(
 
     if let Err(error) = apply_tmux_setup(client, setup, &original_command, &original_shell) {
         let _rollback = rollback_tmux_setup(client, &original_command);
+
         return Err(error);
     }
 
@@ -149,6 +149,7 @@ pub(super) fn enable_prepared_tmux_setup(
     }) {
         let _cleanup = clear_managed_pane_options(client);
         let _rollback = rollback_tmux_setup(client, &original_command);
+
         return Err(error);
     }
 
@@ -182,7 +183,6 @@ pub(in crate::cli) fn run_tmux_disable(
     let expected_setup = setup_from_options(&client, termtrace, tmux)?;
     let expected_wrapper = tmux_wrapper_command(&expected_setup);
     let current_command = client.option(launch_option(&expected_setup))?;
-
     if current_command != expected_wrapper.as_bytes() {
         return Err(miette::miette!(
             "tmux launch command changed after Termtrace was enabled; refusing to overwrite it"
@@ -193,7 +193,6 @@ pub(in crate::cli) fn run_tmux_disable(
 
     for name in GUARDED_HOOKS {
         let current = client.hook(name)?;
-
         if !current.is_empty() && current != expected_hook.as_bytes() {
             return Err(miette::miette!(
                 "tmux hook {} changed after Termtrace was enabled; refusing to overwrite it",
@@ -265,9 +264,11 @@ pub(super) fn prepare_tmux_setup(setup: TmuxSetupArgs, tmux: PathBuf) -> Result<
         Some(root) => SessionRegistry::open(root).into_diagnostic()?,
         None => SessionRegistry::open_default().into_diagnostic()?,
     };
+
     let output_root = fs_err::canonicalize(registry.state_root()).into_diagnostic()?;
     let termtrace =
         fs_err::canonicalize(env::current_exe().into_diagnostic()?).into_diagnostic()?;
+
     let ghostty_config = setup
         .ghostty_config
         .map(fs_err::canonicalize)

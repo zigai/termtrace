@@ -181,6 +181,7 @@ pub(in crate::cli) fn run_record(
         .pixel_width
         .checked_div(geometry.cols)
         .ok_or_else(|| miette::miette!("resolved terminal has no columns"))?;
+
     let cell_height_px = geometry
         .pixel_height
         .checked_div(geometry.rows)
@@ -250,6 +251,7 @@ pub(super) fn durability_policy_for(arguments: &RecordingArgs) -> Result<Durabil
     let interval = arguments
         .durability_max_interval_ms
         .unwrap_or(DEFAULT_DURABILITY_MAX_INTERVAL_MS);
+
     let bytes = arguments
         .durability_max_uncommitted_bytes
         .unwrap_or(DEFAULT_DURABILITY_MAX_UNCOMMITTED_BYTES);
@@ -267,6 +269,7 @@ pub(super) fn record_for_response(
     options: &RecordOptions,
 ) -> Result<RecordOutcome> {
     let mut output = response_output(response);
+
     return record_with_output(options, &mut output).into_diagnostic();
 }
 

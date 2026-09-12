@@ -211,6 +211,7 @@ impl LocatorSpec {
     #[must_use]
     pub fn in_row(mut self, row: u16) -> Self {
         self.row = Some(row);
+
         return self;
     }
 
@@ -223,6 +224,7 @@ impl LocatorSpec {
         }
 
         self.region = Some(region);
+
         return Ok(self);
     }
 
@@ -230,6 +232,7 @@ impl LocatorSpec {
     #[must_use]
     pub fn with_style(mut self, style: StyleFilter) -> Self {
         self.style = Some(style);
+
         return self;
     }
 
@@ -237,6 +240,7 @@ impl LocatorSpec {
     #[must_use]
     pub fn across_soft_wraps(mut self, enabled: bool) -> Self {
         self.cross_soft_wraps = enabled;
+
         return self;
     }
 
@@ -284,7 +288,6 @@ impl LocatorSpec {
         }
 
         let row = self.row.or(other.row);
-
         if let (Some(row), Some(region)) = (row, region)
             && (row < region.top || row >= region.bottom)
         {
@@ -292,7 +295,6 @@ impl LocatorSpec {
                 reason: "composed row and region scopes do not intersect".to_owned(),
             });
         }
-
         return Ok(Self {
             matcher: self.matcher.or(other.matcher),
             row,
@@ -584,6 +586,7 @@ fn multiple_matches(
 
 fn bounded_text(text: &str) -> (String, bool) {
     let end = text.floor_char_boundary(MAX_DIAGNOSTIC_CHARS);
+
     return (
         text.get(..end).unwrap_or_default().to_owned(),
         end != text.len(),
@@ -702,7 +705,6 @@ pub(super) fn query_frame(
         }
 
         let returned = frame.returned_region;
-
         if region.top < returned.top
             || region.left < returned.left
             || region.bottom > returned.bottom
@@ -765,7 +767,6 @@ fn evaluate_rows(
             })
             .map(|(index, _)| return index)
             .collect();
-
         if selected.is_empty() {
             continue;
         }
@@ -797,7 +798,6 @@ fn evaluate_rows(
 
 fn soft_wrap_groups(rows: Vec<LogicalRow>) -> Vec<LogicalRow> {
     let mut groups: Vec<LogicalRow> = Vec::new();
-
     for mut row in rows {
         if let Some(previous) = groups.last_mut()
             && previous.soft_wrapped
@@ -817,6 +817,7 @@ fn soft_wrap_groups(rows: Vec<LogicalRow>) -> Vec<LogicalRow> {
 fn selected_text(row: &LogicalRow, selected: &[usize]) -> (String, Vec<(usize, usize, usize)>) {
     let mut text = String::new();
     let mut boundaries: Vec<(usize, usize, usize)> = Vec::with_capacity(selected.len());
+
     for index in selected {
         if let Some(cell) = row.cells.get(*index) {
             let start = text.len();
@@ -824,6 +825,7 @@ fn selected_text(row: &LogicalRow, selected: &[usize]) -> (String, Vec<(usize, u
             boundaries.push((start, text.len(), *index));
         }
     }
+
     return (text, boundaries);
 }
 
@@ -927,7 +929,6 @@ fn push_byte_match(
         return Ok(());
     };
     budget.charge_work(matched_boundaries.len())?;
-
     if !matched_boundaries.iter().all(|(_, _, index)| {
         return row
             .cells
@@ -981,7 +982,6 @@ fn evaluate_style_ranges(
     budget: &mut QueryBudget,
 ) -> Result<(), QueryError> {
     let mut run: Vec<&LogicalCell> = Vec::new();
-
     for index in selected {
         let Some(cell) = row.cells.get(*index) else {
             continue;
@@ -992,7 +992,6 @@ fn evaluate_style_ranges(
         let contiguous = run
             .last()
             .is_none_or(|previous| return previous.end_column == cell.column);
-
         if style_matches(spec.style.as_ref(), cell) && contiguous {
             run.push(cell);
             continue;
@@ -1026,6 +1025,7 @@ fn charge_and_push_match(
         return total.saturating_add(cell.grapheme.len());
     });
     budget.charge_match(cells.len(), text_bytes)?;
+
     return push_match(output, make_match(frame, spec, cells));
 }
 
@@ -1038,6 +1038,7 @@ fn push_match(output: &mut Vec<ScreenMatch>, screen_match: ScreenMatch) -> Resul
     }
 
     output.push(screen_match);
+
     return Ok(());
 }
 
@@ -1056,7 +1057,6 @@ fn cell_in_region(cell: &LogicalCell, region: Option<ScreenRegion>) -> bool {
 
 fn make_match(frame: &Arc<ScreenFrame>, spec: &LocatorSpec, cells: &[&LogicalCell]) -> ScreenMatch {
     let mut ranges: Vec<MatchRange> = Vec::new();
-
     for cell in cells {
         if let Some(range) = ranges.last_mut()
             && range.row == cell.row

@@ -125,6 +125,7 @@ pub fn normalized_snapshot(
     options: ScreenSnapshotOptions,
 ) -> Result<String, AssertionError> {
     let value = normalize_frame(frame, profile, options).map_err(AssertionError::Snapshot)?;
+
     return serde_json::to_string_pretty(&value)
         .map_err(|_| return AssertionError::Snapshot(ScreenFrameError::Serialization));
 }
@@ -191,7 +192,6 @@ fn data_for_profile(
 
 fn span_row_from_cells(row: &ScreenCellRow) -> ScreenSpanRow {
     let mut spans: Vec<ScreenSpan> = Vec::new();
-
     for cell in &row.cells {
         if let Some(span) = spans.last_mut()
             && span.appearance == cell.appearance
@@ -209,7 +209,6 @@ fn span_row_from_cells(row: &ScreenCellRow) -> ScreenSpanRow {
 
         let mut text = String::new();
         append_snapshot_grapheme(&mut text, &cell.grapheme, cell.wide_kind);
-
         spans.push(ScreenSpan {
             start_column: cell.column,
             end_column: cell.column.saturating_add(1),
@@ -315,7 +314,6 @@ pub fn assert_count(result: &QueryResult, expected: usize) -> Result<(), Expecta
 /// Require literal text to occur in the deterministic presented row stream.
 pub fn assert_screen_text(frame: &ScreenFrame, expected: &str) -> Result<(), ExpectationMismatch> {
     let text = frame_text(frame);
-
     if !expected.is_empty() && text.contains(expected) {
         return Ok(());
     }
@@ -378,7 +376,6 @@ pub fn assert_match_style(
     if covered > 0 && mismatched == 0 {
         return Ok(());
     }
-
     return Err(mismatch(
         "match_style",
         &format!("all covered cells match {expected:?}"),
@@ -455,7 +452,6 @@ pub fn assert_neutral_region(
     }
 
     let returned = frame.returned_region;
-
     if region.top < returned.top
         || region.left < returned.left
         || region.bottom > returned.bottom
@@ -502,6 +498,7 @@ pub fn assert_neutral_region(
             && style.underline == 0;
 
         let neutral_grapheme = grapheme.is_empty() || grapheme == " ";
+
         let neutral_width = matches!(
             wide_kind,
             WideKind::Narrow | WideKind::SpacerHead | WideKind::SpacerTail
@@ -519,11 +516,9 @@ pub fn assert_neutral_region(
     });
 
     let expected_cells = usize::from(region.width()) * usize::from(region.height());
-
     if checked == expected_cells && non_neutral == 0 {
         return Ok(());
     }
-
     return Err(AssertionError::Mismatch(mismatch(
         "neutral_region",
         &format!("{expected_cells} neutral terminal cells"),
@@ -620,6 +615,7 @@ fn frame_excerpt(frame: &ScreenFrame) -> String {
 
 fn bounded(text: &str) -> (String, bool) {
     let end = text.floor_char_boundary(MAX_ASSERTION_CHARS);
+
     return (
         text.get(..end).unwrap_or_default().to_owned(),
         end != text.len(),
@@ -649,7 +645,6 @@ mod tests {
             right: 1,
             bottom: 1,
         };
-
         assert!(matches!(
             assert_neutral_region(
                 &frame,

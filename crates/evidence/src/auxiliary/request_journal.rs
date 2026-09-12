@@ -135,7 +135,6 @@ impl MutationJournal {
         let Some(position) = self.index.lookup(request_id)? else {
             return Ok(None);
         };
-
         if position.length > MAX_MUTATION_JOURNAL_RECORD_BYTES {
             return Err(Error::invalid("mutation index record length exceeds limit"));
         }
@@ -228,7 +227,6 @@ impl MutationJournal {
             event_hash,
             response,
         };
-
         let mut encoded = serde_json::to_vec(&record).map_err(|source| {
             return Error::InvalidJson {
                 path: self.path.clone(),
@@ -237,7 +235,6 @@ impl MutationJournal {
             };
         })?;
         encoded.push(b'\n');
-
         let record_bytes = u64::try_from(encoded.len()).unwrap_or(u64::MAX);
 
         if record_bytes > MAX_MUTATION_JOURNAL_RECORD_BYTES
@@ -272,6 +269,7 @@ impl MutationJournal {
             .ok_or_else(|| return Error::invalid("mutation journal sequence overflow"))?;
 
         self.previous_hash.clone_from(&record.hash);
+
         return Ok(record);
     }
 }
@@ -335,7 +333,6 @@ pub fn read_mutation_journal(path: &Path) -> Result<Vec<MutationJournalRecord>> 
 
     for (index, line) in reader.lines().enumerate() {
         let line = line.map_err(|source| return Error::filesystem(path, source))?;
-
         if u64::try_from(line.len()).unwrap_or(u64::MAX) > MAX_MUTATION_JOURNAL_RECORD_BYTES {
             return Err(Error::invalid(
                 "mutation journal record exceeds its byte limit",
@@ -418,6 +415,7 @@ impl MutationJournalCursor {
             .ok_or_else(|| return Error::invalid("mutation journal sequence overflow"))?;
 
         self.previous_hash.clone_from(&record.hash);
+
         return Ok(Some(record));
     }
 }
@@ -503,7 +501,6 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
     }
 
     let _pending = cursor.finish()?;
-
     let mut journal = MutationJournalCursor::open(&path)?;
     let mut verified_count = 0;
     let mut verified_hash = String::new();
@@ -518,7 +515,6 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
             .optional()
             .map_err(index_error)?
             .flatten();
-
         if expected_hash.as_ref() != Some(&record.event_hash) {
             return Err(Error::invalid(
                 "mutation journal event hash does not match the canonical boundary",
@@ -534,14 +530,13 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
                 .map_err(index_error)?;
 
             let mut previous = None;
-            let mut actual_count = 0;
 
+            let mut actual_count = 0;
             while let Some(row) = rows.next().map_err(index_error)? {
                 let bytes: Vec<u8> = row.get(0).map_err(index_error)?;
                 let id = Uuid::from_slice(&bytes).map_err(|_| {
                     return Error::invalid("canonical operation identifier index is invalid");
                 })?;
-
                 if previous == Some(id) {
                     continue;
                 }
@@ -657,7 +652,6 @@ fn decode_record(
     })?;
 
     let seq = u64::try_from(index).unwrap_or(u64::MAX);
-
     if record.seq != seq
         || record.prev_hash != previous_hash
         || record.response.request_id != record.request_id
@@ -698,6 +692,7 @@ fn hash_body(body: &MutationJournalBody<'_>, path: &Path) -> Result<String> {
             source,
         };
     })?;
+
     return Ok(blake3::hash(&bytes).to_hex().to_string());
 }
 
@@ -709,6 +704,7 @@ fn sync_parent_directory(path: &Path) -> Result<()> {
     File::open(parent)
         .and_then(|directory| return directory.sync_all())
         .map_err(|source| return Error::filesystem(parent, source))?;
+
     return Ok(());
 }
 
@@ -780,12 +776,10 @@ mod tests {
                 error_response(second_id, "second".to_owned()),
             )
             .expect("second record");
-
         let found = journal
             .lookup(first_id)
             .expect("lookup")
             .expect("first record");
-
         assert_eq!(found.response, first_response);
     }
 

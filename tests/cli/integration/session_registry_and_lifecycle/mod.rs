@@ -37,6 +37,7 @@ fn table_cells<'line>(line: &'line str, starts: &[usize]) -> Vec<&'line str> {
         .enumerate()
         .map(|(index, start)| {
             let end = starts.get(index + 1).copied().unwrap_or(line.len());
+
             return line.get(*start..end).map_or("", str::trim);
         })
         .collect();

@@ -29,7 +29,6 @@ pub(super) fn validate_action_options(atoms: &[InputAtom], options: &ActionOptio
             InputAtom::Bytes(bytes) => bytes.len(),
             InputAtom::Key { .. } => continue,
         };
-
         if byte_len == 0 || byte_len > 64 * 1024 {
             return Err(Error::InvalidAtom {
                 atom_index: index,
@@ -48,7 +47,6 @@ pub(super) fn validate_action_options(atoms: &[InputAtom], options: &ActionOptio
     }
 
     let atom_count = u64::try_from(atoms.len()).unwrap_or(u64::MAX);
-
     if pace_ns
         .checked_mul(atom_count)
         .is_none_or(|total| return total > 60_000_000_000)
@@ -256,6 +254,7 @@ pub(super) fn public_control_error(
                 rows,
                 reason,
             };
+
             return public_screen_frame_error(request_id, details, source);
         }
 
@@ -282,6 +281,7 @@ pub(super) fn public_control_error(
                 detail,
                 region,
             };
+
             return public_screen_frame_error(request_id, details, source);
         }
     }
@@ -357,7 +357,6 @@ mod tests {
                 maximum: Some(1),
             }),
         };
-
         let error = public_control_error(
             "screen_frame_resource_limit".to_owned(),
             "projection failed".to_owned(),

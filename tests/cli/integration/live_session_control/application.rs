@@ -39,7 +39,6 @@ fn application_events_are_deduplicated_bounded_and_separate_from_terminal_bytes(
         attributes: BTreeMap::from([("secret".to_owned(), serde_json::json!("private value"))]),
     };
     let request = ControlRequest::new(ControlCommand::Application { data: data.clone() });
-
     let first = send_request_response(&session, &request).expect("application event");
     assert!(matches!(first.result, ControlResult::Ok { .. }));
     assert_eq!(
@@ -51,17 +50,14 @@ fn application_events_are_deduplicated_bounded_and_separate_from_terminal_bytes(
     oversized
         .attributes
         .insert("large".to_owned(), serde_json::json!("x".repeat(65_536)));
-
     let rejected = send_request_response(
         &session,
         &ControlRequest::new(ControlCommand::Application { data: oversized }),
     )
     .expect("bounded rejection");
-
     assert!(
         matches!(rejected.result, ControlResult::Error { code, .. } if code == "invalid_application_event")
     );
-
     let application = Instrumentation::new(Client::new(&session));
     let span = application
         .start_span("work", None, BTreeMap::new())
@@ -94,7 +90,6 @@ fn application_events_are_deduplicated_bounded_and_separate_from_terminal_bytes(
             return matches!(record.event, Event::Application { .. });
         })
         .collect::<Vec<_>>();
-
     assert_eq!(application_records.len(), 3);
 
     let output = log
@@ -109,13 +104,11 @@ fn application_events_are_deduplicated_bounded_and_separate_from_terminal_bytes(
         .flatten()
         .copied()
         .collect::<Vec<_>>();
-
     assert_eq!(output, b"READYDONE");
 
     let metadata =
         serde_json::to_string(&EventProjection::from_record(application_records[0], true))
             .expect("metadata projection");
-
     assert!(!metadata.contains("private value"));
     assert!(!metadata.contains("sensitive diagnostic name"));
     assert!(!metadata.contains("attributes"));

@@ -252,7 +252,6 @@ fn round_trip_preserves_binary_events_and_integrity_chain() {
     drop(writer);
 
     let recording = EventLog::read(&path).expect("read valid recording");
-
     assert_eq!(recording.events.len(), 3);
     assert!(recording.pending_operations.is_empty());
 
@@ -298,6 +297,7 @@ fn round_trip_preserves_binary_events_and_integrity_chain() {
         .permissions()
         .mode()
         & 0o777;
+
     let file_mode = fs_err::metadata(&path)
         .expect("file metadata")
         .permissions()
@@ -379,7 +379,6 @@ fn reports_intent_without_result_as_uncertain() {
     drop(writer);
 
     let recording = EventLog::read(&path).expect("read interrupted recording");
-
     assert_eq!(
         recording.pending_operations,
         vec![PendingOperation {

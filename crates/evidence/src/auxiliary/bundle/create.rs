@@ -48,6 +48,7 @@ impl BundleDraft {
             Some(_) => Path::new("."),
             None => return Err(Error::invalid("bundle path has no parent")),
         };
+
         let name = destination
             .file_name()
             .ok_or_else(|| return Error::invalid("bundle path has no basename"))?;
@@ -106,7 +107,6 @@ impl BundleDraft {
 
         let relative = relative.as_ref();
         let path = validate_relative_path(relative)?;
-
         if !self.paths.insert(path.clone()) {
             return Err(Error::invalid(format!(
                 "bundle contains duplicate member `{path}`"
@@ -119,6 +119,7 @@ impl BundleDraft {
             Ok(file) => BufWriter::new(file),
             Err(error) => {
                 self.paths.remove(&path);
+
                 return Err(error);
             }
         };
@@ -214,10 +215,12 @@ impl BundleDraft {
             Some(_) => Path::new("."),
             None => return Err(Error::invalid("bundle path has no parent")),
         };
+
         let staging_name = self
             .staging
             .file_name()
             .ok_or_else(|| return Error::invalid("staging path has no basename"))?;
+
         let destination_name = self
             .destination
             .file_name()
@@ -246,6 +249,7 @@ impl BundleDraft {
 
         sync_parent(&self.destination)?;
         self.committed = true;
+
         return Ok(manifest);
     }
 }
@@ -299,6 +303,7 @@ impl BundleMemberWriter<'_> {
         };
         self.draft.members.push(member.clone());
         self.finished = true;
+
         return Ok(member);
     }
 }
@@ -315,7 +320,6 @@ impl Write for BundleMemberWriter<'_> {
             .ok_or_else(|| return io::Error::other("bundle member writer is already finished"))?;
         let count = writer.write(buf)?;
         self.draft.remaining_bytes -= u64::try_from(count).unwrap_or(u64::MAX);
-
         let written = buf.get(..count).ok_or_else(|| {
             return io::Error::other("bundle member writer returned an invalid count");
         })?;
@@ -324,6 +328,7 @@ impl Write for BundleMemberWriter<'_> {
             .byte_length
             .checked_add(u64::try_from(count).unwrap_or(u64::MAX))
             .ok_or_else(|| return io::Error::other("bundle member size overflow"))?;
+
         return Ok(count);
     }
 

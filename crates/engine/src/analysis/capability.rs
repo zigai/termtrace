@@ -25,7 +25,6 @@ pub fn require(report: &CapabilityReport, id: &str) -> Result<()> {
     if capability.status == CapabilityStatus::Ready {
         return Ok(());
     }
-
     return Err(Error::CapabilityBlocked {
         id: capability.id.clone(),
         code: capability.code.clone(),
@@ -79,7 +78,6 @@ pub fn probe_capabilities(external: impl IntoIterator<Item = Capability>) -> Cap
     };
 
     let mut capabilities: Vec<Capability> = Vec::with_capacity(CAPABILITY_IDS.len());
-
     for id in CAPABILITY_IDS {
         let capability = match *id {
             CORE_CAPABILITY => core.clone(),
@@ -93,7 +91,6 @@ pub fn probe_capabilities(external: impl IntoIterator<Item = Capability>) -> Cap
                 );
             }),
         };
-
         capabilities.push(capability);
     }
 

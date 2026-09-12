@@ -3,14 +3,15 @@ use std::collections::BTreeMap;
 
 pub(super) fn append_bounded_text(output: &mut String, value: &str) -> bool {
     let remaining = MAX_COMPACT_SCREEN_BYTES.saturating_sub(output.len());
-
     if value.len() <= remaining {
         output.push_str(value);
+
         return false;
     }
 
     let end = value.floor_char_boundary(remaining);
     output.push_str(value.get(..end).unwrap_or_default());
+
     return true;
 }
 
@@ -23,6 +24,7 @@ pub(super) fn bounded_screen_frame_text(
     {
         let mut output = String::new();
         let truncated = append_bounded_text(&mut output, viewport_text);
+
         return Some((output, truncated));
     }
 
@@ -33,7 +35,6 @@ pub(super) fn bounded_screen_frame_text(
         .and_then(serde_json::Value::as_array)?;
 
     let mut output = String::new();
-
     for (index, row) in rows.iter().enumerate() {
         let text = row
             .as_object()
@@ -124,7 +125,6 @@ pub(super) fn bounded_capture_projection(value: &serde_json::Value) -> Option<se
         let Some(nested) = source.get(key).and_then(serde_json::Value::as_object) else {
             continue;
         };
-
         if key == "frame"
             || (key == "observation"
                 && nested.contains_key("state_hash")
@@ -135,6 +135,7 @@ pub(super) fn bounded_capture_projection(value: &serde_json::Value) -> Option<se
         }
 
         let nested = scalar_fields(nested);
+
         if !nested.is_empty() {
             projection.insert(key.to_owned(), serde_json::Value::Object(nested));
         }
@@ -166,7 +167,6 @@ pub(super) fn compact_value_with_paths(
         }
         serde_json::Value::Object(values) => {
             let mut compact = serde_json::Map::new();
-
             for (key, value) in values {
                 let keep = match key.as_str() {
                     "details"
@@ -200,7 +200,6 @@ pub(super) fn compact_value_with_paths(
                     | "timestamps" => selected(fields, ResponseField::Timing),
                     _ => true,
                 };
-
                 if !keep {
                     continue;
                 }
@@ -342,8 +341,8 @@ pub(super) fn compact_postcondition(
     include_screen: bool,
 ) -> Option<serde_json::Value> {
     let source = value.as_object()?;
-
     let mut postcondition = serde_json::Map::new();
+
     for key in [
         "matched",
         "state",
@@ -844,5 +843,6 @@ pub(super) fn bounded_agent_response(response: serde_json::Value) -> Result<Vec<
     }
 
     encoded.push(b'\n');
+
     return Ok(encoded);
 }

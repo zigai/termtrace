@@ -79,6 +79,7 @@ pub(super) fn semantic_key_input(key: NamedKey, modifiers: KeyModifiers) -> Stri
 
     let key = semantic_key_name(key);
     parts.push(&key);
+
     return parts.join("+");
 }
 
@@ -96,6 +97,7 @@ pub(super) fn interpolate_cell(start: u16, end: u16, step: u32, steps: u32) -> u
     let start = i64::from(start);
     let delta = i64::from(end) - start;
     let rounded = start + (delta * i64::from(step) + i64::from(steps) / 2) / i64::from(steps);
+
     return u16::try_from(rounded).unwrap_or(end);
 }
 
@@ -118,6 +120,7 @@ pub(super) fn encode_paste(data: &[u8], bracketed: bool) -> Result<Vec<u8>> {
         encoded.extend_from_slice(b"\x1b[200~");
         encoded.extend_from_slice(data);
         encoded.extend_from_slice(b"\x1b[201~");
+
         return Ok(encoded);
     }
 
@@ -167,6 +170,7 @@ pub(super) fn apply_input(
 
     let Some(error) = write_error else {
         let result_event_seq = result_write?;
+
         return Ok(InputApplication {
             bytes_written,
             intent_event_seq,
@@ -305,9 +309,9 @@ impl InputSequenceExecution {
             }
             Err(error) => return Err(error),
         };
-
         self.first_intent_event_seq
             .get_or_insert(applied.intent_event_seq);
+
         self.last_result_event_seq = Some(applied.result_event_seq);
         self.total_bytes_written = self
             .total_bytes_written
@@ -327,9 +331,9 @@ impl InputSequenceExecution {
 
         if self.next_atom_index < self.atoms.len() {
             self.next_deadline = Instant::now() + Duration::from_nanos(self.pace_ns);
+
             return Ok(None);
         }
-
         return Ok(Some(ActionInputResult {
             sequence_id: self.sequence_id,
             atom_count: u32::try_from(self.atoms.len()).unwrap_or(u32::MAX),
@@ -370,7 +374,6 @@ fn validate_input_sequence(atoms: &[InputSequenceAtom], pace_ns: u64) -> Result<
     }
 
     let mut operation_ids = HashSet::with_capacity(atoms.len());
-
     for atom in atoms {
         if !operation_ids.insert(input_sequence_operation_id(atom)) {
             return Err(control_rejected(
@@ -468,7 +471,6 @@ pub(super) fn prepare_key(
             "the requested key press produced no terminal bytes",
         ));
     }
-
     return Ok(PreparedInput {
         input_kind: InputKind::Keys,
         descriptor: InputDescriptor::Key {
@@ -509,6 +511,7 @@ pub(super) fn mode_hash(modes: &ModeState, operation: &'static str) -> Result<St
     let mode_bytes = serde_json::to_vec(modes).map_err(|error| {
         return terminal_error(operation, error.to_string());
     })?;
+
     return Ok(blake3::hash(&mode_bytes).to_hex().to_string());
 }
 
@@ -565,7 +568,6 @@ pub(super) fn apply_resize(
 
 fn write_input(writer: &mut dyn Write, data: &[u8]) -> (u64, Option<IoError>) {
     let mut offset = 0_usize;
-
     while offset < data.len() {
         let Some(remaining) = data.get(offset..) else {
             return (

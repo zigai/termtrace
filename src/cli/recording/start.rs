@@ -51,13 +51,16 @@ pub(in crate::cli) fn run_start(
         Ok(stdout) => stdout,
         Err(error) => {
             release_start_reservation(&registry, &reservation);
+
             return Err(error);
         }
     };
+
     let stderr = match open_detached_log(&paths.stderr_log) {
         Ok(stderr) => stderr,
         Err(error) => {
             release_start_reservation(&registry, &reservation);
+
             return Err(error);
         }
     };
@@ -71,11 +74,11 @@ pub(in crate::cli) fn run_start(
         .stdin(if environment_stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
-
     let mut recorder = match command.spawn() {
         Ok(recorder) => recorder,
         Err(source) => {
             release_start_reservation(&registry, &reservation);
+
             return Err(source).into_diagnostic();
         }
     };
@@ -90,7 +93,6 @@ pub(in crate::cli) fn run_start(
     }
 
     let deadline = Instant::now() + Duration::from_millis(startup_timeout_ms);
-
     let mut ready_since: Option<Instant> = None;
 
     loop {
@@ -117,6 +119,7 @@ pub(in crate::cli) fn run_start(
                         paths.stderr_log.display(),
                     );
                 })?;
+
                 return report_start_outcome(response, &entry, &paths, None, &synchronization);
             }
         }
@@ -196,6 +199,7 @@ fn promote_completed_start(
             paths.stderr_log.display(),
         );
     })?;
+
     return report_start_outcome(response, &entry, paths, Some(&completion), synchronization);
 }
 
@@ -276,11 +280,9 @@ fn report_start_outcome(
     let Some(completion) = completion else {
         return Ok(ExitCode::SUCCESS);
     };
-
     if completion.resource_limit.is_some() {
         return Ok(ExitCode::FAILURE);
     }
-
     return Ok(match (completion.exit_code, &completion.signal_name) {
         (Some(code), None) => u8::try_from(code).map_or(ExitCode::FAILURE, ExitCode::from),
         _ => ExitCode::FAILURE,
@@ -301,6 +303,7 @@ fn start_postcondition(
             }),
         )
         .into_diagnostic()?;
+
         let ControlData::StableSnapshot { frame, quality, .. } = data else {
             return Err(miette::miette!(
                 "actor returned the wrong stable-capture payload"
@@ -570,6 +573,7 @@ pub(super) fn record_arguments(
 
     arguments.push(OsString::from("--"));
     arguments.extend(recording.command.iter().cloned());
+
     return arguments;
 }
 

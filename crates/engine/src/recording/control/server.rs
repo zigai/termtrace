@@ -132,7 +132,6 @@ fn control_server_loop(
                 }
             }
         };
-
         if !listener_ready && stop_accepting_ready {
             return Ok(());
         }
@@ -217,7 +216,6 @@ fn handle_control_connection(
             source,
         };
     })?;
-
     if request.version != CONTROL_PROTOCOL_VERSION {
         return write_control_response(
             &mut stream,
@@ -244,6 +242,7 @@ fn handle_control_connection(
         request,
         response: response_sender,
     };
+
     let deadline = Instant::now() + response_timeout;
 
     loop {
@@ -265,6 +264,7 @@ fn handle_control_connection(
                         },
                     };
                     let _ = write_control_response(&mut stream, &response);
+
                     return Err(terminal_error(
                         "dispatch control request",
                         "recording actor is unresponsive",
@@ -286,6 +286,7 @@ fn handle_control_connection(
                     },
                 };
                 let _ = write_control_response(&mut stream, &response);
+
                 return Err(terminal_error(
                     "dispatch control request",
                     "recording actor disconnected",
@@ -313,6 +314,7 @@ fn handle_control_connection(
                         },
                     };
                     let _ = write_control_response(&mut stream, &response);
+
                     return Err(terminal_error(
                         "wait for control response",
                         "recording actor is unresponsive",
@@ -330,6 +332,7 @@ fn handle_control_connection(
                     },
                 };
                 let _ = write_control_response(&mut stream, &response);
+
                 return Err(terminal_error(
                     "wait for control response",
                     "recording actor disconnected",
@@ -475,6 +478,7 @@ fn rich_response_context(
         }
         _ => return None,
     };
+
     return Some((frame, boundaries, scope));
 }
 
@@ -482,6 +486,7 @@ fn actor_frame_boundaries(frame: &ScreenFrame) -> Option<ActorBoundaries> {
     let ScreenFrameSource::Actor { boundaries, .. } = &frame.source else {
         return None;
     };
+
     return Some(boundaries.clone());
 }
 
@@ -513,6 +518,7 @@ impl ControlWorker {
             .map_err(|_| return terminal_error("join control server", "control thread panicked"));
 
         let result = finish_with_cleanup(stop_accepting_result, cancel_result);
+
         return finish_with_cleanup(result, join_result);
     }
 }
@@ -535,6 +541,7 @@ mod tests {
             event_hash: "a".repeat(64),
             output_bytes: 11,
         };
+
         return ActorBoundaries {
             durable: boundary.clone(),
             observed: boundary,
@@ -572,7 +579,6 @@ mod tests {
         };
         let (code, _, details) =
             oversized_response_error(&response, MAX_CONTROL_MESSAGE_BYTES + 37);
-
         assert_eq!(code, "screen_frame_resource_limit");
 
         let details = details.expect("rich response details");
@@ -596,7 +602,6 @@ mod tests {
             },
         };
         let (code, _, details) = oversized_response_error(&response, MAX_CONTROL_MESSAGE_BYTES + 1);
-
         assert_eq!(code, "response_too_large");
         assert!(details.is_none());
     }

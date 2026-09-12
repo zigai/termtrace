@@ -88,12 +88,15 @@ pub fn analyze_last_action(
             record: record.clone(),
             state: state.clone(),
         });
+
         states.push(record.clone());
+
         return Ok(());
     })?;
 
     let from_inspection = before_inspection
         .ok_or_else(|| return task_error("no state matches action start sequence"))?;
+
     let to_inspection =
         after_inspection.ok_or_else(|| return task_error("no state matches final sequence"))?;
 
@@ -182,7 +185,6 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
         findings,
         findings_truncated,
     } = inputs;
-
     let (warnings, warning_limit_reached) = action_warnings(
         &difference.rows,
         &before,
@@ -193,11 +195,11 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
         &findings,
     );
     let warnings_truncated = warning_limit_reached || findings_truncated;
-
     let rows_changed = difference.rows.iter().map(|row| return row.row).collect();
     let cells_changed = difference.rows.iter().fold(0_u64, |total, row| {
         return total.saturating_add(u64::try_from(row.cells.len()).unwrap_or(u64::MAX));
     });
+
     let mode_changes = changed_modes(difference.modes.as_ref());
 
     let inspection = LastActionReport {
@@ -240,6 +242,7 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
 fn last_input_action(session: &Path, log: &EventLog) -> Result<LastActionBoundary> {
     let mut journal = MutationJournalCursor::open(&session.join(MUTATION_JOURNAL_NAME))?;
     let mut last_action = None;
+
     while let Some(request) = journal.next_record()? {
         if let Some(action) = journaled_input_action(log, &request)? {
             last_action = Some(action);
@@ -269,7 +272,6 @@ fn journaled_input_action(
     if intents.is_empty() {
         return Ok(None);
     }
-
     return Ok(Some(action_boundary(
         log,
         Some(request.request_id),
@@ -340,7 +342,6 @@ fn action_boundary(
                 _ => return None,
             })
             .ok_or_else(|| return task_error("input intent has no canonical input result"))?;
-
         bytes_written = bytes_written.saturating_add(*atom_bytes_written);
         last_result_event_seq = Some(result_seq);
 
@@ -355,6 +356,7 @@ fn action_boundary(
 
     let intent_event_seq = first_intent_event_seq
         .ok_or_else(|| return task_error("input action has no canonical intent"))?;
+
     let result_event_seq = last_result_event_seq
         .ok_or_else(|| return task_error("input action has no canonical result"))?;
 
@@ -411,6 +413,7 @@ fn changed_modes(change: Option<&ValueChange<ModeState>>) -> Vec<ActionModeChang
         .filter_map(|(ansi, number)| {
             let before = before.get(&(ansi, number)).copied().unwrap_or(false);
             let after = after.get(&(ansi, number)).copied().unwrap_or(false);
+
             return (before != after).then_some(ActionModeChange {
                 number,
                 ansi,
@@ -448,6 +451,7 @@ fn bounded_action_findings(
         .collect::<Vec<_>>();
 
     let truncated = selected.len() > MAX_ACTION_FINDINGS;
+
     selected.truncate(MAX_ACTION_FINDINGS);
 
     for finding in &mut selected {
@@ -472,6 +476,7 @@ fn action_warnings(
     let changed_cells = rows.iter().fold(0_u64, |total, row| {
         return total.saturating_add(u64::try_from(row.cells.len()).unwrap_or(u64::MAX));
     });
+
     let total_cells = u64::from(after.cols.max(before.cols))
         .saturating_mul(u64::from(after.rows.max(before.rows)));
 
@@ -544,5 +549,6 @@ fn action_warnings(
 
     let truncated = warnings.len() > MAX_ACTION_WARNINGS;
     warnings.truncate(MAX_ACTION_WARNINGS);
+
     return (warnings, truncated);
 }

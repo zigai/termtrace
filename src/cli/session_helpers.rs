@@ -34,6 +34,7 @@ pub(super) fn resolve_session(target: PathBuf) -> Result<ResolvedSessionRef> {
         }
 
         let path = PathBuf::from(OsString::from_vec(path.to_vec()));
+
         return Ok(resolve_path_lifecycle(path));
     }
 
@@ -127,6 +128,7 @@ pub(super) fn write_session_lifecycle(
             "diagnostic": resolved.diagnostic,
         }),
     )?;
+
     return Ok(exit_code);
 }
 
@@ -162,7 +164,6 @@ fn resolve_path_lifecycle(path: PathBuf) -> ResolvedSessionRef {
             diagnostic: None,
         };
     }
-
     return ResolvedSessionRef {
         path,
         lifecycle: RegistryLifecycle::Stale,

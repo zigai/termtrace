@@ -46,7 +46,6 @@ fn session_recovery_preserves_context_and_never_claims_completion() {
     let report: serde_json::Value =
         serde_json::from_slice(&fs_err::read(recovered.join("recovery.json")).expect("report"))
             .expect("report JSON");
-
     assert_eq!(report["complete_evidence"], false);
     assert!(report["recovery"]["discarded_tail"].is_object());
 
@@ -195,7 +194,6 @@ fn top_level_video_exposes_complete_manifested_workflow() {
         .clone();
 
     let help = String::from_utf8(output).expect("UTF-8 help");
-
     assert!(help.contains("Usage: termtrace video [OPTIONS]"));
 
     for option in [
@@ -332,7 +330,6 @@ fn complex_selector_help_stays_within_one_hundred_columns() {
             .clone();
 
         let help = String::from_utf8(output).expect("UTF-8 help");
-
         assert!(
             help.contains(synopsis),
             "missing concise synopsis in:\n{help}"
@@ -441,7 +438,6 @@ fn doctor_is_the_only_top_level_capability_inventory_command() {
         .clone();
 
     let root_help = String::from_utf8(output).expect("UTF-8 help");
-
     assert!(
         root_help
             .lines()
@@ -496,7 +492,6 @@ fn doctor_reports_capability_boundaries_and_enforces_requirements() {
 
     let version_json: serde_json::Value =
         serde_json::from_slice(&version_output).expect("version JSON");
-
     assert_eq!(version_json["termtrace_version"], "0.1.0");
     assert!(version_json.get("ghostty_vt_revision").is_some());
     assert!(version_json.get("control_protocol_version").is_some());
@@ -512,10 +507,10 @@ fn doctor_reports_capability_boundaries_and_enforces_requirements() {
 
     let doctor_json: serde_json::Value =
         serde_json::from_slice(&semantic_output).expect("doctor JSON");
+
     let capabilities = doctor_json["capabilities"]
         .as_array()
         .expect("capabilities array");
-
     assert!(
         capabilities
             .iter()
@@ -595,7 +590,6 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
 
     let plan: serde_json::Value =
         serde_json::from_slice(&plan_output).expect("semantic video plan JSON");
-
     assert_eq!(plan["version"], 2);
     assert_eq!(plan["source"]["kind"], "semantic");
 
@@ -614,7 +608,6 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .iter()
         .filter_map(|f| return f["role"].as_str())
         .collect();
-
     assert!(roles.contains(&"regular"));
     assert!(roles.contains(&"bold"));
     assert!(roles.contains(&"italic"));
@@ -643,7 +636,6 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
 
     let supersampled_plan: serde_json::Value =
         serde_json::from_slice(&supersampled_output).expect("supersampled video plan JSON");
-
     assert_eq!(
         supersampled_plan["source"]["plan"]["raster_profile"],
         "supersampled-2x"
@@ -714,6 +706,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         !screenshot.exists(),
         "blocked screenshot created its destination"
     );
+
     assert_no_entry_with_prefix(temporary.path(), ".native-screenshot");
 
     let mut native_capture = Command::cargo_bin("termtrace").expect("binary should build");
@@ -736,6 +729,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         !session.join("visual").exists(),
         "blocked capture published visual evidence"
     );
+
     assert_no_entry_with_prefix(&session, ".visual");
 
     let preview = temporary.path().join("semantic-preview");
@@ -761,6 +755,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .stderr(predicate::str::contains("semantic-video --explain"));
 
     assert!(!preview.exists(), "blocked preview created its destination");
+
     assert_no_entry_with_prefix(temporary.path(), ".preview-");
 
     let export = temporary.path().join("semantic-export.mp4");
@@ -786,6 +781,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .stderr(predicate::str::contains("semantic-video --explain"));
 
     assert!(!export.exists(), "blocked export created its destination");
+
     assert_no_entry_with_prefix(temporary.path(), ".presentation-");
 }
 
@@ -876,7 +872,6 @@ fn retained_native_video_exports_without_native_capture_tools() {
         .clone();
 
     let report: serde_json::Value = serde_json::from_slice(&output).expect("video result JSON");
-
     assert_eq!(report["renderer"], "native");
     assert!(
         destination.is_file(),
@@ -888,7 +883,6 @@ fn retained_native_video_exports_without_native_capture_tools() {
             .as_str()
             .expect("published manifest path"),
     );
-
     assert!(
         manifest.is_file(),
         "retained native export must publish its manifest"
@@ -934,7 +928,6 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
     let temporary = TempDir::new().expect("temporary directory");
     fs_err::set_permissions(temporary.path(), Permissions::from_mode(0o700))
         .expect("owner-only temporary directory");
-
     let session = temporary.path().join("result-session");
     let mut record = Command::cargo_bin("termtrace").expect("binary should build");
     record
@@ -958,7 +951,6 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         .clone();
 
     let result = compact_json_line(&output);
-
     assert_eq!(result["kind"], "asciicast");
     assert!(result["output"].is_string());
     assert_eq!(result["output_display"], cast.display().to_string());
@@ -987,7 +979,6 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         .clone();
 
     let result = compact_json_line(&output);
-
     assert_eq!(result["source"], damaged.display().to_string());
     assert_eq!(result["recovered"], recovered.display().to_string());
     assert!(result["discarded_tail"].is_object());
@@ -1005,7 +996,6 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         .clone();
 
     let first = compact_json_line(&first);
-
     assert_eq!(first["kind"], "schema_generation");
     assert!(first["directory"].is_string());
     assert_eq!(
@@ -1028,7 +1018,6 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         .clone();
 
     let second = compact_json_line(&second);
-
     assert_eq!(second["kind"], "schema_generation");
     assert_eq!(second["file_count"], first["file_count"]);
     assert_eq!(second["replaced_existing_files"], true);
@@ -1051,6 +1040,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
 fn assert_no_entry_with_prefix(directory: &Path, prefix: &str) {
     let entries = fs_err::read_dir(directory)
         .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()));
+
     let matching = entries
         .map(|entry| return entry.expect("directory entry").file_name())
         .filter(|name| return name.as_bytes().starts_with(prefix.as_bytes()))

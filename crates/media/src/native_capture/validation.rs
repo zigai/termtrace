@@ -50,6 +50,7 @@ pub fn validate_replay_screenshot(
     }
 
     verify_artifact_members(directory, &manifest.members)?;
+
     check_review_cancelled(cancelled)?;
 
     let canonical = read_manifest(session)?;
@@ -169,7 +170,6 @@ pub(crate) fn validate_visual_manifest_binding(
     color_source: &str,
 ) -> Result<()> {
     validate_visual_manifest(manifest)?;
-
     if let Some(expected) = recorded_profile_hash
         .or_else(|| return color_source.strip_prefix("ghostty_show_config_blake3:"))
         && manifest.effective_config_hash != expected
@@ -217,7 +217,6 @@ pub fn validated_visual_manifests(
     entries.sort_unstable_by_key(|entry| return entry.file_name());
 
     let mut validated: Vec<ValidatedVisualManifest> = Vec::new();
-
     for entry in entries {
         let file_type = entry.file_type().map_err(|source| {
             return Error::Filesystem {
@@ -225,7 +224,6 @@ pub fn validated_visual_manifests(
                 source,
             };
         })?;
-
         if !file_type.is_dir() {
             continue;
         }
@@ -241,10 +239,10 @@ pub fn validated_visual_manifests(
                 source,
             };
         })?;
+
         let Ok(manifest) = serde_json::from_slice::<VisualManifest>(&manifest_bytes) else {
             continue;
         };
-
         if manifest.session_id != session_manifest.session_id
             || validate_visual_manifest_binding(
                 &manifest,
@@ -343,8 +341,8 @@ pub fn validated_visual_manifests_for_state(
     })?;
 
     let mut validated = Vec::new();
-    let mut retained_bytes = 0_usize;
 
+    let mut retained_bytes = 0_usize;
     for entry in directory {
         check_review_cancelled(cancelled)?;
 
@@ -354,7 +352,6 @@ pub fn validated_visual_manifests_for_state(
                 source,
             };
         })?;
-
         if !entry
             .file_type()
             .map_err(|source| {
@@ -402,7 +399,6 @@ pub fn validated_visual_manifests_for_state(
             .members
             .iter()
             .any(|member| return member.path == "replay-endpoint.json");
-
         if manifest.session_id != session_manifest.session_id
             || !replay_screenshot
                 && manifest.source_event_hash.as_deref()
@@ -459,7 +455,6 @@ pub fn validated_visual_manifests_for_state(
                                 source,
                             };
                         })?;
-
                     if count == 0 {
                         break;
                     }
@@ -552,6 +547,7 @@ pub fn validated_visual_manifests_for_state(
     }
 
     validated.sort_unstable_by(|(left, _), (right, _)| return left.cmp(right));
+
     return Ok(validated
         .into_iter()
         .map(|(_, visual)| return visual)
@@ -659,14 +655,17 @@ mod tests {
         assert!(serde_json::from_value::<VisualManifest>(obsolete).is_err());
 
         manifest.version = VISUAL_MANIFEST_VERSION - 1;
+
         assert!(validate_visual_manifest(&manifest).is_err());
 
         manifest.version = VISUAL_MANIFEST_VERSION;
         manifest.effective_config_hash = "A".repeat(64);
+
         assert!(validate_visual_manifest(&manifest).is_err());
 
         manifest.effective_config_hash = "a".repeat(64);
         manifest.members[0].blake3 = "b".repeat(64);
+
         assert!(validate_visual_manifest(&manifest).is_err());
     }
 
@@ -679,7 +678,6 @@ mod tests {
             &format!("ghostty_show_config_blake3:{}", "b".repeat(64)),
         )
         .expect("recorded profile hash is the sole authority when present");
-
         assert!(validate_visual_manifest_binding(
             &manifest,
             None,

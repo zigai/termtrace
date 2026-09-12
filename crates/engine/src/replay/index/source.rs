@@ -48,7 +48,6 @@ impl IndexSource<'_> {
             }
             Self::File(path, summary) => {
                 let mut cursor = EventLogCursor::open(path)?;
-
                 if cursor.header() != &summary.header {
                     return Err(invalid_replay("index source header changed"));
                 }
@@ -70,22 +69,26 @@ impl IndexSource<'_> {
                                     .validate_boundary(summary.event_count, &terminal.hash);
                             },
                         );
+
                         return validation.err().map(|error| return Err(Error::from(error)));
                     }
 
                     match cursor.next_record() {
                         Ok(Some(record)) => {
                             read += 1;
+
                             return Some(Ok(Cow::Owned(record)));
                         }
                         Ok(None) => {
                             finished = true;
+
                             return Some(Err(invalid_replay(
                                 "index source ended before its validated boundary",
                             )));
                         }
                         Err(error) => {
                             finished = true;
+
                             return Some(Err(Error::from(error)));
                         }
                     }

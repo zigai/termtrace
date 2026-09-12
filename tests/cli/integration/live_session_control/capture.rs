@@ -27,7 +27,6 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         }),
     )
     .expect("stable capture");
-
     let ControlData::StableSnapshot { frame, quality, .. } = capture else {
         panic!("wrong stable capture payload");
     };
@@ -62,7 +61,6 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
 
     let compact: serde_json::Value =
         serde_json::from_slice(&compact_output).expect("compact idle response");
-
     assert_eq!(
         compact.pointer("/kind").and_then(serde_json::Value::as_str),
         Some("stable_snapshot")
@@ -90,7 +88,6 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         .expect("stop stable child");
 
     let _stable_status = stable_child.wait().expect("stable recorder exit");
-
     let changing_session = temporary.path().join("changing");
     let mut changing_child = StdCommand::new(binary)
         .args(["record", "--no-input", "--out"])
@@ -118,7 +115,6 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         }),
     )
     .expect("typed deadline capture");
-
     assert!(matches!(
         deadline,
         ControlData::StableSnapshot {
@@ -126,7 +122,6 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
             ..
         }
     ));
-
     send_request(
         &changing_session,
         &ControlRequest::new(ControlCommand::Stop),
@@ -134,7 +129,6 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     .expect("stop changing child");
 
     let _changing_status = changing_child.wait().expect("changing recorder exit");
-
     let completed_session = temporary.path().join("child-completed");
     let mut completed_child = StdCommand::new(binary)
         .args(["record", "--no-input", "--out"])
@@ -164,7 +158,6 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         }),
     )
     .expect("typed child completion");
-
     let ControlData::StableSnapshot { quality, frame, .. } = completed else {
         panic!("unexpected completed-child outcome: {completed:?}");
     };
@@ -180,7 +173,6 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     );
 
     let _completed_status = completed_child.wait().expect("completed recorder exit");
-
     let closed_session = temporary.path().join("output-closed");
     let mut closed_child = StdCommand::new(binary)
         .args(["record", "--no-input", "--out"])
@@ -210,7 +202,6 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         }),
     )
     .expect("typed output closure");
-
     let ControlData::StableSnapshot {
         quality: StableCaptureQuality::OutputClosed,
         frame,
@@ -272,7 +263,6 @@ fn locator_deadline_bounds_an_in_flight_actor_capture() {
 
     let mut manifest = read_manifest(&session_path).expect("read session manifest");
     manifest.control_socket = format!("{}-deadline", manifest.control_socket);
-
     let address = {
         use std::os::linux::net::SocketAddrExt as _;
 
@@ -304,6 +294,7 @@ fn locator_deadline_bounds_an_in_flight_actor_capture() {
     let error = locator
         .wait(Duration::from_millis(50), Duration::from_millis(5))
         .expect_err("stalled capture transport must honor the locator deadline");
+
     let elapsed = started_at.elapsed();
 
     assert!(

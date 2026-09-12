@@ -53,6 +53,7 @@ pub fn summarize(
         }
 
         final_state_hash.clone_from(&record.state_hash);
+
         return Ok(true);
     })?;
 
@@ -69,6 +70,7 @@ pub fn summarize(
 
     let mut marker_count = 0_u64;
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+
     while let Some(record) = cursor.next_record()? {
         if matches!(record.event, Event::Marker { .. }) {
             marker_count = marker_count.saturating_add(1);
@@ -139,9 +141,10 @@ pub fn export_state(
             source: source_error,
         };
     })?;
-    let screen = state_text(&inspection.state);
 
+    let screen = state_text(&inspection.state);
     let destination = destination.as_ref();
+
     if destination.exists() {
         return Err(review_error("review export destination already exists"));
     }
@@ -149,6 +152,7 @@ pub fn export_state(
     let parent = destination
         .parent()
         .ok_or_else(|| return review_error("review export destination has no parent"))?;
+
     fs::create_dir_all(parent)
         .map_err(|source_error| return filesystem_error(parent, source_error))?;
 
@@ -196,7 +200,6 @@ fn export_into(
         state_json_blake3: blake3::hash(&state_json).to_hex().to_string(),
         screen_text_blake3: blake3::hash(screen.as_bytes()).to_hex().to_string(),
     };
-
     let mut manifest_json = serde_json::to_vec_pretty(&manifest).map_err(|source_error| {
         return Error::InvalidJson {
             path: temporary.join("manifest.json"),
@@ -212,6 +215,7 @@ fn export_into(
         .ok_or_else(|| return review_error("review export destination has no parent"))?;
 
     commit_directory(parent, temporary, destination)?;
+
     return Ok(manifest);
 }
 
@@ -231,6 +235,7 @@ fn temporary_export_path(parent: &Path) -> Result<PathBuf> {
             return review_error(format!("system clock precedes Unix epoch: {source}"));
         })?
         .as_nanos();
+
     return Ok(parent.join(format!(".review-export-{}-{timestamp}.tmp", process::id())));
 }
 

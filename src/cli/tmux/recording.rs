@@ -51,7 +51,6 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
     }
 
     let client = TmuxClient::inherited();
-
     if option_text(&client, OPTION_VERSION)? != TMUX_INTEGRATION_VERSION {
         return Err(miette::miette!(
             "tmux recording is not enabled for this server; run `termtrace tmux enable` or source a generated configuration"
@@ -71,6 +70,7 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
 
     let explicitly_selected = !arguments.pane_launch
         && (arguments.force || arguments.shell_command.is_some() || !arguments.command.is_empty());
+
     let (command, launch_kind) = tmux_child_command(&client, arguments)?;
     client.unset_pane_option(&pane, OPTION_PANE_SESSION)?;
 
@@ -78,6 +78,7 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
 
     if !explicitly_selected && !pane_matches_scope(&client, &pane, &scope)? {
         mark_pane_scope_decision(&client, &pane, false)?;
+
         return exec_unrecorded_command(command);
     }
 
@@ -125,6 +126,7 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
             Err(error) => return Err(error).into_diagnostic(),
         },
     };
+
     let colors = ghostty_profile
         .as_ref()
         .map_or_else(builtin_terminal_colors, terminal_colors_for_profile)
@@ -147,6 +149,7 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
         .ok_or_else(|| {
             return miette::miette!("inherited tmux pane has no terminal columns");
         })?;
+
     let cell_height_px = geometry
         .pixel_height
         .checked_div(geometry.rows)
@@ -187,9 +190,7 @@ pub(in crate::cli) fn run_tmux_pane(arguments: TmuxRunArgs) -> Result<ExitCode> 
         provenance_policy: ProvenancePolicy::default(),
         resource_limits: ResourceLimits::default(),
     };
-
     let outcome = record(&options);
-
     let _cancelled = publication_cancel.try_send(());
     let publication = publication
         .join()
@@ -261,7 +262,6 @@ fn exec_unrecorded_command(command: Vec<OsString>) -> Result<ExitCode> {
     let program = arguments
         .next()
         .ok_or_else(|| return miette::miette!("tmux pane command is empty"))?;
-
     let error = ProcessCommand::new(&program)
         .args(arguments)
         .env_remove("TERMTRACE_RESPONSE")
@@ -287,6 +287,7 @@ fn tmux_child_command(
             OsString::from("--"),
         ];
         command.extend(arguments.command);
+
         return Ok((command, launch_kind));
     }
 
@@ -335,7 +336,6 @@ fn validate_pane_launch(arguments: &[OsString]) -> Result<TmuxPaneLaunchKind> {
     let [mode, shell, rest @ ..] = arguments else {
         return Err(miette::miette!("pane launch requires a mode and shell"));
     };
-
     if shell.is_empty() {
         return Err(miette::miette!("pane launch shell is empty"));
     }
@@ -384,7 +384,6 @@ pub(super) fn exec_pane_launch(arguments: &[OsString]) -> Result<ExitCode> {
             return Err(miette::miette!("unsupported pane launch kind"));
         }
     };
-
     let error = command.exec();
 
     return Err(miette::miette!(
@@ -420,7 +419,6 @@ fn capture_tmux_pane(
             "tmux returned invalid stable object identifiers"
         ));
     }
-
     return Ok(TmuxPaneProvenance {
         version: TMUX_PANE_PROVENANCE_VERSION,
         tmux_version,

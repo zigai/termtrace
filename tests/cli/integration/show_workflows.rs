@@ -47,7 +47,6 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
 
     let live: serde_json::Value =
         serde_json::from_slice(&live.get_output().stdout).expect("live observation");
-
     assert_eq!(
         live.pointer("/source_kind")
             .and_then(serde_json::Value::as_str),
@@ -78,7 +77,6 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
 
     let frame: serde_json::Value =
         serde_json::from_slice(&stable.get_output().stdout).expect("stable frame JSON");
-
     assert_eq!(frame["version"], 1);
     assert_eq!(frame["capture_quality"], "stable");
     assert!(frame["frame"]["viewport_text"]
@@ -126,7 +124,6 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
         .expect("checkpoint entry")
         .expect("checkpoint path")
         .path();
-
     assert_eq!(
         cache.extension().and_then(|value| return value.to_str()),
         Some("zst")
@@ -144,7 +141,6 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
 
     let status: serde_json::Value =
         serde_json::from_slice(&status.get_output().stdout).expect("cache status");
-
     assert_eq!(status["entries"], 1);
     assert!(status["compressed_bytes"]
         .as_u64()
@@ -230,14 +226,12 @@ fn completed_cache_rejects_forged_state_and_same_length_source_tampering() {
 
     let after_forgery: serde_json::Value =
         serde_json::from_slice(&observe()).expect("replayed observation");
-
     assert_eq!(after_forgery["state_hash"], original["state_hash"]);
 
     let events = session.join("events.jsonl");
     let before = fs_err::metadata(&events).expect("source metadata");
     let canonical = fs_err::read_to_string(&events).expect("source");
     let corrupted = canonical.replace("VFJVU1RFRA==", "Rk9SR0VEIQ==");
-
     assert_ne!(
         corrupted, canonical,
         "fixture output payload must be present"
@@ -390,6 +384,7 @@ fn artifact_import_chains_ansi_files_and_stdin() {
     let provenance = imported_manifest
         .import_provenance
         .expect("chain-bound import provenance");
+
     let ansi_bytes = fs_err::read(&ansi).expect("ANSI source bytes");
 
     assert_eq!(provenance.source_kind, "ansi_stream");
@@ -473,9 +468,9 @@ fn synchronization_commands_reject_incomplete_stability() {
         .get_output()
         .stdout
         .clone();
+
     let idle: serde_json::Value =
         serde_json::from_slice(&idle_output).expect("idle start response");
-
     assert_eq!(idle["postcondition"]["matched"], true);
 
     let mut stop_idle = Command::cargo_bin("termtrace").expect("binary should build");

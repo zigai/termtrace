@@ -31,6 +31,7 @@ pub(super) fn claim(client: &TmuxClient, role: &str) -> Result<Option<Flock<File
         "-p",
         "#{socket_path}",
     ])?));
+
     let metadata = fs_err::symlink_metadata(&socket).into_diagnostic()?;
     if !metadata.file_type().is_socket() || metadata.uid() != geteuid().as_raw() {
         return Err(miette::miette!(
@@ -45,6 +46,7 @@ pub(super) fn claim(client: &TmuxClient, role: &str) -> Result<Option<Flock<File
         SessionRegistry::open(PathBuf::from(OsString::from_vec(root)))
     }
     .into_diagnostic()?;
+
     let path = registry.state_root().join(format!(
         ".tmux-{}-{}-{role}.lock",
         metadata.dev(),
@@ -59,8 +61,8 @@ pub(super) fn claim(client: &TmuxClient, role: &str) -> Result<Option<Flock<File
         .custom_flags(O_NOFOLLOW | O_NONBLOCK)
         .open(path)
         .into_diagnostic()?;
-    let metadata = file.metadata().into_diagnostic()?;
 
+    let metadata = file.metadata().into_diagnostic()?;
     if metadata.mode() & S_IFMT != S_IFREG || metadata.uid() != geteuid().as_raw() {
         return Err(miette::miette!(
             "observer lock must be a regular file owned by the current user"

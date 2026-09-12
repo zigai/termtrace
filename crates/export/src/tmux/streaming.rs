@@ -35,6 +35,7 @@ pub fn create(
 ) -> Result<TmuxStreamingBundleManifest> {
     let aggregate_manifest = aggregate_manifest.as_ref();
     let destination = destination.as_ref();
+
     if destination.exists() {
         return Err(Error::invalid("tmux export destination already exists"));
     }
@@ -44,8 +45,10 @@ pub fn create(
         MAX_AGGREGATE_MANIFEST_BYTES,
         "aggregate manifest",
     )?;
+
     let aggregate = parse_aggregate(aggregate_manifest, &bytes)?;
     validate_aggregate(&aggregate)?;
+
     validate_destination(destination, aggregate_manifest, &[])?;
 
     // Validate every source before creating a destination that might lie inside it.
@@ -58,6 +61,7 @@ pub fn create(
         Some(_) => Path::new("."),
         None => return Err(Error::invalid("export destination has no parent")),
     };
+
     let staging = parent.join(format!(".tmux-export-{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
     let cleanup = DirectoryCleanup::new(staging.clone());
@@ -106,7 +110,6 @@ pub fn create(
         let mut row = serde_json::to_vec(&track)
             .map_err(|error| return Error::json(&inventory_path, error))?;
         row.push(b'\n');
-
         if u64::try_from(row.len()).unwrap_or(u64::MAX) > MAX_ROW_BYTES {
             return Err(Error::invalid(
                 "tmux track inventory row exceeds its byte budget",
@@ -120,6 +123,7 @@ pub fn create(
         count = count
             .checked_add(1)
             .ok_or_else(|| return Error::invalid("tmux track count overflow"))?;
+
         return Ok(());
     })?;
 
@@ -147,7 +151,9 @@ pub fn create(
     verify_contents(&staging, aggregate_manifest, &bytes, &aggregate)?;
     sync_directory(&staging)?;
     commit_directory(parent, &staging, destination)?;
+
     cleanup.disarm();
+
     return Ok(manifest);
 }
 
@@ -252,7 +258,6 @@ fn verify_contents(
             serde_json::from_slice(&row).map_err(|error| return Error::json(&inventory, error))?;
 
         let expected = track_directory(count, source.pane_id.as_deref());
-
         if track.role != source.role
             || track.pane_id != source.pane_id
             || track.directory != expected
@@ -265,7 +270,6 @@ fn verify_contents(
         }
 
         let nested_path = directory.join(&expected);
-
         if !fs_err::symlink_metadata(&nested_path)
             .map_err(|error| return Error::filesystem(&nested_path, error))?
             .is_dir()
@@ -289,6 +293,7 @@ fn verify_contents(
         count = count
             .checked_add(1)
             .ok_or_else(|| return Error::invalid("tmux track count overflow"))?;
+
         return Ok(());
     })?;
 
@@ -309,6 +314,7 @@ fn verify_contents(
         aggregate.lifecycle_journal.is_some(),
         manifest.track_count,
     )?;
+
     return Ok(manifest);
 }
 
@@ -326,7 +332,6 @@ fn verify_directory_entries(directory: &Path, journal: bool, track_count: u64) -
         let kind = entry
             .file_type()
             .map_err(|error| return Error::filesystem(entry.path(), error))?;
-
         #[expect(
             clippy::filetype_is_file,
             reason = "aggregate exports require regular files; symlinks, sockets, FIFOs, and devices are invalid"
@@ -337,13 +342,12 @@ fn verify_directory_entries(directory: &Path, journal: bool, track_count: u64) -
     }
 
     let tracks = directory.join("tracks");
-    let mut count = 0_u64;
 
+    let mut count = 0_u64;
     for entry in
         fs_err::read_dir(&tracks).map_err(|error| return Error::filesystem(&tracks, error))?
     {
         let entry = entry.map_err(|error| return Error::filesystem(&tracks, error))?;
-
         if !entry
             .file_type()
             .map_err(|error| return Error::filesystem(entry.path(), error))?
@@ -388,16 +392,19 @@ mod directory_tests {
 
         let target = tempfile::NamedTempFile::new().expect("external regular file");
         symlink(target.path(), &manifest).expect("manifest symlink");
+
         assert!(verify_directory_entries(root.path(), false, 0).is_err());
 
         fs::remove_file(&manifest).expect("remove symlink");
 
         let _socket = UnixListener::bind(&manifest).expect("manifest socket");
+
         assert!(verify_directory_entries(root.path(), false, 0).is_err());
 
         fs::remove_file(&manifest).expect("remove socket path");
 
         fs::create_dir_all(&manifest).expect("manifest directory");
+
         assert!(verify_directory_entries(root.path(), false, 0).is_err());
     }
 }

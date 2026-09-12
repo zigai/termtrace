@@ -93,7 +93,6 @@ impl StateIndexCursor {
                 reason: "state index exceeds its committed length".to_owned(),
             });
         }
-
         return serde_json::from_slice(&self.line)
             .map(Some)
             .map_err(|source| {
@@ -127,6 +126,7 @@ pub(super) fn validate_replay_manifest(
             source,
         };
     })?;
+
     let manifest: ReplayManifest = serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path: path.clone(),
@@ -159,11 +159,11 @@ pub(super) fn validate_replay_manifest(
             })?
             .clone(),
     };
-
     let mut states = source.open()?;
     let mut count = 0_u64;
     let mut final_hash = None;
     let mut hidden = false;
+
     while let Some(state) = states.next_state()? {
         count = count.saturating_add(1);
         final_hash = Some(state.state_hash);
@@ -171,7 +171,6 @@ pub(super) fn validate_replay_manifest(
     }
 
     let expected_hash = log.terminal.as_ref().map(|event| return event.hash.clone());
-
     if manifest.version != STATE_FORMAT_VERSION
         || manifest.session_id != log.header.session_id
         || manifest.source_event_hash != expected_hash
@@ -272,6 +271,7 @@ pub(super) fn validate_acquisition_frames(path: &Path, expected_count: u64) -> R
 
     let mut frames = AcquisitionFrames::new(BufReader::new(file).lines());
     let mut first = None;
+
     let mut count = 0;
     while let Some((_, acquired)) = frames.next_frame()? {
         first.get_or_insert(acquired);
@@ -360,7 +360,6 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
                     reason: format!("cannot read acquisition timestamps: {source}"),
                 };
             })?;
-
             if !line.contains("Parsed_showinfo_") {
                 continue;
             }
@@ -368,6 +367,7 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
             if let Some((_, rest)) = line.split_once("config in time_base: ") {
                 self.time_base = rest.split(',').next().and_then(|value| {
                     let (numerator, denominator) = value.trim().split_once('/')?;
+
                     return Some((numerator.parse().ok()?, denominator.parse().ok()?));
                 });
             }
@@ -403,6 +403,7 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
             }
 
             self.previous = Some((number, acquired));
+
             return Ok(self.previous);
         }
 
@@ -428,7 +429,6 @@ mod timing_tests {
         ];
         let mut frames =
             AcquisitionFrames::new(lines.into_iter().map(|line| return Ok(line.to_owned())));
-
         assert_eq!(
             frames.next_frame().unwrap(),
             Some((0, 1_700_000_000_123_456_000))
@@ -477,7 +477,6 @@ mod state_cursor_tests {
         bytes.push(b'\n');
         let source = source(directory.path(), &bytes);
         let mut first = source.open().expect("first cursor");
-
         assert_eq!(
             first
                 .next_state()
@@ -494,7 +493,6 @@ mod state_cursor_tests {
         changed.push(b'\n');
         fs::write(&source.path, changed).expect("replace index");
         let mut second = source.open().expect("second cursor");
-
         assert_eq!(
             second
                 .next_state()
@@ -518,7 +516,6 @@ mod state_cursor_tests {
             .expect("cursor")
             .next_state()
             .expect_err("oversized line");
-
         assert!(error.to_string().contains("64 KiB"));
     }
 }

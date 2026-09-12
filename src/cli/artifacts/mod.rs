@@ -163,7 +163,6 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
     while let Some(record) = cursor.next_record().into_diagnostic()? {
         if let Event::Output { data } = record.event {
             let end = offset.saturating_add(data.as_bytes().len());
-
             if bytes.get(offset..end) != Some(data.as_bytes()) {
                 return Err(miette::miette!(
                     "ANSI import canonical output does not match the exact source bytes"
@@ -181,7 +180,6 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
     }
 
     let manifest = read_manifest(&arguments.out).into_diagnostic()?;
-
     if manifest
         .import_provenance
         .as_ref()
@@ -195,7 +193,6 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
             "ANSI import session did not bind its source provenance"
         ));
     }
-
     return write_json_line(
         response,
         &serde_json::json!({
@@ -279,6 +276,7 @@ pub(super) fn run_video_facade(
 
     let plan = if let Some(edit_path) = arguments.edit.as_ref() {
         let edit = read_edit_plan(edit_path).into_diagnostic()?;
+
         plan_presentation(&session, &edit, source).into_diagnostic()?
     } else {
         validate_completed_session(&session).into_diagnostic()?;
@@ -377,6 +375,7 @@ pub(super) fn run_video_facade(
     let output = arguments
         .out
         .ok_or_else(|| miette::miette!("video export requires --out"))?;
+
     let sidecar = sidecar.ok_or_else(|| miette::miette!("video export sidecar is missing"))?;
 
     write_progress(
@@ -581,7 +580,6 @@ fn video_sidecar_path(output: &Path) -> PathBuf {
     let mut sidecar = output.as_os_str().to_os_string();
     sidecar.push(".termtrace");
     let sidecar = PathBuf::from(sidecar);
-
     if sidecar
         .parent()
         .is_some_and(|parent| return !parent.as_os_str().is_empty())
@@ -605,7 +603,6 @@ fn video_render_capability_ids(
 
 fn require_video_render_capabilities(source: PresentationSourceRequest) -> Result<()> {
     let (source_capability, presentation_capability) = video_render_capability_ids(source);
-
     if let Some(source_capability) = source_capability {
         require_cli_capability(source_capability)?;
     }
@@ -779,6 +776,7 @@ pub(super) fn run_screenshot(
         ScreenshotFormat::Svg => SaveFormat::Svg,
         ScreenshotFormat::Png => SaveFormat::Png,
     };
+
     let filename = match arguments.format {
         ScreenshotFormat::Svg => "screen.svg",
         ScreenshotFormat::Png => "screen.png",
@@ -887,6 +885,7 @@ pub(super) fn run_bundle(response: &mut ResponseWriter, arguments: BundleArgs) -
             .out
             .parent()
             .ok_or_else(|| return miette::miette!("bundle archive path has no parent"))?;
+
         let staging = parent.join(format!(".bundle-source-{}.tmp", uuid::Uuid::now_v7()));
         let manifest = create_bundle(&session, &staging, profile, None).into_diagnostic()?;
         let policy = BundleVerificationPolicy::new(&session, profile);

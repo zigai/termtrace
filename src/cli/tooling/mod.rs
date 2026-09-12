@@ -51,6 +51,7 @@ pub(super) fn probe_capabilities() -> CapabilityReport {
     let mut external = derived_media_capabilities().to_vec();
     external.extend(native_capabilities(true, true));
     external.push(receipt_signing_capability());
+
     return probe_engine_capabilities(external);
 }
 
@@ -73,7 +74,6 @@ fn require_selected_capability(id: &str) -> termtrace_engine::Result<()> {
     if capability.status == CapabilityStatus::Ready {
         return Ok(());
     }
-
     return Err(EngineError::CapabilityBlocked {
         id: capability.id,
         code: capability.code,
@@ -274,9 +274,11 @@ fn run_typescript_client(assets: &Path, arguments: ClientRunArgs) -> Result<Exit
             .join("typescript/lib/index.js")
             .canonicalize()
             .into_diagnostic()?;
+
         let package_entry = package_entry.to_str().ok_or_else(|| {
             return miette::miette!("TypeScript client assets path is not valid UTF-8");
         })?;
+
         let package_entry = serde_json::to_string(package_entry).into_diagnostic()?;
 
         write_secure(
@@ -345,9 +347,9 @@ fn prepare_client_script(
     let result = read_client_stdin().and_then(|bytes| {
         return write_secure(&path, &bytes).into_diagnostic();
     });
-
     if let Err(error) = result {
         temporary.close().into_diagnostic()?;
+
         return Err(error);
     }
     return Ok((path, Some(temporary)));
@@ -412,6 +414,7 @@ fn executable_on_path(program: &str) -> bool {
 
     return env::split_paths(&path).any(|directory| {
         let candidate = directory.join(program);
+
         return candidate.metadata().is_ok_and(|metadata| {
             return metadata.is_file() && metadata.permissions().mode() & 0o111 != 0;
         });
@@ -427,6 +430,7 @@ fn process_exit_code(status: ExitStatus) -> ExitCode {
         .code()
         .and_then(|code| return u8::try_from(code).ok())
         .unwrap_or(1);
+
     return ExitCode::from(code);
 }
 
@@ -437,6 +441,7 @@ pub(super) fn run_completions(
     let mut command = completion_command();
     let mut output = Vec::new();
     generate(arguments.shell, &mut command, "termtrace", &mut output);
+
     return write_stdout(response, output);
 }
 

@@ -179,6 +179,7 @@ fn resolve_executable(
         } else {
             working_directory.join(requested_path)
         };
+
         return canonical_executable(candidate);
     }
 
@@ -245,6 +246,7 @@ fn hash_file(path: &Path) -> Option<String> {
     let mut file = File::open(path).ok()?;
     let mut hasher = blake3::Hasher::new();
     hasher.update_reader(&mut file).ok()?;
+
     return Some(hasher.finalize().to_hex().to_string());
 }
 
@@ -253,6 +255,7 @@ fn read_process_umask() -> Option<u32> {
     let value = status
         .lines()
         .find_map(|line| return line.strip_prefix("Umask:").map(str::trim))?;
+
     return u32::from_str_radix(value, 8).ok();
 }
 
@@ -278,7 +281,6 @@ fn effective_rules(
                 ("TERM".to_owned(), ProvenanceCapture::Value),
                 ("TZ".to_owned(), ProvenanceCapture::Value),
             ]);
-
             for name in child_environment
                 .keys()
                 .filter_map(|name| return name.to_str())
@@ -334,7 +336,7 @@ fn is_public_configuration(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs::Permissions, os::unix::fs::PermissionsExt as _};
+    use std::fs::Permissions;
 
     fn recorder() -> RecorderBuildIdentity<'static> {
         return RecorderBuildIdentity {
@@ -355,7 +357,6 @@ mod tests {
             Path::new("/"),
             recorder(),
         );
-
         assert_eq!(
             collected.environment.get("TERM").and_then(|item| {
                 return item.value.as_ref().map(|value| return value.as_bytes());
@@ -392,8 +393,8 @@ mod tests {
             Path::new("/"),
             recorder(),
         );
-        let item = collected.environment.get("PRIVATE_TOKEN").expect("item");
 
+        let item = collected.environment.get("PRIVATE_TOKEN").expect("item");
         assert_eq!(item.capture, ProvenanceCapture::Hash);
         assert_eq!(
             item.sensitivity,
@@ -423,8 +424,8 @@ mod tests {
             Path::new("/"),
             recorder(),
         );
-        let item = collected.environment.get("PRIVATE_TOKEN").expect("item");
 
+        let item = collected.environment.get("PRIVATE_TOKEN").expect("item");
         assert_eq!(item.capture, ProvenanceCapture::Hash);
         assert!(item.value.is_none());
         assert!(item.value_hash.is_some());
@@ -449,7 +450,6 @@ mod tests {
             temporary.path(),
             recorder(),
         );
-
         assert_eq!(
             collected.executable.content_identity,
             ContentIdentityStatus::Captured
@@ -483,7 +483,6 @@ mod tests {
             Path::new("/"),
             recorder(),
         );
-
         assert_eq!(
             collected
                 .executable

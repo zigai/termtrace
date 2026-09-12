@@ -49,6 +49,7 @@ fn spawn_reader(
                 match reader.read(&mut buffer) {
                     Ok(0) => {
                         let _ = sender.send(RuntimeMessage::OutputClosed);
+
                         return;
                     }
                     Ok(length) => {
@@ -75,6 +76,7 @@ fn spawn_reader(
                         };
 
                         let _ = sender.send(message);
+
                         return;
                     }
                 }
@@ -103,7 +105,6 @@ fn spawn_resize(
     initial: TerminalGeometry,
 ) -> Result<Option<ResizeWorker>> {
     let stdin = io::stdin();
-
     if !isatty(&stdin)
         .map_err(|error| return terminal_error("inspect standard input", error.to_string()))?
     {
@@ -136,6 +137,7 @@ fn spawn_resize(
                     }
                     Err(error) => {
                         let _ = sender.send(RuntimeMessage::ResizeFailed(error.to_string()));
+
                         return;
                     }
                 }
@@ -168,7 +170,6 @@ fn spawn_host_signals(
                     SIGTERM => ProcessSignal::Terminate,
                     _ => continue,
                 };
-
                 if sender.send(RuntimeMessage::HostSignal(signal)).is_err() {
                     return;
                 }
@@ -209,10 +210,12 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
         Ok(terminal) => terminal,
         Err(Errno::EIO) => {
             let _ = sender.send(RuntimeMessage::TerminalInputClosed);
+
             return;
         }
         Err(error) => {
             let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
+
             return;
         }
     };
@@ -229,6 +232,7 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
             Err(Errno::EINTR) => continue,
             Err(error) => {
                 let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
+
                 return;
             }
         }
@@ -253,7 +257,6 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
                 let Some(slice) = buffer.get(..length) else {
                     continue;
                 };
-
                 if sender.send(RuntimeMessage::Input(slice.to_vec())).is_err() {
                     return;
                 }
@@ -261,10 +264,12 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
             Err(Errno::EINTR) => {}
             Err(Errno::EIO) if terminal => {
                 let _ = sender.send(RuntimeMessage::TerminalInputClosed);
+
                 return;
             }
             Err(error) => {
                 let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
+
                 return;
             }
         }
@@ -400,6 +405,7 @@ impl InputWorker {
 impl ResizeWorker {
     fn stop(self) -> Result<()> {
         self.handle.close();
+
         return self.thread.join().map_err(|_| {
             return terminal_error("join terminal-resize listener", "resize thread panicked");
         });
@@ -409,6 +415,7 @@ impl ResizeWorker {
 impl SignalWorker {
     fn stop(self) -> Result<()> {
         self.handle.close();
+
         return self.thread.join().map_err(|_| {
             return terminal_error("join recorder-signal listener", "signal thread panicked");
         });
@@ -430,6 +437,7 @@ impl RuntimeWorkers {
             Ok(worker) => worker,
             Err(error) => {
                 drop(receiver);
+
                 return finish_with_cleanup(Err(error), signals.stop());
             }
         };
@@ -440,6 +448,7 @@ impl RuntimeWorkers {
                 drop(receiver);
 
                 let cleanup = finish_with_cleanup(signals.stop(), control.stop());
+
                 return finish_with_cleanup(Err(error), cleanup);
             }
         };
@@ -455,6 +464,7 @@ impl RuntimeWorkers {
                 let cleanup =
                     finish_with_cleanup(resize.map_or(Ok(()), ResizeWorker::stop), control.stop());
                 let cleanup = finish_with_cleanup(cleanup, signals.stop());
+
                 return finish_with_cleanup(Err(error), cleanup);
             }
         };
@@ -468,8 +478,10 @@ impl RuntimeWorkers {
                     input.map_or(Ok(()), InputWorker::stop),
                     resize.map_or(Ok(()), ResizeWorker::stop),
                 );
+
                 let cleanup = finish_with_cleanup(cleanup, control.stop());
                 let cleanup = finish_with_cleanup(cleanup, signals.stop());
+
                 return finish_with_cleanup(Err(error), cleanup);
             }
         };
@@ -514,6 +526,7 @@ impl RuntimeWorkers {
         let result = finish_with_cleanup(result, input_stop);
         let result = finish_with_cleanup(result, resize_stop);
         let result = finish_with_cleanup(result, signals_stop);
+
         return finish_with_cleanup(result, reader_join);
     }
 }
@@ -528,6 +541,7 @@ pub(super) fn create_session_directory(path: &Path) -> Result<()> {
                 fs_err::set_permissions(path, Permissions::from_mode(SESSION_DIRECTORY_MODE))
             {
                 let _ = fs_err::remove_dir(path);
+
                 return Err(Error::Filesystem {
                     path: path.to_path_buf(),
                     source,
@@ -536,6 +550,7 @@ pub(super) fn create_session_directory(path: &Path) -> Result<()> {
 
             if let Err(error) = sync_parent_directory(path) {
                 let _ = fs_err::remove_dir(path);
+
                 return Err(error);
             }
             return Ok(());
@@ -559,6 +574,7 @@ fn sync_parent_directory(path: &Path) -> Result<()> {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
     };
+
     let directory = File::open(parent).map_err(|source| {
         return Error::Filesystem {
             path: parent.to_path_buf(),
@@ -602,6 +618,7 @@ mod tests {
             self.0.send(()).map_err(io::Error::other)?;
 
             buf[0] = b'x';
+
             return Ok(1);
         }
     }
@@ -643,7 +660,6 @@ mod tests {
                 receiver,
                 Err(terminal_error("test actor failure", "stop consuming")),
             );
-
             assert!(matches!(
                 result,
                 Err(Error::TerminalOperation {
@@ -652,7 +668,6 @@ mod tests {
                 })
             ));
             assert!(sender.send(RuntimeMessage::OutputClosed).is_err());
-
             completed_sender.send(()).expect("report completed cleanup");
         });
 
@@ -697,7 +712,6 @@ mod tests {
             &"x".repeat(256),
             register_host_signals().expect("register host signals"),
         );
-
         assert!(started.is_err());
 
         completed

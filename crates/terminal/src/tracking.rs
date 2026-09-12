@@ -72,11 +72,13 @@ impl PresentationTracker {
                 0x1b => {
                     self.pending.push(byte);
                     self.state = PresentationParseState::Escape;
+
                     return PresentationAction::Buffered;
                 }
                 0x9b => {
                     self.pending.push(byte);
                     self.state = PresentationParseState::Csi(CsiModeParser::new());
+
                     return PresentationAction::Buffered;
                 }
                 _ => return PresentationAction::Immediate,
@@ -85,6 +87,7 @@ impl PresentationTracker {
                 if byte == 0x1b {
                     let bytes = take(&mut self.pending);
                     self.pending.push(byte);
+
                     return PresentationAction::Sequence {
                         bytes,
                         command: None,
@@ -92,13 +95,14 @@ impl PresentationTracker {
                 }
 
                 self.pending.push(byte);
-
                 if byte == b'[' {
                     self.state = PresentationParseState::Csi(CsiModeParser::new());
+
                     return PresentationAction::Buffered;
                 }
 
                 self.state = PresentationParseState::Ground;
+
                 return self.take_sequence(None);
             }
             PresentationParseState::Csi(parser) => {
@@ -107,11 +111,13 @@ impl PresentationTracker {
                 if (0x40..=0x7e).contains(&byte) {
                     let command = parser.finish(byte);
                     self.state = PresentationParseState::Ground;
+
                     return self.take_sequence(command);
                 }
 
                 if matches!(byte, 0x18 | 0x1a) {
                     self.state = PresentationParseState::Ground;
+
                     return self.take_sequence(None);
                 }
 
@@ -131,6 +137,7 @@ impl PresentationTracker {
 
                 if self.pending.len() > MAX_TRACKED_SEQUENCE_BYTES {
                     self.state = PresentationParseState::CsiPassthrough;
+
                     return self.take_sequence(None);
                 }
                 return PresentationAction::Buffered;
@@ -141,6 +148,7 @@ impl PresentationTracker {
                 } else if byte == 0x1b {
                     self.pending.push(byte);
                     self.state = PresentationParseState::Escape;
+
                     return PresentationAction::Buffered;
                 }
 
@@ -152,6 +160,7 @@ impl PresentationTracker {
     /// Flush an incomplete buffered sequence at end of stream.
     pub fn finish(&mut self) -> Vec<u8> {
         self.state = PresentationParseState::Ground;
+
         return take(&mut self.pending);
     }
 
@@ -164,6 +173,7 @@ impl PresentationTracker {
         };
 
         self.synchronized_output = synchronized_output;
+
         return transition;
     }
 
@@ -201,7 +211,6 @@ impl CsiModeParser {
 
     fn finish(mut self, final_byte: u8) -> Option<bool> {
         self.finish_parameter();
-
         if self.private && self.valid && self.includes_synchronized_output {
             return match final_byte {
                 b'h' => Some(true),
@@ -250,6 +259,7 @@ impl QueryTracker {
     pub fn push(&mut self, byte: u8) -> bool {
         if byte == 0x18 || byte == 0x1a {
             self.clear();
+
             return false;
         }
 
@@ -258,26 +268,31 @@ impl QueryTracker {
                 0x1b => {
                     self.sequence.push(byte);
                     self.kind = QueryKind::Escape;
+
                     return false;
                 }
                 0x9b => {
                     self.sequence.push(byte);
                     self.kind = QueryKind::Csi;
+
                     return false;
                 }
                 0x9d => {
                     self.sequence.push(byte);
                     self.kind = QueryKind::Osc;
+
                     return false;
                 }
                 0x90 | 0x98 | 0x9e | 0x9f => {
                     self.sequence.push(byte);
                     self.kind = QueryKind::String;
+
                     return false;
                 }
                 0x05 => {
                     self.sequence.push(byte);
                     self.kind = QueryKind::Single;
+
                     return true;
                 }
                 _ => return false,
@@ -288,14 +303,17 @@ impl QueryTracker {
                 match byte {
                     b'[' => {
                         self.kind = QueryKind::Csi;
+
                         return false;
                     }
                     b']' => {
                         self.kind = QueryKind::Osc;
+
                         return false;
                     }
                     b'P' | b'_' | b'^' | b'X' => {
                         self.kind = QueryKind::String;
+
                         return false;
                     }
                     _ => return true,
@@ -303,11 +321,13 @@ impl QueryTracker {
             }
             QueryKind::Csi => {
                 self.sequence.push(byte);
+
                 return (0x40..=0x7e).contains(&byte)
                     || self.sequence.len() > MAX_TRACKED_SEQUENCE_BYTES;
             }
             QueryKind::Osc | QueryKind::String => {
                 self.sequence.push(byte);
+
                 return byte == 0x07
                     || byte == 0x9c
                     || self.sequence.ends_with(b"\x1b\\")
@@ -382,8 +402,8 @@ mod tests {
         const TRACKED_SEQUENCE_BOUND: usize = 64 * 1024;
 
         let mut tracker = PresentationTracker::new(false);
-        let mut longest_sequence = 0;
 
+        let mut longest_sequence = 0;
         for byte in b"\x1b[?"
             .iter()
             .copied()
@@ -395,6 +415,7 @@ mod tests {
         }
 
         longest_sequence = longest_sequence.max(tracker.finish().len());
+
         assert!(longest_sequence <= TRACKED_SEQUENCE_BOUND + 1);
     }
 

@@ -44,7 +44,6 @@ pub(super) fn preserve_terminal(
         "recording_degraded",
         "recording failed; interactive PTY forwarding continues",
     );
-
     let degraded_started_monotonic_ns = actor.event_log.elapsed_ns();
     let _boundary = actor.event_log.append(Event::HostError {
         code: "recording_degraded".to_owned(),
@@ -59,8 +58,8 @@ pub(super) fn preserve_terminal(
 
     let mut unrecorded_output_bytes =
         u64::try_from(actor.progress.unrecorded_output.len()).unwrap_or(u64::MAX);
-    let mut unrecorded_input_bytes = 0_u64;
 
+    let mut unrecorded_input_bytes = 0_u64;
     let unrecorded = take(&mut actor.progress.unrecorded_output);
     let _mirror = actor
         .output

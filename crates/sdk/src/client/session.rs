@@ -131,10 +131,10 @@ impl Session {
             projection: options.projection,
         });
         request.request_id = request_id;
+
         request
             .expected_presented_state_hash
             .clone_from(&options.if_state);
-
         let response = send_request_response(&self.path, &request)?;
         let data = match response.result {
             ControlResult::Ok { data } => data,
@@ -255,7 +255,9 @@ impl Session {
         });
 
         process_group_result?;
+
         recorder_kill_result?;
+
         return recorder_wait_result;
     }
 
@@ -303,6 +305,7 @@ impl Session {
                 }
             });
         }
+
         return path;
     }
 
@@ -335,7 +338,6 @@ mod tests {
             recorder: Some(child),
             recorded_process_group: None,
         };
-
         let _path = session.detach();
         let deadline = Instant::now() + Duration::from_secs(1);
 

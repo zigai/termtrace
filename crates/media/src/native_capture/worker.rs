@@ -115,7 +115,6 @@ impl NativeReplayWorker {
 
             let path = session.join(GHOSTTY_REPLAY_PROFILE_NAME);
             let bytes = fs::read(&path).map_err(|source| return filesystem(&path, source))?;
-
             if blake3::hash(&bytes).to_hex().as_str() != provenance.replay_profile_hash {
                 return Err(failure("recorded replay profile hash differs"));
             }
@@ -244,6 +243,7 @@ impl NativeReplayWorker {
     /// Returns selection, replay, acquisition, cancellation, or publication failures.
     pub fn capture(&mut self, point: &StatePoint, destination: &Path) -> Result<CaptureOutcome> {
         let endpoint = replay_endpoint_for_session(&self.session, point, &self.cancelled)?;
+
         return self.capture_endpoint(&endpoint, destination);
     }
 
@@ -257,6 +257,7 @@ impl NativeReplayWorker {
         destination: &Path,
     ) -> Result<CaptureOutcome> {
         let endpoint = replay_endpoint_for_prefix(&self.session, boundary, &self.cancelled)?;
+
         return self.capture_endpoint(&endpoint, destination);
     }
 
@@ -314,7 +315,6 @@ impl NativeReplayWorker {
 
         let result = (|| {
             let mut entries = Vec::new();
-
             for (index, endpoint) in endpoints {
                 let name = format!("capture-{index:04}");
                 let artifact = staging.join(&name);
@@ -347,11 +347,12 @@ impl NativeReplayWorker {
             )?;
 
             sync_directory(&staging)?;
+
             return Ok(());
         })();
-
         if let Err(error) = result {
             self.close();
+
             return Err(preserve_failed(parent, &staging, error));
         }
 
@@ -480,6 +481,7 @@ impl NativeReplayWorker {
             for name in ["ghostty.stdout.log", "ghostty.stderr.log"] {
                 let _ = fs::copy(self.work.0.join(name), staging.join(name));
             }
+
             return Err(preserve_failed(parent, &staging, error));
         }
 
@@ -519,7 +521,6 @@ impl NativeReplayWorker {
 
     fn capture_staged(&mut self, endpoint: &ReplayEndpoint, staging: &Path) -> Result<()> {
         let geometry_report = self.advance(endpoint)?;
-
         let capture_started_unix_ns = unix_now_ns()?;
         let screenshot = staging.join("final.png");
         let samples = capture_stable_x11_frame_with_check(
@@ -531,6 +532,7 @@ impl NativeReplayWorker {
         )?;
 
         check_cancelled(&self.cancelled)?;
+
         secure_permissions(&screenshot)?;
 
         write_secure(
@@ -578,6 +580,7 @@ impl NativeReplayWorker {
         validate_visual_manifest(&visual)?;
         write_json(&staging.join("manifest.json"), &visual)?;
         verify_artifact_members(staging, &visual.members)?;
+
         return sync_directory(staging).map_err(Error::from);
     }
 }
@@ -596,6 +599,7 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
             source,
         };
     })?;
+
     return write_secure(path, &bytes).map_err(Error::from);
 }
 

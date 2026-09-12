@@ -52,6 +52,7 @@ impl<'source> TimelineRanks<'source> {
         };
         ranks.advance_canonical()?;
         ranks.advance_control()?;
+
         return Ok(ranks);
     }
 
@@ -60,7 +61,6 @@ impl<'source> TimelineRanks<'source> {
 
         for record in self.canonical.by_ref() {
             let record = record?;
-
             if self
                 .source_range
                 .is_none_or(|range| return range.contains(record.monotonic_ns))
@@ -91,6 +91,7 @@ impl<'source> TimelineRanks<'source> {
 
         let token: VtToken = serde_json::from_str(&line)
             .map_err(|source| return json_error(self.controls_path.clone(), source))?;
+
         let first = token
             .source
             .first()
@@ -104,6 +105,7 @@ impl<'source> TimelineRanks<'source> {
             .control_offset
             .checked_add(u64::try_from(bytes).unwrap_or(u64::MAX))
             .ok_or_else(|| return invalid_replay("control index byte offset overflow"))?;
+
         return Ok(());
     }
 

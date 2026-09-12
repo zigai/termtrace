@@ -30,6 +30,7 @@ pub(super) fn read(path: impl AsRef<Path>) -> Result<Scenario> {
         })?;
 
     validate(&scenario)?;
+
     return Ok(scenario);
 }
 
@@ -103,7 +104,6 @@ pub(super) fn validate(scenario: &Scenario) -> Result<()> {
     }
 
     let mut combinations = 1_usize;
-
     for (key, values) in &scenario.matrix {
         if key.is_empty()
             || !key
@@ -266,7 +266,6 @@ mod tests {
             "steps": [{ "stop": {} }]
         }))
         .expect("version one scenario JSON");
-
         assert!(validate(&scenario).is_err());
     }
 
@@ -279,7 +278,6 @@ mod tests {
             "steps": [{ "waitScreen": { "contains": "yes", "absent": "no" } }]
         }))
         .expect("scenario JSON");
-
         assert!(validate(&scenario).is_err());
     }
 
@@ -298,7 +296,6 @@ mod tests {
         assert_eq!(expanded.len(), 4);
 
         let first = expanded.first().expect("first matrix variant");
-
         assert_eq!(first.1.launch.command.get(1).expect("theme"), "dark");
         assert_eq!(first.1.launch.command.get(2).expect("width"), "80");
 
@@ -313,7 +310,6 @@ mod tests {
                 };
             })
             .collect::<BTreeSet<_>>();
-
         assert_eq!(names.len(), 4);
     }
 
@@ -340,7 +336,6 @@ mod tests {
         let scenario = read(&path).expect("read scenario document");
         let spec =
             to_environment_spec(&scenario.launch.environment).expect("convert to environment spec");
-
         assert_eq!(
             spec.set
                 .get("PI_SKIP_VERSION_CHECK")

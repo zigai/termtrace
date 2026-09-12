@@ -25,7 +25,9 @@ impl Evidence<'_> {
             false,
             None,
         )?;
+
         verify_saved_artifact(&outcome.directory, &outcome.manifest)?;
+
         return Ok(outcome);
     }
 

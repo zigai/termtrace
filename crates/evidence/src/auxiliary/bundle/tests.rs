@@ -89,7 +89,6 @@ fn direct_and_archived_manifests_share_the_byte_limit() {
     header.set_mtime(0);
     header.set_entry_type(EntryType::Regular);
     header.set_cksum();
-
     builder
         .append(&header, io::empty())
         .expect("archive member");
@@ -127,7 +126,6 @@ fn raw_tar_iteration_rejects_extension_headers_before_their_payload() {
         header.set_mtime(0);
         header.set_entry_type(entry_type);
         header.set_cksum();
-
         builder
             .append(&header, b"xy".as_slice())
             .expect("extension member");
@@ -156,7 +154,6 @@ fn archive_rejects_nonzero_member_padding() {
     header.set_mtime(0);
     header.set_entry_type(EntryType::Regular);
     header.set_cksum();
-
     builder
         .append(&header, b"xy".as_slice())
         .expect("archive member with nonzero padding");

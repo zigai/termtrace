@@ -61,6 +61,7 @@ pub fn native_capture_target(
 
         let path = session.join(GHOSTTY_REPLAY_PROFILE_NAME);
         let bytes = fs::read(&path).map_err(|source| return Error::Filesystem { path, source })?;
+
         restore_ghostty_profile(bytes, provenance.clone())?
     } else {
         resolve_ghostty_profile(None, GhosttyVisualOverrides::default())?
@@ -104,6 +105,7 @@ pub fn probe_ghostty_geometry(
                     source,
                 };
             })?;
+
             return Ok(fitted);
         }
         Err(source) => {
@@ -195,7 +197,6 @@ pub(super) fn solve_geometry_with(
             .ok_or_else(|| {
                 return solver_error(required_cols, required_rows, &attempts, "height overflowed");
             })?;
-
         target = CaptureTarget {
             width: width.max(320),
             height: height.max(200),
@@ -278,6 +279,7 @@ fn probe_staged(
     xvfb.terminate();
 
     validate_report(report)?;
+
     return Ok(report);
 }
 

@@ -58,7 +58,6 @@ fn conflicting_composition_is_rejected_without_observation() {
             bottom: 2,
         })
         .expect("region");
-
     assert!(matches!(
         row.and(disjoint_region),
         Err(QueryError::InvalidQuery { .. })
@@ -73,7 +72,6 @@ fn conflicting_composition_is_rejected_without_observation() {
         })
         .expect("region")
         .in_row(0);
-
     assert!(matches!(
         fixture_frame().query(direct),
         Err(QueryError::InvalidQuery { .. })
@@ -97,7 +95,6 @@ fn spacer_heads_remain_queryable_at_wrap_edges() {
         .single()
         .expect("single row match")
         .clone();
-
     assert_eq!(
         row_match.ranges.as_ref(),
         &[MatchRange {
@@ -122,7 +119,6 @@ fn spacer_heads_remain_queryable_at_wrap_edges() {
         .single()
         .expect("single spacer match")
         .clone();
-
     assert_eq!(region_match.ranges[0].start_column, 11);
     assert_eq!(region_match.ranges[0].end_column, 12);
 }
@@ -164,7 +160,6 @@ fn overlapping_matches_stop_at_aggregate_work_budget() {
     let error = frame
         .query(LocatorSpec::text("a".repeat(8_192)).expect("locator"))
         .expect_err("aggregate budget");
-
     assert!(matches!(error, QueryError::ResourceLimit { .. }));
 }
 
@@ -185,7 +180,6 @@ fn grapheme_boundaries_retain_terminal_columns_for_combining_and_wide_cells() {
         .single()
         .expect("single match")
         .clone();
-
     assert_eq!(query_match.text.as_ref(), "e\u{301}界");
     assert_eq!(
         query_match.ranges.as_ref(),
@@ -207,6 +201,7 @@ fn composed_regions_intersect_and_partial_graphemes_are_rejected() {
             right: 8,
         })
         .unwrap_or_default();
+
     let inner = LocatorSpec::default()
         .in_region(ScreenRegion {
             top: 1,
@@ -228,6 +223,7 @@ fn composed_regions_intersect_and_partial_graphemes_are_rejected() {
     );
 
     let boundaries = [(0, 3, 0), (3, 6, 1)];
+
     assert!(matches!(
         matched_boundary_range(&boundaries, 1, 3),
         Err(QueryError::InvalidQuery { .. })
@@ -303,6 +299,7 @@ impl TryFrom<ConformanceQuery> for LocatorSpec {
             } => {
                 let spec =
                     if exact { LocatorSpec::exact(value)? } else { LocatorSpec::text(value)? };
+
                 return Ok(spec.across_soft_wraps(cross_soft_wraps));
             }
             ConformanceQuery::Regex { pattern } => return LocatorSpec::native_regex(pattern),
@@ -347,6 +344,7 @@ impl TryFrom<ConformanceQuery> for LocatorSpec {
                 for spec in specs {
                     combined = combined.and(LocatorSpec::try_from(spec)?)?;
                 }
+
                 return Ok(combined);
             }
         }
@@ -359,6 +357,7 @@ fn conformance_spec(value: &serde_json::Value) -> Result<LocatorSpec, QueryError
             reason: e.to_string(),
         };
     })?;
+
     return LocatorSpec::try_from(query);
 }
 
@@ -368,7 +367,6 @@ fn shared_locator_conformance_corpus_matches_public_contract() {
         "../../../../../fixtures/conformance/locators/locator.json"
     ))
     .expect("locator conformance fixture");
-
     assert_eq!(corpus.version, 1);
     assert!(!corpus.frame.presented);
     assert_eq!(corpus.frame.capture_quality, CaptureQuality::Incomplete);
@@ -413,7 +411,6 @@ fn shared_locator_conformance_corpus_matches_public_contract() {
         let actual = result.unwrap_or_else(|error| {
             panic!("{} failed: {error}", test_case.name);
         });
-
         assert_eq!(actual.len(), test_case.matches.len(), "{}", test_case.name);
 
         for (actual_match, expected_match) in actual.iter().zip(&test_case.matches) {

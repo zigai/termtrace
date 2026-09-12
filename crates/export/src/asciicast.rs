@@ -39,7 +39,6 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
     let output = output.as_ref();
     let log = EventLogSummary::read(session.join("events.jsonl"))?;
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
-
     let mut writer = secure_writer(output)?;
     write_line(
         &mut writer,
@@ -118,7 +117,9 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
     }
 
     cursor.finish()?;
+
     finish_writer(writer, output)?;
+
     return Ok(());
 }
 
@@ -135,11 +136,13 @@ fn write_cast_event(
 fn write_line(writer: &mut impl Write, value: &impl Serialize, path: &Path) -> Result<()> {
     serde_json::to_writer(&mut *writer, value)
         .map_err(|source| return Error::json(path, source))?;
+
     writer.write_all(b"\n").map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),
             source,
         };
     })?;
+
     return Ok(());
 }

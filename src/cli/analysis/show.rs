@@ -98,6 +98,7 @@ pub(in crate::cli) fn run_show(
                 &[format],
             )
             .into_diagnostic()?;
+
             let formatted = rendered
                 .into_iter()
                 .next()

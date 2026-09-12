@@ -39,6 +39,7 @@ fn filter_path_value(path: &Path) -> Result<String> {
     let value = path
         .to_str()
         .ok_or_else(|| return plan_error("FFmpeg filter resource path is not UTF-8"))?;
+
     return Ok(value
         .replace('\\', "\\\\")
         .replace(':', "\\:")

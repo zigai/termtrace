@@ -80,7 +80,6 @@ pub(in crate::cli) fn run_tmux_scope(
     arguments: TmuxScopeArgs,
 ) -> Result<ExitCode> {
     let client = TmuxClient::from_connection(arguments.connection);
-
     if option_text(&client, OPTION_VERSION)? != TMUX_INTEGRATION_VERSION {
         return Err(miette::miette!(
             "tmux recording is not enabled for this server"
@@ -95,6 +94,7 @@ pub(in crate::cli) fn run_tmux_scope(
         &arguments.windows,
         &arguments.panes,
     )?;
+
     let changed = requested.is_some();
 
     let policy = match requested {
@@ -133,7 +133,6 @@ pub(super) fn initial_scope_policy(
     }
 
     let mut policy = TmuxScopePolicy::selected();
-
     for session in sessions {
         if session.as_bytes().is_empty() {
             return Err(miette::miette!("tmux session names must be nonempty"));
@@ -158,7 +157,6 @@ pub(super) fn initial_scope_policy(
         let pane = str::from_utf8(pane.as_bytes()).map_err(|error| {
             return miette::miette!("tmux pane IDs must be UTF-8: {error}");
         })?;
-
         if !valid_tmux_identifier(pane, b'%') {
             return Err(miette::miette!(
                 "tmux pane selector `{pane}` is not a stable pane ID such as %3"
@@ -195,7 +193,6 @@ pub(super) fn requested_scope_policy(
     }
 
     let mut policy = TmuxScopePolicy::selected();
-
     for target in sessions {
         policy.session_ids.insert(resolve_target_identifier(
             client,
@@ -240,7 +237,6 @@ pub(super) fn resolve_live_scope(
     }
 
     let mut resolved = TmuxScopePolicy::selected();
-
     for session in &policy.session_ids {
         resolved.session_ids.insert(resolve_target_identifier(
             client,
@@ -381,6 +377,7 @@ pub(super) fn validate_scope_policy(policy: &TmuxScopePolicy) -> Result<()> {
 
 pub(super) fn scope_bytes(policy: &TmuxScopePolicy) -> Result<Vec<u8>> {
     validate_scope_policy(policy)?;
+
     return serde_json::to_vec(policy).into_diagnostic();
 }
 
@@ -393,6 +390,7 @@ pub(super) fn scope_from_options(client: &TmuxClient) -> Result<TmuxScopePolicy>
     let policy = serde_json::from_slice::<TmuxScopePolicy>(&bytes).map_err(|error| {
         return miette::miette!("configured tmux recording scope is invalid: {error}");
     })?;
+
     validate_scope_policy(&policy)?;
 
     return Ok(policy);
@@ -400,6 +398,7 @@ pub(super) fn scope_from_options(client: &TmuxClient) -> Result<TmuxScopePolicy>
 
 pub(super) fn set_scope_policy(client: &TmuxClient, policy: &TmuxScopePolicy) -> Result<()> {
     let bytes = scope_bytes(policy)?;
+
     return client.set_option(OPTION_SCOPE, OsStr::from_bytes(&bytes));
 }
 
@@ -464,6 +463,7 @@ pub(super) fn parse_scope_identifier(
         .and_then(|value| return str::from_utf8(value).ok())
         .filter(|value| return valid_tmux_identifier(value, prefix))
         .ok_or_else(|| return miette::miette!("tmux returned an invalid {kind} ID"))?;
+
     return Ok(identifier.to_owned());
 }
 
@@ -485,6 +485,7 @@ pub(super) fn pane_scope_decision(
 
 pub(super) fn pane_option_pid(client: &TmuxClient, pane: &str, name: &str) -> Result<Option<u32>> {
     let bytes = client.pane_option(pane, name)?;
+
     return Ok(str::from_utf8(&bytes)
         .ok()
         .and_then(|value| return value.parse::<u32>().ok()));

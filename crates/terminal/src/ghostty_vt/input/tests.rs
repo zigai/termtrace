@@ -65,14 +65,12 @@ fn key_encoder_tracks_live_cursor_mode_and_modifiers() {
     let normal = terminal
         .encode_key(NamedKey::ArrowUp, KeyModifiers::default())
         .expect("normal arrow");
-
     assert_eq!(normal.data.as_bytes(), b"\x1b[A");
 
     terminal.write(b"\x1b[?1h");
     let application = terminal
         .encode_key(NamedKey::ArrowUp, KeyModifiers::default())
         .expect("application arrow");
-
     assert_eq!(application.data.as_bytes(), b"\x1bOA");
 
     let control_c = terminal
@@ -84,7 +82,6 @@ fn key_encoder_tracks_live_cursor_mode_and_modifiers() {
             },
         )
         .expect("control c");
-
     assert_eq!(control_c.data.as_bytes(), b"\x03");
 
     let shift_tab = terminal
@@ -96,7 +93,6 @@ fn key_encoder_tracks_live_cursor_mode_and_modifiers() {
             },
         )
         .expect("shift tab");
-
     assert_eq!(shift_tab.data.as_bytes(), b"\x1b[Z");
 }
 

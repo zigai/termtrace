@@ -22,6 +22,7 @@ use termtrace_model::{
 /// Returns an error when either selector is missing/ambiguous or replay fails.
 pub fn diff_states(log: &EventLog, from: StatePoint, to: StatePoint) -> Result<SemanticDiff> {
     let (difference, _, _) = diff_states_with_semantic_states(log, from, to)?;
+
     return Ok(difference);
 }
 
@@ -53,7 +54,6 @@ pub fn diff_session_states_with_semantic_states(
             from_inspection.record.state_id, to_inspection.record.state_id
         )));
     }
-
     return Ok(diff_inspections_with_semantic_states(
         from,
         to,
@@ -87,7 +87,6 @@ pub fn diff_states_with_semantic_states(
             from_inspection.record.state_id, to_inspection.record.state_id
         )));
     }
-
     return Ok(diff_inspections_with_semantic_states(
         from,
         to,
@@ -99,30 +98,35 @@ pub fn diff_states_with_semantic_states(
 fn validate_diff_endpoints(from: &StatePoint, to: &StatePoint) -> Result<()> {
     match (from, to) {
         (
-            StatePoint::EventSeq { event_seq: from_seq },
+            StatePoint::EventSeq {
+                event_seq: from_seq,
+            },
             StatePoint::EventSeq { event_seq: to_seq },
         ) if from_seq > to_seq => {
             return Err(diff_error(format!(
                 "inverted diff range: from-event-seq ({from_seq}) > to-event-seq ({to_seq})"
             )));
         }
-        (
-            StatePoint::StateId { state_id: from_id },
-            StatePoint::StateId { state_id: to_id },
-        ) if from_id > to_id => {
+        (StatePoint::StateId { state_id: from_id }, StatePoint::StateId { state_id: to_id })
+            if from_id > to_id =>
+        {
             return Err(diff_error(format!(
                 "inverted diff range: from-state ({from_id}) > to-state ({to_id})"
             )));
         }
         (
-            StatePoint::MonotonicNs { monotonic_ns: from_ns },
-            StatePoint::MonotonicNs { monotonic_ns: to_ns },
+            StatePoint::MonotonicNs {
+                monotonic_ns: from_ns,
+            },
+            StatePoint::MonotonicNs {
+                monotonic_ns: to_ns,
+            },
         ) if from_ns > to_ns => {
             return Err(diff_error(format!(
                 "inverted diff range: from-at ({from_ns}) > to-at ({to_ns})"
             )));
         }
-        _ => Ok(()),
+        _ => return Ok(()),
     }
 }
 
@@ -138,26 +142,32 @@ pub fn diff_inspections_with_semantic_states(
         (from_inspection.state.cols, from_inspection.state.rows),
         (to_inspection.state.cols, to_inspection.state.rows),
     );
+
     let cursor = changed(
         from_inspection.state.cursor.clone(),
         to_inspection.state.cursor.clone(),
     );
+
     let modes = changed(
         from_inspection.state.modes.clone(),
         to_inspection.state.modes.clone(),
     );
+
     let colors = changed(
         from_inspection.state.colors.clone(),
         to_inspection.state.colors.clone(),
     );
+
     let active_style = changed(
         from_inspection.state.active_style.clone(),
         to_inspection.state.active_style.clone(),
     );
+
     let metadata = changed(
         from_inspection.state.metadata.clone(),
         to_inspection.state.metadata.clone(),
     );
+
     let presented = changed(
         from_inspection.record.presented,
         to_inspection.record.presented,
@@ -196,6 +206,7 @@ pub fn diff_inspections_with_semantic_states(
 /// Returns an error when replay fails or a marker is missing/ambiguous.
 pub fn inspect_point(log: &EventLog, point: &StatePoint) -> Result<StateInspection> {
     let selector = state_selector(log, point)?;
+
     return inspect(log, selector);
 }
 
@@ -204,6 +215,7 @@ fn inspect_points(log: &EventLog, points: &[StatePoint]) -> Result<Vec<StateInsp
         .iter()
         .map(|point| return state_selector(log, point))
         .collect::<Result<Vec<_>>>()?;
+
     return inspect_many(log, &selectors);
 }
 
@@ -253,7 +265,6 @@ fn changed<T: Eq>(before: T, after: T) -> Option<ValueChange<T>> {
 fn changed_rows(before: &SemanticState, after: &SemanticState) -> Vec<RowChange> {
     let rows = before.rows.max(after.rows);
     let columns = before.cols.max(after.cols);
-
     let mut row_changes = Vec::new();
 
     for row in 0..rows {
@@ -263,6 +274,7 @@ fn changed_rows(before: &SemanticState, after: &SemanticState) -> Vec<RowChange>
             before_row.map(|value| return value.soft_wrapped),
             after_row.map(|value| return value.soft_wrapped),
         );
+
         let wrap_continuation = changed(
             before_row.map(|value| return value.wrap_continuation),
             after_row.map(|value| return value.wrap_continuation),
@@ -272,6 +284,7 @@ fn changed_rows(before: &SemanticState, after: &SemanticState) -> Vec<RowChange>
         for column in 0..columns {
             let before_cell =
                 before_row.and_then(|value| return value.cells.get(usize::from(column)));
+
             let after_cell =
                 after_row.and_then(|value| return value.cells.get(usize::from(column)));
 
@@ -313,12 +326,10 @@ mod tests {
         let mut terminal = GhosttyVt::new(4, 2, 0).expect("terminal");
         terminal.write(b"abcd");
         let before = terminal.snapshot().expect("before");
-
         let mut after = before.clone();
         after.grid[0].soft_wrapped = !after.grid[0].soft_wrapped;
         after.grid[1].wrap_continuation = !after.grid[1].wrap_continuation;
         let rows = changed_rows(&before, &after);
-
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|row| return row.cells.is_empty()));
         assert!(rows[0].soft_wrapped.is_some());

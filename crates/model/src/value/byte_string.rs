@@ -59,6 +59,7 @@ impl<'de> Deserialize<'de> for ByteString {
         D: Deserializer<'de>,
     {
         let encoded = String::deserialize(deserializer)?;
+
         return STANDARD
             .decode(encoded)
             .map(Self)

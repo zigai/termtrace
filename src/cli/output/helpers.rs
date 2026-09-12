@@ -7,6 +7,7 @@ pub(in crate::cli) fn stable_enum_label(value: &impl serde::Serialize) -> Result
             "human output label did not serialize as a string"
         ));
     };
+
     return Ok(label.to_owned());
 }
 
@@ -58,6 +59,7 @@ pub(in crate::cli) fn write_projection_warning(
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
     writeln!(stderr, "termtrace: {message}").into_diagnostic()?;
+
     return Ok(());
 }
 
@@ -70,5 +72,6 @@ pub(in crate::cli) fn row_text(row: &RowState) -> String {
             text.push_str(&cell.grapheme);
         }
     }
+
     return text.trim_end().to_owned();
 }

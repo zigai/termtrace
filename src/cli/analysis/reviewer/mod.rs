@@ -149,6 +149,7 @@ impl ReviewWorker {
         });
 
         changed.notify_one();
+
         return Ok(());
     }
 
@@ -309,6 +310,7 @@ impl ReviewModel {
     fn query(&mut self, query: ReviewQuery) -> Result<()> {
         self.status = "loading exact semantic page; navigation, Escape and quit remain available";
         self.worker.submit(WorkKind::Page(query))?;
+
         return Ok(());
     }
 
@@ -338,6 +340,7 @@ impl ReviewModel {
                 self.native.clear();
                 self.status = "exact semantic page loaded; validating selected native evidence";
                 self.worker.submit(WorkKind::Native(target))?;
+
                 return Ok(());
             }
 
@@ -370,6 +373,7 @@ impl ReviewModel {
     fn jump_search(&mut self, forward: bool) -> Result<()> {
         let Some(query) = self.search_query.clone() else {
             self.status = "supply --search TEXT to navigate semantic matches";
+
             return Ok(());
         };
         let from = self.selected_entry().map(|entry| return entry.state_id);
@@ -459,6 +463,7 @@ pub(in crate::cli) fn run(
     }
 
     terminal.show_cursor().map_err(terminal_error)?;
+
     return Ok(());
 }
 
@@ -489,7 +494,6 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) 
                 }).collect();
             },
         );
-
         frame.render_widget(List::new(timeline).block(Block::default().title(" timeline page ").borders(Borders::ALL)), timeline_area);
         frame.render_widget(Paragraph::new(text.as_str()).block(Block::default().title(if selected.is_some() { " semantic viewport " } else if viewport.is_some() { " semantic viewport · authenticated endpoint " } else { " validating source " }).borders(Borders::ALL)).wrap(Wrap { trim: false }), viewport_area);
 
@@ -501,7 +505,6 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) 
 
             format!("{}\nsession: {}\ncursor: {:?},{:?} visible={}\nmode filter: {}\nsearch: {} (on-demand exact scan)\nnative: {}", identity, sanitize_text(&model.session.display().to_string()), viewport.and_then(|viewport| return viewport.cursor_row), viewport.and_then(|viewport| return viewport.cursor_column), viewport.is_some_and(|viewport| return viewport.cursor_visible), if model.presented_only { "presented" } else { "all" }, sanitize_text(model.search_query.as_deref().unwrap_or("-")), native)
         };
-
         frame.render_widget(Paragraph::new(details).block(Block::default().title(" evidence ").borders(Borders::ALL)).wrap(Wrap { trim: false }), details_area);
         frame.render_widget(Paragraph::new(vec![Line::styled(" q quit · j/k state · m/M marker · i/I input · n/N match · ? help ", Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)), Line::from(model.status)]), status);
     }).map_err(terminal_error)?;
@@ -550,7 +553,6 @@ mod tests {
     #[test]
     fn recorded_control_characters_are_inert_in_rendered_text() {
         let sanitized = sanitize_text("safe\u{1b}]52;c;payload\u{7}title\rtext");
-
         assert!(!sanitized.contains('\u{1b}'));
         assert!(!sanitized.contains('\u{7}'));
         assert!(!sanitized.contains('\r'));

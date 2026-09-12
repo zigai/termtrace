@@ -29,6 +29,7 @@ pub(crate) fn snapshot_path(failure_root: &Path, name: &str) -> Result<PathBuf> 
     let artifact_root = failure_root
         .parent()
         .ok_or_else(|| return invalid("scenario failure root has no artifact parent"))?;
+
     return Ok(artifact_root
         .join("snapshots")
         .join(format!("{name}.frame.json")));
@@ -68,6 +69,7 @@ pub(crate) fn publish_failure(
     let publish_result = populate_failure(&temporary, scenario, report, final_snapshot);
     if let Err(error) = publish_result {
         let _remove = fs_err::remove_dir_all(&temporary);
+
         return Err(error);
     }
 
@@ -77,6 +79,7 @@ pub(crate) fn publish_failure(
             source,
         };
     })?;
+
     return Ok(());
 }
 
@@ -147,6 +150,7 @@ fn populate_failure(
 
     return Ok(());
 }
+
 const MAX_SCENARIO_FAILURE_TIMELINE_ENTRIES: usize = 1_000;
 
 fn write_timeline(snapshot: &SessionSnapshot, path: &Path) -> Result<()> {
@@ -172,6 +176,7 @@ fn write_timeline(snapshot: &SessionSnapshot, path: &Path) -> Result<()> {
             first = false;
             entry_count = entry_count.saturating_add(1);
             serde_json::to_writer(&mut output, &entry).map_err(timeline_error)?;
+
             return Ok(true);
         })
         .map_err(|error| return operation("derive timeline", error))?;
@@ -199,6 +204,7 @@ fn timeline_error(error: impl Display) -> EngineError {
 
 pub(crate) fn write_bytes(path: PathBuf, bytes: &[u8]) -> Result<()> {
     fs_err::write(&path, bytes).map_err(|source| return Error::Filesystem { path, source })?;
+
     return Ok(());
 }
 
@@ -211,5 +217,6 @@ pub(crate) fn write_json(path: PathBuf, value: &impl Serialize) -> Result<()> {
         };
     })?;
     encoded.push(b'\n');
+
     return write_bytes(path, &encoded);
 }

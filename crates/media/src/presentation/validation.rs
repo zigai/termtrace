@@ -24,6 +24,7 @@ pub fn read_edit_plan(path: impl AsRef<Path>) -> Result<EditPlan> {
             source,
         };
     })?;
+
     let mut plan: EditPlan = serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
@@ -40,6 +41,7 @@ pub fn read_edit_plan(path: impl AsRef<Path>) -> Result<EditPlan> {
     }
 
     validate_edit_plan(&plan)?;
+
     return Ok(plan);
 }
 
@@ -343,6 +345,7 @@ pub(super) fn validate_ass_resource(path: &Path) -> Result<()> {
             source,
         };
     })?;
+
     str::from_utf8(&bytes).map_err(|error| {
         return plan_error(format!("ASS subtitle resource must be UTF-8: {error}"));
     })?;
@@ -375,6 +378,7 @@ pub(super) fn validate_ass_resource(path: &Path) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+
         return Err(plan_error(format!(
             "ASS subtitle resource failed FFmpeg validation: {}",
             stderr.trim()
@@ -385,7 +389,6 @@ pub(super) fn validate_ass_resource(path: &Path) -> Result<()> {
 
 fn validate_annotation_template(template: &str) -> Result<()> {
     let mut token: Option<String> = None;
-
     for character in template.chars() {
         match (character, &mut token) {
             ('{', None) => token = Some(String::new()),

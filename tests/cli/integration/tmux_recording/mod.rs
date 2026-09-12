@@ -157,7 +157,6 @@ impl PrivateTmux {
 
         fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
             .expect("secure isolated tmux test root");
-
         let tmux_tmpdir = temporary.path().join("tmux-sockets");
         fs::create_dir_all(&tmux_tmpdir).expect("create isolated tmux socket root");
         fs::set_permissions(&tmux_tmpdir, Permissions::from_mode(0o700))
@@ -221,7 +220,6 @@ impl PrivateTmux {
                 .expect("query pane recording");
 
             let value = trim_newline(output.stdout);
-
             if output.status.success() && !value.is_empty() {
                 return PathBuf::from(OsString::from_vec(value));
             }
@@ -296,7 +294,6 @@ impl PrivateTmux {
                     .expect("query pane PID")
                     .stdout,
             );
-
             if self.pane_option(pane, option) == pid {
                 return;
             }
@@ -317,6 +314,7 @@ impl PrivateTmux {
             .expect("query configured Termtrace executable");
 
         assert!(output.status.success());
+
         return String::from_utf8(trim_newline(output.stdout)).expect("UTF-8 executable");
     }
 
@@ -414,7 +412,6 @@ fn wait_for_tmux_server_exit(server_pid: u64) {
             .args(["-0", server_pid.as_str()])
             .output()
             .expect("probe original tmux server PID");
-
         if !output.status.success() {
             return;
         }

@@ -72,7 +72,6 @@ impl ApplicationEvent {
         }
 
         let bytes = serde_json::to_vec(self).map_err(|_| return "invalid application JSON")?;
-
         if bytes.len() > MAX_APPLICATION_EVENT_BYTES {
             return Err("application event exceeds 64 KiB");
         }

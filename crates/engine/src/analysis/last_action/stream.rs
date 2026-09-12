@@ -62,11 +62,13 @@ pub fn analyze_last_action_session(
             record: record.clone(),
             state: state.clone(),
         });
+
         return Ok(true);
     })?;
 
     let before =
         before.ok_or_else(|| return task_error("no state matches action start sequence"))?;
+
     let after = after.ok_or_else(|| return task_error("no state matches final sequence"))?;
     let (difference, before, after) = diff_inspections_with_semantic_states(
         StatePoint::EventSeq {
@@ -83,8 +85,8 @@ pub fn analyze_last_action_session(
         event_count: 0,
         byte_count: 0,
     };
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
 
+    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
     while let Some(record) = cursor.next_record()? {
         if record.seq > action.intent_event_seq
             && let Event::Output { data } = record.event
@@ -268,7 +270,6 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
         bytes_written: 0,
         error_code: None,
     };
-
     while let Some(row) = rows.next().map_err(index_error)? {
         let seq = u64::from_be_bytes(row.get::<_, [u8; 8]>(0).map_err(index_error)?);
         let operation: String = row.get(1).map_err(index_error)?;
@@ -290,6 +291,7 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
         action
             .operation_ids
             .push(Uuid::parse_str(&operation).map_err(index_error)?);
+
         action.intended_bytes = action.intended_bytes.saturating_add(bytes);
         action.bytes_written = action.bytes_written.saturating_add(written);
         action.result_event_seq = result_seq;
@@ -304,5 +306,6 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
     }
 
     action.atom_count = u32::try_from(action.operation_ids.len()).unwrap_or(u32::MAX);
+
     return Ok(action);
 }

@@ -42,6 +42,7 @@ impl MutationHistory {
 
         if let Some(cached) = self.cached.get(&request_id) {
             let response = mutation_retry_response(request_id, &requested_hash, cached);
+
             return Ok((requested_hash, Some(response)));
         }
 
@@ -55,6 +56,7 @@ impl MutationHistory {
         let response = mutation_retry_response(request_id, &requested_hash, &cached);
 
         self.cache(request_id, cached);
+
         return Ok((requested_hash, Some(response)));
     }
 
@@ -81,7 +83,6 @@ impl MutationHistory {
             command
         {
             let identifiers: Vec<_> = atoms.iter().map(input_sequence_operation_id).collect();
-
             if !self.journal.reserve_operations(&identifiers)? {
                 return Err(control_rejected(
                     "operation_id_collision",
@@ -111,6 +112,7 @@ impl MutationHistory {
         {
             let attempted = usize::try_from(event_end_seq.saturating_sub(event_start_seq) / 2)
                 .unwrap_or(usize::MAX);
+
             atoms
                 .iter()
                 .take(attempted)
@@ -129,7 +131,6 @@ impl MutationHistory {
             event_hash,
             response,
         )?;
-
         self.cache(
             record.request_id,
             CachedMutation {
@@ -137,6 +138,7 @@ impl MutationHistory {
                 response: record.response,
             },
         );
+
         return Ok(());
     }
 
@@ -202,6 +204,7 @@ mod tests {
             pace_ns: 0,
             include_atom_outcomes: false,
         };
+
         assert!(matches!(
             history.reserve_command(Uuid::now_v7(), &command),
             Err(crate::Error::ControlRejected { code, .. }) if code == "operation_id_collision"
@@ -210,6 +213,7 @@ mod tests {
         history
             .reserve_operation(first)
             .expect("rejected batch did not reserve its first identifier");
+
         assert!(matches!(
             history.reserve_operation(second),
             Err(crate::Error::ControlRejected { code, .. }) if code == "operation_id_collision"

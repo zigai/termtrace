@@ -44,7 +44,6 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         &fs_err::read(destination.join("save-manifest.json")).expect("save manifest"),
     )
     .expect("manifest JSON");
-
     assert_eq!(manifest["format"], "termtrace-save");
     assert_eq!(
         manifest["sensitivity"],
@@ -61,7 +60,6 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         .iter()
         .map(|font| return font["role"].as_str().expect("font role"))
         .collect();
-
     assert_eq!(
         roles,
         [
@@ -77,7 +75,6 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         .iter()
         .map(|font| return font["family"].as_str().expect("font family"))
         .collect();
-
     assert_eq!(
         families,
         [
@@ -116,7 +113,6 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
     assert_eq!(image_resource["cell_height"], 24);
 
     let manifested_files = manifest["files"].as_array().expect("manifested files");
-
     assert_eq!(
         manifested_files
             .iter()
@@ -147,7 +143,6 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
 
     let svg = fs_err::read_to_string(destination.join("screen.svg")).expect("saved SVG");
     let document = roxmltree::Document::parse(&svg).expect("valid saved SVG");
-
     assert_eq!(
         document.root_element().attribute("data-truth-layer"),
         Some("semantic_rendering")
@@ -155,7 +150,6 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
 
     let png = fs_err::read(destination.join("screen.png")).expect("saved PNG");
     let image = Pixmap::decode_png(&png).expect("decode saved PNG");
-
     assert_eq!((image.width(), image.height()), (1920, 1080),);
 
     let cell = |column: i32| {
@@ -240,7 +234,6 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
     for file in manifest["files"].as_array().expect("manifested files") {
         let path = destination.join(file["path"].as_str().expect("relative path"));
         let bytes = fs_err::read(path).expect("saved member");
-
         assert_eq!(file["blake3"], blake3::hash(&bytes).to_hex().to_string());
     }
 
@@ -263,6 +256,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         .expect("final screenshot state")
         .record
         .state_id;
+
     let batch = temporary.path().join("semantic-screenshot-batch");
     let mut batch_command = Command::cargo_bin("termtrace").expect("binary should build");
     batch_command
@@ -279,7 +273,6 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         &fs_err::read(batch.join("batch-manifest.json")).expect("batch manifest"),
     )
     .expect("batch manifest JSON");
-
     assert_eq!(batch_manifest["version"], 3);
     assert_eq!(batch_manifest["entries"][0]["manifest"]["version"], 4);
     assert_eq!(
@@ -332,7 +325,6 @@ fn screenshots_serialize_non_utf8_output_paths_without_panicking() {
 
     let response: serde_json::Value =
         serde_json::from_slice(&output).expect("non-UTF-8 screenshot response JSON");
-
     assert_eq!(response["kind"], "semantic_screenshot");
     assert_eq!(
         response["directory_display"],
@@ -356,7 +348,6 @@ fn state_hash_selectors_reach_every_exact_state_workflow() {
     let initial = inspect_session(&session, StateSelector::StateId(0)).expect("initial state");
     let final_state = inspect_session(&session, StateSelector::Final).expect("final state");
     let final_hash = final_state.record.state_hash;
-
     let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
     inspect
         .args(["analyze", "inspect"])

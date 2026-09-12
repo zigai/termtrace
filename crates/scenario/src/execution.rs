@@ -86,8 +86,8 @@ pub(crate) fn run_validated(
         .map_err(|error| return operation("launch", error))?;
 
     let mut steps: Vec<ScenarioStepResult> = Vec::new();
-    let mut stopped = false;
 
+    let mut stopped = false;
     for (index, step) in scenario.steps.iter().enumerate() {
         match execute_step(
             &mut session,
@@ -128,6 +128,7 @@ pub(crate) fn run_validated(
                     &report,
                     final_snapshot.as_ref(),
                 )?;
+
                 return Ok(report);
             }
         }
@@ -159,6 +160,7 @@ pub(crate) fn run_validated(
         };
 
         publish_failure(&failure_artifacts, scenario, &report, None)?;
+
         return Ok(report);
     }
 
@@ -192,7 +194,6 @@ fn validate_replay_closure(session: &Path, steps: &[ScenarioStepResult]) -> Resu
             true,
         )
         .map_err(|error| return operation("observe asserted replay state", error))?;
-
         if observation.state_hash != *state_hash {
             return Err(invalid(format!(
                 "replay closure resolved asserted state hash `{state_hash}` as `{}`",
@@ -252,6 +253,7 @@ fn execute_step(
                     Duration::from_millis(wait.timeout_ms.unwrap_or(scenario.launch.timeout_ms)),
                 )
                 .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
+
             let wait_satisfied = matched.matched
                 && if wait.stable_for_ms == 0 {
                     matched.quality == ScreenWaitQuality::MatchedUnsettled
@@ -270,7 +272,6 @@ fn execute_step(
                     ),
                 ));
             }
-
             return Ok(ScenarioStepResult {
                 index,
                 kind: step.kind().to_owned(),
@@ -393,6 +394,7 @@ fn execute_step(
         ScenarioStep::Stop {} => {
             let request = ControlRequest::new(ControlCommand::Stop);
             request_ids.push(request.request_id);
+
             let stopped_already = session.path().join("completion.json").is_file();
 
             if !stopped_already {
@@ -402,7 +404,12 @@ fn execute_step(
                         if lifecycle == "completed"
                             || session.path().join("completion.json").is_file() => {}
                     Err(error) => {
-                        return Err(step_failure(index, step, request_ids.clone(), error.to_string()));
+                        return Err(step_failure(
+                            index,
+                            step,
+                            request_ids.clone(),
+                            error.to_string(),
+                        ));
                     }
                 }
             }
@@ -480,6 +487,7 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
 
     let snapshot = SessionSnapshot::capture(session, None)
         .map_err(|error| return operation("snapshot timeline assertion", error))?;
+
     let marker_time = |label: &str| -> Result<u64> {
         let mut cursor = EventLogCursor::open(snapshot.path().join("events.jsonl"))
             .map_err(|error| return operation("read timeline assertion", error))?;
@@ -504,7 +512,6 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
         }
         return Ok(time);
     };
-
     let start = marker_time(start_label)?;
     let end = marker_time(end_label)?;
 

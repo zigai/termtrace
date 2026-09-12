@@ -346,6 +346,7 @@ registry!(
 /// Return the complete ordered catalog after checking registry invariants.
 pub fn catalog() -> Result<&'static [SchemaEntry]> {
     validate_registry()?;
+
     return Ok(SCHEMA_REGISTRY);
 }
 
@@ -359,6 +360,7 @@ pub fn validate_registry() -> Result<()> {
             });
         }
     }
+
     return Ok(());
 }
 
@@ -391,6 +393,7 @@ pub fn write_all(directory: impl AsRef<Path>) -> Result<Vec<PathBuf>> {
                     source,
                 };
             })?;
+
             return Ok(path);
         })
         .collect();
@@ -412,6 +415,7 @@ fn generate_typed<T: JsonSchema>(filename: &'static str) -> Result<GeneratedSche
     let mut json = serde_json::to_vec_pretty(&value)
         .map_err(|source| return Error::Serialize { filename, source })?;
     json.push(b'\n');
+
     return Ok(GeneratedSchema { filename, json });
 }
 

@@ -129,7 +129,6 @@ pub(super) fn capture_stable_x11_frame_with_check(
     mut check: impl FnMut() -> Result<()>,
 ) -> Result<Vec<NativeFrameSample>> {
     let deadline = Instant::now() + timeout;
-
     let mut samples: Vec<NativeFrameSample> = Vec::new();
     let mut previous_hash: Option<String> = None;
     let mut stable_run = 0_u8;
@@ -139,6 +138,7 @@ pub(super) fn capture_stable_x11_frame_with_check(
         check()?;
 
         let remaining = deadline.saturating_duration_since(Instant::now());
+
         if remaining.is_zero() {
             return Err(external_error("X11 frame import", "capture timed out"));
         }
@@ -153,10 +153,10 @@ pub(super) fn capture_stable_x11_frame_with_check(
             remaining,
             &mut check,
         );
-
         if let Err(error) = output {
             log.extend_from_slice(error.to_string().as_bytes());
             write_secure(&staging.join("x11-screenshot.log"), &log)?;
+
             return Err(error);
         }
 
@@ -184,6 +184,7 @@ pub(super) fn capture_stable_x11_frame_with_check(
         if stable_run >= 3 {
             write_secure(screenshot, &bytes)?;
             write_secure(&staging.join("x11-screenshot.log"), &log)?;
+
             return Ok(samples);
         }
 
@@ -206,6 +207,7 @@ pub(super) fn probe_video(
 ) -> Result<serde_json::Value> {
     let probe = ffprobe(path, &["-count_packets", "-show_streams", "-show_format"])?;
     validate_video_probe(&probe, fps, width, height)?;
+
     return Ok(probe);
 }
 
@@ -242,6 +244,7 @@ pub(super) fn validate_video_probe(
 pub(super) fn probe_screenshot(path: &Path, width: u16, height: u16) -> Result<serde_json::Value> {
     let probe = ffprobe(path, &["-show_streams"])?;
     validate_screenshot_probe(&probe, width, height)?;
+
     return Ok(probe);
 }
 
@@ -251,7 +254,6 @@ pub(super) fn validate_screenshot_probe(
     height: u16,
 ) -> Result<()> {
     let stream = first_stream(probe)?;
-
     if stream.get("width").and_then(serde_json::Value::as_u64) != Some(u64::from(width))
         || stream.get("height").and_then(serde_json::Value::as_u64) != Some(u64::from(height))
         || stream.get("codec_name").and_then(serde_json::Value::as_str) != Some("png")
@@ -290,7 +292,6 @@ pub(super) fn probe_variable_video(
 ) -> Result<serde_json::Value> {
     let probe = ffprobe(path, &["-count_packets", "-show_streams", "-show_format"])?;
     let stream = first_stream(&probe)?;
-
     if stream.get("width").and_then(serde_json::Value::as_u64) != Some(u64::from(width))
         || stream.get("height").and_then(serde_json::Value::as_u64) != Some(u64::from(height))
         || stream

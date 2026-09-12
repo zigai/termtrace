@@ -70,8 +70,8 @@ impl Drop for OwnedGroup {
 /// This survives abrupt owner death without tying children to an owner's worker thread.
 pub(super) fn run(arguments: OwnedProcessArgs) -> Result<ExitCode> {
     let cancelled = Arc::new(AtomicBool::new(false));
-
     let mut signals = Signals(Vec::new());
+
     for signal in [SIGHUP, SIGINT, SIGTERM] {
         signals
             .0
@@ -97,10 +97,10 @@ pub(super) fn run(arguments: OwnedProcessArgs) -> Result<ExitCode> {
         Err(error) => {
             let _ = child.kill();
             let _ = child.wait();
+
             return Err(error).into_diagnostic();
         }
     };
-
     let mut owned = OwnedGroup { child, group };
 
     loop {
@@ -130,9 +130,7 @@ fn parent_alive(pid: u32, start_ticks: u64) -> bool {
     let Some((_, suffix)) = stat.rsplit_once(')') else {
         return false;
     };
-
     let mut fields = suffix.split_whitespace();
-
     if matches!(fields.next(), None | Some("Z" | "X")) {
         return false;
     }

@@ -54,6 +54,7 @@ impl Instrumentation {
             parent_span_id,
             attributes,
         )?;
+
         return Ok(span_id);
     }
 
@@ -103,6 +104,7 @@ impl Instrumentation {
         })?;
 
         self.client.request(ControlCommand::Application { data })?;
+
         return Ok(());
     }
 }

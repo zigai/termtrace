@@ -48,6 +48,7 @@ fn output_log_with_geometry(data: &[u8], cols: u16, rows: u16) -> EventLog {
     log.header.rows = rows;
     log.header.pixel_width = cols.saturating_mul(8);
     log.header.pixel_height = rows.saturating_mul(16);
+
     return log;
 }
 
@@ -75,19 +76,21 @@ fn explicit_live_prefix_excludes_later_output_and_hidden_sync_bytes() {
 
     let (_, endpoint) = inspect_latest_presented_prefix(&path, &boundary, &AtomicBool::new(false))
         .expect("frozen prefix");
+
     let expected =
         inspect_latest_presented_fast(&output_log(b"OLD")).expect("expected visible state");
-
     assert_eq!(endpoint.state_hash, expected.state_hash);
     assert_eq!(endpoint.event_seq, Some(0));
     assert_eq!(endpoint.event_byte_offset, Some(2));
 
     let mut wrong_bytes = boundary.clone();
     wrong_bytes.output_bytes += 1;
+
     assert!(inspect_latest_presented_prefix(&path, &wrong_bytes, &AtomicBool::new(false)).is_err());
 
     let mut wrong_hash = boundary.clone();
     wrong_hash.event_hash = "0".repeat(64);
+
     assert!(inspect_latest_presented_prefix(&path, &wrong_hash, &AtomicBool::new(false)).is_err());
     assert!(inspect_latest_presented_prefix(&path, &boundary, &AtomicBool::new(true)).is_err());
 }
@@ -99,7 +102,6 @@ fn fast_endpoint_replay_charges_only_input_output_bytes() {
     reset_test_replay_output_bytes();
 
     let inspection = inspect_latest_presented_fast(&log).expect("fast endpoint replay");
-
     assert_eq!(inspection.state.cols, 200);
     assert_eq!(inspection.state.rows, 100);
     assert_eq!(
@@ -135,7 +137,6 @@ fn fast_endpoint_budgets_deferred_snapshots_across_many_output_records() {
     };
     let inspection =
         inspect_latest_presented_fast_with_limits(&log, limits).expect("bounded fast replay");
-
     assert_eq!(inspection.event_seq, Some(255));
     assert_eq!(inspection.event_byte_offset, Some(0));
     assert_eq!(inspection.monotonic_ns, Some(256));
@@ -157,7 +158,6 @@ fn fast_endpoint_matches_byte_granular_latest_presented_state() {
     let fast = inspect_latest_presented_fast(&log).expect("fast endpoint replay");
     let canonical =
         inspect(&log, StateSelector::LatestPresented).expect("canonical latest presented state");
-
     assert_eq!(fast.state_hash, canonical.record.state_hash);
     assert_eq!(fast.event_seq, canonical.record.event_seq);
     assert_eq!(fast.event_byte_offset, canonical.record.event_byte_offset);
@@ -170,7 +170,6 @@ fn fast_endpoint_retains_source_cursor_for_trailing_buffered_output() {
     let fast = inspect_latest_presented_fast(&log).expect("fast endpoint replay");
     let canonical =
         inspect(&log, StateSelector::LatestPresented).expect("canonical latest presented state");
-
     assert_eq!(fast.state_hash, canonical.record.state_hash);
     assert_eq!(fast.event_seq, canonical.record.event_seq);
     assert_eq!(fast.event_byte_offset, canonical.record.event_byte_offset);
@@ -183,7 +182,6 @@ fn fast_endpoint_excludes_uncommitted_synchronized_output() {
     let fast = inspect_latest_presented_fast(&log).expect("fast endpoint replay");
     let canonical =
         inspect(&log, StateSelector::LatestPresented).expect("canonical latest presented state");
-
     assert_eq!(fast.state_hash, canonical.record.state_hash);
     assert!(!fast.state.modes.synchronized_output);
 }
@@ -268,12 +266,13 @@ fn validated_checkpoint_seed_skips_long_session_canonical_output_prefix() {
         },
         |record, _, _| {
             final_hash = Some(record.state_hash);
+
             return Ok(());
         },
     )
     .expect("checkpoint replay within suffix-only output budget");
-    let canonical = replay(&log).expect("canonical replay");
 
+    let canonical = replay(&log).expect("canonical replay");
     assert_eq!(
         artifacts.final_state_hash,
         canonical.artifacts.final_state_hash
@@ -341,12 +340,12 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
         .lines()
         .map(|line| return serde_json::from_str(line).expect("state index entry"))
         .collect();
+
     let checkpoint_ids: Vec<u64> = entries
         .iter()
         .filter(|entry| return entry.checkpoint)
         .map(|entry| return entry.state_id)
         .collect();
-
     assert!(
         checkpoint_ids.len() > 1,
         "multiple checkpoints must be emitted"
@@ -380,7 +379,6 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
     let seed = load_nearest_replay_seed(&directory, &log, &StateSelector::StateId(1_099))
         .expect("validated checkpoint lookup")
         .expect("nearest late checkpoint");
-
     assert_eq!(
         seed.inspection.record.state_id,
         *checkpoint_ids.last().expect("last checkpoint")
@@ -391,6 +389,7 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
         .record
         .event_byte_offset
         .expect("output checkpoint offset");
+
     let remaining_output_bytes = output_bytes.saturating_sub(seed_offset.saturating_add(1));
     let seeded = replay_with_seed_and_limits(
         &log,
@@ -403,7 +402,6 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
         |_, _, _| return Ok(()),
     )
     .expect("late replay must fit the suffix-only output budget");
-
     assert_eq!(
         seeded.final_state_hash,
         replay(&log)
@@ -453,7 +451,6 @@ fn periodic_checkpoint_reconstructs_scrolling_grid() {
         .map(|line| return serde_json::from_str::<StateIndexEntry>(line).expect("index entry"))
         .filter(|entry| return entry.checkpoint)
         .count();
-
     assert!(
         checkpoint_count > 1,
         "scrolling replay must retain usable checkpoints beyond the initial state"
@@ -466,9 +463,9 @@ fn semantic_hash_v2_binds_wrap_and_wide_but_not_dirtiness() {
     terminal.write("abc界".as_bytes());
     let state = terminal.snapshot().expect("semantic state");
     let baseline = semantic_state_hash(&state).expect("baseline hash");
-
     let mut wrap_changed = state.clone();
     wrap_changed.grid[0].soft_wrapped = !wrap_changed.grid[0].soft_wrapped;
+
     assert_ne!(
         baseline,
         semantic_state_hash(&wrap_changed).expect("wrap hash")
@@ -476,6 +473,7 @@ fn semantic_hash_v2_binds_wrap_and_wide_but_not_dirtiness() {
 
     let mut wide_changed = state.clone();
     wide_changed.grid[0].cells[0].wide_kind = WideKind::SpacerHead;
+
     assert_ne!(
         baseline,
         semantic_state_hash(&wide_changed).expect("wide hash")
@@ -485,6 +483,7 @@ fn semantic_hash_v2_binds_wrap_and_wide_but_not_dirtiness() {
     dirty_changed.dirty = DirtyState::Full;
     dirty_changed.dirty_rows = vec![0];
     dirty_changed.grid[0].dirty = !dirty_changed.grid[0].dirty;
+
     assert_eq!(
         baseline,
         semantic_state_hash(&dirty_changed).expect("dirty hash")
@@ -500,7 +499,6 @@ fn row_delta_emits_and_reconstructs_wrap_facts_without_cell_changes() {
     current.grid[0].soft_wrapped = !current.grid[0].soft_wrapped;
     current.grid[0].wrap_continuation = !current.grid[0].wrap_continuation;
     let delta = state_delta(Some(&previous), &current);
-
     assert_eq!(delta.rows.len(), 1);
     assert!(delta.rows[0].cells.is_empty());
     assert_eq!(delta.rows[0].soft_wrapped, current.grid[0].soft_wrapped);
@@ -510,7 +508,6 @@ fn row_delta_emits_and_reconstructs_wrap_facts_without_cell_changes() {
     );
 
     let mut reconstructed = previous;
-
     for row_diff in delta.rows {
         let row = &mut reconstructed.grid[usize::from(row_diff.row)];
         row.soft_wrapped = row_diff.soft_wrapped;

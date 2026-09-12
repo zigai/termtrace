@@ -46,13 +46,11 @@ const OPTION_SUPERVISOR_PID: &str = "@termtrace-supervisor-pid";
 const OPTION_WATCHDOG_PID: &str = "@termtrace-watchdog-pid";
 const SUPERVISOR_INTERVAL: Duration = Duration::from_millis(250);
 const UNRECORDED_GRACE: Duration = Duration::from_millis(500);
-
 const GUARDED_HOOKS: &[&str] = &[
     "after-new-session",
     "after-new-window",
     "after-split-window",
 ];
-
 const RESERVED_OPTIONS: &[&str] = &[
     OPTION_VERSION,
     OPTION_TERMTRACE,

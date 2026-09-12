@@ -28,7 +28,6 @@ impl SessionRegistry {
             let session = sessions.join(format!("{identity}.termtrace"));
             let stdout_log = diagnostics.join(format!("{identity}.stdout"));
             let stderr_log = diagnostics.join(format!("{identity}.stderr"));
-
             if !session.exists() && !stdout_log.exists() && !stderr_log.exists() {
                 return Ok(DetachedSessionPaths {
                     session,
@@ -112,7 +111,6 @@ impl SessionRegistry {
         }
 
         let mut completed_sessions = Vec::new();
-
         for item in fs::read_dir(&sessions).map_err(|source| {
             return Error::Filesystem {
                 path: sessions.clone(),
@@ -133,7 +131,6 @@ impl SessionRegistry {
                     source,
                 };
             })?;
-
             if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
                 report.skipped_non_completed = report.skipped_non_completed.saturating_add(1);
                 continue;
@@ -198,7 +195,6 @@ impl SessionRegistry {
         {
             let over_quota = max_completed_bytes
                 .is_some_and(|limit| return report.completed_bytes_after_plan > limit);
-
             if u64::try_from(index).unwrap_or(u64::MAX) < keep_latest
                 || (completed > cutoff && !over_quota)
             {
@@ -327,6 +323,7 @@ impl SessionRegistry {
                     // Retention age applies to completed evidence, never to an
                     // authenticated live recorder or its interactive process group.
                     let should_reap = !completion_exists && !is_live;
+
                     if should_reap {
                         if apply {
                             let _ = fs::remove_file(&path);
@@ -354,7 +351,6 @@ impl SessionRegistry {
 
 pub(super) fn directory_bytes_nofollow(directory: &Path) -> Result<u64> {
     let mut total = 0_u64;
-
     for item in fs::read_dir(directory).map_err(|source| {
         return Error::Filesystem {
             path: directory.to_path_buf(),
@@ -375,6 +371,7 @@ pub(super) fn directory_bytes_nofollow(directory: &Path) -> Result<u64> {
                 source,
             };
         })?;
+
         let file_type = metadata.file_type();
         if file_type.is_symlink() {
             return Err(registry_error(

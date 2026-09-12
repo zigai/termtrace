@@ -44,8 +44,8 @@ fn reservation_excludes_concurrent_owners_and_promotes_only_the_winner() {
     fs_err::create_dir(&sessions).expect("sessions directory");
 
     let barrier = Arc::new(Barrier::new(3));
-    let mut contenders = Vec::new();
 
+    let mut contenders = Vec::new();
     for name in ["first", "second"] {
         let registry = Arc::clone(&registry);
         let barrier = Arc::clone(&barrier);
@@ -53,6 +53,7 @@ fn reservation_excludes_concurrent_owners_and_promotes_only_the_winner() {
 
         contenders.push(thread::spawn(move || {
             barrier.wait();
+
             return registry.reserve("demo", &pending, Duration::from_secs(30));
         }));
     }
@@ -63,7 +64,6 @@ fn reservation_excludes_concurrent_owners_and_promotes_only_the_winner() {
         .into_iter()
         .map(|contender| return contender.join().expect("reservation contender"))
         .collect::<Vec<_>>();
-
     assert_eq!(
         results
             .iter()
@@ -83,11 +83,11 @@ fn reservation_excludes_concurrent_owners_and_promotes_only_the_winner() {
         .into_iter()
         .find_map(Result::ok)
         .expect("winning reservation");
+
     let reservation_record: AliasReservation = serde_json::from_slice(
         &fs_err::read(registry.entry_path("demo")).expect("reservation record"),
     )
     .expect("reservation JSON");
-
     assert_eq!(reservation_record.owner_token, reservation.owner_token);
     assert_eq!(
         reservation_record.pending_session,
@@ -98,6 +98,7 @@ fn reservation_excludes_concurrent_owners_and_promotes_only_the_winner() {
 
     let mut wrong_owner = reservation.clone();
     wrong_owner.owner_token = Uuid::now_v7();
+
     assert!(registry.release(&wrong_owner).is_err());
 
     record_fixture(reservation.session_path());
@@ -124,19 +125,16 @@ fn expired_reservation_is_reclaimed_without_accepting_the_old_owner() {
             .expect("expired reservation encoding"),
     )
     .expect("publish expired reservation fixture");
-
     let second_path = registry.state_root().join("sessions/second.termtrace");
     let second = registry
         .reserve("demo", &second_path, Duration::from_secs(30))
         .expect("reclaim expired reservation");
-
     assert_ne!(second.owner_token, first.owner_token);
     assert!(registry.promote(&first).is_err());
 
     let resolved = registry
         .resolve_lifecycle("demo")
         .expect("resolve replacement reservation");
-
     assert_eq!(resolved.lifecycle, RegistryLifecycle::Incomplete);
     assert_eq!(resolved.session, second_path);
 
@@ -160,7 +158,6 @@ fn retarget_uses_compare_and_swap_and_preserves_previous_binding_on_failure() {
     let successor = registry
         .retarget("demo", original.session_id, &second)
         .expect("retarget successor");
-
     assert_ne!(successor.session_id, original.session_id);
     assert_eq!(registry.resolve("demo").unwrap(), successor);
 }

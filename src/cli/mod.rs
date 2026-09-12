@@ -69,5 +69,6 @@ pub(crate) fn run() -> ExitCode {
     }
 
     let result = dispatch::dispatch(&mut response, cli.command);
+
     return finish_response(response, result);
 }

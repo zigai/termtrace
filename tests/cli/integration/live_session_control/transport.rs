@@ -42,7 +42,6 @@ fn live_control_drives_and_audits_a_detached_session() {
         &fs_err::read(registry_state.join("registry/live-demo.json")).expect("registry entry"),
     )
     .expect("registry JSON");
-
     assert!(entry
         .pointer("/recorder_pid")
         .and_then(serde_json::Value::as_u64)
@@ -78,7 +77,6 @@ fn live_control_drives_and_audits_a_detached_session() {
             _ => None,
         }
         .expect("status response data");
-
     assert_eq!(first_boundary, second_boundary);
 
     let duplicate_request = ControlRequest::new(ControlCommand::Mark {
@@ -173,6 +171,7 @@ fn live_control_drives_and_audits_a_detached_session() {
             return matches!(&record.event, Event::Marker { label, .. } if label == "before-input");
         })
         .expect("before-input marker");
+
     let selectors = [
         vec!["--at-marker".to_owned(), "before-input".to_owned()],
         vec!["--event-seq".to_owned(), marker.seq.to_string()],
@@ -180,7 +179,6 @@ fn live_control_drives_and_audits_a_detached_session() {
     ];
 
     let mut selected_hashes = Vec::new();
-
     for selector in selectors {
         let mut show = Command::cargo_bin("termtrace").expect("binary should build");
         let shown = show
@@ -193,7 +191,6 @@ fn live_control_drives_and_audits_a_detached_session() {
 
         let observation: serde_json::Value =
             serde_json::from_slice(&shown.get_output().stdout).expect("selected observation");
-
         selected_hashes.push(
             observation
                 .pointer("/state_hash")
@@ -210,7 +207,6 @@ fn live_control_drives_and_audits_a_detached_session() {
     let journal_path = session.join("requests.jsonl");
     validate_json_lines("mutation-journal-record.schema.json", &journal_path);
     let mutation_records = read_mutation_journal(&journal_path).expect("mutation journal");
-
     assert_eq!(
         mutation_records
             .iter()
@@ -270,7 +266,6 @@ fn live_control_uses_a_bounded_endpoint_for_long_evidence_paths() {
     let output = recorder
         .wait_with_output()
         .expect("wait for long-path recorder");
-
     assert!(
         output.status.success(),
         "long-path recorder failed: {output:?}"

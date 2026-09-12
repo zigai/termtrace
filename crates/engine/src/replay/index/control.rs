@@ -37,7 +37,6 @@ pub(super) fn write_control_index(
     };
 
     let mut framer = VtFramer::default();
-
     for record in source.records()? {
         let record = record?;
 
@@ -57,6 +56,7 @@ pub(super) fn write_control_index(
     }
 
     finish_writer(output.writer, &output.path)?;
+
     return finish_writer(output.sources, &output.source_path).map_err(Error::from);
 }
 
@@ -121,6 +121,7 @@ impl ControlWriter {
             .checked_add(u64::try_from(encoded.len()).unwrap_or(u64::MAX))
             .and_then(|offset| return offset.checked_add(1))
             .ok_or_else(|| return invalid_replay("control index byte offset overflow"))?;
+
         return Ok(());
     }
 }

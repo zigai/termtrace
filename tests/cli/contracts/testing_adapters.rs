@@ -56,7 +56,6 @@ fn rust_test_helper_discards_styled_stable_attempt_after_snapshot() {
     config.rows = 3;
     config.snapshot_root = snapshots.path().to_path_buf();
     config.update_snapshots = true;
-
     let result = run_terminal_test(
         config,
         |test| -> Result<(), Box<dyn StdError + Send + Sync>> {
@@ -73,6 +72,7 @@ fn rust_test_helper_discards_styled_stable_attempt_after_snapshot() {
                         projection: ScreenProjectionRequest::default(),
                         allow_incomplete: false,
                     })?;
+
             let ScreenFrameData::Spans { rows } = &capture.frame.data else {
                 panic!("stable frame did not return span detail");
             };
@@ -89,11 +89,11 @@ fn rust_test_helper_discards_styled_stable_attempt_after_snapshot() {
                 .expect("styled READY span")
                 .appearance
                 .resolved_background;
+
             let query = LocatorSpec::text("READY")?.with_style(StyleFilter {
                 resolved_background: Some(resolved_background),
                 ..StyleFilter::default()
             });
-
             assert_eq!(capture.frame.query(query)?.single()?.text.as_ref(), "READY");
 
             test.assert_snapshot(
@@ -106,7 +106,6 @@ fn rust_test_helper_discards_styled_stable_attempt_after_snapshot() {
             return Ok(());
         },
     );
-
     assert!(result.is_ok(), "passing adapter attempt failed: {result:?}");
     assert_eq!(
         fs::read_dir(evidence.path())
@@ -123,7 +122,6 @@ fn rust_test_helper_retains_verified_failure_artifacts() {
     let terminal = Terminal::new(env!("CARGO_BIN_EXE_termtrace"), temporary.path());
     let mut config = TerminalTestConfig::new(terminal, looping_command());
     config.evidence_policy = EvidencePolicy::OnFailure;
-
     let result = run_terminal_test(config, |test| -> Result<(), &'static str> {
         let session = test.session().expect("open test session");
         session
@@ -133,6 +131,7 @@ fn rust_test_helper_retains_verified_failure_artifacts() {
 
         return Err("PRIMARY_FAILURE_SENTINEL");
     });
+
     let TestFailure::Body {
         error,
         finalization,
@@ -163,7 +162,6 @@ fn rust_test_helper_retains_verified_failure_artifacts() {
         &fs::read(screenshot.join("save-manifest.json")).expect("screenshot manifest"),
     )
     .expect("valid screenshot manifest");
-
     fs::write(screenshot.join("screen.png"), b"changed").expect("corrupt screenshot");
 
     assert!(verify_saved_artifact(&screenshot, &manifest).is_err());
@@ -177,7 +175,6 @@ fn rust_test_helper_creates_and_reports_snapshot_mismatches() {
     let mut update_config = TerminalTestConfig::new(terminal, looping_command());
     update_config.snapshot_root = snapshot_root.clone();
     update_config.update_snapshots = true;
-
     let updated = run_terminal_test(
         update_config,
         |test| -> Result<(), Box<dyn StdError + Send + Sync>> {
@@ -204,7 +201,6 @@ fn rust_test_helper_creates_and_reports_snapshot_mismatches() {
     let terminal = Terminal::new(env!("CARGO_BIN_EXE_termtrace"), temporary.path());
     let mut compare_config = TerminalTestConfig::new(terminal, looping_command());
     compare_config.snapshot_root = snapshot_root;
-
     let mismatch = run_terminal_test(
         compare_config,
         |test| -> Result<(), Box<dyn StdError + Send + Sync>> {
@@ -221,6 +217,7 @@ fn rust_test_helper_creates_and_reports_snapshot_mismatches() {
             return Ok(());
         },
     );
+
     let TestFailure::Body {
         error,
         finalization,
@@ -252,7 +249,6 @@ fn rust_test_helper_timeout_retains_evidence_and_reaps_session() {
 
     let mut config = TerminalTestConfig::new(terminal, command);
     config.evidence_policy = EvidencePolicy::Always;
-
     let mut test = TerminalTest::launch(config).expect("launch timed test");
 
     test.session()
@@ -285,7 +281,6 @@ fn rust_test_helper_timeout_retains_evidence_and_reaps_session() {
                 .is_some_and(|extension| return extension == "tt");
         })
         .expect("verified canonical evidence");
-
     assert!(canonical.join("completion.json").is_file());
     assert!(!control_endpoint_is_reachable(&session_path));
 
@@ -305,7 +300,6 @@ fn rust_test_helper_timeout_retains_evidence_and_reaps_session() {
         .evidence_directory
         .as_ref()
         .expect("retained timeout evidence");
-
     assert!(evidence.join("semantic-screenshot/screen.png").is_file());
     assert!(evidence.join("debug-bundle/manifest.json").is_file());
 
@@ -332,7 +326,6 @@ fn rust_test_helper_timeout_retains_evidence_and_reaps_session() {
     };
     let before = inventory();
     let repeated = test.finalize(TestOutcome::Passed);
-
     assert_eq!(repeated.outcome, TestOutcome::TimedOut);
     assert_eq!(
         repeated, report,
@@ -351,7 +344,6 @@ fn rust_test_helper_preserves_body_failure_when_cleanup_fails() {
     let terminal = Terminal::new(env!("CARGO_BIN_EXE_termtrace"), temporary.path());
     let mut config = TerminalTestConfig::new(terminal, looping_command());
     config.finalization_timeout = Duration::from_millis(20);
-
     let result = run_terminal_test(config, |test| -> Result<(), &'static str> {
         test.session_mut()
             .expect("open test session")
@@ -360,6 +352,7 @@ fn rust_test_helper_preserves_body_failure_when_cleanup_fails() {
 
         return Err("PRIMARY_CLEANUP_FAILURE_SENTINEL");
     });
+
     let TestFailure::Body {
         error,
         finalization,
@@ -392,7 +385,6 @@ fn rust_test_helper_resumes_original_panic_after_finalization() {
         );
     })
     .expect_err("test body panic must be resumed");
-
     assert_eq!(
         panic_payload.downcast_ref::<&str>(),
         Some(&"PRIMARY_PANIC_SENTINEL")
@@ -403,7 +395,6 @@ fn rust_test_helper_resumes_original_panic_after_finalization() {
         .map(|entry| return entry.expect("panic evidence entry").path())
         .find(|path| return path.is_dir())
         .expect("retained panic evidence");
-
     assert!(evidence.join("semantic-screenshot/screen.png").is_file());
     assert!(evidence.join("debug-bundle/manifest.json").is_file());
 }
@@ -467,7 +458,6 @@ fn rust_test_helper_reports_cleanup_failure_while_resuming_panic() {
         let terminal = Terminal::new(env!("CARGO_BIN_EXE_termtrace"), temporary.path());
         let mut config = TerminalTestConfig::new(terminal, looping_command());
         config.finalization_timeout = Duration::from_millis(20);
-
         let _result = run_terminal_test(
             config,
             |test| -> Result<(), Box<dyn StdError + Send + Sync>> {
@@ -496,7 +486,6 @@ fn rust_test_helper_reports_cleanup_failure_while_resuming_panic() {
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-
     assert!(
         stderr.contains("PRIMARY_PANIC_CLEANUP_SENTINEL"),
         "{stderr}"

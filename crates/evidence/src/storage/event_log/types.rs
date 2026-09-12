@@ -26,6 +26,7 @@ impl SessionClock {
             .duration_since(UNIX_EPOCH)
             .map_err(|_| return Error::ClockBeforeEpoch)?
             .as_nanos();
+
         return Ok(Self {
             monotonic_origin: Instant::now(),
             started_unix_ns,
@@ -96,7 +97,6 @@ impl From<&EventLog> for EventLogSummary {
             pending_operations: log.pending_operations.clone(),
             resource_triggers: [false; 3],
         };
-
         for record in &log.events {
             match &record.event {
                 Event::Output { data } => {

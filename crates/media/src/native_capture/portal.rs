@@ -30,6 +30,7 @@ pub(super) fn require_tools() -> Result<()> {
         ]),
         Duration::from_secs(10),
     )?;
+
     return Ok(());
 }
 
@@ -98,6 +99,7 @@ pub(super) fn validate_completion(staging: &Path, packets: u64) -> Result<u128> 
             source,
         };
     })?;
+
     let completion: AcquisitionCompletion = serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path,

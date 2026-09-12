@@ -58,7 +58,6 @@ pub fn replay_endpoint_for_prefix(
         inspect_latest_presented_prefix(&session.join("events.jsonl"), boundary, cancelled)?;
 
     let manifest = read_manifest(session)?;
-
     if header.session_id != manifest.session_id
         || header.session_manifest_hash != manifest_hash(&canonical_manifest_bytes(&manifest)?)
     {
@@ -66,7 +65,6 @@ pub fn replay_endpoint_for_prefix(
             "prefix manifest does not match its canonical header",
         ));
     }
-
     return Ok(ReplayEndpoint {
         session_id: header.session_id,
         session_manifest_hash: header.session_manifest_hash,
@@ -115,7 +113,6 @@ pub fn presented_replay_endpoint_for_session(
     if !state.presented {
         return Ok(None);
     }
-
     return Ok(Some(ReplayEndpoint {
         session_id: manifest.session_id,
         session_manifest_hash: completion.session_manifest_hash,
@@ -210,7 +207,6 @@ pub fn observe_completed_with_formats(
         presented: inspection.record.presented,
         state: inspection.state,
     };
-
     let observation = completed_observation_from_cached(
         &canonical,
         manifest.session_id,
@@ -220,6 +216,7 @@ pub fn observe_completed_with_formats(
         include_hidden,
         ObservationResolution::CanonicalReplay,
     )?;
+
     return Ok((observation, rendered));
 }
 
@@ -260,7 +257,6 @@ pub fn observation_from_live_snapshot(
             "actor returned an unexpected observation",
         ));
     };
-
     let frame = ObservationFrame {
         viewport_text,
         cols,
@@ -462,6 +458,7 @@ fn resolve_completed_state(
 
     if let Some(state) = load_checkpoint(session, point, completion)? {
         source.check(session)?;
+
         return Ok((state, ObservationResolution::ValidatedCheckpoint));
     }
 
@@ -473,6 +470,7 @@ fn resolve_completed_state(
         )
     {
         source.check(session)?;
+
         return Ok((state, ObservationResolution::ValidatedCheckpoint));
     }
 
@@ -483,6 +481,7 @@ fn resolve_completed_state(
             };
         });
     })?;
+
     validate_completion_summary_candidate(session, &summary, completion)?;
     source.check(session)?;
 
@@ -651,6 +650,7 @@ pub fn semantic_state_for_session(
     include_hidden: bool,
 ) -> Result<SemanticState> {
     let (state, _) = semantic_state_with_hash_for_session(session, point, include_hidden)?;
+
     return Ok(state);
 }
 
@@ -759,13 +759,14 @@ pub fn semantic_state_from_live_snapshot(snapshot: ControlData) -> Result<(Seman
             source,
         };
     })?;
+
     return Ok((state, state_hash));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{repeat, Read as _};
+    use std::io::repeat;
     use termtrace_model::{
         execution::event_log::CanonicalBoundary, terminal::observation::ActorBoundaries,
         terminal::state::ModeState, value::ByteString,

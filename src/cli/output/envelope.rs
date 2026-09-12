@@ -46,7 +46,6 @@ pub(super) fn response_string_value(
     let Some(value) = value else {
         return Ok(None);
     };
-
     if value.is_null() {
         return Ok(None);
     }
@@ -65,7 +64,6 @@ fn take_string(
     let Some(value) = fields.remove(key) else {
         return Ok(None);
     };
-
     if value.is_null() {
         return Ok(None);
     }
@@ -84,7 +82,6 @@ fn take_bool(
     let Some(value) = fields.remove(key) else {
         return Ok(None);
     };
-
     if value.is_null() {
         return Ok(None);
     }
@@ -103,7 +100,6 @@ fn take_u64(
     let Some(value) = fields.remove(key) else {
         return Ok(None);
     };
-
     if value.is_null() {
         return Ok(None);
     }
@@ -125,7 +121,6 @@ fn envelope_from_fields(
     fields.remove("v");
     fields.remove("ok");
     fields.remove("type");
-
     let code = take_string(&mut fields, "code")?;
     let applied = take_string(&mut fields, "applied")?
         .map(|value| return applied_from_str(&value))
@@ -173,7 +168,6 @@ fn typed_envelope_from_fields(
 pub(super) fn compact_success(state: &ResponseState) -> serde_json::Value {
     let last = state.values.last();
     let kind = response_type(last, &state.command_type);
-
     let mut response = BTreeMap::new();
 
     if state.values.len() == 1 {
@@ -312,6 +306,7 @@ pub(super) fn compact_failure(
             "none".to_owned()
         };
     });
+
     let retry = nested_string(last, "retry")
         .unwrap_or_else(|| return retry_for_applied(&applied).to_owned());
 

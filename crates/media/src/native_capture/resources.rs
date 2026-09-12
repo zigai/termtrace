@@ -163,7 +163,6 @@ fn mapped_fonts(pid: u32) -> StdResult<BTreeSet<(PathBuf, u64, Option<u64>)>, St
         .map_err(|_| return "process_maps_path_encoding_unavailable".to_owned())?;
 
     let mut paths = BTreeSet::new();
-
     for line in text.lines() {
         let Some(start) = line.find('/') else {
             continue;
@@ -241,8 +240,8 @@ fn resource_identity(
     *budget = budget.saturating_sub(before.len());
     let mut hash = blake3::Hasher::new();
     let mut buffer = vec![0_u8; 65536].into_boxed_slice();
-    let mut total = 0_u64;
 
+    let mut total = 0_u64;
     loop {
         if cancelled.load(Ordering::Relaxed) {
             return Err("native_resource_hash_cancelled".to_owned());
@@ -251,7 +250,6 @@ fn resource_identity(
         let count = file
             .read(&mut buffer)
             .map_err(|_| format!("{kind}_hash_unavailable"))?;
-
         if count == 0 {
             break;
         }
@@ -282,7 +280,6 @@ fn resource_identity(
     {
         return Err(format!("{kind}_changed_during_hashing"));
     }
-
     return Ok(ResourceIdentity {
         path: ByteString::from(path.as_os_str().as_bytes()),
         kind: kind.to_owned(),
@@ -327,8 +324,8 @@ mod tests {
                 &AtomicBool::new(false),
             )
             .expect("resource identity");
-            let length = u64::try_from(length).expect("length fits u64");
 
+            let length = u64::try_from(length).expect("length fits u64");
             assert_eq!(identity.byte_length, length);
             assert_eq!(identity.blake3, blake3::hash(&bytes).to_hex().to_string());
             assert_eq!(budget, 200_000 - length);
@@ -344,7 +341,6 @@ mod tests {
         )
         .err()
         .expect("cancelled hashing");
-
         assert_eq!(error, "native_resource_hash_cancelled");
     }
 }

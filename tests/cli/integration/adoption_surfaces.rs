@@ -97,7 +97,6 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("unchanged screen predicate");
-
     line.keyboard().text("fixture-value\n").expect("line input");
     wait_for_output(
         line.path(),
@@ -150,7 +149,6 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("completed final state is stable");
-
     assert!(final_wait.matched);
     assert!(matches!(
         final_wait.quality,
@@ -189,7 +187,6 @@ fn agent_skill_discovery_uses_root_and_direct_help() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let skill = root.join("skills/termtrace");
     let instructions = fs_err::read_to_string(skill.join("SKILL.md")).expect("skill instructions");
-
     assert!(!instructions.trim().is_empty());
     assert!(instructions.contains("termtrace"));
 
@@ -200,7 +197,6 @@ fn agent_skill_discovery_uses_root_and_direct_help() {
     assert!(root_help.status.success());
 
     let root_help = String::from_utf8_lossy(&root_help.stdout);
-
     assert!(!root_help.contains("commands --json"));
     assert!(root_help.contains("presented screen"));
     assert!(root_help.contains("canonical output"));
@@ -225,12 +221,10 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
         .expect("launch through Rust facade");
 
     wait_for_output(session.path(), b"READY", Duration::from_secs(5)).expect("ready output");
-
     let frame = session
         .screen()
         .frame(ScreenProjectionRequest::default())
         .expect("screen frame");
-
     assert_eq!(frame.geometry.cols, 90);
     assert_eq!(frame.geometry.rows, 25);
     assert!(session
@@ -271,11 +265,9 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
         .text("client\n")
         .expect("typed client input");
     wait_for_output(session.path(), b"<client>", Duration::from_secs(5)).expect("client output");
-
     let completion = session
         .complete(Duration::from_secs(5))
         .expect("completed client evidence");
-
     assert_eq!(completion.session_id, session.session_id());
     assert!(
         session
@@ -402,7 +394,6 @@ fn rust_facade_attach_retains_the_canonical_session_path() {
     recording
         .complete(Duration::from_secs(5))
         .expect("complete recording");
-
     let canonical = recording
         .path()
         .canonicalize()

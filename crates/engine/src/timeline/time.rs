@@ -72,6 +72,7 @@ fn parse_clock_offset(value: &str) -> StdResult<u64, String> {
     let hours_ns = hours
         .checked_mul(NANOS_PER_HOUR)
         .ok_or_else(|| return format!("invalid time offset `{value}`: value overflows"))?;
+
     let minutes_ns = minutes
         .checked_mul(NANOS_PER_MINUTE)
         .ok_or_else(|| return format!("invalid time offset `{value}`: value overflows"))?;
@@ -101,7 +102,6 @@ fn parse_scaled_decimal(number: &str, scale: u64) -> StdResult<u64, String> {
     let Some(fraction) = fraction else {
         return Ok(whole_ns);
     };
-
     if fraction.is_empty() || fraction.len() > 18 {
         return Err("fraction must contain between 1 and 18 digits".to_owned());
     }
@@ -109,12 +109,12 @@ fn parse_scaled_decimal(number: &str, scale: u64) -> StdResult<u64, String> {
     let numerator = parse_integer(fraction, "fraction")?;
     let exponent =
         u32::try_from(fraction.len()).map_err(|_| return "fraction is too precise".to_owned())?;
+
     let denominator = 10_u64
         .checked_pow(exponent)
         .ok_or_else(|| return "fraction is too precise".to_owned())?;
 
     let scaled = u128::from(numerator) * u128::from(scale);
-
     if scaled % u128::from(denominator) != 0 {
         return Err("fraction is more precise than one nanosecond".to_owned());
     }

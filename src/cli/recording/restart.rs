@@ -15,17 +15,16 @@ pub(in crate::cli) fn run_restart(
     let predecessor = predecessor_entry.session_path();
     let timeout = Duration::from_millis(arguments.timeout_ms);
 
-    if !predecessor.join("completion.json").is_file() {
-        if let Err(error) = request(&predecessor, ControlCommand::Stop) {
-            if !matches!(
-                error,
-                termtrace_sdk::Error::ControlUnavailable { .. }
-                    | termtrace_sdk::Error::ControlTimeout { .. }
-                    | termtrace_sdk::Error::ControlTransport { .. }
-            ) {
-                return Err(error).into_diagnostic();
-            }
-        }
+    if !predecessor.join("completion.json").is_file()
+        && let Err(error) = request(&predecessor, ControlCommand::Stop)
+        && !matches!(
+            error,
+            termtrace_sdk::Error::ControlUnavailable { .. }
+                | termtrace_sdk::Error::ControlTimeout { .. }
+                | termtrace_sdk::Error::ControlTransport { .. }
+        )
+    {
+        return Err(error).into_diagnostic();
     }
 
     let completion = wait_for_completion(&predecessor, timeout).into_diagnostic()?;
@@ -67,7 +66,6 @@ pub(in crate::cli) fn run_restart(
             && recorder_identity(&paths.session).is_some()
         {
             let successor_manifest = read_manifest(&paths.session).into_diagnostic()?;
-
             if successor_manifest.lineage.as_ref() != Some(&expected_lineage) {
                 return Err(miette::miette!(
                     "successor lineage does not match the completed predecessor; alias remains unchanged; recoverable orphan: {}",
@@ -166,6 +164,7 @@ pub(super) fn restart_record_arguments(
 
     arguments.push(OsString::from("--"));
     arguments.push(OsString::from("/bin/true"));
+
     return arguments;
 }
 
@@ -220,7 +219,6 @@ pub(super) fn restarted_record_options(
     let term = event_log.header.term.clone();
     let environment = if let Some(environment) = environment_override {
         let effective = EffectiveEnvironment::resolve(&environment, &term).into_diagnostic()?;
-
         if !overrides.allow_environment_change
             && !matches_predecessor_environment(effective, &manifest, predecessor)?
         {
@@ -291,7 +289,6 @@ pub(super) fn restarted_record_options(
             },
         },
     };
-
     apply_restart_overrides(&mut options, overrides)?;
 
     return Ok(options);
@@ -323,7 +320,6 @@ pub(super) fn restart_environment(
     }
 
     let effective = EffectiveEnvironment::resolve(&environment, term).into_diagnostic()?;
-
     if !matches_predecessor_environment(effective, manifest, predecessor)? {
         return Err(miette::miette!(
             "current environment does not match the predecessor's committed effective environment; exact restart refused"
@@ -357,7 +353,6 @@ pub(super) fn restart_overrides_from_args(arguments: &RestartArgs) -> Result<Res
     {
         return Err(miette::miette!("restart command must not be empty"));
     }
-
     return Ok(RestartOverrides {
         cwd: arguments
             .cwd
@@ -459,6 +454,7 @@ pub(super) fn apply_restart_overrides(
             .durability_max_interval_ms
             .or(options.durability_policy.maximum_interval_ms)
             .unwrap_or(50);
+
         let bytes = overrides
             .durability_max_uncommitted_bytes
             .or(options.durability_policy.maximum_uncommitted_bytes)

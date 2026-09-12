@@ -90,10 +90,8 @@ pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Resul
     }
 
     let mut expected_members: BTreeSet<String> = BTreeSet::new();
-
     for member in &manifest.files {
         let path = Path::new(&member.path);
-
         if path.components().count() != 1
             || !matches!(path.components().next(), Some(Component::Normal(_)))
             || !expected_members.insert(member.path.clone())
@@ -102,7 +100,6 @@ pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Resul
         }
 
         let (byte_count, digest) = hash_regular_file(&directory.join(path))?;
-
         if byte_count != member.byte_count || digest != member.blake3 {
             return Err(save_error(format!(
                 "saved artifact member {} failed integrity verification",
@@ -112,7 +109,6 @@ pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Resul
     }
 
     let mut observed_members: BTreeSet<String> = BTreeSet::new();
-
     for entry in
         fs::read_dir(directory).map_err(|source| return filesystem_error(directory, source))?
     {
@@ -120,7 +116,6 @@ pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Resul
         let file_type = entry
             .file_type()
             .map_err(|source| return filesystem_error(entry.path(), source))?;
-
         if file_type.is_dir()
             || file_type.is_symlink()
             || file_type.is_block_device()
@@ -262,6 +257,7 @@ pub fn save(
             .map_err(|source| return filesystem_error(&manifest_path, source))?;
 
         sync_directory(&staging)?;
+
         return Ok(save_manifest);
     })();
 
@@ -269,15 +265,16 @@ pub fn save(
         Ok(value) => value,
         Err(error) => {
             let _ = fs::remove_dir_all(&staging);
+
             return Err(error);
         }
     };
 
     if let Err(error) = commit_directory(parent, &staging, destination) {
         let _ = fs::remove_dir_all(&staging);
+
         return Err(error.into());
     }
-
     return Ok(SaveOutcome {
         directory: destination.to_path_buf(),
         manifest: save_manifest,
@@ -316,7 +313,6 @@ pub fn save_screenshot_batch(
         .collect::<Result<Vec<_>>>()?;
 
     let inspections = inspect_completed_many(&canonical, &selectors)?;
-
     if !include_hidden
         && inspections
             .iter()
@@ -342,7 +338,6 @@ pub fn save_screenshot_batch(
         };
 
         let mut entries: Vec<ScreenshotBatchEntry> = Vec::with_capacity(points.len());
-
         for (index, (point, inspection)) in points.iter().zip(inspections).enumerate() {
             let directory = format!("state-{index:04}");
             let entry_directory = staging.join(&directory);
@@ -400,7 +395,9 @@ pub fn save_screenshot_batch(
 
         let manifest_path = staging.join("batch-manifest.json");
         write_secure(&manifest_path, &pretty_json(&manifest, &manifest_path)?)?;
+
         sync_directory(&staging)?;
+
         return Ok(manifest);
     })();
 
@@ -408,12 +405,14 @@ pub fn save_screenshot_batch(
         Ok(value) => value,
         Err(error) => {
             let _ = fs::remove_dir_all(&staging);
+
             return Err(error);
         }
     };
 
     if let Err(error) = commit_directory(parent, &staging, destination) {
         let _ = fs::remove_dir_all(&staging);
+
         return Err(error.into());
     }
     return Ok(manifest);
@@ -505,7 +504,6 @@ fn save_rendered_file(
             Some(SEMANTIC_PNG_RENDERER),
         ),
     };
-
     let target = staging.join(path);
     let mut output = secure_file(&target)?;
     {
@@ -618,6 +616,7 @@ fn pretty_json(value: &impl serde::Serialize, path: &Path) -> Result<Vec<u8>> {
         };
     })?;
     bytes.push(b'\n');
+
     return Ok(bytes);
 }
 

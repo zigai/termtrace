@@ -64,6 +64,7 @@ impl Driver {
                 .as_ref()
                 .ok_or_else(|| return protocol("missing driver input pipe"))?,
         )?;
+
         nonblocking(
             driver
                 .output
@@ -72,7 +73,6 @@ impl Driver {
         )?;
 
         let response = driver.request(DriverMethod::Hello, Duration::from_secs(10))?;
-
         if !matches!(
             response.result,
             DriverResult::Ok {
@@ -118,7 +118,6 @@ impl Driver {
         let mut encoded = serde_json::to_vec(request)
             .map_err(|_| return protocol("could not encode driver request"))?;
         encoded.push(b'\n');
-
         if u64::try_from(encoded.len()).unwrap_or(u64::MAX) > DRIVER_MAX_REQUEST_BYTES {
             return Err(protocol("driver request exceeds frame limit"));
         }
@@ -150,7 +149,6 @@ impl Driver {
             .ok_or_else(|| return protocol("driver input is closed"))?;
 
         let mut sent = 0;
-
         while let Some(remaining) = encoded
             .get(sent..)
             .filter(|remaining| return !remaining.is_empty())
@@ -192,6 +190,7 @@ impl Driver {
             ready(output, PollFlags::POLLIN, deadline, "read response", true)?;
 
             let mut chunk = [0_u8; 8192];
+
             match output.read(&mut chunk) {
                 Ok(0) => {
                     return Err(transport(
@@ -205,7 +204,6 @@ impl Driver {
                         .get(..count)
                         .ok_or_else(|| return protocol("invalid driver read count"))?;
                     response.extend_from_slice(bytes);
-
                     if u64::try_from(response.len()).unwrap_or(u64::MAX) > DRIVER_MAX_RESPONSE_BYTES
                     {
                         return Err(protocol("driver response exceeds frame limit"));
@@ -300,6 +298,7 @@ fn nonblocking(file: &impl AsFd) -> Result<()> {
             io::Error::from_raw_os_error(error as i32),
         );
     })?;
+
     return Ok(());
 }
 
@@ -321,6 +320,7 @@ fn ready(
             .map_err(|_| return protocol("invalid driver poll duration"))?;
 
         let mut descriptors = [PollFd::new(file.as_fd(), flags)];
+
         match poll(&mut descriptors, timeout) {
             Ok(0) | Err(Errno::EINTR) => {}
             Ok(_) => return Ok(()),

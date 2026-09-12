@@ -55,6 +55,7 @@ pub(super) fn run_resolve(
 
     let mut path = entry.session_path().into_os_string().into_vec();
     path.push(b'\n');
+
     return write_stdout(response, path);
 }
 

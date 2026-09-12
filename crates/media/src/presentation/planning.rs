@@ -61,6 +61,7 @@ pub fn video_clip_ranges(
             ranges.observe(record.monotonic_ns);
         }
     }
+
     return ranges.finish();
 }
 
@@ -75,11 +76,13 @@ pub fn video_clip_ranges_session(
 ) -> Result<Vec<SourceRange>> {
     let mut ranges = IdleRanges::new(selected, idle);
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+
     while let Some(record) = cursor.next_record()? {
         if matches!(record.event, Event::Output { .. }) {
             ranges.observe(record.monotonic_ns);
         }
     }
+
     return Ok(ranges.finish());
 }
 
@@ -380,7 +383,6 @@ pub fn plan_with_source(
     )?;
 
     let verified = validate_completed_session(session)?;
-
     if verified.session_id != completion.session_id
         || verified.final_event_hash != completion.final_event_hash
     {
@@ -388,7 +390,6 @@ pub fn plan_with_source(
             "canonical source changed during presentation planning",
         ));
     }
-
     return Ok(PresentationPlan {
         version: PRESENTATION_FORMAT_VERSION,
         edit_plan_hash,
@@ -468,6 +469,7 @@ fn resolve_source(
                     source,
                 };
             })?;
+
             let manifest: VisualManifest =
                 serde_json::from_slice(&manifest_bytes).map_err(|source| {
                     return Error::InvalidJson {
@@ -533,6 +535,7 @@ fn resolve_source(
             }
 
             let mut semantic_start = u64::MAX;
+
             let mut semantic_end = 0_u64;
             for clip in &edit.clips {
                 let range = resolve_clip(session, clip, 0, fps)?;
@@ -573,6 +576,7 @@ fn resolve_source(
 fn hash_edit_identity(edit: &EditPlan) -> Result<String> {
     let mut hashed_edit = edit.clone();
     let mut subtitle_hashes = Vec::new();
+
     for (index, subtitle) in hashed_edit.subtitles.iter_mut().enumerate() {
         subtitle_hashes.push(hash_file(&subtitle.ass)?);
         subtitle.ass = PathBuf::from(format!("resource-{index}.ass"));
@@ -646,7 +650,6 @@ fn normalize_clips(
         let output_end_frame = output_start_frame
             .saturating_add(retimed_frame_count)
             .saturating_add(hold_frame_count);
-
         clips.push(NormalizedClip {
             source_range: range,
             source_start_frame,
@@ -667,7 +670,6 @@ fn normalize_clips(
             "presentation duration must contain between one frame and 24 hours",
         ));
     }
-
     return Ok(NormalizedClips {
         clips,
         output_frame_count: output_start_frame,
@@ -687,7 +689,6 @@ pub(super) fn validate_planned_source(source: &PresentationSource) -> Result<()>
         }
         PresentationSource::Semantic { plan } => {
             let completion = validate_completed_session(&plan.session)?;
-
             if completion.session_id != plan.session_id
                 || completion.final_event_hash != plan.source_event_hash
             {
@@ -720,6 +721,7 @@ pub(super) fn materialize_planned_source(
                     source,
                 };
             })?;
+
             Ok(video)
         }
     };
@@ -734,7 +736,6 @@ fn normalize_annotations(
     fps: u16,
 ) -> Result<Vec<NormalizedAnnotation>> {
     let mut normalized = Vec::new();
-
     for (annotation_index, annotation) in edit.annotations.iter().enumerate() {
         let spans = match &annotation.scope {
             AnnotationScope::WholeVideo => vec![(0, output_frame_count)],
@@ -742,6 +743,7 @@ fn normalize_annotations(
                 let clip = clips
                     .get(*clip_index)
                     .ok_or_else(|| return plan_error("annotation clip index is out of bounds"))?;
+
                 vec![(clip.output_start_frame, clip.output_end_frame)]
             }
             AnnotationScope::OutputFrame { output_frame } => {
@@ -763,10 +765,10 @@ fn normalize_annotations(
 
                 let start_frame = frame_floor(start.saturating_sub(capture_start_ns), fps);
                 let end_frame = frame_ceil(end.saturating_sub(capture_start_ns), fps);
+
                 output_spans_for_source_frames(clips, start_frame, end_frame)
             }
         };
-
         if spans.is_empty() {
             return Err(plan_error(format!(
                 "annotation {annotation_index} does not intersect an output clip"
@@ -794,6 +796,7 @@ fn normalize_annotations(
             annotation.output_start_frame,
         );
     });
+
     return Ok(normalized);
 }
 
@@ -803,7 +806,6 @@ fn output_spans_for_source_frames(
     source_end_frame: u64,
 ) -> Vec<(u64, u64)> {
     let mut spans = Vec::new();
-
     for clip in clips {
         let mut open = None;
         for output_frame in clip.output_start_frame..clip.output_end_frame {
@@ -848,8 +850,8 @@ fn normalize_semantic_changes(
 
     let x_origin = source_width.saturating_sub(geometry.text_width) / 2;
     let y_origin = source_height.saturating_sub(geometry.text_height) / 2;
-
     let mut output_frames_by_source = BTreeMap::<u64, Vec<u64>>::new();
+
     for clip in clips {
         for output_frame in clip.output_start_frame..clip.output_end_frame {
             let (source_frame, _) = mapped_source_frame(clip, output_frame);
@@ -906,6 +908,7 @@ fn normalize_semantic_changes(
             dirty_rows: state.ghostty_dirty_rows.clone(),
             evidence_level: "semantic_scheduled_for_frame".to_owned(),
         });
+
         return Ok(true);
     })?;
 
@@ -977,7 +980,6 @@ fn normalize_cursor_masks(
 
     let x_origin = source_width.saturating_sub(geometry.text_width) / 2;
     let y_origin = source_height.saturating_sub(geometry.text_height) / 2;
-
     let mut masks = Vec::new();
 
     for clip in clips {
@@ -1055,7 +1057,6 @@ pub(super) fn validate_transform_geometry(
     );
 
     let mut spatial_transform_seen = false;
-
     for transform in &edit.transforms {
         match transform {
             PixelTransform::CursorMask if spatial_transform_seen => {
@@ -1123,6 +1124,7 @@ pub(super) fn validate_transform_geometry(
 fn scaled_even_dimension(value: u16, numerator: u16, denominator: u16) -> Result<u16> {
     let scaled = u32::from(value).saturating_mul(u32::from(numerator)) / u32::from(denominator);
     let even = scaled / 2 * 2;
+
     if even == 0 || even > 8192 {
         return Err(plan_error(
             "zoomed presentation dimension must be an even value from 2 through 8192",
@@ -1140,6 +1142,7 @@ fn resolve_clip(
 ) -> Result<SourceRange> {
     let from = resolve_edit_selector(session, &clip.from, capture_start_ns, fps)?;
     let to = resolve_edit_selector(session, &clip.to, capture_start_ns, fps)?;
+
     return resolve_session_source_selection(session, Some(from), Some(to), None, None)?
         .ok_or_else(|| return plan_error("edit clip must have explicit endpoints"));
 }
@@ -1193,6 +1196,7 @@ fn resolve_edit_selector(
 
     let mut found = None;
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+
     while let Some(record) = cursor.next_record()? {
         if matches!(&record.event, Event::Marker { label, .. } if label == marker)
             && found.replace(record.monotonic_ns).is_some()

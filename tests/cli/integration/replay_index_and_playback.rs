@@ -22,7 +22,6 @@ fn index_replays_every_distinct_state_deterministically() {
 
     let event_log = EventLog::read(session.join("events.jsonl")).expect("valid event log");
     let manifest = read_manifest(&session).expect("session manifest");
-
     assert_eq!(
         (
             manifest.geometry.cols,
@@ -48,13 +47,11 @@ fn index_replays_every_distinct_state_deterministically() {
     let mut cast_lines = cast_text.lines();
     let cast_header: serde_json::Value =
         serde_json::from_str(cast_lines.next().expect("cast header")).expect("cast header JSON");
-
     assert_eq!(cast_header["version"], 2);
     assert!(cast_lines.next().is_some(), "cast should contain output");
 
     let first = replay(&event_log).expect("first replay");
     let second = replay(&event_log).expect("second replay");
-
     assert_eq!(first, second, "replay must be deterministic");
     assert!(first.states.iter().any(|state| return !state.presented));
     assert!(first.states.iter().any(|state| {
@@ -89,7 +86,6 @@ fn index_replays_every_distinct_state_deterministically() {
         &fs_err::read(presented_directory.join("manifest.json")).expect("presented manifest"),
     )
     .expect("presented manifest JSON");
-
     assert_eq!(
         presented_manifest.state_selection,
         StateSelection::Presented
@@ -104,7 +100,6 @@ fn index_replays_every_distinct_state_deterministically() {
         .lines()
         .map(|line| return serde_json::from_str::<StateRecord>(line).expect("presented state"))
         .collect::<Vec<_>>();
-
     assert!(presented_states.iter().all(|state| return state.presented));
     assert!(presented_states.iter().enumerate().all(|(index, state)| {
         return state.state_id == u64::try_from(index).unwrap_or(u64::MAX);
@@ -206,7 +201,6 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
     let event_log = EventLog::read(session.join("events.jsonl")).expect("valid event log");
     let range_start = output_timestamp_containing(&event_log, b"RANGE");
     let range_end = output_timestamp_containing(&event_log, b"AFTER");
-
     assert!(range_start < range_end, "fixture outputs must be separated");
 
     let source_range = SourceRange {
@@ -246,16 +240,17 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
         &fs_err::read(derived.join("manifest.json")).expect("range manifest"),
     )
     .expect("range manifest JSON");
-
     assert_eq!(manifest.source_range, Some(source_range));
     validate_json_file(
         "replay-manifest.schema.json",
         &derived.join("manifest.json"),
     );
+
     validate_json_lines_text(
         "state-record.schema.json",
         &read_zstd_text(&derived.join("states.jsonl.zst")),
     );
+
     validate_json_lines(
         "state-index-entry.schema.json",
         &derived.join("state-index.jsonl"),
@@ -265,7 +260,6 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
         .lines()
         .map(|line| return serde_json::from_str::<StateRecord>(line).expect("state JSON"))
         .collect::<Vec<_>>();
-
     assert!(!states.is_empty(), "range must include a baseline");
     assert_eq!(states[0].state_id, 0);
     assert_eq!(states[0].event_seq, None);
@@ -276,7 +270,6 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
     assert!(states.iter().any(|state| return !state.presented));
 
     let final_text = fs_err::read_to_string(derived.join("final.txt")).expect("range final text");
-
     assert!(final_text.contains("BEFORERANGE"));
     assert!(!final_text.contains("AFTER"));
 
@@ -443,11 +436,14 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
         "replay-manifest.schema.json",
         &derived.join("manifest.json"),
     );
+
     validate_json_lines_text("state-record.schema.json", &states);
+
     validate_json_lines(
         "state-index-entry.schema.json",
         &derived.join("state-index.jsonl"),
     );
+
     validate_json_lines_text(
         "semantic-replay-checkpoint.schema.json",
         &read_zstd_text(&derived.join("checkpoints.jsonl.zst")),
@@ -455,7 +451,6 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
 
     let event_log = fs_err::read_to_string(session.join("events.jsonl")).expect("event log");
     let mut event_lines = event_log.lines();
-
     validate_json_value(
         "event-log-header.schema.json",
         &serde_json::from_str(event_lines.next().expect("event header")).expect("header JSON"),
@@ -497,6 +492,7 @@ fn playback_does_not_echo_terminal_query_responses() {
     let clock = SessionClock::now().expect("session clock");
     let environment = EffectiveEnvironment::resolve(&EnvironmentSpec::default(), "xterm-ghostty")
         .expect("environment");
+
     let header = EventLogHeader::new(
         Uuid::now_v7(),
         "0000000000000000000000000000000000000000000000000000000000000000",
@@ -589,7 +585,6 @@ fn playback_does_not_echo_terminal_query_responses() {
     let error_file = temporary.path().join("playback-error.json");
     let geometry_file = temporary.path().join("geometry.json");
     let ready_file = temporary.path().join("ready");
-
     command.args([
         "playback",
         "--session",
@@ -616,8 +611,8 @@ fn playback_does_not_echo_terminal_query_responses() {
     let reader_thread = thread::spawn(move || {
         let mut output = Vec::new();
         let mut buffer = [0_u8; 128];
-        let mut observed_query = false;
 
+        let mut observed_query = false;
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => break,

@@ -41,6 +41,7 @@ fn render_diff_scene(
     let height = u32::from(before.rows.max(after.rows))
         .saturating_mul(CELL_HEIGHT)
         .saturating_add(HEADER);
+
     let width = before_width.saturating_add(after_width);
 
     let mut svg = format!(
@@ -86,6 +87,7 @@ fn render_diff_scene(
     }
 
     svg.push_str("</svg>\n");
+
     return Ok(svg.into_bytes());
 }
 
@@ -102,5 +104,6 @@ pub fn render_diff_png(
 ) -> Result<Vec<u8>> {
     validate_geometry(before.cols, before.rows, "before semantic state")?;
     validate_geometry(after.cols, after.rows, "after semantic state")?;
+
     return rasterize_svg(&render_diff_scene(before, after, difference, false)?);
 }

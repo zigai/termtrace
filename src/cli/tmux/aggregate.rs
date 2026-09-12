@@ -73,6 +73,7 @@ pub(in crate::cli) fn run_tmux_record(
         Some(root) => SessionRegistry::open(root).into_diagnostic()?,
         None => SessionRegistry::open_default().into_diagnostic()?,
     };
+
     let directory = registry
         .state_root()
         .join(TMUX_RECORDINGS_DIRECTORY)
@@ -177,6 +178,7 @@ pub(in crate::cli) fn run_tmux_record(
         manifest.composite_track.session = Some(ByteString::from(
             entry.session_path().as_os_str().as_bytes(),
         ));
+
         manifest.updated_unix_ns = unix_time_ns()?;
         push_manifest_event(
             &mut manifest,
@@ -275,6 +277,7 @@ pub(in crate::cli) fn run_tmux_events(
         let directory = path
             .parent()
             .ok_or_else(|| miette::miette!("tmux manifest has no parent"))?;
+
         let catalog = TmuxCatalog::read(directory, &manifest).into_diagnostic()?;
 
         for sequence in arguments.from_sequence.max(1)..=boundary.sequence {
@@ -428,9 +431,9 @@ pub(in crate::cli) fn run_tmux_stop(
         let directory = manifest_path
             .parent()
             .ok_or_else(|| miette::miette!("tmux manifest has no parent"))?;
+
         let catalog = TmuxCatalog::read(directory, &initial_manifest).into_diagnostic()?;
         let deadline = Instant::now() + Duration::from_millis(arguments.timeout_ms);
-
         let mut next = 0;
 
         loop {
@@ -480,7 +483,9 @@ pub(in crate::cli) fn run_tmux_stop(
                 }
 
                 drop(_manifest_lock);
+
                 thread::sleep(Duration::from_millis(20));
+
                 continue;
             }
         }
@@ -563,6 +568,7 @@ pub(in crate::cli) fn run_tmux_bundle(
 
 pub(super) fn coverage_from_options(client: &TmuxClient) -> Result<TmuxCoverageMode> {
     let text = option_text(client, OPTION_COVERAGE)?;
+
     return <TmuxCoverageMode as clap::ValueEnum>::from_str(&text, true)
         .map_err(|_| return miette::miette!("unsupported tmux coverage mode `{text}`"));
 }
@@ -571,6 +577,7 @@ pub(super) fn refresh_configured_aggregate_manifest(client: &TmuxClient) -> Resu
     let Some(path) = option_path(client, OPTION_AGGREGATE_MANIFEST)? else {
         return Ok(());
     };
+
     return refresh_aggregate_manifest(&path, client);
 }
 
@@ -641,6 +648,7 @@ fn refresh_track_lifecycle(path: &Path, manifest: &mut TmuxRecordingManifest) ->
     let directory = path
         .parent()
         .ok_or_else(|| miette::miette!("tmux manifest has no parent"))?;
+
     let catalog = TmuxCatalog::read(directory, manifest).into_diagnostic()?;
     let mut next_sequence = 0;
     let mut remaining = catalog.summary().unfinished_tracks;
@@ -658,9 +666,9 @@ fn refresh_track_lifecycle(path: &Path, manifest: &mut TmuxRecordingManifest) ->
                 .ok_or_else(|| miette::miette!("tmux track sequence overflow"))?;
 
             let session = PathBuf::from(OsString::from_vec(entry.track.session.into_bytes()));
+
             if session.join("completion.json").is_file() {
                 let completion = read_completion(&session).into_diagnostic()?;
-
                 if completion.session_id != entry.track.session_id {
                     return Err(miette::miette!("tmux track completion identity changed"));
                 }
@@ -724,7 +732,6 @@ fn observed_tmux_server_identity(client: &TmuxClient) -> Result<ObservedTmuxServ
             socket.display()
         ));
     }
-
     return Ok(ObservedTmuxServerIdentity {
         pid,
         socket_path: ByteString::from(socket_bytes.as_slice()),
@@ -806,6 +813,7 @@ fn refresh_aggregate_manifest(path: &Path, client: &TmuxClient) -> Result<()> {
         .cloned()
         .map(|pane| return (pane.pane_id.clone(), pane))
         .collect::<BTreeMap<_, _>>();
+
     let current = panes
         .iter()
         .map(|pane| return pane.pane_id.clone())
@@ -863,7 +871,6 @@ fn refresh_aggregate_manifest(path: &Path, client: &TmuxClient) -> Result<()> {
     let observed_unix_ns = unix_time_ns()?;
     let report = tmux_status_report(client)?;
     let mut gaps = permanent_coverage_gaps(observed_unix_ns);
-
     gaps.extend(report.panes.into_iter().filter_map(|pane| {
         if !pane.selected || pane.recorded {
             return None;
@@ -877,7 +884,6 @@ fn refresh_aggregate_manifest(path: &Path, client: &TmuxClient) -> Result<()> {
             resolved_unix_ns: None,
         });
     }));
-
     merge_coverage_gaps(&mut manifest, &gaps, observed_unix_ns)?;
     manifest.panes = panes;
     manifest
@@ -907,11 +913,11 @@ fn retain_pane_track(
     let directory = manifest_path
         .parent()
         .ok_or_else(|| miette::miette!("tmux manifest has no parent"))?;
+
     let catalog = TmuxCatalog::read(directory, manifest).into_diagnostic()?;
 
     if let Some(existing) = catalog.track(canonical.session_id).into_diagnostic()? {
         let existing = existing.track;
-
         if existing.pane_id != track.pane_id || existing.session != track.session {
             return Err(miette::miette!(
                 "tmux recording identity was rebound to another pane or path"
@@ -956,7 +962,6 @@ fn tmux_pane_snapshots(client: &TmuxClient) -> Result<Vec<TmuxPaneSnapshot>> {
     );
 
     let output = client.output(["list-panes", "-a", "-F", format.as_str()])?;
-
     let mut panes = Vec::new();
 
     for line in output
@@ -966,6 +971,7 @@ fn tmux_pane_snapshots(client: &TmuxClient) -> Result<Vec<TmuxPaneSnapshot>> {
         let fields = line
             .splitn(12, |byte| return *byte == b'\t')
             .collect::<Vec<_>>();
+
         let [session_id, session_name, window_id, window_index, layout, window_active, zoomed, pane_id, pane_active, copy_mode, pane_mode, recording_session] =
             fields.as_slice()
         else {
@@ -977,7 +983,6 @@ fn tmux_pane_snapshots(client: &TmuxClient) -> Result<Vec<TmuxPaneSnapshot>> {
         let text = |field: &[u8]| -> Result<String> {
             return str::from_utf8(field).map(str::to_owned).into_diagnostic();
         };
-
         panes.push(TmuxPaneSnapshot {
             session_id: text(session_id)?,
             session_name: text(session_name)?,
@@ -1059,6 +1064,7 @@ fn append_container_transitions(
         .iter()
         .map(|pane| return pane.session_id.clone())
         .collect::<BTreeSet<_>>();
+
     let new_sessions = panes
         .iter()
         .map(|pane| return pane.session_id.clone())
@@ -1069,6 +1075,7 @@ fn append_container_transitions(
         .iter()
         .map(|pane| return pane.window_id.clone())
         .collect::<BTreeSet<_>>();
+
     let new_windows = panes
         .iter()
         .map(|pane| return pane.window_id.clone())
@@ -1143,7 +1150,6 @@ fn merge_coverage_gaps(
         let existing = manifest.coverage_gaps.iter_mut().find(|existing| {
             return existing.resolved_unix_ns.is_none() && same_coverage_gap(existing, gap);
         });
-
         if let Some(existing) = existing {
             if existing.first_observed_unix_ns == 0 {
                 existing.first_observed_unix_ns = observed_unix_ns;
@@ -1351,13 +1357,16 @@ fn lock_tmux_manifest(path: &Path) -> Result<Flock<File>> {
     let directory = path
         .parent()
         .ok_or_else(|| return miette::miette!("tmux manifest has no parent directory"))?;
+
     if !directory.is_dir() {
-        let name = directory
-            .file_name()
-            .map(|name| name.to_string_lossy())
-            .unwrap_or_else(|| "unknown".into());
+        let name = directory.file_name().map_or_else(
+            || return "unknown".into(),
+            |name| return name.to_string_lossy(),
+        );
+
         return Err(miette::miette!("tmux recording `{name}` was not found"));
     }
+
     let lock_path = directory.join(".manifest.lock");
     let file = OpenOptions::new()
         .read(true)
@@ -1367,8 +1376,8 @@ fn lock_tmux_manifest(path: &Path) -> Result<Flock<File>> {
         .custom_flags(O_NOFOLLOW)
         .open(&lock_path)
         .into_diagnostic()?;
-    let metadata = file.metadata().into_diagnostic()?;
 
+    let metadata = file.metadata().into_diagnostic()?;
     if metadata.mode() & S_IFMT != S_IFREG || metadata.uid() != geteuid().as_raw() {
         return Err(miette::miette!(
             "tmux manifest lock must be a regular file owned by the current user"
@@ -1394,6 +1403,7 @@ fn write_tmux_manifest(path: &Path, manifest: &mut TmuxRecordingManifest) -> Res
 
     sync_directory(directory).into_diagnostic()?;
     *manifest = snapshot;
+
     return Ok(());
 }
 
@@ -1401,14 +1411,17 @@ fn read_tmux_manifest(path: &Path) -> Result<TmuxRecordingManifest> {
     if !path.is_file() {
         let name = path
             .parent()
-            .and_then(|parent| parent.file_name())
-            .map(|name| name.to_string_lossy())
-            .unwrap_or_else(|| "unknown".into());
+            .and_then(|parent| return parent.file_name())
+            .map_or_else(
+                || return "unknown".into(),
+                |name| return name.to_string_lossy(),
+            );
+
         return Err(miette::miette!("tmux recording `{name}` was not found"));
     }
+
     let bytes = fs_err::read(path).into_diagnostic()?;
     let manifest: TmuxRecordingManifest = serde_json::from_slice(&bytes).into_diagnostic()?;
-
     if manifest.format != TMUX_RECORDING_FORMAT || manifest.version != TMUX_RECORDING_VERSION {
         return Err(miette::miette!(
             "unsupported aggregate tmux recording manifest"

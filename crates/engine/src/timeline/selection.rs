@@ -30,7 +30,6 @@ pub fn resolve_source_range(
 
     let start = start.unwrap_or(0);
     let end = end.unwrap_or(source_end);
-
     if start >= end {
         return Err(range_error(format!(
             "source range must be non-empty with FROM < TO, got {start}..{end}"
@@ -86,6 +85,7 @@ pub fn resolve_source_selection(
         Some(label) => Some(resolve_marker(log, label)?),
         None => start,
     };
+
     let end = match to_marker {
         Some(label) => Some(resolve_marker(log, label)?),
         None => end,
@@ -240,6 +240,7 @@ fn resolve_cursor_source_selection(
         .map(|label| return resolve_found_marker(label, from))
         .transpose()?
         .or(start);
+
     let end = to_marker
         .map(|label| return resolve_found_marker(label, to))
         .transpose()?

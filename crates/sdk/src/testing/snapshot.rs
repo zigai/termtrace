@@ -98,6 +98,7 @@ pub fn assert_snapshot_file(
         })?;
 
         sync_directory(parent).map_err(Error::from)?;
+
         return Ok(());
     }
 
@@ -111,7 +112,6 @@ pub fn assert_snapshot_file(
     }
 
     let (mut file, byte_count) = open_regular_file_nofollow(path)?;
-
     if byte_count > MAX_SNAPSHOT_BYTES {
         return Err(TerminalAssertionError::Operation(testing_error(
             "reviewed snapshot exceeds 4 MiB",
@@ -168,6 +168,7 @@ fn snapshot_mismatch(
 
 pub(super) fn bounded_text(value: &str) -> String {
     let end = value.floor_char_boundary(MAX_SECONDARY_FAILURE_CHARS);
+
     return value.get(..end).unwrap_or_default().to_owned();
 }
 

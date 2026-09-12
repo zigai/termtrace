@@ -29,6 +29,7 @@ pub fn inherited_geometry(
         .checked_div(size.ws_col)
         .filter(|value| return *value > 0)
         .unwrap_or(fallback_cell_width);
+
     let cell_height = size
         .ws_ypixel
         .checked_div(size.ws_row)
@@ -45,6 +46,7 @@ pub fn inherited_geometry(
         .ws_col
         .checked_mul(cell_width)
         .ok_or_else(|| return geometry_error("inherited terminal width overflow"))?;
+
     let pixel_height = size
         .ws_row
         .checked_mul(cell_height)

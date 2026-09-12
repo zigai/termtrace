@@ -29,8 +29,8 @@ fn missing_native_capture_guides_capture_or_semantic_fallback() {
         Path::new("/evidence/session"),
         Path::new("/evidence/session/visual/manifest.json"),
     );
-    let message = error.to_string();
 
+    let message = error.to_string();
     assert!(message.contains("/evidence/session/visual/manifest.json"));
     assert!(message.contains("termtrace artifact capture --session SESSION"));
     assert!(message.contains("--require native-video --explain"));
@@ -141,7 +141,6 @@ fn presentation_map_distinguishes_retimed_and_hold_frames() {
             return serde_json::from_str::<PresentationMapEntry>(line).expect("map entry");
         })
         .collect::<Vec<_>>();
-
     assert_eq!(entries.len(), 8);
     assert_eq!(entries[5].source_frame, 20);
     assert_eq!(entries[6].operation, "hold");
@@ -192,7 +191,6 @@ fn failed_export_removes_its_staging_directory() {
             return name.as_encoded_bytes().starts_with(b".presentation-");
         })
         .collect::<Vec<_>>();
-
     assert!(
         staging.is_empty(),
         "failed export leaked staging: {staging:?}"
@@ -300,9 +298,9 @@ fn exports_multi_clip_h264_presentation_atomically() {
 
     let manifest_bytes =
         fs_err::read(outcome.directory.join("manifest.json")).expect("read manifest");
+
     let manifest: PresentationManifest =
         serde_json::from_slice(&manifest_bytes).expect("parse manifest");
-
     assert_eq!(manifest.plan.output_frame_count, plan.output_frame_count);
     assert!(!manifest.output_video_hash.is_empty());
     assert!(!manifest.members.is_empty());
@@ -343,7 +341,6 @@ fn exports_multi_clip_h264_presentation_atomically() {
         },
     )
     .expect("render preview");
-
     assert!(preview_outcome.contact_sheet.is_file());
     assert!(preview_outcome.video.is_file());
     assert!(preview_outcome.directory.join("manifest.json").is_file());
@@ -425,7 +422,6 @@ fn semantic_change_filters_retain_state_provenance_and_hold() {
         .stdout
         .chunks_exact(80 * 40 * 3)
         .collect::<Vec<_>>();
-
     assert_eq!(frames.len(), 6);
 
     for (index, frame) in frames.iter().enumerate() {
@@ -464,12 +460,10 @@ fn transform_geometry_is_ordered_bounded_and_even() {
         ],
         ..EditPlan::default()
     };
-
     assert_eq!(
         validate_transform_geometry(&edit, 80, 40, false).expect("valid transforms"),
         (64, 48)
     );
-
     let invalid = EditPlan {
         transforms: vec![
             PixelTransform::Crop {
@@ -482,7 +476,6 @@ fn transform_geometry_is_ordered_bounded_and_even() {
         ],
         ..EditPlan::default()
     };
-
     assert!(validate_transform_geometry(&invalid, 80, 40, false).is_err());
 }
 
@@ -616,7 +609,6 @@ fn cursor_masks_coalesce_only_consecutive_identical_regions() {
             evidence_level: "semantic_scheduled_for_frame".to_owned(),
         };
     };
-
     assert_eq!(
         cursor_mask_ranges(&[make(0, 4), make(1, 4), make(2, 8)]),
         vec![
@@ -674,13 +666,13 @@ fn preview_selection_is_bounded_deterministic_and_change_aware() {
         },
     )
     .expect("select changes");
-
     assert_eq!(selected, vec![3, 4, 9]);
 
     let dense = PresentationPlan {
         output_frame_count: u64::MAX,
         ..PresentationPlan::default()
     };
+
     let options = PreviewOptions {
         max_frames: 3,
         ..PreviewOptions::default()
@@ -735,9 +727,11 @@ fn validate_ass_resource_accepts_valid_file_and_rejects_invalid() {
         "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Hello world\n",
     )
     .expect("write valid ASS");
+
     assert!(validate_ass_resource(&valid_ass).is_ok());
 
     let invalid_ass = temporary.path().join("invalid.ass");
     fs_err::write(&invalid_ass, "plain text without sections").expect("write invalid ASS");
+
     assert!(validate_ass_resource(&invalid_ass).is_err());
 }

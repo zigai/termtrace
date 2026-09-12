@@ -55,6 +55,7 @@ where
     })?;
 
     let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
+
     return serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
         return Error::InvalidJson {
             path,

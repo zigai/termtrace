@@ -71,7 +71,6 @@ pub(in crate::cli) fn run_output(
     let event_count = completion.event_count;
     let from_event = arguments.from_event_seq.unwrap_or(0);
     let to_event = arguments.to_event_seq.unwrap_or(event_count);
-
     if from_event > to_event || to_event > event_count {
         return Err(miette::miette!(
             "output event range must satisfy 0 <= FROM <= TO <= {event_count}"
@@ -89,7 +88,6 @@ pub(in crate::cli) fn run_output(
 
     {
         let mut writer = BufWriter::new(&mut staged);
-
         while let Some(record) = cursor.next_record().into_diagnostic()? {
             if record.seq < from_event
                 || record.seq >= to_event
@@ -106,6 +104,7 @@ pub(in crate::cli) fn run_output(
                 let stripped;
                 let bytes = if arguments.strip_controls {
                     stripped = stripper.feed(data.as_bytes());
+
                     stripped.as_slice()
                 } else {
                     data.as_bytes()
@@ -169,6 +168,7 @@ pub(in crate::cli) fn run_output(
     staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
 
     let mut output = response_output(response);
+
     match io::copy(&mut staged, &mut output).and_then(|_| return output.flush()) {
         Ok(()) => return Ok(ExitCode::SUCCESS),
         Err(error) if error.kind() == io::ErrorKind::BrokenPipe => return Ok(ExitCode::SUCCESS),
@@ -195,10 +195,12 @@ fn follow_output(
                 let stripped;
                 let bytes = if strip_controls {
                     stripped = stripper.feed(data.as_bytes());
+
                     stripped.as_slice()
                 } else {
                     data.as_bytes()
                 };
+
                 return write_follow_stdout(response, bytes);
             }
 
@@ -261,7 +263,6 @@ pub(in crate::cli) fn run_events(
     let event_count = completion.event_count;
     let from_event = arguments.from_event_seq.unwrap_or(0);
     let to_event = arguments.to_event_seq.unwrap_or(event_count);
-
     if from_event > to_event || to_event > event_count {
         return Err(miette::miette!(
             "event range must satisfy 0 <= FROM <= TO <= {event_count}"
@@ -276,7 +277,6 @@ pub(in crate::cli) fn run_events(
 
     {
         let mut writer = BufWriter::new(&mut staged);
-
         while let Some(record) = cursor.next_record().into_diagnostic()? {
             let kind = event_type(&record.event);
 
@@ -318,6 +318,7 @@ pub(in crate::cli) fn run_events(
     let _pending = cursor.finish().into_diagnostic()?;
 
     staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
+
     for line in BufReader::new(&mut staged).lines() {
         let value: EventProjection =
             serde_json::from_str(&line.into_diagnostic()?).into_diagnostic()?;
@@ -326,7 +327,6 @@ pub(in crate::cli) fn run_events(
 
     let start = arguments.page.offset.min(total);
     let end = start.saturating_add(returned);
-
     if start != 0 || end < total {
         write_json_line(
             response,
@@ -407,6 +407,7 @@ fn follow_records(
                     }
 
                     thread::sleep(Duration::from_millis(20));
+
                     continue;
                 }
             };
@@ -441,7 +442,6 @@ fn follow_records(
 
             (durable.next_event_seq, Some(durable), None)
         };
-
         if next_event_seq > available {
             return Err(miette::miette!(
                 "event resume cursor {next_event_seq} exceeds durable event count {available}"
@@ -457,7 +457,6 @@ fn follow_records(
 
         {
             let mut staged_writer = BufWriter::new(&mut staged);
-
             while cursor.next_event_seq() < available {
                 let record = cursor.next_record().into_diagnostic()?.ok_or_else(|| {
                     return miette::miette!("durable event prefix is incomplete");
@@ -491,10 +490,8 @@ fn follow_records(
         staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
 
         let mut staged_reader = BufReader::new(&mut staged);
-
         loop {
             line.clear();
-
             if staged_reader
                 .read_until(b'\n', &mut line)
                 .into_diagnostic()?
@@ -504,7 +501,6 @@ fn follow_records(
             }
 
             let record: EventRecord = serde_json::from_slice(&line).into_diagnostic()?;
-
             if !emit(response, record)? {
                 return Ok(ExitCode::SUCCESS);
             }

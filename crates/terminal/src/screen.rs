@@ -39,6 +39,7 @@ pub fn semantic_state_hash(state: &SemanticState) -> Result<String, ScreenFrameE
     for row in &state.grid {
         hash.update(hash_semantic_row(row)?.as_bytes());
     }
+
     return Ok(hash.finalize().to_hex().to_string());
 }
 
@@ -54,6 +55,7 @@ pub fn hash_semantic_row(row: &RowState) -> Result<blake3::Hash, ScreenFrameErro
     let mut hash = blake3::Hasher::new();
     serde_json::to_writer(&mut hash, &normalized)
         .map_err(|_| return ScreenFrameError::Serialization)?;
+
     return Ok(hash.finalize());
 }
 
@@ -68,6 +70,7 @@ pub fn semantic_state_hash_from_row_hashes(
     for row_hash in row_hashes {
         hash.update(row_hash.as_bytes());
     }
+
     return Ok(hash.finalize().to_hex().to_string());
 }
 
@@ -88,6 +91,7 @@ fn semantic_state_metadata_hasher(
     hash.update(SEMANTIC_STATE_HASH_DOMAIN);
     serde_json::to_writer(&mut hash, &metadata)
         .map_err(|_| return ScreenFrameError::Serialization)?;
+
     return Ok(hash);
 }
 
@@ -96,7 +100,6 @@ fn semantic_state_metadata_hasher(
 #[must_use]
 pub fn semantic_viewport_text(state: &SemanticState) -> String {
     let mut output = String::new();
-
     for (index, row) in state.grid.iter().enumerate() {
         for cell in &row.cells {
             if cell.grapheme.is_empty() {
@@ -168,7 +171,6 @@ pub fn validate_screen_region(
     }
 
     let cell_count = u32::from(region.width()) * u32::from(region.height());
-
     if cell_count > MAX_SCREEN_FRAME_CELLS {
         return Err(ScreenFrameError::ResourceLimit {
             limit: ScreenFrameLimitKind::CellCount,
@@ -291,7 +293,6 @@ fn validate_projection_clone_bytes(
     detail: FrameDetail,
 ) -> Result<(), ScreenFrameError> {
     let mut requested = 0u64;
-
     for row in selected_rows(state, region) {
         for cell in selected_cells(row.cells.as_slice(), region) {
             let grapheme_bytes = json_string_content_bytes(&cell.grapheme)?;
@@ -409,6 +410,7 @@ fn project_data(
 )]
 fn selected_rows(state: &SemanticState, region: ScreenRegion) -> impl Iterator<Item = &RowState> {
     let rows = &state.grid[usize::from(region.top)..usize::from(region.bottom)];
+
     return rows.iter();
 }
 
@@ -448,12 +450,12 @@ fn convenience_text(cells: &[CellState]) -> String {
             text.push(' ');
         }
     }
+
     return text;
 }
 
 fn project_spans(cells: &[CellState]) -> Vec<ScreenSpan> {
     let mut spans: Vec<ScreenSpan> = Vec::new();
-
     for cell in cells {
         let cell_appearance = appearance(cell);
 
@@ -473,7 +475,6 @@ fn project_spans(cells: &[CellState]) -> Vec<ScreenSpan> {
 
         let mut text = String::new();
         append_convenience_cell(&mut text, cell);
-
         spans.push(ScreenSpan {
             start_column: cell.column,
             end_column: cell.column.saturating_add(1),
@@ -527,6 +528,7 @@ impl Write for CountingHashWriter {
             .ok_or_else(|| return io::Error::other("screen frame byte count overflow"))?;
 
         self.hasher.update(buf);
+
         return Ok(buf.len());
     }
 
@@ -562,6 +564,7 @@ pub fn screen_frame_hash_and_bytes(frame: &ScreenFrame) -> Result<(String, u64),
         .map_err(|_| return ScreenFrameError::Serialization)?;
     let hash = writer.hasher.finalize().to_hex().to_string();
     let total_bytes = writer.count.saturating_add(80);
+
     return Ok((hash, total_bytes));
 }
 
@@ -578,6 +581,7 @@ pub fn normalize_screen_frame_text(
     let ScreenFrameData::Text { rows } = &frame.data else {
         return Err(ScreenFrameError::Serialization);
     };
+
     return normalized_value(frame, FrameDetail::Text, rows, options);
 }
 
@@ -589,6 +593,7 @@ pub fn normalize_screen_frame_spans(
     let ScreenFrameData::Spans { rows } = &frame.data else {
         return Err(ScreenFrameError::Serialization);
     };
+
     return normalized_value(frame, FrameDetail::Spans, rows, options);
 }
 
@@ -600,6 +605,7 @@ pub fn normalize_screen_frame_cells(
     let ScreenFrameData::Cells { rows } = &frame.data else {
         return Err(ScreenFrameError::Serialization);
     };
+
     return normalized_value(frame, FrameDetail::Cells, rows, options);
 }
 

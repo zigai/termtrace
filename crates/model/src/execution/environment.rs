@@ -90,7 +90,6 @@ impl EnvironmentSpec {
 
         for name in self.set.keys().chain(&self.copy).chain(&self.unset) {
             validate_name(name)?;
-
             if reserved_name(name) {
                 return Err(ModelValidationError::ControlledEnvironmentVariable {
                     name: name.clone(),
@@ -152,7 +151,6 @@ impl ChildEnvironmentPolicy {
             .chain(&self.unset_names)
         {
             validate_name(name)?;
-
             if reserved_name(name) {
                 return Err(ModelValidationError::ReservedEnvironmentVariable {
                     name: name.clone(),
@@ -229,6 +227,7 @@ mod tests {
             set: BTreeMap::from([("TERM".to_owned(), ByteString::from(b"bad".as_slice()))]),
             ..EnvironmentSpec::default()
         };
+
         assert!(reserved.validate().is_err());
 
         let conflict = EnvironmentSpec {
@@ -236,6 +235,7 @@ mod tests {
             unset: BTreeSet::from(["HOME".to_owned()]),
             ..EnvironmentSpec::default()
         };
+
         assert!(conflict.validate().is_err());
 
         let mut policy = ChildEnvironmentPolicy {
@@ -243,6 +243,7 @@ mod tests {
             ..ChildEnvironmentPolicy::default()
         };
         policy.explicit_names.insert("TERM".to_owned());
+
         assert!(policy.validate().is_err());
     }
 }

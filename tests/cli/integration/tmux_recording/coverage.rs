@@ -18,7 +18,6 @@ fn tmux_default_pane_is_a_complete_termtrace_recording() {
         ])
         .status()
         .expect("set manual tmux window size");
-
     assert!(manual_size.success(), "tmux window size mode was not set");
 
     let resized = server
@@ -26,7 +25,6 @@ fn tmux_default_pane_is_a_complete_termtrace_recording() {
         .args(["resize-window", "-t", "recorded:0", "-x", "100", "-y", "30"])
         .status()
         .expect("resize tmux window");
-
     assert!(resized.success(), "tmux window was not resized");
 
     wait_for_recorded_resize(&session, 100, 30);
@@ -42,7 +40,6 @@ fn tmux_default_pane_is_a_complete_termtrace_recording() {
         ])
         .output()
         .expect("send pane input");
-
     assert!(
         sent.status.success(),
         "tmux input was not accepted: {}",
@@ -111,17 +108,16 @@ fn tmux_strict_mode_blocks_creation_and_respawn_bypasses() {
     let server = PrivateTmux::new_with_config_args(&temporary, "/bin/sh", &setup_args);
     let bypass = tmux_new_window(&server, &["/bin/sleep", "30"]);
     server.wait_for_pane_absent(&bypass);
-
     let configured_executable = server
         .command()
         .args(["show-options", "-gqv", "@termtrace-executable"])
         .output()
         .expect("query configured Termtrace executable");
-
     assert!(configured_executable.status.success());
 
     let configured_executable =
         String::from_utf8(trim_newline(configured_executable.stdout)).expect("UTF-8 executable");
+
     let explicit = tmux_new_window(
         &server,
         &[
@@ -145,10 +141,10 @@ fn tmux_strict_mode_blocks_creation_and_respawn_bypasses() {
         ])
         .status()
         .expect("drive explicit wrapped pane");
-
     assert!(sent.success(), "explicit wrapped pane did not accept input");
 
     wait_for_path(&explicit_recording.join("completion.json"));
+
     assert_eq!(
         read_manifest(&explicit_recording)
             .expect("explicit wrapper manifest")
@@ -172,7 +168,6 @@ fn tmux_strict_mode_blocks_creation_and_respawn_bypasses() {
         ])
         .status()
         .expect("respawn pane");
-
     assert!(respawned.success(), "tmux did not respawn the pane");
 
     server.wait_for_pane_absent(&wrapped);
@@ -180,6 +175,7 @@ fn tmux_strict_mode_blocks_creation_and_respawn_bypasses() {
     wait_for_path(&recording.join("completion.json"));
     let log = EventLog::read(recording.join("events.jsonl")).expect("interrupted pane log");
     validate_completed_log(&recording, &log).expect("respawn closed canonical evidence");
+
     assert!(log.events.iter().any(|record| {
         return matches!(
             &record.event,
@@ -218,6 +214,7 @@ fn tmux_default_warn_coverage_never_terminates_uncovered_panes() {
 
     let recorded = tmux_new_window(&server, &[]);
     let recording = server.pane_session(&recorded);
+
     let launch = format!("exec /usr/bin/python3 -c \"{}\"", workflow.program);
 
     let typed = server
@@ -225,7 +222,6 @@ fn tmux_default_warn_coverage_never_terminates_uncovered_panes() {
         .args(["send-keys", "-t", recorded.as_str(), "-l", launch.as_str()])
         .status()
         .expect("type long tmux pane command");
-
     assert!(typed.success());
 
     let entered = server
@@ -233,7 +229,6 @@ fn tmux_default_warn_coverage_never_terminates_uncovered_panes() {
         .args(["send-keys", "-t", recorded.as_str(), "Enter"])
         .status()
         .expect("launch long tmux pane command");
-
     assert!(entered.success());
 
     wait_for_output(
@@ -248,7 +243,6 @@ fn tmux_default_warn_coverage_never_terminates_uncovered_panes() {
         .args(["kill-pane", "-t", recorded.as_str()])
         .status()
         .expect("close long tmux pane");
-
     assert!(killed.success());
 
     wait_for_completion(&recording, Duration::from_secs(30))
