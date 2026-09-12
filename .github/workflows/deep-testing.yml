@@ -98,12 +98,13 @@ jobs:
         run: cargo install cargo-fuzz --version 0.13.2 --locked
       - name: Provision fuzz runtime
         run: scripts/ci-run.sh setup scripts/ci-setup.sh core
-      - name: Run bounded fuzz campaigns
+      - name: Run fuzz campaigns and replay native VT seeds
         run: |
           scripts/ci-run.sh fuzz-output cargo fuzz run output_projection fuzz/corpus/output_projection -- -max_total_time=60 -timeout=5 -max_len=4096
           scripts/ci-run.sh fuzz-control cargo fuzz run control_protocol fuzz/corpus/control_protocol -- -max_total_time=60 -timeout=5 -max_len=16384
           scripts/ci-run.sh fuzz-events cargo fuzz run event_log fuzz/corpus/event_log -- -max_total_time=60 -timeout=5 -max_len=262144
           scripts/ci-run.sh fuzz-bundle cargo fuzz run bundle_archive fuzz/corpus/bundle_archive -- -max_total_time=60 -timeout=5 -max_len=262144
+          scripts/ci-run.sh fuzz-vt cargo fuzz run ghostty_vt fuzz/corpus/ghostty_vt -- -runs=0 -timeout=5 -max_len=4096
       - name: Upload fuzz failures
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -152,6 +153,7 @@ jobs:
     env:
       ASAN_OPTIONS: detect_leaks=1
       RUSTFLAGS: -Zsanitizer=address
+      TERMTRACE_SANITIZE: address
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@46511b1c83438f0dd37c02d843619ece5a4abb5b # 1.97.1
@@ -162,6 +164,8 @@ jobs:
         with:
           shared-key: deep-asan
       - name: Provision sanitizer runtime
+        env:
+          TERMTRACE_SANITIZE: address
         run: scripts/ci-run.sh setup scripts/ci-setup.sh core
       - name: Run address sanitizer over the terminal boundary
         run: scripts/ci-run.sh sanitizer cargo test --locked -Zbuild-std --target x86_64-unknown-linux-gnu -p termtrace-terminal --lib
@@ -180,16 +184,22 @@ jobs:
       inputs.suite == 'all' ||
       inputs.suite == 'concurrency-model'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      RUSTFLAGS: -Zsanitizer=thread
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@46511b1c83438f0dd37c02d843619ece5a4abb5b # 1.97.1
+        with:
+          toolchain: nightly-2026-08-25
+          components: rust-src
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: deep-concurrency-model
       - name: Provision concurrency runtime
         run: scripts/ci-run.sh setup scripts/ci-setup.sh core
-      - run: scripts/ci-run.sh concurrency cargo test --locked -p termtrace-engine connection_limiter
+      - name: Run thread sanitizer over concurrency paths
+        run: scripts/ci-run.sh concurrency cargo test --locked -Zbuild-std --target x86_64-unknown-linux-gnu -p termtrace-engine --lib -- connection_limiter reservation_excludes control_server_accepts_a_second_request runtime_workers parallel_resolution
       - name: Upload concurrency failure evidence
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -221,7 +231,13 @@ jobs:
       - name: Generate diagnostic coverage artifact
         run: |
           mkdir -p coverage
-          scripts/ci-run.sh coverage cargo llvm-cov --locked --workspace --lib --bins --lcov --output-path coverage/lcov.info
+          scripts/ci-run.sh coverage cargo llvm-cov --locked --workspace --lib --bins --test cli --no-clean --lcov --output-path coverage/lcov.info
+      - name: Verify coverage baseline threshold
+        run: |
+          scripts/ci-run.sh coverage-summary cargo llvm-cov report
+          scripts/ci-run.sh coverage-baseline cargo llvm-cov report --fail-under-lines 70 || {
+            echo "::warning::Coverage is below advisory baseline threshold of 70%"
+          }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -249,8 +265,8 @@ jobs:
         run: cargo install cargo-mutants --version 27.1.0 --locked
       - name: Provision mutation runtime
         run: scripts/ci-run.sh setup scripts/ci-setup.sh core
-      - name: Mutate the streaming control-stripper boundary
-        run: scripts/ci-run.sh mutation cargo mutants --cargo-arg=--locked -p termtrace-terminal -f crates/terminal/src/output_projection.rs --timeout 60 --jobs 2
+      - name: Mutate the streaming control-stripper and screen boundary
+        run: scripts/ci-run.sh mutation cargo mutants --cargo-arg=--locked -p termtrace-terminal -f crates/terminal/src/output_projection.rs -f crates/terminal/src/screen.rs --timeout 60 --jobs 2
       - name: Upload mutation diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

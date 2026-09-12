@@ -17,7 +17,7 @@ bun run --cwd packages/typescript test
 node --check packages/typescript/bin/termtrace.js
 
 uv run --project packages/python --locked --group dev \
-    pytest -q packages/python/tests
+    pytest -q packages/python/tests benchmarks/test_acceptance.py
 uv run --project packages/python --locked --group dev \
     mypy packages/python/termtrace packages/python/tests
 uv run --project packages/python --locked --group dev \

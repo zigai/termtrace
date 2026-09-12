@@ -52,12 +52,25 @@ fi
 
 cd "$ghostty"
 
+optimize_mode="ReleaseFast"
+if [[ "${TERMTRACE_SANITIZE:-}" == "address" || "${TERMTRACE_ZIG_SANITIZE:-}" == "address" ]]; then
+    optimize_mode="ReleaseSafe"
+fi
+if [[ -n "${TERMTRACE_ZIG_OPTIMIZE:-}" ]]; then
+    optimize_mode="${TERMTRACE_ZIG_OPTIMIZE}"
+fi
+
 target_args=()
 if [[ -n "${TERMTRACE_ZIG_TARGET:-}" ]]; then
     target_args+=("-Dtarget=${TERMTRACE_ZIG_TARGET}")
 fi
 
-"$zig" build -Demit-lib-vt=true -Doptimize=ReleaseFast "${target_args[@]}"
+extra_args=()
+if [[ -n "${TERMTRACE_ZIG_EXTRA_ARGS:-}" ]]; then
+    read -r -a extra_args <<<"${TERMTRACE_ZIG_EXTRA_ARGS}"
+fi
+
+"$zig" build -Demit-lib-vt=true "-Doptimize=${optimize_mode}" "${target_args[@]}" "${extra_args[@]}"
 
 test -f zig-out/lib/libghostty-vt.a
 test -f zig-out/include/ghostty/vt.h
