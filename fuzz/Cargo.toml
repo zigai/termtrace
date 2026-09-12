@@ -43,5 +43,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "ghostty_vt"
+path = "fuzz_targets/ghostty_vt.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 members = ["."]
