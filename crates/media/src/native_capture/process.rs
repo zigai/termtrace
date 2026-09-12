@@ -50,6 +50,7 @@ impl ProbeOutput {
     fn drain(&mut self, name: &str) -> Result<()> {
         drain_pipe(&mut self.stdout, &mut self.stdout_bytes, 1_048_576, name)?;
         drain_pipe(&mut self.stderr, &mut self.stderr_bytes, 65_536, name)?;
+
         return Ok(());
     }
 }
@@ -111,6 +112,7 @@ pub(super) fn probe_output_with_check(
                 .output
                 .take()
                 .ok_or_else(|| return external_error(name, "probe output pipes are unavailable"))?;
+
             return Ok(output.stdout_bytes);
         }
 
@@ -316,6 +318,7 @@ pub(super) fn owned_command(helper: &Path, program: &str) -> Result<Command> {
         "--",
         program,
     ]);
+
     return Ok(command);
 }
 
@@ -422,6 +425,7 @@ impl ManagedChild {
         managed.group = Some(Pid::from_raw(
             i32::try_from(child.id()).map_err(|error| return external_error(name, error))?,
         ));
+
         return Ok(managed);
     }
 
@@ -446,6 +450,7 @@ impl ManagedChild {
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
+
                 return Err(external_error(name, error));
             }
         };
@@ -480,6 +485,7 @@ impl ManagedChild {
             stderr_bytes: Vec::new(),
             log: None,
         });
+
         return Ok(managed);
     }
 
@@ -516,6 +522,7 @@ impl ManagedChild {
                 .take(2048)
                 .collect();
         });
+
         return external_error(
             self.name,
             format!("exited with {status}: {}", detail.trim()),
@@ -693,6 +700,7 @@ pub(super) fn wait_for_success(
     loop {
         if let Some(status) = process.try_wait()? {
             process.terminate();
+
             return if status.success() {
                 Ok(())
             } else {
@@ -722,18 +730,17 @@ pub(super) fn stop_ffmpeg(
             reason: "managed child is unavailable".to_owned(),
         };
     })?;
-    child
-        .stdin
-        .as_mut()
-        .ok_or_else(|| {
-            return Error::ExternalCommand {
-                operation: process.name.to_owned(),
-                reason: "standard-input control pipe is unavailable".to_owned(),
-            };
-        })?
-        .write_all(b"q\n")
-        .map_err(|error| return external_error(process.name, error))?;
-
+    let stdin = child.stdin.as_mut().ok_or_else(|| {
+        return Error::ExternalCommand {
+            operation: process.name.to_owned(),
+            reason: "standard-input control pipe is unavailable".to_owned(),
+        };
+    })?;
+    if let Err(error) = stdin.write_all(b"q\n")
+        && error.kind() != ErrorKind::BrokenPipe
+    {
+        return Err(external_error(process.name, error));
+    }
     return wait_for_success(process, timeout, staging);
 }
 
@@ -795,8 +802,60 @@ mod ownership_tests {
         assert!(result.is_err());
 
         child.terminate();
+
         assert!(child.child.is_none());
         assert!(child.group.is_none());
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn stop_ffmpeg_ignores_broken_pipe_and_captures_exit_status() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mut child = ManagedChild::spawn_logged(
+            "test ffmpeg exit",
+            Command::new("sh")
+                .args(["-c", "exit 42"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+        .expect("launch process");
+
+        thread::sleep(Duration::from_millis(50));
+
+        let result = stop_ffmpeg(&mut child, Duration::from_secs(2), directory.path());
+
+        match result {
+            Err(Error::ExternalCommand { operation, reason }) => {
+                assert_eq!(operation, "test ffmpeg exit");
+                assert!(
+                    reason.contains("42"),
+                    "expected reason to contain exit code 42, got: {reason}"
+                );
+            }
+            other => panic!("expected ExternalCommand error with exit code, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_ffmpeg_ignores_broken_pipe_on_clean_exit() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mut child = ManagedChild::spawn_logged(
+            "test ffmpeg clean",
+            Command::new("sh")
+                .args(["-c", "exit 0"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+        .expect("launch process");
+
+        thread::sleep(Duration::from_millis(50));
+
+        let result = stop_ffmpeg(&mut child, Duration::from_secs(2), directory.path());
+        assert!(
+            result.is_ok(),
+            "expected clean exit to succeed, got {result:?}"
+        );
     }
 }
