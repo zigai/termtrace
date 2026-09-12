@@ -3,8 +3,8 @@ use super::{
     segments::{canonical_source_fingerprint, CanonicalLogFile, SegmentWriter},
     types::{EventLog, EventLogSummary},
     validation::{
-        chained_hash, invalid_log, parse_json_line, read_line, validate_event_geometry,
-        validate_header, validate_parent_directory, MAX_LINE_BYTES, OWNER_FILE_MODE,
+        invalid_log, parse_json_line, read_line, validate_event_geometry, validate_header,
+        validate_parent_directory, MAX_LINE_BYTES, OWNER_FILE_MODE,
     },
 };
 use crate::storage::{
@@ -43,7 +43,6 @@ pub(super) const DEFAULT_EVENT_LOG_LIMITS: EventLogLimits = EventLogLimits {
     encoded_bytes: MAX_EVENT_LOG_ENCODED_BYTES,
     decoded_payload_bytes: MAX_EVENT_LOG_DECODED_PAYLOAD_BYTES,
 };
-
 // Streaming validation retains one bounded record and a disk-backed identifier index.
 // The materializing reader keeps its allocation limits; lifetime streaming has none.
 const STREAM_EVENT_LOG_LIMITS: EventLogLimits = EventLogLimits {
@@ -116,6 +115,7 @@ impl EventLog {
         }
 
         let _pending = cursor.finish_snapshot()?;
+
         return Ok(records);
     }
 
@@ -191,7 +191,6 @@ struct LogValidation {
 impl LogValidation {
     fn validate_record(&mut self, path: &Path, line: u64, bytes: &[u8]) -> Result<EventRecord> {
         let record: EventRecord = parse_json_line(path, line, bytes)?;
-
         if record
             .observed_monotonic_ns
             .is_some_and(|observed| return observed > record.monotonic_ns)
@@ -230,15 +229,17 @@ impl LogValidation {
             observed_monotonic_ns: record.observed_monotonic_ns,
             event: &record.event,
         };
-        let body_bytes = serde_json::to_vec(&body).map_err(|source| {
+
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(self.previous_hash.as_bytes());
+        serde_json::to_writer(&mut hasher, &body).map_err(|source| {
             return Error::InvalidJson {
                 path: path.to_path_buf(),
                 json_path: "$".to_owned(),
                 source,
             };
         })?;
-
-        let expected_hash = chained_hash(self.previous_hash, &body_bytes);
+        let expected_hash = hasher.finalize();
 
         if record.hash != expected_hash.to_hex().as_str() {
             return Err(invalid_log(path, line, "event hash does not match"));
@@ -260,6 +261,7 @@ impl LogValidation {
             .expected_seq
             .checked_add(1)
             .ok_or_else(|| return invalid_log(path, line, "event sequence overflow"))?;
+
         return Ok(record);
     }
 }
@@ -378,7 +380,6 @@ impl EventLogCursor {
         header_hash: &str,
     ) -> Result<()> {
         self.validate_live_source(device, inode, header_hash)?;
-
         if self.validation.expected_seq != 0 || position.file_offset < self.encoded_bytes {
             return Err(invalid_log(
                 &self.path,
@@ -408,6 +409,7 @@ impl EventLogCursor {
         self.encoded_bytes = position.file_offset;
         self.buffer.clear();
         self.buffer_start = 0;
+
         return Ok(());
     }
 
@@ -469,7 +471,6 @@ impl EventLogCursor {
     /// Require the validated suffix to end at an independently trusted actor position.
     pub fn validate_live_boundary(&self, boundary: &LiveEventCursor) -> Result<()> {
         self.validate_boundary(boundary.next_event_seq, &boundary.event_hash)?;
-
         if self.position_offset() != boundary.file_offset
             || self.validation.previous_time != boundary.monotonic_ns
         {
@@ -485,7 +486,6 @@ impl EventLogCursor {
     /// Compare a validated chain endpoint with a separately validated authority.
     pub fn validate_boundary(&self, next_event_seq: u64, event_hash: &str) -> Result<()> {
         self.validate_source_identity()?;
-
         if self.validation.expected_seq != next_event_seq
             || self.validation.previous_hash.to_hex().as_str() != event_hash
         {
@@ -635,6 +635,7 @@ impl EventLogCursor {
         self.validate_source_identity()?;
         let mut pending: Vec<_> = self.validation.pending_operations.into_values().collect();
         pending.sort_by_key(|operation| return operation.intent_seq);
+
         return Ok(pending);
     }
 
@@ -680,7 +681,6 @@ impl EventLogCursor {
                 metadata.ctime_nsec(),
             );
         };
-
         if identity(&self.opened_metadata) != identity(&finished)
             || identity(&finished) != identity(&current)
             || self.opened_fingerprint
@@ -700,6 +700,7 @@ impl EventLogCursor {
 
         let mut pending: Vec<_> = self.validation.pending_operations.into_values().collect();
         pending.sort_by_key(|operation| return operation.intent_seq);
+
         return Ok(pending);
     }
 
@@ -755,7 +756,6 @@ impl EventLogSummary {
             pending_operations: Vec::new(),
             resource_triggers: [false; 3],
         };
-
         loop {
             check()?;
 
@@ -784,6 +784,7 @@ impl EventLogSummary {
 
         summary.pending_operations =
             if snapshot { cursor.finish_snapshot()? } else { cursor.finish()? };
+
         return Ok(summary);
     }
 }
@@ -889,6 +890,7 @@ pub(super) fn parse_event_log_with_limits(
                     limits.encoded_bytes
                 ),
             );
+
             return Err(error);
         }
 
@@ -898,6 +900,7 @@ pub(super) fn parse_event_log_with_limits(
                 line_number,
                 format!("event log exceeds {} event limit", limits.event_count),
             );
+
             return Err(error);
         }
 
@@ -915,6 +918,7 @@ pub(super) fn parse_event_log_with_limits(
                         limits.decoded_payload_bytes
                     ),
                 );
+
                 return Err(error);
             }
 
@@ -1008,12 +1012,12 @@ fn recover_stream(source: &Path, recovered: &Path) -> Result<Option<RecoveryIssu
             .checked_add(1)
             .ok_or_else(|| return invalid_log(source, line_number, "line number overflow"))?;
     };
-
     writer
         .flush()
         .and_then(|()| return writer.get_ref().sync_data())
         .map_err(|error| return Error::filesystem(recovered, error))?;
 
     sync_parent_directory(recovered)?;
+
     return Ok(issue);
 }

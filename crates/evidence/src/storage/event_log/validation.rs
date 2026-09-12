@@ -67,7 +67,6 @@ pub(super) fn read_line(
                 source,
             };
         })?;
-
         if available.is_empty() {
             return if bytes.is_empty() {
                 Ok(None)
@@ -84,7 +83,6 @@ pub(super) fn read_line(
             .iter()
             .position(|byte| return *byte == b'\n')
             .map_or(available.len(), |position| return position + 1);
-
         if u64::try_from(bytes.len().saturating_add(consumed)).unwrap_or(u64::MAX) > MAX_LINE_BYTES
         {
             return Err(invalid_log(path, line, "line exceeds 64 MiB limit"));
@@ -92,11 +90,13 @@ pub(super) fn read_line(
 
         let (chunk, _) = available.split_at(consumed);
         bytes.extend_from_slice(chunk);
+
         let complete = chunk.last() == Some(&b'\n');
         reader.consume(consumed);
 
         if complete {
             bytes.pop();
+
             return Ok(Some(bytes));
         }
     }
@@ -107,9 +107,11 @@ where
     T: for<'de> serde::Deserialize<'de>,
 {
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+
     return serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
         let json_path = error.path().to_string();
         let source = error.into_inner();
+
         return Error::InvalidEventLog {
             path: path.to_path_buf(),
             line,
@@ -176,7 +178,6 @@ fn supported_geometry_cell_count(cols: u16, rows: u16) -> Option<usize> {
     }
 
     let cells = u32::from(cols).checked_mul(u32::from(rows))?;
-
     if cells > MAX_TERMINAL_CELLS {
         return None;
     }
@@ -203,10 +204,12 @@ pub(super) fn validate_event_geometry(path: &Path, line: u64, event: &Event) -> 
     return Ok(());
 }
 
+#[expect(dead_code, reason = "canonical hash-chain reference helper")]
 pub(super) fn chained_hash(previous: Hash, body: &[u8]) -> Hash {
     let mut hasher = blake3::Hasher::new();
     hasher.update(previous.as_bytes());
     hasher.update(body);
+
     return hasher.finalize();
 }
 

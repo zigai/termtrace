@@ -2,8 +2,8 @@ use super::{
     segments::SegmentWriter,
     types::SessionClock,
     validation::{
-        chained_hash, invalid_log, validate_event_geometry, validate_header,
-        validate_parent_directory, OWNER_FILE_MODE,
+        invalid_log, validate_event_geometry, validate_header, validate_parent_directory,
+        OWNER_FILE_MODE,
     },
 };
 use crate::storage::{artifact::sync_parent_directory, Error, Result};
@@ -76,6 +76,7 @@ impl Write for CountingWrite<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let written = self.writer.write(buf)?;
         self.bytes += u64::try_from(written).unwrap_or(u64::MAX);
+
         return Ok(written);
     }
 
@@ -221,6 +222,7 @@ impl EventLogWriter {
         let path = path.as_ref().to_path_buf();
         validate_parent_directory(&path)?;
         validate_header(&path, header)?;
+
         durability_policy.validate()?;
 
         if header.started_unix_ns != clock.started_unix_ns() {
@@ -250,6 +252,7 @@ impl EventLogWriter {
                 source,
             };
         })?;
+
         let previous_hash = blake3::hash(&header_bytes);
 
         let storage = SegmentWriter::new(&path, file).map_err(|source| {
@@ -359,6 +362,7 @@ impl EventLogWriter {
                     .durability_policy
                     .maximum_uncommitted_bytes
                     .unwrap_or(u64::MAX);
+
                 let maximum_interval = self
                     .durability_policy
                     .maximum_interval_ms
@@ -372,6 +376,7 @@ impl EventLogWriter {
         };
 
         let observation = observed.map(|instant| return self.clock.observed_ns(instant));
+
         return self.append_at_observation(self.clock.elapsed_ns(), observation, event, durable);
     }
 
@@ -397,6 +402,7 @@ impl EventLogWriter {
         }
 
         self.synchronize_observed()?;
+
         return Ok(true);
     }
 
@@ -449,19 +455,23 @@ impl EventLogWriter {
             observed_monotonic_ns,
             event: &payload,
         };
-        let body_bytes = serde_json::to_vec(&body).map_err(|source| {
+
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(self.previous_hash.as_bytes());
+        serde_json::to_writer(&mut hasher, &body).map_err(|source| {
             return Error::InvalidJson {
                 path: self.path.clone(),
                 json_path: "$".to_owned(),
                 source,
             };
         })?;
-        let hash = chained_hash(self.previous_hash, &body_bytes);
+        let hash = hasher.finalize();
 
         let output_bytes = match &event {
             Event::Output { data } => u64::try_from(data.as_bytes().len()).unwrap_or(u64::MAX),
             _ => 0,
         };
+
         let next_output_bytes = self
             .observed_output_bytes
             .checked_add(output_bytes)
@@ -504,9 +514,9 @@ impl EventLogWriter {
         } else {
             write_result
         };
-
         if let Err(source) = write_result {
             self.poisoned = true;
+
             return Err(Error::Filesystem {
                 path: self.path.clone(),
                 source,
@@ -565,6 +575,7 @@ impl EventLogWriter {
             .and_then(|()| return self.writer.get_ref().sync_data())
         {
             self.poisoned = true;
+
             return Err(Error::Filesystem {
                 path: self.path.clone(),
                 source,
@@ -576,6 +587,7 @@ impl EventLogWriter {
         self.durable_output_bytes = self.observed_output_bytes;
         self.durable_cursor = self.observed_cursor;
         self.record_successful_sync();
+
         return Ok(());
     }
 
