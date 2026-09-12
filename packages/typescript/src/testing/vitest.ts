@@ -29,6 +29,7 @@ declare module "vitest" {
         toHaveNoWrappedRows(): Promise<T>;
         toHaveNeutralRegion(): Promise<T>;
         toHaveNoPresentedTransient(): Promise<T>;
+
         toMatchTerminalSnapshot(
             profile?: SnapshotProfile,
             options?: SnapshotOptions,

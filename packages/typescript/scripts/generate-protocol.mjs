@@ -25,6 +25,7 @@ for (const contract of contracts) {
         style: { semi: true, singleQuote: false, tabWidth: 2, trailingComma: "all" },
         unknownAny: true,
     });
+
     await writeFile(typesPath, types);
 
     const schema = JSON.parse(await readFile(schemaPath, "utf8"));
@@ -87,6 +88,7 @@ for (const contract of contracts) {
             const boundaryOutput = boundaryBundle.outputFiles[0];
             if (boundaryOutput === undefined)
                 throw new Error(`esbuild produced no ${boundaryName} validator`);
+
             await writeFile(
                 resolve(outputDirectory, `validate-${boundaryName}.ts`),
                 `/* Generated from schemas/${schemaName}#/$defs/${definitionName}. DO NOT EDIT. */\n// @ts-nocheck -- generated and bundled Ajv validator code\n${boundaryOutput.text}`,

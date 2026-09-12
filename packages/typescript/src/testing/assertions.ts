@@ -19,6 +19,7 @@ export type TerminalSnapshot = NormalizedFrame;
 
 export class AssertionMismatchError extends Error {
     readonly _tag = "AssertionMismatchError" as const;
+
     constructor(message: string) {
         super(message);
         this.name = "AssertionMismatchError";
@@ -43,6 +44,7 @@ export function assertScreenMatch(frame: ScreenFrame, spec: LocatorSpec): Screen
     const matches = evaluateQuery(frame, spec);
     const description = describe(spec);
     if (matches.length === 0) throw new NoMatchError(description, frame.stateHash);
+
     if (matches.length !== 1) {
         throw new MultipleMatchesError(
             description,
@@ -52,6 +54,7 @@ export function assertScreenMatch(frame: ScreenFrame, spec: LocatorSpec): Screen
             matches.slice(0, 8).map((match) => match.text.slice(0, 80)),
         );
     }
+
     const match = matches[0];
     if (match === undefined) throw new NoMatchError(description, frame.stateHash);
     return match;
@@ -71,6 +74,7 @@ export function assertMatches(
             `expected ${count} matches, received ${matches.length}; state=${frame.stateHash}`,
         );
     }
+
     return matches;
 }
 
@@ -88,15 +92,20 @@ export function assertNoMatches(frame: ScreenFrame, spec: LocatorSpec): void {
 export function assertMatchText(match: ScreenMatch, expected: string | RegExp): void {
     if (expected instanceof RegExp) {
         expected.lastIndex = 0;
+
         const result = expected.exec(match.text);
+
         expected.lastIndex = 0;
+
         if (result?.index !== 0 || result[0] !== match.text) {
             throw new AssertionMismatchError(
                 `matched text ${JSON.stringify(bounded(match.text))} does not fully satisfy ${String(expected)}`,
             );
         }
+
         return;
     }
+
     if (match.text !== expected)
         throw new AssertionMismatchError(
             `expected matched text ${JSON.stringify(expected)}, received ${JSON.stringify(bounded(match.text))}`,
@@ -126,6 +135,7 @@ export function assertNoWrappedRows(frame: ScreenFrame): void {
 /** Require a bounded region to contain only unselected default-style blank cells. */
 export function assertNeutralRegion(frame: ScreenFrame, region: Region): void {
     evaluateQuery(frame, regionQuery(region));
+
     const cells = cellsInRegion(frame, region);
     const nonNeutral = cells.filter(
         (cell) => !cellContentIsNeutral(cell.grapheme, cell.wideKind, cell.appearance),
@@ -190,6 +200,7 @@ export const termtraceMatchers = Object.freeze({
     async toHaveScreenText(session: Session, expected: string | RegExp): Promise<MatcherResult> {
         try {
             await assertScreenText(session, expected);
+
             return {
                 pass: true,
                 message: () => `expected presented screen not to match ${String(expected)}`,
@@ -202,6 +213,7 @@ export const termtraceMatchers = Object.freeze({
             ) {
                 return { pass: false, message: () => cause.message };
             }
+
             throw cause;
         }
     },
@@ -211,10 +223,12 @@ export const termtraceMatchers = Object.freeze({
     ): Promise<MatcherResult> {
         try {
             await assertCursor(session, expected);
+
             return { pass: true, message: () => "expected cursor not to match" };
         } catch (cause: unknown) {
             if (cause instanceof AssertionMismatchError)
                 return { pass: false, message: () => cause.message };
+
             throw cause;
         }
     },
@@ -224,6 +238,7 @@ function cellsInRegion(frame: ScreenFrame, region: Region): ScreenCell[] {
     const cells: ScreenCell[] = [];
     const bottom = region.top + region.height;
     const right = region.left + region.width;
+
     for (const row of frame.rows) {
         if (row.row < region.top || row.row >= bottom) continue;
         cells.push(
@@ -232,6 +247,7 @@ function cellsInRegion(frame: ScreenFrame, region: Region): ScreenCell[] {
             ),
         );
     }
+
     return cells;
 }
 
@@ -245,6 +261,7 @@ function assertCursorField(
             `cursor ${field} expected ${String(expected)}, received ${String(actual)}`,
         );
 }
+
 function describe(spec: LocatorSpec): string {
     switch (spec.kind) {
         case "text":
@@ -259,6 +276,7 @@ function describe(spec: LocatorSpec): string {
             return spec.specs.map(describe).join(" and ");
     }
 }
+
 function bounded(value: string): string {
     return value.length <= 1_000 ? value : `${value.slice(0, 999)}…`;
 }

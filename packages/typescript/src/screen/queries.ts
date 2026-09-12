@@ -13,6 +13,7 @@ import type {
 } from "./frame.js";
 
 export type TextQuery = string | RegExp;
+
 export type StyleFilter = {
     readonly bold?: boolean;
     readonly faint?: boolean;
@@ -31,6 +32,7 @@ export type StyleFilter = {
     readonly resolvedForeground?: Rgb | `#${string}` | null;
     readonly resolvedBackground?: Rgb | `#${string}` | null;
 };
+
 export type LocatorSpec =
     | {
           readonly kind: "text";
@@ -42,11 +44,13 @@ export type LocatorSpec =
     | { readonly kind: "row"; readonly row: number }
     | { readonly kind: "region"; readonly region: Region }
     | { readonly kind: "all"; readonly specs: ReadonlyArray<LocatorSpec> };
+
 export type CellRange = {
     readonly row: number;
     readonly startColumn: number;
     readonly endColumn: number;
 };
+
 export type ScreenMatch = {
     readonly frame: ScreenFrame;
     readonly stateHash: string;
@@ -74,35 +78,45 @@ export function textQuery(
         crossSoftWrap: options.crossSoftWrap ?? false,
     });
 }
+
 export function styleQuery(style: StyleFilter): LocatorSpec {
     const parsed = parseStyleFilter(style);
     return Object.freeze({ kind: "style", style: Object.freeze({ ...parsed.filter }) });
 }
+
 export function rowQuery(row: number): LocatorSpec {
     if (!Number.isSafeInteger(row) || row < 0)
         throw new InvalidQueryError("row must be a nonnegative safe integer");
+
     return Object.freeze({ kind: "row", row });
 }
+
 export function regionQuery(region: Region): LocatorSpec {
     return Object.freeze({ kind: "region", region: Object.freeze({ ...region }) });
 }
+
 export function allOf(...specs: ReadonlyArray<LocatorSpec>): LocatorSpec {
     if (specs.length === 0)
         throw new InvalidQueryError("composed query must contain at least one query");
+
     const flattened = flattenSpecs(specs);
     validateComposition(flattened);
+
     return Object.freeze({ kind: "all", specs: Object.freeze(flattened) });
 }
 
 export function evaluateQuery(frame: ScreenFrame, spec: LocatorSpec): ReadonlyArray<ScreenMatch> {
     validateSpec(spec);
+
     if (frame.detail === "text")
         throw new InvalidQueryError("query requires spans or cells frame detail");
+
     const description = describeQuery(spec);
     const matches = evaluate(frame, spec, description);
     matches.sort(compareMatches);
     if (matches.length > MAX_MATCHES)
         throw new ResourceLimitError("match_count", matches.length, MAX_MATCHES);
+
     return Object.freeze(matches);
 }
 
@@ -149,6 +163,7 @@ function evaluateText(
                 throw new InvalidQueryError(
                     "text match is not aligned to complete terminal graphemes",
                 );
+
             const ranges = rangesForOffsets(mapped.units, match.start, match.end);
             if (ranges.length === 0) continue;
             pushBounded(
@@ -157,6 +172,7 @@ function evaluateText(
             );
         }
     }
+
     return matches;
 }
 
@@ -190,6 +206,7 @@ function evaluateStyle(
                 if (start < 0) start = index;
                 continue;
             }
+
             if (start < 0) continue;
             const first = cells[start];
             const last = cells[index - 1];
@@ -209,14 +226,17 @@ function evaluateStyle(
                         description,
                     ),
                 );
+
             start = -1;
         }
     }
+
     return matches;
 }
 
 function evaluateArea(frame: ScreenFrame, region: Region, description: string): ScreenMatch[] {
     evaluateRegionOnly(region);
+
     const bottom = region.top + region.height;
     const right = region.left + region.width;
     const matches: ScreenMatch[] = [];
@@ -232,6 +252,7 @@ function evaluateArea(frame: ScreenFrame, region: Region, description: string): 
             ),
         );
     }
+
     return matches;
 }
 
@@ -255,6 +276,7 @@ function evaluateComposition(
         if (style === undefined) return matches;
         return matches.filter((match) => matchHasStyle(match, style.style));
     }
+
     if (style !== undefined) return evaluateStyle(frame, style.style, description, region);
     return region === undefined ? [] : evaluateArea(frame, region, description);
 }
@@ -266,11 +288,13 @@ type TextUnit = {
     readonly startColumn: number;
     readonly endColumn: number;
 };
+
 type MappedRows = {
     readonly text: string;
     readonly units: ReadonlyArray<TextUnit>;
     readonly boundaries: ReadonlySet<number>;
 };
+
 function mapRows(rows: ReadonlyArray<ScreenRow>, region?: Region): MappedRows {
     let content = "";
     const units: TextUnit[] = [];
@@ -298,10 +322,13 @@ function mapRows(rows: ReadonlyArray<ScreenRow>, region?: Region): MappedRows {
                     continuation.wideKind === "narrow"
                 )
                     break;
+
                 endColumn = continuation.column + 1;
                 index = next;
             }
+
             const start = content.length;
+
             content += grapheme;
             units.push({
                 start,
@@ -312,13 +339,16 @@ function mapRows(rows: ReadonlyArray<ScreenRow>, region?: Region): MappedRows {
             });
         }
     }
+
     const boundaries = new Set<number>([0, content.length]);
     for (const unit of units) {
         boundaries.add(unit.start);
         boundaries.add(unit.end);
     }
+
     return { text: content, units, boundaries };
 }
+
 function logicalRows(rows: ReadonlyArray<ScreenRow>): ReadonlyArray<ReadonlyArray<ScreenRow>> {
     const groups: ScreenRow[][] = [];
     for (const row of rows) {
@@ -328,8 +358,10 @@ function logicalRows(rows: ReadonlyArray<ScreenRow>): ReadonlyArray<ReadonlyArra
             previous.push(row);
         else groups.push([row]);
     }
+
     return groups;
 }
+
 function rangesForOffsets(units: ReadonlyArray<TextUnit>, start: number, end: number): CellRange[] {
     const ranges: CellRange[] = [];
     for (const unit of units) {
@@ -348,8 +380,10 @@ function rangesForOffsets(units: ReadonlyArray<TextUnit>, start: number, end: nu
                 endColumn: unit.endColumn,
             });
     }
+
     return ranges;
 }
+
 function findTextMatches(
     text: string,
     query: TextQuery,
@@ -359,49 +393,63 @@ function findTextMatches(
         const flags = query.flags.includes("g") ? query.flags : `${query.flags}g`;
         const pattern = new RegExp(query.source, flags);
         pattern.lastIndex = 0;
+
         const matches: Array<{ start: number; end: number }> = [];
         for (;;) {
             const match = pattern.exec(text);
             if (match === null) break;
+
             if (match[0].length === 0)
                 throw new InvalidQueryError(
                     "regular expressions must not produce zero-width matches",
                 );
+
             if (!exact || (match.index === 0 && match[0].length === text.length))
                 pushTextMatch(matches, { start: match.index, end: match.index + match[0].length });
         }
+
         return matches;
     }
+
     if (exact) return text === query ? [{ start: 0, end: text.length }] : [];
     const matches: Array<{ start: number; end: number }> = [];
     for (let start = text.indexOf(query); start >= 0; start = text.indexOf(query, start + 1))
         pushTextMatch(matches, { start, end: start + query.length });
+
     return matches;
 }
+
 function pushTextMatch(
     matches: Array<{ start: number; end: number }>,
     match: { readonly start: number; readonly end: number },
 ): void {
     if (matches.length >= MAX_MATCHES)
         throw new ResourceLimitError("match_count", matches.length + 1, MAX_MATCHES);
+
     matches.push(match);
 }
+
 function pushBounded(matches: ScreenMatch[], match: ScreenMatch): void {
     if (matches.length >= MAX_MATCHES)
         throw new ResourceLimitError("match_count", matches.length + 1, MAX_MATCHES);
+
     matches.push(match);
 }
+
 function validateTextQuery(query: TextQuery): void {
     if (!(query instanceof RegExp)) {
         if (query.length === 0) throw new InvalidQueryError("text query must not be empty");
         return;
     }
+
     const probe = new RegExp(query.source, query.flags.replaceAll("g", "").replaceAll("y", ""));
     probe.lastIndex = 0;
+
     const empty = probe.exec("");
     if (empty !== null && empty[0].length === 0)
         throw new InvalidQueryError("regular expression must not match an empty string");
 }
+
 function validateSpec(spec: LocatorSpec): void {
     switch (spec.kind) {
         case "text":
@@ -413,6 +461,7 @@ function validateSpec(spec: LocatorSpec): void {
         case "row":
             if (!Number.isSafeInteger(spec.row) || spec.row < 0)
                 throw new InvalidQueryError("row must be a nonnegative safe integer");
+
             return;
         case "region":
             evaluateRegionOnly(spec.region);
@@ -420,13 +469,16 @@ function validateSpec(spec: LocatorSpec): void {
         case "all": {
             if (spec.specs.length === 0)
                 throw new InvalidQueryError("composed query must not be empty");
+
             const flattened = flattenSpecs(spec.specs);
             for (const nested of flattened) validateSpec(nested);
             validateComposition(flattened);
+
             return;
         }
     }
 }
+
 function evaluateRegionOnly(region: Region): void {
     if (
         !Number.isSafeInteger(region.top) ||
@@ -440,10 +492,12 @@ function evaluateRegionOnly(region: Region): void {
     )
         throw new InvalidRegionError("query region must be nonempty nonnegative safe integers");
 }
+
 type ParsedColorMatcher = {
     readonly source: ColorSource | undefined;
     readonly resolved: Rgb | undefined;
 };
+
 type ParsedStyleFilter = {
     readonly filter: StyleFilter;
     readonly sourceForeground: ColorSource | undefined;
@@ -456,6 +510,7 @@ function parseStyleFilter(input: StyleFilter): ParsedStyleFilter {
     const style = StyleFilterInput.parse(input);
     const foreground = parseColorMatcher(style.foreground);
     const background = parseColorMatcher(style.background);
+
     return Object.freeze({
         filter: style,
         sourceForeground: foreground.source,
@@ -469,6 +524,7 @@ function parseColorMatcher(value: ColorSource | `#${string}` | undefined): Parse
     if (value === undefined) return Object.freeze({ source: undefined, resolved: undefined });
     if (!(value instanceof Object))
         return Object.freeze({ source: undefined, resolved: parseHexRgb(value) });
+
     return Object.freeze({
         source: value,
         resolved: undefined,
@@ -487,20 +543,25 @@ function parseHexRgb(value: string): Rgb {
         b: Number.parseInt(value.slice(5, 7), 16),
     });
 }
+
 function flattenSpecs(specs: ReadonlyArray<LocatorSpec>): LocatorSpec[] {
     const flattened: LocatorSpec[] = [];
     for (const spec of specs) {
         if (spec.kind === "all") flattened.push(...flattenSpecs(spec.specs));
         else flattened.push(spec);
     }
+
     return flattened;
 }
+
 function validateComposition(specs: ReadonlyArray<LocatorSpec>): void {
     if (specs.filter((spec) => spec.kind === "text").length > 1)
         throw new InvalidQueryError("only one text query may be composed");
+
     if (specs.filter((spec) => spec.kind === "style").length > 1)
         throw new InvalidQueryError("only one style query may be composed");
 }
+
 function validateRowInFrame(frame: ScreenFrame, row: number): void {
     if (
         row >= frame.geometry.rows ||
@@ -509,12 +570,15 @@ function validateRowInFrame(frame: ScreenFrame, row: number): void {
     )
         throw new InvalidRegionError("query row is outside the returned frame region");
 }
+
 function validateRegionInFrame(frame: ScreenFrame, region: Region): void {
     validateRegionInGeometry(frame, region);
+
     const bottom = region.top + region.height;
     const right = region.left + region.width;
     const returnedBottom = frame.returnedRegion.top + frame.returnedRegion.height;
     const returnedRight = frame.returnedRegion.left + frame.returnedRegion.width;
+
     if (
         region.top < frame.returnedRegion.top ||
         region.left < frame.returnedRegion.left ||
@@ -523,14 +587,17 @@ function validateRegionInFrame(frame: ScreenFrame, region: Region): void {
     )
         throw new InvalidRegionError("query region is outside the returned frame region");
 }
+
 function validateRegionInGeometry(frame: ScreenFrame, region: Region): void {
     evaluateRegionOnly(region);
+
     if (
         region.top + region.height > frame.geometry.rows ||
         region.left + region.width > frame.geometry.cols
     )
         throw new InvalidRegionError("query region is outside the frame geometry");
 }
+
 function intersectScopes(
     frame: ScreenFrame,
     specs: ReadonlyArray<LocatorSpec>,
@@ -539,12 +606,14 @@ function intersectScopes(
     let left = frame.returnedRegion.left;
     let bottom = top + frame.returnedRegion.height;
     let right = left + frame.returnedRegion.width;
+
     for (const spec of specs) {
         if (spec.kind === "row") {
             validateRowInFrame(frame, spec.row);
             top = Math.max(top, spec.row);
             bottom = Math.min(bottom, spec.row + 1);
         }
+
         if (spec.kind === "region") {
             validateRegionInGeometry(frame, spec.region);
             top = Math.max(top, spec.region.top);
@@ -553,12 +622,16 @@ function intersectScopes(
             right = Math.min(right, spec.region.left + spec.region.width);
         }
     }
+
     if (top >= bottom || left >= right)
         throw new InvalidQueryError("composed region scopes do not intersect");
+
     const intersection = { top, left, width: right - left, height: bottom - top };
     validateRegionInFrame(frame, intersection);
+
     return intersection;
 }
+
 function cellEndColumn(cell: ScreenCell): number {
     return cell.column + (cell.wideKind === "wide" ? 2 : 1);
 }
@@ -566,6 +639,7 @@ function cellEndColumn(cell: ScreenCell): number {
 function matchesStyle(cell: ScreenCell, parsed: ParsedStyleFilter): boolean {
     const filter = parsed.filter;
     const style = cell.appearance.style;
+
     return (
         optionalEqual(filter.bold, style.bold) &&
         optionalEqual(filter.faint, style.faint) &&
@@ -595,14 +669,18 @@ export function matchHasStyle(match: ScreenMatch, filter: StyleFilter): boolean 
             cell.wideKind === "wide" ||
             filter.wideKind === cell.wideKind,
     );
+
     return cells.length > 0 && cells.every((cell) => matchesStyle(cell, parsedFilter));
 }
+
 function optionalEqual<T>(expected: T | undefined, actual: T): boolean {
     return expected === undefined || expected === actual;
 }
+
 function optionalDeepEqual<T>(expected: T | undefined, actual: T): boolean {
     return expected === undefined || isDeepStrictEqual(expected, actual);
 }
+
 function cellsForMatch(frame: ScreenFrame, match: ScreenMatch): ScreenCell[] {
     const cells: ScreenCell[] = [];
     for (const range of match.ranges) {
@@ -614,21 +692,26 @@ function cellsForMatch(frame: ScreenFrame, match: ScreenMatch): ScreenCell[] {
                 ),
             );
     }
+
     return cells;
 }
+
 function textForRange(row: ScreenRow, start: number, end: number): string {
     return textForCells(
         materializeRow(row).filter((cell) => cell.column >= start && cell.column < end),
     );
 }
+
 function textForCells(cells: ReadonlyArray<ScreenCell>): string {
     let value = "";
     for (const cell of cells) {
         if (cell.grapheme.length > 0) value += cell.grapheme;
         else if (cell.wideKind === "narrow") value += " ";
     }
+
     return value;
 }
+
 function makeMatch(
     frame: ScreenFrame,
     ranges: ReadonlyArray<CellRange>,
@@ -636,6 +719,7 @@ function makeMatch(
     query: string,
 ): ScreenMatch {
     const excerptTruncated = text.length > MAX_EXCERPT;
+
     return Object.freeze({
         frame,
         stateHash: frame.stateHash,
@@ -647,6 +731,7 @@ function makeMatch(
         excerptTruncated,
     });
 }
+
 function describeQuery(spec: LocatorSpec): string {
     let value: string;
     switch (spec.kind) {
@@ -666,13 +751,16 @@ function describeQuery(spec: LocatorSpec): string {
             value = spec.specs.map(describeQuery).join(" and ");
             break;
     }
+
     return value.length <= MAX_DESCRIPTION ? value : `${value.slice(0, MAX_DESCRIPTION - 1)}…`;
 }
+
 function compareMatches(left: ScreenMatch, right: ScreenMatch): number {
     const leftRange = left.ranges[0];
     const rightRange = right.ranges[0];
     if (leftRange === undefined || rightRange === undefined)
         return left.ranges.length - right.ranges.length;
+
     return (
         leftRange.row - rightRange.row ||
         leftRange.startColumn - rightRange.startColumn ||

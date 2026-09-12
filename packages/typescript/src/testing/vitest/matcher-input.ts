@@ -5,6 +5,7 @@ import type { SnapshotOptions, SnapshotProfile } from "../../screen/snapshots.js
 import type { TerminalCursorExpectation } from "./types.js";
 
 type Mutable<Value> = { -readonly [Key in keyof Value]: Value[Key] };
+
 type MatcherExpectationSource = {
     readonly column?: unknown;
     readonly includeCursor?: unknown;
@@ -22,10 +23,12 @@ export const TextExpectation = {
         if (input instanceof Object) {
             throw new TypeError("text expectation must be a string or RegExp");
         }
+
         const value = String(input);
         if (input === value) {
             return value;
         }
+
         throw new TypeError("text expectation must be a string or RegExp");
     },
 };
@@ -49,10 +52,12 @@ export const CountExpectation = {
         if (!Number.isSafeInteger(input)) {
             throw new TypeError("matcher count must be a nonnegative safe integer");
         }
+
         const value = Number(input);
         if (value < 0) {
             throw new TypeError("matcher count must be a nonnegative safe integer");
         }
+
         return value;
     },
 };
@@ -65,6 +70,7 @@ export const StyleExpectation = {
             if (cause instanceof InvalidQueryError) {
                 throw new TypeError(cause.message, { cause });
             }
+
             throw cause;
         }
     },
@@ -78,6 +84,7 @@ export const SnapshotProfileExpectation = {
         if (input === "text" || input === "cells") {
             return input;
         }
+
         throw new TypeError("snapshot profile must be text, spans, or cells");
     },
 };
@@ -87,6 +94,7 @@ export const SnapshotOptionsExpectation = {
         if (input === undefined) {
             return Object.freeze({});
         }
+
         const value = MatcherExpectationSource.parse(input, "snapshot options");
         const includeCursor = OptionalBoolean.parse(value.includeCursor, "includeCursor");
         const includeModes = OptionalBoolean.parse(value.includeModes, "includeModes");
@@ -94,6 +102,7 @@ export const SnapshotOptionsExpectation = {
         if (maxCells === 0) {
             throw new TypeError("maxCells must be positive");
         }
+
         const options: Mutable<SnapshotOptions> = {};
         if (includeCursor !== undefined) options.includeCursor = includeCursor;
         if (includeModes !== undefined) options.includeModes = includeModes;
@@ -110,10 +119,12 @@ export const SnapshotHintExpectation = {
         if (input instanceof Object) {
             throw new TypeError("snapshot hint must be a string");
         }
+
         const value = String(input);
         if (input === value) {
             return value;
         }
+
         throw new TypeError("snapshot hint must be a string");
     },
 };
@@ -123,6 +134,7 @@ const MatcherExpectationSource = {
         if (!(input instanceof Object) || input instanceof Function || Array.isArray(input)) {
             throw new TypeError(`${label} must be an object`);
         }
+
         return Object.assign({}, input);
     },
 };
@@ -132,6 +144,7 @@ const OptionalBoolean = {
         if (input === undefined || input === true || input === false) {
             return input;
         }
+
         throw new TypeError(`${label} must be a boolean`);
     },
 };
@@ -144,10 +157,12 @@ const OptionalNonnegativeInteger = {
         if (!Number.isSafeInteger(input)) {
             throw new TypeError(`${label} must be a nonnegative safe integer`);
         }
+
         const value = Number(input);
         if (value < 0) {
             throw new TypeError(`${label} must be a nonnegative safe integer`);
         }
+
         return value;
     },
 };

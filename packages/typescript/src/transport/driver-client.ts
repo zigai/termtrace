@@ -80,6 +80,7 @@ export class DriverClient {
     get closedSuccessfully(): boolean {
         return this.#closedSuccessfully;
     }
+
     get isClosed(): boolean {
         return this.#closed;
     }
@@ -97,9 +98,11 @@ export class DriverClient {
         if (this.#closed) {
             return Promise.reject(new TermtraceProtocolError("driver is closed"));
         }
+
         if (this.#pending.length >= MAX_PENDING_REQUESTS) {
             return Promise.reject(new TermtraceProtocolError("driver request queue is full"));
         }
+
         if (
             options.timeoutMs !== undefined &&
             (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs <= 0)
@@ -109,6 +112,7 @@ export class DriverClient {
         if (options.signal?.aborted === true) {
             return Promise.reject(options.signal.reason);
         }
+
         const requestId = options.requestId ?? randomUUID();
         const timeoutMs = options.timeoutMs;
         const signal = options.signal;
@@ -118,6 +122,7 @@ export class DriverClient {
         } catch (cause: unknown) {
             return Promise.reject(cause);
         }
+
         return new Promise<DriverDataOf<Kind>>((resolve, reject) => {
             const accept = (data: DriverData): void => {
                 try {
@@ -131,6 +136,7 @@ export class DriverClient {
                     void this.#terminateWithFailure(cause);
                     return;
                 }
+
                 const pending = this.#pending.find((request) => request.requestId === requestId);
                 if (pending !== undefined) this.#clearPendingGuards(pending);
                 reject(cause);
@@ -141,13 +147,16 @@ export class DriverClient {
                     : setTimeout(() => {
                           cancel(new RequestTimeoutError(timeoutMs));
                       }, timeoutMs);
+
             timer?.unref();
+
             const abortSubscription =
                 signal === undefined
                     ? undefined
                     : addAbortListener(signal, () => {
                           cancel(signal.reason);
                       });
+
             this.#pending.push({
                 requestId,
                 accept,
@@ -170,8 +179,10 @@ export class DriverClient {
             await this.#exited;
             return;
         }
+
         this.#closed = true;
         this.#process.stdin.end();
+
         let timer: NodeJS.Timeout | undefined;
         const timedOut = await Promise.race([
             this.#exited.then(() => false),
@@ -179,15 +190,19 @@ export class DriverClient {
                 timer = setTimeout(() => resolve(true), DRIVER_CLOSE_TIMEOUT_MS);
             }),
         ]);
+
         clearTimeout(timer);
+
         if (timedOut) {
             const cause = new RequestTimeoutError(DRIVER_CLOSE_TIMEOUT_MS);
             await this.#terminateWithFailure(cause);
             throw cause;
         }
+
         if (this.#process.exitCode !== 0) {
             throw new TermtraceProtocolError("driver failed during close");
         }
+
         this.#closedSuccessfully = true;
     }
 
@@ -202,13 +217,16 @@ export class DriverClient {
 
     async #terminateProcessTree(cause: unknown): Promise<void> {
         this.#signalProcessTree("SIGTERM");
+
         const deadline = Date.now() + PROCESS_TREE_TERMINATION_GRACE_MS;
         while (this.#processTreeExists() && Date.now() < deadline) {
             await new Promise<void>((resolve) => setTimeout(resolve, 25));
         }
+
         if (process.platform !== "win32" || this.#process.exitCode === null) {
             this.#signalProcessTree("SIGKILL");
         }
+
         await this.#exited;
         this.#rejectAll(cause);
     }
@@ -223,6 +241,7 @@ export class DriverClient {
                 return false;
             }
         }
+
         return this.#process.exitCode === null && this.#process.signalCode === null;
     }
 
@@ -238,6 +257,7 @@ export class DriverClient {
                 }
             }
         }
+
         this.#process.kill(signal);
     }
 
@@ -247,7 +267,9 @@ export class DriverClient {
             this.#rejectAll(new TermtraceProtocolError("driver emitted an unsolicited response"));
             return;
         }
+
         this.#clearPendingGuards(pending);
+
         try {
             const input: JsonValue = JSON.parse(line);
             const response = parseDriverResponse(input, pending.requestId);
@@ -255,6 +277,7 @@ export class DriverClient {
                 pending.reject(new TermtraceOperationError(response.failure));
                 return;
             }
+
             pending.accept(response.data);
         } catch (cause: unknown) {
             pending.reject(cause);

@@ -29,8 +29,10 @@ if (result.error !== undefined) {
     console.error(`termtrace: could not launch ${binary}: ${result.error.message}`);
     process.exit(1);
 }
+
 if (result.signal !== null) {
     console.error(`termtrace: process terminated by ${result.signal}`);
     process.exit(1);
 }
+
 process.exit(result.status ?? 1);

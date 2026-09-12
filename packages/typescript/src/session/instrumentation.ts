@@ -47,6 +47,7 @@ export class Instrumentation {
         if (!Number.isSafeInteger(monotonicNs)) {
             throw new RangeError("application monotonic clock exceeds the exact wire range");
         }
+
         await this.#session.control({
             command: "application",
             data: {

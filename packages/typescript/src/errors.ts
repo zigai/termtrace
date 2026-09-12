@@ -35,21 +35,25 @@ export class TermtraceError extends Error {
 }
 
 export class ValidationError extends TermtraceError {}
+
 export class InvalidAtomError extends ValidationError {
     constructor(message: string) {
         super("invalid_atom", message);
     }
 }
+
 export class InvalidDurationError extends ValidationError {
     constructor(message: string) {
         super("invalid_duration", message);
     }
 }
+
 export class InvalidRegionError extends ValidationError {
     constructor(message: string) {
         super("invalid_region", message);
     }
 }
+
 export class InvalidQueryError extends ValidationError {
     constructor(message: string) {
         super("invalid_query", message);
@@ -74,6 +78,7 @@ export class ActionBusyError extends TermtraceError {
         super("action_busy", message);
     }
 }
+
 export class InputSequenceBusyError extends TermtraceError {
     constructor(message = "another input sequence is active") {
         super("input_sequence_busy", message);
@@ -88,6 +93,7 @@ export class PostconditionIncompleteError<TResult> extends TermtraceError {
         super("postcondition_incomplete", `action postcondition ended with ${bounded(quality)}`);
     }
 }
+
 export class StableCaptureIncompleteError<TCapture> extends TermtraceError {
     constructor(
         readonly capture: TCapture,
@@ -157,11 +163,13 @@ export class ProtocolMismatchError extends TermtraceError {
         super("protocol_mismatch", message, options);
     }
 }
+
 export class TransportError extends TermtraceError {
     constructor(message: string, options?: ErrorOptions) {
         super("transport", message, options);
     }
 }
+
 export class RequestTimeoutError extends TermtraceError {
     readonly uncertain = true;
     readonly retrySafe = false;
@@ -182,11 +190,13 @@ export class NoMatchError extends TermtraceError {
         );
     }
 }
+
 export type MatchRangeDiagnostic = {
     readonly row: number;
     readonly startColumn: number;
     readonly endColumn: number;
 };
+
 export class MultipleMatchesError extends TermtraceError {
     constructor(
         readonly query: string,
@@ -201,6 +211,7 @@ export class MultipleMatchesError extends TermtraceError {
         );
     }
 }
+
 export class LocatorTimeoutError extends TermtraceError {
     constructor(
         readonly query: string,
@@ -211,6 +222,7 @@ export class LocatorTimeoutError extends TermtraceError {
 }
 
 const MAX_DIAGNOSTIC_CHARS = 240;
+
 function bounded(value: string): string {
     return value.length <= MAX_DIAGNOSTIC_CHARS
         ? value

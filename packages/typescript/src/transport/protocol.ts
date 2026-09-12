@@ -30,35 +30,41 @@ export type JsonValue =
     | { readonly [key: string]: JsonValue };
 
 export type JsonObject = { readonly [key: string]: JsonValue };
+
 type RequestConstruction<Value> =
     Value extends ReadonlyArray<infer Item>
         ? ReadonlyArray<RequestConstruction<Item>>
         : Value extends object
           ? { readonly [Key in keyof Value]: RequestConstruction<Value[Key]> }
           : Value;
+
 export type DriverRequest = RequestConstruction<WireDriverRequest>;
 export type DriverMethod = DriverRequest["method"];
 export type DriverMethodName = DriverMethod["method"];
+
 export type DriverMethodOf<Method extends DriverMethodName> = Extract<
     DriverMethod,
     { readonly method: Method }
 >;
+
 export type ControlCommand = DriverMethodOf<"control">["command"];
+
 type WithoutSessionHandle<Method> = Method extends { readonly handle: string }
     ? Omit<Method, "handle">
     : never;
-export type SessionMethodFields = WithoutSessionHandle<DriverMethod>;
 
+export type SessionMethodFields = WithoutSessionHandle<DriverMethod>;
 type DriverResult = WireDriverResponse["result"];
 type DriverSuccess = Extract<DriverResult, { readonly status: "ok" }>;
 type DriverError = Extract<DriverResult, { readonly status: "error" }>;
-
 export type DriverData = DriverSuccess["data"];
 export type DriverDataKind = DriverData["kind"];
+
 export type DriverDataOf<Kind extends DriverDataKind> = Extract<
     DriverData,
     { readonly kind: Kind }
 >;
+
 export type ControlResult = DriverDataOf<"control">["data"];
 export type Artifact = DriverDataOf<"artifact">;
 export type BundleResult = DriverDataOf<"bundle">;
@@ -102,6 +108,7 @@ export function parseDriverResponse(input: JsonValue, expectedRequestId: string)
     if (!validateDriverResponse(input)) {
         throw new TermtraceProtocolError("driver response does not match the protocol schema");
     }
+
     // SAFETY: the generated Ajv validator has proved the complete generated wire contract.
     const root = input as JsonObject & WireDriverResponse;
     if (root.version !== 5 || root.request_id !== expectedRequestId) {
@@ -110,6 +117,7 @@ export function parseDriverResponse(input: JsonValue, expectedRequestId: string)
     if (root.result.status === "error") {
         return { _tag: "Failure", failure: failureFromWire(root.result) };
     }
+
     return { _tag: "Success", data: root.result.data };
 }
 
@@ -121,6 +129,7 @@ export function expectDriverData<Kind extends DriverDataKind>(
     if (data.kind !== expectedKind) {
         throw new TermtraceProtocolError("driver returned an unexpected result kind");
     }
+
     // SAFETY: DriverData is a generated discriminated union and kind was checked above.
     return data as DriverDataOf<Kind>;
 }
@@ -129,20 +138,24 @@ export function expectDriverData<Kind extends DriverDataKind>(
 export function encodeDriverRequest(method: DriverMethod, requestId: string): string {
     let encoded: string;
     let request: unknown;
+
     try {
         const authoredRequest: DriverRequest = { version: 5, request_id: requestId, method };
         const serialized = JSON.stringify(authoredRequest);
         if (serialized === undefined) {
             throw new Error("request serialization returned undefined");
         }
+
         encoded = serialized;
         request = JSON.parse(encoded);
     } catch {
         throw new TermtraceProtocolError("client request does not match the protocol schema");
     }
+
     if (!validateDriverRequest(request)) {
         throw new TermtraceProtocolError("client request does not match the protocol schema");
     }
+
     return encoded;
 }
 

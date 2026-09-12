@@ -31,6 +31,7 @@ import {
 type ScreenSession = {
     readonly completed: boolean;
     control(command: ControlCommand): Promise<ControlResult>;
+
     request<Kind extends DriverDataKind>(
         methodFields: SessionMethodFields,
         expectedKind: Kind,
@@ -44,12 +45,14 @@ export type ScreenWait = {
     readonly firstMatchAt: Duration | null;
     readonly observedAt: Duration;
     readonly stableFor: Duration;
+
     readonly quality:
         | "matched"
         | "matched_unsettled"
         | "child_completed"
         | "output_closed"
         | "deadline";
+
     readonly frame: ScreenFrame;
 };
 
@@ -99,6 +102,7 @@ export class Screen {
             "screen_frame",
             options,
         );
+
         return parseScreenFrame(data.frame);
     }
 
@@ -136,6 +140,7 @@ export class Screen {
         const timeout = Duration.milliseconds(options.timeoutMs ?? 10_000);
         const interval = Duration.milliseconds(25);
         const stableFor = Duration.milliseconds(options.stableForMs ?? 0);
+
         const waitOptions =
             options.signal === undefined
                 ? { timeout, interval, stableFor }
@@ -159,6 +164,7 @@ export class Screen {
         });
         if (data.kind !== "screen_wait")
             throw new TermtraceProtocolError("screen wait response has an invalid kind");
+
         const observed = exactWireInteger(data.observed_monotonic_ns, "screen wait observed time");
         const stableFor = exactWireInteger(data.stable_for_ns, "screen wait stable interval");
         const first =
@@ -172,6 +178,7 @@ export class Screen {
                           ),
                       ),
                   );
+
         return Object.freeze({
             predicate,
             matched: data.matched,
@@ -195,6 +202,7 @@ export class Screen {
         ) {
             throw new InvalidDurationError("stableFor must be nonzero and no greater than timeout");
         }
+
         if (this.session.completed) {
             return Object.freeze({
                 kind: "stable_snapshot",
@@ -205,6 +213,7 @@ export class Screen {
                 frame: await this.frame(options.frame ?? {}),
             });
         }
+
         const data = await this.session.control({
             command: "capture_stable",
             stable_for_ns: options.stableFor.toWireNumber("stableFor"),
@@ -213,6 +222,7 @@ export class Screen {
         });
         if (data.kind !== "stable_snapshot")
             throw new TermtraceProtocolError("stable capture response has an invalid kind");
+
         const first = exactWireInteger(
             data.first_observed_monotonic_ns,
             "stable capture first observed time",
@@ -229,6 +239,7 @@ export class Screen {
         });
         if (data.quality !== "stable" && options.allowIncomplete !== true)
             throw new StableCaptureIncompleteError(capture, data.quality);
+
         return capture;
     }
 

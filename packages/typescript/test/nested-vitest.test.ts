@@ -39,9 +39,11 @@ describe("packed Vitest consumer", () => {
         expect(packed.exitCode, packed.output).toBe(0);
         const tarballName = (await readdir(packDirectory)).find((entry) => entry.endsWith(".tgz"));
         expect(tarballName).toBeDefined();
+
         if (tarballName === undefined) {
             return;
         }
+
         const tarball = join(packDirectory, tarballName);
 
         const rootConsumer = join(temporaryRoot, "root-consumer");
@@ -85,9 +87,11 @@ describe("packed Vitest consumer", () => {
             (path) => path.includes("__snapshots__") && path.endsWith(".snap"),
         );
         expect(snapshot).toBeDefined();
+
         if (snapshot === undefined) {
             return;
         }
+
         const snapshotText = await readFile(snapshot, "utf8");
         expect(snapshotText).toContain("READY");
         await writeFile(snapshot, snapshotText.replace("READY", "STALE"), "utf8");
@@ -189,6 +193,7 @@ async function run(
         `${command.join(" ")}\n${stdout}\n${stderr}`,
         "utf8",
     );
+
     return {
         exitCode,
         output: `${stdout}\n${stderr}`,
@@ -204,15 +209,19 @@ async function filesBelow(directory: string): Promise<string[]> {
         if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
             return files;
         }
+
         throw cause;
     }
+
     for (const entry of entries) {
         const path = join(directory, entry.name);
         if (entry.isDirectory()) {
             files.push(...(await filesBelow(path)));
             continue;
         }
+
         files.push(path);
     }
+
     return files;
 }

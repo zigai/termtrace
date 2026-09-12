@@ -46,11 +46,13 @@ export type CreateTerminalTestOptions = {
     readonly termtrace: Omit<TermtraceOptions, "evidenceRoot"> & {
         readonly evidenceRoot: string;
     };
+
     readonly launch:
         | TerminalLaunchOptions
         | ((context: {
               readonly task: TerminalTestTask;
           }) => TerminalLaunchOptions | Promise<TerminalLaunchOptions>);
+
     readonly failureArtifacts?: FailureArtifactOptions;
     readonly operationTimeoutMs?: number;
 };
@@ -74,25 +76,32 @@ export type TerminalMatchers = {
         received: ScreenAssertionSubject,
         expected: string | RegExp,
     ) => Promise<TerminalMatcherResult>;
+
     readonly toHaveCursor: (
         received: ScreenAssertionSubject,
         expected: TerminalCursorExpectation,
     ) => Promise<TerminalMatcherResult>;
+
     readonly toExist: (received: Locator) => Promise<TerminalMatcherResult>;
     readonly toHaveCount: (received: Locator, expected: number) => Promise<TerminalMatcherResult>;
+
     readonly toHaveText: (
         received: Locator,
         expected: string | RegExp,
     ) => Promise<TerminalMatcherResult>;
+
     readonly toHaveStyle: (
         received: Locator,
         expected: StyleFilter,
     ) => Promise<TerminalMatcherResult>;
+
     readonly toHaveNoWrappedRows: (
         received: ScreenAssertionSubject,
     ) => Promise<TerminalMatcherResult>;
+
     readonly toHaveNeutralRegion: (received: Locator) => Promise<TerminalMatcherResult>;
     readonly toHaveNoPresentedTransient: (received: Session) => Promise<TerminalMatcherResult>;
+
     readonly toMatchTerminalSnapshot: (
         this: MatcherState,
         received: SnapshotSubject,

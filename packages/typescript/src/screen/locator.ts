@@ -25,10 +25,12 @@ export type LocatorWaitOptions = {
     readonly stableFor?: Duration;
     readonly signal?: AbortSignal;
 };
+
 export type LocatorWaitResult = {
     readonly frame: ScreenFrame;
     readonly matches: ReadonlyArray<ScreenMatch>;
 };
+
 export type FrameCapture = (
     request: FrameRequest,
     options?: { readonly signal?: AbortSignal },
@@ -45,12 +47,15 @@ export class Locator {
     and(spec: LocatorSpec): Locator {
         return new Locator(this.capture, allOf(this.spec, spec));
     }
+
     row(row: number): Locator {
         return this.and(rowQuery(row));
     }
+
     region(region: Region): Locator {
         return this.and(regionQuery(region));
     }
+
     filter(style: StyleFilter): Locator {
         return this.and(styleQuery(style));
     }
@@ -58,13 +63,16 @@ export class Locator {
     async all(): Promise<ReadonlyArray<ScreenMatch>> {
         return (await this.observeOnce()).matches;
     }
+
     async count(): Promise<number> {
         return (await this.observeOnce()).matches.length;
     }
+
     async single(): Promise<ScreenMatch> {
         const result = await this.observeOnce();
         if (result.matches.length === 0)
             throw new NoMatchError(describe(this.spec), result.frame.stateHash);
+
         if (result.matches.length !== 1) {
             throw new MultipleMatchesError(
                 describe(this.spec),
@@ -74,21 +82,27 @@ export class Locator {
                 result.matches.slice(0, 8).map((match) => match.excerpt),
             );
         }
+
         const match = result.matches[0];
         if (match === undefined)
             throw new NoMatchError(describe(this.spec), result.frame.stateHash);
+
         return match;
     }
+
     async first(): Promise<ScreenMatch> {
         const result = await this.observeOnce();
         const match = result.matches[0];
         if (match === undefined)
             throw new NoMatchError(describe(this.spec), result.frame.stateHash);
+
         return match;
     }
+
     async nth(index: number): Promise<ScreenMatch> {
         if (!Number.isSafeInteger(index) || index < 0)
             throw new InvalidQueryError("locator index must be a nonnegative safe integer");
+
         const result = await this.observeOnce();
         const match = result.matches[index];
         if (match === undefined)
@@ -96,6 +110,7 @@ export class Locator {
                 `${describe(this.spec)} at index ${index}`,
                 result.frame.stateHash,
             );
+
         return match;
     }
 
@@ -103,23 +118,30 @@ export class Locator {
         const timeout = options.timeout ?? Duration.seconds(10);
         const interval = options.interval ?? Duration.milliseconds(25);
         const stableFor = options.stableFor ?? Duration.nanoseconds(0n);
+
         if (timeout.nanoseconds === 0n)
             throw new InvalidDurationError("locator timeout must be nonzero");
+
         if (interval.nanoseconds === 0n)
             throw new InvalidDurationError("locator interval must be nonzero");
+
         if (stableFor.nanoseconds > timeout.nanoseconds)
             throw new InvalidDurationError("locator stable interval must not exceed its timeout");
+
         const timeoutMs = Number(timeout.nanoseconds / 1_000_000n);
         const intervalMs = Math.max(1, Number(interval.nanoseconds / 1_000_000n));
         const stableForMs = Number(stableFor.nanoseconds / 1_000_000n);
         const deadline = performance.now() + timeoutMs;
         let matchingState: { readonly hash: string; readonly since: number } | undefined;
         let lastFrame: ScreenFrame | undefined;
+
         for (;;) {
             options.signal?.throwIfAborted();
+
             const remainingBeforeCapture = deadline - performance.now();
             if (remainingBeforeCapture <= 0)
                 throw new LocatorTimeoutError(describe(this.spec), lastFrame?.stateHash);
+
             const captureGuard = new AbortController();
             const guardSignal =
                 options.signal === undefined
@@ -142,14 +164,19 @@ export class Locator {
             } finally {
                 captureGuard.abort();
             }
+
             options.signal?.throwIfAborted();
+
             const observedAt = performance.now();
             if (observedAt >= deadline)
                 throw new LocatorTimeoutError(describe(this.spec), lastFrame?.stateHash);
+
             lastFrame = frame;
+
             const matches = evaluateQuery(frame, this.spec);
             if (matches.length > 0) {
                 if (stableFor.nanoseconds === 0n) return Object.freeze({ frame, matches });
+
                 if (matchingState === undefined || matchingState.hash !== frame.stateHash)
                     matchingState = { hash: frame.stateHash, since: observedAt };
                 else if (observedAt - matchingState.since >= stableForMs)
@@ -157,6 +184,7 @@ export class Locator {
             } else {
                 matchingState = undefined;
             }
+
             const remaining = deadline - observedAt;
             await sleep(Math.min(intervalMs, remaining), undefined, { signal: options.signal });
         }
@@ -172,6 +200,7 @@ function frameRequest(spec: LocatorSpec): FrameRequest {
     const region = findRegion(spec);
     return region === undefined ? { detail: "spans" } : { detail: "spans", region };
 }
+
 function findRegion(spec: LocatorSpec): Region | undefined {
     if (spec.kind === "region") return spec.region;
     if (spec.kind !== "all") return undefined;
@@ -179,19 +208,24 @@ function findRegion(spec: LocatorSpec): Region | undefined {
     for (const nested of spec.specs) {
         const region = findRegion(nested);
         if (region === undefined) continue;
+
         if (selected === undefined) {
             selected = region;
             continue;
         }
+
         const top = Math.max(selected.top, region.top);
         const left = Math.max(selected.left, region.left);
         const bottom = Math.min(selected.top + selected.height, region.top + region.height);
         const right = Math.min(selected.left + selected.width, region.left + region.width);
+
         if (top >= bottom || left >= right) return undefined;
         selected = { top, left, width: right - left, height: bottom - top };
     }
+
     return selected;
 }
+
 function describe(spec: LocatorSpec): string {
     switch (spec.kind) {
         case "text":

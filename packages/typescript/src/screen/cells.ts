@@ -17,6 +17,7 @@ export function materializeRow(row: ScreenRow): ReadonlyArray<ScreenCell> {
             );
         }
     }
+
     return Object.freeze(cells);
 }
 
@@ -27,6 +28,7 @@ export function cellContentIsNeutral(
     appearance: ScreenCell["appearance"],
 ): boolean {
     const style = appearance.style;
+
     return (
         (grapheme === "" || grapheme === " ") &&
         (wideKind === "narrow" || wideKind === "spacer_head" || wideKind === "spacer_tail") &&

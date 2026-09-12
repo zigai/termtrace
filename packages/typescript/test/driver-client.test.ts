@@ -121,9 +121,11 @@ test("aborting an in-flight request reaps the driver tree and rejects all FIFO w
         });
         const firstOutcome = first.catch((cause: unknown) => cause);
         const secondOutcome = second.catch((cause: unknown) => cause);
+
         for (let attempt = 0; attempt < 100 && !existsSync(childPidFile); attempt += 1) {
             await sleep(5);
         }
+
         expect(existsSync(childPidFile)).toBe(true);
 
         controller.abort(reason);

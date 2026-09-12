@@ -29,6 +29,7 @@ export const terminalMatchers: TerminalMatchers = {
     async toHaveScreenText(received, expected) {
         const subject =
             received instanceof Screen ? await received.frame({ detail: "spans" }) : received;
+
         return assertionResult(
             () => assertScreenText(subject, expected),
             `expected screen not to contain ${String(expected)}`,
@@ -37,6 +38,7 @@ export const terminalMatchers: TerminalMatchers = {
     async toHaveCursor(received, expected) {
         const subject =
             received instanceof Screen ? await received.frame({ detail: "spans" }) : received;
+
         return assertionResult(
             () => assertCursor(subject, expected),
             "expected cursor not to match",
@@ -54,6 +56,7 @@ export const terminalMatchers: TerminalMatchers = {
         if (!Number.isSafeInteger(expected) || expected < 0) {
             throw new RangeError("expected locator count must be a nonnegative safe integer");
         }
+
         const matches = await received.all();
         return matcherResult(
             matches.length === expected,
@@ -220,6 +223,7 @@ async function assertionResult(
         ) {
             throw cause;
         }
+
         return matcherResult(false, cause.message, negatedMessage);
     }
 }
@@ -237,6 +241,7 @@ const LocatorSubject = {
         if (received instanceof Locator) {
             return received;
         }
+
         throw new TypeError("matcher requires a Termtrace Locator");
     },
 };
@@ -246,6 +251,7 @@ const SessionSubject = {
         if (received instanceof Session) {
             return received;
         }
+
         throw new TypeError("matcher requires a Termtrace Session");
     },
 };
@@ -255,6 +261,7 @@ const ScreenTextSubject = {
         if (received instanceof Screen) {
             return received;
         }
+
         return ScreenAssertionSubject.parse(received);
     },
 };
@@ -264,6 +271,7 @@ const ScreenAssertionSubject = {
         if (received instanceof Session || received instanceof ScreenFrame) {
             return received;
         }
+
         throw new TypeError("matcher requires a Termtrace Session, Screen, or ScreenFrame");
     },
 };
@@ -273,6 +281,7 @@ const SnapshotSubject = {
         if (received instanceof Locator) {
             return received;
         }
+
         return ScreenTextSubject.parse(received);
     },
 };
@@ -289,14 +298,17 @@ async function resolveFrame(
     if (received instanceof Screen) {
         return received.frame({ detail: "spans" });
     }
+
     if (received instanceof Locator) {
         const matches = await received.all();
         const first = matches[0];
         if (first !== undefined) {
             return first.frame;
         }
+
         throw new AssertionMismatchError("locator did not resolve a frame for snapshotting");
     }
+
     throw new TypeError("matcher requires a Termtrace Session, Screen, ScreenFrame, or Locator");
 }
 
@@ -304,8 +316,11 @@ function textMatches(actual: string, expected: string | RegExp): boolean {
     if (!(expected instanceof RegExp)) {
         return actual === expected;
     }
+
     expected.lastIndex = 0;
+
     const match = expected.exec(actual);
+
     expected.lastIndex = 0;
     return match?.index === 0 && match[0] === actual;
 }
@@ -314,6 +329,7 @@ function locatorMismatch(assertion: string, matches: ReadonlyArray<ScreenMatch>)
     if (matches.length !== 1) {
         return `expected strict locator ${assertion}, but it resolved ${matches.length} match(es)`;
     }
+
     return `strict locator did not have the expected ${assertion}; received ${matches[0]?.excerpt ?? ""}`;
 }
 
@@ -323,6 +339,7 @@ function matchIsNeutral(match: ScreenMatch): boolean {
         if (row === undefined) {
             return false;
         }
+
         for (let column = range.startColumn; column < range.endColumn; column += 1) {
             if (row.cells !== null) {
                 const cell = row.cells.find((candidate) => candidate.column === column);
@@ -334,6 +351,7 @@ function matchIsNeutral(match: ScreenMatch): boolean {
                 }
                 continue;
             }
+
             const span = row.spans.find(
                 (candidate) => candidate.startColumn <= column && candidate.endColumn > column,
             );
@@ -347,5 +365,6 @@ function matchIsNeutral(match: ScreenMatch): boolean {
             }
         }
     }
+
     return true;
 }

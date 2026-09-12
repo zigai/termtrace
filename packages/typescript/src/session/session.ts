@@ -61,21 +61,24 @@ export type MutationOptions = {
 };
 
 export type KeyboardAtom = InputAtom;
-
 export type Key = Extract<ControlCommand, { readonly command: "key" }>["key"];
 export type DiagnosticCheck = DriverMethodOf<"diagnose">["checks"][number];
+
 export type InputSequenceOptions = MutationOptions & {
     readonly paceMs?: number;
     readonly verbose?: boolean;
 };
+
 export type WaitOptions = {
     readonly timeoutMs?: number;
     readonly stableForMs?: number;
     readonly signal?: AbortSignal;
 };
+
 export type SessionDriver = {
     readonly closedSuccessfully?: boolean;
     readonly isClosed?: boolean;
+
     request<Kind extends DriverDataKind>(
         method: DriverMethod,
         expectedKind: Kind,
@@ -88,9 +91,11 @@ type ControlSession = {
 };
 
 type SessionIdentity = DriverDataOf<"attached">;
+
 type DriverRequestOptionsBuilder = {
     -readonly [Key in keyof DriverRequestOptions]: DriverRequestOptions[Key];
 };
+
 type SequenceActionOptionsBuilder = {
     -readonly [Key in keyof Pick<
         ActionOptions,
@@ -142,12 +147,14 @@ export class Session implements AsyncDisposable {
         this.native = new Native(this);
         this.evidence = new Evidence(this);
     }
+
     get completed(): boolean {
         return this.#completed;
     }
 
     async control(command: ControlCommand, options: MutationOptions = {}): Promise<ControlResult> {
         const expectedState = options.ifState ?? null;
+
         try {
             const requestOptions: DriverRequestOptionsBuilder = {};
             if (options.requestId !== undefined) requestOptions.requestId = options.requestId;
@@ -186,6 +193,7 @@ export class Session implements AsyncDisposable {
                 throw new InvalidRegionError(failure.message);
             if (failure.code === "protocol_mismatch")
                 throw new ProtocolMismatchError(failure.message);
+
             if (
                 failure.code === "input_sequence_incomplete" &&
                 failure.details?.input_sequence !== undefined &&
@@ -194,6 +202,7 @@ export class Session implements AsyncDisposable {
                 const details = failure.details.input_sequence;
                 throw new PartialInputError(details, failure);
             }
+
             if (failure.code === "screen_frame_resource_limit") {
                 const screen = failure.details?.screen_frame;
                 if (
@@ -211,9 +220,11 @@ export class Session implements AsyncDisposable {
                     );
                 }
             }
+
             throw cause;
         }
     }
+
     async act(atoms: ReadonlyArray<InputAtom>, options: ActionOptions = {}): Promise<ActionResult> {
         const encoded = encodeAction(atoms, options);
         const data = await this.control(encoded.command, {
@@ -250,6 +261,7 @@ export class Session implements AsyncDisposable {
             "completion",
             requestTimeoutMs === undefined ? {} : { timeoutMs: requestTimeoutMs },
         );
+
         this.#completed = true;
         return result.completion;
     }
@@ -264,6 +276,7 @@ export class Session implements AsyncDisposable {
             },
             "output_wait",
         );
+
         return result.outcome;
     }
 
@@ -296,9 +309,11 @@ export class Session implements AsyncDisposable {
         if (this.#closed) {
             return;
         }
+
         if (this.#owned && this.#evidencePolicy !== "manual") {
             await this.#ensureCompleted();
         }
+
         if (!this.#driver.isClosed) {
             try {
                 await this.#driver.request({ method: "detach", handle: this.#handle }, "detached");
@@ -311,19 +326,24 @@ export class Session implements AsyncDisposable {
                 }
             }
         }
+
         this.#closed = true;
     }
 
     /** Complete and verify owned work; discard is deferred until the owning client closes. */
     async finish(passed: boolean, requestTimeoutMs = 10_000): Promise<void> {
         if (this.#closed) return;
+
         if (!this.#owned)
             throw new TypeError("finish is valid only for sessions launched by this client");
+
         await this.#ensureCompleted(requestTimeoutMs);
+
         const verification = await this.evidence.verify("content", requestTimeoutMs);
         if (!verification.valid) {
             throw new Error("canonical evidence failed content verification");
         }
+
         if (!this.#driver.isClosed) {
             try {
                 await this.#driver.request({ method: "detach", handle: this.#handle }, "detached", {
@@ -338,6 +358,7 @@ export class Session implements AsyncDisposable {
                 }
             }
         }
+
         this.#closed = true;
         this.#discardAfterClose = passed && this.#evidencePolicy === "on-failure";
     }
@@ -350,11 +371,13 @@ export class Session implements AsyncDisposable {
     /** Apply a verified finish decision only after the owning driver has closed successfully. */
     async discardAfterDriverClose(): Promise<void> {
         if (!this.#discardAfterClose) return;
+
         if (this.#driver.closedSuccessfully !== true) {
             throw new Error(
                 "canonical evidence cannot be discarded before successful driver close",
             );
         }
+
         await rm(this.canonicalSession, { recursive: true });
         this.#discardAfterClose = false;
     }
@@ -371,8 +394,10 @@ export class Session implements AsyncDisposable {
             )
                 throw cause;
         }
+
         await this.complete(requestTimeoutMs, requestTimeoutMs);
     }
+
     async [Symbol.asyncDispose](): Promise<void> {
         await this.close();
     }
@@ -433,10 +458,12 @@ export class Keyboard {
                 "total input sequence pacing must not exceed 60 seconds",
             );
         }
+
         const actionOptions: SequenceActionOptionsBuilder = { requestId, pace };
         if (options.callerIntent !== undefined) actionOptions.callerIntent = options.callerIntent;
         if (options.verbose !== undefined) actionOptions.verboseAtomOutcomes = options.verbose;
         const encoded = encodeAction(atoms, actionOptions);
+
         return this.session.control(
             {
                 command: "input_sequence",

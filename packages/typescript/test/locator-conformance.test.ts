@@ -29,6 +29,7 @@ import { parseScreenFrame, ScreenFrame, type ScreenAppearance } from "../src/scr
 import type { JsonObject, JsonValue } from "../src/index.js";
 
 const fixturePath = join(import.meta.dir, "../../../fixtures/conformance/locators/locator.json");
+
 type MutableStyleFilter = { -readonly [Key in keyof StyleFilter]: StyleFilter[Key] };
 type NormalizedMatch = {
     readonly text: string;
@@ -193,15 +194,21 @@ function spec(query: FixtureQuery): LocatorSpec {
             crossSoftWrap: query.cross_soft_wraps ?? false,
         });
     }
+
     if (query.kind === "regex") return textQuery(new RegExp(query.pattern));
+
     if (query.kind === "style") {
         const filter: MutableStyleFilter = {};
         if (query.bold !== undefined) filter.bold = query.bold;
+
         if (query.resolved_background !== undefined)
             filter.resolvedBackground = parseHexColor(query.resolved_background);
+
         return styleQuery(filter);
     }
+
     if (query.kind === "row") return rowQuery(query.row);
+
     if (query.kind === "region") {
         return regionQuery({
             top: query.top,
@@ -210,6 +217,7 @@ function spec(query: FixtureQuery): LocatorSpec {
             height: query.height,
         });
     }
+
     if (query.kind === "all") return allOf(...query.specs.map(spec));
     const exhaustive: never = query;
     throw new TypeError(`unknown fixture query ${String(exhaustive)}`);
@@ -225,6 +233,7 @@ function normalizedMatches(
         expect(match.frameHash).toBe("fixture-frame-v1");
         expect(match.frame.presented).toBe(false);
         expect(match.query.length).toBeLessThanOrEqual(240);
+
         return {
             text: match.text,
             ranges: match.ranges.map(
@@ -236,6 +245,7 @@ function normalizedMatches(
 
 function parseHexColor(value: string): `#${string}` {
     if (!/^#[0-9a-fA-F]{6}$/u.test(value)) throw new TypeError("fixture color must be #RRGGBB");
+
     // SAFETY: the preceding anchored expression proves the complete #RRGGBB representation;
     // TypeScript cannot derive a template-literal type from a regular-expression match.
     return value as `#${string}`;
@@ -247,6 +257,7 @@ function fixtureFrame(): ScreenFrame {
 
 function textOnlyFixtureFrame(): ScreenFrame {
     const frame = corpus.frame;
+
     return parseScreenFrame({
         ...frame,
         data: {
@@ -267,6 +278,7 @@ function literalFrame(text: string): ScreenFrame {
     if (appearance === undefined) throw new TypeError("fixture must contain a styled span");
     const cells = [...text].map((grapheme) => ({ grapheme, wideKind: "narrow" as const }));
     const region = { top: 0, left: 0, width: cells.length, height: 1 };
+
     return new ScreenFrame(
         source.version,
         source.stateHash,
@@ -302,6 +314,7 @@ function literalFrame(text: string): ScreenFrame {
         ],
     );
 }
+
 function malformedStyleFilter(
     ...properties: ReadonlyArray<readonly [string, JsonValue | undefined]>
 ): StyleFilter {
@@ -309,6 +322,7 @@ function malformedStyleFilter(
     for (const [name, value] of properties) {
         Object.defineProperty(filter, name, { value, enumerable: true });
     }
+
     return filter;
 }
 
@@ -321,9 +335,12 @@ test("shared locator conformance corpus matches public contract", () => {
     for (const testCase of corpus.cases) {
         if (testCase.error === "invalid_query") {
             expect(() => normalizedMatches(frame, testCase.query)).toThrow(InvalidQueryError);
+
             continue;
         }
+
         expect(testCase.error).toBeUndefined();
+
         if (testCase.matches === undefined) throw new TypeError("fixture matches must be an array");
         expect(normalizedMatches(frame, testCase.query), testCase.name).toEqual(testCase.matches);
     }
@@ -429,6 +446,7 @@ test("locator wait observes timeout while capture is in flight", async () => {
     const locator = new Locator(async (request, options) => {
         expect(request.detail).toBe("spans");
         captureSignal = options?.signal;
+
         return await new Promise<ScreenFrame>(() => {});
     }, textQuery("Ready"));
     await expect(
@@ -450,6 +468,7 @@ test("locator wait observes abort while capture is in flight", async () => {
         expect(request.detail).toBe("spans");
         captureSignal = options?.signal;
         captureStarted?.();
+
         return await new Promise<ScreenFrame>(() => {});
     }, textQuery("Ready"));
     const controller = new AbortController();

@@ -34,9 +34,11 @@ type CyclicMethod = {
     method: "hello";
     self?: JsonObject;
 };
+
 function methodSerializedAs(value: JsonValue): DriverMethod {
     const method: DriverMethod = { method: "hello" };
     Object.defineProperty(method, "toJSON", { enumerable: true, value: () => value });
+
     return method;
 }
 
@@ -84,8 +86,10 @@ describe("parseDriverResponse", () => {
         const parsedAttached = parseDriverResponse(attached.response, attached.response.request_id);
 
         expect(parsedHello._tag).toBe("Success");
+
         if (parsedHello._tag === "Success") expect(parsedHello.data.kind).toBe("hello");
         expect(parsedAttached._tag).toBe("Success");
+
         if (parsedAttached._tag === "Success") expect(parsedAttached.data.kind).toBe("attached");
     });
 
@@ -123,6 +127,7 @@ describe("parseDriverResponse", () => {
         const response = parseDriverResponse(fixture.response, fixture.response.request_id);
 
         expect(response._tag).toBe("Failure");
+
         if (response._tag === "Failure") {
             expect(response.failure.retrySafety).toBe("safe_same_request_id");
             expect(response.failure.uncertain).toBe(true);
@@ -142,6 +147,7 @@ describe("parseDriverResponse", () => {
         const controlDetails = parsed.failure.details;
         if (controlDetails === undefined)
             throw new Error("partial-input control details are missing");
+
         let envelopeRequestId: string | undefined;
         const driver: SessionDriver = {
             request(methodFields, expectedKind, options): Promise<never> {
@@ -155,6 +161,7 @@ describe("parseDriverResponse", () => {
                     generatedRequestId === undefined
                 )
                     throw new Error("partial-input test setup is incomplete");
+
                 throw new TermtraceOperationError({
                     ...parsed.failure,
                     details: {
@@ -186,9 +193,12 @@ describe("parseDriverResponse", () => {
             .catch((cause: unknown) => cause);
 
         expect(cause).toBeInstanceOf(PartialInputError);
+
         if (!(cause instanceof PartialInputError)) throw new Error("expected a PartialInputError");
+
         if (envelopeRequestId === undefined)
             throw new Error("partial-input envelope request ID is missing");
+
         expect(cause.sequenceId).toBe(envelopeRequestId);
         expect(cause).toMatchObject({
             atomCount: 3,
@@ -285,6 +295,7 @@ describe("parseDriverResponse", () => {
 
     test("rejects malformed runtime request input", () => {
         const requestId = "00000000-0000-0000-0000-000000000020";
+
         const malformedMethods: DriverMethod[] = [
             methodSerializedAs(null),
             methodSerializedAs([]),
@@ -309,6 +320,7 @@ describe("Keyboard.sequence", () => {
         const session: ConstructorParameters<typeof Keyboard>[0] = {
             control(command): Promise<ControlResult> {
                 captured = command;
+
                 return Promise.resolve({
                     kind: "acknowledged",
                     boundaries: {
@@ -332,6 +344,7 @@ describe("Keyboard.sequence", () => {
             ],
             { paceMs: 5, verbose: true, requestId: "00000000-0000-0000-0000-000000000020" },
         );
+
         if (captured?.command !== "input_sequence")
             throw new Error("sequence command was not captured");
 

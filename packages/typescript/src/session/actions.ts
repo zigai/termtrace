@@ -26,11 +26,14 @@ export class Duration {
     static nanoseconds(value: bigint): Duration {
         if (value < 0n || value > 18_446_744_073_709_551_615n)
             throw new InvalidDurationError("nanoseconds must fit unsigned 64-bit range");
+
         return new Duration(value);
     }
+
     static milliseconds(value: number): Duration {
         return Duration.fromNumber(value, 1_000_000, "milliseconds");
     }
+
     static seconds(value: number): Duration {
         return Duration.fromNumber(value, 1_000_000_000, "seconds");
     }
@@ -38,17 +41,20 @@ export class Duration {
     toWireNumber(field: string): number {
         if (this.nanoseconds > BigInt(Number.MAX_SAFE_INTEGER))
             throw new InvalidDurationError(`${field} exceeds the lossless JSON integer range`);
+
         return Number(this.nanoseconds);
     }
 
     private static fromNumber(value: number, multiplier: number, field: string): Duration {
         if (!Number.isFinite(value) || value < 0)
             throw new InvalidDurationError(`${field} must be finite and nonnegative`);
+
         const nanoseconds = value * multiplier;
         if (!Number.isSafeInteger(nanoseconds))
             throw new InvalidDurationError(
                 `${field} must represent an exact, lossless whole nanosecond duration`,
             );
+
         return Duration.nanoseconds(BigInt(nanoseconds));
     }
 }
@@ -70,6 +76,7 @@ export type KeyInput =
     | "arrow_right"
     | { readonly function: number }
     | { readonly letter: string };
+
 export type InputAtom =
     | { readonly kind: "text"; readonly text: string; readonly callerIntent?: string }
     | {
@@ -81,12 +88,14 @@ export type InputAtom =
     | {
           readonly kind: "key";
           readonly key: KeyInput;
+
           readonly modifiers?: {
               readonly shift?: boolean;
               readonly control?: boolean;
               readonly alt?: boolean;
               readonly superKey?: boolean;
           };
+
           readonly callerIntent?: string;
       }
     | {
@@ -95,6 +104,7 @@ export type InputAtom =
           readonly bracketed?: boolean;
           readonly callerIntent?: string;
       };
+
 export type ActionPostcondition =
     | { readonly kind: "none" }
     | { readonly kind: "idle"; readonly stableFor: Duration; readonly timeout: Duration }
@@ -103,6 +113,7 @@ export type ActionPostcondition =
           readonly predicate: ScreenPredicate;
           readonly timeout: Duration;
       };
+
 export type ActionOptions = {
     readonly requestId?: string;
     readonly ifState?: string;
@@ -113,6 +124,7 @@ export type ActionOptions = {
     readonly frame?: FrameRequest;
     readonly allowIncomplete?: boolean;
 };
+
 export type InputAtomOutcome = {
     readonly operationId: string;
     readonly inputKind: string;
@@ -120,6 +132,7 @@ export type InputAtomOutcome = {
     readonly intentEventSeq: number;
     readonly resultEventSeq: number;
 };
+
 export type ActionInputResult = {
     readonly completedAtoms: number;
     readonly bytesWritten: number;
@@ -128,6 +141,7 @@ export type ActionInputResult = {
     readonly pace: Duration;
     readonly atomOutcomes: ReadonlyArray<InputAtomOutcome> | null;
 };
+
 export type ActionCompletion =
     | { readonly kind: "none" }
     | {
@@ -136,6 +150,7 @@ export type ActionCompletion =
       }
     | {
           readonly kind: "screen";
+
           readonly quality:
               | "matched"
               | "matched_unsettled"
@@ -143,15 +158,18 @@ export type ActionCompletion =
               | "output_closed"
               | "deadline";
       };
+
 export type CanonicalBoundary = {
     readonly eventHash: string;
     readonly nextEventSeq: number;
     readonly outputBytes: number;
 };
+
 export type ActionBoundaries = {
     readonly durable: CanonicalBoundary;
     readonly observed: CanonicalBoundary;
 };
+
 export type ActionResult = {
     readonly requestId: string;
     readonly input: ActionInputResult;
@@ -167,10 +185,13 @@ export function normalizeInputAtoms(
 ): ReadonlyArray<WireInputSequenceAtom> {
     if (atoms.length < 1 || atoms.length > 4096)
         throw new InvalidAtomError("input must contain 1 through 4096 atoms");
+
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(requestId))
         throw new InvalidAtomError("requestId must be a UUID");
+
     const canonicalRequestId = requestId.toLowerCase();
     const namespace = Buffer.from("6ba7b8119dad11d180b400c04fd430c8", "hex");
+
     return Object.freeze(
         atoms.map((atom, index) => {
             const hash = createHash("sha1")
@@ -179,6 +200,7 @@ export function normalizeInputAtoms(
                 .digest();
             hash.writeUInt8((hash.readUInt8(6) & 0x0f) | 0x50, 6);
             hash.writeUInt8((hash.readUInt8(8) & 0x3f) | 0x80, 8);
+
             const hex = hash.subarray(0, 16).toString("hex");
             const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
             return encodeAtom(atom, id, callerIntent);
@@ -188,6 +210,7 @@ export function normalizeInputAtoms(
 
 type WireControlMethod = Extract<WireDriverRequest["method"], { readonly method: "control" }>;
 type WireActionCommand = Extract<WireControlMethod["command"], { readonly command: "act" }>;
+
 type ActionCommand = Readonly<
     Omit<WireActionCommand, "atoms"> & {
         readonly atoms: ReadonlyArray<WireInputSequenceAtom>;
@@ -205,7 +228,9 @@ export function encodeAction(
         throw new InvalidDurationError("pace must not exceed 60 seconds");
     if (pace.nanoseconds * BigInt(atoms.length) > 60_000_000_000n)
         throw new InvalidDurationError("total action pacing must not exceed 60 seconds");
+
     const postcondition = encodePostcondition(options.postcondition ?? { kind: "none" });
+
     return Object.freeze({
         requestId,
         command: Object.freeze({
@@ -223,6 +248,7 @@ const controlResultSchema = Object.freeze({
     parse(input: unknown): ControlResult {
         if (!validateControlData(input))
             throw new ProtocolMismatchError("action result does not match the protocol schema");
+
         // SAFETY: the generated Ajv validator proved the complete ControlData definition.
         return input as ControlResult;
     },
@@ -236,11 +262,14 @@ export function parseActionResult(
     const value = controlResultSchema.parse(input);
     if (value.kind !== "action_applied")
         throw new ProtocolMismatchError("action response kind is invalid");
+
     const wireInput = value.input;
     const wirePostcondition = value.postcondition;
     const boundaries = parseActionBoundaries(value.boundaries);
+
     if (wirePostcondition.frame.source.source !== "actor")
         throw new ProtocolMismatchError("action terminating frame is not actor-owned");
+
     const frameBoundaries = parseActionBoundaries(wirePostcondition.frame.source.boundaries);
     if (!equalBoundaries(boundaries, frameBoundaries))
         throw new ProtocolMismatchError(
@@ -262,6 +291,7 @@ export function parseActionResult(
             quality: wirePostcondition.quality,
         });
     }
+
     const atomOutcomes =
         wireInput.atoms === undefined ? null : wireInput.atoms.map(parseAtomOutcome);
     const result: ActionResult = Object.freeze({
@@ -280,6 +310,7 @@ export function parseActionResult(
     });
     if (result.requestId !== expectedRequestId)
         throw new ProtocolMismatchError("action result request ID does not match request");
+
     const complete =
         completion.kind === "none" ||
         (completion.kind === "idle" && completion.quality === "stable") ||
@@ -288,6 +319,7 @@ export function parseActionResult(
     if (!complete && !allowIncomplete && completion.kind !== "none") {
         throw new PostconditionIncompleteError(result, completion.quality);
     }
+
     return result;
 }
 
@@ -310,6 +342,7 @@ function encodeAtom(
         case "bytes":
             if (atom.bytes.byteLength === 0)
                 throw new InvalidAtomError("bytes atom must not be empty");
+
             return Object.freeze({
                 input: "bytes",
                 operation_id: id,
@@ -333,6 +366,7 @@ function encodeAtom(
         case "paste": {
             const bytes = Buffer.from(atom.data);
             if (bytes.byteLength === 0) throw new InvalidAtomError("paste atom must not be empty");
+
             if (atom.bracketed === false)
                 return Object.freeze({
                     input: "bytes",
@@ -341,6 +375,7 @@ function encodeAtom(
                     input_kind: "text",
                     caller_intent: callerIntent,
                 });
+
             return Object.freeze({
                 input: "paste",
                 operation_id: id,
@@ -350,6 +385,7 @@ function encodeAtom(
         }
     }
 }
+
 function encodePostcondition(
     postcondition: ActionPostcondition,
 ): WireActionCommand["postcondition"] {
@@ -365,6 +401,7 @@ function encodePostcondition(
                 throw new InvalidDurationError(
                     "idle stableFor must be nonzero and no greater than timeout",
                 );
+
             return Object.freeze({
                 condition: "idle",
                 stable_for_ns: postcondition.stableFor.toWireNumber("stableFor"),
@@ -373,6 +410,7 @@ function encodePostcondition(
         case "screen":
             if (postcondition.timeout.nanoseconds === 0n)
                 throw new InvalidDurationError("screen timeout must be nonzero");
+
             return Object.freeze({
                 condition: "screen",
                 predicate: postcondition.predicate,
@@ -380,6 +418,7 @@ function encodePostcondition(
             });
     }
 }
+
 function normalizeKey(key: KeyInput): KeyInput {
     switch (key) {
         case "enter":
@@ -398,13 +437,17 @@ function normalizeKey(key: KeyInput): KeyInput {
         case "arrow_right":
             return key;
     }
+
     if ("function" in key) {
         if (!Number.isSafeInteger(key.function) || key.function < 1 || key.function > 24)
             throw new InvalidAtomError("function key must be between 1 and 24");
+
         return Object.freeze({ function: key.function });
     }
+
     if (key.letter.length === 0 || Array.from(key.letter).length !== 1)
         throw new InvalidAtomError("letter key must contain exactly one Unicode scalar");
+
     return Object.freeze({ letter: key.letter });
 }
 

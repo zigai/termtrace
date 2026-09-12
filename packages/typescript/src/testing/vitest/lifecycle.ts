@@ -46,6 +46,7 @@ export async function finishTerminalTest(input: {
         secondaryFailures,
         input.operationTimeoutMs,
     );
+
     if (input.bodyFailed || secondaryFailures.length > 0) {
         secondaryFailures.push(
             ...(await captureFailureArtifacts(
@@ -57,6 +58,7 @@ export async function finishTerminalTest(input: {
             )),
         );
     }
+
     if (completionSucceeded) {
         try {
             await input.session.finish(
@@ -68,14 +70,17 @@ export async function finishTerminalTest(input: {
             secondaryFailures.push(cause);
         }
     }
+
     if (input.bodyFailed || secondaryFailures.length > 0) {
         input.session.retain();
     }
+
     try {
         await input.client.close({ requestTimeoutMs: input.operationTimeoutMs });
     } catch (cause: unknown) {
         secondaryFailures.push(cause);
     }
+
     if (
         !input.bodyFailed &&
         secondaryFailures.length === 0 &&
@@ -96,8 +101,10 @@ export async function finishTerminalTest(input: {
     if (input.bodyFailed && input.primaryWasCaught) {
         throwPrimary(input.primaryFailure, secondaryFailures, input.artifacts);
     }
+
     if (input.bodyFailed) {
         const diagnostic = artifactDiagnostic(input.artifacts);
+
         if (secondaryFailures.length > 0) {
             throw lifecycleError(
                 "Secondary Termtrace failure after a Vitest-reported test failure",
@@ -105,11 +112,14 @@ export async function finishTerminalTest(input: {
                 input.artifacts,
             );
         }
+
         if (diagnostic.length > 0) {
             throw new Error(diagnostic);
         }
+
         return;
     }
+
     if (secondaryFailures.length > 0) {
         throw lifecycleError("Termtrace test cleanup failed", secondaryFailures, input.artifacts);
     }
@@ -122,17 +132,20 @@ async function completeSession(
 ): Promise<boolean> {
     let stopFailed = false;
     let stopFailure: unknown;
+
     try {
         await session.stop({ requestTimeoutMs: operationTimeoutMs });
     } catch (cause: unknown) {
         stopFailed = true;
         stopFailure = cause;
     }
+
     try {
         await session.evidence.complete({
             timeoutMs: operationTimeoutMs,
             requestTimeoutMs: operationTimeoutMs,
         });
+
         if (
             stopFailed &&
             !(
@@ -142,10 +155,12 @@ async function completeSession(
         ) {
             failures.push(stopFailure);
         }
+
         return true;
     } catch (cause: unknown) {
         if (stopFailed) failures.push(stopFailure);
         failures.push(cause);
+
         return false;
     }
 }
@@ -163,6 +178,7 @@ async function captureFailureArtifacts(
         `session-${boundedPathPart(session.sessionId)}`,
         "failure",
     );
+
     await collectFailure(failures, async () =>
         mkdir(artifactRoot, { recursive: true, mode: 0o700 }),
     );
@@ -184,17 +200,20 @@ async function captureFailureArtifacts(
         ) {
             throw new Error("semantic screenshot escaped its committed artifact directory");
         }
+
         const metadata = await lstat(primary);
         const maximum = options?.maxScreenshotBytes ?? DEFAULT_SCREENSHOT_BYTES;
         if (!metadata.isFile() || metadata.size > maximum) {
             throw new RangeError(`semantic screenshot exceeds the ${maximum}-byte adapter limit`);
         }
+
         artifacts.semanticScreenshot = primary;
     });
 
     await collectFailure(failures, async () => {
         const verification = await session.evidence.verify("content", operationTimeoutMs);
         artifacts.verificationValid = verification.valid;
+
         if (!verification.valid) {
             throw new Error(
                 `canonical evidence verification failed with ${verification.findings.length} finding(s)`,
@@ -217,11 +236,13 @@ async function captureFailureArtifacts(
         if (!Number.isSafeInteger(bytes) || bytes > maximum) {
             throw new RangeError(`failure bundle exceeds the ${maximum}-byte adapter limit`);
         }
+
         const committedRoot = resolve(bundle.directory);
         const metadata = await lstat(committedRoot);
         if (!metadata.isDirectory()) {
             throw new Error("failure bundle verification did not find the committed directory");
         }
+
         for (const member of bundle.manifest.members) {
             const memberPath = resolve(committedRoot, member.path);
             const localPath = relative(committedRoot, memberPath);
@@ -230,6 +251,7 @@ async function captureFailureArtifacts(
                     "failure bundle manifest contains a path outside its committed directory",
                 );
             }
+
             const memberMetadata = await lstat(memberPath);
             if (!memberMetadata.isFile() || memberMetadata.size !== member.byte_length) {
                 throw new Error(
@@ -237,8 +259,10 @@ async function captureFailureArtifacts(
                 );
             }
         }
+
         artifacts.bundle = bundle.directory;
     });
+
     return failures;
 }
 
@@ -263,17 +287,20 @@ function throwPrimary(
             cause,
         });
     }
+
     try {
         const diagnostic = artifactDiagnostic(artifacts);
         if (diagnostic.length > 0 && !cause.message.includes(diagnostic)) {
             cause.message = `${cause.message}\n${diagnostic}`;
         }
+
         if (secondaryFailures.length > 0) {
             Object.defineProperty(cause, "termtraceSecondaryFailures", {
                 configurable: true,
                 enumerable: false,
                 value: Object.freeze([...secondaryFailures]),
             });
+
             if (cause.cause === undefined) {
                 Object.defineProperty(cause, "cause", {
                     configurable: true,
@@ -285,6 +312,7 @@ function throwPrimary(
     } catch {
         // Frozen or exotic Error objects must still remain the primary thrown value.
     }
+
     throw cause;
 }
 
@@ -303,6 +331,7 @@ function lifecycleError(
         enumerable: false,
         value: Object.freeze([...failures]),
     });
+
     return error;
 }
 
@@ -310,6 +339,7 @@ function artifactDiagnostic(artifacts: MutableArtifacts | undefined): string {
     if (artifacts === undefined) {
         return "";
     }
+
     const values = [
         `Termtrace evidence: ${artifacts.canonicalSession}`,
         artifacts.semanticScreenshot === undefined
@@ -317,5 +347,6 @@ function artifactDiagnostic(artifacts: MutableArtifacts | undefined): string {
             : `Semantic screenshot: ${artifacts.semanticScreenshot}`,
         artifacts.bundle === undefined ? undefined : `Failure bundle: ${artifacts.bundle}`,
     ].filter((value): value is string => value !== undefined);
+
     return values.join("\n").slice(0, 2048);
 }

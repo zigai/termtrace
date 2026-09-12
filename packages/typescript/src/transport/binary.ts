@@ -11,12 +11,14 @@ export function packagedBinary(): string | undefined {
     if (platformPackage === undefined) {
         return undefined;
     }
+
     try {
         return createRequire(import.meta.url).resolve(`${platformPackage}/bin/termtrace`);
     } catch (cause: unknown) {
         if (cause instanceof Error && "code" in cause && cause.code === "MODULE_NOT_FOUND") {
             return undefined;
         }
+
         throw cause;
     }
 }

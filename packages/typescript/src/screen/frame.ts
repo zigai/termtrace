@@ -18,10 +18,12 @@ import type { JsonValue } from "../transport/protocol.js";
 export type FrameDetail = "text" | "spans" | "cells";
 export type WideKind = "narrow" | "wide" | "spacer_tail" | "spacer_head";
 export type Rgb = { readonly r: number; readonly g: number; readonly b: number };
+
 export type ColorSource =
     | { readonly kind: "none" }
     | { readonly kind: "palette"; readonly value: number }
     | { readonly kind: "rgb"; readonly value: Rgb };
+
 export type CellStyle = {
     readonly foreground: ColorSource;
     readonly background: ColorSource;
@@ -36,12 +38,14 @@ export type CellStyle = {
     readonly overline: boolean;
     readonly underline: number;
 };
+
 export type ScreenAppearance = {
     readonly style: CellStyle;
     readonly resolvedForeground: Rgb | null;
     readonly resolvedBackground: Rgb | null;
     readonly selected: boolean;
 };
+
 export type ScreenCell = {
     readonly row: number;
     readonly column: number;
@@ -49,7 +53,9 @@ export type ScreenCell = {
     readonly wideKind: WideKind;
     readonly appearance: ScreenAppearance;
 };
+
 export type SpanCell = { readonly grapheme: string; readonly wideKind: WideKind };
+
 export type ScreenSpan = {
     readonly startColumn: number;
     readonly endColumn: number;
@@ -58,6 +64,7 @@ export type ScreenSpan = {
     readonly appearance: ScreenAppearance;
     readonly cells: ReadonlyArray<SpanCell>;
 };
+
 export type ScreenRow = {
     readonly row: number;
     readonly softWrapped: boolean;
@@ -66,30 +73,36 @@ export type ScreenRow = {
     readonly spans: ReadonlyArray<ScreenSpan>;
     readonly cells: ReadonlyArray<ScreenCell> | null;
 };
+
 export type Region = {
     readonly top: number;
     readonly left: number;
     readonly width: number;
     readonly height: number;
 };
+
 export type WireRegion = {
     readonly top: number;
     readonly left: number;
     readonly right: number;
     readonly bottom: number;
 };
+
 export type StatePoint =
     | { readonly selector: "latest_presented" }
     | { readonly selector: "state_id"; readonly state_id: number }
     | { readonly selector: "event_seq"; readonly event_seq: number }
     | { readonly selector: "monotonic_ns"; readonly monotonic_ns: number }
     | { readonly selector: "marker"; readonly label: string };
+
 export type FrameRequest = {
     readonly point?: StatePoint;
     readonly detail?: FrameDetail;
     readonly region?: Region;
 };
+
 export type ScreenGeometry = { readonly cols: number; readonly rows: number };
+
 export type CursorState = {
     readonly row: number | null;
     readonly column: number | null;
@@ -99,23 +112,27 @@ export type CursorState = {
     readonly style: "bar" | "block" | "underline" | "hollow_block";
     readonly wideTail: boolean | null;
 };
+
 export type ModeState = {
     readonly alternateScreen: boolean;
     readonly bracketedPaste: boolean;
     readonly synchronizedOutput: boolean;
     readonly wraparound: boolean;
+
     readonly values: ReadonlyArray<{
         readonly ansi: boolean;
         readonly enabled: boolean;
         readonly number: number;
     }>;
 };
+
 export type ColorState = {
     readonly foreground: Rgb;
     readonly background: Rgb;
     readonly cursor: Rgb | null;
     readonly palette: ReadonlyArray<Rgb>;
 };
+
 export type ScreenFrameSource = WireScreenFrame["source"];
 
 export class ScreenFrame {
@@ -140,6 +157,7 @@ export class ScreenFrame {
         this.rows = Object.freeze([...rows]);
         Object.freeze(this);
     }
+
     get viewportText(): string {
         return this.rows.map((row) => row.text).join("\n");
     }
@@ -147,6 +165,7 @@ export class ScreenFrame {
     get viewport_text(): string {
         return this.viewportText;
     }
+
     get state_hash(): string {
         return this.stateHash;
     }
@@ -165,12 +184,15 @@ export function normalizeRegion(region: Region): WireRegion {
         if (!Number.isSafeInteger(value) || value < 0)
             throw new InvalidRegionError(`${field} must be a nonnegative safe integer`);
     }
+
     if (region.width === 0 || region.height === 0)
         throw new InvalidRegionError("region width and height must be nonzero");
+
     const right = region.left + region.width;
     const bottom = region.top + region.height;
     if (!Number.isSafeInteger(right) || !Number.isSafeInteger(bottom))
         throw new InvalidRegionError("region edges overflow safe integers");
+
     return { top: region.top, left: region.left, right, bottom };
 }
 
@@ -180,6 +202,7 @@ export function encodeFrameRequest(
     const detail = request.detail ?? "spans";
     if (detail === "cells" && request.region === undefined)
         throw new InvalidRegionError("cell detail requires an explicit region");
+
     return Object.freeze({
         detail,
         region: request.region === undefined ? null : normalizeRegion(request.region),
@@ -190,6 +213,7 @@ const wireScreenFrameSchema = Object.freeze({
     parse(input: unknown): WireScreenFrame {
         if (!validateScreenFrame(input))
             throw new ProtocolMismatchError("screen frame does not match the protocol schema");
+
         // SAFETY: the generated Ajv validator proved the complete ScreenFrame definition.
         return input as WireScreenFrame;
     },
@@ -202,6 +226,7 @@ export function parseScreenFrame(input: unknown): ScreenFrame {
         throw new ProtocolMismatchError(`unsupported screen frame version ${frame.version}`);
     if (frame.geometry.cols === 0 || frame.geometry.rows === 0)
         throw new ProtocolMismatchError("screen frame geometry must be positive");
+
     const geometry = Object.freeze({
         cols: frame.geometry.cols,
         rows: frame.geometry.rows,
@@ -214,6 +239,7 @@ export function parseScreenFrame(input: unknown): ScreenFrame {
     const rows = parseRows(frame.data, returnedRegion);
     if (rows.length !== returnedRegion.height)
         throw new ProtocolMismatchError("screen frame row count does not match returned region");
+
     return new ScreenFrame(
         frame.version,
         frame.state_hash,
@@ -250,19 +276,23 @@ function parseTextRow(value: WireScreenTextRow, expectedRow: number): ScreenRow 
 
 function parseSpanRow(value: WireScreenSpanRow, region: Region, expectedRow: number): ScreenRow {
     validateRow(value.row, expectedRow);
+
     const spans = value.spans.map(parseSpan);
     validateSpanCoverage(spans, region);
+
     return makeRow(value, spans, null);
 }
 
 function parseCellRow(value: WireScreenCellRow, region: Region, expectedRow: number): ScreenRow {
     validateRow(value.row, expectedRow);
+
     const cells = value.cells.map(parseCell);
     if (
         cells.length !== region.width ||
         cells.some((cell, index) => cell.row !== value.row || cell.column !== region.left + index)
     )
         throw new ProtocolMismatchError("screen cell coverage is inconsistent");
+
     return makeRow(value, [], cells);
 }
 
@@ -299,6 +329,7 @@ function parseSpan(value: WireScreenSpan): ScreenSpan {
         cells.length !== value.cell_count
     )
         throw new ProtocolMismatchError("screen span coverage is inconsistent");
+
     return Object.freeze({
         startColumn: value.start_column,
         endColumn: value.end_column,
@@ -314,8 +345,10 @@ function validateSpanCoverage(spans: ReadonlyArray<ScreenSpan>, region: Region):
     for (const span of spans) {
         if (span.startColumn !== column)
             throw new ProtocolMismatchError("screen spans are not contiguous");
+
         column = span.endColumn;
     }
+
     if (column !== region.left + region.width)
         throw new ProtocolMismatchError("screen spans do not cover the returned region");
 }
@@ -413,6 +446,7 @@ function parseWireRegion(
         value.bottom > geometry.rows
     )
         throw new ProtocolMismatchError(`${label} is empty or outside geometry`);
+
     return Object.freeze({
         top: value.top,
         left: value.left,

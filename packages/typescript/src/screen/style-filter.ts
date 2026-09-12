@@ -11,12 +11,14 @@ export const StyleFilterInput = Object.freeze({
         } catch {
             throw new InvalidQueryError("style query must match the style filter schema");
         }
+
         if (
             !validateStyleFilter(candidate) ||
             Object.values(Object(candidate)).includes(undefined)
         ) {
             throw new InvalidQueryError("style query must match the style filter schema");
         }
+
         // SAFETY: the generated Ajv validator proves the full StyleFilter contract;
         // the explicit undefined check also enforces present optional-property values.
         const style = candidate as StyleFilter;
@@ -32,6 +34,7 @@ export const StyleFilterInput = Object.freeze({
                 Object.freeze(color);
             }
         }
+
         return Object.freeze(style);
     },
 });

@@ -75,6 +75,7 @@ function frameFor(rows: ReadonlyArray<ReadonlyArray<TestCell>>, stateHash = "sta
                     appearance: cell.appearance ?? appearance,
                 }),
         );
+
         return Object.freeze({
             row,
             softWrapped: false,
@@ -84,6 +85,7 @@ function frameFor(rows: ReadonlyArray<ReadonlyArray<TestCell>>, stateHash = "sta
             cells: Object.freeze(cells),
         });
     });
+
     return new ScreenFrame(
         1,
         stateHash,
@@ -176,6 +178,7 @@ function wireFrame(
             },
         })),
     }));
+
     return {
         version: 1,
         state_hash: frame.stateHash,
@@ -347,10 +350,12 @@ describe("lazy locator request accounting", () => {
                 initialReturned = true;
                 return initial;
             }
+
             if (finalObservedAt === undefined) {
                 await sleep(stableForMs / 2);
                 finalObservedAt = performance.now();
             }
+
             return final;
         }, textQuery("ok"));
         const result = await locator.wait({
@@ -360,6 +365,7 @@ describe("lazy locator request accounting", () => {
         });
         const settledAt = performance.now();
         expect(result.frame).toBe(final);
+
         if (finalObservedAt === undefined) throw new Error("final state was not observed");
         expect(settledAt - finalObservedAt).toBeGreaterThanOrEqual(stableForMs);
 
@@ -376,8 +382,10 @@ describe("lazy locator request accounting", () => {
             .single()
             .catch((cause: unknown) => cause);
         expect(error).toBeInstanceOf(MultipleMatchesError);
+
         if (!(error instanceof MultipleMatchesError))
             throw new Error("expected MultipleMatchesError");
+
         expect(error.stateHash).toBe("ambiguous-state");
         expect(error.ranges[0]?.[0]).toEqual({ row: 0, startColumn: 0, endColumn: 1 });
     });
@@ -409,9 +417,11 @@ describe("Screen rich-frame requests", () => {
             ): Promise<DriverDataOf<Kind>> {
                 if (methodFields.method !== "screen_frame")
                     throw new Error("screen test received a non-frame request");
+
                 requests.push(methodFields);
                 requestOptions.push(options);
                 let captured = wire;
+
                 if (waitingForStability) {
                     if (!initialReturned) {
                         initialReturned = true;
@@ -420,9 +430,11 @@ describe("Screen rich-frame requests", () => {
                             await sleep(stableForMs / 2);
                             finalObservedAt = performance.now();
                         }
+
                         captured = finalWire;
                     }
                 }
+
                 const requestId = "00000000-0000-0000-0000-000000000012";
                 const response = parseDriverResponse(
                     {
@@ -437,6 +449,7 @@ describe("Screen rich-frame requests", () => {
                 );
                 if (response._tag === "Failure")
                     throw new Error("screen test response must be successful");
+
                 return expectDriverData(response.data, expectedKind);
             },
         };
@@ -462,6 +475,7 @@ describe("Screen rich-frame requests", () => {
         });
         const settledAt = performance.now();
         expect(stable.stateHash).toBe("final-state");
+
         if (finalObservedAt === undefined) throw new Error("final state was not observed");
         expect(settledAt - finalObservedAt).toBeGreaterThanOrEqual(stableForMs);
     });
@@ -508,8 +522,10 @@ describe("Screen rich-frame requests", () => {
                     "screen_frame",
                     "screen_frame",
                 ]);
+
                 if (options.signal !== undefined) captureSignals.push(options.signal);
                 captureStarted?.();
+
                 return new Promise<never>(() => {});
             },
         };
@@ -552,6 +568,7 @@ describe("actions and snapshots", () => {
             (atom) => atom.operation_id,
         );
         expect(new Set(ids).size).toBe(4);
+
         for (const id of ids)
             expect(id).toMatch(
                 /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
@@ -575,8 +592,10 @@ describe("actions and snapshots", () => {
         const driver: SessionDriver = {
             request(methodFields, expectedKind, options) {
                 expect([methodFields.method, expectedKind]).toEqual(["control", "control"]);
+
                 if (options?.requestId === undefined)
                     throw new Error("action control request ID was not generated");
+
                 envelopeRequestId = options.requestId;
                 const response = parseDriverResponse(
                     {
@@ -610,6 +629,7 @@ describe("actions and snapshots", () => {
                 );
                 if (response._tag === "Failure")
                     throw new Error("action test response must be successful");
+
                 return Promise.resolve(expectDriverData(response.data, expectedKind));
             },
         };
@@ -627,6 +647,7 @@ describe("actions and snapshots", () => {
         );
 
         const result = await session.act([{ kind: "text", text: "x" }]);
+
         if (envelopeRequestId === undefined)
             throw new Error("action envelope request ID was not captured");
 

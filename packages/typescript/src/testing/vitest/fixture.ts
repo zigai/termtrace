@@ -22,7 +22,9 @@ import type {
  */
 export function createTerminalTest(options: CreateTerminalTestOptions): TerminalTestApi {
     validateOptions(options);
+
     const operationTimeoutMs = options.operationTimeoutMs ?? 10_000;
+
     return test.extend<TerminalTestFixtures>({
         terminal: [
             async ({ task, signal, onTestFinished }, use) => {
@@ -36,6 +38,7 @@ export function createTerminalTest(options: CreateTerminalTestOptions): Terminal
                         : { binaryPath: options.termtrace.binaryPath, evidenceRoot, signal },
                 );
                 let session: Session;
+
                 try {
                     signal.throwIfAborted();
                     session = await client.launch({
@@ -78,16 +81,20 @@ export function createTerminalTest(options: CreateTerminalTestOptions): Terminal
                 let primaryWasCaught = false;
                 let primaryFailure: unknown;
                 let finalized = false;
+
                 onTestFinished(async (finishedContext) => {
                     if (finalized) return;
                     finalized = true;
+
                     const frameworkReportedFailure = finishedContext.task.result?.state === "fail";
                     const bodyFailed =
                         frameworkReportedFailure || primaryWasCaught || signal.aborted;
+
                     if (signal.aborted && !primaryWasCaught) {
                         primaryWasCaught = true;
                         primaryFailure = signal.reason;
                     }
+
                     await finishTerminalTest({
                         session,
                         client,
@@ -127,6 +134,7 @@ async function resolveLaunch(
     if (resolved.command.length === 0) {
         throw new TypeError("terminal test launch command must not be empty");
     }
+
     return resolved;
 }
 
@@ -141,6 +149,7 @@ function identifyTask(task: TestContext["task"]): TerminalTestTask {
     ]
         .filter((value): value is string => value !== undefined)
         .join(":");
+
     return Object.freeze({
         id: task.id,
         name: task.name,
@@ -168,6 +177,7 @@ function validateOptions(options: CreateTerminalTestOptions): void {
     if (options.termtrace.evidenceRoot.length === 0) {
         throw new TypeError("terminal test evidenceRoot must not be empty");
     }
+
     positiveLimit(options.failureArtifacts?.maxScreenshotBytes, "maxScreenshotBytes");
     positiveLimit(options.failureArtifacts?.maxBundleBytes, "maxBundleBytes");
     positiveLimit(options.operationTimeoutMs, "operationTimeoutMs");

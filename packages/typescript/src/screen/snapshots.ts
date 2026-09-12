@@ -12,15 +12,18 @@ import type {
 } from "./frame.js";
 
 export type SnapshotProfile = "text" | "spans" | "cells";
+
 export type SnapshotOptions = {
     readonly includeCursor?: boolean;
     readonly includeModes?: boolean;
     readonly maxCells?: number;
 };
+
 type NormalizedFrameRow = Pick<ScreenRow, "row" | "softWrapped" | "wrapContinuation" | "text"> & {
     readonly spans?: ReadonlyArray<ScreenSpan>;
     readonly cells?: ReadonlyArray<ScreenCell>;
 };
+
 type NormalizedFrameBase = {
     readonly version: number;
     readonly profile: SnapshotProfile;
@@ -33,9 +36,11 @@ type NormalizedFrameBase = {
     readonly cursor?: ScreenFrame["cursor"];
     readonly modes?: ScreenFrame["modes"];
 };
+
 type NormalizedFrameBaseBuilder = {
     -readonly [Key in keyof NormalizedFrameBase]: NormalizedFrameBase[Key];
 };
+
 export type NormalizedFrame = NormalizedFrameBase & {
     readonly rows: ReadonlyArray<NormalizedFrameRow>;
 };
@@ -58,6 +63,7 @@ export function normalizeFrame(
     };
     if (options.includeCursor !== false) common.cursor = frame.cursor;
     if (options.includeModes !== false) common.modes = frame.modes;
+
     if (profile === "text") {
         const rows = Object.freeze(
             frame.rows.map((row) =>
@@ -69,8 +75,10 @@ export function normalizeFrame(
                 }),
             ),
         );
+
         return Object.freeze({ ...common, rows });
     }
+
     if (profile === "spans") {
         const rows = Object.freeze(
             frame.rows.map((row) =>
@@ -83,11 +91,14 @@ export function normalizeFrame(
                 }),
             ),
         );
+
         return Object.freeze({ ...common, rows });
     }
+
     const maximum = options.maxCells ?? 4096;
     if (!Number.isSafeInteger(maximum) || maximum <= 0)
         throw new RangeError("snapshot maxCells must be a positive safe integer");
+
     const requested = frame.rows.reduce(
         (count, row) =>
             count +
@@ -107,6 +118,7 @@ export function normalizeFrame(
             }),
         ),
     );
+
     return Object.freeze({ ...common, rows });
 }
 
@@ -119,6 +131,7 @@ function spansFromCells(cells: ReadonlyArray<ScreenCell>): ReadonlyArray<ScreenS
         readonly appearance: ScreenAppearance;
         readonly cells: SpanCell[];
     };
+
     const drafts: SpanDraft[] = [];
     for (const cell of cells) {
         const last = drafts.at(-1);
@@ -132,8 +145,10 @@ function spansFromCells(cells: ReadonlyArray<ScreenCell>): ReadonlyArray<ScreenS
             last.cellCount += 1;
             last.text += convenienceGrapheme(cell);
             last.cells.push(spanCell);
+
             continue;
         }
+
         drafts.push({
             startColumn: cell.column,
             endColumn: cell.column + 1,
@@ -143,6 +158,7 @@ function spansFromCells(cells: ReadonlyArray<ScreenCell>): ReadonlyArray<ScreenS
             cells: [spanCell],
         });
     }
+
     return Object.freeze(
         drafts.map((span) =>
             Object.freeze({
@@ -161,6 +177,7 @@ function convenienceGrapheme(cell: ScreenCell): string {
 function equalAppearance(left: ScreenAppearance, right: ScreenAppearance): boolean {
     const leftStyle = left.style;
     const rightStyle = right.style;
+
     return (
         equalColorSource(leftStyle.foreground, rightStyle.foreground) &&
         equalColorSource(leftStyle.background, rightStyle.background) &&

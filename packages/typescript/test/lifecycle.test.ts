@@ -103,6 +103,7 @@ test("a real driver close failure after a passing body retains verified canonica
         } finally {
             await verifier.close();
         }
+
         await expect(client.close()).rejects.toThrow();
         expect((await stat(session.canonicalSession)).isDirectory()).toBe(true);
     } finally {
@@ -225,6 +226,7 @@ driver.on("exit", (code) => { process.exitCode = code ?? 1; });
                 await sleep(10);
             }
         }
+
         await stat(attached);
         const pid = Number.parseInt(await readFile(childPid, "utf8"), 10);
         const started = Date.now();
@@ -235,6 +237,7 @@ driver.on("exit", (code) => { process.exitCode = code ?? 1; });
         expect(() => process.kill(pid, 0)).toThrow();
         const canonical = (await readdir(root)).find((name) => name.endsWith(".tt"));
         expect(canonical).toBeDefined();
+
         if (canonical === undefined) throw new Error("launch did not record canonical evidence");
         const verifier = await Termtrace.create({ binaryPath: binary });
         try {

@@ -56,6 +56,7 @@ terminalTest("isolates retry evidence", { retry: 1 }, async ({ evidenceRoot: att
     if (retryAttempt === 1) {
         throw new Error("EXPECTED_FIRST_ATTEMPT_FAILURE");
     }
+
     expect(new Set(retryRoots).size).toBe(2);
 });
 

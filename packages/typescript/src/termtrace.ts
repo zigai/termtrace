@@ -42,7 +42,9 @@ export class Termtrace implements AsyncDisposable {
 
     static async create(options: TermtraceOptions = {}): Promise<Termtrace> {
         options.signal?.throwIfAborted();
+
         const driver = new DriverClient(resolveBinary(options.binaryPath));
+
         try {
             const requestOptions =
                 options.signal === undefined
@@ -53,15 +55,18 @@ export class Termtrace implements AsyncDisposable {
             await driver.close();
             throw cause;
         }
+
         return new Termtrace(driver, options.evidenceRoot);
     }
 
     async launch(options: LaunchOptions): Promise<Session> {
         options.signal?.throwIfAborted();
+
         const evidenceRoot = options.evidenceRoot ?? this.#evidenceRoot;
         if (evidenceRoot === undefined) {
             throw new TypeError("launch requires evidenceRoot on Termtrace or this call");
         }
+
         const viewport = options.viewport ?? { cols: 160, rows: 45 };
         const command = options.command.map((argument) => Buffer.from(argument).toString("base64"));
         const data = await this.#driver.request(
@@ -82,6 +87,7 @@ export class Termtrace implements AsyncDisposable {
         );
         const session = new Session(this.#driver, data, true, options.evidence ?? "always");
         this.#sessions.add(session);
+
         return session;
     }
 
@@ -104,28 +110,35 @@ export class Termtrace implements AsyncDisposable {
                 failures.push(cause);
             }
         }
+
         if (failures.length > 0) {
             await this.#driver.terminate(
                 new AggregateError(failures, "Termtrace finalization failed"),
             );
         }
+
         try {
             await this.#driver.close();
         } catch (cause: unknown) {
             failures.push(cause);
         }
+
         if (failures.length > 0) {
             throw new AggregateError(failures, "Termtrace client cleanup failed");
         }
+
         for (const session of this.#sessions) {
             await session.discardAfterDriverClose();
         }
+
         this.#sessions.clear();
     }
+
     async [Symbol.asyncDispose](): Promise<void> {
         await this.close();
     }
 }
+
 type EnvironmentSpec = NonNullable<DriverMethodOf<"launch">["environment"]>;
 
 function encodeEnvironment(options: EnvironmentOptions | undefined): EnvironmentSpec {
@@ -134,6 +147,7 @@ function encodeEnvironment(options: EnvironmentOptions | undefined): Environment
         const bytes = Buffer.from(value);
         set[name] = bytes.toString("base64");
     }
+
     return {
         base: options?.inheritEnv === false ? "clear" : "inherit",
         set,
