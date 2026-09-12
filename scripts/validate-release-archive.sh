@@ -34,7 +34,7 @@ test -f "$archive_root/NOTICE"
 "$binary" doctor --require core,semantic
 "$binary" tooling client status
 
-session="$work/install-smoke.termtrace"
-"$binary" record --no-input --out "$session" -- /bin/sh -c 'printf RELEASE-SMOKE'
+session="$work/install-check.termtrace"
+"$binary" record --no-input --out "$session" -- /bin/sh -c 'printf RELEASE-CHECK'
 "$binary" integrity verify "$session" --level content --json >/dev/null
-test "$("$binary" show "$session" --format text | tr -d ' ')" = "RELEASE-SMOKE"
+test "$("$binary" show "$session" --format text | tr -d ' ')" = "RELEASE-CHECK"

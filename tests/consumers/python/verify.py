@@ -1,4 +1,4 @@
-"""Exercise an installed wheel and its bundled recorder from outside the checkout."""
+"""Verify an installed wheel and its bundled recorder from outside the checkout."""
 
 from pathlib import Path
 

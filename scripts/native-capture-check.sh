@@ -4,13 +4,13 @@ umask 077
 
 readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 binary="${TERMTRACE_BINARY:-$root/target/debug/termtrace}"
-readonly SMOKE_RANGE_FROM_NS=11000000000
-readonly SMOKE_RANGE_TO_NS=12350000000
-readonly SMOKE_RANGE_SUFFIX="range-${SMOKE_RANGE_FROM_NS}-${SMOKE_RANGE_TO_NS}"
-readonly SMOKE_VIEWPORT_WIDTH=1280
-readonly SMOKE_VIEWPORT_HEIGHT=720
-readonly SMOKE_VIEWPORT="${SMOKE_VIEWPORT_WIDTH}x${SMOKE_VIEWPORT_HEIGHT}"
-readonly SMOKE_FONT_SIZE=18
+readonly VERIFICATION_RANGE_FROM_NS=11000000000
+readonly VERIFICATION_RANGE_TO_NS=12350000000
+readonly VERIFICATION_RANGE_SUFFIX="range-${VERIFICATION_RANGE_FROM_NS}-${VERIFICATION_RANGE_TO_NS}"
+readonly VERIFICATION_VIEWPORT_WIDTH=1280
+readonly VERIFICATION_VIEWPORT_HEIGHT=720
+readonly VERIFICATION_VIEWPORT="${VERIFICATION_VIEWPORT_WIDTH}x${VERIFICATION_VIEWPORT_HEIGHT}"
+readonly VERIFICATION_FONT_SIZE=18
 
 output=""
 keep_log=false
@@ -20,18 +20,18 @@ output_supplied=false
 
 usage() {
     cat <<'EOF'
-Run the native capture smoke test.
+Run the native capture verification test.
 
 Usage:
-  just smoke
+  just native-check
 
-`just smoke` is the only public entrypoint. The script options below are for
+`just native-check` is the only public entrypoint. The script options below are for
 automation and diagnostics.
 
 Options:
   -o, --output PATH  Write evidence to PATH instead of a temporary directory.
       --validate PATH
-                        Validate an existing smoke recording without recapturing.
+                        Validate an existing verification recording without recapturing.
       --keep-log       Retain the detailed command log after a successful run.
   -v, --verbose        Stream raw build and Termtrace output to the console.
   -h, --help           Show this help.
@@ -90,7 +90,7 @@ fi
 
 if [[ -z "$output" ]]; then
     temporary_root="$(mktemp -d)" || die "could not create a temporary output directory"
-    output="$temporary_root/native-smoke.termtrace"
+    output="$temporary_root/native-verification.termtrace"
 fi
 
 output_parent="$(dirname -- "$output")"
@@ -101,16 +101,16 @@ output="$output_parent/$(basename -- "$output")"
 readonly output
 
 if [[ "$validation_only" == true ]]; then
-    [[ -d "$output" ]] || die "smoke recording does not exist: $output"
+    [[ -d "$output" ]] || die "verification recording does not exist: $output"
     log="${output}.validation.$$.log"
 else
     [[ ! -e "$output" ]] || die "output already exists: $output"
-    log="${output}.smoke.log"
+    log="${output}.verification.log"
 fi
 readonly log
 
 profile=""
-current_step="Initializing smoke test"
+current_step="Initializing verification test"
 failed_check=""
 failed_expected=""
 failed_observed=""
@@ -139,7 +139,7 @@ cleanup() {
     fi
     if ((status != 0)) && [[ -z "$failed_check" ]]; then
         failed_check="unclassified script failure"
-        failed_expected="smoke step completes successfully"
+        failed_expected="verification step completes successfully"
         failed_observed="script exited with status $status during: $current_step"
         failed_file="$log"
     fi
@@ -158,7 +158,7 @@ cleanup() {
             fi
         fi
         printf 'Detailed log: %s\n' "$log" >&2
-        printf 'Run again: just smoke\n' >&2
+        printf 'Run again: just native-check\n' >&2
     elif ((status == 0)) && [[ "$keep_log" == false ]]; then
         rm -f "$log"
     fi
@@ -374,7 +374,7 @@ check_session_integrity() {
         finding="verification command did not return a valid report"
     fi
     failed_check="session_and_artifact_integrity"
-    failed_expected="content-valid canonical recording and at least five verified smoke artifact roots"
+    failed_expected="content-valid canonical recording and at least five verified verification artifact roots"
     failed_observed="$finding; artifact_roots_verified=$(jq -r '.artifact_roots_verified // "unknown"' <<<"$report" 2>>"$log") (verification status $status)"
     failed_file="$output"
     return 1
@@ -539,9 +539,9 @@ check_pixels_differ() {
     return 1
 }
 
-validate_smoke_artifacts() {
-    local range_derived="$output/derived-$SMOKE_RANGE_SUFFIX"
-    local range_visual="$output/visual-$SMOKE_RANGE_SUFFIX"
+validate_verification_artifacts() {
+    local range_derived="$output/derived-$VERIFICATION_RANGE_SUFFIX"
+    local range_visual="$output/visual-$VERIFICATION_RANGE_SUFFIX"
     local manifest="$output/visual/manifest.json"
     local range_manifest="$range_visual/manifest.json"
     local full_duration
@@ -739,9 +739,9 @@ validate_smoke_artifacts() {
         "$output/visual/final.png" \
         "$output/visual/video-map.jsonl"
     check_media_stream "full_video_decodes" \
-        "$output/visual/session.mkv" h264 "$SMOKE_VIEWPORT_WIDTH" "$SMOKE_VIEWPORT_HEIGHT"
+        "$output/visual/session.mkv" h264 "$VERIFICATION_VIEWPORT_WIDTH" "$VERIFICATION_VIEWPORT_HEIGHT"
     check_media_stream "full_screenshot_decodes" \
-        "$output/visual/final.png" png "$SMOKE_VIEWPORT_WIDTH" "$SMOKE_VIEWPORT_HEIGHT"
+        "$output/visual/final.png" png "$VERIFICATION_VIEWPORT_WIDTH" "$VERIFICATION_VIEWPORT_HEIGHT"
     check_absent_regex "profile_has_no_external_config_paths" \
         "$output/ghostty-profile.ghostty" \
         '^[[:space:]]*config-(file|default-files)[[:space:]]*='
@@ -750,7 +750,7 @@ validate_smoke_artifacts() {
         "$output/native-single/final.png" \
         "$output/native-single/ghostty-effective-config.txt"
     check_media_stream "point_screenshot_decodes" \
-        "$output/native-single/final.png" png "$SMOKE_VIEWPORT_WIDTH" "$SMOKE_VIEWPORT_HEIGHT"
+        "$output/native-single/final.png" png "$VERIFICATION_VIEWPORT_WIDTH" "$VERIFICATION_VIEWPORT_HEIGHT"
     check_missing "point_screenshot_has_no_video" "$output/native-single/session.mkv"
     check_jq "point_screenshot_manifest_contract" \
         "$output/native-single/manifest.json" '
@@ -795,9 +795,9 @@ validate_smoke_artifacts() {
         "$range_visual/ghostty-effective-config.txt" \
         "$range_visual/video-map.jsonl"
     check_media_stream "range_video_decodes" \
-        "$range_visual/session.mkv" h264 "$SMOKE_VIEWPORT_WIDTH" "$SMOKE_VIEWPORT_HEIGHT"
+        "$range_visual/session.mkv" h264 "$VERIFICATION_VIEWPORT_WIDTH" "$VERIFICATION_VIEWPORT_HEIGHT"
     check_media_stream "range_screenshot_decodes" \
-        "$range_visual/final.png" png "$SMOKE_VIEWPORT_WIDTH" "$SMOKE_VIEWPORT_HEIGHT"
+        "$range_visual/final.png" png "$VERIFICATION_VIEWPORT_WIDTH" "$VERIFICATION_VIEWPORT_HEIGHT"
     check_jq "artifact_root_catalog_contract" "$output/artifact-roots.jsonl" '
       (map(.artifact_directory)) as $directories |
       length >= 5 and
@@ -829,7 +829,7 @@ if [[ "$validation_only" == true ]]; then
         exit 2
     fi
     step "Validating retained manifests, media, range boundaries, and provenance"
-    validate_smoke_artifacts
+    validate_verification_artifacts
     printf '\n[PASS] Retained native capture evidence is valid.\n'
     if [[ "$keep_log" == true ]]; then
         printf 'Detailed log: %s\n' "$log"
@@ -837,7 +837,7 @@ if [[ "$validation_only" == true ]]; then
     exit 0
 fi
 
-printf 'Termtrace native capture smoke test\n'
+printf 'Termtrace native capture verification test\n'
 printf '  Output:  %s\n\n' "$output"
 
 step "Checking host commands"
@@ -864,7 +864,7 @@ printf 'font-size = 11\nwindow-padding-x = 2\nbackground = #220000\n' >"$profile
 
 step "Recording the timed fixture (about 13 seconds)"
 run "$binary" --response full record --no-input --geometry fit \
-    --viewport "$SMOKE_VIEWPORT" --ghostty-config "$profile" --font-size "$SMOKE_FONT_SIZE" \
+    --viewport "$VERIFICATION_VIEWPORT" --ghostty-config "$profile" --font-size "$VERIFICATION_FONT_SIZE" \
     --padding-x 6 --padding-y 4 --foreground '#e6e6e6' \
     --background '#101010' --out "$output" -- /bin/sh -c \
     'printf "\033[2J\033[H\033[38;2;255;0;0mLong preroll\033[0m\n"; sleep 12; printf "\033[38;2;0;255;0mSelected range\033[0m\n"; sleep 0.5; printf "excluded tail\n"'
@@ -876,27 +876,27 @@ run "$binary" --response full analyze index --session "$output"
 step "Capturing full video and a strict screenshot"
 run "$binary" --response full artifact capture --session "$output" --fps 24
 run "$binary" --response full screenshot "$output" \
-    --renderer native --at 12.2s --viewport "$SMOKE_VIEWPORT" --strict \
+    --renderer native --at 12.2s --viewport "$VERIFICATION_VIEWPORT" --strict \
     --out "$output/native-single"
 
-readonly capture_range_visual="$output/visual-$SMOKE_RANGE_SUFFIX"
+readonly capture_range_visual="$output/visual-$VERIFICATION_RANGE_SUFFIX"
 
 step "Capturing the selected 11.0s–12.35s range"
 run "$binary" --response full analyze index --session "$output" \
-    --from "${SMOKE_RANGE_FROM_NS}ns" --to "${SMOKE_RANGE_TO_NS}ns"
+    --from "${VERIFICATION_RANGE_FROM_NS}ns" --to "${VERIFICATION_RANGE_TO_NS}ns"
 range_capture_started="$(python3 -c 'import time; print(time.monotonic_ns())')"
 readonly range_capture_started
 run "$binary" --response full artifact capture --session "$output" --fps 24 \
-    --from "${SMOKE_RANGE_FROM_NS}ns" --to "${SMOKE_RANGE_TO_NS}ns"
+    --from "${VERIFICATION_RANGE_FROM_NS}ns" --to "${VERIFICATION_RANGE_TO_NS}ns"
 range_capture_finished="$(python3 -c 'import time; print(time.monotonic_ns())')"
 readonly range_capture_finished
 range_capture_elapsed_ns="$((range_capture_finished - range_capture_started))"
 readonly range_capture_elapsed_ns
 check_less_than "range_capture_fast_forwards_preroll" \
-    "$range_capture_elapsed_ns" "$SMOKE_RANGE_FROM_NS" "$capture_range_visual"
+    "$range_capture_elapsed_ns" "$VERIFICATION_RANGE_FROM_NS" "$capture_range_visual"
 
 step "Validating manifests, media, range boundaries, and provenance"
-validate_smoke_artifacts
+validate_verification_artifacts
 
 printf '\n[PASS] Native capture workflow is healthy.\n'
 printf 'Evidence:\n'
@@ -905,7 +905,7 @@ printf '  Full video:       %s\n' "$output/visual/session.mkv"
 printf '  Full screenshot:  %s\n' "$output/visual/final.png"
 printf '  Point screenshot: %s\n' "$output/native-single/final.png"
 printf '  Ranged capture:   %s\n' "$capture_range_visual"
-awk -v elapsed="$range_capture_elapsed_ns" -v preroll="$SMOKE_RANGE_FROM_NS" \
+awk -v elapsed="$range_capture_elapsed_ns" -v preroll="$VERIFICATION_RANGE_FROM_NS" \
     'BEGIN { printf "Performance: ranged capture took %.3fs for %.3fs of pre-roll\n", elapsed / 1000000000, preroll / 1000000000 }'
 if [[ "$keep_log" == true ]]; then
     printf 'Detailed log:      %s\n' "$log"

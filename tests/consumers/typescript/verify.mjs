@@ -1,3 +1,4 @@
+// Verify the installed package from outside the checkout.
 import assert from "node:assert/strict";
 import { Termtrace } from "@termtrace/test";
 

@@ -109,8 +109,8 @@ jobs:
           uv venv --python 3.11 "$wheel_root/venv"
           uv pip install --python "$wheel_root/venv/bin/python" dist/python/*.whl
           "$wheel_root/venv/bin/termtrace" doctor --require core,semantic
-          cp tests/consumers/python/smoke.py "$wheel_root/smoke.py"
-          (cd "$wheel_root" && env -u TERMTRACE_BINARY "$wheel_root/venv/bin/python" smoke.py)
+          cp tests/consumers/python/verify.py "$wheel_root/verify.py"
+          (cd "$wheel_root" && env -u TERMTRACE_BINARY "$wheel_root/venv/bin/python" verify.py)
       - name: Test npm command
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
@@ -118,8 +118,8 @@ jobs:
           trap 'rm -rf "$npm_root"' EXIT
           npm install --prefix "$npm_root" dist/npm/termtrace-cli-linux-x64-*.tgz dist/npm/termtrace-test-*.tgz
           node "$npm_root/node_modules/@termtrace/test/bin/termtrace.js" doctor --require core,semantic
-          cp tests/consumers/typescript/smoke.mjs "$npm_root/smoke.mjs"
-          (cd "$npm_root" && env -u TERMTRACE_BINARY node smoke.mjs)
+          cp tests/consumers/typescript/verify.mjs "$npm_root/verify.mjs"
+          (cd "$npm_root" && env -u TERMTRACE_BINARY node verify.mjs)
       - name: Checksum client packages
         run: find dist/python dist/npm -type f -print0 | sort -z | xargs -0 sha256sum > "dist/termtrace-${{ matrix.target }}-packages.sha256"
       - name: Generate CycloneDX SBOM
