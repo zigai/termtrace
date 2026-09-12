@@ -9,6 +9,8 @@ pub(crate) fn index_error(source: rusqlite::Error) -> Error {
     return Error::filesystem(Path::new("<identifier-index>"), io::Error::other(source));
 }
 
+const MEMORY_LIMIT: usize = 65_536;
+
 /// A small set stays in memory; lifetime history spills to a temporary disk database.
 #[derive(Default)]
 pub(crate) struct IdentifierSet {
@@ -18,7 +20,7 @@ pub(crate) struct IdentifierSet {
 
 impl IdentifierSet {
     pub(crate) fn insert(&mut self, id: Uuid) -> Result<bool> {
-        if self.disk.is_none() && self.memory.len() < 4096 {
+        if self.disk.is_none() && self.memory.len() < MEMORY_LIMIT {
             return Ok(self.memory.insert(id));
         }
 
@@ -96,7 +98,6 @@ impl RequestIndex {
                     [id.as_bytes().as_slice()],
                 )
                 .map_err(index_error)?;
-
             if count == 0 {
                 // Dropping this uncommitted transaction rolls back the entire batch.
                 return Ok(false);
@@ -104,6 +105,7 @@ impl RequestIndex {
         }
 
         transaction.commit().map_err(index_error)?;
+
         return Ok(true);
     }
 
@@ -153,7 +155,7 @@ mod tests {
     #[test]
     fn spilled_identifiers_still_reject_early_duplicates() {
         let mut ids = IdentifierSet::default();
-        for id in 0..8192 {
+        for id in 0..((MEMORY_LIMIT + 1024) as u128) {
             assert!(ids.insert(Uuid::from_u128(id)).expect("insert"));
         }
 
