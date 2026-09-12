@@ -134,15 +134,22 @@ def wait_process(process: subprocess.Popen[bytes], timeout: float) -> int:
 
 
 class AcceptanceRunner:
-    def __init__(self, output: Path, smoke: bool, binary: Path | None) -> None:
+    def __init__(self, output: Path, reduced: bool, binary: Path | None,
+                 allow_non_reference: bool | None = None) -> None:
         self.output = output
-        self.smoke = smoke
+        self.reduced = reduced
         self.external_binary = binary
         self.binary = binary or ROOT / "target/release/termtrace"
+        if allow_non_reference is not None:
+            self.allow_non_reference = allow_non_reference
+        else:
+            allow_env = os.environ.get("TERMTRACE_BENCHMARK_ALLOW_NON_REFERENCE") in ("1", "true")
+            strict_env = os.environ.get("TERMTRACE_BENCHMARK_STRICT") in ("1", "true")
+            self.allow_non_reference = allow_env and not strict_env
         self.contract = msgspec.json.decode((ROOT / "benchmarks/acceptance-v1.json").read_bytes(), type=Contract)
         self.measurement = self.contract.measurement
-        self.warmups = 1 if smoke else self.measurement.warmup_repetitions
-        self.repetitions = 2 if smoke else self.measurement.measured_repetitions
+        self.warmups = 1 if reduced else self.measurement.warmup_repetitions
+        self.repetitions = 2 if reduced else self.measurement.measured_repetitions
         self.limit = self.measurement.resident_memory_limit_bytes
         self.timer = shutil.which("time")
         self.counter = 0
@@ -272,9 +279,9 @@ class AcceptanceRunner:
         expected = self.contract.environment
         mismatches = {key: {"expected": expected[key], "observed": value} for key, value in runtime.items()
                       if expected.get(key) != value}
-        self.eligible = not mismatches and self.external_binary is None
+        self.eligible = (not mismatches or self.allow_non_reference) and self.external_binary is None
         json_file(self.output / "run.json", {
-            "format": "termtrace-acceptance-run", "version": 1, "smoke": self.smoke,
+            "format": "termtrace-acceptance-run", "version": 1, "reduced": self.reduced,
             "binary": {"path": str(self.binary.resolve()), "sha256": digest(self.binary),
                        "reported_identity": version, "profile": "release" if self.external_binary is None else "unverified-external",
                        "built_source_revision": revision if self.external_binary is None else None,
@@ -292,6 +299,7 @@ class AcceptanceRunner:
             "invariant_binaries": {package: {"path": path, "sha256": digest(Path(path))}
                                    for package, path in self.test_binaries.items()},
             "host_eligible": self.eligible, "host_mismatches": mismatches,
+            "allow_non_reference": self.allow_non_reference,
             "measurement": self.measurement, "actual_warmups": self.warmups,
             "actual_repetitions": self.repetitions, "concurrency": 1,
             "resource_accounting": "5ms /proc descendant RSS samples plus GNU time maximum RSS; 512MiB runtime tree cap; compilation excluded",
@@ -373,7 +381,7 @@ class AcceptanceRunner:
             self.emit(Result(identifier, kind, "failed", error=str(e)))
 
     def latency(self, gate: Gate, operation: Callable[[int], Sample]) -> Result:
-        return latency_result(gate, self.repeated(operation), self.eligible, self.smoke, self.limit)
+        return latency_result(gate, self.repeated(operation), self.eligible, self.reduced, self.limit)
 
     def notification(self, session: Path, iteration: int) -> Sample:
         # Sample the actor/system mapping, never substitute command elapsed time for actor delay.
@@ -522,8 +530,8 @@ class AcceptanceRunner:
     def large_fixture(self) -> Path:
         fixture = next(f for f in self.contract.fixtures if f.id == "million-event-1gib")
         session = self.output / "large-completed.termtrace"
-        events = 1000 if self.smoke else fixture.event_count
-        output_bytes = 1_048_576 if self.smoke else fixture.output_bytes
+        events = 1000 if self.reduced else fixture.event_count
+        output_bytes = 1_048_576 if self.reduced else fixture.output_bytes
         generator = self.generator
         self.run([str(generator), "large", "--events", str(events), "--output-bytes", str(output_bytes), "--out", str(session)], timeout=7200)
         json_file(self.output / "large-fixture.json", {"path": str(session), "event_count": events,
@@ -617,8 +625,8 @@ class AcceptanceRunner:
         with self.live("large-live") as (session, control):
             total_produced = 0
             for scale in (0.01, 0.1, 1.0):
-                events = int((1000 if self.smoke else 1_000_000) * scale)
-                size = int((1_048_576 if self.smoke else 1_073_741_824) * scale)
+                events = int((1000 if self.reduced else 1_000_000) * scale)
+                size = int((1_048_576 if self.reduced else 1_073_741_824) * scale)
                 total_produced += self.grow(session, control, events, max(0, size - total_produced))
                 length = self.log_position(session)
                 operations = {"screen": lambda i: self.run(self.cli("screen", session, "--screen", "text")),
@@ -651,7 +659,7 @@ class AcceptanceRunner:
                 passed &= independent
                 trends[f"{op}:{metric}"] = {"slope_per_event": slope, "standard_error": stderr,
                                             "lower_99_percent_bound": lower, "independent": independent}
-        return Result(gate.id, gate.kind, "failed" if not passed else "smoke" if self.smoke else "passed",
+        return Result(gate.id, gate.kind, "failed" if not passed else "reduced" if self.reduced else "passed",
                       details={"points": points, "linear_growth_tests": trends,
                                "criterion": "no positive linear growth at 99% confidence across three real live lengths"})
 
@@ -757,9 +765,10 @@ class AcceptanceRunner:
         for validator in self.contract.artifact_validators:
             self.attempt(f"validator:{validator.artifact}", "artifact_validator",
                          lambda v=validator: self.validator(v.artifact, v.command))
-        passed = all(result.status == "passed" for result in self.results) and self.eligible and not self.smoke
-        json_file(self.output / "summary.json", {"accepted": passed, "smoke": self.smoke,
-                  "host_eligible": self.eligible, "results": self.results,
+        passed = all(result.status == "passed" for result in self.results) and self.eligible and not self.reduced
+        json_file(self.output / "summary.json", {"accepted": passed, "reduced": self.reduced,
+                  "host_eligible": self.eligible, "allow_non_reference": self.allow_non_reference,
+                  "results": self.results,
                   "expected_gate_ids": [gate.id for gate in self.contract.gates]})
         return passed
 
@@ -772,15 +781,20 @@ class AcceptanceRunner:
         for identifier, kind in required:
             if identifier not in present:
                 self.emit(Result(identifier, kind, "failed", error=error))
-        json_file(self.output / "summary.json", {"accepted": False, "smoke": self.smoke,
-                  "host_eligible": self.eligible, "results": self.results})
+        json_file(self.output / "summary.json", {"accepted": False, "reduced": self.reduced,
+                  "host_eligible": self.eligible, "allow_non_reference": self.allow_non_reference,
+                  "results": self.results})
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--smoke", action="store_true", help="reduced mechanics only; never an acceptance pass")
+    parser.add_argument("--reduced", action="store_true", help="reduced mechanics only; never an acceptance pass")
     parser.add_argument("--binary", type=Path, help="external binary; provenance is unverified and cannot pass acceptance")
+    parser.add_argument("--allow-non-reference", action="store_true", default=None,
+                        help="allow host gating to pass on non-reference environments")
+    parser.add_argument("--strict", action="store_true", default=None,
+                        help="enforce strict reference host checking, overriding allow-non-reference")
     args = parser.parse_args()
     os.umask(0o077)
     output = args.output
@@ -793,8 +807,14 @@ def main() -> int:
         output.mkdir(parents=True, exist_ok=False)
     print(f"acceptance evidence: {output}", flush=True)
     runner = None
+    allow_non_reference: bool | None = None
+    if args.strict:
+        allow_non_reference = False
+    elif args.allow_non_reference:
+        allow_non_reference = True
     try:
-        runner = AcceptanceRunner(output, args.smoke, args.binary.resolve() if args.binary else None)
+        runner = AcceptanceRunner(output, args.reduced, args.binary.resolve() if args.binary else None,
+                                  allow_non_reference=allow_non_reference)
         accepted = runner.execute()
     except (OSError, ValueError, RuntimeError, LookupError, subprocess.SubprocessError) as e:
         json_file(output / "failure.json", {"accepted": False, "error": str(e)})

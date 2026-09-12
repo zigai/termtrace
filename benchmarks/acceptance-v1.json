@@ -195,7 +195,7 @@
     },
     {
       "artifact": "native-capture",
-      "command": "scripts/native-smoke-test.sh --output OUTPUT_DIRECTORY"
+      "command": "scripts/native-reduced-test.sh --output OUTPUT_DIRECTORY"
     }
   ]
 }

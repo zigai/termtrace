@@ -41,7 +41,7 @@ class Measurement(msgspec.Struct, forbid_unknown_fields=True):
                 or self.measured_repetitions != 30 or self.reported_percentiles != (50, 95, 99)
                 or self.percentile_method != "nearest-rank" or self.concurrency != 1
                 or self.timeout_seconds != 120 or self.resident_memory_limit_bytes != 536_870_912):
-            raise ValueError("acceptance requires the pinned complete measurement protocol; use --smoke for reduced mechanics")
+            raise ValueError("acceptance requires the pinned complete measurement protocol; use --reduced for reduced mechanics")
 
 
 class Fixture(msgspec.Struct, forbid_unknown_fields=True):
@@ -92,7 +92,7 @@ class Distribution(msgspec.Struct):
 class Result(msgspec.Struct):
     id: str
     kind: str
-    status: Literal["passed", "failed", "ineligible", "smoke"]
+    status: Literal["passed", "failed", "ineligible", "reduced"]
     samples: tuple[Sample, ...] = ()
     distribution: Distribution | None = None
     threshold_ms: int | None = None
@@ -112,7 +112,7 @@ def distribution(samples: list[Sample]) -> Distribution:
                         maximum_rss_bytes=max(sample.maximum_rss_bytes for sample in samples))
 
 
-def latency_result(gate: Gate, samples: list[Sample], eligible: bool, smoke: bool,
+def latency_result(gate: Gate, samples: list[Sample], eligible: bool, reduced: bool,
                    memory_limit: int) -> Result:
     summary = distribution(samples)
     threshold = gate.maximum_ms if gate.maximum_ms is not None else gate.maximum_delta_ms
@@ -121,7 +121,7 @@ def latency_result(gate: Gate, samples: list[Sample], eligible: bool, smoke: boo
     upper_bounds = [sample.elapsed_ns + sample.clock_uncertainty_ns for sample in samples]
     passed = (percentile(upper_bounds, gate.percentile) <= threshold * 1_000_000
               and summary.maximum_rss_bytes <= memory_limit)
-    status = "failed" if not passed else "smoke" if smoke else "passed" if eligible else "ineligible"
+    status = "failed" if not passed else "reduced" if reduced else "passed" if eligible else "ineligible"
     return Result(gate.id, gate.kind, status, tuple(samples), summary, threshold,
                   {"absolute_latency_host_eligible": eligible,
                    "uncertainty_included_in_threshold": True})

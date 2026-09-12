@@ -31,7 +31,7 @@ class AcceptanceEvaluationTests(unittest.TestCase):
         gate = Gate("status", "latency", maximum_ms=100)
         samples = [Sample(10, 1024, 1, ("status",), "status.json")] * 30
         self.assertEqual(latency_result(gate, samples, False, False, 536_870_912).status, "ineligible")
-        self.assertEqual(latency_result(gate, samples, True, True, 536_870_912).status, "smoke")
+        self.assertEqual(latency_result(gate, samples, True, True, 536_870_912).status, "reduced")
 
     def test_memory_violation_cannot_hide_behind_fast_latency(self) -> None:
         gate = Gate("status", "latency", maximum_ms=100)
