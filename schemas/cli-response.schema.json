@@ -111,7 +111,7 @@
       }
     }
   ],
-  "description": "Version 1 compact response emitted by --response agent.",
+  "description": "Version 1 compact response emitted by -A / --agent.",
   "properties": {
     "applied": {
       "$ref": "#/$defs/Applied"

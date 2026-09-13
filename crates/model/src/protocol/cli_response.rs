@@ -102,7 +102,7 @@ impl JsonSchema for CliResponseEnvelope {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         return json_schema!({
             "title": "Termtrace CLI response",
-            "description": "Version 1 compact response emitted by --response agent.",
+            "description": "Version 1 compact response emitted by -A / --agent.",
             "type": "object",
             "required": ["v", "ok", "type"],
             "properties": {
