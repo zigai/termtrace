@@ -59,8 +59,12 @@ bench:
   @benchmarks/run-durability.sh
   @benchmarks/run-render.sh
 
+# Synchronize skill definition to local skills catalog if present
+sync-skill:
+  @scripts/sync-skill.sh
+
 # Auto-fix linting and formatting issues
-fix:
+fix: sync-skill
   cargo statement-spacing fix --format-first
   cargo clippy --locked --workspace --all-targets --all-features --fix --allow-dirty --allow-staged
   bun run --cwd packages/typescript lint:fix
