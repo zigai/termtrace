@@ -1,28 +1,37 @@
 # Managed client workflows
 
-Use individual `--response agent` CLI commands when a workflow will finish in
-two or three actions. Beyond that, keep one `termtrace agent` JSONL driver
-process so repeated observations and actions do not pay process startup and
-discovery costs. Use `termtrace test` when assertions should be repeatable. A
-managed client script is appropriate for branching, loops, multiple sessions,
-or caller-owned retry IDs.
+Use individual CLI commands (`termtrace act`, `termtrace screen --json`, etc.) when a workflow will finish in
+two or three actions. Beyond that, use the Python SDK (`import termtrace` / `from termtrace import Terminal`)
+so repeated observations and actions do not pay process startup and discovery costs. Use `termtrace test`
+when assertions should be repeatable. A managed client script is appropriate for branching, loops,
+multiple sessions, or caller-owned retry IDs.
 
-The `agent` command is the public alias for the persistent driver; `rpc` is an
-equivalent compatibility alias. Begin the protocol with `hello`. Driver handles
-are process-local, while canonical session IDs and paths remain valid after a
-driver restart.
+## Python SDK for Stateful Workflows
 
-## Run a script file
+When orchestrating multi-step interactive workflows, import the SDK:
+
+```python
+from termtrace import Terminal
+
+terminal = Terminal.start(["my-app", "--arg"])
+terminal.wait_screen(contains="Ready", timeout_ms=5000)
+terminal.act("text:help", "enter", until_screen="Commands")
+screen = terminal.screen()
+print(screen.text)
+terminal.stop()
+```
+
+## Run a script file via managed runners
 
 Keep substantial workflows in reviewable `.py` or `.ts` files:
 
 ```sh
-termtrace tooling client python workflow.py -- WORKFLOW_ARGUMENTS
-termtrace tooling client typescript workflow.ts -- WORKFLOW_ARGUMENTS
+termtrace client python workflow.py -- WORKFLOW_ARGUMENTS
+termtrace client typescript workflow.ts -- WORKFLOW_ARGUMENTS
 ```
 
 Prefer the language already used by the project; use Python when neither is a
-natural fit. Use `termtrace tooling client status` only when checking SDK asset
+natural fit. Use `termtrace client status` when checking SDK asset
 or runtime availability.
 
 ## Use standard input sparingly
@@ -31,7 +40,8 @@ Standard input is an escape hatch for a short, disposable, trusted snippet that
 does not deserve a file:
 
 ```sh
-termtrace tooling client python - <<'PY'
+termtrace client python - <<'PY'
+from termtrace import Terminal
 # Short one-off workflow.
 PY
 ```

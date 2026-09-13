@@ -12,5 +12,5 @@ After the CLI graph changes:
   refresh.
 
 The refresh is complete only when examples invoke the tested CLI graph and the
-skill explains response profiles, presented-screen truth, persistent-driver
+skill explains clean text and JSON output, presented-screen truth, Python SDK
 selection, and mutation/retry authority.

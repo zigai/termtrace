@@ -4,25 +4,27 @@ description: Flight recorder for terminal applications through Termtrace. Use wh
 disable-model-invocation: false
 user-invocable: true
 ---
-Use the smallest evidence-producing workflow that answers the task. Pass
-`--response agent` for a single compact, versioned JSON response. Use
-`--response full` only when debugging Termtrace itself requires forensic
-internals. Never redirect a normal response to a temporary file and parse it
-with `rg`, `sed`, `jq`, or similar shell filters; select the response profile,
-screen encoding, or `--fields cursor,modes,boundary,timing` at the command
-boundary instead.
+Use the smallest evidence-producing workflow that answers the task. By default,
+every CLI command emits human-readable, clean text and tables. Pass `--json` to
+any command to receive machine-readable, 2-space formatted JSON on stdout. When
+quiet execution is required, pass `-q` / `--quiet` to suppress stdout completely
+and communicate strictly via exit code.
 
 ## Choose the interface first
 
-- Use `start --until-*` for initial synchronization, `act` for input plus its
-  postcondition, and `screen --since STATE` for repeated observations. After
-  completion, use `inspect SESSION` and `diagnose SESSION` before descending
-  into advanced analysis selectors.
-- Keep a persistent `termtrace agent` driver after two or three expected
-  actions, or whenever the workflow needs branching, loops, repeated
-  observations, multiple sessions, or caller-owned retry IDs. Read
-  [client workflows](references/client-workflows.md).
-- Use `termtrace test` for a repeatable assertion workflow or regression. Start
+- For quick one-shot inspection and control, use the CLI:
+  - `record -d <NAME> --until-*` for background recording and initial synchronization.
+  - `screen <SESSION> [--since <STATE>]` to inspect the live presented terminal viewport.
+  - `send <SESSION> [INPUT]... [--until-*]` for semantic input (keys, clicks, resize, signal) plus postcondition.
+  - `wait <SESSION>` to synchronize on screen text, output bytes, or idle stability.
+  - `status [<SESSION>]` to inspect session lifecycle or list registered sessions (`--gc` to prune).
+  - `analyze <SESSION>` after completion to triage the last action and view diagnostic findings.
+  - `screenshot`, `video`, or `bundle` to generate self-contained artifacts.
+  - Pass `--json` when structured data is required.
+- For complex, stateful workflows (loops, retries, branching, multi-step agent drivers),
+  use the Python SDK (`import termtrace` / `from termtrace import Terminal`) rather than
+  chaining dozens of subshell CLI calls. Read [client workflows](references/client-workflows.md).
+- Use `termtrace test` for repeatable assertion workflows or regressions. Start
   from [the tested scenario example](examples/ready.termtrace.json) and read
   [repeatable testing](references/testing.md).
 - Use the supplied canonical session directly for review. Never relaunch an
@@ -34,17 +36,18 @@ boundary instead.
   postcondition. The presented screen is the latest presentation-eligible
   viewport, not a transcript.
 - Exact child byte-history requirement: `wait --output` or `analyze output`.
-- Semantic transition: start with `inspect SESSION` or `diagnose SESSION`; use
-  `analyze timeline`, `analyze diff`,
-  and `analyze explain` only when explicit endpoints or forensic detail are
+- Semantic transition & forensics: start with bare `analyze <SESSION>` for triage; use
+  `analyze timeline`, `analyze diff`, and `analyze explain` when explicit endpoints or forensic detail are
   needed.
+- Cryptographic validity: `analyze verify <SESSION>`.
 - Native pixels: request native screenshot/video explicitly; semantic images do
   not become native evidence.
-- Handoff or publication: use top-level `screenshot`, `bundle`, or `bug-report`
-  and read [artifact branches](references/artifacts.md).
+- Handoff or publication: use top-level `screenshot`, `video`, or `bundle`
+  and read [artifact branches](references/artifacts.md). For debugging bundles,
+  use `bundle --profile debug` (with optional `--screenshot`).
 
 Read [live control](references/live-control.md) before state-dependent input.
-The root help explains the ordinary workflow:
+The root help explains the flat workflow:
 
 ```text
 termtrace --help
@@ -57,25 +60,21 @@ from an older command name.
 
 ## Live workflow
 
-1. Start fresh evidence with `--until-screen` or `--until-idle`, or resolve the
+1. Start fresh evidence with `termtrace record -d my-app --until-screen Ready -- ./cmd`, or resolve the
    supplied session. This combines readiness with initial synchronization.
-2. Use `act` to combine state-guarded input and the next screen or idle
-   postcondition. Do not split it into `send` followed by a wait.
+2. Use `send` to combine state-guarded input and the next screen or idle
+   postcondition. Natural input atoms include keys (`enter`, `ctrl+c`), text (`text:hello`),
+   mouse clicks (`click:10,20`), semantic activation (`activate:"Save"`), window resizing
+   (`resize:120,40`), and signals (`signal:INT`).
 3. Use the returned presented-state hash with `screen --since STATE` to receive
    only a changed screen. Pass it through `--if-state` when an action is valid
    only for that exact presentation.
-4. After two or three actions, keep one persistent `termtrace agent` process
-   instead of repeatedly starting CLI processes.
-5. Mark meaningful workflow milestones only: phase entry, failure boundary, or
-   a point requested by the user. Canonical input intents and results already
-   identify mutations.
-6. Treat response fields `applied`, `retry`, and `session_state` as
-   authoritative. Never infer mutation success from a postcondition failure.
-   Retry only as directed: uncertain mutations commonly require the identical
-   request ID and payload, while deterministic rejection requires a corrected
-   request.
-7. Stop with completion waiting. Inspect or diagnose the last action, then
-   publish the smallest sufficient `screenshot`, `bundle`, or `bug-report`.
+4. For multi-action or interactive loops, use the Python SDK (`Terminal.start` / `Terminal.attach`).
+5. Mark meaningful workflow milestones only: `send my-app mark:checkpoint`.
+6. Check exit codes and `--json` error structures. Exit code 0 indicates success;
+   non-zero indicates failure. Diagnostic logs go to stderr via `TERMTRACE_LOG`.
+7. Stop with completion waiting (`stop my-app`). Triage the last action with `analyze my-app`,
+   then publish the smallest sufficient `screenshot`, `video`, or `bundle`.
    Preserve failed and incomplete evidence.
 
 ## Evidence invariants
